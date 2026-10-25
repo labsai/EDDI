@@ -130,11 +130,28 @@ class OutputMatchHookTest {
     void cacheMiss() {
         IConversationMemory memory = memory(Map.of("escalate", true), "{\"a\":1}", List.of("x"));
         when(cache.cachedOutputNeeds(AGENT)).thenReturn(Optional.empty());
+        when(dispatcher.submit(any())).thenReturn(true);
         TurnSnapshot all = OutputMatchHook.snapshot(memory, OutputNeeds.ALL);
         hook.onCleanTurn(memory);
         verify(dispatcher, times(2)).submit(any());
         assertEquals("{\"a\":1}", all.outputText());
         assertEquals(Map.of("escalate", true), all.properties());
+    }
+
+    @Test
+    @DisplayName("on a cache miss with alerts off or the queue full, nothing is read from the turn and nothing else is queued")
+    void cacheMissLoaderRefused() {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getAgentId()).thenReturn(AGENT);
+        when(cache.cachedOutputNeeds(AGENT)).thenReturn(Optional.empty());
+        when(dispatcher.submit(any())).thenReturn(false);
+
+        hook.onCleanTurn(memory);
+
+        verify(dispatcher, times(1)).submit(any());
+        verify(memory).getAgentId();
+        verifyNoMoreInteractions(memory);
+        verifyNoInteractions(engine);
     }
 
     @Test

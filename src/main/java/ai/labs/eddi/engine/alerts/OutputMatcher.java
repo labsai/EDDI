@@ -138,7 +138,10 @@ public final class OutputMatcher {
             return Optional.empty();
         }
         if (ACTIONS.equals(path)) {
-            return Optional.ofNullable(snapshot.actions());
+            // A turn with no actions has none to exist: an empty list is absent, so
+            // "actions exists" does not fire on every clean turn.
+            List<String> actions = snapshot.actions();
+            return actions == null || actions.isEmpty() ? Optional.empty() : Optional.of(actions);
         }
         if (path.startsWith(PROPERTIES_PREFIX)) {
             String[] segments = path.substring(PROPERTIES_PREFIX.length()).split("\\.");

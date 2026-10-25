@@ -132,8 +132,9 @@ public class AlertSenders {
             throw new AlertDeliveryException("The webhook URL is not valid");
         }
         String scheme = uri.getScheme();
-        if (scheme == null || !(scheme.equalsIgnoreCase("https") || scheme.equalsIgnoreCase("http"))) {
-            throw new AlertDeliveryException("The webhook URL is not an http(s) URL");
+        if (scheme == null || !scheme.equalsIgnoreCase("https") || uri.getHost() == null) {
+            // Checked again here because a vault-reference URL is only known now.
+            throw new AlertDeliveryException("The webhook URL is not an https URL");
         }
         OutboundRequest request = OutboundRequest.builder(Profile.DEFAULT, uri).method("POST", RequestBody.ofBytes(body))
                 .header("Content-Type", "application/json").header(WebhookSignatureVerifier.EDDI_SIGNATURE_HEADER,

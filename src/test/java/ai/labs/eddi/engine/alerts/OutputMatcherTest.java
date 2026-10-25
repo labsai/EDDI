@@ -41,7 +41,18 @@ class OutputMatcherTest {
             assertTrue(matches("properties.escalate", MatchOp.EQ, true, s));
             assertTrue(matches("properties.order.status", MatchOp.EQ, "late", s));
             assertTrue(matches("actions", MatchOp.CONTAINS, "handoff_requested", s));
+            assertTrue(matches("actions", MatchOp.EXISTS, null, s));
             assertFalse(matches("properties.missing", MatchOp.EXISTS, null, s));
+        }
+
+        @Test
+        @DisplayName("a turn without actions has none: actions exists does not fire, contains still does not match")
+        void emptyActionsAreAbsent() {
+            TurnSnapshot none = snapshot(Map.of(), null, List.of());
+            assertFalse(matches("actions", MatchOp.EXISTS, null, none));
+            assertFalse(matches("actions", MatchOp.CONTAINS, "handoff_requested", none));
+            assertEquals(Optional.empty(), OutputMatcher.resolve("actions", none));
+            assertFalse(matches("actions", MatchOp.EXISTS, null, snapshot(Map.of(), null, null)));
         }
 
         @Test

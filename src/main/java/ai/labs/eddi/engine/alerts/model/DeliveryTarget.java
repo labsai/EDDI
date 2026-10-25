@@ -42,7 +42,7 @@ import java.util.Locale;
  * @param channelId
  *            SLACK: the Slack channel id
  * @param url
- *            WEBHOOK: the endpoint (http or https)
+ *            WEBHOOK: the endpoint (https only)
  * @param signingSecret
  *            WEBHOOK: a {@code ${vault:...}} reference to the signing secret
  * @param urlConfigured
