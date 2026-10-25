@@ -687,6 +687,20 @@ recipient over `eddi.mail.notify.max-per-recipient-per-hour` (a sustained rise m
 30 s), so aggregate with `max`; it reads `NaN` until the first sweep and after a failed one. No tag carries an
 address, an agent or a conversation.
 
+**Mail sender authentication** ([security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc)):
+
+```text
+eddi_email_auth_total                       # Verdicts of DKIM + DMARC alignment; tag: result (aligned_pass|pass_unaligned|fail|none)
+eddi_email_dns_lookups_total                # TXT lookups for DKIM keys and DMARC records; tags: result (found|not_found|tempfail|budget_exhausted|oversize|invalid_name), cached (true|false)
+```
+
+`eddi_email_auth_total` shows whether a mailbox's correspondents can be authenticated at all: a mailbox whose mail is
+mostly `none` comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
+tampered, forwarded or list mail, or forged mail. No tag carries a domain or an address. For
+`eddi_email_dns_lookups_total`, `cached=true` is an answer served from the cache (no query sent); a sustained
+`tempfail` means the resolver (`eddi.email.dns.servers`) is unreachable, and `budget_exhausted` that messages carry
+more signatures than `eddi.email.dns.max-lookups-per-message` allows.
+
 ### Platform Operator Metrics
 
 ```text

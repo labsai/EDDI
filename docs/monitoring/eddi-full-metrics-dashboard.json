@@ -10381,6 +10381,102 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 266,
+          "type": "timeseries",
+          "title": "Mail sender authentication",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 53
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (result) (rate(eddi_email_auth_total{job=~\"$job\"}[5m]))",
+              "legendFormat": "{{result}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Verdicts of EDDI's own DKIM verification and DMARC alignment on inbound mail: aligned_pass (the only authenticated one), pass_unaligned (a valid signature for another domain, e.g. a mailing list), fail (signatures that do not verify, a lookup failure, or an ambiguous From), none (unsigned). Mostly none means the correspondents do not sign with DKIM."
+        },
+        {
+          "id": 267,
+          "type": "timeseries",
+          "title": "Mail DNS lookups (DKIM keys, DMARC records)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 53
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (result, cached) (rate(eddi_email_dns_lookups_total{job=~\"$job\"}[5m]))",
+              "legendFormat": "{{result}} (cached={{cached}})",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: the resolver (eddi.email.dns.servers) is unreachable. budget_exhausted: messages carry more signatures than eddi.email.dns.max-lookups-per-message allows."
         }
       ]
     },

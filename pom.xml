@@ -413,6 +413,20 @@
             <artifactId>angus-mail</artifactId>
             <version>2.0.5</version>
         </dependency>
+        <!-- DKIM/DMARC TXT lookups (engine/mail MailDnsResolver). dnsjava,
+             BSD-3-Clause; its only runtime dependency is slf4j-api, which the
+             Quarkus BOM manages. Known advisories (CVE-2024-25638, the KeyTrap
+             pair) are all fixed in 3.6.0 and concern the DNSSEC validator, which
+             EDDI does not use. The jar registers a
+             java.net.spi.InetAddressResolverProvider, but that provider hands
+             back the JDK's built-in resolver unless the system property
+             org.dnsjava.spi.enable=true is set, so the JVM's own host-name
+             resolution (and SafeSocketConnector's) is unchanged; never set it. -->
+        <dependency>
+            <groupId>dnsjava</groupId>
+            <artifactId>dnsjava</artifactId>
+            <version>3.6.5</version>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-csv</artifactId>
