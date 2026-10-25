@@ -601,6 +601,24 @@ class RestScheduleStoreExpandedTest {
         }
 
         @Test
+        @DisplayName("should refuse the reserved name alerts-maintenance without the marker, on create and on a rename")
+        void alertMaintenanceNameIsReserved() throws Exception {
+            var s = new ScheduleConfiguration();
+            s.setAgentId("agent-1");
+            s.setCronExpression("0 9 * * *");
+            s.setMessage("hello");
+            s.setName(" Alerts-Maintenance ");
+
+            Response create = sut.createSchedule(s);
+            Response update = sut.updateSchedule("s1", s);
+
+            assertEquals(400, create.getStatus());
+            assertEquals(400, update.getStatus());
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).updateSchedule(eq("s1"), any());
+        }
+
+        @Test
         @DisplayName("the stored alerts-maintenance schedule cannot be updated, deleted, disabled, enabled or dismissed — 409 SYSTEM_SCHEDULE")
         @SuppressWarnings("unchecked")
         void systemScheduleIsProtected() throws Exception {

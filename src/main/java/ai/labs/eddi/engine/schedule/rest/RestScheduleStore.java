@@ -966,18 +966,19 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     /**
-     * Refuses a schedule body that claims an alert role ({@code alertType}). The
-     * {@code alerts-maintenance} schedule is created by the server itself; a second
-     * one made by hand would only run the same job twice.
+     * Refuses a schedule body that claims an alert role ({@code alertType}) or the
+     * reserved name {@code alerts-maintenance}. That schedule is created by the
+     * server itself: a second one made by hand would only run the same job twice,
+     * and a same-named row without the marker would pass for the real one by name.
      */
     private Response rejectAlertBody(ScheduleConfiguration schedule, String operation) {
-        if (schedule != null && AlertSchedules.claimsAlertType(schedule.getMetadata())) {
+        if (schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata()) || AlertSchedules.isReservedName(schedule.getName()))) {
             LOGGER.warnf("Refused %s of a schedule whose body declares %s — alert schedules are minted internally only", operation,
                     AlertSchedules.METADATA_TYPE_KEY);
             return Response.status(Response.Status.BAD_REQUEST)
-                    .entity("Schedules marked as alert maintenance (metadata " + AlertSchedules.METADATA_TYPE_KEY
-                            + ") cannot be created or updated via this API. The server manages the " + AlertSchedules.SCHEDULE_NAME
-                            + " schedule itself.")
+                    .entity("Schedules named " + AlertSchedules.SCHEDULE_NAME + " or marked as alert maintenance (metadata "
+                            + AlertSchedules.METADATA_TYPE_KEY + ") cannot be created or updated via this API. The server manages the "
+                            + AlertSchedules.SCHEDULE_NAME + " schedule itself.")
                     .build();
         }
         return null;

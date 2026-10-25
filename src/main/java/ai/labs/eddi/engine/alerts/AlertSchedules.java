@@ -35,4 +35,13 @@ public final class AlertSchedules {
     public static boolean claimsAlertType(Map<String, Object> metadata) {
         return metadata != null && metadata.containsKey(METADATA_TYPE_KEY);
     }
+
+    /**
+     * Whether a name is the reserved {@value #SCHEDULE_NAME} — refused on
+     * user-created schedules, so a hand-made row can never pass for the system one.
+     * Compared trimmed and case-insensitively.
+     */
+    public static boolean isReservedName(String name) {
+        return name != null && SCHEDULE_NAME.equalsIgnoreCase(name.trim());
+    }
 }
