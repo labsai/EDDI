@@ -54,6 +54,11 @@ export interface StoredRating {
 export interface ConversationRatings {
   conversation: StoredRating | null;
   steps: StoredRating[];
+  /**
+   * The rating controls of the version this conversation runs on — null when
+   * it takes no ratings, undefined when the server did not say (an older one).
+   */
+  controls?: RatingProfile | null;
 }
 
 /** What the widget sends. */
@@ -193,10 +198,12 @@ function stepPath(conversationId: string, stepIndex: number): string {
   return `/agents/${encodeSegment(conversationId)}/steps/${stepIndex}/rating`;
 }
 
-function normalizeRatings(raw: ConversationRatings | null): ConversationRatings {
+export function normalizeRatings(raw: ConversationRatings | null): ConversationRatings {
+  const hasControls = !!raw && Object.prototype.hasOwnProperty.call(raw, "controls");
   return {
     conversation: raw?.conversation ?? null,
     steps: Array.isArray(raw?.steps) ? raw.steps : [],
+    controls: hasControls ? parseRatingProfile((raw as { controls?: unknown }).controls) : undefined,
   };
 }
 

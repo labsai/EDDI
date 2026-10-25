@@ -29,6 +29,8 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
   const [stepRatings, setStepRatings] = useState<Record<number, OwnRating>>({});
   const [restoredFor, setRestoredFor] = useState<string | null>(null);
   const [cardOpen, setCardOpen] = useState(false);
+  /** The conversation's own controls; undefined until (or unless) the server says. */
+  const [controls, setControls] = useState<RatingProfile | null | undefined>(undefined);
   const promptedRef = useRef<Set<string>>(new Set());
   const conversationRef = useRef(conversationId);
   const stepRatingsRef = useRef(stepRatings);
@@ -42,11 +44,15 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
   // Keyed on whether ratings are on, not on the profile object, so a new but
   // equal profile never wipes what was restored.
   const enabled = !!profile;
+  // Once the server names the controls of the version this conversation runs
+  // on, they decide what is shown — a rating write is checked against them.
+  const effective = controls !== undefined ? controls : profile;
   useEffect(() => {
     setConversationRating(null);
     setStepRatings({});
     setCardOpen(false);
     setRestoredFor(null);
+    setControls(undefined);
     if (!enabled || !conversationId) return;
     let cancelled = false;
     readOwnRatings(conversationId)
@@ -54,6 +60,7 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
         if (cancelled) return;
         setConversationRating(ratings.conversation);
         setStepRatings(Object.fromEntries(ratings.steps.map((r) => [r.stepIndex, r])));
+        setControls(ratings.controls);
       })
       .catch(() => {
         // Nothing rated, or an older server: start empty.
@@ -153,21 +160,21 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
   /** Ending the conversation: offer the card once, when the agent asks on end. */
   const onEnded = useCallback(() => {
     const convId = conversationRef.current;
-    if (!profile?.conversationRating || !profile.askOnEnd || !convId || promptedRef.current.has(convId)) return;
+    if (!effective?.conversationRating || !effective.askOnEnd || !convId || promptedRef.current.has(convId)) return;
     if (conversationRatingRef.current) return;
     promptedRef.current.add(convId);
     setCardOpen(true);
-  }, [profile]);
+  }, [effective]);
 
   const replies = useMemo(() => agentReplyCount(messages), [messages]);
   useEffect(() => {
-    if (!profile?.conversationRating || !conversationId || cardOpen || restoredFor !== conversationId) return;
+    if (!effective?.conversationRating || !conversationId || cardOpen || restoredFor !== conversationId) return;
     if (conversationRating || promptedRef.current.has(conversationId)) return;
-    if (profile.askAfterTurns > 0 && replies >= profile.askAfterTurns) {
+    if (effective.askAfterTurns > 0 && replies >= effective.askAfterTurns) {
       promptedRef.current.add(conversationId);
       setCardOpen(true);
     }
-  }, [profile, conversationId, cardOpen, restoredFor, conversationRating, replies]);
+  }, [effective, conversationId, cardOpen, restoredFor, conversationRating, replies]);
 
   return {
     conversationRating,
@@ -175,9 +182,11 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
     rateReply,
     rateWhole,
     clearStep,
-    cardOpen: cardOpen && !!profile?.conversationRating,
+    cardOpen: cardOpen && !!effective?.conversationRating,
     openCard,
     closeCard,
     onEnded,
+    /** The controls to render — the conversation's own once known. */
+    profile: effective,
   };
 }

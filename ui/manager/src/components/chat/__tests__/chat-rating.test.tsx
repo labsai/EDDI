@@ -105,6 +105,25 @@ describe("useChatRatings", () => {
     expect(error).toHaveBeenCalledWith("This conversation can no longer be rated.");
   });
 
+  it("renders the conversation's own controls once the server names them", async () => {
+    server.use(
+      http.get("*/agents/:conversationId/rating", () =>
+        HttpResponse.json({ conversation: null, steps: [], controls: profile({ scale: "THUMBS", messageRating: false }) }),
+      ),
+    );
+    const { result } = renderHook(() => useChatRatings("conv-c", profile(), [msg("agent", "Hi")]));
+    await waitFor(() => expect(result.current.profile?.scale).toBe("THUMBS"));
+    expect(result.current.profile?.messageRating).toBe(false);
+  });
+
+  it("shows no card when the conversation's version takes no ratings", async () => {
+    server.use(http.get("*/agents/:conversationId/rating", () => HttpResponse.json({ conversation: null, steps: [], controls: null })));
+    const { result } = renderHook(() => useChatRatings("conv-d", profile(), [msg("agent", "Hi")]));
+    await waitFor(() => expect(result.current.profile).toBeNull());
+    act(() => result.current.openCard());
+    expect(result.current.cardOpen).toBe(false);
+  });
+
   it("offers the card after askAfterTurns replies, once, and on End when asked on end", async () => {
     const replies = (count: number) => {
       const list = [msg("agent", "Hi")];

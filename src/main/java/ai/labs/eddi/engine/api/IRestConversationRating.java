@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.api;
 
+import ai.labs.eddi.engine.api.IRestAgentProfile.RatingProfile;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.Consumes;
@@ -67,8 +68,14 @@ public interface IRestConversationRating {
      *            the rating of the conversation as a whole, or null
      * @param steps
      *            the ratings of single replies, by step
+     * @param controls
+     *            the rating controls of the agent version <em>this
+     *            conversation</em> runs on — the version a rating is checked
+     *            against — or null when that version takes no ratings. A client
+     *            resuming a conversation shows these rather than the profile's,
+     *            which follow the version a <em>new</em> conversation would get.
      */
-    record ConversationRatings(ConversationRating conversation, List<ConversationRating> steps) {
+    record ConversationRatings(ConversationRating conversation, List<ConversationRating> steps, RatingProfile controls) {
     }
 
     @PUT

@@ -68,7 +68,7 @@ public class McpRatingTools {
     }
 
     @Tool(name = "list_conversation_ratings", description = "List the ratings people gave an agent's conversations and replies "
-            + "(thumbs, stars or 0-10 scores, tags and comments), newest first or lowest score first, one page at a time. "
+            + "(thumbs up/down or 1-5 stars, tags and comments), newest first or lowest score first, one page at a time. "
             + "Each row has the score normalized to 0..1, the agent version and environment it was given on, its review status "
             + "(NEW or REVIEWED) and whether you may open the transcript. needsAttention=true lists exactly the triage queue: "
             + "NEW ratings that are low (normalized 0.5 or less) or carry a comment.")
