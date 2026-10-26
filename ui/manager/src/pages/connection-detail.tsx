@@ -622,7 +622,7 @@ export function ConnectionDetailPage() {
         </div>
 
         {perUser && (
-          <div className="space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
+          <div className="space-y-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-3">
             <label className="flex items-start gap-2 text-xs">
               <input
                 type="checkbox"
@@ -1050,7 +1050,7 @@ function ExtraParamsField({
           </div>
           {duplicated.has(key) && (
             <p
-              className="text-[10px] text-amber-600 dark:text-amber-400"
+              className="text-[10px] text-warn-600 dark:text-warn-400"
               data-testid={`connection-param-duplicate-${index}`}
             >
               {t(

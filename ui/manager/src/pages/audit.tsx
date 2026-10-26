@@ -58,7 +58,7 @@ const TASK_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
   "eddi://ai.labs.llm":      { bg: "bg-purple-500/15",  text: "text-purple-400" },
   "eddi://ai.labs.rules":    { bg: "bg-blue-500/15",    text: "text-blue-400" },
   "eddi://ai.labs.output":   { bg: "bg-emerald-500/15", text: "text-emerald-400" },
-  "eddi://ai.labs.parser":   { bg: "bg-amber-500/15",   text: "text-amber-400" },
+  "eddi://ai.labs.parser":   { bg: "bg-ochre-500/15",   text: "text-ochre-400" },
   "eddi://ai.labs.apicalls": { bg: "bg-orange-500/15",  text: "text-orange-400" },
   "eddi://ai.labs.property": { bg: "bg-teal-500/15",    text: "text-teal-400" },
   "eddi://ai.labs.mcpcalls": { bg: "bg-rose-500/15",    text: "text-rose-400" },
@@ -66,7 +66,7 @@ const TASK_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
 };
 
 /** Human-in-the-loop decisions are not a pipeline step; they get the HITL hand. */
-const HITL_STYLE = { bg: "bg-amber-500/15", text: "text-amber-500", icon: Hand };
+const HITL_STYLE = { bg: "bg-warn-500/15", text: "text-warn-500", icon: Hand };
 
 const DEFAULT_STYLE = { bg: "bg-gray-500/15", text: "text-gray-400", icon: UNKNOWN_RESOURCE_TYPE_ICON };
 
@@ -256,7 +256,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
         {/* Cost pill */}
         {costStr && (
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-500"
+            className="inline-flex items-center gap-1 rounded-full bg-ochre-500/10 px-2 py-0.5 text-xs font-medium text-ochre-500"
             data-testid="cost-pill"
           >
             <DollarSign className="h-3 w-3" />
@@ -276,7 +276,7 @@ function TaskCard({ entry, t }: { entry: AuditEntry; t: ReturnType<typeof useTra
         )}
         {problem !== undefined && problem !== "INVALID" && (
           <span
-            className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400"
+            className="inline-flex items-center gap-1 rounded-full bg-warn-500/10 px-2 py-0.5 text-[11px] font-medium text-warn-600 dark:text-warn-400"
             data-testid="entry-verify-unproven"
           >
             <ShieldAlert className="h-3 w-3" />
@@ -382,7 +382,7 @@ function StepGroup({
             {formatDuration(stepDuration)}
           </span>
           {stepCost > 0 && (
-            <span className="text-xs text-amber-500 hidden sm:inline-flex items-center gap-1">
+            <span className="text-xs text-ochre-500 hidden sm:inline-flex items-center gap-1">
               <DollarSign className="h-3 w-3" />
               {formatCost(stepCost)}
             </span>
@@ -464,7 +464,7 @@ function ConversationGroup({
             {formatDuration(totalDuration)}
           </span>
           {totalCost > 0 && (
-            <span className="text-xs text-amber-500 hidden sm:inline-flex items-center gap-1">
+            <span className="text-xs text-ochre-500 hidden sm:inline-flex items-center gap-1">
               <DollarSign className="h-3 w-3" />
               {formatCost(totalCost)}
             </span>
@@ -475,7 +475,7 @@ function ConversationGroup({
               className={`hidden sm:inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
                 signedCount === entries.length
                   ? "bg-foreground/5 text-foreground/60"
-                  : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                  : "bg-warn-500/10 text-warn-600 dark:text-warn-400"
               }`}
             >
               <Fingerprint className="h-3 w-3" />
@@ -1081,8 +1081,8 @@ function AuditTrailView({ tabs }: { tabs: ReactNode | null }) {
             <>
               <div className="h-4 w-px bg-border" />
               <div className="flex items-center gap-2 text-sm">
-                <DollarSign className="h-4 w-4 text-amber-500" />
-                <span className="font-semibold text-amber-500">{formatCost(stats.cost)}</span>
+                <DollarSign className="h-4 w-4 text-ochre-500" />
+                <span className="font-semibold text-ochre-500">{formatCost(stats.cost)}</span>
                 <span className="text-muted-foreground">{t("audit.totalCost", "total cost")}</span>
               </div>
             </>
@@ -1391,15 +1391,15 @@ function IntegrityBanner({
     reasons.push(t("audit.verify.reasonUncovered", { count: uncovered, defaultValue: "{{count}} loaded entry(ies) older than the checked window" }));
   }
   return (
-    <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3" data-testid="integrity-banner" data-verdict="unverified">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-500/15">
-        <ShieldAlert className="h-4 w-4 text-amber-500" />
+    <div className="flex items-start gap-3 rounded-xl border border-warn-500/30 bg-warn-500/5 px-4 py-3" data-testid="integrity-banner" data-verdict="unverified">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-warn-500/15">
+        <ShieldAlert className="h-4 w-4 text-warn-500" />
       </div>
       <div className="min-w-0 flex-1 space-y-0.5">
-        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+        <p className="text-sm font-medium text-warn-700 dark:text-warn-400">
           {t("audit.verify.unverifiedTitle", "Not fully verified")}
         </p>
-        <p className="text-xs text-amber-600/80 dark:text-amber-400/70">
+        <p className="text-xs text-warn-600/80 dark:text-warn-400/70">
           {t("audit.verify.unverifiedDesc", {
             reasons: reasons.join("; "),
             defaultValue: "No signature was disproven, but not everything could be checked: {{reasons}}.",

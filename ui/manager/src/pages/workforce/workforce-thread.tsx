@@ -1402,8 +1402,8 @@ function WorkforceThread() {
                               className={cn(
                                 "mt-0.5 inline-flex items-center gap-1 rounded-full ps-2 pe-2 py-0.5 text-[10px]",
                                 msg.role === "user"
-                                  ? "bg-amber-500/20 text-amber-100"
-                                  : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                                  ? "bg-warn-500/20 text-warn-100"
+                                  : "bg-warn-100 text-warn-700 dark:bg-warn-900/30 dark:text-warn-400",
                               )}
                             >
                               <AlertTriangle className="h-2.5 w-2.5" />

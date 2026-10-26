@@ -25,7 +25,7 @@ export function toEnvironment(value: string | undefined | null): Environment {
 /** Tailwind classes for capability confidence badges */
 export const CONFIDENCE_COLORS: Record<string, string> = {
   high: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-  medium: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+  medium: "bg-warn-500/10 text-warn-600 dark:text-warn-400 border-warn-500/20",
   low: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
 };
 

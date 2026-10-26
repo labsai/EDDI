@@ -71,8 +71,8 @@ const DEFAULT_STATE = { label: "Created", color: "text-muted-foreground", dot: "
 
 const STATE_CONFIG: Record<string, { label: string; color: string; dot: string }> = {
   COMPLETED: { label: "Completed", color: "text-emerald-500", dot: "bg-emerald-500" },
-  IN_PROGRESS: { label: "In Progress", color: "text-amber-500", dot: "bg-amber-500" },
-  SYNTHESIZING: { label: "Synthesizing", color: "text-amber-500", dot: "bg-amber-500" },
+  IN_PROGRESS: { label: "In Progress", color: "text-warn-500", dot: "bg-warn-500" },
+  SYNTHESIZING: { label: "Synthesizing", color: "text-warn-500", dot: "bg-warn-500" },
   FAILED: { label: "Failed", color: "text-destructive", dot: "bg-destructive" },
   // Muted, not destructive: a human declined the recommendation, nothing broke.
   REJECTED: { label: "Rejected", color: "text-muted-foreground", dot: "bg-muted-foreground" },
@@ -1100,12 +1100,12 @@ export function GroupDetailPage() {
               discussion is still awaiting approval; the pause is recoverable. */}
           {streamState.state === "FAILED" && streamState.errorKind === "config_drift" && (
             <div
-              className="flex items-start gap-2 border-b border-amber-500/30 bg-amber-500/5 px-4 py-2.5"
+              className="flex items-start gap-2 border-b border-warn-500/30 bg-warn-500/5 px-4 py-2.5"
               data-testid="group-drift-banner"
             >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-500" aria-hidden="true" />
               <div className="text-xs">
-                <p className="font-medium text-amber-600 dark:text-amber-400">
+                <p className="font-medium text-warn-600 dark:text-warn-400">
                   {t("groups.driftTitle", "Group configuration changed while paused")}
                 </p>
                 <p className="mt-0.5 text-muted-foreground">

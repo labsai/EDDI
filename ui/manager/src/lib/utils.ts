@@ -34,8 +34,8 @@ export const statusConfig: Record<
   },
   IN_PROGRESS: {
     label: "Deploying",
-    color: "text-amber-600 dark:text-amber-400",
-    dot: "bg-amber-500",
+    color: "text-warn-600 dark:text-warn-400",
+    dot: "bg-warn-500",
   },
   ERROR: {
     label: "Error",
@@ -52,7 +52,7 @@ export const statusConfig: Record<
 const AVATAR_COLORS = [
   "bg-blue-500",
   "bg-emerald-500",
-  "bg-amber-500",
+  "bg-ochre-500",
   "bg-purple-500",
   "bg-rose-500",
   "bg-cyan-500",

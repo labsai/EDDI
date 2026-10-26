@@ -397,7 +397,7 @@ export function SyncPage() {
                       {t("syncPage.remote", "Remote")}
                       {m.remoteVersion != null && ` · v${m.remoteVersion}`}
                       {m.autoMatched && (
-                        <span className="inline-flex items-center gap-0.5 ms-1.5 text-amber-500">
+                        <span className="inline-flex items-center gap-0.5 ms-1.5 text-warn-500">
                           <Sparkles className="h-3 w-3" />
                           {t("syncPage.autoMatched", "auto-matched")}
                         </span>

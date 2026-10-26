@@ -2,7 +2,7 @@
 
 EDDI can run under your product name, logo, icon and colours. One image serves every brand, and a rebrand needs neither a rebuild nor a restart.
 
-> **Status.** This page describes what is built so far: the brand store, its admin API and its delivery to the browser. The shells (page titles, descriptions, favicons and link previews) are branded today. The Manager's and the Chat UI's own screens, the Platform Operator, Swagger UI and the Keycloak login theme are not branded yet; the [white-labeling plan](../planning/white-label-ui-plan.md) lists what follows. With no brand set, EDDI looks exactly as it always has.
+> **Status.** This page describes what is built so far: the brand store, its admin API and its delivery to the browser. The shells (page titles, descriptions, favicons, link previews and the loading spinner) and the Manager's colours are branded today. The Manager's and the Chat UI's own screens, the Platform Operator, Swagger UI and the Keycloak login theme are not branded yet; the [white-labeling plan](../planning/white-label-ui-plan.md) lists what follows. With no brand set, EDDI looks exactly as it always has.
 
 ## Where the brand comes from
 
@@ -160,6 +160,21 @@ These paths are public, like the pages that load them: a browser needs them befo
 
 `brand.css` sets the Manager's `--color-primary`, `--color-primary-foreground`, `--color-ring`, `--color-sidebar-accent` and `--color-sidebar-accent-foreground` for light (`:root`) and dark (`.dark`) mode, and the Chat UI's `--chat-accent`. Each page loads it after its own stylesheet, so the brand's values win.
 
+With a primary colour set, it also carries:
+
+- **The Manager's brand scale**, `--color-brand-50` to `--color-brand-950`, in both blocks. Step 500 is the primary itself. Lighter steps mix it with white and darker ones with black, as fixed `color-mix(in oklch, var(--color-primary) N%, white|black)` text, so the browser derives every shade and the server computes none. Because each block re-declares the scale, dark mode derives it from the dark primary.
+- **`--brand-loader-accent`** for the spinner the HTML shells show before the app has loaded. The spinner sits on a dark background, so it takes the dark primary.
+
+The Manager has three colour scales in place of Tailwind's amber palette, and all three equal amber when nothing is branded:
+
+| Scale | Used for | Follows the brand |
+|---|---|---|
+| `brand-*` | Accents, selection, primary emphasis | Yes |
+| `warn-*` | Caution: warnings, human-in-the-loop pauses and pending approvals, unsaved-changes markers, in-progress and degraded states, the mock-data banner, secret and rotation notices | No, it stays amber |
+| `ochre-*` | A fixed categorical hue, not a warning: one colour of a per-type or per-category palette, such as resource-type badges, editor section accents, avatar colours, syntax colours, cost figures and search highlights | No, it stays amber |
+
+So a teal brand turns the accents teal, while a warning still reads as a warning and a per-type badge keeps its colour. `warn` and `ochre` render the same; they are separate so that code says what the colour means. Pick `warn` when the colour asks the reader to look at something, and `ochre` when amber is just that item's colour next to blue, emerald and the rest. A test (`no-hardcoded-amber.test.ts`) fails on any `amber-N` utility or brand-gold hex in the Manager's sources, so new code has to pick one of the three.
+
 The HTML pages are rendered with the brand before they are sent: `/manage`, `/welcome`, `/workforce`, `/chat` and the root redirect at `/`. This covers the page title, the description, the favicon, the loader logo and text, and for `/chat` the `theme-color` and link-preview (`og:*`) tags.
 
 ### Caching
@@ -173,7 +188,7 @@ The HTML pages are rendered with the brand before they are sent: `/manage`, `/we
 
 These still show EDDI, whatever the brand:
 
-- The Manager's screens: sidebar logo, colours, strings, the update UI and the About dialog.
+- The Manager's screens: sidebar logo, strings, the update UI and the About dialog. Its colours follow the brand (see above), except a few hard-coded third-party marks and the editor's syntax colours.
 - The Chat UI widget's default title, logo and accent.
 - The Platform Operator's persona.
 - Swagger UI, the OpenAPI document and the A2A agent cards.

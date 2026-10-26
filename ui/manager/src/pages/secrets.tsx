@@ -681,7 +681,7 @@ export function SecretsPage() {
                         </button>
                         <button
                           onClick={() => openRotate(s)}
-                          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 transition-colors hover:bg-amber-500/10"
+                          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-warn-600 dark:text-warn-400 transition-colors hover:bg-warn-500/10"
                           data-testid={`rotate-${s.keyName}`}
                           aria-label={t("secrets.rotateKey", { key: s.keyName, defaultValue: `Rotate ${s.keyName}` })}
                         >
@@ -778,20 +778,20 @@ export function SecretsPage() {
           {/* KEK rotation success — unmissable restart instruction */}
           {kekResult !== null && (
             <div
-              className="relative space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 pe-10"
+              className="relative space-y-2 rounded-lg border border-warn-500/40 bg-warn-500/10 px-4 py-3 pe-10"
               data-testid="kek-rotation-result"
               role="status"
             >
               <button
                 type="button"
                 onClick={() => setKekResult(null)}
-                className="absolute inset-e-2 top-2 rounded-md p-1 text-amber-700 hover:bg-amber-500/20 dark:text-amber-300"
+                className="absolute inset-e-2 top-2 rounded-md p-1 text-warn-700 hover:bg-warn-500/20 dark:text-warn-300"
                 aria-label={t("common.dismiss", "Dismiss")}
                 data-testid="dismiss-kek-result"
               >
                 <X className="h-4 w-4" />
               </button>
-              <p className="flex items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300">
+              <p className="flex items-center gap-2 text-sm font-semibold text-warn-700 dark:text-warn-300">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
                 {t("secrets.kekResultTitle", {
                   count: kekResult,
@@ -835,7 +835,7 @@ export function SecretsPage() {
             {/* Rotate KEK */}
             <div className="flex flex-col gap-2 rounded-lg border border-border bg-card p-3">
               <div className="flex items-center gap-2">
-                <KeySquare className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <KeySquare className="h-4 w-4 text-warn-600 dark:text-warn-400" />
                 <span className="text-sm font-medium text-foreground">
                   {t("secrets.rotateKekTitle", "Rotate master key (KEK)")}
                 </span>
@@ -848,7 +848,7 @@ export function SecretsPage() {
               </p>
               <button
                 onClick={() => setShowRotateKek(true)}
-                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300 transition-colors hover:bg-amber-500/20"
+                className="mt-auto inline-flex items-center justify-center gap-2 rounded-lg border border-warn-500/40 bg-warn-500/10 px-3 py-2 text-xs font-medium text-warn-700 dark:text-warn-300 transition-colors hover:bg-warn-500/20"
                 data-testid="open-rotate-kek"
               >
                 <KeySquare className="h-3.5 w-3.5" />
@@ -926,9 +926,9 @@ export function SecretsPage() {
         confirmDisabled={!kekValid}
       >
         <div className="space-y-3">
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-            <p className="text-xs text-amber-800 dark:text-amber-200">
+          <div className="flex items-start gap-2 rounded-lg border border-warn-500/40 bg-warn-500/10 px-3 py-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-600 dark:text-warn-400" />
+            <p className="text-xs text-warn-800 dark:text-warn-200">
               {t(
                 "secrets.kekTlsWarning",
                 "Both keys are sent in the request body. Only perform this over a TLS (HTTPS) connection so the keys are not exposed in transit.",
@@ -1417,7 +1417,7 @@ export function SecretsPage() {
               id="rotate-secret-title"
               className="flex items-center gap-2 text-lg font-semibold text-foreground"
             >
-              <RefreshCw className="h-5 w-5 text-amber-500" />
+              <RefreshCw className="h-5 w-5 text-warn-500" />
               {t("secrets.rotateTitle", { key: rotateTarget.keyName, defaultValue: `Rotate "${rotateTarget.keyName}"` })}
             </h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -1462,7 +1462,7 @@ export function SecretsPage() {
               <button
                 onClick={handleRotate}
                 disabled={!rotateValue.trim() || rotateMut.isPending}
-                className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+                className="inline-flex items-center gap-2 rounded-lg bg-warn-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-warn-600 disabled:opacity-50"
                 data-testid="confirm-rotate-button"
               >
                 {rotateMut.isPending && <Loader2 className="h-4 w-4 animate-spin" />}

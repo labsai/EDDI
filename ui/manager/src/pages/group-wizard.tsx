@@ -424,7 +424,7 @@ function styleBestFor(style: string, t: TFunction): string {
 
 /** Style-specific accent colors */
 const STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; text: string; accent: string }> = {
-  ROUND_TABLE: { bg: "bg-amber-500/10", border: "border-amber-500/30", text: "text-amber-600 dark:text-amber-400", accent: "bg-amber-500" },
+  ROUND_TABLE: { bg: "bg-ochre-500/10", border: "border-ochre-500/30", text: "text-ochre-600 dark:text-ochre-400", accent: "bg-ochre-500" },
   PEER_REVIEW: { bg: "bg-teal-500/10", border: "border-teal-500/30", text: "text-teal-600 dark:text-teal-400", accent: "bg-teal-500" },
   DEVIL_ADVOCATE: { bg: "bg-rose-500/10", border: "border-rose-500/30", text: "text-rose-600 dark:text-rose-400", accent: "bg-rose-500" },
   DELPHI: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-600 dark:text-violet-400", accent: "bg-violet-500" },
@@ -816,11 +816,11 @@ export function GroupWizardPage() {
       {step?.id !== "review" && blockers.length > 0 && (
         <div
           id="group-wizard-blockers"
-          className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+          className="rounded-lg border border-warn-500/30 bg-warn-500/5 p-3"
           role="status"
           data-testid="group-wizard-blockers"
         >
-          <p className="flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+          <p className="flex items-center gap-1.5 text-xs font-medium text-warn-600 dark:text-warn-400">
             <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
             {t("groupWizard.blockersTitle", "To continue:")}
           </p>
@@ -1267,7 +1267,7 @@ function HitlWizardSection({
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-            <Hand className="h-4 w-4 text-amber-500" aria-hidden="true" />
+            <Hand className="h-4 w-4 text-warn-500" aria-hidden="true" />
             {t("groupWizard.hitlTitle", "Require human approval")}
           </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
@@ -1308,7 +1308,7 @@ function HitlWizardSection({
               </div>
             )}
             {state.approvalPhases.length === 0 && phases.length > 0 && (
-              <p className="mt-1.5 flex items-center gap-1 text-xs text-amber-500">
+              <p className="mt-1.5 flex items-center gap-1 text-xs text-warn-500">
                 <AlertTriangle className="h-3 w-3" aria-hidden="true" />
                 {t("groupWizard.hitlNoApprovalPoints", "Select at least one phase, or the discussion will never pause.")}
               </p>
@@ -1668,7 +1668,7 @@ function MembersStep({
 
       {/* Member count indicator */}
       {state.members.length < 2 && (
-        <p className="mt-3 text-xs text-amber-500 font-medium flex items-center gap-1.5">
+        <p className="mt-3 text-xs text-warn-500 font-medium flex items-center gap-1.5">
           <AlertTriangle className="h-3.5 w-3.5" />
           {t("groupWizard.needMembers")}
         </p>
@@ -1909,7 +1909,7 @@ function MemberCard({
             "flex items-center gap-1.5 rounded-md border px-2 py-0.5 transition-colors",
             member.displayName.trim()
               ? "border-border/60 focus-within:border-primary/50"
-              : "border-amber-500/50 bg-amber-500/5"
+              : "border-warn-500/50 bg-warn-500/5"
           )}>
             <Pencil className="h-3 w-3 shrink-0 text-muted-foreground/50" />
             <input
@@ -2058,7 +2058,7 @@ function MemberCard({
                     aria-label={t("groupWizard.selectAgent")}
                     className={cn(
                       "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
-                      !member.agentId ? "border-amber-400/50" : "border-input"
+                      !member.agentId ? "border-warn-400/50" : "border-input"
                     )}
                   >
                     <option value="">{t("groupWizard.selectAgent")}</option>
@@ -2146,7 +2146,7 @@ function MemberCard({
                         aria-invalid={keyMissing || undefined}
                       />
                       {keyMissing && (
-                        <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400" data-testid={`gw-apikey-required-${index}`}>
+                        <p className="mt-1 text-[11px] text-warn-600 dark:text-warn-400" data-testid={`gw-apikey-required-${index}`}>
                           {t("groupWizard.apiKeyRequired", "{{provider}} needs an API key before this agent can be created.", {
                             provider: providerLabel(member.provider || DEFAULT_PROVIDER),
                           })}
@@ -2351,7 +2351,7 @@ function ModeratorCard({
                 aria-invalid={keyMissing || undefined}
               />
               {keyMissing && (
-                <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+                <p className="mt-1 text-[11px] text-warn-600 dark:text-warn-400">
                   {t("groupWizard.apiKeyRequired", "{{provider}} needs an API key before this agent can be created.", {
                     provider: providerLabel(moderator.provider || DEFAULT_PROVIDER),
                   })}
@@ -2448,7 +2448,7 @@ function ReviewStep({
               </Badge>
             )}
             {state.hitlEnabled && (
-              <Badge variant="outline" className="text-xs text-amber-600 dark:text-amber-400">
+              <Badge variant="outline" className="text-xs text-warn-600 dark:text-warn-400">
                 <Hand className="me-1 h-3 w-3" />
                 {t("groupWizard.hitlReviewBadge", "Human approval")}
                 {state.approvalPhases.length > 0 && ` · ${state.approvalPhases.length}`}
@@ -2474,10 +2474,10 @@ function ReviewStep({
 
         {/* Unassigned existing warning */}
         {unassignedExistingCount > 0 && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+          <div className="flex items-start gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-3">
+            <AlertTriangle className="h-4 w-4 text-warn-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+              <p className="text-sm font-medium text-warn-600 dark:text-warn-400">
                 {t("groupWizard.unassignedWarning", { count: unassignedExistingCount })}
               </p>
               <p className="text-xs text-muted-foreground mt-0.5">
@@ -2490,14 +2490,14 @@ function ReviewStep({
         {/* Role coverage warning — a ROLE:<x> phase with no member carrying <x> */}
         {roleGaps.length > 0 && (
           <div
-            className="flex flex-col gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+            className="flex flex-col gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-3"
             data-testid="wizard-role-coverage-warning"
           >
             {roleGaps.map((gap) => (
               <div key={gap.role} className="flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                <AlertTriangle className="h-4 w-4 text-warn-500 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium text-amber-600 dark:text-amber-400">
+                  <p className="text-sm font-medium text-warn-600 dark:text-warn-400">
                     {t(
                       "groupWizard.roleCoverageWarning",
                       'No member has the role "{{role}}"',
@@ -2626,9 +2626,9 @@ function GroupMemberPicker({
           message={t("common.loadError", "Failed to load data")}
         />
       ) : !hasGroups ? (
-        <div className="rounded-lg border border-dashed border-amber-400/50 bg-amber-400/5 px-3 py-3 text-center">
-          <Users className="h-4 w-4 text-amber-500 mx-auto mb-1" />
-          <p className="text-xs font-medium text-amber-600 dark:text-amber-400">
+        <div className="rounded-lg border border-dashed border-warn-400/50 bg-warn-400/5 px-3 py-3 text-center">
+          <Users className="h-4 w-4 text-warn-500 mx-auto mb-1" />
+          <p className="text-xs font-medium text-warn-600 dark:text-warn-400">
             {t("groupWizard.noGroupsYet", "No groups available")}
           </p>
           <p className="text-[10px] text-muted-foreground mt-0.5">
@@ -2642,7 +2642,7 @@ function GroupMemberPicker({
             onChange={(e) => onUpdate({ agentId: e.target.value, mode: "existing" })}
             className={cn(
               "w-full appearance-none rounded-lg border bg-background px-3 py-2 pe-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring",
-              !agentId ? "border-amber-400/50" : "border-input"
+              !agentId ? "border-warn-400/50" : "border-input"
             )}
           >
             <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>
