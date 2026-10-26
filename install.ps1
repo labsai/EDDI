@@ -1932,7 +1932,7 @@ echo EDDI updated.
 goto :eof
 
 :update_failed
-echo EDDI update failed: docker compose reported an error, see above. Nothing was updated.
+echo EDDI update failed: docker compose reported an error, see above. The compose files and .env may already be refreshed, so check the state with eddi status.
 exit /b 1
 
 :check_ref
