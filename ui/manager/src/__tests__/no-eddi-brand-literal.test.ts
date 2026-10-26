@@ -42,20 +42,6 @@ const ALLOWED_KEYS: Record<string, string> = {
   "cluster.metrics.text": "names the Grafana dashboard as it is titled (\"EDDI Cluster\"), so an operator can find it",
 };
 
-/**
- * Source files not graded yet.
- *
- * TODO(white-label Phase 6): the Platform Operator — its persona, prompt and
- * activation screen — is rebranded in Phase 6 of the white-label plan. Remove
- * these entries then; the list may only shrink.
- */
-const PHASE_6_EXCLUDED = [
-  /^src\/lib\/operator\//,
-  /^src\/pages\/operator\.tsx$/,
-  /^src\/lib\/api\/operator[^/]*\.ts$/,
-  /^src\/hooks\/use-operator[^/]*\.ts$/,
-];
-
 type Json = Record<string, unknown>;
 
 function flatten(obj: Json, prefix = "", out: Record<string, unknown> = {}) {
@@ -98,6 +84,8 @@ const PATTERNS: { kind: string; regex: RegExp }[] = [
     regex: /\bt\(\s*(["'`])(?<key>[^"'`]*)\1\s*,\s*(["'`])((?:\\.|(?!\3)[^\\])*)\3/g,
   },
   { kind: "defaultValue", regex: /\bdefaultValue:\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1/g },
+  // Error messages: the operator screens show them to the admin verbatim.
+  { kind: "Error message", regex: /\bnew Error\(\s*(["'`])((?:\\.|(?!\1)[^\\])*)\1/g },
   // JSX text between tags. Not after `=>` or `->`, and never across a quote, so
   // an arrow function or a `<hex>` inside a string does not read as a tag.
   { kind: "JSX text", regex: /(?<![=-])>([^<>{}"]*)</g },
@@ -156,7 +144,6 @@ describe("no EDDI in user-visible strings", () => {
   it("no t() fallback, JSX text or text attribute names EDDI", () => {
     const offenders = sourceFiles(join(repoRoot, "src")).flatMap((file) => {
       const rel = relative(repoRoot, file).split("\\").join("/");
-      if (PHASE_6_EXCLUDED.some((re) => re.test(rel))) return [];
       return sourceOffenders(rel, readFileSync(file, "utf8"));
     });
     expect(offenders, "Use {{productName}} in the fallback, or useBrand().productName in JSX").toEqual([]);
@@ -182,6 +169,9 @@ describe("no EDDI in user-visible strings", () => {
     expect(sourceOffenders("a.tsx", "<p>Welcome to EDDI</p>")).toHaveLength(1);
     expect(sourceOffenders("a.tsx", '<img alt="EDDI" />')).toHaveLength(1);
     expect(sourceOffenders("a.tsx", "<svg aria-label={'EDDI'} />")).toHaveLength(1);
+    expect(sourceOffenders("a.ts", 'throw new Error("This EDDI deployment is down");')).toHaveLength(1);
+    expect(sourceOffenders("a.ts", "throw new Error(`EDDI said ${x}`);")).toHaveLength(1);
+    expect(sourceOffenders("a.ts", 'throw new Error("This deployment is down");')).toEqual([]);
 
     expect(sourceOffenders("a.tsx", 't("k", "Welcome to {{productName}}")')).toEqual([]);
     expect(sourceOffenders("a.tsx", "// EDDI does this\n/* and EDDI that */")).toEqual([]);

@@ -5,6 +5,7 @@ import { renderPage, userEvent } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { BrandingPage } from "@/pages/branding";
 import { getBrand, setBrand } from "@/lib/brand";
+import { UNBRANDED_COLORS } from "@/lib/brand-css";
 import {
   MOCK_BRAND_CONFLICT_TRIGGER,
   MOCK_BRAND_LOCKED_KEY,
@@ -75,6 +76,29 @@ describe("BrandingPage — editing", () => {
     expect(screen.getByTestId("branding-contrast-light")).toHaveAttribute("data-ok", "true");
     // Dark follows light while it is unset.
     expect(screen.getByTestId("branding-contrast-dark")).toHaveAttribute("data-ok", "true");
+  });
+
+  it("shows an empty colour's fallback in its swatch, never black", async () => {
+    renderBranding();
+    const picker = (key: string) => screen.getByTestId(`branding-color-${key}-picker`);
+    await screen.findByTestId("branding-color-primary");
+    // Nothing set: the unbranded defaults — the Manager's amber pair, the chat's own accent.
+    expect(picker("primary")).toHaveValue(UNBRANDED_COLORS.primary);
+    expect(picker("darkPrimary")).toHaveValue(UNBRANDED_COLORS.primary);
+    expect(picker("darkPrimaryForeground")).toHaveValue(UNBRANDED_COLORS.primaryForeground);
+    expect(picker("chatAccent")).toHaveValue(UNBRANDED_COLORS.chatAccent);
+
+    fireEvent.change(screen.getByTestId("branding-color-primary"), { target: { value: "#0F766E" } });
+    fireEvent.change(screen.getByTestId("branding-color-primaryForeground"), { target: { value: "#fff" } });
+    // Dark follows light and the accent follows the primary while they are empty.
+    expect(picker("darkPrimary")).toHaveValue("#0f766e");
+    expect(picker("darkPrimaryForeground")).toHaveValue("#ffffff");
+    expect(picker("chatAccent")).toHaveValue("#0f766e");
+    expect(picker("darkPrimary").className).toContain("opacity-40");
+
+    fireEvent.change(screen.getByTestId("branding-color-darkPrimary"), { target: { value: "#2dd4bf" } });
+    expect(picker("darkPrimary")).toHaveValue("#2dd4bf");
+    expect(picker("darkPrimary").className).not.toContain("opacity-40");
   });
 
   it("previews the colours in both modes with the brand.css formulas", async () => {
@@ -195,6 +219,48 @@ describe("BrandingPage — conflicts, reset and lock", () => {
     expect(screen.queryByTestId("branding-reset-btn")).not.toBeInTheDocument();
     expect(screen.queryByTestId("brand-asset-logo-remove")).not.toBeInTheDocument();
     expect(screen.getByTestId("brand-asset-logo-drop")).toHaveAttribute("aria-disabled", "true");
+    // Downloading the login theme is a read, so it stays available.
+    expect(screen.getByTestId("branding-login-theme-download")).toBeEnabled();
+  });
+});
+
+describe("BrandingPage — login theme", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("downloads the Keycloak theme ZIP under its file name", async () => {
+    const user = userEvent.setup();
+    const createObjectURL = vi.fn((blob: Blob) => {
+      expect(blob.size).toBeGreaterThan(0);
+      return "blob:theme";
+    });
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    let saved: string | null = null;
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      saved = this.download;
+    });
+    renderBranding();
+    await user.click(await screen.findByTestId("branding-login-theme-download"));
+    await waitFor(() => expect(saved).toBe("brand-keycloak-theme.zip"));
+    expect(createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it("says that unsaved edits are not in it", async () => {
+    renderBranding();
+    expect(await screen.findByTestId("branding-login-theme")).toBeInTheDocument();
+    expect(screen.queryByTestId("branding-login-theme-unsaved")).not.toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("branding-productName"), { target: { value: "Acme" } });
+    expect(screen.getByTestId("branding-login-theme-unsaved")).toBeInTheDocument();
+  });
+
+  it("reports a failed download", async () => {
+    const { toast } = await import("sonner");
+    server.use(
+      http.get("*/administration/branding/keycloak-theme.zip", () => new HttpResponse(null, { status: 403, statusText: "Forbidden" })),
+    );
+    const user = userEvent.setup();
+    renderBranding();
+    await user.click(await screen.findByTestId("branding-login-theme-download"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(expect.stringContaining("403")));
   });
 });
 

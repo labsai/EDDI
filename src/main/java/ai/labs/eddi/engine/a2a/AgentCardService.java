@@ -6,6 +6,9 @@ package ai.labs.eddi.engine.a2a;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.branding.BrandRequest;
+import ai.labs.eddi.configs.branding.BrandingService;
+import ai.labs.eddi.configs.branding.model.ResolvedBrand;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentAuthentication;
@@ -28,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -77,6 +81,15 @@ public class AgentCardService {
     private final String applicationVersion;
 
     /**
+     * The deployment's product name, read per card: the provider, the fallback name
+     * and description and the default skill name it instead of EDDI
+     * (white-labeling). The brand is cached for 30 seconds in
+     * {@link BrandingService}, the roster for {@link #ROSTER_CACHE_TTL}, so a
+     * rebrand reaches discovery within about a minute.
+     */
+    private final Supplier<String> productName;
+
+    /**
      * Input modes every EDDI agent accepts: text parts, and data parts read as
      * JSON.
      */
@@ -94,7 +107,17 @@ public class AgentCardService {
             @ConfigProperty(name = "quarkus.oidc.auth-server-url") Optional<String> oidcAuthServerUrl,
             @ConfigProperty(name = "eddi.a2a.public-token-endpoint") Optional<String> publicTokenEndpoint,
             @ConfigProperty(name = "eddi.keycloak.public.url") Optional<String> keycloakPublicUrl,
-            @ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown") String applicationVersion) {
+            @ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown") String applicationVersion,
+            BrandingService branding) {
+        this(agentStore, documentDescriptorStore, baseUrl, authEnabled, oidcAuthServerUrl, publicTokenEndpoint, keycloakPublicUrl,
+                applicationVersion, () -> branding.current(BrandRequest.NONE).productName());
+    }
+
+    /** With the product name supplied directly — the constructor tests use. */
+    AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, String baseUrl, boolean authEnabled,
+            Optional<String> oidcAuthServerUrl, Optional<String> publicTokenEndpoint, Optional<String> keycloakPublicUrl,
+            String applicationVersion, Supplier<String> productName) {
+        this.productName = productName;
         this.applicationVersion = isNullOrEmpty(applicationVersion) ? "unknown" : applicationVersion;
         this.agentStore = agentStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -109,7 +132,22 @@ public class AgentCardService {
     AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, String baseUrl, boolean authEnabled,
             Optional<String> oidcAuthServerUrl, Optional<String> publicTokenEndpoint, Optional<String> keycloakPublicUrl) {
         this(agentStore, documentDescriptorStore, baseUrl, authEnabled, oidcAuthServerUrl, publicTokenEndpoint, keycloakPublicUrl,
-                "unknown");
+                "unknown", () -> ResolvedBrand.DEFAULT_PRODUCT_NAME);
+    }
+
+    /**
+     * The product name to put on a card. Never fails a card: a brand that cannot be
+     * read (a store outage) falls back to the EDDI name rather than dropping the
+     * card.
+     */
+    private String product() {
+        try {
+            String name = productName.get();
+            return isNullOrEmpty(name) ? ResolvedBrand.DEFAULT_PRODUCT_NAME : name;
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Brand unavailable for an A2A card: %s", e.getMessage());
+            return ResolvedBrand.DEFAULT_PRODUCT_NAME;
+        }
     }
 
     /**
@@ -315,7 +353,7 @@ public class AgentCardService {
      * back to the old form when the descriptor is missing or unnamed, so a card is
      * still served rather than dropped.
      */
-    private String agentDisplayName(String agentId, Integer version) {
+    private String agentDisplayName(String agentId, Integer version, String product) {
         try {
             DocumentDescriptor descriptor = documentDescriptorStore.readDescriptor(agentId, version);
             if (descriptor != null && !isNullOrEmpty(descriptor.getName())) {
@@ -324,7 +362,7 @@ public class AgentCardService {
         } catch (Exception e) {
             LOGGER.debugf("No descriptor name for A2A agent %s: %s", sanitize(agentId), e.getMessage());
         }
-        return "EDDI Agent " + agentId;
+        return product + " Agent " + agentId;
     }
 
     /**
@@ -336,9 +374,10 @@ public class AgentCardService {
      * dialects apart by method name.
      */
     AgentCard buildAgentCard(String agentId, AgentConfiguration config, Integer version) {
-        String name = agentDisplayName(agentId, version);
+        String product = product();
+        String name = agentDisplayName(agentId, version, product);
 
-        String description = !isNullOrEmpty(config.getDescription()) ? config.getDescription() : "EDDI conversational AI agent";
+        String description = !isNullOrEmpty(config.getDescription()) ? config.getDescription() : product + " conversational AI agent";
 
         String agentUrl = baseUrl + "/a2a/agents/" + agentId;
 
@@ -351,7 +390,8 @@ public class AgentCardService {
             }
         } else {
             // Default skill
-            skills.add(new AgentSkill("chat", "Conversational AI", "General conversational AI agent powered by EDDI", List.of("chat", "ai"), null));
+            skills.add(new AgentSkill("chat", "Conversational AI", "General conversational AI agent powered by " + product, List.of("chat", "ai"),
+                    null));
         }
 
         var capabilities = new AgentCapabilities(true, false, false);
@@ -370,8 +410,8 @@ public class AgentCardService {
             bearer.put("scheme", "Bearer");
             bearer.put("bearerFormat", "JWT");
             bearer.put("description", tokenEndpoint == null
-                    ? "An OIDC access token for this EDDI deployment"
-                    : "An OIDC access token for this EDDI deployment, issued by " + tokenEndpoint);
+                    ? "An OIDC access token for this " + product + " deployment"
+                    : "An OIDC access token for this " + product + " deployment, issued by " + tokenEndpoint);
             securitySchemes.put(BEARER_SCHEME, Map.of("httpAuthSecurityScheme", bearer));
             String issuer = publicTokenEndpoint == null ? publicIssuerUrl() : null;
             if (issuer != null) {
@@ -382,7 +422,7 @@ public class AgentCardService {
         }
 
         return new AgentCard(name, description, agentUrl, A2AModels.LEGACY_CARD_PROTOCOL_VERSION, A2AModels.TRANSPORT_JSONRPC, interfaces,
-                new AgentProvider("EDDI", baseUrl), applicationVersion, capabilities, securitySchemes, securityRequirements, INPUT_MODES,
+                new AgentProvider(product, baseUrl), applicationVersion, capabilities, securitySchemes, securityRequirements, INPUT_MODES,
                 OUTPUT_MODES, skills, authentication);
     }
 }

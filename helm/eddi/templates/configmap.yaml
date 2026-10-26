@@ -184,6 +184,51 @@ data:
   {{- with (.Values.eddi.chat | default dict).frameAncestors }}
   EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
   {{- end }}
+  {{- /*
+    White-labeling seed (eddi.branding.*). Only values that are set are
+    rendered, so an unset one keeps EDDI's default, and EDDI validates each at
+    startup (an invalid one fails the pod with the property named). The booleans
+    are tested with kindIs so that an explicit false is rendered, not dropped.
+  */}}
+  {{- $branding := .Values.eddi.branding | default dict }}
+  {{- $brandColors := $branding.colors | default dict }}
+  {{- with $branding.productName }}
+  EDDI_BRANDING_PRODUCT_NAME: {{ . | quote }}
+  {{- end }}
+  {{- with $branding.shortName }}
+  EDDI_BRANDING_SHORT_NAME: {{ . | quote }}
+  {{- end }}
+  {{- with $branding.tagline }}
+  EDDI_BRANDING_TAGLINE: {{ . | quote }}
+  {{- end }}
+  {{- with $brandColors.primary }}
+  EDDI_BRANDING_COLOR_PRIMARY: {{ . | quote }}
+  {{- end }}
+  {{- with $brandColors.primaryForeground }}
+  EDDI_BRANDING_COLOR_PRIMARY_FOREGROUND: {{ . | quote }}
+  {{- end }}
+  {{- with $brandColors.darkPrimary }}
+  EDDI_BRANDING_COLOR_DARK_PRIMARY: {{ . | quote }}
+  {{- end }}
+  {{- with $brandColors.darkPrimaryForeground }}
+  EDDI_BRANDING_COLOR_DARK_PRIMARY_FOREGROUND: {{ . | quote }}
+  {{- end }}
+  {{- with $brandColors.chatAccent }}
+  EDDI_BRANDING_COLOR_CHAT_ACCENT: {{ . | quote }}
+  {{- end }}
+  {{- if kindIs "bool" $branding.poweredBy }}
+  EDDI_BRANDING_POWERED_BY: {{ $branding.poweredBy | quote }}
+  {{- end }}
+  {{- if kindIs "bool" $branding.showUpdateCheck }}
+  EDDI_BRANDING_SHOW_UPDATE_CHECK: {{ $branding.showUpdateCheck | quote }}
+  {{- end }}
+  {{- if $branding.locked }}
+  EDDI_BRANDING_LOCKED: "true"
+  {{- end }}
+  {{- $brandAssets := $branding.assets | default dict }}
+  {{- if $brandAssets.configMap }}
+  EDDI_BRANDING_ASSETS_DIR: {{ $brandAssets.mountPath | default "/deployments/branding" | quote }}
+  {{- end }}
   QUARKUS_OIDC_TENANT_ENABLED: {{ .Values.eddi.oidc.enabled | quote }}
   {{- /*
     An ingress with tls serves EDDI's public origin over https, so tell browsers

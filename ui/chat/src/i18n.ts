@@ -31,6 +31,7 @@ const en = {
   "copy.done": "Copied",
   "copy.failed": "Could not copy",
   "theme.toggle": "Toggle theme",
+  "demo.unavailable": "The demo is not available on this site.",
 
   // Starting
   "start.retry": "Try again",
@@ -184,6 +185,7 @@ const de: Table = {
   "copy.done": "Kopiert",
   "copy.failed": "Kopieren fehlgeschlagen",
   "theme.toggle": "Design wechseln",
+  "demo.unavailable": "Die Demo ist auf dieser Website nicht verfügbar.",
   "start.retry": "Erneut versuchen",
   "start.notFoundEnv":
     "⚠️ Dieser Agent ist in der Umgebung „{env}“ nicht verfügbar. Er ist dort möglicherweise nicht bereitgestellt.",
@@ -325,6 +327,7 @@ const fr: Table = {
   "copy.done": "Copié",
   "copy.failed": "Échec de la copie",
   "theme.toggle": "Changer de thème",
+  "demo.unavailable": "La démo n’est pas disponible sur ce site.",
   "start.retry": "Réessayer",
   "start.notFoundEnv":
     "⚠️ Cet agent n’est pas disponible dans l’environnement « {env} ». Il n’y est peut-être pas déployé.",
@@ -467,6 +470,7 @@ const es: Table = {
   "copy.done": "Copiado",
   "copy.failed": "No se pudo copiar",
   "theme.toggle": "Cambiar tema",
+  "demo.unavailable": "La demostración no está disponible en este sitio.",
   "start.retry": "Reintentar",
   "start.notFoundEnv":
     "⚠️ Este agente no está disponible en el entorno «{env}». Puede que no esté desplegado allí.",

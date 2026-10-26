@@ -20,7 +20,8 @@ import {
 } from "../scripts/vite-plugin-brand.mjs";
 
 const ROOT = process.cwd();
-const SHELLS = ["chat.html"];
+// index.html is the `npm run dev` entry; production builds and serves chat.html.
+const SHELLS = ["chat.html", "index.html"];
 const PLACEHOLDER = /%BRAND_[A-Z_]+%/g;
 
 // realpath: on Windows tmpdir() can be an 8.3 short name, which Vite then
@@ -80,8 +81,8 @@ describe("brand placeholders", () => {
 });
 
 describe("dev-server defaults", () => {
-  it("renders chat.html's head exactly as before branding existed", () => {
-    const chat = substituteBrandDefaults(shell("chat.html"), "chat.html");
+  it.each(SHELLS)("renders %s's head exactly as before branding existed", (name) => {
+    const chat = substituteBrandDefaults(shell(name), name);
     expect(chat).toContain("<title>EDDI Chat</title>");
     expect(chat).toContain('<meta name="theme-color" content="#1a1a1a" />');
     expect(chat).toContain('<meta name="description" content="EDDI — Open Source Conversational AI" />');

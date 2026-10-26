@@ -6771,6 +6771,14 @@
       "errorType": "此处不接受该文件类型。请使用 PNG、WebP 或 SVG（ICO 仅限网站图标）。",
       "errorLocked": "品牌已锁定，无法在此更改图片。"
     },
+    "loginTheme": {
+      "title": "登录页面",
+      "description": "通过 Keycloak 登录时，登录页面是一个 Keycloak 主题，无法读取此品牌。请将其下载为应用了已保存品牌的主题，安装到 Keycloak 中，并设置其 README 中列出的 realm 值。更换品牌后请重新下载。",
+      "download": "下载登录主题",
+      "downloading": "正在准备…",
+      "unsaved": "其中包含已保存的品牌。请先保存更改，才能将其包含在内。",
+      "failed": "无法下载登录主题：{{reason}}"
+    },
     "resetDialog": {
       "title": "重置品牌？",
       "description": "这将清除所有已保存的名称、颜色、选项和图片。所有用户将重新使用配置属性或默认值。"

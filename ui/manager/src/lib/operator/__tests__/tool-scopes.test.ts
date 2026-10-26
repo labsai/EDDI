@@ -62,6 +62,16 @@ describe("tool-scopes", () => {
       expect(READ_ENDPOINTS).toContain("GET /administration/version");
     });
 
+    it("never reaches the branding API, in either scope (white-label plan R9)", () => {
+      // A brand change is seen by every user at once and is one click on the
+      // Admin → Branding page; the prompt sends the admin there instead. This
+      // covers the reads too — the theme ZIP included — and the public assets.
+      for (const scope of ["read_only", "read_write"] as const) {
+        const granted = endpointsForScope(scope).filter((e) => /\/branding(\/|$)/.test(e));
+        expect(granted, scope).toEqual([]);
+      }
+    });
+
     it("can see the schedule it might later be asked to disable", () => {
       // WRITE_ENDPOINTS can bind /disable without this — but an operator that
       // cannot list schedules would recommend disabling one it cannot name.

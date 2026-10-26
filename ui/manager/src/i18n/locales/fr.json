@@ -6842,6 +6842,14 @@
       "errorType": "Ce type de fichier n’est pas accepté ici. Utilisez PNG, WebP ou SVG (ICO pour le favicon uniquement).",
       "errorLocked": "L’image de marque est verrouillée : les images ne peuvent pas être modifiées ici."
     },
+    "loginTheme": {
+      "title": "Page de connexion",
+      "description": "Avec la connexion via Keycloak, la page de connexion est un thème Keycloak, qui ne peut pas lire cette marque. Téléchargez-le sous forme de thème avec la marque enregistrée appliquée, installez-le dans Keycloak et définissez les valeurs de realm indiquées dans son README. Téléchargez-le à nouveau après un changement de marque.",
+      "download": "Télécharger le thème de connexion",
+      "downloading": "Préparation…",
+      "unsaved": "Il contient la marque enregistrée. Enregistrez d’abord vos modifications pour les inclure.",
+      "failed": "Le thème de connexion n’a pas pu être téléchargé : {{reason}}"
+    },
     "resetDialog": {
       "title": "Réinitialiser l’image de marque ?",
       "description": "Cela efface tous les noms, couleurs, options et images enregistrés. Les propriétés de configuration, ou les valeurs par défaut, s’appliquent de nouveau pour tous les utilisateurs."

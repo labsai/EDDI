@@ -15,6 +15,7 @@ import {
 import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
 import type { AttachmentResult } from "@/api/attachments-api";
 import type { ApprovalStatus } from "@/api/hitl-api";
+import { agentAppearanceLayer, brandConfigLayer } from "@/api/brand";
 
 /* ─── State ───────────────────────────────────── */
 
@@ -77,17 +78,24 @@ export interface ChatState {
   restoreDraft: string | null;
 }
 
-/** The title a header shows when nobody overrode it. */
+/**
+ * The title a header shows when nobody overrode it and nothing is branded. A
+ * branded deployment's product name takes its place (brandConfigLayer).
+ */
 export const DEFAULT_TITLE = "EDDI";
 
 /** The composer placeholder when nobody overrode it (shown translated). */
 export const DEFAULT_PLACEHOLDER = "Type a message...";
 
+/**
+ * The built-in defaults: the lowest layer of the config (precedence in
+ * src/api/brand.ts). `accentColor` and `logoUrl` are deliberately unset — the
+ * stylesheet's own accent tokens apply, and the header resolves the logo from
+ * the brand (brandLogoUrl) — so that setting either is always an override.
+ */
 const defaultConfig: ChatConfig = {
   theme: "dark",
-  accentColor: "#113B92",
   showLogo: true,
-  logoUrl: "/img/logo_eddi.png",
   title: DEFAULT_TITLE,
   placeholder: DEFAULT_PLACEHOLDER,
   enableStreaming: true,
@@ -474,10 +482,13 @@ export function ChatProvider({
   children: ReactNode;
   config?: Partial<ChatConfig>;
 }) {
-  const [state, dispatch] = useReducer(chatReducer, {
+  // Lowest to highest: built-in defaults, the deployment brand, the agent's
+  // appearance (a seam, empty today), the embedder's config. URL parameters
+  // come last, dispatched by ChatWidget on mount. Computed once, at mount.
+  const [state, dispatch] = useReducer(chatReducer, config, (embedderConfig) => ({
     ...initialState,
-    config: { ...defaultConfig, ...config },
-  });
+    config: { ...defaultConfig, ...brandConfigLayer(), ...agentAppearanceLayer(), ...embedderConfig },
+  }));
   const composerConversation = useRef<string | null | undefined>(undefined);
 
   return (

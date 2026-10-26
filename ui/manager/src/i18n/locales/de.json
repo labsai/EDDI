@@ -6771,6 +6771,14 @@
       "errorType": "Dieser Dateityp wird hier nicht angenommen. Verwenden Sie PNG, WebP oder SVG (ICO nur für das Favicon).",
       "errorLocked": "Der Markenauftritt ist gesperrt, Bilder können hier nicht geändert werden."
     },
+    "loginTheme": {
+      "title": "Anmeldeseite",
+      "description": "Bei der Anmeldung über Keycloak ist die Anmeldeseite ein Keycloak-Theme, das diese Marke nicht lesen kann. Laden Sie es als Theme mit der gespeicherten Marke herunter, installieren Sie es in Keycloak und setzen Sie die Realm-Werte, die seine README nennt. Laden Sie es nach einem Rebranding erneut herunter.",
+      "download": "Anmelde-Theme herunterladen",
+      "downloading": "Wird vorbereitet…",
+      "unsaved": "Es enthält die gespeicherte Marke. Speichern Sie Ihre Änderungen zuerst, um sie einzuschließen.",
+      "failed": "Das Anmelde-Theme konnte nicht heruntergeladen werden: {{reason}}"
+    },
     "resetDialog": {
       "title": "Markenauftritt zurücksetzen?",
       "description": "Dies löscht alle gespeicherten Namen, Farben, Optionen und Bilder. Für alle Nutzer gelten wieder die Konfigurationseigenschaften oder die Standardwerte."

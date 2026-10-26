@@ -32,6 +32,8 @@ export const DEFAULT_BRAND_SCRIPT =
 const SHELL_DEFAULTS = {
   "welcome.html": { tagline: "Open Source Conversational AI Platform", themeColor: "#111113" },
   "chat.html": { tagline: "Open Source Conversational AI", themeColor: "#1a1a1a" },
+  // The dev-server entry: the same head as chat.html, which production serves.
+  "index.html": { tagline: "Open Source Conversational AI", themeColor: "#1a1a1a" },
 };
 const FALLBACK_DEFAULTS = { tagline: "", themeColor: "#111113" };
 

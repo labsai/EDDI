@@ -6842,6 +6842,14 @@
       "errorType": "Este tipo de archivo no se acepta aquí. Use PNG, WebP o SVG (ICO solo para el favicon).",
       "errorLocked": "La marca está bloqueada, así que las imágenes no se pueden cambiar aquí."
     },
+    "loginTheme": {
+      "title": "Página de inicio de sesión",
+      "description": "Con el inicio de sesión a través de Keycloak, la página de inicio de sesión es un tema de Keycloak, que no puede leer esta marca. Descárguelo como un tema con la marca guardada aplicada, instálelo en Keycloak y configure los valores del realm que indica su README. Vuelva a descargarlo después de un cambio de marca.",
+      "download": "Descargar tema de inicio de sesión",
+      "downloading": "Preparando…",
+      "unsaved": "Contiene la marca guardada. Guarde primero sus cambios para incluirlos.",
+      "failed": "No se pudo descargar el tema de inicio de sesión: {{reason}}"
+    },
     "resetDialog": {
       "title": "¿Restablecer la marca?",
       "description": "Esto borra todos los nombres, colores, opciones e imágenes guardados. Las propiedades de configuración, o los valores predeterminados, vuelven a aplicarse para todos los usuarios."

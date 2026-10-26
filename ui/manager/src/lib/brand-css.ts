@@ -29,6 +29,26 @@ export interface BrandColorValues {
   chatAccent: string | null;
 }
 
+/** `#rrggbb` for a 24-bit colour number. */
+function hex(rgb: number): string {
+  return `#${rgb.toString(16).padStart(6, "0")}`;
+}
+
+/**
+ * The colours an unset field resolves to when nothing is branded, as the hex a
+ * native colour picker needs: the Manager's `--color-primary` pair and the Chat
+ * UI's `--chat-accent`. A picker cannot show a CSS variable, so these are
+ * values to DISPLAY on the Branding page, never colours to paint with — every
+ * surface paints from the tokens in `index.css`, which is why they are numbers
+ * here and not the hex literals `no-hardcoded-amber.test.ts` keeps out of
+ * component code. `brand-css.test.ts` pins them to `index.css`.
+ */
+export const UNBRANDED_COLORS: Readonly<{ primary: string; primaryForeground: string; chatAccent: string }> = Object.freeze({
+  primary: hex(0xf59e0b),
+  primaryForeground: hex(0x0c0a09),
+  chatAccent: hex(0x113b92),
+});
+
 export const EMPTY_COLORS: Readonly<BrandColorValues> = Object.freeze({
   primary: null,
   primaryForeground: null,

@@ -17,6 +17,7 @@ import {
 } from "./agents";
 import { startConversation, sendMessageStreaming, endConversation } from "./chat";
 import { markOperatorDescriptor } from "./operator-marker";
+import { getBrand } from "@/lib/brand";
 import { seg } from "./path-segment";
 import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import {
@@ -413,10 +414,26 @@ export function unusableEndpointsFromResult(result: SetupResult): string[] {
 
 /** The user-facing refusal, shared by the pre-flight and the post-provision check. */
 export function unusableEndpointsMessage(unusable: readonly string[]): string {
-  return `This EDDI deployment exposes ${unusable.length} endpoint(s) the operator needs whose tool would not be able to send a required input, so they would fail on every call: ${unusable.join("; ")}`;
+  return `This deployment exposes ${unusable.length} endpoint(s) the operator needs whose tool would not be able to send a required input, so they would fail on every call: ${unusable.join("; ")}`;
 }
 
 /* ─── Provisioning ─── */
+
+/**
+ * The name a new operator agent is created with: `<product> Platform Operator`,
+ * so "EDDI Platform Operator" when nothing is branded.
+ *
+ * Display only. The operator is recognised by `OPERATOR_DESCRIPTOR_MARKER`
+ * on its descriptor (activation, supersede, upgrade, trust and discovery all
+ * read the marker), never by this name — so a rebrand, or an admin renaming the
+ * agent, cannot make the Manager lose or mistake its operator. The one place a
+ * name is read at all is discovery's fallback for operators older than the
+ * marker, which matches "operator" anywhere in it; every name built here
+ * contains it.
+ */
+export function operatorAgentName(productName: string = getBrand().productName): string {
+  return `${productName} Platform Operator`;
+}
 
 export interface ProvisionOperatorParams {
   agentName: string;
@@ -527,7 +544,7 @@ export async function provisionOperator(
 export function assertProvisioned(result: SetupResult): void {
   if (!result.agentId || result.agentId === "unknown") {
     throw new Error(
-      "EDDI created the operator but did not return its agent id, so it cannot be managed. Check the platform logs and try again.",
+      "The server created the operator but did not return its agent id, so it cannot be managed. Check the platform logs and try again.",
     );
   }
 }
@@ -549,7 +566,7 @@ function requireApiBaseUrl(config: OperatorConfig): string {
   const resolved = normalizeBaseUrl(config.apiBaseUrl);
   if (!resolved) {
     throw new Error(
-      "The operator has no platform base URL to point its tools at. This is the address EDDI can reach itself at (for example http://127.0.0.1:7070) — resolve it before provisioning.",
+      "The operator has no platform base URL to point its tools at. This is the address the server can reach itself at (for example http://127.0.0.1:7070) — resolve it before provisioning.",
     );
   }
   return resolved;
@@ -650,7 +667,7 @@ export async function resolveOperatorApiBaseUrl(config: OperatorConfig): Promise
     // the original defect. Only a backend too old to answer (404 -> null) earns
     // the fallback below.
     throw new Error(
-      "This EDDI deployment cannot determine its own address (it runs on a random HTTP port and eddi.self.base-url is not set). Enter the platform base URL explicitly, or set eddi.self.base-url.",
+      "This deployment cannot determine its own address (it runs on a random HTTP port and eddi.self.base-url is not set). Enter the platform base URL explicitly, or set eddi.self.base-url.",
     );
   }
 
@@ -659,12 +676,12 @@ export async function resolveOperatorApiBaseUrl(config: OperatorConfig): Promise
   // to log on the way to throwing.
   if (!origin) {
     throw new Error(
-      "This EDDI deployment cannot report its own base URL, and there is no browser origin to fall back on. Enter the platform base URL explicitly.",
+      "This deployment cannot report its own base URL, and there is no browser origin to fall back on. Enter the platform base URL explicitly.",
     );
   }
   console.warn(
-    "[operator] This EDDI deployment cannot report its own base URL (it predates /administration/operator/self-url). " +
-      `Falling back to this browser's origin (${origin}), which is only correct when nothing sits between the browser and EDDI. ` +
+    "[operator] This deployment cannot report its own base URL (it predates /administration/operator/self-url). " +
+      `Falling back to this browser's origin (${origin}), which is only correct when nothing sits between the browser and the server. ` +
       "If the operator's tools fail to connect, set the platform base URL explicitly.",
   );
   return origin;
@@ -975,7 +992,7 @@ export async function runOperatorCanary(
           if (entry.type !== "tool_result") continue;
           if (looksLikeAuthFailure(entry.result)) {
             toolError =
-              "The operator's tools were rejected by EDDI (unauthorized). Its authentication mode cannot reach this deployment.";
+              "The operator's tools were rejected by the server (unauthorized). Its authentication mode cannot reach this deployment.";
           }
           // Checked SECOND and allowed to win: an unreachable address is the more
           // actionable of the two, and it is the diagnosis the admin will not
@@ -1067,8 +1084,8 @@ function connectionFailureMessage(config: OperatorConfig): string {
   const target = config.apiBaseUrl?.trim();
   return (
     `The operator could not connect to the platform API at ${target || "its configured base URL"}. ` +
-    "This is the operator's own base URL being unreachable from the EDDI server — not an outage of EDDI or its internal services. " +
-    "It must be an address EDDI can reach itself at (for example http://127.0.0.1:7070), not the address your browser uses. " +
+    "This is the operator's own base URL being unreachable from the server — not an outage of the platform or its internal services. " +
+    "It must be an address the server can reach itself at (for example http://127.0.0.1:7070), not the address your browser uses. " +
     "Reconfigure the operator and set the platform base URL."
   );
 }

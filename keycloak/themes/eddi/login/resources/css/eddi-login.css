@@ -316,6 +316,11 @@
     --pf-v5-global--primary-color--dark-100:  var(--eddi-primary);
     --pf-v5-global--active-color--100:        var(--eddi-primary);
 
+    /* keycloak.v2 (26.x) draws a 4px rule above the card in
+       --keycloak-card-top-color, PatternFly blue-400 by default. Without this
+       the amber card wears a blue top edge. */
+    --keycloak-card-top-color:                var(--eddi-primary);
+
     /* Links */
     --pf-v5-global--link--Color:               var(--eddi-link);
     --pf-v5-global--link--Color--hover:        var(--eddi-primary);

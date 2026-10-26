@@ -61,6 +61,7 @@
     "GET /admin/gdpr/{userId}/export",
     "GET /admin/gdpr/{userId}/restrict",
     "GET /administration/branding",
+    "GET /administration/branding/keycloak-theme.zip",
     "GET /administration/cluster/activity",
     "GET /administration/cluster/activity/stream",
     "GET /administration/cluster/dead-letters",

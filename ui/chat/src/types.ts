@@ -186,13 +186,21 @@ export interface ChatConfig {
   apiBaseUrl?: string;
   /** Theme mode. Default: `"dark"` */
   theme?: "dark" | "light" | "system";
-  /** Primary accent color (CSS value). Default: EDDI blue `#113B92` */
+  /**
+   * Primary accent color (CSS value; must pass `isSafeCssColor`). Applied the
+   * same way as `?accentColor=`, which beats it. Default: the deployment brand's
+   * chat accent when branded, else the stylesheet's EDDI blue `#113B92`.
+   */
   accentColor?: string;
-  /** Show the EDDI logo in the header. Default: `true` */
+  /** Show the logo in the header. Default: `true` */
   showLogo?: boolean;
-  /** Custom logo URL. Default: `/img/logo_eddi.png` */
+  /**
+   * Custom logo URL; `""` shows the title as text instead. Default: the brand's
+   * uploaded logo; the product name as text when branded without one; else
+   * `/img/logo_eddi.png`.
+   */
   logoUrl?: string;
-  /** Header title text. Default: `"EDDI"` */
+  /** Header title text. Default: the brand's product name, else `"EDDI"` */
   title?: string;
   /** Input field placeholder. Default: `"Type a message..."` */
   placeholder?: string;

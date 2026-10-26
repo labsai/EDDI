@@ -262,6 +262,35 @@ eddi:
   chat:
     frameAncestors: ""
 
+  # White-labeling (docs/white-labeling.md). Everything here is the SEED: the
+  # brand used while no admin has saved one on the Manager's Admin → Branding
+  # page. Each value set becomes the matching eddi.branding.* property; an empty
+  # one is not rendered, so EDDI's own default applies. Nothing is set by default.
+  branding:
+    productName: ""        # at most 40 characters, no < or >
+    shortName: ""          # at most 12
+    tagline: ""            # at most 120
+    colors:                # #rgb, #rrggbb, or rgb()/hsl()/oklch() with plain numbers
+      primary: ""
+      primaryForeground: ""
+      darkPrimary: ""
+      darkPrimaryForeground: ""
+      chatAccent: ""
+    # true / false; null keeps EDDI's default (Powered by on, update check off).
+    poweredBy: null
+    showUpdateCheck: null
+    # true makes these values the whole brand: the Branding page turns read-only
+    # and every write answers 409. For brands kept in Git, like this file.
+    locked: false
+    assets:
+      # An existing ConfigMap holding the images under fixed names (logo.svg or
+      # .png/.webp, logo-dark.*, icon.*, favicon.ico, og-image.*), as binaryData
+      # for PNG/WebP/ICO. Mounted read-only at mountPath, which becomes
+      # eddi.branding.assets-dir. Empty: no mount.
+      #   kubectl create configmap acme-brand --from-file=logo.svg --from-file=icon.png
+      configMap: ""
+      mountPath: /deployments/branding
+
   # Pod annotations (e.g., Prometheus scrape)
   podAnnotations:
     prometheus.io/scrape: "true"

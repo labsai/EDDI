@@ -7,6 +7,13 @@ import { describe, it, expect } from "vitest";
 
 const ROOT = process.cwd();
 
+/**
+ * Prefixes the dev server answers itself rather than proxying: `/branding/*`
+ * comes from the brand-defaults plugin (scripts/vite-plugin-brand.mjs), so
+ * `npm run dev` always shows the unbranded EDDI brand.
+ */
+const SERVED_BY_DEV_PLUGIN = new Set(["/branding"]);
+
 function apiPrefixes(): Set<string> {
   const dir = resolve(ROOT, "src/api");
   const prefixes = new Set<string>();
@@ -40,7 +47,7 @@ describe("vite dev proxy", () => {
 
   it("proxies every path prefix the API layer calls", () => {
     const proxied = proxiedPrefixes();
-    const missing = [...apiPrefixes()].filter((p) => !proxied.has(p));
+    const missing = [...apiPrefixes()].filter((p) => !proxied.has(p) && !SERVED_BY_DEV_PLUGIN.has(p));
     expect(missing).toEqual([]);
   });
 });

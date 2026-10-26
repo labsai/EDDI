@@ -122,7 +122,7 @@ Model-specific behaviour:
 
 Model-specific behaviour:
 
-- `maxTokens` — **Rejected** on models matching `^(o\d|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject maxTokens; EDDI sends its value as maxCompletionTokens instead (unless that is set). The value is sent as `maxCompletionTokens` instead.
+- `maxTokens` — **Rejected** on models matching `^(o\d|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject maxTokens; the server sends its value as maxCompletionTokens instead (unless that is set). The value is sent as `maxCompletionTokens` instead.
 - `stopSequences` — **Rejected** on models matching `^(o3(-pro)?|o4-mini)(-\d{4}-\d{2}-\d{2})?$`: o3 and o4-mini do not support stop sequences.
 
 ### Tools
@@ -379,7 +379,7 @@ Model-specific behaviour:
 
 | Parameter | Type | Values | Description |
 | --- | --- | --- | --- |
-| `baseModel` | string |  | The model your deployment runs, such as gpt-4.1; EDDI uses it only to know which settings that model accepts. |
+| `baseModel` | string |  | The model your deployment runs, such as gpt-4.1; the server uses it only to know which settings that model accepts. |
 
 ### Sampling
 
@@ -427,7 +427,7 @@ Model-specific behaviour:
 
 Model-specific behaviour:
 
-- `maxTokens` — **Rejected** on models matching `^(o\d|codex|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject maxTokens; EDDI sends its value as maxCompletionTokens instead (unless that is set). The value is sent as `maxCompletionTokens` instead.
+- `maxTokens` — **Rejected** on models matching `^(o\d|codex|gpt-5(?!.*chat)|gpt-6)`: Reasoning models reject maxTokens; the server sends its value as maxCompletionTokens instead (unless that is set). The value is sent as `maxCompletionTokens` instead.
 
 ### Safety
 
