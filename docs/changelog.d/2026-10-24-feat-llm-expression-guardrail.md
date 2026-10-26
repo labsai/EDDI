@@ -19,6 +19,8 @@ A well-formed answer can still be wrong: an invoice whose `total` is not the sum
 - **Fuzzing:** `SafeJsonExpressionFuzzTest` (Jazzer `@FuzzTest` over expressions and over JSON data, plus seeded random sweeps that run in every unit-test run) and a ClusterFuzzLite target `SafeJsonExpressionFuzzer`; `.clusterfuzzlite/SafeJsonExpression.java` is the vendored copy, and the `Vendored Fuzz Sources In Sync` guard knows the fourth file.
 - **Docs:** [langchain.md](../langchain.md#the-expression-type-a-deterministic-check-over-a-json-answer) (grammar, semantics, bounds, the invoice example and the exact corrective message), [security.md](../security.md) (sandboxed evaluator, closed vocabulary, fuzz targets), [security-review.md](../security-review.md).
 
+- **End-to-end proof:** `ExpressionGuardrailIT` runs a real agent against a WireMock fake OpenAI endpoint: pass (also from a code fence), fail then repair (the second request carries the fixed frame around the author's `fix` and no computed value), exhausted reprompt and `block`/`warn` actions, non-JSON, duplicate-key and null-operand answers under both `failMode`s, exact decimal arithmetic (`0.1 + 0.2 == 0.3`, a one-cent difference caught), and deploy refusal for a syntax error, an over-long or over-deep expression, sandbox escapes and a bad issue code or fix.
+
 ### Design decisions
 
 - **A new evaluator, not `ExpressionProvider`** (plan §9.1): that is the NLP expression grammar, with no arithmetic or paths into JSON. `PathNavigator` has only `+`/`-` on path values, no comparisons, logic or aggregates.
