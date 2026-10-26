@@ -993,8 +993,10 @@ your tool schemas do not cover it, not as a routine first step:
   issue codes for a judge, else the last attempt), recorded as a warn with
   reason "<reason>:delivered_best" — and that attempt is still screened by
   the output guardrails after it (the ones before it already screened it; a
-  redact rewrites it, a block or reprompt finding blocks it), so it never
-  bypasses PII redaction or a classifier. The
+  redact rewrites it, a block or reprompt finding blocks it), so it cannot
+  bypass the PII redaction or classifiers after it. The exhausted guardrail
+  does not re-screen its own pick, so a classifier with deliver-best delivers
+  what it flagged; keep a safety classifier on onExhausted block. The
   deploy refuses deliver-best on any other action or on input guardrails, and
   logs a warning for deliver-best on a classifier (a safety check should not
   deliver what it flagged). block/redact/reprompt on the output side make the task buffer
