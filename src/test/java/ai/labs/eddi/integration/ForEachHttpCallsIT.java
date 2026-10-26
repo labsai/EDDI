@@ -307,10 +307,14 @@ public class ForEachHttpCallsIT extends BaseIntegrationIT {
         return wireMock.findAll(getRequestedFor(urlPathMatching(urlRegex)));
     }
 
+    /** Absorbs timestamp jitter in WireMock's logged arrival times. */
+    private static final long TOLERANCE_MS = 50;
+
     /**
-     * Most requests in flight at once, from WireMock's own arrival times: each
-     * request is assumed to be open for {@code delayMs}, less a tolerance for
-     * scheduling jitter.
+     * Most requests in flight at once, from WireMock's own arrival times. Each
+     * request is assumed to be open for {@code delayMs}, so the requests in flight
+     * when one arrives are those that started at or before it and less than
+     * {@code delayMs} (less a tolerance for jitter) earlier.
      */
     private static int peakOverlap(String urlRegex, int delayMs) {
         List<Long> starts = new ArrayList<>();
@@ -319,7 +323,7 @@ public class ForEachHttpCallsIT extends BaseIntegrationIT {
         for (long start : starts) {
             int overlapping = 0;
             for (long other : starts) {
-                if (other >= start - 100 && other < start + delayMs - 150) {
+                if (other <= start && other > start - delayMs + TOLERANCE_MS) {
                     overlapping++;
                 }
             }
