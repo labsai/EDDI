@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   EMAIL_FIXED_KEYS,
+  aiDisclosureEnabled,
   emailConfigProblems,
+  emailMode,
   initialEmailPlatformConfig,
   isOpenTrigger,
   isSenderPattern,
@@ -87,8 +89,68 @@ describe("email channel rules", () => {
     expect(isOpenTrigger({ requireAuthentication: "false", senderAllowlist: "*@example.com" })).toBe(false);
   });
 
-  it("always writes mode and transport, overriding anything loaded", () => {
+  it("always writes the transport and a mode, trigger unless conversation is chosen", () => {
     expect(initialEmailPlatformConfig()).toEqual({ mode: "trigger", transport: "imap" });
-    expect(withEmailFixedKeys({ ...VALID, mode: "conversation" })).toEqual({ ...VALID, ...EMAIL_FIXED_KEYS });
+    expect(withEmailFixedKeys({ ...VALID, transport: "graph" })).toEqual({ ...VALID, mode: "trigger", ...EMAIL_FIXED_KEYS });
+    expect(withEmailFixedKeys({ ...VALID, mode: "whatever" }).mode).toBe("trigger");
+    expect(withEmailFixedKeys({ ...VALID, mode: "conversation", smtpHost: "smtp.example.com" }).mode).toBe("conversation");
+  });
+
+  it("drops the other mode's keys, so the backend never refuses a hidden value", () => {
+    const trigger = withEmailFixedKeys({ ...VALID, smtpHost: "smtp.example.com", aiDisclosure: "", correlateThreads: "true" });
+    expect(trigger).toEqual({ ...VALID, mode: "trigger", transport: "imap", correlateThreads: "true" });
+    const conversation = withEmailFixedKeys({
+      ...VALID,
+      mode: "conversation",
+      smtpHost: "smtp.example.com",
+      aiDisclosure: "",
+      correlateThreads: "true",
+      requireAuthentication: "false",
+    });
+    expect(conversation).toEqual({ ...VALID, mode: "conversation", transport: "imap", smtpHost: "smtp.example.com", aiDisclosure: "" });
+  });
+});
+
+describe("email conversation mode rules", () => {
+  const CONVERSATION = { ...VALID, mode: "conversation", smtpHost: "smtp.office365.com" };
+
+  it("needs an SMTP host, a DNS name, and port 587 or 465", () => {
+    expect(emailConfigProblems(CONVERSATION)).toEqual([]);
+    expect(emailConfigProblems({ ...CONVERSATION, smtpHost: "" })).toEqual(["smtpHostRequired"]);
+    expect(emailConfigProblems({ ...CONVERSATION, smtpHost: "10.0.0.5" })).toEqual(["smtpHostIpLiteral"]);
+    expect(emailConfigProblems({ ...CONVERSATION, smtpHost: "bad host" })).toEqual(["smtpHostInvalid"]);
+    expect(emailConfigProblems({ ...CONVERSATION, smtpPort: "465" })).toEqual([]);
+    expect(emailConfigProblems({ ...CONVERSATION, smtpPort: "25" })).toEqual(["smtpPort"]);
+  });
+
+  it("checks the sender name, the template and disclosure lengths and the reply limit", () => {
+    expect(emailConfigProblems({ ...CONVERSATION, fromName: "Support\nBcc: x@evil.example" })).toEqual(["fromNameInvalid"]);
+    expect(emailConfigProblems({ ...CONVERSATION, fromName: "x".repeat(101) })).toEqual(["fromNameInvalid"]);
+    expect(emailConfigProblems({ ...CONVERSATION, replyTemplate: "x".repeat(4001) })).toEqual(["replyTemplateTooLong"]);
+    expect(emailConfigProblems({ ...CONVERSATION, aiDisclosure: "x".repeat(501) })).toEqual(["aiDisclosureTooLong"]);
+    expect(emailConfigProblems({ ...CONVERSATION, maxRepliesPerThreadPerHour: "0" })).toEqual(["maxRepliesPerThreadPerHour"]);
+    expect(emailConfigProblems({ ...CONVERSATION, maxRepliesPerThreadPerHour: "1000" })).toEqual([]);
+  });
+
+  it("ignores conversation fields in trigger mode, and is never an open trigger", () => {
+    expect(emailConfigProblems({ ...VALID, smtpHost: "" })).toEqual([]);
+    expect(isOpenTrigger({ ...CONVERSATION, requireAuthentication: "false" })).toBe(false);
+  });
+
+  it("reads the disclosure as on unless it is present and empty", () => {
+    expect(aiDisclosureEnabled({})).toBe(true);
+    expect(aiDisclosureEnabled({ aiDisclosure: "Written by an AI." })).toBe(true);
+    expect(aiDisclosureEnabled({ aiDisclosure: " " })).toBe(false);
+    expect(emailMode({ mode: "conversation" })).toBe("conversation");
+    expect(emailMode({})).toBe("trigger");
+  });
+
+  it("reads the mode case-insensitively, as the backend does, and keeps an API-saved CONVERSATION integration's reply settings", () => {
+    expect(emailMode({ mode: "CONVERSATION" })).toBe("conversation");
+    expect(emailMode({ mode: " Conversation " })).toBe("conversation");
+    const saved = withEmailFixedKeys({ ...VALID, mode: "CONVERSATION", smtpHost: "smtp.example.com", honorReplyTo: "true" });
+    expect(saved.mode).toBe("conversation");
+    expect(saved.smtpHost).toBe("smtp.example.com");
+    expect(saved.honorReplyTo).toBe("true");
   });
 });

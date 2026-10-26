@@ -648,6 +648,30 @@ user directory recorded for that principal.
 **Not yet:** group conversations (`AWAITING_APPROVAL` discussions) are not notified by email; their approvals
 appear on the Approvals page and in Slack as before.
 
+## Email conversations
+
+A conversation that an [email integration in conversation mode](email-integration.md#conversation-mode) runs answers
+its correspondent in the mail thread, and that includes pauses — the counterpart of Slack's in-thread notice and
+continuation push:
+
+- **In-thread pause notice.** When the turn of a mail pauses, the sender gets a reply in the thread: the agent's
+  output so far, a fixed sentence that a person must approve the next step, and the agent's `pauseReason`. Never the
+  tool's name or its arguments — the same data minimisation as Slack's in-thread notice; the approver sees those on
+  the Approvals page or in their [notification](#email-notifications). It is sent from `HitlPauseCommittedEvent`,
+  after the pause is durable, so it always carries the reason of the pause it is about.
+- **Continuation.** `EmailHitlResumeObserver` listens for `HitlResumeCompletedEvent`, as `SlackHitlResumeObserver`
+  does: after an approval the sender gets the resumed turn's output; after a rejection, a cancellation or a timeout a
+  plain notice that the step was not carried out; after a resume that failed, that it could not be completed. Who
+  decided is never named — approvers are staff, the correspondent is outside.
+- **One row, any node.** Both are reply rows in the email ledger, keyed by conversation and pause (or by the
+  continuation's verdict and text), retried like every reply and rebuilt from the conversation if a node dies; a
+  second observer of the event sends nothing. The ledger deduplicates rows, not deliveries: a node that dies after
+  the relay accepted a notice but before its row was marked `SENT` leaves a row whose lease runs out, and the retry
+  sends it again (same Message-ID, so most mail clients show it once). A pause decided before its notice went out
+  ends `SUPPRESSED`.
+- Mail the sender writes while the conversation is paused waits in the mailbox until the decision, then runs.
+- A pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn ran, sends no notice.
+
 ## MCP Surface
 
 The HITL operations are also exposed over the MCP server (`McpHitlTools`), so an MCP client that drives a conversation (`talk_to_agent` / `chat_managed`) and receives a `PAUSED_FOR_APPROVAL` result can resolve the gate over the **same transport** instead of switching to REST. That paused payload names the tool to call next (`"suggestNextTool": "resume_conversation"`).

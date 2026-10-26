@@ -6663,7 +6663,7 @@
     "turnCount": "턴: {{n}}"
   },
   "emailChannel": {
-    "modeNote": "트리거 모드: 메일이 에이전트 턴을 시작합니다. 답장은 보내지 않습니다. 대화 모드는 나중에 제공됩니다.",
+    "modeNote": "트리거 모드: 메일이 에이전트 턴을 시작합니다. 답장은 절대 보내지 않습니다.",
     "openTriggerWarning": "인터넷의 누구나 이 에이전트를 실행시킬 수 있습니다. 발신자 허용 목록이 없고 DKIM/DMARC 정렬에 실패한 메일도 처리됩니다. 허용할 발신자를 추가하거나 인증을 요구하세요.",
     "connection": "연결",
     "connectionHint": "필수. 허용 목록에 imaps://<host> 또는 imap://<host>:143이 포함된 OAUTH2_CLIENT_CREDENTIALS(XOAUTH2) 또는 BASIC(앱 비밀번호) 연결의 이름입니다.",
@@ -6730,15 +6730,53 @@
       "maxTurnsPerSenderPerDay": "일일 턴 제한은 0~100000 사이의 정수여야 합니다.",
       "dailyCostBudgetUsd": "일일 예산은 0보다 큰 숫자이거나, 예산이 없으면 비워 두어야 합니다.",
       "ownerNotifyTooMany": "소유자 주소는 최대 {{max}}개까지 지정하세요.",
-      "ownerNotifyInvalid": "각 소유자 주소는 유효한 이메일 주소여야 합니다."
+      "ownerNotifyInvalid": "각 소유자 주소는 유효한 이메일 주소여야 합니다.",
+      "smtpHostRequired": "SMTP 서버의 호스트 이름을 입력하세요: 답장은 이 서버를 통해 전송됩니다.",
+      "smtpHostIpLiteral": "SMTP 서버에는 IP 주소가 아닌 DNS 이름을 사용하세요: TLS 인증서가 이 이름으로 검증됩니다.",
+      "smtpHostInvalid": "유효한 SMTP 호스트 이름이 아닙니다.",
+      "smtpPort": "SMTP 포트는 587(STARTTLS) 또는 465(TLS)여야 합니다.",
+      "fromNameInvalid": "발신자 이름은 줄바꿈 없이 최대 {{max}}자까지 가능합니다.",
+      "replyTemplateTooLong": "답장 템플릿은 최대 {{max}}자까지 가능합니다.",
+      "aiDisclosureTooLong": "AI 고지는 최대 {{max}}자까지 가능합니다.",
+      "maxRepliesPerThreadPerHour": "답장 한도는 1에서 1000 사이의 정수여야 합니다."
     },
     "warning": {
       "openTrigger": "저장했지만 인터넷의 누구나 이 에이전트를 실행시킬 수 있습니다. 발신자 허용 목록이 없고 인증되지 않은 메일도 처리됩니다.",
-      "toolsWithoutApprovals": "저장했지만 이 통합이 대상으로 하는 에이전트에 도구가 있고 도구 승인이 없습니다. 메일 내용은 신뢰할 수 없는 입력이므로, 무언가를 변경하는 도구에 hitlConfig.toolApprovals를 추가하세요."
+      "toolsWithoutApprovals": "저장했지만 이 통합이 대상으로 하는 에이전트에 도구가 있고 도구 승인이 없습니다. 메일 내용은 신뢰할 수 없는 입력이므로, 무언가를 변경하는 도구에 hitlConfig.toolApprovals를 추가하세요.",
+      "aiDisclosureDisabled": "저장했지만 답장에 더 이상 AI가 작성했다는 내용이 표시되지 않습니다. EU AI 법과 같은 투명성 규정은 사람들이 AI와 대화하고 있음을 알아야 한다고 요구합니다.",
+      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다."
     },
     "defaultTargetHint": "기본 대상은 플러스 태그(invoices+urgent@…)나 제목이 다른 대상의 트리거와 일치하지 않는 모든 메일을 받습니다. 생성 후 대상을 더 추가할 수 있습니다.",
     "triggerLabel": "플러스 태그 또는 제목 단어",
     "triggerHint": "invoices+urgent@…로 보낸 메일은 트리거 urgent와 일치하며, 그 단어가 들어간 제목도 일치합니다. 일치하는 것이 없으면 기본 대상으로 갑니다.",
-    "setupTitle": "설정 및 보안"
+    "setupTitle": "설정 및 보안",
+    "mode": "모드",
+    "modeTrigger": "트리거: 메일이 에이전트 턴을 시작하며, 아무것도 회신하지 않습니다",
+    "modeConversation": "대화: 에이전트가 스레드에서 답장합니다",
+    "modeNoteConversation": "대화 모드: 에이전트가 SMTP로 메일 스레드에 답장합니다. 답장은 DKIM/DMARC로 주소가 인증된 발신자에게 보냅니다('Reply-To 주소로 답장'을 켜면 대신 메일의 유일한 Reply-To 주소로 보내며, 이 주소는 DMARC가 보장하지 않습니다). 참조(Cc)나 모델이 지정한 사람에게는 절대 보내지 않습니다.",
+    "requireAuthenticationConversationHint": "대화 모드에서는 항상 켜져 있습니다: EDDI는 주소가 위조되었을 수 있는 발신자에게 절대 답장하지 않습니다.",
+    "repliesSection": "답장",
+    "smtpHost": "SMTP 호스트",
+    "smtpHostHint": "필수. 연결의 허용 목록에 smtp://<host>:587 또는 smtps://<host>도 포함되어야 하며, 같은 자격 증명으로 로그인합니다.",
+    "smtpPort": "SMTP 포트",
+    "fromName": "발신자 이름",
+    "fromNameHint": "모든 답장에서 메일함 주소 옆에 표시됩니다.",
+    "threadParticipants": "스레드를 이어갈 수 있는 사람",
+    "participantsOriginal": "스레드를 시작한 발신자만",
+    "participantsAny": "답장이 전송된 인증된 주소도 포함",
+    "threadParticipantsHint": "그 외의 사람이 스레드의 Message-ID(전달할 때마다 함께 전달됨)로 답장하면 자신만의 대화가 시작됩니다.",
+    "maxRepliesPerThreadPerHour": "스레드당 시간당 답장 수",
+    "maxRepliesHint": "루프 방지 장치: 최근 1시간 동안 스레드에 이만큼 답장했으면 추가 답장은 보내지 않으며(나중에 보내지 않고 버립니다) 소유자에게 알립니다.",
+    "honorReplyTo": "Reply-To 주소로 답장",
+    "honorReplyToHint": "방문자를 대신해 메일을 보내는 웹 양식에만 사용하세요. 그 외에는 답장이 항상 인증된 From으로 갑니다.",
+    "honorReplyToWarning": "DMARC는 Reply-To를 인증하지 않습니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 에이전트의 답장이 갈 곳을 정할 수 있습니다.",
+    "aiDisclosureEnabled": "모든 답장에 AI가 작성했음을 표시",
+    "aiDisclosure": "AI 고지",
+    "aiDisclosureHint": "답장 뒤에 추가됩니다. 비워 두면 표시된 기본값을 사용합니다.",
+    "aiDisclosureWarning": "답장에 AI가 작성했다는 내용이 표시되지 않습니다. EU AI 법과 같은 투명성 규정은 사람들이 AI와 대화하고 있음을 알아야 한다고 요구합니다.",
+    "replyTemplate": "답장 템플릿",
+    "replyTemplateHint": "에이전트의 답변을 감쌉니다. 답변은 텍스트로 삽입되며 템플릿으로 실행되지 않습니다. 변수:",
+    "noteDkim": "답장에는 메일함 도메인에 대해 발신 메일에 DKIM 서명을 하는 메일 서버와 해당 도메인의 DMARC 레코드가 필요합니다. EDDI는 서명하지 않습니다. 이것이 없으면 답장이 스팸으로 분류되거나 거부됩니다. Exchange Online과 대부분의 호스팅 업체는 도메인에 DKIM을 활성화하면 제출된 메일에 서명합니다.",
+    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 EDDI는 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear)."
   }
 }

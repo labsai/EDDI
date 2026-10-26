@@ -1,6 +1,13 @@
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
-import { EMAIL_MAX_OWNER_ADDRESSES, EMAIL_MAX_TEMPLATE_CHARS, type EmailProblem } from "./email-channel";
+import {
+  EMAIL_MAX_AI_DISCLOSURE_CHARS,
+  EMAIL_MAX_FROM_NAME_CHARS,
+  EMAIL_MAX_OWNER_ADDRESSES,
+  EMAIL_MAX_REPLY_TEMPLATE_CHARS,
+  EMAIL_MAX_TEMPLATE_CHARS,
+  type EmailProblem,
+} from "./email-channel";
 
 /**
  * The translated sentence for one email-settings problem. Literal keys on
@@ -54,6 +61,31 @@ export function emailProblemMessage(problem: EmailProblem, t: TFunction): string
       });
     case "ownerNotifyInvalid":
       return t("emailChannel.problem.ownerNotifyInvalid", "Each owner address must be a valid email address.");
+    case "smtpHostRequired":
+      return t("emailChannel.problem.smtpHostRequired", "Enter the SMTP server's host name: replies are sent through it.");
+    case "smtpHostIpLiteral":
+      return t("emailChannel.problem.smtpHostIpLiteral", "Use a DNS name for the SMTP server, not an IP address: the TLS certificate is checked against it.");
+    case "smtpHostInvalid":
+      return t("emailChannel.problem.smtpHostInvalid", "This is not a valid SMTP host name.");
+    case "smtpPort":
+      return t("emailChannel.problem.smtpPort", "The SMTP port must be 587 (STARTTLS) or 465 (TLS).");
+    case "fromNameInvalid":
+      return t("emailChannel.problem.fromNameInvalid", {
+        max: EMAIL_MAX_FROM_NAME_CHARS,
+        defaultValue: "The sender name may be at most {{max}} characters, without line breaks.",
+      });
+    case "replyTemplateTooLong":
+      return t("emailChannel.problem.replyTemplateTooLong", {
+        max: EMAIL_MAX_REPLY_TEMPLATE_CHARS,
+        defaultValue: "The reply template may be at most {{max}} characters.",
+      });
+    case "aiDisclosureTooLong":
+      return t("emailChannel.problem.aiDisclosureTooLong", {
+        max: EMAIL_MAX_AI_DISCLOSURE_CHARS,
+        defaultValue: "The AI disclosure may be at most {{max}} characters.",
+      });
+    case "maxRepliesPerThreadPerHour":
+      return t("emailChannel.problem.maxRepliesPerThreadPerHour", "The reply limit must be a whole number from 1 to 1000.");
   }
 }
 
@@ -69,6 +101,16 @@ export function channelWarningMessage(code: string, t: TFunction): string {
       return t(
         "emailChannel.warning.toolsWithoutApprovals",
         "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things.",
+      );
+    case "email.ai-disclosure-disabled":
+      return t(
+        "emailChannel.warning.aiDisclosureDisabled",
+        "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
+      );
+    case "email.honor-reply-to":
+      return t(
+        "emailChannel.warning.honorReplyTo",
+        "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
       );
     default:
       return code;

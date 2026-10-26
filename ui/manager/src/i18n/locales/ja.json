@@ -6663,7 +6663,7 @@
     "turnCount": "ターン数：{{n}}"
   },
   "emailChannel": {
-    "modeNote": "トリガーモード：メールがエージェントのターンを開始します。返信は送信されません。会話モードは今後対応予定です。",
+    "modeNote": "トリガーモード：メールがエージェントのターンを開始します。返信は一切送信されません。",
     "openTriggerWarning": "インターネット上の誰でもこのエージェントを実行させられます。送信者の許可リストがなく、DKIM/DMARC アラインメントに失敗したメールも処理されます。許可する送信者を追加するか、認証を必須にしてください。",
     "connection": "接続",
     "connectionHint": "必須。許可リストに imaps://<host> または imap://<host>:143 を含む、OAUTH2_CLIENT_CREDENTIALS（XOAUTH2）または BASIC（アプリパスワード）接続の名前。",
@@ -6730,15 +6730,53 @@
       "maxTurnsPerSenderPerDay": "1 日のターン制限は 0〜100000 の整数である必要があります。",
       "dailyCostBudgetUsd": "1 日の予算は 0 より大きい数値にするか、予算なしの場合は空にしてください。",
       "ownerNotifyTooMany": "オーナーのアドレスは最大 {{max}} 件までです。",
-      "ownerNotifyInvalid": "オーナーのアドレスはそれぞれ有効なメールアドレスである必要があります。"
+      "ownerNotifyInvalid": "オーナーのアドレスはそれぞれ有効なメールアドレスである必要があります。",
+      "smtpHostRequired": "SMTP サーバーのホスト名を入力してください。返信はこのサーバー経由で送信されます。",
+      "smtpHostIpLiteral": "SMTP サーバーには IP アドレスではなく DNS 名を使用してください。TLS 証明書はこの名前で検証されます。",
+      "smtpHostInvalid": "有効な SMTP ホスト名ではありません。",
+      "smtpPort": "SMTP ポートは 587（STARTTLS）または 465（TLS）である必要があります。",
+      "fromNameInvalid": "送信者名は改行を含まず、最大 {{max}} 文字までです。",
+      "replyTemplateTooLong": "返信テンプレートは最大 {{max}} 文字までです。",
+      "aiDisclosureTooLong": "AI の開示文は最大 {{max}} 文字までです。",
+      "maxRepliesPerThreadPerHour": "返信の上限は 1 から 1000 までの整数である必要があります。"
     },
     "warning": {
       "openTrigger": "保存しましたが、インターネット上の誰でもこのエージェントを実行させられます。送信者の許可リストがなく、認証されていないメールも処理されます。",
-      "toolsWithoutApprovals": "保存しましたが、この統合が対象とするエージェントにツールがあり、ツールの承認がありません。メールの内容は信頼できない入力です。変更を加えるツールには hitlConfig.toolApprovals を追加してください。"
+      "toolsWithoutApprovals": "保存しましたが、この統合が対象とするエージェントにツールがあり、ツールの承認がありません。メールの内容は信頼できない入力です。変更を加えるツールには hitlConfig.toolApprovals を追加してください。",
+      "aiDisclosureDisabled": "保存しましたが、返信に AI が作成したことが記載されなくなりました。EU AI 法などの透明性ルールは、人々が AI と対話していることを知っているべきだとしています。",
+      "honorReplyTo": "保存しましたが、返信は DMARC が認証しない Reply-To アドレスに送られます。許可されたドメインから認証済みメールを送れる人なら誰でも返信先を決められます。"
     },
     "defaultTargetHint": "既定のターゲットは、プラスタグ（invoices+urgent@…）や件名が他のどのターゲットのトリガーにも一致しないメールをすべて受け取ります。作成後にターゲットを追加できます。",
     "triggerLabel": "プラスタグまたは件名の単語",
     "triggerHint": "invoices+urgent@… 宛てのメールはトリガー urgent に一致し、その単語を含む件名も一致します。一致しない場合は既定のターゲットに送られます。",
-    "setupTitle": "セットアップとセキュリティ"
+    "setupTitle": "セットアップとセキュリティ",
+    "mode": "モード",
+    "modeTrigger": "トリガー：メールがエージェントのターンを開始し、何も返送しません",
+    "modeConversation": "会話：エージェントがスレッド内で返信します",
+    "modeNoteConversation": "会話モード：エージェントは SMTP でメールスレッドに返信します。返信先は DKIM/DMARC でアドレスが認証された送信者です（「Reply-To アドレスに返信する」をオンにすると、代わりにメールの唯一の Reply-To アドレス宛てになります。このアドレスは DMARC の対象外です）。Cc やモデルが指定した相手には決して送りません。",
+    "requireAuthenticationConversationHint": "会話モードでは常にオン：EDDI はアドレスが偽装されている可能性のある送信者には決して返信しません。",
+    "repliesSection": "返信",
+    "smtpHost": "SMTP ホスト",
+    "smtpHostHint": "必須。接続の許可リストには smtp://<host>:587 または smtps://<host> も含める必要があります。同じ認証情報でログインします。",
+    "smtpPort": "SMTP ポート",
+    "fromName": "送信者名",
+    "fromNameHint": "すべての返信でメールボックスのアドレスの横に表示されます。",
+    "threadParticipants": "スレッドを継続できる人",
+    "participantsOriginal": "スレッドを開始した送信者のみ",
+    "participantsAny": "返信の送信先となった認証済みアドレスも含める",
+    "threadParticipantsHint": "それ以外の人がスレッドの Message-ID（転送のたびに含まれます）で返信した場合は、別の会話が始まります。",
+    "maxRepliesPerThreadPerHour": "スレッドごとの 1 時間あたりの返信数",
+    "maxRepliesHint": "ループ防止のブレーキです。直近 1 時間にスレッドへこの数の返信を送ると、それ以上の返信は送信されません（後で送られるのではなく破棄されます）。オーナーに通知されます。",
+    "honorReplyTo": "Reply-To アドレスに返信する",
+    "honorReplyToHint": "訪問者に代わって送信する Web フォームの場合のみ。それ以外では返信は常に認証済みの From に送られます。",
+    "honorReplyToWarning": "DMARC は Reply-To を認証しません。許可されたドメインから認証済みメールを送れる人なら誰でも、エージェントの返信先を決められます。",
+    "aiDisclosureEnabled": "すべての返信に AI が作成したことを記載する",
+    "aiDisclosure": "AI の開示文",
+    "aiDisclosureHint": "返信の後に追加されます。空欄の場合は表示されている既定値を使用します。",
+    "aiDisclosureWarning": "返信に AI が作成したことが記載されません。EU AI 法などの透明性ルールは、人々が AI と対話していることを知っているべきだとしています。",
+    "replyTemplate": "返信テンプレート",
+    "replyTemplateHint": "エージェントの回答を包みます。回答はテキストとして挿入され、テンプレートとして実行されることはありません。変数：",
+    "noteDkim": "返信には、メールボックスのドメインについて送信メールに DKIM 署名するメールサーバーと、そのドメインの DMARC レコードが必要です。EDDI は署名しません。これらがないと返信は迷惑メールになるか拒否されます。Exchange Online と多くのホスティング事業者は、ドメインで DKIM を有効にすると送信されたメールに署名します。",
+    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで EDDI はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。"
   }
 }

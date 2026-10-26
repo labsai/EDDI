@@ -368,6 +368,30 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("inbound: resubmissions are due RECEIVED rows of one integration that name a conversation, oldest first")
+    default void resubmissionQuery() {
+        LedgerEntry older = inbound("int-1", "<r1@example.com>", "a@example.com", NOW);
+        LedgerEntry newer = inbound("int-1", "<r2@example.com>", "a@example.com", NOW);
+        LedgerEntry noConversation = inbound("int-1", "<r3@example.com>", "a@example.com", NOW);
+        LedgerEntry notDue = inbound("int-1", "<r4@example.com>", "a@example.com", NOW);
+        LedgerEntry otherIntegration = inbound("int-2", "<r5@example.com>", "a@example.com", NOW);
+        LedgerEntry submitted = inbound("int-1", "<r6@example.com>", "a@example.com", NOW);
+        for (LedgerEntry row : List.of(older, newer, noConversation, notDue, otherIntegration, submitted)) {
+            ledger().insertIfAbsent(row);
+        }
+        ledger().transition(older.id(), State.RECEIVED, State.RECEIVED, "c1", NOW.minusSeconds(120), "resubmit", false, NOW);
+        ledger().transition(newer.id(), State.RECEIVED, State.RECEIVED, "c2", NOW.minusSeconds(60), "resubmit", false, NOW);
+        ledger().transition(noConversation.id(), State.RECEIVED, State.RECEIVED, null, NOW.minusSeconds(180), "auth_temporary", false, NOW);
+        ledger().transition(notDue.id(), State.RECEIVED, State.RECEIVED, "c4", NOW.plusSeconds(600), "resubmit", false, NOW);
+        ledger().transition(otherIntegration.id(), State.RECEIVED, State.RECEIVED, "c5", NOW.minusSeconds(300), "resubmit", false, NOW);
+        ledger().transition(submitted.id(), State.RECEIVED, State.TURN_SUBMITTED, "c6", NOW.minusSeconds(300), null, true, NOW);
+
+        assertEquals(List.of(older.id(), newer.id()), ledger().findDueResubmissions("int-1", NOW, 10).stream().map(LedgerEntry::id).toList());
+        assertEquals(List.of(older.id()), ledger().findDueResubmissions("int-1", NOW, 1).stream().map(LedgerEntry::id).toList(), "bounded");
+        assertEquals(List.of(otherIntegration.id()), ledger().findDueResubmissions("int-2", NOW, 10).stream().map(LedgerEntry::id).toList());
+    }
+
+    @Test
     @DisplayName("inbound: the per-sender count reaches only this integration's submitted or done turns since the day began")
     default void perSenderCount() {
         Instant dayStart = NOW.minus(Duration.ofHours(1));
@@ -399,5 +423,59 @@ interface EmailMessageLedgerContract {
 
         assertEquals(notification.id(), ledger().findOutboundByMessageId(notification.messageId()).orElseThrow().id());
         assertTrue(ledger().findOutboundByMessageId("<unknown@example.com>").isEmpty());
+    }
+
+    static LedgerEntry reply(String integrationId, String conversationId, String key, String recipient, State state, Instant createdAt) {
+        return new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.REPLY, Direction.OUT, "<eddi." + UUID.randomUUID() + "@contoso.com>",
+                conversationId, "row-1|1|reply", key, recipient, state, 1, createdAt, null, null, null, createdAt, createdAt,
+                createdAt.plus(Duration.ofDays(30)));
+    }
+
+    @Test
+    @DisplayName("replies: a conversation's first and latest turn, its sent replies, and the per-thread count that skips suppressed rows")
+    default void conversationRowsAndThreadCount() {
+        LedgerEntry first = inbound("int-1", "<q0@example.com>", "alice@example.com", NOW.minusSeconds(40));
+        LedgerEntry in = inbound("int-1", "<q1@example.com>", "bob@example.com", NOW.minusSeconds(30));
+        LedgerEntry refused = inbound("int-1", "<q2@example.com>", "eve@example.com", NOW.minusSeconds(5));
+        LedgerEntry otherIn = inbound("int-1", "<q3@example.com>", "eve@example.com", NOW);
+        for (LedgerEntry row : List.of(first, in, refused, otherIn)) {
+            ledger().insertIfAbsent(row);
+        }
+        ledger().transition(first.id(), State.RECEIVED, State.TURN_SUBMITTED, "conv-9", NOW.plusSeconds(600), null, true, NOW);
+        ledger().transition(first.id(), State.TURN_SUBMITTED, State.DONE, null, null, null, false, NOW);
+        ledger().transition(in.id(), State.RECEIVED, State.TURN_SUBMITTED, "conv-9", NOW.plusSeconds(600), null, true, NOW);
+        ledger().transition(refused.id(), State.RECEIVED, State.REFUSED, "conv-9", null, "loop", false, NOW);
+        ledger().transition(otherIn.id(), State.RECEIVED, State.TURN_SUBMITTED, "conv-other", NOW.plusSeconds(600), null, true, NOW);
+        LedgerEntry sent = reply("int-1", "conv-9", "reply:a", "alice@example.com", State.SENT, NOW.minusSeconds(20));
+        LedgerEntry suppressed = reply("int-1", "conv-9", "reply:b", "carol@example.com", State.SUPPRESSED, NOW.minusSeconds(10));
+        LedgerEntry old = reply("int-1", "conv-9", "reply:c", "alice@example.com", State.SENT, NOW.minus(Duration.ofHours(2)));
+        LedgerEntry other = reply("int-1", "conv-other", "reply:d", "dave@example.com", State.SENT, NOW);
+        for (LedgerEntry row : List.of(sent, suppressed, old, other)) {
+            assertTrue(ledger().insertIfAbsent(row));
+        }
+
+        assertEquals(first.id(), ledger().findInboundTurn("conv-9", false).orElseThrow().id(), "the mail that started it");
+        assertEquals(in.id(), ledger().findInboundTurn("conv-9", true).orElseThrow().id(), "the latest mail that ran, not a refused one");
+        assertTrue(ledger().findInboundTurn("conv-none", true).isEmpty());
+        assertTrue(ledger().hasSentReply("conv-9", "alice@example.com"));
+        assertFalse(ledger().hasSentReply("conv-9", "carol@example.com"), "a suppressed reply was not sent");
+        assertFalse(ledger().hasSentReply("conv-9", "dave@example.com"), "another conversation's reply");
+        assertEquals(1, ledger().countByConversationSince("conv-9", Kind.REPLY, NOW.minus(Duration.ofHours(1))));
+        assertEquals(0, ledger().countByConversationSince("conv-9", Kind.NOTIFY, NOW.minus(Duration.ofHours(1))));
+        assertEquals(sent.id(), ledger().findByMessage("int-1", Direction.OUT, sent.messageId()).orElseThrow().id(), "the thread index");
+    }
+
+    @Test
+    @DisplayName("replies: a bounce moves a SENT reply to FAILED by a conditional transition, once")
+    default void bounceTransition() {
+        LedgerEntry sent = reply("int-1", "conv-9", "reply:e", "alice@example.com", State.SENT, NOW);
+        ledger().insertIfAbsent(sent);
+
+        assertTrue(ledger().transition(sent.id(), State.SENT, State.FAILED, null, null, "BOUNCED: 5.1.1", false, NOW));
+        assertFalse(ledger().transition(sent.id(), State.SENT, State.FAILED, null, null, "BOUNCED: 5.1.1", false, NOW));
+        LedgerEntry after = ledger().findById(sent.id()).orElseThrow();
+        assertEquals(State.FAILED, after.state());
+        assertEquals("BOUNCED: 5.1.1", after.lastError());
+        assertEquals("conv-9", after.conversationId());
     }
 }

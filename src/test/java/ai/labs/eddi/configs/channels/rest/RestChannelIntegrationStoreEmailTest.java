@@ -7,18 +7,22 @@ package ai.labs.eddi.configs.channels.rest;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
+import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -124,13 +128,61 @@ class RestChannelIntegrationStoreEmailTest {
     }
 
     @Test
-    @DisplayName("conversation mode and its keys are refused before anything is checked or stored")
-    void conversationModeRefused() throws Exception {
-        var error = assertThrows(BadRequestException.class, () -> sut.createChannel(email(Map.of("mode", "conversation"))));
-        assertTrue(error.getMessage().contains("not supported yet"));
-        assertThrows(BadRequestException.class, () -> sut.createChannel(email(Map.of("replyTemplate", "{output}"))));
+    @DisplayName("conversation-mode keys on a trigger integration, and conversation mode without smtpHost, are refused before anything is "
+            + "checked or stored")
+    void conversationKeysRefusedInTriggerMode() throws Exception {
+        var error = assertThrows(BadRequestException.class, () -> sut.createChannel(email(Map.of("replyTemplate", "{output}"))));
+        assertTrue(error.getMessage().contains("conversation mode"));
+        var noSmtp = assertThrows(BadRequestException.class, () -> sut.createChannel(email(Map.of("mode", "conversation"))));
+        assertTrue(noSmtp.getMessage().contains("smtpHost"));
+        assertThrows(BadRequestException.class,
+                () -> sut.createChannel(email(Map.of("mode", "conversation", "smtpHost", "smtp.office365.com", "requireAuthentication", "false"))));
         verify(support, never()).validateAgainstDeployment(any(), any());
         verify(channelStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("conversation mode is accepted: checked against the deployment, scheduled, and its warnings returned")
+    void conversationMode() {
+        var config = email(Map.of("mode", "conversation", "smtpHost", "smtp.office365.com", "aiDisclosure", ""));
+        when(support.warnings(any())).thenReturn(List.of("email.ai-disclosure-disabled"));
+
+        Response response = sut.createChannel(config);
+
+        assertEquals(201, response.getStatus());
+        verify(support).validateAgainstDeployment(config, null);
+        verify(support).afterSave(ID, config);
+        assertEquals("email.ai-disclosure-disabled", response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER));
+    }
+
+    @Test
+    @DisplayName("the suppression list is read and cleared through the integration, with the address in the body")
+    void suppressions() throws Exception {
+        when(channelStore.read(ID, 1)).thenReturn(email(Map.of()));
+        when(support.suppressions(ID, 100)).thenReturn(
+                List.of(new IEmailSuppressionStore.Suppression(ID, "sha256:ab", "example.com", "bounce:5.1.1",
+                        Instant.parse("2026-10-25T10:00:00Z"))));
+        when(support.clearSuppression(ID, "alice@example.com")).thenReturn(true);
+
+        var listed = sut.readEmailSuppressions(ID, 100);
+        assertEquals(1, listed.size());
+        assertEquals("sha256:ab", listed.get(0).addressHash());
+        assertEquals("2026-10-25T10:00:00Z", listed.get(0).createdAt());
+        assertEquals(204, sut.clearEmailSuppression(ID, new EmailSuppressionView.ClearRequest("alice@example.com")).getStatus());
+        assertEquals(404, sut.clearEmailSuppression(ID, new EmailSuppressionView.ClearRequest("bob@example.com")).getStatus());
+        assertThrows(BadRequestException.class, () -> sut.clearEmailSuppression(ID, new EmailSuppressionView.ClearRequest(" ")));
+    }
+
+    @Test
+    @DisplayName("a channel that is not an email integration has no suppression list")
+    void suppressionsOnlyForEmail() throws Exception {
+        var slack = email(Map.of());
+        slack.setChannelType("slack");
+        when(channelStore.read(ID, 1)).thenReturn(slack);
+
+        assertThrows(NotFoundException.class, () -> sut.readEmailSuppressions(ID, 10));
+        assertThrows(NotFoundException.class, () -> sut.clearEmailSuppression(ID, new EmailSuppressionView.ClearRequest("a@b.example")));
+        verify(support, never()).clearSuppression(any(), any());
     }
 
     @Test

@@ -1,8 +1,6 @@
 # Implementation Plan — Email Support
 
-**Status:** Proposal. The shared mail core and socket guard (Phase 0 and 0b: `engine/mail`, `engine/net`,
-Angus Mail) land with this plan; the email channel itself is not built by that change. Revised once after a
-critical review (§2 lists what changed and why).
+**Status:** Phases 0–3 are implemented (mail core, sockets and tokens, HITL notifications, trigger mode, conversation mode — see [`docs/email-integration.md`](../docs/email-integration.md)); Phases 4–7 (Graph, relay webhooks, Gmail, extras) are not. Revised once after a critical review (§2 lists what changed and why). The sections below are the plan as written; where the implementation deviated, the changelog fragments under `docs/changelog.d/2026-10-2*-feat-email-*.md` say so.
 **Created:** 2026-10-24
 **Verified:** 2026-10-24 against `main` @ `5028af0a3`. Every EDDI class named here exists at that commit, and
 no mail, DNS or Markdown library was in `pom.xml` there (Phase 0 adds Angus Mail). The provider facts in §2 and §7 were checked against

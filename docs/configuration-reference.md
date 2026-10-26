@@ -539,8 +539,10 @@ Full guide: [slack-integration.md](slack-integration.md).
 These settings govern the **system mailer** — the deployment's one SMTP sender, used for
 [HITL email notifications](hitl.md#email-notifications) and the email channel's owner notices — the email message
 ledger, the mail socket guard every IMAP/SMTP connection goes through, the DNS lookups of sender authentication (DKIM
-and DMARC), and the polling of [email channel integrations](email-integration.md) (trigger mode). An email
-integration's own settings are its `platformConfig`, listed in [email-integration.md](email-integration.md#every-key).
+and DMARC), and the polling and replies of [email channel integrations](email-integration.md) (trigger and
+conversation mode). An email integration's own settings — its SMTP relay for replies included — are its
+`platformConfig`, listed in [email-integration.md](email-integration.md#every-key); a channel reply never goes through
+the system mailer.
 Details:
 [security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector),
 [security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc).
@@ -558,10 +560,10 @@ Details:
 | `eddi.mail.smtp.password` | *(unset)* | SMTP password. Supply it through the environment (`EDDI_MAIL_SMTP_PASSWORD`) or a secret-backed config source, not `application.properties` |
 | `eddi.mail.notify.allowed-recipient-domains` | *(unset — the domain of `eddi.mail.smtp.from` and its subdomains)* | Comma-separated domains HITL email notifications may be sent to: an exact domain (`example.com`), `*.domain` for its subdomains (not the domain itself), or `*` for any. Recipients come from agent configs that anyone with EDIT on an agent can change, while the mail leaves through this relay from this sender, so the default keeps it inside the sender's organisation. A recipient outside is refused at agent save time when a mailer is configured (accepted with a WARN when not) and is never mailed (ledger row `SUPPRESSED`, `outcome=not_allowed`). An entry that is not a domain makes notifications go to nobody, with an ERROR at startup |
 | `eddi.mail.notify.max-per-recipient-per-hour` | `30` | Flood brake: at most this many notifications per recipient in any hour, counted across the cluster from the email ledger (suppressed rows do not count). Over it, rows are `SUPPRESSED` (`outcome=rate_limited`) and each instance logs one WARN per recipient per hour, naming the recipient by hash. Concurrent pauses on several instances can overshoot by a few. `0` or less disables the limit |
-| `eddi.email.ledger-retention` | `30d` | How long an email ledger row (one per notification: recipient, state, Message-ID — never a body) is kept. Zero or negative falls back to `30d` |
-| `eddi.email.outbound.max-attempts` | `6` | Send attempts before a notification is marked `FAILED`. A 5xx refusal fails it at once |
+| `eddi.email.ledger-retention` | `30d` | How long an email ledger row (one per notification, reply or inbound mail: address, state, Message-ID — never a body) is kept. Zero or negative falls back to `30d`. A reply's Message-ID stops threading the conversation once its row expires (the `References` thread key still does) |
+| `eddi.email.outbound.max-attempts` | `6` | Send attempts before a notification or a conversation-mode reply is marked `FAILED`. A 5xx refusal fails it at once |
 | `eddi.email.outbound.retry-backoff` | `1m` | Delay before the first retry; it doubles per attempt, capped at one hour |
-| `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so instances never send the same row twice |
+| `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so two instances never work the same row at once; a node that dies after the relay accepted a message but before its row was completed leaves it to be sent again when the lease runs out |
 | `eddi.email.allowed-hosts` | *(empty — any public host)* | Comma-separated mail servers (IMAP/SMTP) that channel and knowledge-base authors may name: exact host names, or `*.domain` for its subdomains (not the domain itself). Applied on top of the always-on refusal of private, loopback, link-local and metadata addresses, which an entry here does not lift. An entry that is not a host name fails the first mail connection rather than being ignored |
 | `eddi.email.dns.servers` | *(unset — the system's resolvers)* | Comma-separated DNS servers for DKIM key and DMARC record lookups: `host`, `host:port` or `[v6]:port`. Point an air-gapped deployment at its own resolver. DNSSEC is not required; a validating resolver adds it. A value that cannot be used makes every lookup fail temporarily, with one ERROR — no mail is then authenticated |
 | `eddi.email.dns.timeout` | `5s` | Timeout of one DNS query (one retry). A timeout makes that signature or policy check temporary, never a pass |
@@ -571,7 +573,8 @@ Details:
 | `eddi.email.poll.max-messages-per-poll` | `50` | Mails one poll of one mailbox processes at most; the rest wait for the next poll. Mails that are still deferred (a budget, a temporary authentication result) do not count |
 | `eddi.email.poll.max-duration` | `2m` | Time one poll may spend before it stops starting new mails. Keep it well below `eddi.schedule.fire-timeout` |
 | `eddi.email.inbound.stranded-after` | `30m` | How long a mail's turn may stay submitted without its completion being recorded before the inbound sweep resolves it from the conversation's state (a lost completion, e.g. a node that died). A mail is never run twice |
-| `eddi.email.inbound.sweep-interval` | `5m` | How often each instance runs the inbound sweep: stranded turns, and re-creating a missing poll schedule |
+| `eddi.email.inbound.sweep-interval` | `5m` | How often each instance runs the inbound sweep: stranded turns (in conversation mode also rebuilding a reply a dead node did not send, and resubmitting a mail whose turn never ran), and re-creating a missing poll schedule |
+| `eddi.email.reply.sweep-interval` | `30s` | Conversation mode: how often each instance claims due reply retries (`eddi.email.outbound.max-attempts`, `eddi.email.outbound.retry-backoff`). Claims are conditional updates, so two instances never work the same reply at once; a node that dies after the relay accepted a reply but before its row was completed leaves it to be sent again (same Message-ID) when the lease runs out |
 | `eddi.email.dns.max-lookups-per-message` | `10` | Network lookups one message may cause (cache hits are free): one per DKIM signature, at most 5 of which are evaluated, plus up to two for DMARC. Past it, the remaining checks are temporary failures |
 
 ### OpenAI-compatible API

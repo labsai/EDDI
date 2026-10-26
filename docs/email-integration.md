@@ -1,17 +1,21 @@
-# Email Integration (Trigger Mode)
+# Email Integration
 
-> **Status**: New · **Since**: v6.6.0 · Plan: [`planning/email-channel-plan.md`](../planning/email-channel-plan.md) (Phase 2)
+> **Status**: New · **Since**: v6.6.0 · Plan: [`planning/email-channel-plan.md`](../planning/email-channel-plan.md) (Phases 2 and 3)
 
 An **email integration** connects a mailbox to an agent: EDDI polls the mailbox over IMAP and every new mail starts
 one agent turn, with the mail as the turn's input and its attachments as files. It is a channel integration with
 `channelType: "email"`, so it reuses what channels already have — the `targets` routing table, `defaultTargetName`,
 the Manager's Channels page and the MCP `create_channel_integration` tool.
 
-This is **trigger mode**: the agent acts through its tools (book the invoice, open the claim, file the CV). **Nothing
-is ever sent back to the sender** — no reply, no bounce, no "we received your mail". Leaving the reply out removes the
-worst risks of an email-facing agent: backscatter to forged senders, reply loops and the agent as an exfiltration
-path. Conversation mode, where the agent answers in the thread, is a later phase; `mode: "conversation"` is refused
-until then.
+It has two modes, chosen with `mode` and switchable later without re-creating the integration:
+
+- **`trigger`**: the agent acts through its tools (book the invoice, open the claim, file the CV). **Nothing is ever
+  sent back to the sender** — no reply, no bounce, no "we received your mail". Leaving the reply out removes the worst
+  risks of an email-facing agent: backscatter to forged senders, reply loops and the agent as an exfiltration path.
+- **`conversation`**: the agent **replies in the mail thread** over SMTP — to the sender whose address DKIM and
+  DMARC alignment authenticated (or, only with `honorReplyTo: true`, to the mail's single `Reply-To` instead), never to
+  a copy recipient, never to anyone the model names. The sender's answer to
+  that reply continues the same conversation. [Conversation mode](#conversation-mode) describes what it adds.
 
 EDDI is not a mail server: it receives nothing over SMTP, needs no MX record and no public ingress. It logs in to an
 existing mailbox (Exchange Online, Microsoft 365, any IMAP host), like a mail client would.
@@ -20,7 +24,8 @@ existing mailbox (Exchange Online, Microsoft 365, any IMAP host), like a mail cl
 
 | Situation | Use |
 |---|---|
-| A process mailbox nobody corresponds on: invoices, orders, CVs, claims, forms | **This channel** |
+| A process mailbox nobody corresponds on: invoices, orders, CVs, claims, forms | **This channel, trigger mode** |
+| A small team's `info@` / `support@` without a helpdesk, mostly known correspondents | **This channel, conversation mode**, with a sender allowlist where possible |
 | A helpdesk (Zendesk, Freshdesk, Front, Help Scout, ServiceNow) already receives the mail | **Not this channel.** Use the helpdesk's trigger → EDDI [webhook channel](webhook-triggers.md), and have the agent answer through `httpcalls` against the helpdesk API ([recipe below](#helpdesk-recipe-webhook--httpcalls)). The helpdesk keeps threading, spam handling, assignment and human handoff |
 | Public, high-volume support | A helpdesk, with EDDI behind it (the recipe) |
 | Staff should hear that an agent waits for an approval | [HITL email notifications](hitl.md#email-notifications) |
@@ -135,14 +140,14 @@ comma-separated; the Manager shows them, `create_channel_integration` lists them
 
 ## Every key
 
-All values are strings, like every channel's `platformConfig`. Unknown keys are refused, and so are the conversation-mode
-keys (`smtpHost`, `smtpPort`, `fromName`, `replyTemplate`, `aiDisclosure`, `threadParticipants`,
-`maxRepliesPerThreadPerHour`, `honorReplyTo`) — a reply setting on an integration that never replies would read as if
-it did something.
+All values are strings, like every channel's `platformConfig`. Unknown keys are refused, and so is a key of the other
+mode when it has a value: the conversation-mode keys ([below](#conversation-mode-keys)) on a trigger integration — a
+reply setting on an integration that never replies would read as if it did something — and `correlateThreads` on a
+conversation integration, which always keeps a thread in one conversation.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `mode` | — (required) | `trigger`. `conversation` is refused until conversation mode ships |
+| `mode` | — (required) | `trigger` or `conversation` |
 | `transport` | — (required) | `imap` |
 | `connection` | — (required) | Name of the connection (or `${connection:name}`) |
 | `host` | — (required) | IMAP server, e.g. `outlook.office365.com` |
@@ -151,11 +156,11 @@ it did something.
 | `folder` | `INBOX` | The one folder that is polled. Poll the folder that comes *after* the server's spam filtering |
 | `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there** |
 | `pollSeconds` | `60` | Poll interval, 60 – 86400 |
-| `requireAuthentication` | `true` | Only mail whose sender passes DKIM with DMARC alignment runs a turn. `false` also runs unauthenticated mail — under a one-off anonymous identity with **no memory** ([Identity](#identity)) |
+| `requireAuthentication` | `true` | Only mail whose sender passes DKIM with DMARC alignment runs a turn. `false` also runs unauthenticated mail — under a one-off anonymous identity with **no memory** ([Identity](#identity)). Always `true` in conversation mode: `false` is refused |
 | `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains). Matched against the `From`, which without `requireAuthentication` anyone can forge |
 | `senderBlocklist` | *(empty)* | Same syntax; checked before the allowlist |
 | `identityMode` | `perSender` | `perSender`: `email:<integrationId>:<address>`. `integration`: one shared `email:<integrationId>` for every authenticated sender |
-| `correlateThreads` | `false` | Each mail is its own conversation by default. `true`: a mail continuing a thread (by `References`/`In-Reply-To`) **from the same authenticated sender** continues that sender's conversation; anyone else starts their own ([Threads](#threads)) |
+| `correlateThreads` | `false` | Trigger mode only. Each mail is its own conversation by default. `true`: a mail continuing a thread (by `References`/`In-Reply-To`) **from the same authenticated sender** continues that sender's conversation; anyone else starts their own ([Threads](#threads)) |
 | `attachments` | `drop` | `drop`: not passed on. `metadata`: name, type, size. `store`: allowed types into the attachment store and the turn |
 | `attachmentMimeTypes` | *(empty)* | Required for `store`: `type/subtype` or `type/*`. Executables are never stored, whatever this says; archives are never expanded |
 | `maxMessageBytes` | `26214400` (25 MB) | Checked from the server's `RFC822.SIZE` before the mail is downloaded, and again while it is; 1 KB – 50 MB |
@@ -194,6 +199,7 @@ The context key **`mail`** holds what the mail says about itself — every field
 | `from`, `fromName` | The `From` address and display name |
 | `to`, `cc` | Recipient addresses |
 | `subject`, `date`, `messageId` | |
+| `inReplyTo`, `references`, `replyTo` | The ids the mail answers, and its `Reply-To` addresses (conversation mode threads its reply with them) |
 | `authentication`, `signingDomain` | `aligned-pass` (the only authenticated verdict), `pass-unaligned`, `fail`, `none` — and the DKIM signing domain |
 | `quotedHistoryRemoved` | Whether `stripQuotedHistory` removed anything |
 | `anomalies` | Parser findings, e.g. `alternatives_diverge` (the plain-text and HTML parts say different things — the agent reads the plain text) |
@@ -263,7 +269,8 @@ What a crashed node leaves behind, and what happens to it:
 | After the ledger write, before the claim | `RECEIVED` | The mail is unmarked and the cursor stops before it: the next poll processes it |
 | After the claim, before any side effect | `CLAIMED` | Once the claim's deadline (`eddi.email.inbound.stranded-after`, 30 min) has passed, the next poll — or the inbound sweep — gives it back to `RECEIVED`, and the mail, which was not marked or moved and is still in the polled folder above the cursor, is fetched and processed again |
 | While the conversation was being started (no conversation recorded) | `TURN_SUBMITTED` | Ambiguous — `CONVERSATION_START` may have called tools — so it is **not** run again: the next poll marks it, the sweep ends it `REFUSED(stranded)`, logs it, counts `outcome=lost` and sends the owners the once-a-day `lost` notice |
-| After the conversation was started | `TURN_SUBMITTED` + conversation | The sweep resolves it from the conversation's state (`DONE`, noting failed or awaiting approval). If the node died before the queued turn ran, the conversation shows only its start; this is not detected yet |
+| After the conversation was started, the mail's turn ran | `TURN_SUBMITTED` + conversation | The sweep resolves it from the conversation's state (`DONE`, noting failed or awaiting approval). In conversation mode it first rebuilds the reply (or pause notice) the node did not queue, from the stored conversation; when that fails (the ledger or channel store did not answer) the row stays submitted and the next sweep after `stranded-after` tries again, up to 5 times, before the row is closed without the reply (logged at WARN) |
+| After the conversation was started, before the queued turn ran | `TURN_SUBMITTED` + conversation without the mail's step | Nothing of the mail ran, so it is **submitted again**, once: the sweep hands the row back to `RECEIVED` keeping its conversation (`outcome=resubmitted`, conditional — one node wins), and the next poll finds the mail in the polled or the move folder by its Message-ID (`SEARCH HEADER`, then an exact match) and runs its turn in that conversation. The turn carries the mail's ledger key as its idempotency key. A mail that is in neither folder any more ends `REFUSED(stranded:not_in_mailbox)` with the `lost` notice. A mail found but now over `maxMessageBytes` (the limit was lowered) ends `REFUSED(too_large)`, and the poll goes on with the next one. A conversation that ended or failed meanwhile is resolved `DONE` instead — when in doubt, a mail is not run twice |
 
 The **inbound sweep** runs every `eddi.email.inbound.sweep-interval` (5 min). It opens no mailbox itself: the mailbox
 belongs to whichever node holds the poll schedule's cluster claim, and giving a stale claim back is enough for that
@@ -292,7 +299,8 @@ cost); an unpriced model counts as zero.
   approvals.
 - Prefer `requireAuthentication: true` and a `senderAllowlist`. Without authentication the allowlist only matches a
   claim: anyone can write `From: billing@supplier-a.com`.
-- The model never chooses a recipient: trigger mode sends nothing at all.
+- The model never chooses a recipient: trigger mode sends nothing at all, and conversation mode answers only the
+  authenticated sender, or with `honorReplyTo` that mail's single `Reply-To` ([Who gets a reply](#who-gets-a-reply)).
 - Sockets go through `SafeSocketConnector`'s author policy: DNS names only, no private, loopback, link-local or
   metadata address (an on-premises Exchange on a private address cannot be reached yet), TLS always verified, the
   resolved address pinned. `eddi.email.allowed-hosts` confines which servers authors may name.
@@ -331,6 +339,8 @@ spend. A changed `UIDVALIDITY` (the folder was rebuilt) rescans the folder, dedu
 | `eddi.email.poll.max-duration` | `2m` | Time one poll may spend |
 | `eddi.email.inbound.stranded-after` | `30m` | When a submitted turn counts as stranded |
 | `eddi.email.inbound.sweep-interval` | `5m` | How often the inbound sweep runs |
+| `eddi.email.reply.sweep-interval` | `30s` | Conversation mode: how often due replies are retried |
+| `eddi.email.outbound.max-attempts`, `eddi.email.outbound.retry-backoff` | `6`, `1m` | Attempts per reply, and the first retry delay (doubling, at most an hour) |
 | `eddi.email.allowed-hosts` | *(any public host)* | Mail servers authors may name |
 
 A failed poll (connection, login, folder) is logged at WARN with its category, recorded on the mailbox state, and
@@ -341,20 +351,172 @@ inbound sweep re-creates it.
 
 ### Metrics
 
-`eddi_email_inbound_total{integration,transport,mode,outcome}`, `eddi_email_poll_duration_seconds{…,outcome}`,
-`eddi_email_poll_cursor_resets_total`, `eddi_email_ledger_stranded_recovered_total{outcome}`, plus the deployment-wide
-`eddi_email_auth_total{result}`. Described in [metrics.md](metrics.md), charted in the Full Metrics dashboard's
+`eddi_email_inbound_total{integration,transport,mode,outcome}` (`mode` is `trigger` or `conversation`; `outcome=bounce`
+for a delivery report that applied to a reply), `eddi_email_poll_duration_seconds{…,outcome}`,
+`eddi_email_poll_cursor_resets_total`, `eddi_email_ledger_stranded_recovered_total{outcome}` (`requeued`, `lost`, `done`,
+`failed`, `awaiting_human`, `resubmitted`, `reply_rebuilt`), plus the deployment-wide `eddi_email_auth_total{result}`.
+Conversation mode adds `eddi_email_outbound_total{kind="reply",outcome}` (`sent`, `retry`, `failed`, `suppressed`,
+`throttled`, `refused`, `bounced`, `no_output`), `eddi_email_outbound_latency_seconds{kind="reply"}` and
+`eddi_email_suppressions_total{reason}`. Described in [metrics.md](metrics.md), charted in the Full Metrics dashboard's
 Integrations row.
 
 ### Limits of this phase
 
-- IMAP only, one folder per integration, polling (no IDLE).
-- No reply of any kind; conversation mode is Phase 3.
-- A sender who does not sign with DKIM can only be processed with `requireAuthentication: false`, without memory.
+- IMAP in, SMTP out, one folder per integration, polling (no IDLE). Microsoft Graph and relay webhooks are later phases.
+- A sender who does not sign with DKIM can only be processed in trigger mode with `requireAuthentication: false`,
+  without memory — and never gets a reply.
 - Mail already in the folder when the integration is created is not processed.
-- A node that dies after starting a mail's conversation but before its queued turn ran leaves the mail recorded as done.
+- Replies are `text/plain` only; there is no quick-reply parsing.
+- A mail resubmitted after a crash needs the mail still in the polled or move folder, with a real Message-ID.
 - Up to `eddi.email.poll.max-messages-per-poll × 20` envelopes are listed per poll; a backlog of mail deferred
   beyond that waits until the deferred mail settles.
+
+## Conversation mode
+
+`"mode": "conversation"` keeps everything above and adds the reply. A minimal integration:
+
+```json
+{
+  "name": "Support",
+  "channelType": "email",
+  "platformConfig": {
+    "mode": "conversation",
+    "transport": "imap",
+    "connection": "exo-support-mailbox",
+    "host": "outlook.office365.com",
+    "smtpHost": "smtp.office365.com",
+    "address": "support@contoso.com",
+    "fromName": "Contoso Support",
+    "processedAction": "move:EDDI/Processed",
+    "senderAllowlist": "*@contoso.com,*@partner.example"
+  },
+  "targets": [ { "name": "support", "type": "AGENT", "targetId": "<agentId>" } ],
+  "defaultTargetName": "support"
+}
+```
+
+### Before you switch it on
+
+- **DKIM and DMARC for the mailbox's domain.** EDDI submits the reply to `smtpHost`; it does not sign it. The mail
+  server must sign outgoing mail with DKIM for the domain of `address`, and that domain should publish DMARC —
+  otherwise replies land in spam or are rejected, and the people you answer cannot tell your mail from a forgery.
+  Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.
+- **SMTP submission for the connection.** The same connection logs in to IMAP and SMTP, so its `baseUrlAllowlist`
+  must also name `smtp://<smtpHost>:587` (STARTTLS, the default) or `smtps://<smtpHost>` (port 465). Exchange Online:
+  add `smtps://smtp.office365.com` or `smtp://smtp.office365.com:587` to the allowlist, and allow SMTP AUTH for the
+  mailbox (`Set-CASMailbox -SmtpClientAuthenticationDisabled $false`); the token's scope
+  `https://outlook.office365.com/.default` covers both. `smtpHost` passes the same socket policy as `host`.
+- **The agent.** It now writes to people. Everything under [Security](#security) applies, and tool approvals matter
+  more: an approved tool's result can end up in a reply.
+
+### Conversation-mode keys
+
+| Key | Default | Meaning |
+|---|---|---|
+| `smtpHost` | — (required) | The SMTP submission server |
+| `smtpPort` | `587` | `587` (STARTTLS, required — never a plaintext login) or `465` (TLS) |
+| `fromName` | *(none)* | Display name of the replies' `From`; the address is `address` |
+| `replyTemplate` | `{output}` | Wraps the agent's answer: Qute, with `{output}` and the answered mail's `{mail.subject}`, `{mail.from}`, `{mail.fromName}`, `{mail.date}`. The answer and the subject are data — a `{…}` the model writes is printed, never evaluated. At most 4000 characters |
+| `aiDisclosure` | `This reply was written by an AI assistant.` | Appended after a blank line to every reply. **An empty value switches it off**, and the save warns (`email.ai-disclosure-disabled`): transparency rules such as Art. 50 of the EU AI Act ([eu-ai-act-compliance.md](eu-ai-act-compliance.md)) expect people to know they are talking to an AI. At most 500 characters |
+| `threadParticipants` | `originalSenderOnly` | Who may continue a conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
+| `maxRepliesPerThreadPerHour` | `5` | At most this many replies per conversation per hour, counted cluster-wide from the ledger (1 – 1000) |
+| `honorReplyTo` | `false` | `true`: reply to the mail's `Reply-To` when it names exactly one valid address. **Only for a web-form relay** that sends on behalf of its visitors; the save warns (`email.honor-reply-to`) |
+
+### Who gets a reply
+
+One decision, made again on every attempt: the reply goes to the **authenticated `From`** of the mail it answers —
+never to `Cc`, never to another recipient, never to an address the model writes. A reply is only sent when:
+
+- the integration is in conversation mode at the moment of sending;
+- the answered mail reached a turn (a refused mail never gets one);
+- the conversation runs as an authenticated email identity of the integration (`email:<id>:<address>` or `email:<id>`,
+  minted only for a DKIM-aligned pass) — never `email-anon:`;
+- the mail's step in conversation memory names the same mail, the verdict `aligned-pass` and the same `From` as the
+  ledger row;
+- the recipient is not the integration's own address and not on its [suppression list](#bounces-and-the-suppression-list).
+
+Unauthenticated mail cannot reach a turn in this mode at all (`requireAuthentication` is forced on), so the checks
+above are the second and third line, not the first. With `honorReplyTo: true` the recipient is the single `Reply-To` —
+which DMARC does not cover: whoever can send authenticated mail from an allowed domain decides where the reply goes.
+
+### What a reply contains
+
+The text of the turn's output (for a conversation's first mail, also what its `CONVERSATION_START` turn said), through
+`replyTemplate`, then `aiDisclosure`. It is `text/plain` (UTF-8, `format=flowed`), from `fromName <address>`,
+`Subject: Re: <subject>` without stacked `Re:`/`AW:` prefixes, `In-Reply-To` the answered mail, `References` its
+thread plus its id (capped), `Auto-Submitted: auto-replied` and `X-Auto-Response-Suppress: All`. The envelope sender is
+`address`, so bounces come back to the polled mailbox. **A turn without output sends nothing**, and neither does a
+failed one.
+
+### Threads in conversation mode
+
+A thread is always one conversation (`correlateThreads` is implied). EDDI's Message-IDs are random
+(`<eddi.<uuid>@<domain of address>>`) and recorded in the ledger, so a mail whose `In-Reply-To` or `References` names
+one of the integration's replies continues that reply's conversation — even from a client that drops `References`.
+The **hijack guard** applies here too, because Message-IDs travel in every forward: the mail continues the
+conversation only when its authenticated sender is the one who started it, or, with
+`threadParticipants: anyAuthenticatedParticipant`, an address a reply in that conversation was sent to (the
+`honorReplyTo` case). Anyone else falls back to the thread key, which holds their own address, and starts their own
+conversation. A mail for a conversation that is busy or waiting for an approval waits in the mailbox.
+
+### Delivery, retries, limits
+
+Each reply is an outbound `REPLY` row in the [message ledger](#the-message-ledger), keyed by conversation, the step it
+answers and its kind (reply, pause notice, continuation, group synthesis), so there is **one** reply however many
+observers see the turn complete. The ledger deduplicates rows, not deliveries: a node that dies after the relay
+accepted a reply but before the row was marked `SENT` leaves a claim whose lease runs out, and the retry sends the
+reply again, under the same Message-ID. The first attempt starts as soon as the turn ends; a failure that may be transient is
+retried with backoff until `eddi.email.outbound.max-attempts`; a permanent refusal (5xx) or the last attempt ends the
+row `FAILED`, and the owners get the once-a-day `reply_failed` notice. The ledger holds no body: a retry re-reads the
+conversation and re-renders the reply under the Message-ID the row was given. A conversation over
+`maxRepliesPerThreadPerHour` gets no further reply that hour — the row is `SUPPRESSED` (`THREAD_BUDGET`) and the owners
+hear once a day (`thread_throttled`) — usually a mail loop the loop guard did not catch. Auto-replies to a reply are
+dropped by the loop guard like any automated mail.
+
+A group target's discussion **synthesis** is the reply. A group conversation keeps no copy of the mail it answered, so
+a group reply that fails is retried only by the node that ran the discussion; elsewhere, or after a restart, it ends
+`FAILED` (`CONTENT_UNAVAILABLE`).
+
+### Bounces and the suppression list
+
+A delivery status notification (`multipart/report`) that arrives in the mailbox is still refused as input, but first
+read: when it names a Message-ID this integration sent and reports a **permanent** failure (5.x.x) **for that reply's
+recipient**, the reply row ends `FAILED` (`BOUNCED: <status>`) and the address goes on the integration's suppression
+list; a delay (4.x.x) is noted on the row. Anything else in a report is ignored — a report is untrusted mail, and it
+counts only for an id EDDI minted and sent to that one recipient. **No mail is sent to a suppressed address** (checked
+when the reply is queued and again before every attempt).
+
+The list stores the SHA-256 of each address and its domain, not the address. An administrator (EDIT on the
+integration) reads and clears it:
+
+```bash
+curl http://localhost:7070/channelstore/channels/<id>/email-suppressions
+curl -X POST http://localhost:7070/channelstore/channels/<id>/email-suppressions/clear \
+  -H "Content-Type: application/json" -d '{"address": "alice@example.com"}'   # 204, or 404 when not suppressed
+```
+
+The address travels in the body, not the URL, so it stays out of access logs. Deleting the integration drops its list;
+GDPR erasure of an address removes its entries ([gdpr-compliance.md](gdpr-compliance.md)).
+
+### Approvals in the thread
+
+When the turn of a mail pauses for approval ([hitl.md](hitl.md#email-conversations)), the sender gets an in-thread
+notice: the agent's output so far, a fixed sentence that a person must approve the next step, and the pause reason
+the agent designer wrote — **never the tool or its arguments**. When the pause is decided, the sender gets the
+continuation after an approval, or a plain notice after a rejection, a cancellation or a timeout; the approver is
+never named. Both go through the ledger like any reply, so a second observer or a node failover writes no second row (a crash between the relay's acceptance and the row's completion can still deliver one twice, as for any reply). A
+pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn, sends no notice; the mail waits
+in the mailbox until the conversation continues.
+
+Human takeover of an email conversation (a person answering from the Manager) does not exist yet: EDDI has no
+takeover feature ([planning/human-takeover-design.md](../planning/human-takeover-design.md) is a design under review).
+
+### Audit and personal data
+
+Every sent, failed or bounced reply leaves an audit-ledger entry (`taskId: email.reply`): integration, reply kind,
+outcome, Message-ID, ledger row, attempts and the recipient's domain plus SHA-256 hash — never the address or the
+body. A reply row holds the recipient's address (reached by erasure and export) and no content; the reply itself is
+rebuilt from the conversation, where the inbound mail already lives.
 
 ## Helpdesk recipe (webhook + httpcalls)
 

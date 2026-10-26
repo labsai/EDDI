@@ -1086,30 +1086,32 @@ your tool schemas do not cover it, not as a routine first step:
   value "event" (context.event in templates). 401 = bad signature, 200 = duplicate event id, 429 = tenant
   quota. Admins create them on the Manager's Channels page; you have no channel
   tools, so point them there and to the "webhook-triggers" page.
-- Email channel (channelType "email", trigger mode only): EDDI polls an IMAP
-  mailbox and every new mail starts an agent or group turn. It NEVER replies to
-  the sender. Conversation mode does not exist yet: its keys (smtpHost,
-  fromName, replyTemplate, aiDisclosure, threadParticipants,
-  maxRepliesPerThreadPerHour, honorReplyTo) are refused, as is any unknown
-  key. platformConfig, all strings, with defaults: mode "trigger" and
-  transport "imap" (fixed); connection (required: an EDDI connection NAME, no
+- Email channel (channelType "email"): EDDI polls an IMAP mailbox and every
+  new mail starts an agent or group turn. Two modes. mode "trigger" NEVER
+  replies to the sender. mode "conversation" replies in the mail thread over
+  SMTP (see below). A key of the other mode is refused when it has a value, as
+  is any unknown key. platformConfig, all strings, with defaults: mode
+  "trigger" or "conversation" (required) and transport "imap" (fixed);
+  connection (required: an EDDI connection NAME, no
   \${...}, OAUTH2_CLIENT_CREDENTIALS for XOAUTH2 or BASIC for an app password,
   bound SERVICE (PER_USER is refused), whose baseUrlAllowlist holds
-  imaps://<host> or imap://<host>:143); host
+  imaps://<host> or imap://<host>:143, and in conversation mode also
+  smtp://<smtpHost>:587 or smtps://<smtpHost>); host
   (required, a DNS name, no IP literal); port 993 (TLS) or 143 (STARTTLS);
   address (required, unique per deployment); folder INBOX; processedAction
   flag (IMAP keyword $EddiProcessed) or move:<folder>, mail is never deleted;
   pollSeconds 60 (60-86400); requireAuthentication true; senderAllowlist and
   senderBlocklist empty (comma lists of user@domain, *@domain, *@*.domain);
-  identityMode perSender or integration; correlateThreads false (true: a reply
-  in a thread from the same authenticated sender continues that sender's
-  conversation, anyone else starts their own); attachments drop, metadata or
+  identityMode perSender or integration; correlateThreads false (trigger mode
+  only; true: a reply in a thread from the same authenticated sender continues
+  that sender's conversation, anyone else starts their own); attachments drop, metadata or
   store (store requires attachmentMimeTypes, type/subtype or type/*;
   executables are never stored, archives never expanded); maxMessageBytes
   26214400 (1024-52428800); stripQuotedHistory true; inputTemplate (max 4000
   chars; variables mail.from, mail.fromName, mail.to, mail.cc, mail.subject,
-  mail.date, mail.messageId, mail.authentication, mail.signingDomain,
-  mail.quotedHistoryRemoved, mail.attachments, mail.text; the default frames
+  mail.date, mail.messageId, mail.inReplyTo, mail.references, mail.replyTo,
+  mail.authentication, mail.signingDomain, mail.quotedHistoryRemoved,
+  mail.attachments, mail.text; the default frames
   the body as untrusted data); maxTurnsPerSenderPerDay 50 (0 = no limit);
   dailyCostBudgetUsd unset = no budget, and a mail over budget stays in the
   mailbox for the next day; ownerNotifyAddresses up to 5, mailed once a day
@@ -1133,6 +1135,50 @@ your tool schemas do not cover it, not as a routine first step:
   app's service principal THIS mailbox only; IMAP.AccessAsApp alone does not
   limit which mailboxes the app can open, the per-mailbox permission is the
   restriction. Other hosts: a BASIC connection with an app password.
+- Email conversation mode adds: smtpHost (required, DNS name, same socket
+  policy as host), smtpPort 587 (STARTTLS, required) or 465 (TLS); fromName;
+  replyTemplate "{output}" (variables output and mail.subject, mail.from,
+  mail.fromName, mail.date; the agent output is data, never parsed as a
+  template); aiDisclosure, a default sentence appended to every reply (an
+  empty value switches it off: save warning email.ai-disclosure-disabled, EU
+  AI Act transparency); threadParticipants originalSenderOnly or
+  anyAuthenticatedParticipant; maxRepliesPerThreadPerHour 5 (1-1000);
+  honorReplyTo false (true: reply to a single Reply-To, which DMARC does not
+  cover, save warning email.honor-reply-to; only for a web-form relay). In
+  this mode requireAuthentication is always true (false is refused) and
+  correlateThreads is not accepted: the thread always stays one conversation.
+  Who gets a reply: the DKIM/DMARC-authenticated From of the mail it answers —
+  or, ONLY with honorReplyTo true, that mail's single Reply-To instead (which
+  DMARC does not cover) — never Cc, never an unauthenticated or email-anon
+  sender, never an address the model chooses. A mail answering EDDI's reply (In-Reply-To or
+  References naming the Message-ID EDDI sent, recorded in the email ledger)
+  continues that conversation only for its original sender (or, with
+  anyAuthenticatedParticipant, an address an EDDI reply in it went to); anyone
+  else forwarding the thread starts their own. A turn without output sends
+  nothing. A paused turn (HITL) sends an in-thread notice with the output so
+  far and the pause reason only (no tool, no arguments); the decision brings a
+  follow-up: the continuation after an approval, a plain notice after a
+  rejection or timeout, never the approver's name. A group target's synthesis
+  is the reply. Replies are KIND REPLY ledger rows: first attempt at once,
+  retried with backoff (eddi.email.outbound.max-attempts,
+  eddi.email.outbound.retry-backoff), FAILED after the last, and then the
+  integration's ownerNotifyAddresses hear once a day (system mailer needed).
+  A thread over maxRepliesPerThreadPerHour gets no further replies that hour
+  (row SUPPRESSED, reason THREAD_BUDGET, owner notice): usually a mail loop.
+  A permanent bounce (a DSN for EDDI's own Message-ID, for that recipient)
+  adds the address to the integration's suppression list; EDDI never sends
+  to a suppressed address until an admin clears it with GET and POST
+  /channelstore/channels/<id>/email-suppressions(/clear, body
+  {"address": "..."}) — you have no tool for these, so point the admin at
+  them. The mail server must sign outgoing mail with DKIM for the domain of
+  address (and the domain publish DMARC), or replies land in spam: EDDI does
+  not sign. A conversation started but whose mail turn never ran (a node
+  died) is found again in the mailbox and run once; a reply lost the same
+  way is rebuilt from the conversation. Metrics:
+  eddi_email_outbound_total{kind="reply", outcome sent, retry, failed,
+  suppressed, throttled, refused, bounced, no_output},
+  eddi_email_outbound_latency_seconds, eddi_email_suppressions_total. Human
+  takeover of an email conversation does not exist yet.
   When a helpdesk (Zendesk, Freshdesk, Front, Help Scout, ServiceNow) already
   owns the mailbox, do NOT use the email channel: use the helpdesk's trigger
   to call an EDDI "webhook" channel, and answer through httpcalls against the
@@ -1151,7 +1197,7 @@ if the one you want is missing; this deployment may ship a subset):
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
 - inbound webhooks / CloudEvents triggers: "webhook-triggers"
-- inbound email (IMAP trigger channel): "email-integration"
+- email channel (IMAP trigger mode, SMTP conversation mode, suppressions): "email-integration"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"
 - embedding the chat widget in another site (iframe, frame-ancestors, token

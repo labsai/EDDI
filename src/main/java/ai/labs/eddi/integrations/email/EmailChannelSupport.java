@@ -10,7 +10,9 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
+import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
+import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -41,6 +43,13 @@ public class EmailChannelSupport {
     private final EmailPollScheduler scheduler;
     private final EmailAgentToolsInspector toolsInspector;
 
+    /**
+     * Conversation mode's suppression list. Field-injected so the constructor stays
+     * the one the tests use.
+     */
+    @Inject
+    Instance<IEmailSuppressionStore> suppressions;
+
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
             EmailPollScheduler scheduler, EmailAgentToolsInspector toolsInspector) {
@@ -52,9 +61,10 @@ public class EmailChannelSupport {
     }
 
     /**
-     * The checks that need the deployment: the IMAP host passes the author socket
-     * policy (and resolves), the connection exists and may log in to exactly that
-     * origin, and no other email integration polls the same address.
+     * The checks that need the deployment: the IMAP host (and, in conversation
+     * mode, the SMTP host) passes the author socket policy and resolves, the
+     * connection exists and may log in to exactly those origins, and no other email
+     * integration polls the same address.
      *
      * @param excludeId
      *            the integration being updated (null on create)
@@ -69,16 +79,28 @@ public class EmailChannelSupport {
         } catch (SocketPolicyException e) {
             errors.add("platformConfig.host: " + e.getMessage());
         }
+        boolean replies = settings.replies();
+        if (replies) {
+            // The reply relay is the author's choice exactly as the IMAP host is: the
+            // author policy, never the operator one the system mailer uses.
+            try {
+                connector.resolve(settings.smtpHost(), settings.smtpPort(), SafeSocketConnector.Protocol.SMTP);
+            } catch (SocketPolicyException e) {
+                errors.add("platformConfig.smtpHost: " + e.getMessage());
+            }
+        }
         if (connectionResolver == null || !connectionResolver.isResolvable()) {
             errors.add("Connections are not available in this deployment, so platformConfig.connection cannot be checked.");
         } else {
-            try {
-                connectionResolver.get().requireMailLoginTarget("${connection:" + settings.connection() + "}", URI.create(settings.imapOrigin()));
-            } catch (ConnectionException e) {
-                errors.add("platformConfig.connection: " + e.getMessage() + " The connection's baseUrlAllowlist must contain "
-                        + settings.imapOrigin() + ".");
-            } catch (IllegalArgumentException e) {
-                errors.add("platformConfig.connection: " + e.getMessage());
+            List<String> origins = replies ? List.of(settings.imapOrigin(), settings.smtpOrigin()) : List.of(settings.imapOrigin());
+            for (String origin : origins) {
+                try {
+                    connectionResolver.get().requireMailLoginTarget("${connection:" + settings.connection() + "}", URI.create(origin));
+                } catch (ConnectionException e) {
+                    errors.add("platformConfig.connection: " + e.getMessage() + " The connection's baseUrlAllowlist must contain " + origin + ".");
+                } catch (IllegalArgumentException e) {
+                    errors.add("platformConfig.connection: " + e.getMessage());
+                }
             }
         }
         List<EmailIntegration> others;
@@ -134,9 +156,55 @@ public class EmailChannelSupport {
         }
     }
 
-    /** Stops polling a deleted integration. Never throws. */
+    /**
+     * Stops polling a deleted integration and drops its suppression list. Never
+     * throws.
+     */
     public void afterDelete(String integrationId) {
         directory.invalidate();
         scheduler.remove(integrationId);
+        if (suppressions != null && suppressions.isResolvable()) {
+            try {
+                suppressions.get().removeAll(integrationId);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Email integration %s: its suppression list could not be removed: %s", sanitize(integrationId), e.getMessage());
+            }
+        }
     }
+
+    /**
+     * The integration's suppressed addresses, newest first (hashes, no addresses).
+     */
+    public List<IEmailSuppressionStore.Suppression> suppressions(String integrationId, int limit) {
+        return requireSuppressions().list(integrationId, Math.max(1, Math.min(limit, MAX_LISTED_SUPPRESSIONS)));
+    }
+
+    /**
+     * Clears the suppression of {@code address} for {@code integrationId}, so
+     * replies to it are sent again.
+     *
+     * @return whether there was an entry
+     * @throws BadRequestException
+     *             when {@code address} is not a plain email address
+     */
+    public boolean clearSuppression(String integrationId, String address) {
+        String normalized = address == null ? null : AddressNormalizer.tryNormalize(address).orElse(null);
+        if (normalized == null) {
+            throw new BadRequestException("'address' must be a plain email address.");
+        }
+        boolean removed = requireSuppressions().remove(integrationId, normalized);
+        LOGGER.infof("Email integration %s: suppression of %s %s by an administrator", sanitize(integrationId),
+                IEmailSuppressionStore.hash(normalized), removed ? "cleared" : "not found");
+        return removed;
+    }
+
+    private IEmailSuppressionStore requireSuppressions() {
+        if (suppressions == null || !suppressions.isResolvable()) {
+            throw new ServiceUnavailableException("The email suppression store is not available on this node.");
+        }
+        return suppressions.get();
+    }
+
+    /** Entries one listing returns at most. */
+    static final int MAX_LISTED_SUPPRESSIONS = 500;
 }

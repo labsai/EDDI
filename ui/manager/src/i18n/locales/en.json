@@ -6663,7 +6663,7 @@
     "turnCount": "Turns: {{n}}"
   },
   "emailChannel": {
-    "modeNote": "Trigger mode: mail starts agent turns; no reply is sent. Conversation mode comes later.",
+    "modeNote": "Trigger mode: mail starts agent turns; no reply is ever sent.",
     "openTriggerWarning": "Anyone on the internet can make this agent run: there is no sender allowlist, and mail that fails DKIM/DMARC alignment is processed. Add allowed senders or require authentication.",
     "connection": "Connection",
     "connectionHint": "Required. The name of an OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) or BASIC (app password) connection whose allowlist contains imaps://<host> or imap://<host>:143.",
@@ -6730,15 +6730,53 @@
       "maxTurnsPerSenderPerDay": "The daily turn limit must be a whole number from 0 to 100000.",
       "dailyCostBudgetUsd": "The daily budget must be a number above 0, or empty for no budget.",
       "ownerNotifyTooMany": "Name at most {{max}} owner addresses.",
-      "ownerNotifyInvalid": "Each owner address must be a valid email address."
+      "ownerNotifyInvalid": "Each owner address must be a valid email address.",
+      "smtpHostRequired": "Enter the SMTP server's host name: replies are sent through it.",
+      "smtpHostIpLiteral": "Use a DNS name for the SMTP server, not an IP address: the TLS certificate is checked against it.",
+      "smtpHostInvalid": "This is not a valid SMTP host name.",
+      "smtpPort": "The SMTP port must be 587 (STARTTLS) or 465 (TLS).",
+      "fromNameInvalid": "The sender name may be at most {{max}} characters, without line breaks.",
+      "replyTemplateTooLong": "The reply template may be at most {{max}} characters.",
+      "aiDisclosureTooLong": "The AI disclosure may be at most {{max}} characters.",
+      "maxRepliesPerThreadPerHour": "The reply limit must be a whole number from 1 to 1000."
     },
     "warning": {
       "openTrigger": "Saved, but anyone on the internet can make this agent run: there is no sender allowlist and unauthenticated mail is processed.",
-      "toolsWithoutApprovals": "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things."
+      "toolsWithoutApprovals": "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things.",
+      "aiDisclosureDisabled": "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
+      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
     "triggerHint": "Mail sent to invoices+urgent@… matches the trigger urgent; so does a subject containing the word. No match goes to the default target.",
-    "setupTitle": "Setup and security"
+    "setupTitle": "Setup and security",
+    "mode": "Mode",
+    "modeTrigger": "Trigger: mail starts agent turns, nothing is sent back",
+    "modeConversation": "Conversation: the agent replies in the thread",
+    "modeNoteConversation": "Conversation mode: the agent replies in the mail thread over SMTP, to the sender whose address DKIM/DMARC authenticated (with Reply to the Reply-To address switched on: to the mail's single Reply-To instead, which DMARC does not cover) — never to Cc, never to anyone the model names.",
+    "requireAuthenticationConversationHint": "Always on in conversation mode: EDDI never answers a sender whose address may be forged.",
+    "repliesSection": "Replies",
+    "smtpHost": "SMTP host",
+    "smtpHostHint": "Required. The connection's allowlist must also contain smtp://<host>:587 or smtps://<host>; the same credential logs in.",
+    "smtpPort": "SMTP port",
+    "fromName": "Sender name",
+    "fromNameHint": "Shown next to the mailbox address on every reply.",
+    "threadParticipants": "Who may continue a thread",
+    "participantsOriginal": "Only the sender who started it",
+    "participantsAny": "Also authenticated addresses its replies went to",
+    "threadParticipantsHint": "Anyone else who answers with the thread's Message-ID (they travel in every forward) starts a conversation of their own.",
+    "maxRepliesPerThreadPerHour": "Replies per thread per hour",
+    "maxRepliesHint": "A loop brake: once a thread has had this many replies in the last hour, further replies are not sent (they are dropped, not delayed), and the owners are told.",
+    "honorReplyTo": "Reply to the Reply-To address",
+    "honorReplyToHint": "Only for a web form that sends on behalf of its visitors. Otherwise replies always go to the authenticated From.",
+    "honorReplyToWarning": "DMARC does not authenticate the Reply-To: anyone who can send authenticated mail from an allowed domain decides where the agent's reply goes.",
+    "aiDisclosureEnabled": "Say in every reply that an AI wrote it",
+    "aiDisclosure": "AI disclosure",
+    "aiDisclosureHint": "Appended after the reply. Empty uses the default shown.",
+    "aiDisclosureWarning": "Replies will not say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
+    "replyTemplate": "Reply template",
+    "replyTemplateHint": "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:",
+    "noteDkim": "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — EDDI does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
+    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and EDDI sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear)."
   }
 }

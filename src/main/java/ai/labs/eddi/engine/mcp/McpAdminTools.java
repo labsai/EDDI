@@ -1349,18 +1349,23 @@ public class McpAdminTools {
             + "optional keys: signatureScheme (eddi-v1 default | github | generic-hmac), signatureHeader, signatureEncoding, "
             + "signaturePrefix, eventTypeHeader, eventTypePath, eventIdHeader, inputTemplate, conversationStrategy (new | correlate), "
             + "correlationKeyPath. For webhook, targets[].triggers are event types (exact, or a 'prefix*'). "
-            + "Or 'email' — trigger mode only: EDDI polls an IMAP mailbox and every new mail starts an agent turn; nothing is ever sent "
-            + "back to the sender. platformConfig: mode 'trigger' (required; 'conversation' is not supported yet), transport 'imap' "
+            + "Or 'email': EDDI polls an IMAP mailbox and every new mail starts an agent turn. mode 'trigger' sends nothing back, "
+            + "ever; mode 'conversation' replies in the thread over SMTP, to the DKIM/DMARC-authenticated From, or with honorReplyTo "
+            + "true to the mail's single Reply-To instead (never Cc, never an unauthenticated sender). platformConfig: mode (required: trigger | conversation), transport 'imap' "
             + "(required), connection (required: name of a BASIC app-password or OAUTH2_CLIENT_CREDENTIALS/XOAUTH2 connection whose "
-            + "baseUrlAllowlist contains imaps://<host>), host (required), port (993 | 143), address (required, unique per deployment), "
+            + "baseUrlAllowlist contains imaps://<host>, and in conversation mode also smtp://<smtpHost>:587 or smtps://<smtpHost>), "
+            + "host (required), port (993 | 143), address (required, unique per deployment; the From of replies), "
             + "folder (INBOX), processedAction (flag | move:<folder>), pollSeconds (60), requireAuthentication (true: only "
-            + "DKIM/DMARC-aligned senders run turns), senderAllowlist / senderBlocklist (user@domain, *@domain, *@*.domain), "
-            + "identityMode (perSender | integration), correlateThreads (false), attachments (drop | metadata | store), "
+            + "DKIM/DMARC-aligned senders run turns; always true in conversation mode), senderAllowlist / senderBlocklist (user@domain, "
+            + "*@domain, *@*.domain), identityMode (perSender | integration), attachments (drop | metadata | store), "
             + "attachmentMimeTypes (required for store), maxMessageBytes, stripQuotedHistory (true), inputTemplate, "
-            + "maxTurnsPerSenderPerDay (50), dailyCostBudgetUsd, ownerNotifyAddresses. For email, targets[].triggers match the "
-            + "address plus-tag or a subject word. Returns the new resource ID and URI, for a webhook its endpoint path "
-            + "POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
-            + "email.tools-without-approvals) when there are any.")
+            + "maxTurnsPerSenderPerDay (50), dailyCostBudgetUsd, ownerNotifyAddresses. Trigger mode only: correlateThreads (false). "
+            + "Conversation mode only: smtpHost (required), smtpPort (587 STARTTLS | 465 TLS), fromName, replyTemplate ('{output}'), "
+            + "aiDisclosure (a default sentence; empty switches it off and warns), threadParticipants (originalSenderOnly | "
+            + "anyAuthenticatedParticipant), maxRepliesPerThreadPerHour (5), honorReplyTo (false; warns). For email, "
+            + "targets[].triggers match the address plus-tag or a subject word. Returns the new resource ID and URI, for a webhook "
+            + "its endpoint path POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
+            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to) when there are any.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
@@ -1396,7 +1401,9 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration.")
+    @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration. The body has "
+            + "the same shape as create_channel_integration's; for email, switching mode between 'trigger' and 'conversation' keeps the "
+            + "mailbox and its cursor, and the other mode's keys must be removed. Returns save-time warnings when there are any.")
     public String updateChannelIntegration(
                                            @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
                                            @ToolArg(description = "Current version number (required)") Integer version,
@@ -1452,6 +1459,10 @@ public class McpAdminTools {
                         + "can make this agent run";
                 case "email.tools-without-approvals" -> trimmed + ": a targeted agent has tools but no hitlConfig.toolApprovals, and mail "
                         + "is untrusted input";
+                case "email.ai-disclosure-disabled" -> trimmed + ": aiDisclosure is empty, so replies no longer say an AI wrote them "
+                        + "(EU AI Act Art. 50 transparency)";
+                case "email.honor-reply-to" -> trimmed + ": replies go to the Reply-To, which DMARC does not authenticate — anyone who can "
+                        + "send authenticated mail from an allowed domain chooses where the reply goes";
                 default -> trimmed;
             });
         }

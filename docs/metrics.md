@@ -676,7 +676,7 @@ reset with every restart and never saw pauses taken before it; alert on
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
 ```text
-eddi_email_outbound_total                   # System mails by outcome; tags: kind (notify|notice), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited)
+eddi_email_outbound_total                   # Mail EDDI sends, by outcome; tags: kind (notify|notice|reply), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited; for reply also throttled|refused|bounced|no_output)
 eddi_email_ledger_pending                   # Email ledger rows not yet sent, failed or suppressed (gauge)
 ```
 
@@ -709,14 +709,16 @@ address. For
 one possible cause; `budget_exhausted` is a local limit, not a DNS failure: a message needed more DKIM key and DMARC
 record lookups than `eddi.email.dns.max-lookups-per-message` allows, and the lookups past it were not sent.
 
-**Email channel, trigger mode** ([email-integration.md](email-integration.md#metrics)):
+**Email channel** ([email-integration.md](email-integration.md#metrics)):
 
 ```text
-eddi_email_inbound_total                    # Inbound mail by outcome; tags: integration, transport (imap), mode (trigger), outcome (processed|duplicate|unauthenticated|blocked|loop|throttled|budget|too_large|parse_error|deferred|unroutable|failed)
+eddi_email_inbound_total                    # Inbound mail by outcome; tags: integration, transport (imap), mode (trigger|conversation), outcome (processed|duplicate|unauthenticated|blocked|loop|bounce|throttled|budget|too_large|parse_error|deferred|unroutable|failed)
 eddi_email_poll_duration_seconds            # One mailbox poll (timer); tags: integration, transport, mode, outcome (ok|error)
 eddi_email_poll_cursor_resets_total         # UIDVALIDITY changes that restarted a folder scan; tags: integration, transport, mode
 eddi_email_poll_marked_total                # Processed mail marked in the mailbox; tags: integration, transport, mode, result (flagged|moved|flagged_not_moved|nothing)
-eddi_email_ledger_stranded_recovered_total  # Claims given back and submitted turns resolved after a crash; tag: outcome (requeued|done|failed|awaiting_human|lost)
+eddi_email_ledger_stranded_recovered_total  # Claims given back and submitted turns resolved after a crash; tag: outcome (requeued|done|failed|awaiting_human|lost|resubmitted|reply_rebuilt)
+eddi_email_outbound_latency_seconds         # Conversation mode: from a reply being queued to the relay accepting it, retries included (timer); tag: kind (reply)
+eddi_email_suppressions_total               # Addresses added to an integration's suppression list; tag: reason (bounce)
 ```
 
 `integration` is the channel integration's resource id, never an address. `processed` means a turn was submitted;
@@ -729,7 +731,17 @@ folder); the integration backs off on its own. `poll_marked{result="nothing"}` m
 keywords (Exchange Online, some hosters) and no move is configured: polling continues on the cursor and the ledger, and
 `processedAction: move:<folder>` is the fix. `stranded_recovered{outcome="requeued"}` is a claim whose node died before
 anything left EDDI — the mail was processed again; `outcome="lost"` is mail whose node stopped while starting its
-conversation: it is not run again, and the integration's owners get the `lost` notice.
+conversation: it is not run again, and the integration's owners get the `lost` notice; `outcome="resubmitted"` is a
+mail whose conversation was started but whose own turn never ran — it is found again in the mailbox and run once;
+`outcome="reply_rebuilt"` is a conversation-mode reply the dead node had not queued, rebuilt from the conversation.
+
+Conversation-mode replies are `eddi_email_outbound_total{kind="reply"}`: `retry` a deferred attempt, `failed` a reply
+given up on (the owners get the `reply_failed` notice), `suppressed` a reply to an address on the suppression list
+(or a pause decided before its notice went out), `throttled` a conversation over `maxRepliesPerThreadPerHour` — a
+sustained rise is usually a mail loop — `refused` a reply the recipient rules did not allow (for example an
+integration switched to trigger mode while a retry was pending), `bounced` a sent reply a delivery report failed, and
+`no_output` a turn that had nothing to say. `eddi_email_suppressions_total` rises with every permanent bounce; the
+list is read and cleared through `GET`/`POST /channelstore/channels/{id}/email-suppressions[/clear]`.
 
 ### Platform Operator Metrics
 

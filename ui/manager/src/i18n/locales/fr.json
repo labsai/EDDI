@@ -6734,7 +6734,7 @@
     "turnCount": "Tours : {{n}}"
   },
   "emailChannel": {
-    "modeNote": "Mode déclencheur : les e-mails lancent des tours de l'agent ; aucune réponse n'est envoyée. Le mode conversation viendra plus tard.",
+    "modeNote": "Mode déclencheur : les e-mails lancent des tours de l'agent ; aucune réponse n'est jamais envoyée.",
     "openTriggerWarning": "N'importe qui sur Internet peut faire agir cet agent : il n'y a pas de liste d'expéditeurs autorisés, et les e-mails qui échouent à l'alignement DKIM/DMARC sont traités. Ajoutez des expéditeurs autorisés ou exigez l'authentification.",
     "connection": "Connexion",
     "connectionHint": "Obligatoire. Le nom d'une connexion OAUTH2_CLIENT_CREDENTIALS (XOAUTH2) ou BASIC (mot de passe d'application) dont la liste autorisée contient imaps://<host> ou imap://<host>:143.",
@@ -6801,15 +6801,53 @@
       "maxTurnsPerSenderPerDay": "La limite quotidienne de tours doit être un nombre entier de 0 à 100000.",
       "dailyCostBudgetUsd": "Le budget quotidien doit être un nombre supérieur à 0, ou vide pour aucun budget.",
       "ownerNotifyTooMany": "Indiquez au plus {{max}} adresses de responsables.",
-      "ownerNotifyInvalid": "Chaque adresse de responsable doit être une adresse e-mail valide."
+      "ownerNotifyInvalid": "Chaque adresse de responsable doit être une adresse e-mail valide.",
+      "smtpHostRequired": "Saisissez le nom d'hôte du serveur SMTP : les réponses passent par lui.",
+      "smtpHostIpLiteral": "Utilisez un nom DNS pour le serveur SMTP, pas une adresse IP : le certificat TLS est vérifié par rapport à lui.",
+      "smtpHostInvalid": "Ce n'est pas un nom d'hôte SMTP valide.",
+      "smtpPort": "Le port SMTP doit être 587 (STARTTLS) ou 465 (TLS).",
+      "fromNameInvalid": "Le nom de l'expéditeur peut contenir au plus {{max}} caractères, sans saut de ligne.",
+      "replyTemplateTooLong": "Le modèle de réponse peut contenir au plus {{max}} caractères.",
+      "aiDisclosureTooLong": "La mention d'IA peut contenir au plus {{max}} caractères.",
+      "maxRepliesPerThreadPerHour": "La limite de réponses doit être un nombre entier de 1 à 1000."
     },
     "warning": {
       "openTrigger": "Enregistré, mais n'importe qui sur Internet peut faire agir cet agent : il n'y a pas de liste d'expéditeurs autorisés et les e-mails non authentifiés sont traités.",
-      "toolsWithoutApprovals": "Enregistré, mais un agent ciblé par cette intégration a des outils sans approbation d'outils. Le contenu des e-mails est une entrée non fiable : ajoutez hitlConfig.toolApprovals pour les outils qui modifient des choses."
+      "toolsWithoutApprovals": "Enregistré, mais un agent ciblé par cette intégration a des outils sans approbation d'outils. Le contenu des e-mails est une entrée non fiable : ajoutez hitlConfig.toolApprovals pour les outils qui modifient des choses.",
+      "aiDisclosureDisabled": "Enregistré, mais les réponses n'indiquent plus qu'une IA les a rédigées. Les règles de transparence comme l'AI Act européen attendent que les gens sachent qu'ils parlent à une IA.",
+      "honorReplyTo": "Enregistré, mais les réponses vont à l'adresse Reply-To, que DMARC n'authentifie pas : quiconque peut envoyer un e-mail authentifié depuis un domaine autorisé décide où va la réponse."
     },
     "defaultTargetHint": "La cible par défaut reçoit chaque e-mail dont le plus-tag (invoices+urgent@…) ou l'objet ne correspond au déclencheur d'aucune autre cible. Vous pourrez ajouter d'autres cibles après la création.",
     "triggerLabel": "Plus-tags ou mots de l'objet",
     "triggerHint": "Un e-mail envoyé à invoices+urgent@… correspond au déclencheur urgent, tout comme un objet contenant ce mot. Sans correspondance, il va à la cible par défaut.",
-    "setupTitle": "Configuration et sécurité"
+    "setupTitle": "Configuration et sécurité",
+    "mode": "Mode",
+    "modeTrigger": "Déclencheur : les e-mails lancent des tours de l'agent, rien n'est renvoyé",
+    "modeConversation": "Conversation : l'agent répond dans le fil",
+    "modeNoteConversation": "Mode conversation : l'agent répond dans le fil de discussion par SMTP à l'expéditeur dont l'adresse a été authentifiée par DKIM/DMARC (avec « Répondre à l'adresse Reply-To » activé : plutôt à l'unique adresse Reply-To du message, que DMARC ne couvre pas) — jamais en Cc, jamais à quelqu'un que le modèle désigne.",
+    "requireAuthenticationConversationHint": "Toujours activé en mode conversation : EDDI ne répond jamais à un expéditeur dont l'adresse peut être falsifiée.",
+    "repliesSection": "Réponses",
+    "smtpHost": "Hôte SMTP",
+    "smtpHostHint": "Obligatoire. La liste d'autorisation de la connexion doit aussi contenir smtp://<host>:587 ou smtps://<host> ; les mêmes identifiants se connectent.",
+    "smtpPort": "Port SMTP",
+    "fromName": "Nom de l'expéditeur",
+    "fromNameHint": "Affiché à côté de l'adresse de la boîte aux lettres dans chaque réponse.",
+    "threadParticipants": "Qui peut poursuivre un fil",
+    "participantsOriginal": "Seulement l'expéditeur qui l'a commencé",
+    "participantsAny": "Aussi les adresses authentifiées auxquelles ses réponses ont été envoyées",
+    "threadParticipantsHint": "Toute autre personne qui répond avec le Message-ID du fil (il figure dans chaque transfert) commence sa propre conversation.",
+    "maxRepliesPerThreadPerHour": "Réponses par fil et par heure",
+    "maxRepliesHint": "Un frein aux boucles : dès qu'un fil a reçu ce nombre de réponses dans la dernière heure, les suivantes ne sont pas envoyées (elles sont abandonnées, pas différées), et les responsables sont prévenus.",
+    "honorReplyTo": "Répondre à l'adresse Reply-To",
+    "honorReplyToHint": "Uniquement pour un formulaire web qui envoie au nom de ses visiteurs. Sinon, les réponses vont toujours au From authentifié.",
+    "honorReplyToWarning": "DMARC n'authentifie pas le Reply-To : quiconque peut envoyer un e-mail authentifié depuis un domaine autorisé décide où va la réponse de l'agent.",
+    "aiDisclosureEnabled": "Indiquer dans chaque réponse qu'une IA l'a rédigée",
+    "aiDisclosure": "Mention d'IA",
+    "aiDisclosureHint": "Ajoutée après la réponse. Vide utilise la valeur par défaut affichée.",
+    "aiDisclosureWarning": "Les réponses n'indiqueront pas qu'une IA les a rédigées. Les règles de transparence comme l'AI Act européen attendent que les gens sachent qu'ils parlent à une IA.",
+    "replyTemplate": "Modèle de réponse",
+    "replyTemplateHint": "Encadre la réponse de l'agent, insérée comme texte et jamais exécutée comme modèle. Variables :",
+    "noteDkim": "Les réponses nécessitent un serveur de messagerie qui signe le courrier sortant avec DKIM pour le domaine de la boîte, et un enregistrement DMARC pour ce domaine — EDDI ne signe pas. Sans eux, les réponses finissent en spam ou sont rejetées. Exchange Online et la plupart des hébergeurs signent le courrier soumis dès que DKIM est activé pour le domaine.",
+    "noteBounces": "Une réponse en échec définitif place l'adresse sur la liste de suppression de cette intégration, et EDDI ne lui envoie plus rien tant qu'un administrateur ne l'a pas effacée (POST /channelstore/channels/<id>/email-suppressions/clear)."
   }
 }

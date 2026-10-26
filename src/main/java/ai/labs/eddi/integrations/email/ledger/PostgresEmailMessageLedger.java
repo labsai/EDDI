@@ -73,7 +73,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_rate ON email_message_ledger (recipient, kind, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -316,6 +317,26 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE integration_id = ? AND state = 'RECEIVED' AND kind = 'TRIGGER' "
+                + "AND conversation_id IS NOT NULL AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setTimestamp(2, timestamp(now));
+            statement.setInt(3, limit);
+            List<LedgerEntry> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(toEntry(rows));
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger rows due for resubmission", e);
+        }
+    }
+
+    @Override
     public long countInboundTurns(String integrationId, String sender, Instant since) {
         String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND recipient = ? AND kind = 'TRIGGER' AND created_at >= ? "
                 + "AND state IN ('TURN_SUBMITTED', 'DONE')";
@@ -328,6 +349,51 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             }
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to count inbound email ledger rows", e);
+        }
+    }
+
+    @Override
+    public Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest) {
+        String order = latest ? "created_at DESC, id DESC" : "created_at, id";
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'TRIGGER' AND direction = 'IN' "
+                + "AND state IN ('TURN_SUBMITTED', 'DONE') ORDER BY " + order + " LIMIT 1";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conversationId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? Optional.of(toEntry(rows)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the inbound email ledger row of a conversation", e);
+        }
+    }
+
+    @Override
+    public boolean hasSentReply(String conversationId, String recipient) {
+        String sql = "SELECT 1 FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'REPLY' AND direction = 'OUT' AND state = 'SENT' "
+                + "AND recipient = ? LIMIT 1";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conversationId);
+            statement.setString(2, recipient);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger replies of a conversation", e);
+        }
+    }
+
+    @Override
+    public long countByConversationSince(String conversationId, Kind kind, Instant since) {
+        String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE conversation_id = ? AND kind = ? AND created_at >= ? AND state <> 'SUPPRESSED'";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, conversationId);
+            statement.setString(2, kind.name());
+            statement.setTimestamp(3, timestamp(since));
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count the email ledger rows of a conversation", e);
         }
     }
 
