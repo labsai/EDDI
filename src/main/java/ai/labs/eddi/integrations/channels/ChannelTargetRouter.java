@@ -17,7 +17,9 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.integrations.slack.SlackWebApiClient;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,6 +33,7 @@ import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RestUtilities.extractResourceId;
 
 /**
@@ -65,6 +68,17 @@ public class ChannelTargetRouter {
     private final IDeploymentStatusReader agentAdmin;
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
+    private final VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * Platform-config keys whose resolved value this deployment sends outbound, per
+     * channel type, and the destination it is sent to. A vaulted value under one of
+     * these keys is held to its secret's {@code allowedHosts} before it is
+     * resolved. Signing secrets are absent on purpose: they verify inbound requests
+     * and are never sent anywhere.
+     */
+    private static final Map<String, Map<String, String>> OUTBOUND_CREDENTIAL_DESTINATIONS = Map.of(CHANNEL_TYPE_SLACK,
+            Map.of("botToken", SlackWebApiClient.SLACK_API_BASE));
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
 
@@ -116,13 +130,25 @@ public class ChannelTargetRouter {
             IDeploymentStatusReader agentAdmin,
             IAgentStore agentStore,
             SecretResolver secretResolver,
+            VaultHostAllowlist vaultHostAllowlist,
             ICacheFactory cacheFactory) {
         this.channelStore = channelStore;
         this.descriptorStore = descriptorStore;
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
         this.secretResolver = secretResolver;
+        this.vaultHostAllowlist = vaultHostAllowlist;
         this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
+    }
+
+    /** Without the destination check — for tests that do not exercise it. */
+    public ChannelTargetRouter(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore descriptorStore,
+            IDeploymentStatusReader agentAdmin,
+            IAgentStore agentStore,
+            SecretResolver secretResolver,
+            ICacheFactory cacheFactory) {
+        this(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, null, cacheFactory);
     }
 
     // ─── Public API ────────────────────────────────────────────────────────────
@@ -914,8 +940,10 @@ public class ChannelTargetRouter {
                                 // connector)
                                 String coveredKey = CHANNEL_TYPE_SLACK + ":" + chId;
                                 if (chId != null && !coveredChannelKeys.contains(coveredKey)) {
-                                    String bt = resolveSecret(
-                                            connector.getConfig().get("botToken"));
+                                    String bt = resolveOutboundSecret(
+                                            connector.getConfig().get("botToken"),
+                                            SlackWebApiClient.SLACK_API_BASE,
+                                            "Legacy Slack channel connector of agent '" + agentId + "' (botToken)");
                                     String ss = resolveSecret(
                                             connector.getConfig().get("signingSecret"));
                                     String gid = connector.getConfig().get("groupId");
@@ -980,11 +1008,39 @@ public class ChannelTargetRouter {
     }
 
     private void resolvePlatformSecrets(ChannelIntegrationConfiguration config) {
+        Map<String, String> destinations = OUTBOUND_CREDENTIAL_DESTINATIONS.getOrDefault(config.getChannelType().toLowerCase(Locale.ROOT),
+                Map.of());
         Map<String, String> resolved = new HashMap<>();
         for (var entry : config.getPlatformConfig().entrySet()) {
-            resolved.put(entry.getKey(), resolveSecret(entry.getValue()));
+            String destination = destinations.get(entry.getKey());
+            resolved.put(entry.getKey(), destination == null
+                    ? resolveSecret(entry.getValue())
+                    : resolveOutboundSecret(entry.getValue(), destination,
+                            "Channel integration '" + config.getName() + "' (" + entry.getKey() + ")"));
         }
         config.setPlatformConfig(resolved);
+    }
+
+    /**
+     * {@link #resolveSecret} for a value that is sent to {@code destination}: a
+     * {@code ${vault:…}} secret whose {@code allowedHosts} does not admit it is
+     * withheld (null — the integration cannot post) instead of resolved, so its
+     * plaintext never reaches the client that would send it there.
+     */
+    private String resolveOutboundSecret(String value, String destination, String usedFor) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        if (vaultHostAllowlist != null) {
+            try {
+                vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(value)), destination, usedFor);
+            } catch (VaultHostAllowlist.HostNotAllowedException e) {
+                LOGGER.warnf("[SECURITY] %s The credential is withheld, so this channel cannot send until the secret's allowedHosts "
+                        + "admits that destination.", sanitize(e.getMessage()));
+                return null;
+            }
+        }
+        return resolveSecret(value);
     }
 
     private String resolveSecret(String value) {

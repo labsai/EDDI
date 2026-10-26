@@ -7,9 +7,12 @@ package ai.labs.eddi.connections;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.net.URI;
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -47,11 +50,22 @@ public class CredentialReferenceResolver {
 
     private final SecretResolver secretResolver;
     private final GlobalVariableResolver globalVariableResolver;
+    private final VaultHostAllowlist vaultHostAllowlist;
 
     @Inject
-    public CredentialReferenceResolver(SecretResolver secretResolver, GlobalVariableResolver globalVariableResolver) {
+    public CredentialReferenceResolver(SecretResolver secretResolver, GlobalVariableResolver globalVariableResolver,
+            VaultHostAllowlist vaultHostAllowlist) {
         this.secretResolver = secretResolver;
         this.globalVariableResolver = globalVariableResolver;
+        this.vaultHostAllowlist = vaultHostAllowlist;
+    }
+
+    /**
+     * Without a destination check — for the save-time helpers and for tests that do
+     * not exercise one.
+     */
+    public CredentialReferenceResolver(SecretResolver secretResolver, GlobalVariableResolver globalVariableResolver) {
+        this(secretResolver, globalVariableResolver, null);
     }
 
     /**
@@ -72,6 +86,29 @@ public class CredentialReferenceResolver {
      *             a revoked grant.
      */
     public String resolveRequired(String template, String connectionName, String what) {
+        return resolveRequired(template, connectionName, what, null);
+    }
+
+    /**
+     * {@link #resolveRequired(String, String, String)} for a credential that is
+     * about to be sent to {@code destination}.
+     * <p>
+     * A connection's {@code baseUrlAllowlist} says where the <em>connection</em>
+     * may be sent; the {@code ${vault:…}} secrets behind it carry their own
+     * {@code allowedHosts}, set by whoever vaulted them. Both must hold: without
+     * this check a connection was a way around the secret's own policy, because the
+     * reference became plaintext here and the caller only ever saw the plaintext.
+     * The references are checked after {@code ${vars:…}} expansion, so one a
+     * variable points at is checked too, and before anything is decrypted.
+     *
+     * @param destination
+     *            the request's target, or {@code null} when the value is not sent
+     *            anywhere this caller knows
+     * @throws ConnectionException
+     *             with {@code TARGET_NOT_ALLOWED} when a secret's
+     *             {@code allowedHosts} does not admit {@code destination}
+     */
+    public String resolveRequired(String template, String connectionName, String what, URI destination) {
         String expanded = globalVariableResolver.resolveValue(template);
         if (template != null && !template.equals(expanded) && !ConnectionConfiguration.isAcceptableValueTemplate(expanded)) {
             // A ${vars:} in a header template may stand for a vault reference or for
@@ -86,6 +123,7 @@ public class CredentialReferenceResolver {
                             + "credential may only live in the vault: store it with PUT /secretstore/secrets/{tenantId}/{keyName} and let "
                             + "the variable hold the ${vault:…} reference.");
         }
+        requireDestinationAllowed(expanded, destination, connectionName, what);
         String resolved = secretResolver.resolveValue(expanded);
         if (resolved == null || resolved.isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
@@ -99,6 +137,18 @@ public class CredentialReferenceResolver {
                             + "provider would reject as a bad credential and which is indistinguishable from a revoked grant.");
         }
         return resolved;
+    }
+
+    private void requireDestinationAllowed(String expanded, URI destination, String connectionName, String what) {
+        if (destination == null || vaultHostAllowlist == null || expanded == null) {
+            return;
+        }
+        try {
+            vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(expanded)), destination.toString(),
+                    "The " + what + " for connection '" + connectionName + "'");
+        } catch (VaultHostAllowlist.HostNotAllowedException e) {
+            throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, e.getMessage(), e);
+        }
     }
 
     /**
@@ -118,6 +168,15 @@ public class CredentialReferenceResolver {
      *             {@code ${vars:…}} expansion, is not exactly one vault reference
      */
     public String resolveVaultBacked(String template, String connectionName, String what) {
+        return resolveVaultBacked(template, connectionName, what, null);
+    }
+
+    /**
+     * {@link #resolveVaultBacked(String, String, String)} for a value about to be
+     * sent to {@code destination}; see
+     * {@link #resolveRequired(String, String, String, URI)}.
+     */
+    public String resolveVaultBacked(String template, String connectionName, String what, URI destination) {
         if (template == null || template.isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' is empty. Re-save the connection with a ${vault:…} reference.");
@@ -127,7 +186,7 @@ public class CredentialReferenceResolver {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' " + notVaultBacked(template, expanded));
         }
-        return resolveRequired(expanded, connectionName, what);
+        return resolveRequired(expanded, connectionName, what, destination);
     }
 
     /**
