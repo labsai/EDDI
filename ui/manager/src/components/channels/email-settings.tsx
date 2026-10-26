@@ -125,7 +125,7 @@ export function EmailPlatformFields({
             {conversation
               ? t(
                   "emailChannel.modeNoteConversation",
-                  "Conversation mode: the agent replies in the mail thread over SMTP — only to the sender whose address DKIM/DMARC authenticated, never to Cc, never to anyone the model names.",
+                  "Conversation mode: the agent replies in the mail thread over SMTP, to the sender whose address DKIM/DMARC authenticated (with Reply to the Reply-To address switched on: to the mail's single Reply-To instead, which DMARC does not cover) — never to Cc, never to anyone the model names.",
                 )
               : t("emailChannel.modeNote", "Trigger mode: mail starts agent turns; no reply is ever sent.")}
           </p>
@@ -346,7 +346,7 @@ export function EmailPlatformFields({
                 onChange={(e) => set("maxRepliesPerThreadPerHour", e.target.value)}
                 placeholder={EMAIL_DEFAULTS.maxRepliesPerThreadPerHour}
               />
-              <p className={hintClass}>{t("emailChannel.maxRepliesHint", "A loop brake: further replies in that thread wait for the next hour, and the owners are told.")}</p>
+              <p className={hintClass}>{t("emailChannel.maxRepliesHint", "A loop brake: once a thread has had this many replies in the last hour, further replies are not sent (they are dropped, not delayed), and the owners are told.")}</p>
               {problemFor("maxRepliesPerThreadPerHour")}
             </div>
           </div>

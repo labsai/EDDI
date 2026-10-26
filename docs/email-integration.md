@@ -12,8 +12,9 @@ It has two modes, chosen with `mode` and switchable later without re-creating th
 - **`trigger`**: the agent acts through its tools (book the invoice, open the claim, file the CV). **Nothing is ever
   sent back to the sender** — no reply, no bounce, no "we received your mail". Leaving the reply out removes the worst
   risks of an email-facing agent: backscatter to forged senders, reply loops and the agent as an exfiltration path.
-- **`conversation`**: the agent **replies in the mail thread** over SMTP — only to the sender whose address DKIM and
-  DMARC alignment authenticated, never to a copy recipient, never to anyone the model names. The sender's answer to
+- **`conversation`**: the agent **replies in the mail thread** over SMTP — to the sender whose address DKIM and
+  DMARC alignment authenticated (or, only with `honorReplyTo: true`, to the mail's single `Reply-To` instead), never to
+  a copy recipient, never to anyone the model names. The sender's answer to
   that reply continues the same conversation. [Conversation mode](#conversation-mode) describes what it adds.
 
 EDDI is not a mail server: it receives nothing over SMTP, needs no MX record and no public ingress. It logs in to an
@@ -299,7 +300,7 @@ cost); an unpriced model counts as zero.
 - Prefer `requireAuthentication: true` and a `senderAllowlist`. Without authentication the allowlist only matches a
   claim: anyone can write `From: billing@supplier-a.com`.
 - The model never chooses a recipient: trigger mode sends nothing at all, and conversation mode answers only the
-  authenticated sender ([Who gets a reply](#who-gets-a-reply)).
+  authenticated sender, or with `honorReplyTo` that mail's single `Reply-To` ([Who gets a reply](#who-gets-a-reply)).
 - Sockets go through `SafeSocketConnector`'s author policy: DNS names only, no private, loopback, link-local or
   metadata address (an on-premises Exchange on a private address cannot be reached yet), TLS always verified, the
   resolved address pinned. `eddi.email.allowed-hosts` confines which servers authors may name.

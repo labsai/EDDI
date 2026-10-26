@@ -1147,9 +1147,10 @@ your tool schemas do not cover it, not as a routine first step:
   cover, save warning email.honor-reply-to; only for a web-form relay). In
   this mode requireAuthentication is always true (false is refused) and
   correlateThreads is not accepted: the thread always stays one conversation.
-  Who gets a reply: ONLY the DKIM/DMARC-authenticated From of the mail it
-  answers — never Cc, never an unauthenticated or email-anon sender, never an
-  address the model chooses. A mail answering EDDI's reply (In-Reply-To or
+  Who gets a reply: the DKIM/DMARC-authenticated From of the mail it answers —
+  or, ONLY with honorReplyTo true, that mail's single Reply-To instead (which
+  DMARC does not cover) — never Cc, never an unauthenticated or email-anon
+  sender, never an address the model chooses. A mail answering EDDI's reply (In-Reply-To or
   References naming the Message-ID EDDI sent, recorded in the email ledger)
   continues that conversation only for its original sender (or, with
   anyAuthenticatedParticipant, an address an EDDI reply in it went to); anyone
