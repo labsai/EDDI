@@ -150,6 +150,19 @@ public interface IScheduleStore {
     int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
 
     /**
+     * Deletes the used-up one-shots with the given name, with their fire logs:
+     * exactly the rows {@link #markCompleted} left behind after a one-shot fired
+     * (disabled, {@code PENDING}, no next fire, a last fire, unclaimed, no disabled
+     * reason). A pending, claimed or executing, failed, dead-lettered,
+     * undeploy-disabled or hand-disabled row is never touched — a hand-disabled row
+     * keeps its next fire. Self-continuation calls it so a long job does not leave
+     * one spent row per turn behind.
+     *
+     * @return number of deleted schedules
+     */
+    int deleteUsedUpOneShotsByName(String name) throws IResourceStore.ResourceStoreException;
+
+    /**
      * The schedule with the given name, for the system schedules whose name is
      * their identity (an ingestion source's {@code rag-ingestion:<kb>:<source>}).
      * When several share the name — which their writers prevent by deleting by name

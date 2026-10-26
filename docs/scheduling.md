@@ -555,7 +555,10 @@ is refused with `400` for everyone: a forged one would act on a conversation the
 A continuation fire also checks that the schedule's `userId` owns the conversation, and runs nothing
 otherwise (`owner_mismatch`). A continuation is disabled by an
 undeploy and re-enabled by the next deploy like the agent's own schedules; a failed continuation fire
-is retried with the normal backoff and dead-lettered after `eddi.schedule.max-retries`.
+is retried with the normal backoff and dead-lettered after `eddi.schedule.max-retries`. A fired
+continuation is disabled like any one-shot, and the engine deletes those used-up rows, fire logs
+included, as the job goes on, so a conversation keeps at most its latest used-up continuation and the
+pending one; dead-lettered, undeploy-disabled and hand-disabled rows are never pruned.
 
 ## Best Practices
 

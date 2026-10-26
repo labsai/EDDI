@@ -303,13 +303,30 @@ public class ConversationContinuations {
      * once the turn has been committed. A one-shot schedule due now: the next poll
      * claims it. Never throws: a schedule that cannot be written is logged and
      * counted ({@code schedule_failed}); the committed turn stands.
+     * <p>
+     * <b>Spent rows.</b> A fired one-shot is disabled, not deleted, so every
+     * continuation that ran would stay behind under the conversation's schedule
+     * name, with its fire log. Before writing the next schedule — and on the last
+     * continuation turn of a job, which writes none — the used-up ones are pruned
+     * ({@link IScheduleStore#deleteUsedUpOneShotsByName}). The row of the
+     * continuation that is running now is still claimed and is kept, so a
+     * conversation holds at most its latest spent continuation and the pending one.
+     * A prune that fails is logged and never stops the arm.
      *
      * @return whether a schedule was written
      */
     public boolean armIfDecided(String conversationId, IConversationMemory memory, Environment environment) {
         IWritableConversationStep step = memory != null ? memory.getCurrentStep() : null;
-        IData<Object> next = step != null ? step.getData(STEP_NEXT) : null;
-        if (conversationId == null || next == null || !(next.getResult() instanceof Number number)) {
+        if (conversationId == null || step == null) {
+            return false;
+        }
+        IData<Object> next = step.getData(STEP_NEXT);
+        if (next == null || !(next.getResult() instanceof Number number)) {
+            if (step.getData(STEP_NUMBER) != null) {
+                // The last continuation turn of a job arms nothing: prune here, or the
+                // continuation before it would stay behind for good.
+                pruneUsedUp(conversationId);
+            }
             return false;
         }
         ContinuationPolicy policy = memory.getContinuationPolicy();
@@ -319,6 +336,7 @@ public class ConversationContinuations {
             refuse(REASON_INTERRUPTED, conversationId, "the turn was cancelled before its continuation was armed");
             return false;
         }
+        pruneUsedUp(conversationId);
         try {
             Instant now = clock.instant();
             var schedule = new ScheduleConfiguration();
@@ -349,6 +367,18 @@ public class ConversationContinuations {
         } catch (Exception e) {
             refuse(REASON_SCHEDULE_FAILED, conversationId, "the schedule could not be written: " + e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Deletes the conversation's used-up continuation schedules, with their fire
+     * logs. Never throws: a failure is logged and the arm goes on.
+     */
+    private void pruneUsedUp(String conversationId) {
+        try {
+            scheduleStore.deleteUsedUpOneShotsByName(scheduleName(conversationId));
+        } catch (Exception e) {
+            LOGGER.warnf("Could not prune the used-up continuations of conversation %s: %s", sanitize(conversationId), e.toString());
         }
     }
 

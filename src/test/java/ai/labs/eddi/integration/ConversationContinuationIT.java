@@ -155,8 +155,13 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
         // No pending continuation is left behind.
         assertTrue(pendingContinuations(continuingAgent, conversationId).isEmpty(),
                 "no enabled continuation schedule may remain: " + continuationSchedules(continuingAgent, conversationId));
-        // Every continuation schedule that ran was recorded as COMPLETED.
-        for (Map<String, Object> schedule : continuationSchedules(continuingAgent, conversationId)) {
+        // Spent continuations are pruned as the job goes: only the latest one stays,
+        // with its fire log, not one row per continuation that ran.
+        List<Map<String, Object>> left = continuationSchedules(continuingAgent, conversationId);
+        assertEquals(1, left.size(), "exactly the last continuation's used-up row may remain: " + left);
+        for (Map<String, Object> schedule : left) {
+            assertEquals(MAX_CONTINUATIONS, asInt(((Map<?, ?>) schedule.get("metadata")).get("continuationNumber")),
+                    "the row left is the last continuation's: " + schedule);
             List<Map<String, Object>> fires = given().get(SCHEDULE_BASE + schedule.get("id") + "/fires").then().statusCode(200)
                     .extract().jsonPath().getList("$");
             assertFalse(fires.isEmpty(), "fire log of " + schedule.get("id"));

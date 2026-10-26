@@ -232,6 +232,45 @@ class ConversationContinuationsTest {
 
             assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
             verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).deleteUsedUpOneShotsByName(anyString());
+        }
+
+        @Test
+        @DisplayName("arming prunes the conversation's used-up continuations before it writes the next one")
+        void armPrunesBeforeItWrites() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+
+            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+
+            var order = inOrder(scheduleStore);
+            order.verify(scheduleStore).deleteUsedUpOneShotsByName(ConversationContinuations.scheduleName(CONVERSATION_ID));
+            order.verify(scheduleStore).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a prune that fails is logged and the continuation is still armed")
+        void pruneFailureStillArms() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).deleteUsedUpOneShotsByName(anyString());
+
+            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            verify(scheduleStore).createSchedule(any());
+            assertEquals(1.0, meters.find(ConversationContinuations.METRIC_SCHEDULED).counter().count());
+        }
+
+        @Test
+        @DisplayName("the last continuation turn of a job arms nothing but still prunes, so the one before it does not stay behind")
+        void lastContinuationTurnPrunes() throws Exception {
+            var memory = memoryWith(new ContinuationPolicy(2, ""), IConversation.CONTINUE_CONVERSATION);
+            ranBefore(memory, 1);
+            memory.getCurrentStep().storeData(new Data<>(ConversationContinuations.STEP_NUMBER, 2));
+            continuations.decide(memory); // refused: limit
+
+            assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            verify(scheduleStore).deleteUsedUpOneShotsByName(ConversationContinuations.scheduleName(CONVERSATION_ID));
+            verify(scheduleStore, never()).createSchedule(any());
         }
 
         @Test

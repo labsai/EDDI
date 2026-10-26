@@ -172,7 +172,8 @@ MCP `fire_schedule_now` tool refuses it) and is never exported with its agent.
 - **The conversation** — every phase is a step: `GET /agents/{conversationId}?returnDetailed=true`
   shows `continuation:number`, `continuation:next` and `continuation:refused` on the steps.
 - **Schedules** — the pending continuation is a schedule named `continuation-<conversationId>`,
-  with its fire log (status, error, attempt) like any schedule.
+  with its fire log (status, error, attempt) like any schedule. Spent continuations are pruned as the
+  job runs: after a job only the last continuation's row is left, with its fire log.
 - **Metrics** — `eddi_continuation_scheduled_total`, `eddi_continuation_run_total` and
   `eddi_continuation_refused_total{reason}`; see [Metrics](metrics.md#self-continuation-metrics).
 
