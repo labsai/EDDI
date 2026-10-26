@@ -120,10 +120,38 @@ full loop with headers, answer to EDDI's Message-ID, third party, bounce → sup
 rebuilt reply, resubmission found by Message-ID and run once), `Mongo/PostgresEmailSuppressionStoreIT`, the new cases
 of `Mongo/PostgresEmailMessageLedgerIT`. The security guards were mutation-checked.
 
+### Review follow-up (PR #1144)
+
+- **Resubmissions per integration.** `pendingResubmissions` read one global batch of 50 due `RECEIVED` rows and
+  filtered it in memory, so rows nobody polls any more (a deleted or invalid integration's) could fill it for ever.
+  The new `IEmailMessageLedger.findDueResubmissions(integrationId, now, limit)` filters in the store (MongoDB,
+  PostgreSQL, in-memory, contract case). Orphaned rows block nobody now and are left to ledger retention.
+- **No 500-row cap on a thread.** `findByConversation` (oldest 500 rows) gives way to `findInboundTurn(conversationId,
+  latest)` and `hasSentReply(conversationId, recipient)`, so a long thread still finds the mail a pause notice or
+  continuation answers, and `anyAuthenticatedParticipant` still admits an address a late reply went to.
+- **Cost before the reply.** `completed()` records the turn's spend before queueing the reply, so a reply that cannot be
+  queued no longer drops the cost from `dailyCostBudgetUsd`.
+- **A failed reply rebuild keeps the row.** The stranded sweep leaves the row `TURN_SUBMITTED`
+  (`reply_rebuild_failed:<n>`, deadline moved by `stranded-after`) and tries again, 5 sweeps in all, instead of closing
+  it `DONE` with no reply.
+- **Oversized resubmission.** A resubmitted mail found over `maxMessageBytes` ends `REFUSED(too_large)` and the poll
+  goes on, instead of failing and backing off on the same row every poll.
+- **Wording.** [hitl.md](../hitl.md#email-conversations), [configuration-reference.md](../configuration-reference.md#email)
+  and [email-integration.md](../email-integration.md) say the ledger deduplicates rows, not deliveries: a crash after
+  the relay accepted a message and before its row completed can send it twice (same Message-ID). The recipient rule in
+  the Manager's mode note, the operator prompt (revision 40), the `create_channel_integration` description and the
+  `eddi-admin` skill now name the `honorReplyTo` exception; the throttle hint says further replies are not sent (they
+  are `SUPPRESSED`), not delayed — all 11 locales.
+- **Manager mode.** `emailMode` reads the mode case-insensitively like `Mode.fromId`, so an API-saved
+  `"CONVERSATION"` integration keeps its conversation controls and reply settings on save.
+- Tests: `EmailConversationModeTest`, `EmailReplySenderTest`, `EmailInboundSweeperTest`, `EmailMailboxPollerTest`, the
+  ledger contract (`Mongo/PostgresEmailMessageLedgerIT`) and `email-channel.test.ts`, each mutation-checked.
+
 ```decision-log
 | 2026-10-25 | A conversation-mode reply's recipient is decided in one function, from the ledger row cross-checked with the mail's step in conversation memory and the conversation's identity, on every attempt | Authentication is a fact of the inbound mail; the processor forces it on, and the reply path checks it again from two independent records, so a reply to an unauthenticated or anonymous sender cannot be produced even for a turn that should not have run | An authenticated flag on the ledger row (a new column on both stores for a fact the step already holds); trusting the processor's check alone |
 | 2026-10-25 | Replies are rebuilt from the conversation on retry; group replies, whose discussion keeps no copy of the mail, are retried only by the node that holds them | The ledger stores no body or subject (plan §12); a group conversation has no field for the answered mail's subject | Storing the subject in the ledger; an extra copy of the mail in the group conversation |
 | 2026-10-25 | A mail whose conversation was started but whose turn never ran is found again in the mailbox by Message-ID and run once | The raw mail is not kept, and the mailbox still has it (flagged or moved); the hand-back is a conditional transition and the turn carries the mail's ledger key | Keeping the rendered input (a body in storage); marking it lost (a mail silently not processed) |
 | 2026-10-25 | The email suppression list stores a SHA-256 of the address per integration, and GDPR erasure deletes the entry | Enough to answer "suppressed?" and to clear it for someone who knows the address; conversation mode only answers mail the person sends, so an erased person is written to again only if they write first | Plain addresses (a list of correspondents); keeping a hash after erasure (plan §23 Q4 — keeps the identifier the request asked to remove) |
 | 2026-10-25 | Suppressions are cleared through two channel REST endpoints, not an MCP tool or an operator grant | An administrator needs a way to undo a bounce without database access; the operator holds no channel endpoints by design | Store-only clearing (database access); an MCP tool (one more admin surface to secure) |
+| 2026-10-26 | Due resubmission rows of a deleted integration are left to ledger retention, not refused by the sweeper | Once the query is scoped to one integration they block nobody; a sweeper pass over all RECEIVED rows would again read one global batch | Refusing them in the inbound sweep; deleting an integration's ledger rows with it (the rows are GDPR-reachable history) |
 ```
