@@ -42,8 +42,12 @@ userinfo URLs from the request, which is plain http behind the proxy; the issuer
 and authorization URLs come from `KC_HOSTNAME` and stayed https. Claude Code
 refuses to send credentials to an http token endpoint, so login failed after the
 browser step. Fix: `KC_PROXY_HEADERS=xforwarded`.
-- `gcp/provision-vm.sh --https` now sets it (nginx already sends the headers;
-  Keycloak binds to 127.0.0.1).
+- `gcp/provision-vm.sh --https` now sets it, and its nginx Keycloak location
+  now **sets** every forwarded header instead of passing client values through:
+  `X-Forwarded-Host $host`, `X-Forwarded-Port 443`, `X-Forwarded-For
+  $remote_addr` (was appended). Once Keycloak trusts these headers, a
+  client-supplied `X-Forwarded-Host` would choose the host in that caller's
+  discovery response (review finding, CWE-346).
 - Helm: new `keycloak.proxyHeaders` — empty means `xforwarded` when
   `eddi.oidc.publicUrl` is https, nothing otherwise; `none` opts out. Rendered and
   checked for all four cases. Chart `2.11.0` → `2.12.0`.
@@ -59,6 +63,11 @@ browser step. Fix: `KC_PROXY_HEADERS=xforwarded`.
   `eddi-mcp` scope-mapping assertion allows `offline_access`; new
   `mcpClientIssuesOfflineTokens` pins the three conditions in every realm copy and
   that `eddi-frontend` stays without it.
+- `ui/manager/scripts/make-test-realm.mjs`, `ui/manager/e2e/auth/auth-helpers.ts`
+  — the Auth E2E fixtures pin each seed user's exact roles; they now include
+  `offline_access`. `ui/manager/e2e/auth/mcp-oauth.spec.ts` — the real
+  authorization-code + PKCE + consent flow against `eddi-mcp` now asserts the
+  refresh token is `typ: Offline`, the one path the container check could not drive.
 - `docs/mcp-server.md` — corrected offline-token section, upgrade steps for an
   existing realm, proxy-header deployment note. `docs/kubernetes.md` — settings row.
 

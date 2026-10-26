@@ -665,13 +665,21 @@ server {
     # year. No includeSubDomains: sslip.io names are not ours to bind.
     add_header Strict-Transport-Security "max-age=31536000" always;
 
+    # Keycloak trusts the X-Forwarded-* headers (KC_PROXY_HEADERS=xforwarded in
+    # the override below), so every one of them is SET here, never passed on:
+    # a client-supplied X-Forwarded-Host or -Port would otherwise choose the
+    # host and port of the URLs in Keycloak's discovery response, and an
+    # appended X-Forwarded-For would let the caller pick the address Keycloak
+    # records for it in login events.
     location / {
         proxy_pass         http://localhost:8180;
         proxy_http_version 1.1;
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
-        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-For \$remote_addr;
         proxy_set_header   X-Forwarded-Proto https;
+        proxy_set_header   X-Forwarded-Host \$host;
+        proxy_set_header   X-Forwarded-Port 443;
         proxy_buffer_size  128k;
         proxy_buffers      4 256k;
     }
