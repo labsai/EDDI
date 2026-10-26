@@ -356,7 +356,7 @@ export function GdprPage() {
           <p className="text-xs text-muted-foreground">
             {t(
               "gdpr.exportIncompleteBody",
-              "This bundle does not cover everything EDDI holds on this user. It must not be handed over as a fulfilled Art. 15/20 request.",
+              "This bundle does not cover everything {{productName}} holds on this user. It must not be handed over as a fulfilled Art. 15/20 request.",
             )}
           </p>
           {exportSummary.omittedCategories.length > 0 && (
@@ -621,7 +621,7 @@ function AuditErasureSummary({ result }: { result: GdprDeletionResult }) {
   if (typeof redacted !== "number") {
     text = t(
       "gdpr.auditLegacy",
-      "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
+      "This server only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. Server versions 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
     );
   } else if (
     redacted === 0 &&

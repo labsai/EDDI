@@ -152,7 +152,7 @@ describe("Administrative actions", () => {
   it("explains a 404: this EDDI does not record them", async () => {
     server.use(http.get("*/auditstore/admin-actions", () => new HttpResponse(null, { status: 404 })));
     renderAdminActions();
-    expect(await screen.findByText(/This EDDI does not record administrative actions/)).toBeInTheDocument();
+    expect(await screen.findByText(/This server does not record administrative actions/)).toBeInTheDocument();
   });
 
   it("an empty answer (also what an older EDDI gives) says when they are recorded", async () => {

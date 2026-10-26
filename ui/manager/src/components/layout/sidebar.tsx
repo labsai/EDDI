@@ -14,6 +14,7 @@ import {
   RotateCcw,
   ChevronRight,
   Languages,
+  Info,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth, useMayOpenScreen } from "@/hooks/use-auth";
@@ -27,12 +28,10 @@ import { UNKNOWN_VERSION } from "@/lib/api/system";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 import { useLanguageSwitcher } from "@/hooks/use-language-switcher";
 import { NAV_SECTIONS, pageLabel } from "@/lib/route-registry";
-// Imported rather than referenced as "/logo_eddi.png" from public/: at 2 KB it
-// is under Vite's 4 KB assetsInlineLimit, so the app inlines it as a data URI
-// (same pixels, one fewer request) — and the design-system bundle, which cannot
-// ship public/ assets, inlines it too instead of rendering a broken image in
-// every design built with Sidebar.
-import logoEddi from "@/assets/logo_eddi.png";
+import { BrandIcon, BrandWordmark } from "./brand-logo";
+import { AboutDialog } from "./about-dialog";
+import { useBrand } from "@/hooks/use-brand";
+import { isUpdateUiVisible, UPDATES_PATH } from "@/lib/brand";
 
 const externalLinks = [
   {
@@ -77,12 +76,15 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
   const showUser = method === "keycloak" && user;
 
   const { data: serverVersion, isLoading } = useEddiVersion();
+  const brand = useBrand();
+  const updateUi = isUpdateUiVisible(brand);
+  const [aboutOpen, setAboutOpen] = useState(false);
 
   const versionLabel = isLoading
     ? t("nav.checkingVersion", "Checking version...")
     : serverVersion && serverVersion !== UNKNOWN_VERSION
-      ? `EDDI ${serverVersion}`
-      : `EDDI Demo ${__APP_VERSION__}`;
+      ? `${brand.productName} ${serverVersion}`
+      : `${brand.productName} Demo ${__APP_VERSION__}`;
 
   // Shares its query key with the approvals page, so mounting this in the
   // sidebar adds an observer rather than a second poll. The endpoint allows
@@ -150,36 +152,35 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
       {/* Logo */}
       <div className="flex h-16 items-center justify-center border-b border-sidebar-border px-4">
         {collapsed ? (
-          <svg
-            width="28"
-            height="28"
-            viewBox="0 0 28 28"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            className="shrink-0"
-            aria-label="EDDI"
-          >
-            <rect width="28" height="28" rx="6" className="fill-sidebar-accent" />
-            <text
-              x="5"
-              y="20"
-              fontFamily="'Noto Sans', sans-serif"
-              fontWeight="700"
-              fontSize="16"
-              className="fill-sidebar"
+          brand.branded ? (
+            <BrandIcon className="h-7 w-7 shrink-0 rounded-md" testId="sidebar-brand-icon" />
+          ) : (
+            <svg
+              width="28"
+              height="28"
+              viewBox="0 0 28 28"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              className="shrink-0"
+              role="img"
+              aria-label={brand.productName}
+              data-testid="sidebar-monogram"
             >
-              E.
-            </text>
-          </svg>
+              <rect width="28" height="28" rx="6" className="fill-sidebar-accent" />
+              <text
+                x="5"
+                y="20"
+                fontFamily="'Noto Sans', sans-serif"
+                fontWeight="700"
+                fontSize="16"
+                className="fill-sidebar"
+              >
+                E.
+              </text>
+            </svg>
+          )
         ) : (
-          // The wordmark is a pure-white glyph: keep it white on the dark
-          // sidebar (dark mode) but invert to near-black on the white sidebar
-          // (light mode) so it stays visible.
-          <img
-            src={logoEddi}
-            alt="EDDI"
-            className="h-7 w-auto invert dark:invert-0"
-          />
+          <BrandWordmark className="h-7 w-auto" invertInLight testId="sidebar-logo" />
         )}
       </div>
 
@@ -395,31 +396,44 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
       )}
 
       {/* Help & Tour menu */}
-      <HelpMenu collapsed={collapsed} />
+      <HelpMenu collapsed={collapsed} onAbout={() => setAboutOpen(true)} />
 
       {/* Version + Collapse toggle */}
       <div className="border-t border-sidebar-border p-1.5">
-        {!collapsed && (
-          // The version is where "am I current?" gets asked, and it is the only
-          // place in the app that already states which release you are on — so
-          // it links to the Updates page instead of sitting there inert. The
-          // nav entry is the last item of the last section; this is the shortcut.
-          <Link
-            to="/manage/updates"
-            className="mb-1 block px-3 text-center text-[10px] text-sidebar-foreground/30 transition-colors hover:text-sidebar-accent"
-            title={
-              serverVersion === UNKNOWN_VERSION
-                ? `Standalone Demo Mode fallback`
-                : t("updates.title", "EDDI Updates")
-            }
-            // The visible text is a version string, which says nothing about
-            // where the link goes.
-            aria-label={`${versionLabel} — ${t("updates.title", "EDDI Updates")}`}
-            data-testid="sidebar-version"
-          >
-            {versionLabel}
-          </Link>
-        )}
+        {!collapsed &&
+          (updateUi ? (
+            // The version is where "am I current?" gets asked, and it is the only
+            // place in the app that already states which release you are on — so
+            // it links to the Updates page instead of sitting there inert. The
+            // nav entry is the last item of the last section; this is the shortcut.
+            <Link
+              to={UPDATES_PATH}
+              className="mb-1 block px-3 text-center text-[10px] text-sidebar-foreground/30 transition-colors hover:text-sidebar-accent"
+              title={
+                serverVersion === UNKNOWN_VERSION
+                  ? `Standalone Demo Mode fallback`
+                  : t("updates.title", "{{productName}} Updates")
+              }
+              // The visible text is a version string, which says nothing about
+              // where the link goes.
+              aria-label={`${versionLabel} — ${t("updates.title", "{{productName}} Updates")}`}
+              data-testid="sidebar-version"
+            >
+              {versionLabel}
+            </Link>
+          ) : (
+            // Branded without the update UI there is no Updates page to point at;
+            // the version opens the About dialog instead.
+            <button
+              type="button"
+              onClick={() => setAboutOpen(true)}
+              className="mb-1 block w-full px-3 text-center text-[10px] text-sidebar-foreground/30 transition-colors hover:text-sidebar-accent"
+              aria-label={`${versionLabel} — ${t("about.title", "About {{productName}}")}`}
+              data-testid="sidebar-version"
+            >
+              {versionLabel}
+            </button>
+          ))}
         <button
           onClick={onToggle}
           data-testid="sidebar-toggle"
@@ -438,6 +452,11 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
           )}
         </button>
       </div>
+      <AboutDialog
+        open={aboutOpen}
+        onOpenChange={setAboutOpen}
+        version={serverVersion && serverVersion !== UNKNOWN_VERSION ? serverVersion : null}
+      />
     </aside>
   );
 }
@@ -465,7 +484,7 @@ const CHAPTER_ROUTES: Record<TourChapterId, string> = {
  * Sidebar "Help & Tour" popover: replays one onboarding chapter (jumping to
  * its page) or resets them all. Closes on an outside click or Escape.
  */
-function HelpMenu({ collapsed }: { collapsed: boolean }) {
+function HelpMenu({ collapsed, onAbout }: { collapsed: boolean; onAbout: () => void }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
@@ -635,6 +654,19 @@ function HelpMenu({ collapsed }: { collapsed: boolean }) {
             >
               <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
               {t("onboarding.help.resetAll", "Reset All Tours")}
+            </button>
+            <button
+              onClick={() => {
+                setOpen(false);
+                onAbout();
+              }}
+              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs text-sidebar-foreground/50 transition-colors hover:text-sidebar-foreground hover:bg-sidebar-accent/10 focus:bg-sidebar-accent/10"
+              role="menuitem"
+              tabIndex={-1}
+              data-testid="help-about"
+            >
+              <Info className="h-3.5 w-3.5" aria-hidden="true" />
+              {t("about.title", "About {{productName}}")}
             </button>
           </div>
         </div>

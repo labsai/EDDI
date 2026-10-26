@@ -476,7 +476,7 @@ function McpMaxResponseSize({
       <p id={hintId} className="text-[10px] text-muted-foreground">
         {t(
           "mcpcallsEditor.maxResponseSizeHint",
-          "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later.",
+          "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs server version 6.6 or later.",
         )}
       </p>
     </div>

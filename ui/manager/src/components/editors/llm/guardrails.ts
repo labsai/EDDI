@@ -192,7 +192,7 @@ export const TYPE_TEXT: Record<GuardrailTypeName, [string, string, string, strin
     "llmEditor.grTypeClassifier",
     "Safety classifier model",
     "llmEditor.grTypeClassifierDesc",
-    "Asks a safety-classifier model you run (Granite Guardian, ShieldGemma, a moderation API) for a verdict. EDDI ships no classifier model.",
+    "Asks a safety-classifier model you run (Granite Guardian, ShieldGemma, a moderation API) for a verdict. {{productName}} ships no classifier model.",
   ],
   "json-object": [
     "llmEditor.grTypeJson",

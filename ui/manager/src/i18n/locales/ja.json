@@ -14,8 +14,16 @@
     "confirmDeleteAllDesc": "この会話が保有するすべてのファイルを完全に削除します。元に戻せません。"
   },
   "app": {
-    "title": "EDDI Manager",
-    "description": "EDDI 会話型AIプラットフォーム管理ダッシュボード"
+    "title": "{{productName}} Manager",
+    "description": "{{productName}} 会話型AIプラットフォーム管理ダッシュボード"
+  },
+  "about": {
+    "title": "{{productName}} について",
+    "versionLabel": "バージョン",
+    "versionUnknown": "バージョン不明",
+    "poweredBy": "EDDI を搭載",
+    "license": "EDDI は Apache License 2.0 でライセンスされたオープンソースソフトウェアです。",
+    "licenseLink": "ライセンスを読む"
   },
   "auth": {
     "login": "ログイン",
@@ -111,7 +119,7 @@
   "pages": {
     "dashboard": {
       "title": "ダッシュボード",
-      "subtitle": "EDDI Agents と会話の概要",
+      "subtitle": "{{productName}} Agents と会話の概要",
       "activeAgents": "アクティブ Agents",
       "totalWorkflows": "ワークフロー",
       "totalResources": "リソース",
@@ -163,11 +171,11 @@
     "approvalsSubtitle": "人間の入力を待っている会話を確認し決定します",
     "connections": {
       "title": "接続",
-      "subtitle": "エージェントが利用する外部システムに EDDI がどう認証するか"
+      "subtitle": "エージェントが利用する外部システムに {{productName}} がどう認証するか"
     },
     "linkedAccounts": {
       "title": "連携アカウント",
-      "subtitle": "EDDI があなたの代わりに使うことを許可したサービス"
+      "subtitle": "{{productName}} があなたの代わりに使うことを許可したサービス"
     }
   },
   "common": {
@@ -232,7 +240,7 @@
     "deletePermanently": "完全に削除",
     "deletePermanentlyHint": "元に戻せません。オフの場合、項目は削除済みとしてマークされるだけで、パージされるまで復元できます。",
     "errors": {
-      "network": "EDDI に接続できません。接続を確認してもう一度お試しください。",
+      "network": "{{productName}} に接続できません。接続を確認してもう一度お試しください。",
       "unauthorized": "セッションの有効期限が切れました。もう一度サインインしてください。",
       "forbidden": "これを表示する権限がありません。",
       "notFound": "見つかりません。削除された可能性があります。"
@@ -296,7 +304,7 @@
     "a2aDescription": "エージェントの説明",
     "a2aEnable": "A2A を有効化",
     "a2aEnabled": "有効",
-    "a2aEnabledDesc": "A2A プロトコルを通じて、このエージェントを他のエージェントから検出可能にします。他の EDDI インスタンスがこのエージェントをツールとして検出・呼び出しできます。",
+    "a2aEnabledDesc": "A2A プロトコルを通じて、このエージェントを他のエージェントから検出可能にします。他の {{productName}} インスタンスがこのエージェントをツールとして検出・呼び出しできます。",
     "a2aEndpoints": "エンドポイント",
     "a2aNoSkills": "スキルなし — デフォルトの「chat」スキルが使用されます",
     "a2aSection": "エージェント間通信 (A2A)",
@@ -444,9 +452,9 @@
     "slackWebhookUrl": "Webhook URL",
     "slackWebhookCopied": "Webhook URLをコピーしました",
     "slackStep1": "api.slack.com/appsでSlackアプリを作成し、ワークスペースにインストールします。",
-    "slackStep2": "ボットトークン（xoxb-…）と署名シークレットをEDDI Vaultにコピーし、以下でチャネルを設定します。",
+    "slackStep2": "ボットトークン（xoxb-…）と署名シークレットを{{productName}} Vaultにコピーし、以下でチャネルを設定します。",
     "slackStep3": "次にSlackアプリでEvent Subscriptionsを有効にし、上記のWebhook URLを貼り付けて、以下を購読します：",
-    "slackSetupNote": "重要：Event Subscriptionsを有効にする前に、下のチャネルを設定してください — SlackはURL検証チャレンジを送信し、EDDIで署名シークレットが設定されている必要があります。",
+    "slackSetupNote": "重要：Event Subscriptionsを有効にする前に、下のチャネルを設定してください — SlackはURL検証チャレンジを送信し、{{productName}}で署名シークレットが設定されている必要があります。",
     "slackRequiredScopes": "必要なボットトークンスコープ",
     "hitlConfig": "ヒューマン・イン・ザ・ループ",
     "hitlConfigDesc": "このエージェントが人間の承認のために会話を一時停止するとき、これらの設定で待機時間と、時間内に判断がない場合の動作を制御します。",
@@ -504,9 +512,9 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "プロキシ、プライベートデプロイ、または Azure OpenAI エンドポイントを使用する場合にのみ必要です",
-    "jlamaNoteTitle": "Jlama は EDDI 内部で動作します",
-    "jlamaNoteBody": "指定すべきモデルサーバーはありません。EDDI が自身のプロセスにモデルを読み込み、初回利用時に Hugging Face から重みをダウンロードするため、最初のメッセージには時間がかかることがあります。",
-    "jlamaNoteTuning": "EDDI をコンテナで実行していますか。作成後にエージェントの LLM 設定を開き、modelCachePath をマウント済みボリュームに設定してください。既定のキャッシュはコンテナの一時レイヤー上にあるため、コンテナが削除または置き換えられるとモデルが再ダウンロードされることがあります。quantizeModelAtRuntime、workingDirectory、workingQuantizedType も同じ場所で調整できます。",
+    "jlamaNoteTitle": "Jlama は {{productName}} 内部で動作します",
+    "jlamaNoteBody": "指定すべきモデルサーバーはありません。{{productName}} が自身のプロセスにモデルを読み込み、初回利用時に Hugging Face から重みをダウンロードするため、最初のメッセージには時間がかかることがあります。",
+    "jlamaNoteTuning": "{{productName}} をコンテナで実行していますか。作成後にエージェントの LLM 設定を開き、modelCachePath をマウント済みボリュームに設定してください。既定のキャッシュはコンテナの一時レイヤー上にあるため、コンテナが削除または置き換えられるとモデルが再ダウンロードされることがあります。quantizeModelAtRuntime、workingDirectory、workingQuantizedType も同じ場所で調整できます。",
     "baseUrlHintLocal": "必須 — ローカルモデルサーバーが稼働している URL",
     "modelHint": "プロバイダーがサポートする任意のモデル名を入力するか、候補から選択してください",
     "modelHintSelfHosted": "サーバーが提供しているとおりのモデル ID（/v1/models の一覧）。既定値はありません。",
@@ -573,7 +581,7 @@
     "structuredOutputDesc": "LLMがプレーンテキストではなくJSONオブジェクトで応答します",
     "structuredOutputInfo": "これを有効にすると、LLMは構造化フィールドを持つJSONオブジェクトで応答します。JSONスキーマがシステムプロンプトに追加され、モデルはJSON応答モードに設定されます。",
     "builtInTools": "内蔵ツール",
-    "builtInToolsDesc": "EDDI の内蔵ツールライブラリを有効化（電卓、日時など）",
+    "builtInToolsDesc": "{{productName}} の内蔵ツールライブラリを有効化（電卓、日時など）",
     "toolsWhitelist": "ホワイトリスト（空 = すべて）",
     "mcpServers": "MCPサーバー",
     "mcpServersDesc": "外部ツール用の Model Context Protocol サーバー",
@@ -1221,7 +1229,7 @@
     "argumentInvalidJson": "有効な JSON ではありません。最後の有効な値が保持されます",
     "removeArgument": "引数を削除",
     "maxResponseSize": "保存する応答の最大サイズ（文字数）",
-    "maxResponseSizeHint": "これより長いツール結果は、会話メモリに保存される前にこの文字数に切り詰められます（警告がログに記録されます）。空欄、0 以下ではデフォルトの 2,000,000（約 2 MB）が使われます。EDDI 6.6 以降が必要です。"
+    "maxResponseSizeHint": "これより長いツール結果は、会話メモリに保存される前にこの文字数に切り詰められます（警告がログに記録されます）。空欄、0 以下ではデフォルトの 2,000,000（約 2 MB）が使われます。サーバーバージョン 6.6 以降が必要です。"
   },
   "llmEditor": {
     "addCustomInstruction": "指示を追加",
@@ -1496,7 +1504,7 @@
     "maxToolCallsPerIterationDefault": "（デフォルト {{n}}）",
     "maxToolCallsPerTurn": "1 ターンあたりの最大ツール呼び出し数",
     "maxToolCallsPerTurnDefault": "（デフォルト {{n}}）",
-    "maxToolCallsHint": "上限を超えた呼び出しは実行されません。各呼び出しには上限に達したことをモデルに伝える NOT_EXECUTED の結果が返され、モデルは手元の情報で回答します。拒否された呼び出しが承認ゲートに届くことはありません。ターンごとのカウントには承認待ちの前の呼び出しも含まれます。-1 または 0 で上限を解除します。EDDI 6.6 以降が必要です。古いサーバーでは空欄のままにしてください。",
+    "maxToolCallsHint": "上限を超えた呼び出しは実行されません。各呼び出しには上限に達したことをモデルに伝える NOT_EXECUTED の結果が返され、モデルは手元の情報で回答します。拒否された呼び出しが承認ゲートに届くことはありません。ターンごとのカウントには承認待ちの前の呼び出しも含まれます。-1 または 0 で上限を解除します。サーバーバージョン 6.6 以降が必要です。古いサーバーでは空欄のままにしてください。",
     "maxToolCallsUncapped": "上限が無効になっています。モデルはそこで任意の数のツール呼び出しを実行でき、制限は Max Tool Iterations のみです。",
     "repeatGuardTitle": "繰り返し失敗するツール呼び出し",
     "repeatGuardEnabled": "失敗の繰り返しをブロック",
@@ -1504,7 +1512,7 @@
     "maxRefusalsPerTurn": "停止までの拒否回数",
     "maxIdenticalCalls": "同一の成功呼び出しの上限",
     "exemptTools": "除外するツール（カンマ区切り）",
-    "repeatGuardHint": "同一の呼び出しがすでに失敗し、その後に成功した呼び出しがない場合、再実行せず NOT_EXECUTED を返します。拒否の上限に達するとターンは固定メッセージで終了します。既定で有効です。空欄は既定値のままになります。恒久的な失敗（例: HTTP 403/404）は次の同一呼び出しで拒否され、再試行可能な失敗は許容回数の後に拒否されます。同一の成功呼び出しの上限は設定しない限り無効です（-1 または 0 = 無制限）。EDDI 6.6 以降が必要です。古いサーバーでは変更しないでください。",
+    "repeatGuardHint": "同一の呼び出しがすでに失敗し、その後に成功した呼び出しがない場合、再実行せず NOT_EXECUTED を返します。拒否の上限に達するとターンは固定メッセージで終了します。既定で有効です。空欄は既定値のままになります。恒久的な失敗（例: HTTP 403/404）は次の同一呼び出しで拒否され、再試行可能な失敗は許容回数の後に拒否されます。同一の成功呼び出しの上限は設定しない限り無効です（-1 または 0 = 無制限）。サーバーバージョン 6.6 以降が必要です。古いサーバーでは変更しないでください。",
     "toggleTask": "タスクの詳細を表示または非表示",
     "noActionsWarning": "このタスクにはトリガーとなるアクションがないため、実行されません。振る舞いルールが出力するアクション（例: send_message）を追加してください。",
     "model": "モデル",
@@ -1526,7 +1534,7 @@
       "title": "モデル設定",
       "rejectedBy": "{{model}} では拒否されます",
       "noEffectOn": "{{model}} では効果がありません",
-      "droppedHint": "EDDI はリクエストのたびにこれを削除するため、この値は送信されません。",
+      "droppedHint": "{{productName}} はリクエストのたびにこれを削除するため、この値は送信されません。",
       "removeKey": "{{key}} を削除",
       "remove": "削除",
       "providerDefault": "プロバイダーの既定値",
@@ -1577,7 +1585,7 @@
       "groupTotal": "このグループの設定: {{count}}",
       "unavailable_one": "{{model}} が拒否または無視する設定 {{count}} 件",
       "unavailable_other": "{{model}} が拒否または無視する設定 {{count}} 件",
-      "variableModel": "モデルが変数参照（{{model}}）のため、以下のチェックではまだモデルを判別できません。変数が解決されると EDDI がモデル固有のルールを適用します。",
+      "variableModel": "モデルが変数参照（{{model}}）のため、以下のチェックではまだモデルを判別できません。変数が解決されると {{productName}} がモデル固有のルールを適用します。",
       "badgeMigrated": "{{key}} として送信",
       "migratedTo": "{{model}} には {{key}} として送信",
       "group": {
@@ -1606,7 +1614,7 @@
     "grTypeJson": "JSON オブジェクト",
     "grTypeJsonDesc": "ちょうど 1 つの JSON オブジェクトではない回答を検出します（Markdown のコードフェンスは許容）。形式のみを確認します。",
     "grTypeClassifier": "安全性分類モデル",
-    "grTypeClassifierDesc": "ユーザー自身が運用する安全性分類モデル（Granite Guardian、ShieldGemma、モデレーション API）に判定を依頼します。EDDI には分類モデルは付属しません。",
+    "grTypeClassifierDesc": "ユーザー自身が運用する安全性分類モデル（Granite Guardian、ShieldGemma、モデレーション API）に判定を依頼します。{{productName}} には分類モデルは付属しません。",
     "grActionBlock": "ブロック",
     "grActionRedact": "マスク",
     "grActionReprompt": "再プロンプト",
@@ -1682,7 +1690,7 @@
     "grClfOutputPrice": "出力 $/100 万トークン",
     "grClfContext": "このターンで取得した RAG コンテキストを {context} としてテンプレートに渡します（根拠性チェック用）。プロンプトテンプレートがない場合は効果がありません。",
     "grSectionTitle": "ガードレール",
-    "grIntro": "モデルを呼び出す前にユーザーのメッセージを、保存または配信する前にモデルの回答を審査します。ガードレールを追加しない限り、何も審査されません。EDDI 6.6 以降が必要です。古いサーバーはこれらのリストを無視し、エージェントはガードなしで動作します。",
+    "grIntro": "モデルを呼び出す前にユーザーのメッセージを、保存または配信する前にモデルの回答を審査します。ガードレールを追加しない限り、何も審査されません。サーバーバージョン 6.6 以降が必要です。古いサーバーはこれらのリストを無視し、エージェントはガードなしで動作します。",
     "grInput": "入力ガードレール",
     "grOutput": "出力ガードレール",
     "grInputHint": "ユーザーのメッセージに対し、検索とモデル呼び出しの前に順番に実行されます。",
@@ -2028,8 +2036,8 @@
     "kekNewKeyLabel": "新しいマスターキー",
     "kekNewKeyPlaceholder": "新しいキー — 8 文字以上",
     "kekNewKeyTooShort": "新しいマスターキーは 8 文字以上である必要があります。",
-    "kekRestartHint": "ローテーション後、EDDI_VAULT_MASTER_KEY を新しいキーに更新し、EDDI を再起動する必要があります。",
-    "kekResultInstruction": "対応が必要です: 環境変数 EDDI_VAULT_MASTER_KEY を新しいマスターキーに設定し、EDDI を再起動してください。それまで、稼働中のインスタンスはメモリ内で古いキーを使い続けます。",
+    "kekRestartHint": "ローテーション後、EDDI_VAULT_MASTER_KEY を新しいキーに更新し、{{productName}} を再起動する必要があります。",
+    "kekResultInstruction": "対応が必要です: 環境変数 EDDI_VAULT_MASTER_KEY を新しいマスターキーに設定し、{{productName}} を再起動してください。それまで、稼働中のインスタンスはメモリ内で古いキーを使い続けます。",
     "resetTenantTitle": "このテナントの Vault をリセット",
     "resetTenantBlurb": "破壊的な最終手段です。すべての Secret と DEK を完全に削除し、Vault を新規の状態から開始できるようにします — マスターキーを紛失または変更した後に使用します。",
     "resetTenantAction": "Vault をリセット",
@@ -2160,7 +2168,7 @@
       "noMatch": "このフィルターに一致する管理操作はありません",
       "empty": "記録された管理操作はまだありません",
       "noMatchLoadOlder": "読み込まれているのは最新の行だけです。さらに遡るには古い行を読み込んでください。",
-      "emptyHint": "EDDI はバージョン 6.6 以降で記録します（eddi.audit.admin-actions.enabled が false の場合を除く）。古いサーバーではここには何も表示されません。",
+      "emptyHint": "サーバーはバージョン 6.6 以降で記録します（eddi.audit.admin-actions.enabled が false の場合を除く）。古いサーバーではここには何も表示されません。",
       "caption": "管理操作（新しい順）",
       "colTime": "日時",
       "colActor": "実行者",
@@ -2172,8 +2180,8 @@
       "loadOlder": "古い行を読み込む",
       "forbidden": "管理操作を閲覧できるのは管理者だけです",
       "forbiddenHint": "このログにはすべての管理者の変更が記録されるため、閲覧には eddi-admin ロールが必要です。",
-      "unsupported": "この EDDI は管理操作を記録しません",
-      "unsupportedHint": "EDDI 6.6 以降で記録されます。",
+      "unsupported": "このサーバー は管理操作を記録しません",
+      "unsupportedHint": "サーバーバージョン 6.6 以降で記録されます。",
       "loadError": "管理操作を読み込めませんでした。",
       "shown": "読み込み済み {{loaded}} 行のうち {{shown}} 行を表示",
       "windowAny": "すべての期間",
@@ -2315,15 +2323,15 @@
     },
     "totalCappedHint": "サーバーが 1 ページ分すべてを返したため、ここに表示されている以上のスケジュールが存在する可能性があります。",
     "systemManaged": "システム",
-    "systemManagedHint": "EDDI が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
+    "systemManagedHint": "{{productName}} が管理しています（ナレッジベースの取り込み、メモリ統合、またはチームのケイデンス）。ここではなく、定義されている場所で変更してください。",
     "persistentConversationIdLocked": "スケジュール作成時に設定されます。サーバーは、実行が追記されてきた会話を保持します。",
     "failedScheduleGone": "スケジュールはもう存在しません",
-    "disabledByPerson": "人が無効化しました。EDDI 6.6 より前のアンデプロイで停止したスケジュールもこう表示されます。一度手動で有効にしてください。",
+    "disabledByPerson": "人が無効化しました。サーバーバージョン 6.6 より前のアンデプロイで停止したスケジュールもこう表示されます。一度手動で有効にしてください。",
     "disabledUndeployed": "エージェントがアンデプロイ済み",
     "disabledUndeployedHint": "エージェントがアンデプロイされたときに停止しました。エージェントの次のデプロイが成功すると自動的に再開されます。操作は不要です。",
     "disabledAccessRevoked": "アクセスが取り消されました",
     "disabledAccessRevokedHint": "作成者がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
-    "disabledOtherHint": "表示された理由により EDDI が停止しました。",
+    "disabledOtherHint": "表示された理由により {{productName}} が停止しました。",
     "serverRefusedUpdate": "サーバーがこの変更を拒否しました:",
     "serverRefusedCreate": "サーバーがこのスケジュールを拒否しました:",
     "disabledAccessRevokedHintBy": "作成者（{{user}}）がこのエージェントを使えなくなったため、実行が止まりました。作成者と再度エージェントを共有するか、エージェントを使える人としてスケジュールを作り直してから有効にしてください。",
@@ -2657,7 +2665,7 @@
       "reference": "ストアの場所は ${…} 参照ではなく、名前をそのまま書く必要があります。場所はエージェントが誰のドキュメントを読むかを決め、参照はストア構築時（すべてのチェックの後）に、どの編集者でも変更できる変数から解決されるため、別のナレッジベースのストアや SQL を指してしまう可能性があります。参照付きで保存済みのナレッジベースは、名前をそのまま書いて一度保存し直すまで、取り込みと検索を停止します。",
       "pgIdentifier": "pgvector のテーブル名は、スキーマ修飾も可能な単純な名前（英字、数字、_ と $）でなければなりません。ストアはそれをそのまま SQL に入れるため、引用符、空白、句読点は拒否されます。",
       "refused": "サーバーは {{param}} = {{value}} を拒否します",
-      "reserved": "{{prefix}} で始まる名前（どの部分でも、大文字小文字を問わず）は予約されています。EDDI は各ナレッジベース固有の場所をこの接頭辞から導くため、この名前は別のナレッジベースのストアを指す可能性があります。別の名前を選ぶか、空欄にしてこのナレッジベース専用の場所を使ってください。",
+      "reserved": "{{prefix}} で始まる名前（どの部分でも、大文字小文字を問わず）は予約されています。{{productName}} は各ナレッジベース固有の場所をこの接頭辞から導くため、この名前は別のナレッジベースのストアを指す可能性があります。別の名前を選ぶか、空欄にしてこのナレッジベース専用の場所を使ってください。",
       "savedReference": "保存済みの {{param}} = {{value}} は使えなくなりました",
       "refusedIfChanged": "{{param}} = {{value}} は保存どおりなら引き続き動作しますが、変更するとサーバーに拒否されます"
     },
@@ -2665,10 +2673,10 @@
       "idTitle": "専用ストア（ID で指定）",
       "nameTitle": "名前ベースのストア（6.5 レイアウト）",
       "idBody": "このナレッジベースには専用のストアがあります。各チャンクにはその ID が付き、共有テーブルであっても検索では自身のチャンクしか見えません。",
-      "nameBody": "EDDI 6.6 より前に作成: ストアはナレッジベースの名前で見つけられるため、同じ名前の他のナレッジベースと共有されます。このままでも動作します。",
+      "nameBody": "サーバーバージョン 6.6 より前に作成: ストアはナレッジベースの名前で見つけられるため、同じ名前の他のナレッジベースと共有されます。このままでも動作します。",
       "defaultUnsaved": "場所: eddi_kbid_<id>（デフォルト、保存時に割り当て）",
       "migrate": "専用ストアへ移動…",
-      "renameNote": "このナレッジベースの名前を変更しても同じように移動します。EDDI 6.6 以降が必要です。",
+      "renameNote": "このナレッジベースの名前を変更しても同じように移動します。サーバーバージョン 6.6 以降が必要です。",
       "migrateTitle": "このナレッジベースを専用ストアへ移動しますか？",
       "migrateBodyExplicit": "テーブルはそのままですが、今後はその ID が付いたチャンクだけが検索されます。既存のチャンクにはこの印がないため、空の状態から始まります。ソースは次回の実行で自動的に再取り込みされますが、/ingest で追加したドキュメントは取り込み直す必要があります。何も削除されません。変更は保存時に適用され、元に戻せません。",
       "migrateBody": "新しい空の専用ストアへ移動します。ソースは次回の実行で自動的に再取り込みされますが、/ingest で追加したドキュメントは取り込み直す必要があります。古いストアはそのまま残ります。変更は保存時に適用され、元に戻せません。",
@@ -2774,9 +2782,9 @@
   },
   "onboarding": {
     "welcome": {
-      "title": "EDDIへようこそ",
+      "title": "{{productName}}へようこそ",
       "subtitle": "AIエージェントのコマンドセンター",
-      "introText": "EDDI Managerは、会話型AIエージェントの構築、テスト、運用のためのコマンドセンターです。",
+      "introText": "{{productName}} Managerは、会話型AIエージェントの構築、テスト、運用のためのコマンドセンターです。",
       "capabilitiesTitle": "できること",
       "capabilitiesSubtitle": "本番環境対応のAIエージェントを作成するために必要なすべて",
       "buildAgents": "エージェントを構築",
@@ -2808,7 +2816,7 @@
         "step3Title": "クイックアクション",
         "step3Desc": "一般的なタスクに直接ジャンプします。Agent Wizardは最初のエージェントを作成する最速の方法です。2分以内で完了します。",
         "step4Title": "自分好みにカスタマイズ",
-        "step4Desc": "ライト、ダーク、システムテーマを切り替えます。EDDI Managerは11の言語をサポートしています。言語セレクターからお選びください。"
+        "step4Desc": "ライト、ダーク、システムテーマを切り替えます。{{productName}} Managerは11の言語をサポートしています。言語セレクターからお選びください。"
       },
       "agents": {
         "title": "エージェント ツアー",
@@ -2923,7 +2931,7 @@
         "step1Title": "クラスターの健全性",
         "step1Desc": "判定（正常、縮退、分断、シングルノード）と、その理由および次のステップ。",
         "step2Title": "ノード",
-        "step2Desc": "すべての EDDI レプリカ：ハートビート、NATS 往復時間、実行中のターンとリース、ドレイン済みまたは喪失かどうか。",
+        "step2Desc": "すべての {{productName}} レプリカ：ハートビート、NATS 往復時間、実行中のターンとリース、ドレイン済みまたは喪失かどうか。",
         "step3Title": "デッドレター",
         "step3Desc": "失敗したタスクを検査し、システムの安定性を維持するために体系的に破棄または再試行します。"
       },
@@ -3718,7 +3726,7 @@
     "upgradeExisting": "既存のエージェントをアップグレード",
     "upgradeDesc": "リソースをターゲットエージェントと構造的にマッチングします。環境間の昇格に最適です。",
     "syncRemote": "リモートインスタンスから同期",
-    "syncDesc": "別のEDDIインスタンスに接続し、特定のエージェントをライブで同期します。",
+    "syncDesc": "別の{{productName}}インスタンスに接続し、特定のエージェントをライブで同期します。",
     "importNow": "今すぐインポート",
     "previewChanges": "変更をプレビュー",
     "selectTargetAgent": "ターゲットエージェントを選択",
@@ -3760,11 +3768,11 @@
   },
   "syncPage": {
     "title": "エージェントの同期",
-    "subtitle": "EDDIインスタンス間でエージェントを同期する",
+    "subtitle": "{{productName}}インスタンス間でエージェントを同期する",
     "connection": "ソースインスタンス",
     "loadingLocalAgents": "照合の前にすべてのローカルエージェントを読み込んでいます…",
     "localAgentsError": "ローカルのエージェント一覧を完全に読み込めなかったため、名前でエージェントを照合できません。今同期すると重複が作成されます。",
-    "sourceUrl": "ソースEDDIインスタンスのURL",
+    "sourceUrl": "ソース{{productName}}インスタンスのURL",
     "authToken": "認証トークン",
     "authHint": "任意。X-Source-Authorization ヘッダに設定。",
     "connect": "接続",
@@ -4328,7 +4336,7 @@
     "userLookup": "ユーザー検索",
     "exportIncomplete": "ダウンロードしましたが、このバンドルは完全ではありません — 第15条/第20条の請求に対する完全な回答として送付しないでください。",
     "exportIncompleteTitle": "不完全なエクスポートバンドル",
-    "exportIncompleteBody": "このバンドルは、EDDI がこのユーザーについて保持しているすべてを網羅していません。第15条/第20条の請求を満たしたものとして引き渡さないでください。",
+    "exportIncompleteBody": "このバンドルは、{{productName}} がこのユーザーについて保持しているすべてを網羅していません。第15条/第20条の請求を満たしたものとして引き渡さないでください。",
     "omittedCategories": "エクスポート対象外",
     "resultsPartialTitle": "消去が不完全です",
     "resultsPartialBody": "このユーザーのデータの一部がまだ残っている可能性があります。以下の手順が成功するまで、消去が完了したと報告しないでください。",
@@ -4345,7 +4353,7 @@
     "failedConversations_one": "{{count}} 件の会話を読み取れず、バンドルに含まれていません。",
     "deleteIncomplete": "消去は完了していません。このユーザーのデータの一部がまだ残っている可能性があります。完了として報告しないでください。",
     "auditRedacted": "マスクされた監査エントリ",
-    "auditLegacy": "この EDDI は監査台帳のユーザー ID を置き換えるだけで、記録されたプロンプトと応答は残ります。EDDI 6.6 以降はそれらもマスクします（サーバーが eddi.audit.erasure-mode=pseudonymize で動作している場合を除く）。",
+    "auditLegacy": "このサーバー は監査台帳のユーザー ID を置き換えるだけで、記録されたプロンプトと応答は残ります。サーバーバージョン 6.6 以降はそれらもマスクします（サーバーが eddi.audit.erasure-mode=pseudonymize で動作している場合を除く）。",
     "auditPseudonymizeMode": "監査内容は保持されました。このサーバーは eddi.audit.erasure-mode=pseudonymize で動作しているため（法的保存など）、監査台帳のユーザー ID だけが置き換えられました。",
     "auditRedactionFailed": "監査内容はマスクされませんでした。マスク処理が失敗したため（上記参照）、台帳に記録されたプロンプトと応答はそのまま残っています。消去をもう一度実行してください。",
     "auditRedactedExplanation": "ユーザーの監査行は記録保持のために残りますが、プロンプト、応答、モデルの詳細、ツール呼び出しはマスク用のマーカーに置き換えられ、ユーザー ID は仮名化されました。以前に検証できていた行は再署名され、すでに改ざんされていた行は無効のままです。",
@@ -4362,7 +4370,7 @@
     "confirmTypeLabel": "確認のため、ユーザー ID「{{userId}}」を入力してください"
   },
   "mockBanner": {
-    "message": "デモモード — サンプルデータを表示しています。実際のデータには EDDI バックエンドを接続してください。"
+    "message": "デモモード — サンプルデータを表示しています。実際のデータには {{productName}} バックエンドを接続してください。"
   },
   "orphans": {
     "description": "どのエージェントやパッケージからも参照されていないリソースを検出してクリーンアップします。",
@@ -4383,7 +4391,7 @@
     "scanIncomplete": "このスキャンは完了しませんでした",
     "scanIncompleteBody": "まだ使用中のリソースが孤立として表示される場合があります。スキャンが完了するまで、削除は無効化されます。",
     "confirmPurge": "孤立したリソース {{count}} 件をすべて完全に削除しますか？この操作は元に戻せません。",
-    "purgeIncompleteScan": "何も削除されていません：EDDI は使用中のリソースの確認を完了できませんでした。再スキャンしてからもう一度お試しください。",
+    "purgeIncompleteScan": "何も削除されていません：{{productName}} は使用中のリソースの確認を完了できませんでした。再スキャンしてからもう一度お試しください。",
     "purgeFailed": "パージに失敗しました",
     "scanFailed": "スキャンに失敗しました：{{reason}}",
     "reviewHint": "先に一覧のリソースを開いて内容を確認してください。一覧のすべての孤立リソースが削除されます。",
@@ -4434,11 +4442,11 @@
     "noMatch": "「{{filter}}」に一致するキーはありません",
     "pickFromVault": "Vault から選択",
     "placeholder": "API キーまたは ${vault:key-name}",
-    "vaultDown": "Vault が設定されていません — EDDI バックエンドでシークレットプロバイダーを設定してください",
+    "vaultDown": "Vault が設定されていません — {{productName}} バックエンドでシークレットプロバイダーを設定してください",
     "referencePlaceholder": "${vault:key-name}",
     "mustBeReference": "この項目にはシークレットそのものではなく参照 — ${vault:key} または ${vars:key} — を入力します。キーを選ぶか、先に値を Vault に保存してください。",
     "connectionChip": "接続",
-    "connectionChipTitle": "接続参照 — EDDI がリクエストごとに資格情報へ解決します",
+    "connectionChipTitle": "接続参照 — {{productName}} がリクエストごとに資格情報へ解決します",
     "clearConnection": "接続参照をクリア",
     "pickConnection": "接続参照を挿入",
     "connectionFilterPlaceholder": "接続を検索…",
@@ -4448,7 +4456,7 @@
     "connectionForbidden": "あなたのロールでは接続を一覧できません。名前が分かる場合は ${connection:name} を手入力してください。",
     "connectionUnavailable": "このバックエンドは接続機能を提供していません。",
     "connectionFailed": "接続を読み込めませんでした。",
-    "connectionHint": "${connection:name} を値全体として挿入します。EDDI がリクエストごとに資格情報へ解決します。",
+    "connectionHint": "${connection:name} を値全体として挿入します。{{productName}} がリクエストごとに資格情報へ解決します。",
     "restricted_one": "{{count}} 件のエージェントに制限",
     "restricted_other": "{{count}} 件のエージェントに制限",
     "restrictedTooltip": "許可先：{{agents}}",
@@ -5084,7 +5092,7 @@
   },
   "operator": {
     "title": "プラットフォームオペレーター",
-    "subtitle": "この EDDI 環境について質問すると、代わりに調べてくれます。",
+    "subtitle": "この {{productName}} 環境について質問すると、代わりに調べてくれます。",
     "readOnlyChip": "読み取り専用",
     "readWriteChip": "読み書き可能",
     "configError": "オペレーターの設定を読み込めませんでした",
@@ -5109,12 +5117,12 @@
       "baseUrl": "ベース URL",
       "apiKey": "モデルの API キー",
       "apiKeyOptional": "モデルの API キー（任意）",
-      "apiKeyHint": "ご利用の LLM プロバイダーのキーです。EDDI の資格情報ではありません。",
+      "apiKeyHint": "ご利用の LLM プロバイダーのキーです。{{productName}} の資格情報ではありません。",
       "apiKeyPlaceholder": "API キーを貼り付けるか、Vault のキーを選択してください",
       "vaultDown": "シークレット Vault が利用できないため、現在キーを保存できません。ここに入力したキーはバックエンドに渡され、可能であればバックエンドが Vault に保存します。",
       "environment": "環境",
       "authMode": "オペレーターの認証方法",
-      "authModeHint": "オペレーターは EDDI の管理 API を呼び出します。この設定で、その呼び出しが持つ資格情報が決まります。",
+      "authModeHint": "オペレーターは {{productName}} の管理 API を呼び出します。この設定で、その呼び出しが持つ資格情報が決まります。",
       "authNoneBlocked": "この環境では認証が有効なため、認証なしのツール呼び出しは拒否されます。オペレーターのデプロイ自体は成功しますが、その後すべての照会に失敗します。「あなたの ID」を選択してください。",
       "scope": {
         "label": "権限範囲",
@@ -5136,14 +5144,14 @@
       "promptBodyHint": "オペレーターの自己紹介や進め方を編集できます。",
       "tools": "付与されるツール（{{toolCount}} 件）",
       "activate": "有効にしてデプロイ",
-      "callerIdentityNote": "EDDI は呼び出し時にトークンを差し込みます。会話には保存されず、この環境にのみ送られます。",
+      "callerIdentityNote": "{{productName}} は呼び出し時にトークンを差し込みます。会話には保存されず、この環境にのみ送られます。",
       "rebuildWarning": "保存するとオペレーターは置き換えられます。新しいエージェントが作成され、現在のエージェント ({{agentId}}) はアンデプロイされ削除されます。既存のオペレーター会話は引き継がれず、以降この画面は新しいエージェントを対象にします。",
       "environmentHint": "オペレーターエージェント自体が動作する場所です。どの環境でも読み取りは可能です。",
       "platformBaseUrl": "プラットフォームのベース URL",
-      "platformBaseUrlHint": "EDDI が自分自身に到達できるアドレスです。オペレーターのツールはサーバー内部から呼び出すため、ブラウザーが使うアドレスとは異なります。事情が分かっている場合を除き、初期値のままにしてください。",
+      "platformBaseUrlHint": "{{productName}} が自分自身に到達できるアドレスです。オペレーターのツールはサーバー内部から呼び出すため、ブラウザーが使うアドレスとは異なります。事情が分かっている場合を除き、初期値のままにしてください。",
       "platformBaseUrlInvalid": "http:// または https:// で始まる絶対 URL を指定してください（例: http://127.0.0.1:7070）。",
-      "platformBaseUrlUnknown": "この EDDI デプロイは自身のアドレスを返せないため、ブラウザーのオリジンにフォールバックします。これはブラウザーと EDDI の間にトンネル・ポートマッピング・リバースプロキシが一切ない場合にのみ正しい値です。そうでなければ、ここにアドレスを入力してください。",
-      "platformBaseUrlLoopback": "このデプロイの HTTP ポートから導出しました。EDDI をサービス名やプロセス内 TLS で指定する必要がある場合は上書きしてください。",
+      "platformBaseUrlUnknown": "この {{productName}} デプロイは自身のアドレスを返せないため、ブラウザーのオリジンにフォールバックします。これはブラウザーと {{productName}} の間にトンネル・ポートマッピング・リバースプロキシが一切ない場合にのみ正しい値です。そうでなければ、ここにアドレスを入力してください。",
+      "platformBaseUrlLoopback": "このデプロイの HTTP ポートから導出しました。{{productName}} をサービス名やプロセス内 TLS で指定する必要がある場合は上書きしてください。",
       "platformBaseUrlAuto": "サーバーから取得",
       "platformBaseUrlDiffers": "このデプロイは現在、自身のアドレスを {{serverUrl}} と報告しています。上の値はこれと異なります。意図して設定した場合のみそのままにしてください。",
       "platformBaseUrlQueryFailed": "サーバーに自身のアドレスを問い合わせられませんでした。ここに入力しない限り有効化は失敗します。再試行するにはページを再読み込みしてください。",
@@ -5156,7 +5164,7 @@
     "authMode": {
       "none": {
         "label": "資格情報なし",
-        "description": "ツール呼び出しに Authorization ヘッダーを付けません。この EDDI 環境で認証が無効な場合にのみ動作します。"
+        "description": "ツール呼び出しに Authorization ヘッダーを付けません。この {{productName}} 環境で認証が無効な場合にのみ動作します。"
       },
       "caller-identity": {
         "label": "あなたの ID",
@@ -5243,9 +5251,9 @@
       "diffFailed": "比較用の保存済みバージョンを読み込めませんでした — 提案されたドキュメント全体は下に表示されます。",
       "diffForbidden": "保存済みバージョンとの比較には編集者権限が必要です — 提案されたドキュメント全体は下に表示されます。",
       "diffRedactionNote": "提案版では認証情報がマスクされているため、変更されていなくてもここでは変更として表示されます。",
-      "proposedNotJson": "提案されたドキュメントは有効な JSON ではないため、EDDI はこの書き込みを拒否します。権限付与の有無も確認できませんでした。却下して、修正したリクエストを求めてください。",
-      "proposedNotJsonRedacted": "このプレビューでマスクされた認証情報を考慮しても、提案されたドキュメントは有効な JSON ではないため、EDDI はこの書き込みをほぼ確実に拒否します。権限付与の有無も確認できませんでした。却下して、修正したリクエストを求めてください。",
-      "proposedTrailingText": "提案されたドキュメントの終わりの後に余分なテキストがあります。EDDI はその前のドキュメントだけを保存し、残りを通知なく破棄する可能性があります。権限付与の有無を確認したのもその部分だけです。却下して、修正したリクエストを求めてください。",
+      "proposedNotJson": "提案されたドキュメントは有効な JSON ではないため、{{productName}} はこの書き込みを拒否します。権限付与の有無も確認できませんでした。却下して、修正したリクエストを求めてください。",
+      "proposedNotJsonRedacted": "このプレビューでマスクされた認証情報を考慮しても、提案されたドキュメントは有効な JSON ではないため、{{productName}} はこの書き込みをほぼ確実に拒否します。権限付与の有無も確認できませんでした。却下して、修正したリクエストを求めてください。",
+      "proposedTrailingText": "提案されたドキュメントの終わりの後に余分なテキストがあります。{{productName}} はその前のドキュメントだけを保存し、残りを通知なく破棄する可能性があります。権限付与の有無を確認したのもその部分だけです。却下して、修正したリクエストを求めてください。",
       "diffStored": "保存済み v{{version}}",
       "diffProposed": "提案",
       "showFullRequest": "提案されたドキュメント全体を表示",
@@ -5454,8 +5462,8 @@
     "title": "新しいチーム"
   },
   "updates": {
-    "title": "EDDI のアップデート",
-    "description": "より新しい EDDI リリースがあるか確認します。実行するまで何も送信されません。",
+    "title": "{{productName}} のアップデート",
+    "description": "より新しい {{productName}} リリースがあるか確認します。実行するまで何も送信されません。",
     "installed": "インストール済み",
     "githubRelease": "GitHub リリース",
     "dockerImage": "Docker イメージ",
@@ -5467,7 +5475,7 @@
     "privacyNote": "確認はブラウザから api.github.com にのみ直接アクセスします。他のホストへの接続やデプロイ情報の送信は一切ありません。",
     "neverChecked": "まだ確認していません。",
     "upToDate": "最新リリース（{{version}}）を使用しています。",
-    "updateAvailable": "EDDI {{version}} が利用可能です",
+    "updateAvailable": "{{productName}} {{version}} が利用可能です",
     "updateAvailableDetail": "現在 {{installed}} を使用しています。",
     "ahead": "現在 {{installed}} を使用しており、最新リリース（{{version}}）より新しいバージョンです。",
     "unknownInstalled": "最新リリースは {{version}} です。インストール済みのバージョンを特定できなかったため、比較できません。",
@@ -5573,7 +5581,7 @@
       "title": "Manager"
     },
     "subtitle": "ワークスペースを選択して始めましょう。",
-    "title": "EDDI へようこそ",
+    "title": "{{productName}} へようこそ",
     "workforce": {
       "description": "複雑な課題について共に議論・分析・解決する AI チームを編成します。",
       "feature1": "エージェントのタスクフォースを編成",
@@ -5628,7 +5636,7 @@
     "count": "{{shown}} 件表示",
     "empty": "接続はまだありません",
     "emptyDesc": "エージェントが外部システムに認証できるよう、接続を作成してください。",
-    "guidance": "接続とは、資格情報と、それを送ってよいオリジンの一覧の組み合わせです。エージェントは名前で参照し — ${connection:jira} — EDDI がリクエストごとに解決します。そのため同じ接続で、組織共通の API キーも各自の個人アカウントも扱えます。",
+    "guidance": "接続とは、資格情報と、それを送ってよいオリジンの一覧の組み合わせです。エージェントは名前で参照し — ${connection:jira} — {{productName}} がリクエストごとに解決します。そのため同じ接続で、組織共通の API キーも各自の個人アカウントも扱えます。",
     "howItAuthenticates": "認証の方式",
     "confirmDelete": "この接続を削除しますか？",
     "confirmDeleteDesc": "これを通じて連携されたアカウントもすべて同時に解除されます — トークンは、それを生み出した接続より長く残ってはなりません。名前で参照しているエージェントは以後認証できなくなります。",
@@ -5646,7 +5654,7 @@
     },
     "choice": {
       "staticBody": "全員に共通の固定ヘッダー — X-Api-Key、または Authorization: Bearer …",
-      "basicBody": "HTTP Basic。エンコードは EDDI が行うため、パスワードは Vault の独立した項目として単独でローテーションできます。",
+      "basicBody": "HTTP Basic。エンコードは {{productName}} が行うため、パスワードは Vault の独立した項目として単独でローテーションできます。",
       "clientCredentialsBody": "エージェント自身としてログインします。全員で共有する 1 つのアクセストークンが自動更新されます。",
       "authorizationCodeBody": "各自が自分のアカウントを連携し、エージェントはその人として振る舞います。ログインの有効化と Vault が必要です。"
     },
@@ -5701,7 +5709,7 @@
     "removeOrigin": "{{origin}} を削除",
     "moreOrigins": "+{{more}}",
     "mineTitle": "あなたの連携アカウント",
-    "mineSubtitle": "EDDI があなたの代わりに使うことを許可したサービスです。ほかの人は使えず、EDDI が資格情報そのものを表示することもありません。",
+    "mineSubtitle": "{{productName}} があなたの代わりに使うことを許可したサービスです。ほかの人は使えず、{{productName}} が資格情報そのものを表示することもありません。",
     "noneLinked": "連携アカウントはありません",
     "noneLinkedDesc": "エージェントが他のサービスであなたとして動く必要が生じたときに、連携を求められます。連携したアカウントはここに表示され、いつでも解除できます。",
     "connect": "連携する",
@@ -5711,7 +5719,7 @@
     "unlinked": "「{{name}}」はアカウントとの連携が解除されました。",
     "unlinkFailed": "そのアカウントの連携を解除できませんでした。",
     "confirmUnlink": "このアカウントの連携を解除しますか？",
-    "confirmUnlinkDesc": "EDDI はあなたが与えた資格情報を破棄し、そのサービスであなたとして動けなくなります。いつでも再び連携できます。",
+    "confirmUnlinkDesc": "{{productName}} はあなたが与えた資格情報を破棄し、そのサービスであなたとして動けなくなります。いつでも再び連携できます。",
     "linked": "連携しました —「{{name}}」があなたのアカウントに紐づきました。",
     "linkStartFailed": "連携を開始できませんでした。",
     "loadMineFailed": "連携アカウントを読み込めませんでした",
@@ -5729,7 +5737,7 @@
       "active": "正常に動作しています。",
       "connectedOn": "{{date}} に連携しました。",
       "expired": "アクセストークンの有効期限が切れており、次の利用時に自動で更新されます — 操作は不要です。",
-      "revoked": "このアクセスは取り消されました。引き続き EDDI に使わせたい場合は再連携してください。",
+      "revoked": "このアクセスは取り消されました。引き続き {{productName}} に使わせたい場合は再連携してください。",
       "refreshFailed": "サービス側が保存済みの資格情報を受け付けなくなりました。再連携してアクセスを与え直してください。",
       "expiresAt": "アクセストークンの有効期限：{{date}}"
     },
@@ -5765,7 +5773,7 @@
       "nameTooLong": "名前は 64 文字以内です。",
       "timeoutRange": "タイムアウトは 1 ～ 60000 ミリ秒の整数で指定してください。デフォルトにするには空のままにします。",
       "templateLiteralCredential": "参照の前後のテキスト自体が資格情報のように見えます。${vault:…} の外に置けるのは「Bearer 」のような短いスキーム接頭辞だけです。残りはボールトに保存してください。",
-      "paramReserved": "これらのパラメーターのいずれかは EDDI 自身が設定します（client_id、redirect_uri、response_type、state、code_challenge…）。上書きするとフローが壊れます。",
+      "paramReserved": "これらのパラメーターのいずれかは {{productName}} 自身が設定します（client_id、redirect_uri、response_type、state、code_challenge…）。上書きするとフローが壊れます。",
       "paramValueReference": "パラメーター値は書かれたとおりに送信されます。ここでの ${…} 参照は解決されず、ボールトへのポインターが URL に載ってしまいます。プレーンなプロトコル値のみを使用してください。",
       "paramValueTooLong": "パラメーター値は 512 文字以内です。",
       "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。"
@@ -5775,20 +5783,20 @@
     "discardNewTitle": "この接続を破棄しますか？",
     "discardNewBody": "ここまで入力した内容は失われます。まだ何も作成されていません。",
     "confirmReconnect": "このアカウントを連携し直しますか？",
-    "confirmReconnectDesc": "このアカウントは正常に動作しているため、直すものはありません。続けると EDDI を離れてプロバイダーのサインイン画面に移動し、以前許可したアクセスが置き換わります。",
+    "confirmReconnectDesc": "このアカウントは正常に動作しているため、直すものはありません。続けると {{productName}} を離れてプロバイダーのサインイン画面に移動し、以前許可したアクセスが置き換わります。",
     "paramDuplicate": "この名前は別のパラメーターがすでに使用しています。保存されるのは最後の 1 つだけです。",
     "bindingChooser": "キーの出どころ",
     "bindingChoice": {
       "serviceBody": "ボールト内の 1 つのキーを全員に送信します。シンプルですが、エージェントはそのキーで届く範囲すべてにアクセスできます。",
-      "callerSuppliedBody": "EDDI は何も保存しません。EDDI を呼び出すシステムがリクエストごとに各ユーザー自身の資格情報を送るため、エージェントはそのユーザーができることしかできません。境界となるのは送信先の権限です。"
+      "callerSuppliedBody": "{{productName}} は何も保存しません。{{productName}} を呼び出すシステムがリクエストごとに各ユーザー自身の資格情報を送るため、エージェントはそのユーザーができることしかできません。境界となるのは送信先の権限です。"
     },
     "callerSuppliedHeaderTitle": "呼び出し元システムが送るもの",
     "callerSuppliedHeaderBody": "リクエストごとにヘッダーを 1 つ: 接続名、スペース、続いて {{header}} として送る値全体です。スキームも含めるので「Bearer abc」にエスケープは不要です。資格情報はそのリクエストの間だけ存在し、保存されることはありません。",
-    "callerSuppliedNeedsAuth": "呼び出し元は EDDI にサインインしている必要があります。資格情報のないリクエストは、未認証のまま送信されるのではなく失敗します。一時停止したツール呼び出しの再開時も同様で、この接続は MCP と A2A の検出からは除外されます。",
+    "callerSuppliedNeedsAuth": "呼び出し元は {{productName}} にサインインしている必要があります。資格情報のないリクエストは、未認証のまま送信されるのではなく失敗します。一時停止したツール呼び出しの再開時も同様で、この接続は MCP と A2A の検出からは除外されます。",
     "bindingCallerSuppliedTitle": "呼び出している本人として解決",
-    "bindingCallerSuppliedBody": "呼び出し元システムがリクエストと一緒に各ユーザー自身の資格情報を渡し、EDDI は何も保存しません。エージェントは送信先でそのユーザーができることしかできず、この接続は MCP と A2A の検出からは除外されます。",
+    "bindingCallerSuppliedBody": "呼び出し元システムがリクエストと一緒に各ユーザー自身の資格情報を渡し、{{productName}} は何も保存しません。エージェントは送信先でそのユーザーができることしかできず、この接続は MCP と A2A の検出からは除外されます。",
     "confirmAuthChange": "この接続の認証方法を変更しますか？",
-    "confirmAuthChangeDesc": "この接続を通じてリンクされたアカウントは解決されなくなります。付与された権限はそれを生んだフローに属するためです。アカウントがリンクされている間、EDDI は変更を拒否し、その数を伝えます。先にリンクを解除するか、新しい接続を作成してそちらをリンクしてもらってください。",
+    "confirmAuthChangeDesc": "この接続を通じてリンクされたアカウントは解決されなくなります。付与された権限はそれを生んだフローに属するためです。アカウントがリンクされている間、{{productName}} は変更を拒否し、その数を伝えます。先にリンクを解除するか、新しい接続を作成してそちらをリンクしてもらってください。",
     "confirmAuthChangeAccept": "変更する",
     "deleted": "接続「{{name}}」を削除しました",
     "confirmDeleteNamed": "接続「{{name}}」を削除しますか？"
@@ -6057,7 +6065,7 @@
     "valueLabel": "値",
     "intRange": "Integer の範囲（±2,147,483,647）外です。この値には長整数を選んでください。",
     "unsafeLong": "9,007,199,254,740,991 を超えると、ブラウザーはこの整数を正確に保持できません。JSON タブで編集してください。",
-    "needs66": "長整数と小数には EDDI 6.6 以降が必要です。",
+    "needs66": "長整数と小数には サーバーバージョン 6.6 以降が必要です。",
     "conflict": "この行は {{fields}} を設定しています。使われるのは {{winner}} だけです。ここで型を選ぶと、その 1 つの値を残して他は削除されます。",
     "kindString": "テキスト / テンプレート",
     "kindInt": "整数",
@@ -6095,7 +6103,7 @@
       "degradedNatsText": "このページに応答しているノードは NATS に到達できません。サービスは継続しますが、クラスター協調はありません：共有リース、フェンス、クラスター全体のイベントはいずれも機能しません。",
       "degradedText": "NATS には到達できますが、ノードの欠落、遅延、または問題の報告があります。そのノードのターンが保持していた会話は、リース TTL 内に引き継がれます。",
       "partitionedText": "ストリームまたはバケットのレプリカを持つ NATS サーバーがオフラインです：NATS クラスター自体が分断されています。クォーラムが残っている間は書き込みが継続します。",
-      "singleNodeText": "このデプロイはインメモリコーディネーターで 1 つの EDDI ノードを実行しています。ノード間で協調する対象はありません。"
+      "singleNodeText": "このデプロイはインメモリコーディネーターで 1 つの {{productName}} ノードを実行しています。ノード間で協調する対象はありません。"
     },
     "next": {
       "deadLetters": "待機中のデッドレターを確認してください：原因が解消されたものは再実行し、残りは破棄します。",
@@ -6276,11 +6284,11 @@
     "answeredBy": "応答ノード：{{node}}",
     "staleNotice": "最新の更新に失敗しました — これは {{age}} 前の表示です。",
     "title": "クラスター",
-    "subtitle": "すべての EDDI レプリカの健全性、ノード、リース、失敗したターン — そして安全に実行できる対処",
+    "subtitle": "すべての {{productName}} レプリカの健全性、ノード、リース、失敗したターン — そして安全に実行できる対処",
     "tabs": "クラスターコンソールのセクション",
     "single": {
       "title": "クラスターモードで追加される機能",
-      "scale": "任意の数の EDDI レプリカを単純なラウンドロビン型ロードバランサーの背後に配置し、1 つのデータベースと NATS JetStream クラスターを共有します。",
+      "scale": "任意の数の {{productName}} レプリカを単純なラウンドロビン型ロードバランサーの背後に配置し、1 つのデータベースと NATS JetStream クラスターを共有します。",
       "leases": "フェンシングトークン付きの会話リース：1 つの会話のターンはどこでも重複せず、リースを失ったノードは新しいターンを上書きできません。",
       "failover": "フェイルオーバー：クラッシュしたノードの会話はリース TTL 内に別のノードで継続します。デッドレター、キャッシュ、デプロイ、キャンセルはクラスター全体で機能します。",
       "docs": "クラスタリングガイドを読む"

@@ -29,7 +29,7 @@ export function MockDataBanner() {
       <span>
         {t(
           "mockBanner.message",
-          "Demo Mode — Displaying sample data. Connect an EDDI backend for real data.",
+          "Demo Mode — Displaying sample data. Connect an {{productName}} backend for real data.",
         )}
       </span>
       <button

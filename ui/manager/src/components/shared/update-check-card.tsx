@@ -168,7 +168,7 @@ export function UpdateCheckCard() {
             <ResultRow tone="accent" icon={ArrowUpCircle}>
               <div className="space-y-1">
                 <p className="font-medium text-foreground">
-                  {t("updates.updateAvailable", "EDDI {{version}} is available", {
+                  {t("updates.updateAvailable", "{{productName}} {{version}} is available", {
                     version: latest.version,
                   })}
                 </p>

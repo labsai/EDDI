@@ -53,7 +53,7 @@ export function LinkedAccountsPage() {
         <p className="mt-1 text-muted-foreground">
           {t(
             "pages.linkedAccounts.subtitle",
-            "Services you have allowed EDDI to use on your behalf",
+            "Services you have allowed {{productName}} to use on your behalf",
           )}
         </p>
       </div>

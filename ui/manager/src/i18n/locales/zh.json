@@ -14,8 +14,16 @@
     "confirmDeleteAllDesc": "永久删除此对话拥有的所有文件。此操作无法撤销。"
   },
   "app": {
-    "title": "EDDI Manager",
-    "description": "EDDI 会话式 AI 平台管理面板"
+    "title": "{{productName}} Manager",
+    "description": "{{productName}} 会话式 AI 平台管理面板"
+  },
+  "about": {
+    "title": "关于 {{productName}}",
+    "versionLabel": "版本",
+    "versionUnknown": "版本未知",
+    "poweredBy": "由 EDDI 提供支持",
+    "license": "EDDI 是开源软件，采用 Apache License 2.0 许可。",
+    "licenseLink": "阅读许可证"
   },
   "auth": {
     "login": "登录",
@@ -111,7 +119,7 @@
   "pages": {
     "dashboard": {
       "title": "仪表盘",
-      "subtitle": "EDDI Agents 和会话概览",
+      "subtitle": "{{productName}} Agents 和会话概览",
       "activeAgents": "活跃 Agents",
       "totalWorkflows": "工作流",
       "totalResources": "资源",
@@ -163,11 +171,11 @@
     "approvalsSubtitle": "审查并决定等待人工输入的对话",
     "connections": {
       "title": "连接",
-      "subtitle": "EDDI 如何向智能体所访问的系统进行身份验证"
+      "subtitle": "{{productName}} 如何向智能体所访问的系统进行身份验证"
     },
     "linkedAccounts": {
       "title": "已关联账户",
-      "subtitle": "你已授权 EDDI 代表你使用的服务"
+      "subtitle": "你已授权 {{productName}} 代表你使用的服务"
     }
   },
   "common": {
@@ -232,7 +240,7 @@
     "deletePermanently": "永久删除",
     "deletePermanentlyHint": "无法撤消。不勾选此项时，该项仅被标记为已删除，在被清除前仍可恢复。",
     "errors": {
-      "network": "无法连接到 EDDI。请检查网络连接后重试。",
+      "network": "无法连接到 {{productName}}。请检查网络连接后重试。",
       "unauthorized": "您的会话已过期，请重新登录。",
       "forbidden": "您无权查看此内容。",
       "notFound": "未找到——可能已被删除。"
@@ -296,7 +304,7 @@
     "a2aDescription": "智能体描述",
     "a2aEnable": "启用 A2A",
     "a2aEnabled": "已启用",
-    "a2aEnabledDesc": "使此智能体可通过 A2A 协议被其他智能体发现。其他 EDDI 实例可以将此智能体作为工具查找并调用。",
+    "a2aEnabledDesc": "使此智能体可通过 A2A 协议被其他智能体发现。其他 {{productName}} 实例可以将此智能体作为工具查找并调用。",
     "a2aEndpoints": "端点",
     "a2aNoSkills": "无技能——将使用默认的 'chat' 技能",
     "a2aSection": "智能体间 (A2A)",
@@ -444,9 +452,9 @@
     "slackWebhookUrl": "Webhook URL",
     "slackWebhookCopied": "Webhook URL 已复制",
     "slackStep1": "在 api.slack.com/apps 上创建一个 Slack 应用并将其安装到您的工作区。",
-    "slackStep2": "将 Bot 令牌 (xoxb-…) 和签名密钥复制到 EDDI 保管库中，并在下方配置频道。",
+    "slackStep2": "将 Bot 令牌 (xoxb-…) 和签名密钥复制到 {{productName}} 保管库中，并在下方配置频道。",
     "slackStep3": "然后在 Slack 应用中启用 Event Subscriptions，粘贴上面的 Webhook URL，并订阅：",
-    "slackSetupNote": "重要提示：在启用 Event Subscriptions 之前，请先在下方配置频道 — Slack 会发送 URL 验证请求，需要在 EDDI 中配置签名密钥。",
+    "slackSetupNote": "重要提示：在启用 Event Subscriptions 之前，请先在下方配置频道 — Slack 会发送 URL 验证请求，需要在 {{productName}} 中配置签名密钥。",
     "slackRequiredScopes": "所需的 Bot 令牌权限",
     "hitlConfig": "人机协同",
     "hitlConfigDesc": "当此智能体为人工批准暂停对话时，这些设置控制等待时长以及未及时决定时的处理方式。",
@@ -504,9 +512,9 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "仅在使用代理、私有部署或 Azure OpenAI 端点时需要",
-    "jlamaNoteTitle": "Jlama 在 EDDI 内部运行",
-    "jlamaNoteBody": "没有可指向的模型服务器——EDDI 将模型加载到自身进程中，并在首次使用时从 Hugging Face 下载权重，因此第一条消息可能需要一段时间。",
-    "jlamaNoteTuning": "在容器中运行 EDDI？请在创建后打开该智能体的 LLM 配置，将 modelCachePath 指向挂载的卷——默认缓存位于容器的临时层，容器被移除或替换后模型可能会重新下载。quantizeModelAtRuntime、workingDirectory 和 workingQuantizedType 也可在那里调整。",
+    "jlamaNoteTitle": "Jlama 在 {{productName}} 内部运行",
+    "jlamaNoteBody": "没有可指向的模型服务器——{{productName}} 将模型加载到自身进程中，并在首次使用时从 Hugging Face 下载权重，因此第一条消息可能需要一段时间。",
+    "jlamaNoteTuning": "在容器中运行 {{productName}}？请在创建后打开该智能体的 LLM 配置，将 modelCachePath 指向挂载的卷——默认缓存位于容器的临时层，容器被移除或替换后模型可能会重新下载。quantizeModelAtRuntime、workingDirectory 和 workingQuantizedType 也可在那里调整。",
     "baseUrlHintLocal": "必填——本地模型服务器运行的 URL",
     "modelHint": "输入您的提供商支持的任何模型名称，或从建议中选择一个",
     "modelHintSelfHosted": "与服务器提供的完全一致的模型 ID（见其 /v1/models 列表）。没有默认值。",
@@ -573,7 +581,7 @@
     "structuredOutputDesc": "LLM 以 JSON 对象而非纯文本形式响应",
     "structuredOutputInfo": "启用此功能后，LLM 将以包含结构化字段的 JSON 对象进行响应。系统提示词中会附加 JSON 架构，并将模型设为 JSON 响应模式。",
     "builtInTools": "内置工具",
-    "builtInToolsDesc": "启用 EDDI 内置工具库（计算器、日期时间等）",
+    "builtInToolsDesc": "启用 {{productName}} 内置工具库（计算器、日期时间等）",
     "toolsWhitelist": "白名单（空 = 全部）",
     "mcpServers": "MCP 服务器",
     "mcpServersDesc": "用于外部工具的 Model Context Protocol 服务器",
@@ -1221,7 +1229,7 @@
     "argumentInvalidJson": "不是有效的 JSON——保留最后一个有效值",
     "removeArgument": "移除参数",
     "maxResponseSize": "最大存储响应长度（字符）",
-    "maxResponseSizeHint": "较长的工具结果在存入会话记忆前会被截断为该字符数（并记录警告）。留空、0 或更小则使用默认值 2,000,000（约 2 MB）。需要 EDDI 6.6 或更高版本。"
+    "maxResponseSizeHint": "较长的工具结果在存入会话记忆前会被截断为该字符数（并记录警告）。留空、0 或更小则使用默认值 2,000,000（约 2 MB）。需要 服务器版本 6.6 或更高版本。"
   },
   "llmEditor": {
     "addCustomInstruction": "添加指令",
@@ -1496,7 +1504,7 @@
     "maxToolCallsPerIterationDefault": "（默认 {{n}}）",
     "maxToolCallsPerTurn": "每轮最多工具调用数",
     "maxToolCallsPerTurnDefault": "（默认 {{n}}）",
-    "maxToolCallsHint": "超出上限的调用不会执行：每个调用都会得到一个 NOT_EXECUTED 结果，告知模型已达到上限，模型会基于已有信息作答。被拒绝的调用永远不会进入审批环节。每轮计数包含审批暂停之前的调用。-1 或 0 表示取消上限。需要 EDDI 6.6 或更高版本——在旧服务器上请留空。",
+    "maxToolCallsHint": "超出上限的调用不会执行：每个调用都会得到一个 NOT_EXECUTED 结果，告知模型已达到上限，模型会基于已有信息作答。被拒绝的调用永远不会进入审批环节。每轮计数包含审批暂停之前的调用。-1 或 0 表示取消上限。需要 服务器版本 6.6 或更高版本——在旧服务器上请留空。",
     "maxToolCallsUncapped": "某个上限已关闭：模型在该处可执行任意数量的工具调用，仅受 Max Tool Iterations 限制。",
     "repeatGuardTitle": "重复失败的工具调用",
     "repeatGuardEnabled": "阻止重复的失败调用",
@@ -1504,7 +1512,7 @@
     "maxRefusalsPerTurn": "停止前的拒绝次数",
     "maxIdenticalCalls": "相同成功调用的上限",
     "exemptTools": "豁免的工具（逗号分隔）",
-    "repeatGuardHint": "如果某个工具调用已以相同方式失败，且此后没有任何调用成功，则不再重新执行，而是返回 NOT_EXECUTED；达到拒绝上限后，该轮以固定消息结束。默认开启；留空则保留默认值。永久性失败（如 HTTP 403/404）在下一次相同调用时即被拒绝，可重试的失败在允许次数之后被拒绝。相同成功调用的上限未设置时不启用（-1 或 0 = 不限）。需要 EDDI 6.6 或更高版本——旧服务器上请勿改动。",
+    "repeatGuardHint": "如果某个工具调用已以相同方式失败，且此后没有任何调用成功，则不再重新执行，而是返回 NOT_EXECUTED；达到拒绝上限后，该轮以固定消息结束。默认开启；留空则保留默认值。永久性失败（如 HTTP 403/404）在下一次相同调用时即被拒绝，可重试的失败在允许次数之后被拒绝。相同成功调用的上限未设置时不启用（-1 或 0 = 不限）。需要 服务器版本 6.6 或更高版本——旧服务器上请勿改动。",
     "toggleTask": "显示或隐藏任务详情",
     "noActionsWarning": "此任务没有触发动作，因此永远不会运行。请添加行为规则发出的动作，例如 send_message。",
     "model": "模型",
@@ -1526,7 +1534,7 @@
       "title": "模型设置",
       "rejectedBy": "{{model}} 不接受",
       "noEffectOn": "对 {{model}} 无效",
-      "droppedHint": "EDDI 会在每次请求前将其移除，因此该值永远不会被发送。",
+      "droppedHint": "{{productName}} 会在每次请求前将其移除，因此该值永远不会被发送。",
       "removeKey": "移除 {{key}}",
       "remove": "移除",
       "providerDefault": "提供商默认值",
@@ -1577,7 +1585,7 @@
       "groupTotal": "此组中的设置：{{count}}",
       "unavailable_one": "{{count}} 项设置被 {{model}} 拒绝或忽略",
       "unavailable_other": "{{count}} 项设置被 {{model}} 拒绝或忽略",
-      "variableModel": "模型是变量引用（{{model}}），下方的检查暂时无法得知具体模型；变量解析后 EDDI 会应用针对该模型的规则。",
+      "variableModel": "模型是变量引用（{{model}}），下方的检查暂时无法得知具体模型；变量解析后 {{productName}} 会应用针对该模型的规则。",
       "badgeMigrated": "以 {{key}} 发送",
       "migratedTo": "对 {{model}} 以 {{key}} 发送",
       "group": {
@@ -1606,7 +1614,7 @@
     "grTypeJson": "JSON 对象",
     "grTypeJsonDesc": "查找不是恰好一个 JSON 对象的回答（允许使用 Markdown 代码围栏）。仅检查结构。",
     "grTypeClassifier": "安全分类器模型",
-    "grTypeClassifierDesc": "向你自行运行的安全分类器模型（Granite Guardian、ShieldGemma、内容审核 API）请求判定。EDDI 不附带分类器模型。",
+    "grTypeClassifierDesc": "向你自行运行的安全分类器模型（Granite Guardian、ShieldGemma、内容审核 API）请求判定。{{productName}} 不附带分类器模型。",
     "grActionBlock": "拦截",
     "grActionRedact": "脱敏",
     "grActionReprompt": "重新提示",
@@ -1682,7 +1690,7 @@
     "grClfOutputPrice": "输出价格 $/百万 token",
     "grClfContext": "将本轮检索到的 RAG 上下文以 {context} 提供给模板（用于有据性检查）。没有提示模板时无效。",
     "grSectionTitle": "防护栏",
-    "grIntro": "在调用模型之前筛查用户的消息，并在存储或送达之前筛查模型的回答。除非你添加防护栏，否则不会筛查任何内容。需要 EDDI 6.6 或更高版本：较旧的服务器会忽略这些列表，使智能体在无防护的状态下运行。",
+    "grIntro": "在调用模型之前筛查用户的消息，并在存储或送达之前筛查模型的回答。除非你添加防护栏，否则不会筛查任何内容。需要 服务器版本 6.6 或更高版本：较旧的服务器会忽略这些列表，使智能体在无防护的状态下运行。",
     "grInput": "输入防护栏",
     "grOutput": "输出防护栏",
     "grInputHint": "按顺序处理用户的消息，先于检索和模型调用。",
@@ -2028,8 +2036,8 @@
     "kekNewKeyLabel": "新主密钥",
     "kekNewKeyPlaceholder": "新密钥 — 至少 8 个字符",
     "kekNewKeyTooShort": "新主密钥必须至少包含 8 个字符。",
-    "kekRestartHint": "轮换后，您必须将 EDDI_VAULT_MASTER_KEY 更新为新密钥并重启 EDDI。",
-    "kekResultInstruction": "需要操作：将环境变量 EDDI_VAULT_MASTER_KEY 设置为新的主密钥并重启 EDDI。在此之前，正在运行的实例仍在内存中使用旧密钥。",
+    "kekRestartHint": "轮换后，您必须将 EDDI_VAULT_MASTER_KEY 更新为新密钥并重启 {{productName}}。",
+    "kekResultInstruction": "需要操作：将环境变量 EDDI_VAULT_MASTER_KEY 设置为新的主密钥并重启 {{productName}}。在此之前，正在运行的实例仍在内存中使用旧密钥。",
     "resetTenantTitle": "重置此租户的 Vault",
     "resetTenantBlurb": "破坏性的最后手段。永久删除所有 Secret 和 DEK，使 Vault 可以重新开始 — 在主密钥丢失或更改后使用。",
     "resetTenantAction": "重置 Vault",
@@ -2160,7 +2168,7 @@
       "noMatch": "没有符合这些筛选条件的管理操作",
       "empty": "尚未记录任何管理操作",
       "noMatchLoadOlder": "只加载了最新的记录——加载更早的记录以继续向前查找。",
-      "emptyHint": "EDDI 从 6.6 版本开始记录这些操作，除非 eddi.audit.admin-actions.enabled 为 false。较旧的服务器在此不显示任何内容。",
+      "emptyHint": "服务器从 6.6 版本开始记录这些操作，除非 eddi.audit.admin-actions.enabled 为 false。较旧的服务器在此不显示任何内容。",
       "caption": "管理操作，最新的在前",
       "colTime": "时间",
       "colActor": "操作者",
@@ -2172,8 +2180,8 @@
       "loadOlder": "加载更早的记录",
       "forbidden": "只有管理员可以查看管理操作",
       "forbiddenHint": "该日志记录了所有管理员的变更，因此查看需要 eddi-admin 角色。",
-      "unsupported": "此 EDDI 不记录管理操作",
-      "unsupportedHint": "从 EDDI 6.6 起开始记录。",
+      "unsupported": "此服务器不记录管理操作",
+      "unsupportedHint": "从 服务器版本 6.6 起开始记录。",
       "loadError": "无法加载管理操作。",
       "shown": "已显示 {{loaded}} 条已加载记录中的 {{shown}} 条",
       "windowAny": "任意时间",
@@ -2315,15 +2323,15 @@
     },
     "totalCappedHint": "服务器返回了完整的一页，因此实际计划任务可能多于此处显示的数量。",
     "systemManaged": "系统",
-    "systemManagedHint": "由 EDDI 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
+    "systemManagedHint": "由 {{productName}} 管理（知识库摄取、记忆整合或团队节奏）。请在其定义处修改，而不是在这里。",
     "persistentConversationIdLocked": "在创建计划时设置。服务器会保留各次触发一直追加到的那个对话。",
     "failedScheduleGone": "该计划已不存在",
-    "disabledByPerson": "由人工停用。在 EDDI 6.6 之前因取消部署而关闭的计划也会显示为此状态：请手动启用一次。",
+    "disabledByPerson": "由人工停用。在 服务器版本 6.6 之前因取消部署而关闭的计划也会显示为此状态：请手动启用一次。",
     "disabledUndeployed": "智能体已取消部署",
     "disabledUndeployedHint": "在其智能体取消部署时被关闭。智能体下次成功部署时会自动重新启用——无需操作。",
     "disabledAccessRevoked": "访问已撤销",
     "disabledAccessRevokedHint": "其创建者已无法再使用此智能体，因此停止触发。请重新与其共享该智能体——或以有权使用者的身份重新创建计划——然后启用。",
-    "disabledOtherHint": "由 EDDI 因所示原因关闭。",
+    "disabledOtherHint": "由 {{productName}} 因所示原因关闭。",
     "serverRefusedUpdate": "服务器拒绝了此更改：",
     "serverRefusedCreate": "服务器拒绝了此计划：",
     "disabledAccessRevokedHintBy": "其创建者（{{user}}）已无法再使用此智能体，因此停止触发。请重新与其共享该智能体——或以有权使用者的身份重新创建计划——然后启用。",
@@ -2657,7 +2665,7 @@
       "reference": "存储位置必须写成字面名称，不能是 ${…} 引用。该位置决定智能体读取谁的文档，而引用只在构建存储时——所有检查之后——才从任何编辑者都能修改的变量中解析，因此可能指向另一个知识库的存储或 SQL。已用引用保存的知识库会停止摄取和检索，直到用字面名称重新保存一次。",
       "pgIdentifier": "pgvector 表名必须是简单名称，可带 schema 前缀（字母、数字、_ 和 $）。存储会将其原样放入 SQL，因此引号、空格和标点都会被拒绝。",
       "refused": "服务器拒绝 {{param}} = {{value}}",
-      "reserved": "以 {{prefix}} 开头的名称（任一部分、不区分大小写）为保留名称：EDDI 用该前缀派生每个知识库自己的位置，因此此名称可能指向另一个知识库的存储。请换一个名称，或留空以获得此知识库自己的位置。",
+      "reserved": "以 {{prefix}} 开头的名称（任一部分、不区分大小写）为保留名称：{{productName}} 用该前缀派生每个知识库自己的位置，因此此名称可能指向另一个知识库的存储。请换一个名称，或留空以获得此知识库自己的位置。",
       "savedReference": "已保存的 {{param}} = {{value}} 不再有效",
       "refusedIfChanged": "{{param}} = {{value}} 按已保存的状态继续有效，但如果修改，服务器会拒绝"
     },
@@ -2665,10 +2673,10 @@
       "idTitle": "独立存储（按 ID 寻址）",
       "nameTitle": "按名称存储（6.5 布局）",
       "idBody": "此知识库拥有独立存储：每个分块都带有它的 ID，检索只会看到它自己的分块，即使在共享表中也是如此。",
-      "nameBody": "创建于 EDDI 6.6 之前：其存储按知识库名称查找，因此任何同名知识库都会共享它。它会按原样继续工作。",
+      "nameBody": "创建于 服务器版本 6.6 之前：其存储按知识库名称查找，因此任何同名知识库都会共享它。它会按原样继续工作。",
       "defaultUnsaved": "位置：eddi_kbid_<id>（默认，保存时分配）",
       "migrate": "迁移到独立存储…",
-      "renameNote": "重命名此知识库也会以同样方式迁移它。需要 EDDI 6.6 或更高版本。",
+      "renameNote": "重命名此知识库也会以同样方式迁移它。需要 服务器版本 6.6 或更高版本。",
       "migrateTitle": "将此知识库迁移到独立存储？",
       "migrateBodyExplicit": "它保留原有的表，但从现在起只检索带有其 ID 的分块——现有分块都没有这个标记，所以它会从空开始。其数据源会在下次运行时自动重新摄取；通过 /ingest 添加的文档必须重新摄取。不会删除任何内容。更改在保存时生效，且无法撤回。",
       "migrateBody": "它会迁移到一个新的、空的独立存储。其数据源会在下次运行时自动重新摄取；通过 /ingest 添加的文档必须重新摄取。旧存储保持原样不动。更改在保存时生效，且无法撤回。",
@@ -2774,9 +2782,9 @@
   },
   "onboarding": {
     "welcome": {
-      "title": "欢迎使用 EDDI",
+      "title": "欢迎使用 {{productName}}",
       "subtitle": "您的AI智能体指挥中心",
-      "introText": "EDDI Manager是您构建、测试和运行对话式AI智能体的指挥中心。",
+      "introText": "{{productName}} Manager是您构建、测试和运行对话式AI智能体的指挥中心。",
       "capabilitiesTitle": "您可以做什么",
       "capabilitiesSubtitle": "一切生产级智能体所需的功能",
       "buildAgents": "构建智能体",
@@ -2808,7 +2816,7 @@
         "step3Title": "快捷操作",
         "step3Desc": "直接进入常用功能。智能体向导是创建首个智能体最快的方式，只需不到2分钟。",
         "step4Title": "个性化设置",
-        "step4Desc": "在浅色、深色和系统主题间切换。EDDI Manager 支持11种语言，选择最适合您的语言。"
+        "step4Desc": "在浅色、深色和系统主题间切换。{{productName}} Manager 支持11种语言，选择最适合您的语言。"
       },
       "agents": {
         "title": "智能体导览",
@@ -2923,7 +2931,7 @@
         "step1Title": "集群健康状况",
         "step1Desc": "结论——健康、降级、分区或单节点——及其背后的原因和下一步操作。",
         "step2Title": "节点",
-        "step2Desc": "每个 EDDI 副本：心跳、NATS 往返时延、运行中的轮次和租约，以及是否已排空或丢失。",
+        "step2Desc": "每个 {{productName}} 副本：心跳、NATS 往返时延、运行中的轮次和租约，以及是否已排空或丢失。",
         "step3Title": "死信队列",
         "step3Desc": "检查故障任务并重新提交，将崩溃系统隔离控制住稳定安全环境。"
       },
@@ -3718,7 +3726,7 @@
     "upgradeExisting": "升级现有智能体",
     "upgradeDesc": "将资源在结构上匹配到目标智能体。最适合环境间的升级推广。",
     "syncRemote": "从远程实例同步",
-    "syncDesc": "连接到另一个EDDI实例，并实时同步特定智能体。",
+    "syncDesc": "连接到另一个{{productName}}实例，并实时同步特定智能体。",
     "importNow": "立即导入",
     "previewChanges": "预览更改",
     "selectTargetAgent": "选择目标智能体",
@@ -3760,11 +3768,11 @@
   },
   "syncPage": {
     "title": "智能体同步",
-    "subtitle": "在 EDDI 实例之间同步智能体",
+    "subtitle": "在 {{productName}} 实例之间同步智能体",
     "connection": "源实例",
     "loadingLocalAgents": "正在加载所有本地代理后再进行匹配…",
     "localAgentsError": "无法完整加载本地代理列表，因此无法按名称匹配代理。现在同步会创建重复项。",
-    "sourceUrl": "源 EDDI 实例 URL",
+    "sourceUrl": "源 {{productName}} 实例 URL",
     "authToken": "授权 Token",
     "authHint": "可选，将作为 X-Source-Authorization 请求头发送。",
     "connect": "连接",
@@ -4328,7 +4336,7 @@
     "userLookup": "用户查找",
     "exportIncomplete": "已下载，但此数据包并不完整 — 请勿将其作为已履行的第 15/20 条请求发送。",
     "exportIncompleteTitle": "导出数据包不完整",
-    "exportIncompleteBody": "此数据包未涵盖 EDDI 保存的该用户全部数据，不得作为已履行的第 15/20 条请求交付。",
+    "exportIncompleteBody": "此数据包未涵盖 {{productName}} 保存的该用户全部数据，不得作为已履行的第 15/20 条请求交付。",
     "omittedCategories": "未导出",
     "resultsPartialTitle": "擦除不完整",
     "resultsPartialBody": "该用户的部分数据可能仍然存在。在这些步骤成功之前，请勿报告擦除已完成。",
@@ -4345,7 +4353,7 @@
     "failedConversations_one": "有 {{count}} 个会话无法读取，未包含在数据包中。",
     "deleteIncomplete": "删除未完成 — 该用户的部分数据可能仍然存在。请勿报告为已完成。",
     "auditRedacted": "已脱敏的审计条目",
-    "auditLegacy": "此 EDDI 只会替换审计账本中的用户 ID：其中记录的提示和回复会被保留。EDDI 6.6 及更高版本还会将其脱敏，除非服务器以 eddi.audit.erasure-mode=pseudonymize 运行。",
+    "auditLegacy": "此服务器只会替换审计账本中的用户 ID：其中记录的提示和回复会被保留。服务器版本 6.6 及更高版本还会将其脱敏，除非服务器以 eddi.audit.erasure-mode=pseudonymize 运行。",
     "auditPseudonymizeMode": "审计内容已保留：此服务器以 eddi.audit.erasure-mode=pseudonymize 运行（例如处于法律保留期间），因此只替换了审计账本中的用户 ID。",
     "auditRedactionFailed": "没有任何审计内容被涂黑：涂黑步骤失败（见上文），因此账本中记录的提示词和回复仍然存在。请重新执行删除。",
     "auditRedactedExplanation": "该用户的审计记录为留存需要而保留，但其提示、回复、模型详情和工具调用已被脱敏标记替换，用户 ID 已假名化。此前校验通过的记录已重新签名；已被篡改的记录仍标记为无效。",
@@ -4362,7 +4370,7 @@
     "confirmTypeLabel": "请输入用户 ID“{{userId}}”以确认"
   },
   "mockBanner": {
-    "message": "演示模式——显示示例数据。连接 EDDI 后端以获取真实数据。"
+    "message": "演示模式——显示示例数据。连接 {{productName}} 后端以获取真实数据。"
   },
   "orphans": {
     "description": "查找并清理未被任何智能体或工作流引用的资源。",
@@ -4383,7 +4391,7 @@
     "scanIncomplete": "本次扫描未完成",
     "scanIncompleteBody": "仍在使用中的资源可能被列为孤立资源。在扫描完整完成之前，清除操作已被禁用。",
     "confirmPurge": "永久删除全部 {{count}} 个孤立资源？此操作无法撤销。",
-    "purgeIncompleteScan": "未删除任何内容：EDDI 未能完成对仍在使用的资源的检查。请重新扫描后再试。",
+    "purgeIncompleteScan": "未删除任何内容：{{productName}} 未能完成对仍在使用的资源的检查。请重新扫描后再试。",
     "purgeFailed": "清理失败",
     "scanFailed": "扫描失败：{{reason}}",
     "reviewHint": "请先从列表中打开资源进行查看；列表中的所有孤立资源都会被删除。",
@@ -4434,11 +4442,11 @@
     "noMatch": "没有与 \"{{filter}}\" 匹配的密钥",
     "pickFromVault": "从保管库选择",
     "placeholder": "API 密钥或 ${vault:key-name}",
-    "vaultDown": "保管库尚未配置——请在 EDDI 后端设置 Secret 提供程序",
+    "vaultDown": "保管库尚未配置——请在 {{productName}} 后端设置 Secret 提供程序",
     "referencePlaceholder": "${vault:key-name}",
     "mustBeReference": "此字段接受引用 —— ${vault:key} 或 ${vars:key} —— 而不是密钥本身。请选择一个密钥，或先把值存入保险库。",
     "connectionChip": "连接",
-    "connectionChipTitle": "连接引用——EDDI 在每个请求中将其解析为凭据",
+    "connectionChipTitle": "连接引用——{{productName}} 在每个请求中将其解析为凭据",
     "clearConnection": "清除连接引用",
     "pickConnection": "插入连接引用",
     "connectionFilterPlaceholder": "搜索连接…",
@@ -4448,7 +4456,7 @@
     "connectionForbidden": "您的角色无法列出连接。如果知道名称，请手动输入 ${connection:name}。",
     "connectionUnavailable": "此后端不提供连接功能。",
     "connectionFailed": "无法加载连接。",
-    "connectionHint": "将 ${connection:name} 作为完整值插入。EDDI 在每个请求中将其解析为凭据。",
+    "connectionHint": "将 ${connection:name} 作为完整值插入。{{productName}} 在每个请求中将其解析为凭据。",
     "restricted_one": "仅限 {{count}} 个智能体",
     "restricted_other": "仅限 {{count}} 个智能体",
     "restrictedTooltip": "已授权给：{{agents}}",
@@ -5084,7 +5092,7 @@
   },
   "operator": {
     "title": "平台操作员",
-    "subtitle": "询问这套 EDDI 部署的情况——它会替你查。",
+    "subtitle": "询问这套 {{productName}} 部署的情况——它会替你查。",
     "readOnlyChip": "只读",
     "readWriteChip": "读写",
     "configError": "无法加载操作员配置",
@@ -5109,12 +5117,12 @@
       "baseUrl": "基础 URL",
       "apiKey": "模型 API 密钥",
       "apiKeyOptional": "模型 API 密钥（可选）",
-      "apiKeyHint": "你的大模型提供商的密钥，不是 EDDI 的凭据。",
+      "apiKeyHint": "你的大模型提供商的密钥，不是 {{productName}} 的凭据。",
       "apiKeyPlaceholder": "粘贴 API 密钥，或选择一个保险库密钥",
       "vaultDown": "密钥保险库当前不可用，因此暂时无法将密钥存入其中。在此输入的密钥会传给后端，后端会在可行时将其存入保险库。",
       "environment": "环境",
       "authMode": "操作员的身份验证方式",
-      "authModeHint": "操作员会调用你的 EDDI 管理 API。此设置决定这些调用携带何种凭据。",
+      "authModeHint": "操作员会调用你的 {{productName}} 管理 API。此设置决定这些调用携带何种凭据。",
       "authNoneBlocked": "本部署已启用身份验证，未经身份验证的工具调用会被拒绝。操作员虽能成功部署，但随后每次查询都会失败。请改选「你的身份」。",
       "scope": {
         "label": "权限范围",
@@ -5136,14 +5144,14 @@
       "promptBodyHint": "编辑操作员如何自我介绍以及如何工作。",
       "tools": "将授予它的工具（{{toolCount}} 个）",
       "activate": "启用并部署",
-      "callerIdentityNote": "EDDI 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",
+      "callerIdentityNote": "{{productName}} 在发起调用时才代入你的令牌。它不会存入会话，也只会发回本部署。",
       "rebuildWarning": "保存将替换运维助手：系统会新建一个智能体，并将当前的智能体（{{agentId}}）下线并删除。现有的运维助手会话不会延续，此后本页面将指向新的智能体。",
       "environmentHint": "操作员智能体自身运行的位置。它仍可读取任意环境。",
       "platformBaseUrl": "平台基础 URL",
-      "platformBaseUrlHint": "EDDI 能够访问自身的地址。运维助手的工具是在服务器内部调用它的，因此不是你的浏览器所用的地址。除非你确知另有需要，请保留预填的值。",
+      "platformBaseUrlHint": "{{productName}} 能够访问自身的地址。运维助手的工具是在服务器内部调用它的，因此不是你的浏览器所用的地址。除非你确知另有需要，请保留预填的值。",
       "platformBaseUrlInvalid": "必须是以 http:// 或 https:// 开头的绝对 URL，例如 http://127.0.0.1:7070。",
-      "platformBaseUrlUnknown": "此 EDDI 部署无法报告自身地址，因此将回退到你浏览器的来源地址。只有在浏览器与 EDDI 之间没有任何隧道、端口映射或反向代理时，该地址才是正确的；否则请在此处填写地址。",
-      "platformBaseUrlLoopback": "由此部署的 HTTP 端口推导得出。如果必须通过服务名或进程内 TLS 访问 EDDI，请覆盖此值。",
+      "platformBaseUrlUnknown": "此 {{productName}} 部署无法报告自身地址，因此将回退到你浏览器的来源地址。只有在浏览器与 {{productName}} 之间没有任何隧道、端口映射或反向代理时，该地址才是正确的；否则请在此处填写地址。",
+      "platformBaseUrlLoopback": "由此部署的 HTTP 端口推导得出。如果必须通过服务名或进程内 TLS 访问 {{productName}}，请覆盖此值。",
       "platformBaseUrlAuto": "由服务器解析",
       "platformBaseUrlDiffers": "此部署当前报告的自身地址为 {{serverUrl}}。上方的值与之不同——仅在你有意设置时才保留。",
       "platformBaseUrlQueryFailed": "无法向服务器查询其自身地址。除非在此处填写，否则激活将失败；也可刷新页面重试。",
@@ -5156,7 +5164,7 @@
     "authMode": {
       "none": {
         "label": "不带凭据",
-        "description": "工具调用不携带 Authorization 头。仅当本 EDDI 部署关闭了身份验证时才可用。"
+        "description": "工具调用不携带 Authorization 头。仅当本 {{productName}} 部署关闭了身份验证时才可用。"
       },
       "caller-identity": {
         "label": "你的身份",
@@ -5243,9 +5251,9 @@
       "diffFailed": "无法加载用于比较的已存储版本——完整的拟议文档见下方。",
       "diffForbidden": "与已存储版本比较需要编辑者权限——完整的拟议文档见下方。",
       "diffRedactionNote": "拟议版本中的凭据值已被隐去，因此即使未更改也会在此显示为变更。",
-      "proposedNotJson": "拟议文档不是有效的 JSON，因此 EDDI 会拒绝此次写入。也无法扫描是否存在权限授予——请拒绝并要求提交更正后的请求。",
-      "proposedNotJsonRedacted": "即使考虑到此预览中被隐去的凭据，拟议文档仍不是有效的 JSON，因此 EDDI 很可能会拒绝此次写入。也无法扫描是否存在权限授予——请拒绝并要求提交更正后的请求。",
-      "proposedTrailingText": "拟议文档在结尾之后还有多余的文本。EDDI 可能只保存其之前的文档并悄悄丢弃其余部分，且只对该部分扫描了权限授予——请拒绝并要求提交更正后的请求。",
+      "proposedNotJson": "拟议文档不是有效的 JSON，因此 {{productName}} 会拒绝此次写入。也无法扫描是否存在权限授予——请拒绝并要求提交更正后的请求。",
+      "proposedNotJsonRedacted": "即使考虑到此预览中被隐去的凭据，拟议文档仍不是有效的 JSON，因此 {{productName}} 很可能会拒绝此次写入。也无法扫描是否存在权限授予——请拒绝并要求提交更正后的请求。",
+      "proposedTrailingText": "拟议文档在结尾之后还有多余的文本。{{productName}} 可能只保存其之前的文档并悄悄丢弃其余部分，且只对该部分扫描了权限授予——请拒绝并要求提交更正后的请求。",
       "diffStored": "已存储 v{{version}}",
       "diffProposed": "提议",
       "showFullRequest": "显示完整的拟议文档",
@@ -5454,8 +5462,8 @@
     "title": "新建团队"
   },
   "updates": {
-    "title": "EDDI 更新",
-    "description": "检查是否有更新的 EDDI 版本。在你发起检查之前不会发送任何请求。",
+    "title": "{{productName}} 更新",
+    "description": "检查是否有更新的 {{productName}} 版本。在你发起检查之前不会发送任何请求。",
     "installed": "已安装",
     "githubRelease": "GitHub 发布",
     "dockerImage": "Docker 镜像",
@@ -5467,7 +5475,7 @@
     "privacyNote": "检查仅会从你的浏览器直接访问 api.github.com，不会访问其他主机，也不会发送任何部署数据。",
     "neverChecked": "尚未执行检查。",
     "upToDate": "你正在运行最新版本（{{version}}）。",
-    "updateAvailable": "EDDI {{version}} 已发布",
+    "updateAvailable": "{{productName}} {{version}} 已发布",
     "updateAvailableDetail": "你当前运行的是 {{installed}}。",
     "ahead": "你当前运行的是 {{installed}}，比最新发布版本（{{version}}）更新。",
     "unknownInstalled": "最新版本是 {{version}}。无法确定已安装的版本，因此无法比较。",
@@ -5573,7 +5581,7 @@
       "title": "Manager"
     },
     "subtitle": "选择您的工作区即可开始。",
-    "title": "欢迎使用 EDDI",
+    "title": "欢迎使用 {{productName}}",
     "workforce": {
       "description": "组建 AI 团队，共同辩论、分析并解决复杂挑战。",
       "feature1": "组建代理任务组",
@@ -5628,7 +5636,7 @@
     "count": "显示 {{shown}} 个",
     "empty": "暂无连接",
     "emptyDesc": "创建一个，让你的智能体能够向外部系统验证身份。",
-    "guidance": "一个连接由一份凭据和它可被发送到的来源列表组成。智能体按名称引用它 —— ${connection:jira} —— EDDI 会在每次请求时解析，因此同一个连接既可以承载全组织通用的 API 密钥，也可以承载每个人自己的账户。",
+    "guidance": "一个连接由一份凭据和它可被发送到的来源列表组成。智能体按名称引用它 —— ${connection:jira} —— {{productName}} 会在每次请求时解析，因此同一个连接既可以承载全组织通用的 API 密钥，也可以承载每个人自己的账户。",
     "howItAuthenticates": "验证方式",
     "confirmDelete": "删除此连接？",
     "confirmDeleteDesc": "通过它关联的每个账户都会同时解除关联 —— 令牌不应在产生它的连接消失后继续存在。按名称引用它的智能体将无法再完成身份验证。",
@@ -5646,7 +5654,7 @@
     },
     "choice": {
       "staticBody": "一个固定请求头，对所有人相同 —— X-Api-Key，或 Authorization: Bearer …",
-      "basicBody": "HTTP Basic。编码由 EDDI 完成，因此密码仍是保险库中的独立条目，可以单独轮换。",
+      "basicBody": "HTTP Basic。编码由 {{productName}} 完成，因此密码仍是保险库中的独立条目，可以单独轮换。",
       "clientCredentialsBody": "智能体以自身身份登录。一个访问令牌供所有人共享，并自动续期。",
       "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。"
     },
@@ -5701,7 +5709,7 @@
     "removeOrigin": "移除 {{origin}}",
     "moreOrigins": "+{{more}}",
     "mineTitle": "你的已关联账户",
-    "mineSubtitle": "你已授权 EDDI 代表你使用的服务。其他人无法使用它们，EDDI 也绝不会向你显示凭据本身。",
+    "mineSubtitle": "你已授权 {{productName}} 代表你使用的服务。其他人无法使用它们，{{productName}} 也绝不会向你显示凭据本身。",
     "noneLinked": "暂无已关联账户",
     "noneLinkedDesc": "当某个智能体需要在其他服务中以你的身份行事时，会请你进行关联。你关联的账户会显示在这里，并可随时解除关联。",
     "connect": "关联",
@@ -5711,7 +5719,7 @@
     "unlinked": "“{{name}}”已不再与你的账户关联。",
     "unlinkFailed": "无法解除该账户的关联。",
     "confirmUnlink": "解除此账户的关联？",
-    "confirmUnlinkDesc": "EDDI 会忘记你授予的凭据，并不再能在该服务中代表你行事。你随时可以重新关联。",
+    "confirmUnlinkDesc": "{{productName}} 会忘记你授予的凭据，并不再能在该服务中代表你行事。你随时可以重新关联。",
     "linked": "已关联 ——“{{name}}”现在已与你的账户绑定。",
     "linkStartFailed": "无法开始关联。",
     "loadMineFailed": "无法加载你的已关联账户",
@@ -5729,7 +5737,7 @@
       "active": "运行正常。",
       "connectedOn": "于 {{date}} 关联。",
       "expired": "访问令牌已过期，下次使用时会自动续期 —— 你无需操作。",
-      "revoked": "此访问权限已被撤销。若仍希望 EDDI 使用，请重新关联。",
+      "revoked": "此访问权限已被撤销。若仍希望 {{productName}} 使用，请重新关联。",
       "refreshFailed": "该服务不再接受已保存的凭据。请重新关联以再次授予访问权限。",
       "expiresAt": "访问令牌有效期至 {{date}}"
     },
@@ -5765,7 +5773,7 @@
       "nameTooLong": "名称最多 64 个字符。",
       "timeoutRange": "超时必须是 1 到 60000 毫秒之间的整数。留空则使用默认值。",
       "templateLiteralCredential": "引用周围的文本本身看起来像凭据。${vault:…} 之外只应有简短的方案前缀（如“Bearer ”）——其余内容请存入保险库。",
-      "paramReserved": "其中一个参数由 EDDI 自行设置（client_id、redirect_uri、response_type、state、code_challenge……）。覆盖它会破坏流程。",
+      "paramReserved": "其中一个参数由 {{productName}} 自行设置（client_id、redirect_uri、response_type、state、code_challenge……）。覆盖它会破坏流程。",
       "paramValueReference": "参数值按原样发送——这里的 ${…} 引用不会被解析，而且会把保险库指针放进 URL。请只使用普通协议值。",
       "paramValueTooLong": "参数值最多 512 个字符。",
       "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。"
@@ -5775,20 +5783,20 @@
     "discardNewTitle": "放弃这个连接？",
     "discardNewBody": "你目前填写的内容将会丢失。目前尚未创建任何内容。",
     "confirmReconnect": "重新关联此账户？",
-    "confirmReconnectDesc": "该账户运行正常，无需修复。继续将带你离开 EDDI 前往服务商的登录页面，并替换你此前授予的访问权限。",
+    "confirmReconnectDesc": "该账户运行正常，无需修复。继续将带你离开 {{productName}} 前往服务商的登录页面，并替换你此前授予的访问权限。",
     "paramDuplicate": "已有另一个参数使用此名称。只会保存最后一个。",
     "bindingChooser": "密钥的来源",
     "bindingChoice": {
       "serviceBody": "保险库中的一把密钥，为所有人发送。简单——但代理可以访问该密钥能访问的一切。",
-      "callerSuppliedBody": "EDDI 不存储任何内容。调用 EDDI 的系统在每个请求中发送各用户自己的凭据，因此代理只能做该用户能做的事——目标系统自身的权限即是边界。"
+      "callerSuppliedBody": "{{productName}} 不存储任何内容。调用 {{productName}} 的系统在每个请求中发送各用户自己的凭据，因此代理只能做该用户能做的事——目标系统自身的权限即是边界。"
     },
     "callerSuppliedHeaderTitle": "调用系统需要发送的内容",
     "callerSuppliedHeaderBody": "每个请求一个标头：连接名称、一个空格，然后是作为 {{header}} 发送的完整值——包含方案，因此“Bearer abc”无需转义。凭据仅在该请求期间存在，从不存储。",
-    "callerSuppliedNeedsAuth": "调用方必须已登录 EDDI。没有凭据的请求会失败，而不是以未认证方式发出——包括恢复已暂停的工具调用时——并且此连接不会出现在 MCP 和 A2A 发现中。",
+    "callerSuppliedNeedsAuth": "调用方必须已登录 {{productName}}。没有凭据的请求会失败，而不是以未认证方式发出——包括恢复已暂停的工具调用时——并且此连接不会出现在 MCP 和 A2A 发现中。",
     "bindingCallerSuppliedTitle": "以调用者身份解析",
-    "bindingCallerSuppliedBody": "调用系统随请求交付各用户自己的凭据，EDDI 不存储任何内容。代理只能做该用户在目标系统能做的事，并且此连接不会出现在 MCP 和 A2A 发现中。",
+    "bindingCallerSuppliedBody": "调用系统随请求交付各用户自己的凭据，{{productName}} 不存储任何内容。代理只能做该用户在目标系统能做的事，并且此连接不会出现在 MCP 和 A2A 发现中。",
     "confirmAuthChange": "更改此连接的认证方式？",
-    "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，EDDI 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
+    "confirmAuthChangeDesc": "通过此连接关联的账户将无法再解析——授权属于产生它的流程。只要仍有账户关联，{{productName}} 就会拒绝更改并说明数量；请先取消关联，或新建一个连接并让用户改为关联它。",
     "confirmAuthChangeAccept": "更改",
     "deleted": "连接“{{name}}”已删除",
     "confirmDeleteNamed": "删除连接“{{name}}”？"
@@ -6057,7 +6065,7 @@
     "valueLabel": "值",
     "intRange": "超出 Integer 范围（±2,147,483,647）。请为此值选择长整数。",
     "unsafeLong": "超过 9,007,199,254,740,991 后，浏览器无法精确保存这个整数；请在 JSON 标签页中编辑。",
-    "needs66": "长整数和小数需要 EDDI 6.6 或更高版本。",
+    "needs66": "长整数和小数需要 服务器版本 6.6 或更高版本。",
     "conflict": "此行设置了 {{fields}}。只会使用 {{winner}}；在此选择类型会保留这一个值并移除其余的值。",
     "kindString": "文本 / 模板",
     "kindInt": "整数",
@@ -6095,7 +6103,7 @@
       "degradedNatsText": "响应此页面的节点无法连接 NATS。它会继续提供服务，但没有集群协调：没有共享租约、没有隔离保护、没有集群范围事件。",
       "degradedText": "NATS 可达，但有节点缺失、心跳延迟或报告问题。其轮次所持有的会话将在租约 TTL 内被接管。",
       "partitionedText": "一个持有流或存储桶副本的 NATS 服务器已离线：NATS 集群本身已分裂。只要仍有法定数量（quorum），写入即可继续。",
-      "singleNodeText": "此部署以内存协调器运行单个 EDDI 节点。节点之间无需协调。"
+      "singleNodeText": "此部署以内存协调器运行单个 {{productName}} 节点。节点之间无需协调。"
     },
     "next": {
       "deadLetters": "查看等待中的死信：重放原因已修复的条目，丢弃其余条目。",
@@ -6276,11 +6284,11 @@
     "answeredBy": "由 {{node}} 响应",
     "staleNotice": "最近一次刷新失败——当前显示的是 {{age}} 前的视图。",
     "title": "集群",
-    "subtitle": "所有 EDDI 副本的健康状况、节点、租约和失败轮次——以及可以安全采取的操作",
+    "subtitle": "所有 {{productName}} 副本的健康状况、节点、租约和失败轮次——以及可以安全采取的操作",
     "tabs": "集群控制台分区",
     "single": {
       "title": "集群模式带来的功能",
-      "scale": "任意数量的 EDDI 副本可部署在普通轮询负载均衡器之后，共享一个数据库和一个 NATS JetStream 集群。",
+      "scale": "任意数量的 {{productName}} 副本可部署在普通轮询负载均衡器之后，共享一个数据库和一个 NATS JetStream 集群。",
       "leases": "带隔离令牌的会话租约：同一会话的轮次在任何位置都不会重叠，失去租约的节点无法覆盖更新的轮次。",
       "failover": "故障转移：崩溃节点的会话会在租约 TTL 内在其他节点上继续；死信、缓存、部署和取消操作均在集群范围内生效。",
       "docs": "阅读集群指南"

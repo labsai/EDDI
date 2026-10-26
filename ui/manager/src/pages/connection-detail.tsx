@@ -594,7 +594,7 @@ export function ConnectionDetailPage() {
                 : callerSupplied
                   ? t(
                       "connections.bindingCallerSuppliedBody",
-                      "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
+                      "The calling system hands over each user's own credential with the request and {{productName}} stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
                     )
                   : t(
                       "connections.bindingServiceBody",
@@ -876,7 +876,7 @@ export function ConnectionDetailPage() {
         )}
         description={t(
           "connections.confirmAuthChangeDesc",
-          "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
+          "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. {{productName}} refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
         )}
         onConfirm={confirmAuthChange}
         confirmLabel={t("connections.confirmAuthChangeAccept", "Change it")}

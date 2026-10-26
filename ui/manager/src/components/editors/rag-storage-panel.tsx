@@ -119,7 +119,7 @@ export function RagStoragePanel<T extends StorageConfig>({
                     )
                   : t("ragEditor.location.reserved", {
                       defaultValue:
-                        "Names starting with {{prefix}} (in any part, any case) are reserved: EDDI derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
+                        "Names starting with {{prefix}} (in any part, any case) are reserved: {{productName}} derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
                       prefix: RESERVED_PREFIX,
                     })}
             </p>
@@ -142,7 +142,7 @@ export function RagStoragePanel<T extends StorageConfig>({
               )
             : t(
                 "ragEditor.layout.nameBody",
-                "Created before EDDI 6.6: its store is found by the knowledge base's name, so any other knowledge base with the same name shares it. It keeps working as it is.",
+                "Created before server version 6.6: its store is found by the knowledge base's name, so any other knowledge base with the same name shares it. It keeps working as it is.",
               )}
         </p>
         <p className="mt-1 text-muted-foreground" data-testid="rag-storage-location">
@@ -171,7 +171,7 @@ export function RagStoragePanel<T extends StorageConfig>({
             <p className="mt-1 text-[10px] text-muted-foreground">
               {t(
                 "ragEditor.layout.renameNote",
-                "Renaming this knowledge base moves it the same way. Needs EDDI 6.6 or later.",
+                "Renaming this knowledge base moves it the same way. Needs server version 6.6 or later.",
               )}
             </p>
           </div>

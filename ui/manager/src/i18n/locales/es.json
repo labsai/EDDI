@@ -14,8 +14,16 @@
     "confirmDeleteAllDesc": "Elimina permanentemente todos los archivos de esta conversación. No se puede deshacer."
   },
   "app": {
-    "title": "EDDI Manager",
-    "description": "Panel de administración de la plataforma de IA EDDI"
+    "title": "{{productName}} Manager",
+    "description": "Panel de administración de la plataforma de IA {{productName}}"
+  },
+  "about": {
+    "title": "Acerca de {{productName}}",
+    "versionLabel": "Versión",
+    "versionUnknown": "Versión desconocida",
+    "poweredBy": "Con la tecnología de EDDI",
+    "license": "EDDI es software de código abierto, con licencia Apache 2.0.",
+    "licenseLink": "Leer la licencia"
   },
   "auth": {
     "login": "Iniciar sesión",
@@ -111,7 +119,7 @@
   "pages": {
     "dashboard": {
       "title": "Panel",
-      "subtitle": "Resumen de sus agents y conversaciones EDDI",
+      "subtitle": "Resumen de sus agents y conversaciones {{productName}}",
       "activeAgents": "Agents activos",
       "totalWorkflows": "Flujos de trabajo",
       "totalResources": "Recursos",
@@ -163,11 +171,11 @@
     "approvalsSubtitle": "Revise y decida sobre conversaciones que esperan intervención humana",
     "connections": {
       "title": "Conexiones",
-      "subtitle": "Cómo se autentica EDDI ante los sistemas que usan sus agentes"
+      "subtitle": "Cómo se autentica {{productName}} ante los sistemas que usan sus agentes"
     },
     "linkedAccounts": {
       "title": "Cuentas vinculadas",
-      "subtitle": "Servicios que ha autorizado a EDDI a usar en su nombre"
+      "subtitle": "Servicios que ha autorizado a {{productName}} a usar en su nombre"
     }
   },
   "common": {
@@ -232,7 +240,7 @@
     "deletePermanently": "Eliminar permanentemente",
     "deletePermanentlyHint": "No se puede deshacer. Sin esta opción, el elemento solo se marca como eliminado y sigue siendo recuperable hasta que se purgue.",
     "errors": {
-      "network": "No se puede conectar con EDDI. Comprueba tu conexión e inténtalo de nuevo.",
+      "network": "No se puede conectar con {{productName}}. Comprueba tu conexión e inténtalo de nuevo.",
       "unauthorized": "Tu sesión ha caducado. Vuelve a iniciar sesión.",
       "forbidden": "No tienes permiso para ver esto.",
       "notFound": "No encontrado: puede que se haya eliminado."
@@ -297,7 +305,7 @@
     "a2aDescription": "Descripción del agente",
     "a2aEnable": "Activar A2A",
     "a2aEnabled": "Activado",
-    "a2aEnabledDesc": "Permite que otros agentes descubran este agente mediante el protocolo A2A. Otras instancias de EDDI pueden encontrarlo y llamarlo como una herramienta.",
+    "a2aEnabledDesc": "Permite que otros agentes descubran este agente mediante el protocolo A2A. Otras instancias de {{productName}} pueden encontrarlo y llamarlo como una herramienta.",
     "a2aEndpoints": "Endpoints",
     "a2aNoSkills": "Sin habilidades — se usará una habilidad 'chat' predeterminada",
     "a2aSection": "Agente a agente (A2A)",
@@ -445,9 +453,9 @@
     "slackWebhookUrl": "URL del webhook",
     "slackWebhookCopied": "URL del webhook copiada",
     "slackStep1": "Crea una aplicación Slack en api.slack.com/apps e instálala en tu workspace.",
-    "slackStep2": "Copia el token del bot (xoxb-…) y el secreto de firma en el vault de EDDI y configura los canales abajo.",
+    "slackStep2": "Copia el token del bot (xoxb-…) y el secreto de firma en el vault de {{productName}} y configura los canales abajo.",
     "slackStep3": "Luego activa Event Subscriptions en tu aplicación Slack, pega la URL del webhook arriba y suscríbete a:",
-    "slackSetupNote": "Importante: Configura el canal abajo antes de activar Event Subscriptions — Slack envía un desafío de verificación de URL que requiere que el secreto de firma esté configurado en EDDI.",
+    "slackSetupNote": "Importante: Configura el canal abajo antes de activar Event Subscriptions — Slack envía un desafío de verificación de URL que requiere que el secreto de firma esté configurado en {{productName}}.",
     "slackRequiredScopes": "Permisos requeridos para el token del bot",
     "hitlConfig": "Human-in-the-Loop",
     "hitlConfigDesc": "Cuando este agente pausa una conversación para aprobación humana, estos ajustes controlan cuánto esperar y qué ocurre si no se decide a tiempo.",
@@ -505,9 +513,9 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "Solo es necesario si usa un proxy, un despliegue privado o un endpoint de Azure OpenAI",
-    "jlamaNoteTitle": "Jlama se ejecuta dentro de EDDI",
-    "jlamaNoteBody": "No hay ningún servidor de modelos al que apuntar: EDDI carga el modelo en su propio proceso y descarga los pesos de Hugging Face la primera vez, por lo que el primer mensaje puede tardar un rato.",
-    "jlamaNoteTuning": "¿EDDI se ejecuta en un contenedor? Abra después la configuración LLM del agente y establezca modelCachePath en un volumen montado: la caché predeterminada vive en la capa efímera del contenedor, así que el modelo puede volver a descargarse después de eliminar o sustituir el contenedor. quantizeModelAtRuntime, workingDirectory y workingQuantizedType también se ajustan ahí.",
+    "jlamaNoteTitle": "Jlama se ejecuta dentro de {{productName}}",
+    "jlamaNoteBody": "No hay ningún servidor de modelos al que apuntar: {{productName}} carga el modelo en su propio proceso y descarga los pesos de Hugging Face la primera vez, por lo que el primer mensaje puede tardar un rato.",
+    "jlamaNoteTuning": "¿{{productName}} se ejecuta en un contenedor? Abra después la configuración LLM del agente y establezca modelCachePath en un volumen montado: la caché predeterminada vive en la capa efímera del contenedor, así que el modelo puede volver a descargarse después de eliminar o sustituir el contenedor. quantizeModelAtRuntime, workingDirectory y workingQuantizedType también se ajustan ahí.",
     "baseUrlHintLocal": "Obligatorio — la URL donde se ejecuta su servidor de modelos local",
     "modelHint": "Escriba cualquier nombre de modelo compatible con su proveedor, o elija uno de las sugerencias",
     "modelHintSelfHosted": "El id del modelo exactamente como lo sirve su servidor (su lista /v1/models). No hay valor predeterminado.",
@@ -574,7 +582,7 @@
     "structuredOutputDesc": "El LLM responde con un objeto JSON en lugar de texto plano",
     "structuredOutputInfo": "Al activar esto, el LLM responde con un objeto JSON con campos estructurados. Se añade un esquema JSON al prompt del sistema y el modelo se configura en modo de respuesta JSON.",
     "builtInTools": "Herramientas integradas",
-    "builtInToolsDesc": "Activar la biblioteca de herramientas integradas de EDDI (calculadora, fecha/hora, etc.)",
+    "builtInToolsDesc": "Activar la biblioteca de herramientas integradas de {{productName}} (calculadora, fecha/hora, etc.)",
     "toolsWhitelist": "Whitelist (vacío = todas)",
     "mcpServers": "Servidores MCP",
     "mcpServersDesc": "Servidores Model Context Protocol para herramientas externas",
@@ -1237,7 +1245,7 @@
     "argumentInvalidJson": "JSON no válido: se conserva el último valor válido",
     "removeArgument": "Quitar argumento",
     "maxResponseSize": "Tamaño máx. de respuesta guardada (caracteres)",
-    "maxResponseSizeHint": "Un resultado de herramienta más largo se recorta a este número de caracteres antes de guardarse en la memoria de la conversación (se registra una advertencia). Vacío, 0 o menos usa el valor predeterminado de 2.000.000 (unos 2 MB). Requiere EDDI 6.6 o posterior."
+    "maxResponseSizeHint": "Un resultado de herramienta más largo se recorta a este número de caracteres antes de guardarse en la memoria de la conversación (se registra una advertencia). Vacío, 0 o menos usa el valor predeterminado de 2.000.000 (unos 2 MB). Requiere la versión de servidor 6.6 o posterior."
   },
   "llmEditor": {
     "addCustomInstruction": "Añadir instrucción",
@@ -1512,7 +1520,7 @@
     "maxToolCallsPerIterationDefault": "(predeterminado {{n}})",
     "maxToolCallsPerTurn": "Máx. llamadas a herramientas por turno",
     "maxToolCallsPerTurnDefault": "(predeterminado {{n}})",
-    "maxToolCallsHint": "Las llamadas que superan un límite no se ejecutan: cada una recibe un resultado NOT_EXECUTED que indica al modelo que se alcanzó el límite, y el modelo responde con lo que tiene. Las llamadas rechazadas nunca llegan a la aprobación. El recuento por turno incluye las llamadas hechas antes de una pausa de aprobación. -1 o 0 elimina un límite. Requiere EDDI 6.6 o posterior: déjalo vacío en un servidor más antiguo.",
+    "maxToolCallsHint": "Las llamadas que superan un límite no se ejecutan: cada una recibe un resultado NOT_EXECUTED que indica al modelo que se alcanzó el límite, y el modelo responde con lo que tiene. Las llamadas rechazadas nunca llegan a la aprobación. El recuento por turno incluye las llamadas hechas antes de una pausa de aprobación. -1 o 0 elimina un límite. Requiere la versión de servidor 6.6 o posterior: déjalo vacío en un servidor más antiguo.",
     "maxToolCallsUncapped": "Un límite está desactivado: el modelo puede ejecutar allí cualquier número de llamadas, limitado solo por Max Tool Iterations.",
     "repeatGuardTitle": "Llamadas a herramientas fallidas repetidas",
     "repeatGuardEnabled": "Bloquear llamadas fallidas repetidas",
@@ -1520,7 +1528,7 @@
     "maxRefusalsPerTurn": "Rechazos antes de detenerse",
     "maxIdenticalCalls": "Máx. de llamadas idénticas exitosas",
     "exemptTools": "Herramientas exentas (separadas por comas)",
-    "repeatGuardHint": "Una llamada a una herramienta que ya falló de forma idéntica, sin que nada haya tenido éxito desde entonces, recibe NOT_EXECUTED en lugar de ejecutarse de nuevo; al llegar al límite de rechazos el turno termina con un mensaje fijo. Activado por defecto; deja los campos vacíos para mantener los valores por defecto. Un fallo definitivo (p. ej. HTTP 403/404) se rechaza en la siguiente llamada idéntica, uno reintentable tras los fallos permitidos. El máx. de llamadas idénticas exitosas está desactivado salvo que se defina (-1 o 0 = ilimitado). Requiere EDDI 6.6 o posterior: no lo toques en un servidor más antiguo.",
+    "repeatGuardHint": "Una llamada a una herramienta que ya falló de forma idéntica, sin que nada haya tenido éxito desde entonces, recibe NOT_EXECUTED en lugar de ejecutarse de nuevo; al llegar al límite de rechazos el turno termina con un mensaje fijo. Activado por defecto; deja los campos vacíos para mantener los valores por defecto. Un fallo definitivo (p. ej. HTTP 403/404) se rechaza en la siguiente llamada idéntica, uno reintentable tras los fallos permitidos. El máx. de llamadas idénticas exitosas está desactivado salvo que se defina (-1 o 0 = ilimitado). Requiere la versión de servidor 6.6 o posterior: no lo toques en un servidor más antiguo.",
     "toggleTask": "Mostrar u ocultar los detalles de la tarea",
     "noActionsWarning": "Esta tarea no tiene ninguna acción de activación, así que nunca se ejecuta. Añade la acción que emiten tus reglas de comportamiento, por ejemplo send_message.",
     "model": "Modelo",
@@ -1542,7 +1550,7 @@
       "title": "Ajustes del modelo",
       "rejectedBy": "Rechazado por {{model}}",
       "noEffectOn": "Sin efecto en {{model}}",
-      "droppedHint": "EDDI lo elimina antes de cada solicitud, así que este valor nunca se envía.",
+      "droppedHint": "{{productName}} lo elimina antes de cada solicitud, así que este valor nunca se envía.",
       "removeKey": "Quitar {{key}}",
       "remove": "Quitar",
       "providerDefault": "Valor predeterminado del proveedor",
@@ -1597,7 +1605,7 @@
       "unavailable_one": "{{count}} ajuste que {{model}} rechaza o ignora",
       "unavailable_many": "{{count}} ajustes que {{model}} rechaza o ignora",
       "unavailable_other": "{{count}} ajustes que {{model}} rechaza o ignora",
-      "variableModel": "El modelo es una referencia a una variable ({{model}}), así que las comprobaciones de abajo aún no lo conocen; EDDI aplica las reglas propias del modelo cuando se resuelve la variable.",
+      "variableModel": "El modelo es una referencia a una variable ({{model}}), así que las comprobaciones de abajo aún no lo conocen; {{productName}} aplica las reglas propias del modelo cuando se resuelve la variable.",
       "badgeMigrated": "Enviado como {{key}}",
       "migratedTo": "Enviado como {{key}} para {{model}}",
       "group": {
@@ -1626,7 +1634,7 @@
     "grTypeJson": "Objeto JSON",
     "grTypeJsonDesc": "Detecta una respuesta que no sea exactamente un objeto JSON (se tolera un bloque de código Markdown). Solo comprueba la forma.",
     "grTypeClassifier": "Modelo clasificador de seguridad",
-    "grTypeClassifierDesc": "Pide un veredicto a un modelo clasificador de seguridad que tú ejecutas (Granite Guardian, ShieldGemma, una API de moderación). EDDI no incluye ningún modelo clasificador.",
+    "grTypeClassifierDesc": "Pide un veredicto a un modelo clasificador de seguridad que tú ejecutas (Granite Guardian, ShieldGemma, una API de moderación). {{productName}} no incluye ningún modelo clasificador.",
     "grActionBlock": "Bloquear",
     "grActionRedact": "Ocultar",
     "grActionReprompt": "Repreguntar",
@@ -1702,7 +1710,7 @@
     "grClfOutputPrice": "Salida $/1M tokens",
     "grClfContext": "Da a la plantilla el contexto RAG recuperado en este turno como {context} (para una comprobación de fundamentación). No tiene efecto sin plantilla de prompt.",
     "grSectionTitle": "Guardrails",
-    "grIntro": "Filtra el mensaje del usuario antes de llamar al modelo, y la respuesta del modelo antes de almacenarla o entregarla. No se filtra nada a menos que añadas un guardrail. Requiere EDDI 6.6 o posterior: un servidor más antiguo ignora estas listas y ejecuta el agente sin protección.",
+    "grIntro": "Filtra el mensaje del usuario antes de llamar al modelo, y la respuesta del modelo antes de almacenarla o entregarla. No se filtra nada a menos que añadas un guardrail. Requiere la versión de servidor 6.6 o posterior: un servidor más antiguo ignora estas listas y ejecuta el agente sin protección.",
     "grInput": "Guardrails de entrada",
     "grOutput": "Guardrails de salida",
     "grInputHint": "Se ejecutan en orden sobre el mensaje del usuario, antes de la recuperación y de la llamada al modelo.",
@@ -2050,8 +2058,8 @@
     "kekNewKeyLabel": "Nueva clave maestra",
     "kekNewKeyPlaceholder": "Nueva clave — al menos 8 caracteres",
     "kekNewKeyTooShort": "La nueva clave maestra debe tener al menos 8 caracteres.",
-    "kekRestartHint": "Después de la rotación, debe actualizar EDDI_VAULT_MASTER_KEY con la nueva clave y reiniciar EDDI.",
-    "kekResultInstruction": "Acción requerida: establezca la variable de entorno EDDI_VAULT_MASTER_KEY con la NUEVA clave maestra y reinicie EDDI. Hasta que lo haga, la instancia en ejecución seguirá usando la clave anterior en memoria.",
+    "kekRestartHint": "Después de la rotación, debe actualizar EDDI_VAULT_MASTER_KEY con la nueva clave y reiniciar {{productName}}.",
+    "kekResultInstruction": "Acción requerida: establezca la variable de entorno EDDI_VAULT_MASTER_KEY con la NUEVA clave maestra y reinicie {{productName}}. Hasta que lo haga, la instancia en ejecución seguirá usando la clave anterior en memoria.",
     "resetTenantTitle": "Restablecer el Vault para este inquilino",
     "resetTenantBlurb": "Último recurso destructivo. Elimina permanentemente todos los secretos y el DEK para que el Vault pueda empezar de cero — úselo después de perder o cambiar la clave maestra.",
     "resetTenantAction": "Restablecer Vault",
@@ -2190,7 +2198,7 @@
       "noMatch": "Ninguna acción administrativa coincide con estos filtros",
       "empty": "Aún no hay acciones administrativas registradas",
       "noMatchLoadOlder": "Solo están cargadas las filas más recientes: carga las anteriores para buscar más atrás.",
-      "emptyHint": "EDDI las registra desde la versión 6.6, salvo que eddi.audit.admin-actions.enabled sea false. Un servidor más antiguo no muestra nada aquí.",
+      "emptyHint": "El servidor las registra desde la versión 6.6, salvo que eddi.audit.admin-actions.enabled sea false. Un servidor más antiguo no muestra nada aquí.",
       "caption": "Acciones administrativas, las más recientes primero",
       "colTime": "Hora",
       "colActor": "Actor",
@@ -2202,8 +2210,8 @@
       "loadOlder": "Cargar anteriores",
       "forbidden": "Solo los administradores pueden leer las acciones administrativas",
       "forbiddenHint": "El registro contiene los cambios de todos los administradores, así que leerlo requiere el rol eddi-admin.",
-      "unsupported": "Este EDDI no registra acciones administrativas",
-      "unsupportedHint": "Se registran a partir de EDDI 6.6.",
+      "unsupported": "Este servidor no registra acciones administrativas",
+      "unsupportedHint": "Se registran a partir de la versión de servidor 6.6.",
       "loadError": "No se pudieron cargar las acciones administrativas.",
       "shown": "{{shown}} de {{loaded}} filas cargadas mostradas",
       "windowAny": "Cualquier momento",
@@ -2345,15 +2353,15 @@
     },
     "totalCappedHint": "El servidor devolvió una página completa, así que puede haber más programaciones de las mostradas.",
     "systemManaged": "Sistema",
-    "systemManagedHint": "Gestionado por EDDI (ingesta de la base de conocimiento, consolidación de memoria o cadencia de equipo). Cámbielo donde se define, no aquí.",
+    "systemManagedHint": "Gestionado por {{productName}} (ingesta de la base de conocimiento, consolidación de memoria o cadencia de equipo). Cámbielo donde se define, no aquí.",
     "persistentConversationIdLocked": "Se establece al crear la programación. El servidor conserva la conversación a la que se han ido añadiendo las ejecuciones.",
     "failedScheduleGone": "La programación ya no existe",
-    "disabledByPerson": "Desactivada por una persona. Una programación que un repliegue desactivó antes de EDDI 6.6 también aparece así: actívala una vez a mano.",
+    "disabledByPerson": "Desactivada por una persona. Una programación que un repliegue desactivó antes de la versión de servidor 6.6 también aparece así: actívala una vez a mano.",
     "disabledUndeployed": "Agente replegado",
     "disabledUndeployedHint": "Se desactivó al replegar su agente. Vuelve a activarse sola en el próximo despliegue correcto del agente: no hay que hacer nada.",
     "disabledAccessRevoked": "Acceso revocado",
     "disabledAccessRevokedHint": "Su creador ya no puede usar este agente, por lo que dejó de dispararse. Vuelve a compartir el agente con esa persona —o crea de nuevo la programación como alguien que pueda usarlo— y luego actívala.",
-    "disabledOtherHint": "Desactivada por EDDI por el motivo indicado.",
+    "disabledOtherHint": "Desactivada por {{productName}} por el motivo indicado.",
     "serverRefusedUpdate": "El servidor rechazó este cambio:",
     "serverRefusedCreate": "El servidor rechazó esta programación:",
     "disabledAccessRevokedHintBy": "Su creador ({{user}}) ya no puede usar este agente, por lo que dejó de dispararse. Vuelve a compartir el agente con esa persona —o crea de nuevo la programación como alguien que pueda usarlo— y luego actívala.",
@@ -2688,7 +2696,7 @@
       "reference": "Una ubicación de almacenamiento debe escribirse de forma literal, no como referencia ${…}. La ubicación decide qué documentos lee un agente, y una referencia solo se resuelve al construir el almacén —después de todas las comprobaciones— a partir de variables que cualquier editor puede cambiar, por lo que podría apuntar al almacén de otra base de conocimiento o a SQL. Una base ya guardada con una referencia deja de ingerir y recuperar hasta que se guarde una vez con el nombre literal.",
       "pgIdentifier": "Una tabla pgvector debe ser un nombre simple, opcionalmente con esquema (letras, dígitos, _ y $). El almacén la inserta tal cual en el SQL, así que se rechazan comillas, espacios y signos de puntuación.",
       "refused": "El servidor rechaza {{param}} = {{value}}",
-      "reserved": "Los nombres que empiezan por {{prefix}} (en cualquier parte, sin importar mayúsculas) están reservados: EDDI deriva la ubicación propia de cada base de conocimiento de ese prefijo, así que este nombre podría apuntar al almacén de otra base. Elige otro nombre o déjalo vacío para obtener una ubicación propia para esta base.",
+      "reserved": "Los nombres que empiezan por {{prefix}} (en cualquier parte, sin importar mayúsculas) están reservados: {{productName}} deriva la ubicación propia de cada base de conocimiento de ese prefijo, así que este nombre podría apuntar al almacén de otra base. Elige otro nombre o déjalo vacío para obtener una ubicación propia para esta base.",
       "savedReference": "El {{param}} = {{value}} guardado ya no funciona",
       "refusedIfChanged": "{{param}} = {{value}} sigue funcionando tal como está guardado, pero el servidor lo rechazaría si se cambiara"
     },
@@ -2696,10 +2704,10 @@
       "idTitle": "Almacén propio (direccionado por id)",
       "nameTitle": "Almacén por nombre (diseño 6.5)",
       "idBody": "Esta base de conocimiento tiene su propio almacén: cada fragmento lleva su id y la recuperación solo ve sus propios fragmentos, incluso en una tabla compartida.",
-      "nameBody": "Creada antes de EDDI 6.6: su almacén se encuentra por el nombre de la base, así que cualquier otra base con el mismo nombre lo comparte. Sigue funcionando como está.",
+      "nameBody": "Creada antes de la versión de servidor 6.6: su almacén se encuentra por el nombre de la base, así que cualquier otra base con el mismo nombre lo comparte. Sigue funcionando como está.",
       "defaultUnsaved": "Ubicación: eddi_kbid_<id> (predeterminada, asignada al guardar)",
       "migrate": "Mover a su propio almacén…",
-      "renameNote": "Cambiar el nombre de esta base de conocimiento la mueve del mismo modo. Requiere EDDI 6.6 o posterior.",
+      "renameNote": "Cambiar el nombre de esta base de conocimiento la mueve del mismo modo. Requiere la versión de servidor 6.6 o posterior.",
       "migrateTitle": "¿Mover esta base de conocimiento a su propio almacén?",
       "migrateBodyExplicit": "Conserva su tabla, pero desde ahora solo se recuperan los fragmentos con su id; ninguno de los existentes lleva esa etiqueta, así que empieza VACÍA. Sus fuentes se vuelven a ingerir solas en su próxima ejecución; los documentos añadidos mediante /ingest deben ingerirse de nuevo. No se borra nada. El cambio se aplica al guardar y no se puede revertir.",
       "migrateBody": "Pasa a un almacén propio nuevo y VACÍO. Sus fuentes se vuelven a ingerir solas en su próxima ejecución; los documentos añadidos mediante /ingest deben ingerirse de nuevo. El almacén antiguo queda intacto. El cambio se aplica al guardar y no se puede revertir.",
@@ -2805,9 +2813,9 @@
   },
   "onboarding": {
     "welcome": {
-      "title": "Bienvenido a EDDI",
+      "title": "Bienvenido a {{productName}}",
       "subtitle": "Su centro de comando de agentes de IA",
-      "introText": "EDDI Manager es su centro de comando para crear, probar y operar agentes de IA conversacional.",
+      "introText": "{{productName}} Manager es su centro de comando para crear, probar y operar agentes de IA conversacional.",
       "capabilitiesTitle": "Lo que puede hacer",
       "capabilitiesSubtitle": "Todo lo que necesita para crear agentes de IA listos para producción",
       "buildAgents": "Crear agentes",
@@ -2839,7 +2847,7 @@
         "step3Title": "Acciones rápidas",
         "step3Desc": "Acceda rápidamente a tareas comunes. El Asistente de Agentes es la forma más rápida de crear su primer agente: toma menos de 2 minutos.",
         "step4Title": "Personalice el espacio",
-        "step4Desc": "Cambie entre temas claro, oscuro y de sistema. EDDI Manager habla 11 idiomas: elija el suyo en el selector de idiomas."
+        "step4Desc": "Cambie entre temas claro, oscuro y de sistema. {{productName}} Manager habla 11 idiomas: elija el suyo en el selector de idiomas."
       },
       "agents": {
         "title": "Tour de Agents",
@@ -2954,7 +2962,7 @@
         "step1Title": "Estado del clúster",
         "step1Desc": "El veredicto (saludable, degradado, particionado o nodo único), con sus motivos y el siguiente paso.",
         "step2Title": "Nodos",
-        "step2Desc": "Cada réplica de EDDI: heartbeat, ida y vuelta a NATS, turnos en ejecución y leases, y si está drenada o perdida.",
+        "step2Desc": "Cada réplica de {{productName}}: heartbeat, ida y vuelta a NATS, turnos en ejecución y leases, y si está drenada o perdida.",
         "step3Title": "Mensajes muertos",
         "step3Desc": "Inspeccione las tareas fallidas en la cola de dead-letter, descártelas o reinténtelas para mantener la plataforma estable."
       },
@@ -3763,7 +3771,7 @@
     "upgradeExisting": "Actualizar agente existente",
     "upgradeDesc": "Hacer coincidir recursos estructuralmente con un agente destino. Ideal para promover entre entornos.",
     "syncRemote": "Sincronizar desde instancia remota",
-    "syncDesc": "Conéctese a otra instancia de EDDI y sincronice un agente en directo.",
+    "syncDesc": "Conéctese a otra instancia de {{productName}} y sincronice un agente en directo.",
     "importNow": "Importar ahora",
     "previewChanges": "Vista previa de cambios",
     "selectTargetAgent": "Seleccionar agente destino",
@@ -3806,11 +3814,11 @@
   },
   "syncPage": {
     "title": "Sincronización de agentes",
-    "subtitle": "Sincronizar agentes entre instancias de EDDI",
+    "subtitle": "Sincronizar agentes entre instancias de {{productName}}",
     "connection": "Instancia origen",
     "loadingLocalAgents": "Cargando todos los agentes locales antes de emparejar…",
     "localAgentsError": "La lista de agentes locales no se pudo cargar por completo, por lo que no se pueden emparejar por nombre. Sincronizar ahora crearía duplicados.",
-    "sourceUrl": "URL de la instancia EDDI de origen",
+    "sourceUrl": "URL de la instancia {{productName}} de origen",
     "authToken": "Token de autorización",
     "authHint": "Opcional. Se envía como encabezado X-Source-Authorization.",
     "connect": "Conectar",
@@ -4376,7 +4384,7 @@
     "userLookup": "Búsqueda de usuario",
     "exportIncomplete": "Descargado, pero este paquete NO está completo — no lo envíe como una solicitud del art. 15/20 satisfecha.",
     "exportIncompleteTitle": "Paquete de exportación incompleto",
-    "exportIncompleteBody": "Este paquete no cubre todo lo que EDDI almacena sobre este usuario. No debe entregarse como una solicitud del art. 15/20 satisfecha.",
+    "exportIncompleteBody": "Este paquete no cubre todo lo que {{productName}} almacena sobre este usuario. No debe entregarse como una solicitud del art. 15/20 satisfecha.",
     "omittedCategories": "No exportado",
     "resultsPartialTitle": "Supresión incompleta",
     "resultsPartialBody": "Parte de los datos de este usuario puede seguir existiendo. No informe de la supresión como satisfecha hasta que estos pasos tengan éxito.",
@@ -4395,7 +4403,7 @@
     "failedConversations_many": "No se pudieron leer {{count}} conversaciones y faltan en el paquete.",
     "deleteIncomplete": "Borrado incompleto: algunos datos de este usuario pueden seguir existiendo. No lo notifiques como cumplido.",
     "auditRedacted": "Entradas de auditoría ocultadas",
-    "auditLegacy": "Este EDDI solo sustituye el id de usuario en el registro de auditoría: los prompts y respuestas guardados allí se conservan. EDDI 6.6 y posteriores también los ocultan, salvo que el servidor se ejecute con eddi.audit.erasure-mode=pseudonymize.",
+    "auditLegacy": "Este servidor solo sustituye el id de usuario en el registro de auditoría: los prompts y respuestas guardados allí se conservan. Las versiones de servidor 6.6 y posteriores también los ocultan, salvo que el servidor se ejecute con eddi.audit.erasure-mode=pseudonymize.",
     "auditPseudonymizeMode": "El contenido de auditoría se conservó: este servidor se ejecuta con eddi.audit.erasure-mode=pseudonymize (por ejemplo, por una retención legal), así que solo se sustituyó el id de usuario en el registro de auditoría.",
     "auditRedactionFailed": "No se redactó ningún contenido de auditoría: el paso de redacción falló (ver arriba), por lo que los prompts y respuestas registrados en el libro siguen ahí. Vuelva a ejecutar el borrado.",
     "auditRedactedExplanation": "Las filas de auditoría del usuario se conservan para el registro, pero sus prompts, respuestas, detalles del modelo y llamadas a herramientas se sustituyeron por una marca de ocultación y el id de usuario se seudonimizó. Las filas que se verificaban antes se volvieron a firmar; una fila ya manipulada sigue marcada como no válida.",
@@ -4412,7 +4420,7 @@
     "confirmTypeLabel": "Escribe el ID de usuario «{{userId}}» para confirmar"
   },
   "mockBanner": {
-    "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de EDDI para ver datos reales."
+    "message": "Modo demo — Se muestran datos de ejemplo. Conecte un backend de {{productName}} para ver datos reales."
   },
   "orphans": {
     "description": "Encuentre y limpie los recursos no referenciados por ningún agente o paquete.",
@@ -4434,7 +4442,7 @@
     "scanIncomplete": "Este análisis no finalizó",
     "scanIncompleteBody": "Puede que aparezcan como huérfanos recursos que siguen en uso. La purga está bloqueada hasta que un análisis se complete.",
     "confirmPurge": "¿Eliminar permanentemente los {{count}} recursos huérfanos? Esta acción no se puede deshacer.",
-    "purgeIncompleteScan": "No se eliminó nada: EDDI no pudo terminar de comprobar qué recursos siguen en uso. Vuelve a escanear e inténtalo de nuevo.",
+    "purgeIncompleteScan": "No se eliminó nada: {{productName}} no pudo terminar de comprobar qué recursos siguen en uso. Vuelve a escanear e inténtalo de nuevo.",
     "purgeFailed": "La purga falló",
     "scanFailed": "El escaneo falló: {{reason}}",
     "reviewHint": "Abre un recurso de la lista para inspeccionarlo antes; se eliminan todos los huérfanos de la lista.",
@@ -4485,11 +4493,11 @@
     "noMatch": "No hay claves que coincidan con \"{{filter}}\"",
     "pickFromVault": "Elegir del vault",
     "placeholder": "Clave API o ${vault:key-name}",
-    "vaultDown": "El vault no está configurado — configure un proveedor de secrets en el backend de EDDI",
+    "vaultDown": "El vault no está configurado — configure un proveedor de secrets en el backend de {{productName}}",
     "referencePlaceholder": "${vault:key-name}",
     "mustBeReference": "Este campo admite una referencia — ${vault:clave} o ${vars:clave} —, no el secreto en sí. Elija una clave o guarde antes el valor en la bóveda.",
     "connectionChip": "Conexión",
-    "connectionChipTitle": "Una referencia de conexión: EDDI la resuelve en la credencial en cada solicitud",
+    "connectionChipTitle": "Una referencia de conexión: {{productName}} la resuelve en la credencial en cada solicitud",
     "clearConnection": "Quitar la referencia de conexión",
     "pickConnection": "Insertar una referencia de conexión",
     "connectionFilterPlaceholder": "Buscar conexiones…",
@@ -4499,7 +4507,7 @@
     "connectionForbidden": "Su rol no puede listar conexiones. Si conoce el nombre, escriba ${connection:name} a mano.",
     "connectionUnavailable": "Este backend no ofrece conexiones.",
     "connectionFailed": "No se pudieron cargar las conexiones.",
-    "connectionHint": "Inserta ${connection:name} como valor completo. EDDI lo resuelve en la credencial en cada solicitud.",
+    "connectionHint": "Inserta ${connection:name} como valor completo. {{productName}} lo resuelve en la credencial en cada solicitud.",
     "restricted_one": "Restringida a {{count}} agente",
     "restricted_many": "Restringida a {{count}} agentes",
     "restricted_other": "Restringida a {{count}} agentes",
@@ -5139,7 +5147,7 @@
   },
   "operator": {
     "title": "Operador de plataforma",
-    "subtitle": "Pregunta sobre esta instalación de EDDI: el operador lo consulta por ti.",
+    "subtitle": "Pregunta sobre esta instalación de {{productName}}: el operador lo consulta por ti.",
     "readOnlyChip": "Solo lectura",
     "readWriteChip": "Lectura y escritura",
     "configError": "No se pudo cargar la configuración del operador",
@@ -5164,12 +5172,12 @@
       "baseUrl": "URL base",
       "apiKey": "Clave de API del modelo",
       "apiKeyOptional": "Clave de API del modelo (opcional)",
-      "apiKeyHint": "La clave de tu proveedor de LLM. No es una credencial de EDDI.",
+      "apiKeyHint": "La clave de tu proveedor de LLM. No es una credencial de {{productName}}.",
       "apiKeyPlaceholder": "Pega tu clave de API o elige una clave del almacén",
       "vaultDown": "El almacén de secretos no está disponible, por lo que ahora mismo no se pueden guardar claves en él. Una clave introducida aquí se envía al backend, que la guardará en el almacén si puede.",
       "environment": "Entorno",
       "authMode": "Cómo se autentica el operador",
-      "authModeHint": "El operador llama a tu API de administración de EDDI. Esto determina qué credenciales llevan esas llamadas.",
+      "authModeHint": "El operador llama a tu API de administración de {{productName}}. Esto determina qué credenciales llevan esas llamadas.",
       "authNoneBlocked": "Esta instalación tiene la autenticación activada, por lo que las llamadas de herramientas sin autenticar serían rechazadas. El operador se desplegaría correctamente y luego fallaría en cada consulta. Elige «Tu identidad» en su lugar.",
       "scope": {
         "label": "Capacidad",
@@ -5191,14 +5199,14 @@
       "promptBodyHint": "Edita cómo se presenta el operador y cómo trabaja.",
       "tools": "Herramientas que recibirá ({{toolCount}})",
       "activate": "Activar y desplegar",
-      "callerIdentityNote": "EDDI inserta tu token en el momento de la llamada. Nunca se almacena en la conversación y solo se envía de vuelta a esta instalación.",
+      "callerIdentityNote": "{{productName}} inserta tu token en el momento de la llamada. Nunca se almacena en la conversación y solo se envía de vuelta a esta instalación.",
       "rebuildWarning": "Guardar SUSTITUYE al operador: se crea un agente nuevo y el actual ({{agentId}}) se retira del despliegue y se elimina. Tu conversación de operador actual no se conservará, y desde ese momento esta pantalla se referirá al nuevo agente.",
       "environmentHint": "Dónde se ejecuta el propio agente operador. Aun así puede leer cualquier entorno.",
       "platformBaseUrl": "URL base de la plataforma",
-      "platformBaseUrlHint": "La dirección en la que EDDI puede alcanzarse a sí mismo: las herramientas del operador la llaman desde dentro del servidor, por lo que no es la dirección que usa tu navegador. Déjala como viene rellenada salvo que sepas lo contrario.",
+      "platformBaseUrlHint": "La dirección en la que {{productName}} puede alcanzarse a sí mismo: las herramientas del operador la llaman desde dentro del servidor, por lo que no es la dirección que usa tu navegador. Déjala como viene rellenada salvo que sepas lo contrario.",
       "platformBaseUrlInvalid": "Debe ser una URL absoluta http:// o https://, por ejemplo http://127.0.0.1:7070.",
-      "platformBaseUrlUnknown": "Esta instalación de EDDI no puede informar de su propia dirección, así que se usará el origen de tu navegador. Eso solo es correcto si nada (ningún túnel, redirección de puertos ni proxy inverso) se interpone entre tu navegador y EDDI; en caso contrario, introduce aquí la dirección.",
-      "platformBaseUrlLoopback": "Derivada del puerto HTTP de esta instalación. Sustitúyela si hay que dirigirse a EDDI por un nombre de servicio o mediante TLS en el propio proceso.",
+      "platformBaseUrlUnknown": "Esta instalación de {{productName}} no puede informar de su propia dirección, así que se usará el origen de tu navegador. Eso solo es correcto si nada (ningún túnel, redirección de puertos ni proxy inverso) se interpone entre tu navegador y {{productName}}; en caso contrario, introduce aquí la dirección.",
+      "platformBaseUrlLoopback": "Derivada del puerto HTTP de esta instalación. Sustitúyela si hay que dirigirse a {{productName}} por un nombre de servicio o mediante TLS en el propio proceso.",
       "platformBaseUrlAuto": "resuelta por el servidor",
       "platformBaseUrlDiffers": "Esta instalación informa actualmente de su propia dirección como {{serverUrl}}. El valor de arriba es distinto: consérvalo solo si lo pusiste a propósito.",
       "platformBaseUrlQueryFailed": "No se pudo preguntar al servidor por su propia dirección. La activación fallará salvo que la introduzcas aquí, o recarga para volver a intentarlo.",
@@ -5211,7 +5219,7 @@
     "authMode": {
       "none": {
         "label": "Sin credenciales",
-        "description": "Las llamadas de herramientas no llevan cabecera Authorization. Solo funciona si esta instalación de EDDI tiene la autenticación desactivada."
+        "description": "Las llamadas de herramientas no llevan cabecera Authorization. Solo funciona si esta instalación de {{productName}} tiene la autenticación desactivada."
       },
       "caller-identity": {
         "label": "Tu identidad",
@@ -5298,9 +5306,9 @@
       "diffFailed": "No se pudo cargar la versión almacenada para comparar: el documento propuesto completo está abajo.",
       "diffForbidden": "Comparar con la versión almacenada requiere acceso de editor: el documento propuesto completo está abajo.",
       "diffRedactionNote": "Las credenciales están ocultas en la versión propuesta, por lo que aparecen aquí como cambios aunque no hayan cambiado.",
-      "proposedNotJson": "El documento propuesto no es JSON válido, así que EDDI rechazará esta escritura. Tampoco se pudo analizar en busca de concesiones de capacidad: recházala y pide una solicitud corregida.",
-      "proposedNotJsonRedacted": "El documento propuesto no es JSON válido, incluso teniendo en cuenta las credenciales ocultas en esta vista previa, así que lo más probable es que EDDI rechace esta escritura. Tampoco se pudo analizar en busca de concesiones de capacidad: recházala y pide una solicitud corregida.",
-      "proposedTrailingText": "El documento propuesto tiene texto adicional después de su final. EDDI podría guardar solo el documento anterior y descartar el resto sin avisar, y solo esa parte se analizó en busca de concesiones de capacidad: recházala y pide una solicitud corregida.",
+      "proposedNotJson": "El documento propuesto no es JSON válido, así que {{productName}} rechazará esta escritura. Tampoco se pudo analizar en busca de concesiones de capacidad: recházala y pide una solicitud corregida.",
+      "proposedNotJsonRedacted": "El documento propuesto no es JSON válido, incluso teniendo en cuenta las credenciales ocultas en esta vista previa, así que lo más probable es que {{productName}} rechace esta escritura. Tampoco se pudo analizar en busca de concesiones de capacidad: recházala y pide una solicitud corregida.",
+      "proposedTrailingText": "El documento propuesto tiene texto adicional después de su final. {{productName}} podría guardar solo el documento anterior y descartar el resto sin avisar, y solo esa parte se analizó en busca de concesiones de capacidad: recházala y pide una solicitud corregida.",
       "diffStored": "Almacenado v{{version}}",
       "diffProposed": "Propuesto",
       "showFullRequest": "Mostrar el documento propuesto completo",
@@ -5514,8 +5522,8 @@
     "title": "Equipo nuevo"
   },
   "updates": {
-    "title": "Actualizaciones de EDDI",
-    "description": "Comprueba si hay una versión más reciente de EDDI. No se envía nada hasta que lo solicites.",
+    "title": "Actualizaciones de {{productName}}",
+    "description": "Comprueba si hay una versión más reciente de {{productName}}. No se envía nada hasta que lo solicites.",
     "installed": "Instalada",
     "githubRelease": "Versión de GitHub",
     "dockerImage": "Imagen de Docker",
@@ -5527,7 +5535,7 @@
     "privacyNote": "La comprobación contacta únicamente con api.github.com desde tu navegador. No se envía ningún dato del despliegue.",
     "neverChecked": "Aún no se ha realizado ninguna comprobación.",
     "upToDate": "Estás usando la última versión ({{version}}).",
-    "updateAvailable": "EDDI {{version}} está disponible",
+    "updateAvailable": "{{productName}} {{version}} está disponible",
     "updateAvailableDetail": "Estás usando {{installed}}.",
     "ahead": "Estás usando {{installed}}, más reciente que la última versión publicada ({{version}}).",
     "unknownInstalled": "La última versión es {{version}}. No se pudo determinar la versión instalada, así que no hay nada con lo que compararla.",
@@ -5633,7 +5641,7 @@
       "title": "Manager"
     },
     "subtitle": "Elige tu espacio de trabajo para empezar.",
-    "title": "Bienvenido a EDDI",
+    "title": "Bienvenido a {{productName}}",
     "workforce": {
       "description": "Reúne equipos de IA que debaten, analizan y resuelven juntos desafíos complejos.",
       "feature1": "Formar grupos de trabajo de agentes",
@@ -5688,7 +5696,7 @@
     "count": "{{shown}} mostradas",
     "empty": "Todavía no hay conexiones",
     "emptyDesc": "Cree una para que sus agentes puedan autenticarse ante un sistema externo.",
-    "guidance": "Una conexión es una credencial más la lista de orígenes a los que puede enviarse. Los agentes la nombran — ${connection:jira} — y EDDI la resuelve en cada petición, de modo que la misma conexión puede llevar una clave de API para toda la organización o la cuenta personal de cada persona.",
+    "guidance": "Una conexión es una credencial más la lista de orígenes a los que puede enviarse. Los agentes la nombran — ${connection:jira} — y {{productName}} la resuelve en cada petición, de modo que la misma conexión puede llevar una clave de API para toda la organización o la cuenta personal de cada persona.",
     "howItAuthenticates": "Cómo se autentica",
     "confirmDelete": "¿Eliminar esta conexión?",
     "confirmDeleteDesc": "Todas las cuentas vinculadas a través de ella se desvinculan a la vez — los tokens no deben sobrevivir a la conexión que los generó. Los agentes que la nombren dejarán de poder autenticarse.",
@@ -5706,7 +5714,7 @@
     },
     "choice": {
       "staticBody": "Una cabecera fija, la misma para todos — X-Api-Key, o Authorization: Bearer …",
-      "basicBody": "HTTP Basic. EDDI se encarga de la codificación, así la contraseña sigue siendo una entrada aparte de la bóveda que puede rotar por su cuenta.",
+      "basicBody": "HTTP Basic. {{productName}} se encarga de la codificación, así la contraseña sigue siendo una entrada aparte de la bóveda que puede rotar por su cuenta.",
       "clientCredentialsBody": "El agente se identifica como sí mismo. Un token de acceso compartido por todos, renovado automáticamente.",
       "authorizationCodeBody": "Cada persona vincula su propia cuenta y el agente actúa en su nombre. Requiere el inicio de sesión activado y una bóveda."
     },
@@ -5761,7 +5769,7 @@
     "removeOrigin": "Quitar {{origin}}",
     "moreOrigins": "+{{more}}",
     "mineTitle": "Sus cuentas vinculadas",
-    "mineSubtitle": "Servicios que ha autorizado a EDDI a usar en su nombre. Nadie más puede usarlos, y EDDI nunca le muestra las credenciales.",
+    "mineSubtitle": "Servicios que ha autorizado a {{productName}} a usar en su nombre. Nadie más puede usarlos, y {{productName}} nunca le muestra las credenciales.",
     "noneLinked": "No hay cuentas vinculadas",
     "noneLinkedDesc": "Cuando un agente necesite actuar en su nombre en otro servicio, se le pedirá que lo conecte. Las cuentas que conecte aparecerán aquí y podrá desvincularlas cuando quiera.",
     "connect": "Conectar",
@@ -5771,7 +5779,7 @@
     "unlinked": "«{{name}}» ya no está vinculada a su cuenta.",
     "unlinkFailed": "No se ha podido desvincular esa cuenta.",
     "confirmUnlink": "¿Desvincular esta cuenta?",
-    "confirmUnlinkDesc": "EDDI olvidará las credenciales que concedió y ya no podrá actuar en su nombre en ese servicio. Podrá volver a conectarla cuando quiera.",
+    "confirmUnlinkDesc": "{{productName}} olvidará las credenciales que concedió y ya no podrá actuar en su nombre en ese servicio. Podrá volver a conectarla cuando quiera.",
     "linked": "Conectada — «{{name}}» ya está vinculada a su cuenta.",
     "linkStartFailed": "No se ha podido iniciar la vinculación.",
     "loadMineFailed": "No se han podido cargar sus cuentas vinculadas",
@@ -5789,7 +5797,7 @@
       "active": "Funciona con normalidad.",
       "connectedOn": "Conectada el {{date}}.",
       "expired": "El token de acceso ha caducado y se renovará automáticamente en el siguiente uso — no tiene que hacer nada.",
-      "revoked": "Este acceso fue revocado. Vuelva a conectar si aún quiere que EDDI lo use.",
+      "revoked": "Este acceso fue revocado. Vuelva a conectar si aún quiere que {{productName}} lo use.",
       "refreshFailed": "El servicio ha dejado de aceptar las credenciales guardadas. Vuelve a conectar para conceder el acceso de nuevo.",
       "expiresAt": "Token de acceso válido hasta {{date}}"
     },
@@ -5825,7 +5833,7 @@
       "nameTooLong": "Un nombre tiene como máximo 64 caracteres.",
       "timeoutRange": "El tiempo de espera debe ser un número entero entre 1 y 60000 milisegundos. Déjelo vacío para usar el valor predeterminado.",
       "templateLiteralCredential": "El texto alrededor de la referencia parece una credencial en sí mismo. Fuera de ${vault:…} solo cabe un prefijo de esquema corto como «Bearer »; guarde el resto en la bóveda.",
-      "paramReserved": "Uno de estos parámetros lo establece el propio EDDI (client_id, redirect_uri, response_type, state, code_challenge…). Sobrescribirlo rompería el flujo.",
+      "paramReserved": "Uno de estos parámetros lo establece el propio {{productName}} (client_id, redirect_uri, response_type, state, code_challenge…). Sobrescribirlo rompería el flujo.",
       "paramValueReference": "Los valores de los parámetros se envían tal cual: una referencia ${…} aquí no se resuelve y pondría un puntero de la bóveda en una URL. Use solo valores de protocolo simples.",
       "paramValueTooLong": "Un valor de parámetro tiene como máximo 512 caracteres.",
       "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos."
@@ -5835,20 +5843,20 @@
     "discardNewTitle": "¿Descartar esta conexión?",
     "discardNewBody": "Se perderá lo que haya rellenado hasta ahora. Todavía no se ha creado nada.",
     "confirmReconnect": "¿Volver a conectar esta cuenta?",
-    "confirmReconnectDesc": "Esta cuenta funciona, así que no hay nada que reparar. Si continúa, saldrá de EDDI a la página de inicio de sesión del proveedor y se reemplazará el acceso que concedió antes.",
+    "confirmReconnectDesc": "Esta cuenta funciona, así que no hay nada que reparar. Si continúa, saldrá de {{productName}} a la página de inicio de sesión del proveedor y se reemplazará el acceso que concedió antes.",
     "paramDuplicate": "Otro parámetro ya usa este nombre. Solo se guarda el último.",
     "bindingChooser": "De dónde procede la clave",
     "bindingChoice": {
       "serviceBody": "Una clave en la bóveda, enviada para todos. Sencillo, pero el agente puede llegar a todo lo que esa clave alcanza.",
-      "callerSuppliedBody": "EDDI no almacena nada. El sistema que llama a EDDI envía la credencial de cada usuario con cada solicitud, así que el agente solo puede hacer lo que ese usuario puede hacer: los permisos del destino son el límite."
+      "callerSuppliedBody": "{{productName}} no almacena nada. El sistema que llama a {{productName}} envía la credencial de cada usuario con cada solicitud, así que el agente solo puede hacer lo que ese usuario puede hacer: los permisos del destino son el límite."
     },
     "callerSuppliedHeaderTitle": "Lo que envía el sistema que llama",
     "callerSuppliedHeaderBody": "Una cabecera por solicitud: el nombre de la conexión, un espacio y después el valor completo que se enviará como {{header}}, esquema incluido, así que «Bearer abc» no necesita escaparse. La credencial existe solo durante esa solicitud y nunca se almacena.",
-    "callerSuppliedNeedsAuth": "El llamante debe haber iniciado sesión en EDDI. Una solicitud sin la credencial falla en lugar de salir sin autenticar, incluso al reanudar una llamada a herramienta en pausa, y esta conexión se excluye del descubrimiento MCP y A2A.",
+    "callerSuppliedNeedsAuth": "El llamante debe haber iniciado sesión en {{productName}}. Una solicitud sin la credencial falla en lugar de salir sin autenticar, incluso al reanudar una llamada a herramienta en pausa, y esta conexión se excluye del descubrimiento MCP y A2A.",
     "bindingCallerSuppliedTitle": "Se resuelve como quien llama",
-    "bindingCallerSuppliedBody": "El sistema que llama entrega la credencial de cada usuario con la solicitud y EDDI no almacena nada. El agente solo puede hacer lo que ese usuario puede hacer en el destino, y esta conexión se excluye del descubrimiento MCP y A2A.",
+    "bindingCallerSuppliedBody": "El sistema que llama entrega la credencial de cada usuario con la solicitud y {{productName}} no almacena nada. El agente solo puede hacer lo que ese usuario puede hacer en el destino, y esta conexión se excluye del descubrimiento MCP y A2A.",
     "confirmAuthChange": "¿Cambiar cómo se autentica esta conexión?",
-    "confirmAuthChangeDesc": "Las cuentas vinculadas a través de esta conexión dejarán de resolverse: una concesión pertenece al flujo que la produjo. EDDI rechaza el cambio mientras quede alguna cuenta vinculada e indica cuántas; desvincúlelas primero, o cree una conexión nueva y deje que la gente vincule esa.",
+    "confirmAuthChangeDesc": "Las cuentas vinculadas a través de esta conexión dejarán de resolverse: una concesión pertenece al flujo que la produjo. {{productName}} rechaza el cambio mientras quede alguna cuenta vinculada e indica cuántas; desvincúlelas primero, o cree una conexión nueva y deje que la gente vincule esa.",
     "confirmAuthChangeAccept": "Cambiar",
     "deleted": "Conexión \"{{name}}\" eliminada",
     "confirmDeleteNamed": "¿Eliminar la conexión \"{{name}}\"?"
@@ -6127,7 +6135,7 @@
     "valueLabel": "Valor",
     "intRange": "Fuera del rango Integer (±2.147.483.647). Elige Entero largo para este valor.",
     "unsafeLong": "Más allá de 9.007.199.254.740.991 el navegador no puede conservar este número entero con exactitud; edítalo en la pestaña JSON.",
-    "needs66": "Entero largo y Decimal requieren EDDI 6.6 o posterior.",
+    "needs66": "Entero largo y Decimal requieren la versión de servidor 6.6 o posterior.",
     "conflict": "Esta fila define {{fields}}. Solo se usa {{winner}}; elegir un tipo aquí conserva ese único valor y elimina el resto.",
     "kindString": "Texto / plantilla",
     "kindInt": "Entero",
@@ -6165,7 +6173,7 @@
       "degradedNatsText": "El nodo que responde esta página no puede alcanzar NATS. Sigue atendiendo, pero sin coordinación de clúster: sin leases compartidos, sin fencing y sin eventos a nivel de clúster.",
       "degradedText": "NATS es accesible, pero falta un nodo, va con retraso o informa de problemas. Las conversaciones cuyos turnos retenía se traspasan dentro del TTL del lease.",
       "partitionedText": "Un servidor NATS que aloja una réplica de un stream o bucket está fuera de línea: el propio clúster NATS está dividido. Las escrituras continúan mientras haya quórum.",
-      "singleNodeText": "Este despliegue ejecuta un único nodo EDDI con el coordinador en memoria. No hay nada que coordinar entre nodos."
+      "singleNodeText": "Este despliegue ejecuta un único nodo {{productName}} con el coordinador en memoria. No hay nada que coordinar entre nodos."
     },
     "next": {
       "deadLetters": "Revise las dead letters en espera: reproduzca aquellas cuya causa esté corregida y descarte el resto.",
@@ -6346,11 +6354,11 @@
     "answeredBy": "Respondido por {{node}}",
     "staleNotice": "La última actualización falló; esta es la vista de hace {{age}}.",
     "title": "Clúster",
-    "subtitle": "Estado, nodos, leases y turnos fallidos en todas las réplicas de EDDI, y qué puede hacer con seguridad al respecto",
+    "subtitle": "Estado, nodos, leases y turnos fallidos en todas las réplicas de {{productName}}, y qué puede hacer con seguridad al respecto",
     "tabs": "Secciones de la consola del clúster",
     "single": {
       "title": "Qué aporta el modo clúster",
-      "scale": "Cualquier número de réplicas de EDDI detrás de un balanceador de carga round-robin simple, compartiendo una base de datos y un clúster NATS JetStream.",
+      "scale": "Cualquier número de réplicas de {{productName}} detrás de un balanceador de carga round-robin simple, compartiendo una base de datos y un clúster NATS JetStream.",
       "leases": "Leases de conversación con tokens de fencing: los turnos de una conversación nunca se solapan y un nodo que perdió su lease no puede sobrescribir turnos más recientes.",
       "failover": "Failover: las conversaciones de un nodo caído continúan en otro nodo dentro del TTL del lease; las dead letters, cachés, despliegues y cancelaciones funcionan en todo el clúster.",
       "docs": "Leer la guía de clustering"

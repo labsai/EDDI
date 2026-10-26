@@ -74,7 +74,7 @@ export function verdictExplanation(t: TFunction, verdict: ClusterVerdict, reason
     case "SINGLE_NODE":
       return t(
         "cluster.verdict.singleNodeText",
-        "This deployment runs one EDDI node with the in-memory coordinator. There is nothing to coordinate between nodes.",
+        "This deployment runs one {{productName}} node with the in-memory coordinator. There is nothing to coordinate between nodes.",
       );
   }
 }

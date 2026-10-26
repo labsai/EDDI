@@ -1714,7 +1714,7 @@ function A2ASection({
             <p className="mt-3 text-sm text-muted-foreground max-w-md">
               {t(
                 "agentDetail.a2aEnabledDesc",
-                "Make this agent discoverable by other agents via the A2A protocol. Other EDDI instances can find and call this agent as a tool."
+                "Make this agent discoverable by other agents via the A2A protocol. Other {{productName}} instances can find and call this agent as a tool."
               )}
             </p>
             <button

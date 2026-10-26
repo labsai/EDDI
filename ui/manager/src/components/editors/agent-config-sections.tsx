@@ -1462,7 +1462,7 @@ function SlackSetupGuide() {
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">2</span>
-              {t("agentDetail.slackStep2", "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.")}
+              {t("agentDetail.slackStep2", "Copy the Bot Token (xoxb-…) and Signing Secret into the {{productName}} vault and configure channels below.")}
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">3</span>
@@ -1475,7 +1475,7 @@ function SlackSetupGuide() {
           </ol>
 
           <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-            {t("agentDetail.slackSetupNote", "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.")}
+            {t("agentDetail.slackSetupNote", "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in {{productName}}.")}
           </p>
 
           {/* Required scopes */}

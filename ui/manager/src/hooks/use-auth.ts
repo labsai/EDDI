@@ -1,6 +1,8 @@
 import { useCallback, useContext } from "react";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
 import { mayUse, rolesForScreen, ROLE_ADMIN } from "@/lib/roles";
+import { isUpdateUiVisible, UPDATES_PATH } from "@/lib/brand";
+import { useBrand } from "@/hooks/use-brand";
 
 /**
  * Access the auth context — user, roles, login/logout.
@@ -36,10 +38,20 @@ export function useMayUse(): (required: readonly string[] | null) => boolean {
   );
 }
 
-/** Whether the user may open the Manager screen at `path` (see `rolesForScreen`). */
+/**
+ * Whether the user may open the Manager screen at `path` (see `rolesForScreen`).
+ *
+ * Also false for the Updates page while the brand hides the update UI
+ * (`isUpdateUiVisible`), so the sidebar and the command palette, which both
+ * filter through this, stop offering a screen that is not there.
+ */
 export function useMayOpenScreen(): (path: string) => boolean {
   const may = useMayUse();
-  return useCallback((path: string) => may(rolesForScreen(path)), [may]);
+  const updateUi = isUpdateUiVisible(useBrand());
+  return useCallback(
+    (path: string) => (path === UPDATES_PATH && !updateUi ? false : may(rolesForScreen(path))),
+    [may, updateUi],
+  );
 }
 
 /**

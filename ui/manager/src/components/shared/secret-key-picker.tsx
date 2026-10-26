@@ -611,7 +611,7 @@ function VaultPopup({
               {vaultError ||
                 t(
                   "secretPicker.vaultDown",
-                  "Vault is not configured — set up a secret provider in the EDDI backend",
+                  "Vault is not configured — set up a secret provider in the {{productName}} backend",
                 )}
             </span>
           </div>
@@ -1085,7 +1085,7 @@ export function SecretKeyPicker({
           }`}
           title={t(
             "secretPicker.connectionChipTitle",
-            "A connection reference — EDDI resolves it to the credential on every request",
+            "A connection reference — {{productName}} resolves it to the credential on every request",
           )}
           data-testid={`${testId}-connection-chip`}
         >

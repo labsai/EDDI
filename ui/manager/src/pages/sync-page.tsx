@@ -298,7 +298,7 @@ export function SyncPage() {
           {t("syncPage.title", "Agent Sync")}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {t("syncPage.subtitle", "Synchronize agents between EDDI instances")}
+          {t("syncPage.subtitle", "Synchronize agents between {{productName}} instances")}
         </p>
       </div>
 

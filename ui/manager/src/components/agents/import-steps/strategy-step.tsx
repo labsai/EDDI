@@ -88,7 +88,7 @@ export function StrategyStep({
           onChange={onStrategyChange}
           icon={<Globe className="h-4 w-4 text-violet-500" />}
           label={t("importDialog.syncRemote", "Sync from remote instance")}
-          desc={t("importDialog.syncDesc", "Connect to another EDDI instance and sync a specific agent live.")}
+          desc={t("importDialog.syncDesc", "Connect to another {{productName}} instance and sync a specific agent live.")}
           testId="strategy-sync"
         />
       </fieldset>

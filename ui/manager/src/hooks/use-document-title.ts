@@ -16,6 +16,8 @@ export function useDocumentTitle(entityName?: string) {
   const { t } = useTranslation();
 
   useEffect(() => {
-    document.title = `${pageTitleLabel(t, location.pathname, entityName)} — EDDI Manager`;
+    // "<product> Manager" is a translatable string, and `{{productName}}` in it
+    // is the deployment's brand (src/i18n/config.ts), so a rebrand reaches the tab.
+    document.title = `${pageTitleLabel(t, location.pathname, entityName)} — ${t("app.title", "{{productName}} Manager")}`;
   }, [location.pathname, t, entityName]);
 }

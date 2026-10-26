@@ -46,7 +46,7 @@ export function UpdateBanner() {
       {/* A release is a delivery, not an alarm — the icon should read that way. */}
       <Gift className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
       <span>
-        {t("updates.updateAvailable", "EDDI {{version}} is available", {
+        {t("updates.updateAvailable", "{{productName}} {{version}} is available", {
           version: latest.version,
         })}
         {knownInstalledVersion && (
