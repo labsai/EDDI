@@ -72,6 +72,18 @@ without a ceiling and with quotas off behaves exactly as before.
 [`tenant-quotas.md`](../tenant-quotas.md), [`metrics.md`](../metrics.md); Platform Operator prompt and
 revision 37.
 
+### End-to-end tests
+
+- [`LlmSpendChecksIT`](../../src/test/java/ai/labs/eddi/integration/LlmSpendChecksIT.java) and its
+  PostgreSQL twin [`PostgresLlmSpendChecksIT`](../../src/test/java/ai/labs/eddi/integration/postgres/PostgresLlmSpendChecksIT.java)
+  drive a deployed agent against a WireMock OpenAI endpoint whose `usage` blocks are priced by the task:
+  the ceiling refusing the turn after the one that crosses it; a re-ask, a guardrail reprompt, a cascade
+  escalation and an output `classifier` call each refused on the task's unrecorded spend (each with a
+  control that makes the call when nothing stops it); the tenant budget charged by one conversation and
+  refusing the next, and refusing a re-ask on the same turn's unsettled spend; and an under-budget turn
+  whose `audit:cost` and tenant usage equal the reported usage at the configured prices. Each asserts the
+  client's answer, the stored conversation and the exact number of provider requests.
+
 ### Not done / next
 
 - The cascade's `judge_model` confidence call is still unchecked (it is priced through the cascade's run
