@@ -443,10 +443,16 @@ Validation (all `400`, applied **before** any state changes, so a bad body never
 - `toolDecisions` is only valid for a `TOOL_CALL` pause.
 - An unknown `callId` (not in the pending batch) is rejected (the body names the valid ids).
 - Each listed call requires a `verdict`; per-call `note` ≤ **1024** chars (top-level `note` ≤ 4096).
+- A listed call that is `REJECTED` and has no note of its own (absent or blank) uses the top-level `note`, so a client can send one note for the whole decision and still list the calls it rejects. An `APPROVED` call's note is never shown to the model.
 - Top-level `REJECTED` combined with any per-call `APPROVED` is contradictory — set the top-level verdict to `APPROVED` to mix outcomes.
 - `amendedArguments` is only valid on an `APPROVED` call, must be a **JSON object**, is size-capped, and cannot amend a call whose arguments were truncated at pause time (approve/reject it as-is).
 
-A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (with the reviewer's note) so it can produce a coherent tool-less answer — rejection feeds *back into* the model rather than aborting the turn. `hitlConfig.onRejection` does not change this: it applies to rule pauses only.
+A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (`status: REJECTED_BY_REVIEWER`, the tool name and the reviewer's note) — rejection feeds *back into* the model rather than aborting the turn. What the result tells the model to do depends on who decided and whether a note came with it (`hitlConfig.onRejection` does not change this: it applies to rule pauses only):
+
+- **A person left a note.** The result says the user did not approve the call and left a note: if the note asks for changes, call the tool again with exactly those changes and nothing else changed; if it declines or asks for something else, do not call it again and reply briefly. A note is therefore a way to ask for a revision. The re-proposed call is a new call: it is gated like any other, pauses again (a new `pauseId` and its own timeout) and needs its own approval. Nothing a note says changes a call that was approved.
+- **No note, or an automated decision.** The result keeps the plain "declined" text: do not retry this exact call, explain the situation and offer alternatives. An automated decision is one whose `decidedBy` starts with `system:` — the timeout auto-reject (`system:timeout`) and the group-conversation auto-reject (`system:group`, note "tool approval is not available during group discussions in this version"). The note on those is an explanation, not a request, and asking the model to revise would only make it retry a call that can never be approved.
+
+Each re-proposal is another pause and counts toward `maxPausesPerTurn`. A deployment that expects notes to come back as revisions should raise it (the maximum is `10`); at the cap the remaining gated calls in the turn are refused.
 
 ### `pauseDetails` for a tool pause
 
