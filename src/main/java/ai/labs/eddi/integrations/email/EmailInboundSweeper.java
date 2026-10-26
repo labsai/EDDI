@@ -69,7 +69,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * mail whose step exists but has no reply row gets its reply rendered from the
  * stored conversation, and a mail whose turn paused gets its pause notice
  * ({@link EmailReplySender#ensureFor}, idempotent —
- * {@code outcome=reply_rebuilt}).
+ * {@code outcome=reply_rebuilt}). A rebuild that fails leaves the row
+ * {@code TURN_SUBMITTED} with its deadline moved on, so a later sweep tries
+ * again ({@link #MAX_REBUILD_ATTEMPTS} times in all) before the row is closed
+ * without the reply.
  * <p>
  * Each resolution is a conditional transition, so several nodes running the
  * sweep at once resolve each row once.
@@ -90,6 +93,19 @@ public class EmailInboundSweeper {
      * finds such a row by its recorded conversation.
      */
     public static final String RESUBMIT = "resubmit";
+
+    /**
+     * The note on a submitted row whose reply could not be rebuilt yet, followed by
+     * how many sweeps failed so far.
+     */
+    static final String REBUILD_FAILED = "reply_rebuild_failed:";
+
+    /**
+     * Sweeps that try to rebuild a reply before the row is closed without it — one
+     * every {@code stranded-after}, so a store outage of a few hours is covered and
+     * a reply that can never be built does not keep its row open for ever.
+     */
+    static final int MAX_REBUILD_ATTEMPTS = 5;
 
     private final IEmailMessageLedger ledger;
     private final IConversationService conversationService;
@@ -200,8 +216,17 @@ public class EmailInboundSweeper {
                 }
                 continue;
             }
-            if (step >= 0) {
-                rebuildReply(row, snapshot, now);
+            if (step >= 0 && !rebuildReply(row, snapshot, now)) {
+                // Closing the row now would leave the reply to nobody: the outbound row may
+                // not exist yet, and DONE leaves every recovery query. Kept for a later sweep.
+                int failures = rebuildFailures(row) + 1;
+                if (failures < MAX_REBUILD_ATTEMPTS) {
+                    ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, null, now.plus(strandedAfter), REBUILD_FAILED + failures,
+                            false, now);
+                    continue;
+                }
+                LOGGER.warnf("Email integration %s: the reply to inbound mail %s could not be rebuilt in %d sweeps; the mail is closed "
+                        + "without it", sanitize(row.integrationId()), row.id(), failures);
             }
             String outcome = switch (state) {
                 case ERROR, EXECUTION_INTERRUPTED -> "failed";
@@ -218,10 +243,13 @@ public class EmailInboundSweeper {
 
     /**
      * Conversation mode: the reply (or pause notice) the dead node did not queue.
+     *
+     * @return false when it could not be rebuilt (and may be tried again); true
+     *         when it exists now or none is due
      */
-    private void rebuildReply(LedgerEntry row, SimpleConversationMemorySnapshot snapshot, Instant now) {
+    private boolean rebuildReply(LedgerEntry row, SimpleConversationMemorySnapshot snapshot, Instant now) {
         if (replies == null) {
-            return;
+            return true;
         }
         try {
             Optional<EmailIntegration> integration = directory.find(row.integrationId());
@@ -234,6 +262,21 @@ public class EmailInboundSweeper {
         } catch (RuntimeException e) {
             LOGGER.warnf("Email integration %s: the reply to inbound mail %s could not be rebuilt: %s", sanitize(row.integrationId()), row.id(),
                     e.getMessage());
+            return false;
+        }
+        return true;
+    }
+
+    /** How many sweeps failed to rebuild the reply of {@code row} so far. */
+    static int rebuildFailures(LedgerEntry row) {
+        String note = row.lastError();
+        if (note == null || !note.startsWith(REBUILD_FAILED)) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(note.substring(REBUILD_FAILED.length())));
+        } catch (NumberFormatException e) {
+            return 0;
         }
     }
 

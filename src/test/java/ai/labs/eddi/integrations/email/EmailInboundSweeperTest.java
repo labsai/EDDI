@@ -188,6 +188,45 @@ class EmailInboundSweeperTest {
     }
 
     @Test
+    @DisplayName("conversation mode: a reply that cannot be rebuilt keeps the row submitted for a later sweep, a bounded number of times")
+    void rebuildFailureKeepsRow() throws Exception {
+        submitted("answered", "c-answered", now.minusSeconds(1));
+        when(conversations.getConversationState("c-answered")).thenReturn(ConversationState.READY);
+        var snapshot = conversation("<answered@x.com>");
+        when(conversations.readConversation("c-answered", true, false, List.of())).thenReturn(snapshot);
+        var configuration = EmailInboundProcessorTest.integration(Map.of("mode", "conversation", "smtpHost", "smtp.contoso.com"));
+        var settings = EmailChannelSettings.from(configuration.getPlatformConfig());
+        when(directory.find("int-1")).thenReturn(Optional.of(new EmailIntegration("int-1", configuration, settings)));
+        EmailReplySender replies = mock(EmailReplySender.class);
+        when(replies.ensureFor(any(), any(), any(), any())).thenThrow(new IllegalStateException("ledger unavailable"))
+                .thenReturn(true);
+        sweeper.replies = replies;
+
+        sweeper.resolveStranded(now);
+
+        var kept = ledger.findById("answered").orElseThrow();
+        assertEquals(State.TURN_SUBMITTED, kept.state(), "not closed without its reply");
+        assertEquals(EmailInboundSweeper.REBUILD_FAILED + 1, kept.lastError());
+        assertTrue(kept.nextAttemptAt().isAfter(now), "tried again after stranded-after, not on every sweep");
+
+        sweeper.resolveStranded(now.plus(Duration.ofMinutes(31)));
+        assertEquals(State.DONE, ledger.findById("answered").orElseThrow().state(), "rebuilt on the next sweep, then closed");
+
+        submitted("hopeless", "c-hopeless", now.minusSeconds(1));
+        when(conversations.getConversationState("c-hopeless")).thenReturn(ConversationState.READY);
+        when(conversations.readConversation("c-hopeless", true, false, List.of())).thenReturn(conversation("<hopeless@x.com>"));
+        when(replies.ensureFor(any(), any(), any(), any())).thenThrow(new IllegalStateException("never"));
+        Instant at = now;
+        for (int i = 1; i < EmailInboundSweeper.MAX_REBUILD_ATTEMPTS; i++) {
+            sweeper.resolveStranded(at);
+            assertEquals(State.TURN_SUBMITTED, ledger.findById("hopeless").orElseThrow().state());
+            at = at.plus(Duration.ofMinutes(31));
+        }
+        sweeper.resolveStranded(at);
+        assertEquals(State.DONE, ledger.findById("hopeless").orElseThrow().state(), "given up after the last attempt");
+    }
+
+    @Test
     @DisplayName("trigger mode: no reply is ever rebuilt")
     void triggerModeRebuildsNothing() throws Exception {
         submitted("answered", "c-answered", now.minusSeconds(1));
