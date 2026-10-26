@@ -1429,10 +1429,12 @@ jobs:
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
       # one Auth E2E run). It normally takes 20 s to 5 min, so ten minutes fails
-      # a stall fast enough to re-run.
+      # a stall fast enough to re-run. The script skips `--with-deps` — apt fonts
+      # from a mirror that crawled for 10+ minutes on 2026-10-26 — when the
+      # runner's own libraries already launch Chromium; the two steps below share it.
       - name: Install Playwright browsers
         timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        run: node scripts/install-playwright-chromium.mjs
 
       # Two workers: the config's `workers: 1` on CI exists for the backend tiers,
       # whose specs share state in serial groups. Every MSW test gets its own mocked
@@ -2151,7 +2153,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: npx playwright install --with-deps chromium
+        run: node scripts/install-playwright-chromium.mjs
 
       # Against the app EDDI serves on :7070 — the bundle in this image — not a Vite
       # dev server (see E2E_AGAINST_BACKEND in playwright.config.ts).
@@ -2299,7 +2301,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: npx playwright install --with-deps chromium
+        run: node scripts/install-playwright-chromium.mjs
 
       - name: Run auth tests
         working-directory: ui/manager
