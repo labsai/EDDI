@@ -5,7 +5,7 @@
 package ai.labs.eddi.engine.ratings;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.RatingConfig.Scale;
-import ai.labs.eddi.engine.alerts.IAlertEventStore;
+import ai.labs.eddi.engine.alerts.AlertErasureRedactor;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import ai.labs.eddi.engine.ratings.model.ReviewStatus;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +25,7 @@ import static org.mockito.Mockito.when;
 class ConversationRatingGdprParticipantTest {
 
     private final IConversationRatingStore store = mock(IConversationRatingStore.class);
-    private final IAlertEventStore alerts = mock(IAlertEventStore.class);
+    private final AlertErasureRedactor alerts = mock(AlertErasureRedactor.class);
     private final ConversationRatingGdprParticipant participant = new ConversationRatingGdprParticipant(store, alerts);
 
     @Test

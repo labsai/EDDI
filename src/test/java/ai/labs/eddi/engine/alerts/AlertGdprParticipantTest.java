@@ -37,13 +37,15 @@ class AlertGdprParticipantTest {
 
     private IAlertEventStore events;
     private IAlertRuleStore rules;
+    private AlertErasureRedactor redactor;
     private AlertGdprParticipant participant;
 
     @BeforeEach
     void setUp() {
         events = mock(IAlertEventStore.class);
         rules = mock(IAlertRuleStore.class);
-        participant = new AlertGdprParticipant(events, rules);
+        redactor = mock(AlertErasureRedactor.class);
+        participant = new AlertGdprParticipant(events, rules, redactor);
     }
 
     private static AlertRule rule(String id, String name, String createdBy, String updatedBy) {
@@ -61,9 +63,9 @@ class AlertGdprParticipantTest {
     void erase() {
         when(events.clearAcknowledger("erin")).thenReturn(3L);
         when(rules.clearAuthor("erin")).thenReturn(2L);
-        when(events.redactOutputValues("erin")).thenReturn(4L);
+        when(redactor.redactOutputValues("erin")).thenReturn(4L);
         assertEquals(9L, participant.erase("erin"));
-        verify(events).redactOutputValues("erin");
+        verify(redactor).redactOutputValues("erin");
         verify(events).clearAcknowledger("erin");
         verify(rules).clearAuthor("erin");
     }

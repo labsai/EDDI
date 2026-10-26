@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.engine.ratings;
 
-import ai.labs.eddi.engine.alerts.IAlertEventStore;
+import ai.labs.eddi.engine.alerts.AlertErasureRedactor;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -38,12 +38,12 @@ public class ConversationRatingGdprParticipant implements IGdprParticipant {
     static final int MAX_EXPORTED_RATINGS = 10_000;
 
     private final IConversationRatingStore ratingStore;
-    private final IAlertEventStore alertEventStore;
+    private final AlertErasureRedactor alertRedactor;
 
     @Inject
-    public ConversationRatingGdprParticipant(IConversationRatingStore ratingStore, IAlertEventStore alertEventStore) {
+    public ConversationRatingGdprParticipant(IConversationRatingStore ratingStore, AlertErasureRedactor alertRedactor) {
         this.ratingStore = ratingStore;
-        this.alertEventStore = alertEventStore;
+        this.alertRedactor = alertRedactor;
     }
 
     @Override
@@ -55,7 +55,8 @@ public class ConversationRatingGdprParticipant implements IGdprParticipant {
     public long erase(String userId) {
         // First, while the ratings still say whose they are.
         List<String> ratingIds = ratingStore.readByUserId(userId, Integer.MAX_VALUE).stream().map(ConversationRating::id).toList();
-        alertEventStore.redactRatingComments(ratingIds);
+        // Waits for deliveries holding a send claim on one of these alerts.
+        alertRedactor.redactRatingComments(ratingIds);
         long deleted = ratingStore.deleteByUserId(userId);
         ratingStore.clearReviewer(userId);
         return deleted;

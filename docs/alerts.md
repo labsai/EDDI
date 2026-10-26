@@ -355,11 +355,16 @@ value or excerpt blanked before it is delivered. A fence lasts 15 minutes, far l
 drain; it only ever holds back content captured *before* the erasure, so a later
 conversation of a reused id is not affected.
 
-Every delivery — the first one and each retry, on any node — reads the event from
-the store right before it is sent and sends what is stored then, so a redaction
-made after the event was written is what goes out; an event deleted meanwhile is
-not sent. What is left is the moment between that read and the send: a message
-already on its way to Slack or a webhook cannot be recalled.
+**No send starts with erased content once an erasure has completed.** Every send —
+the first delivery and each retry, on any node — first takes a short claim on the
+event in the store (an atomic conditional write, 30 seconds), then reads the event
+and sends what is stored then, then releases the claim; a send that cannot take
+the claim (another node is sending) waits for the next pass, and one left with too
+little of its claim to finish inside it is put off. The erasure's redactions skip
+a claimed event and the erasure repeats them until no event of the user still holds
+the content, so it completes only after every send that had already read the
+content has finished — or its claim has expired, for a node that died mid-send.
+The one limit: a send that started before the erasure completed cannot be recalled.
 
 **A GDPR export** (`alerts` in its `additionalData`) lists, for a person who runs
 agents, the rules they created or last edited — id, name, times and which of the two —

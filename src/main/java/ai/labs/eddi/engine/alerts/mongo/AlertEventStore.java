@@ -45,6 +45,7 @@ import static com.mongodb.client.model.Filters.in;
 import static com.mongodb.client.model.Filters.lt;
 import static com.mongodb.client.model.Filters.lte;
 import static com.mongodb.client.model.Filters.ne;
+import static com.mongodb.client.model.Filters.or;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
@@ -65,6 +66,10 @@ import static com.mongodb.client.model.Updates.unset;
 @ApplicationScoped
 @DefaultBean
 public class AlertEventStore implements IAlertEventStore {
+
+    /** Internal: the send claim (never read into an event). */
+    static final String SEND_CLAIM_TOKEN = "sendClaimToken";
+    static final String SEND_CLAIM_UNTIL = "sendClaimUntil";
 
     static final String COLLECTION_EVENTS = "alertevents";
     static final String COLLECTION_WINDOWS = "alertwindows";
@@ -218,12 +223,37 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactRatingComments(Collection<String> ratingIds) {
+    public long redactRatingComments(Collection<String> ratingIds, Instant now) {
         if (ratingIds.isEmpty()) {
             return 0;
         }
-        return events.updateMany(and(in("match.ratingId", ratingIds), ne("match.commentExcerpt", null)), set("match.commentExcerpt", null))
-                .getModifiedCount();
+        return events.updateMany(and(in("match.ratingId", ratingIds), ne("match.commentExcerpt", null), unclaimed(now)),
+                set("match.commentExcerpt", null)).getModifiedCount();
+    }
+
+    @Override
+    public long countRatingComments(Collection<String> ratingIds) {
+        if (ratingIds.isEmpty()) {
+            return 0;
+        }
+        return events.countDocuments(and(in("match.ratingId", ratingIds), ne("match.commentExcerpt", null)));
+    }
+
+    /** No send claim, or an expired one. */
+    private static Bson unclaimed(Instant now) {
+        return or(eq(SEND_CLAIM_UNTIL, null), lte(SEND_CLAIM_UNTIL, Date.from(now)));
+    }
+
+    @Override
+    public boolean claimSend(String eventId, String token, Instant now, Instant until) {
+        return events.updateOne(and(eq("_id", eventId), unclaimed(now)),
+                combine(set(SEND_CLAIM_TOKEN, token), set(SEND_CLAIM_UNTIL, Date.from(until)))).getModifiedCount() == 1;
+    }
+
+    @Override
+    public boolean releaseSend(String eventId, String token) {
+        return events.updateOne(and(eq("_id", eventId), eq(SEND_CLAIM_TOKEN, token)), combine(unset(SEND_CLAIM_TOKEN), unset(SEND_CLAIM_UNTIL)))
+                .getModifiedCount() == 1;
     }
 
     @Override
@@ -245,8 +275,14 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactOutputValues(String userId) {
-        return events.updateMany(eq("subjectUserId", userId), combine(unset("match.value"), unset("subjectUserId"))).getModifiedCount();
+    public long redactOutputValues(String userId, Instant now) {
+        return events.updateMany(and(eq("subjectUserId", userId), unclaimed(now)), combine(unset("match.value"), unset("subjectUserId")))
+                .getModifiedCount();
+    }
+
+    @Override
+    public long countOutputValues(String userId) {
+        return events.countDocuments(eq("subjectUserId", userId));
     }
 
     @Override
@@ -258,8 +294,8 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactRatingComment(String eventId) {
-        return events.updateOne(and(eq("_id", eventId), exists("match.commentExcerpt", true)), unset("match.commentExcerpt"))
+    public long redactRatingComment(String eventId, Instant now) {
+        return events.updateOne(and(eq("_id", eventId), exists("match.commentExcerpt", true), unclaimed(now)), unset("match.commentExcerpt"))
                 .getModifiedCount();
     }
 

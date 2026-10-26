@@ -82,7 +82,9 @@ public class PostgresAlertEventStore implements IAlertEventStore {
                 acknowledged_at TIMESTAMPTZ,
                 version BIGINT NOT NULL DEFAULT 0,
                 subject_user_id VARCHAR(255),
-                digest_event_ids TEXT[]
+                digest_event_ids TEXT[],
+                send_claim_token VARCHAR(64),
+                send_claim_until TIMESTAMPTZ
             )
             """;
 
@@ -103,6 +105,9 @@ public class PostgresAlertEventStore implements IAlertEventStore {
             "CREATE INDEX IF NOT EXISTS idx_alert_events_rating ON alert_events (rating_id) WHERE rating_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_events_subject ON alert_events (subject_user_id) WHERE subject_user_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_windows_expiry ON alert_windows (expires_at)"};
+
+    /** No send claim, or an expired one (one parameter: now). */
+    private static final String UNCLAIMED = " AND (send_claim_until IS NULL OR send_claim_until <= ?)";
 
     private static final String COLUMNS = "id, rule_id, rule_name, source, kind, agent_id, agent_version, conversation_id, fired_at, summary, "
             + "match::text, deliveries::text, state, next_attempt_at, dedupe_key, duplicates, digest_count, digest_items, acknowledged_by, "
@@ -125,6 +130,8 @@ public class PostgresAlertEventStore implements IAlertEventStore {
             // Columns added after the table first shipped on development branches.
             stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS subject_user_id VARCHAR(255)");
             stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS digest_event_ids TEXT[]");
+            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS send_claim_token VARCHAR(64)");
+            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS send_claim_until TIMESTAMPTZ");
             stmt.execute(CREATE_WINDOWS);
             for (String index : CREATE_INDEXES) {
                 stmt.execute(index);
@@ -307,13 +314,37 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactRatingComments(Collection<String> ratingIds) {
+    public long redactRatingComments(Collection<String> ratingIds, Instant now) {
         ensureSchema();
         if (ratingIds.isEmpty()) {
             return 0;
         }
-        return update("UPDATE alert_events SET match = match - 'commentExcerpt' WHERE rating_id = ANY(?) AND match->>'commentExcerpt' IS NOT NULL",
-                List.of((Object) ratingIds.toArray(new String[0])), false);
+        return update("UPDATE alert_events SET match = match - 'commentExcerpt' WHERE rating_id = ANY(?) AND match->>'commentExcerpt' IS NOT NULL"
+                + UNCLAIMED, Arrays.asList((Object) ratingIds.toArray(new String[0]), timestamp(now)), false);
+    }
+
+    @Override
+    public long countRatingComments(Collection<String> ratingIds) {
+        ensureSchema();
+        if (ratingIds.isEmpty()) {
+            return 0;
+        }
+        return update("SELECT COUNT(*) FROM alert_events WHERE rating_id = ANY(?) AND match->>'commentExcerpt' IS NOT NULL",
+                List.of((Object) ratingIds.toArray(new String[0])), true);
+    }
+
+    @Override
+    public boolean claimSend(String eventId, String token, Instant now, Instant until) {
+        ensureSchema();
+        return update("UPDATE alert_events SET send_claim_token = ?, send_claim_until = ? WHERE id = ?" + UNCLAIMED,
+                Arrays.asList(token, timestamp(until), eventId, timestamp(now)), false) == 1;
+    }
+
+    @Override
+    public boolean releaseSend(String eventId, String token) {
+        ensureSchema();
+        return update("UPDATE alert_events SET send_claim_token = NULL, send_claim_until = NULL WHERE id = ? AND send_claim_token = ?",
+                Arrays.asList(eventId, token), false) == 1;
     }
 
     @Override
@@ -337,10 +368,16 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactOutputValues(String userId) {
+    public long redactOutputValues(String userId, Instant now) {
         ensureSchema();
-        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE subject_user_id = ?", List.of(userId),
-                false);
+        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE subject_user_id = ?" + UNCLAIMED,
+                Arrays.asList(userId, timestamp(now)), false);
+    }
+
+    @Override
+    public long countOutputValues(String userId) {
+        ensureSchema();
+        return update("SELECT COUNT(*) FROM alert_events WHERE subject_user_id = ?", List.of(userId), true);
     }
 
     @Override
@@ -351,10 +388,10 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public long redactRatingComment(String eventId) {
+    public long redactRatingComment(String eventId, Instant now) {
         ensureSchema();
-        return update("UPDATE alert_events SET match = match - 'commentExcerpt' WHERE id = ? AND match->>'commentExcerpt' IS NOT NULL",
-                List.of(eventId), false);
+        return update("UPDATE alert_events SET match = match - 'commentExcerpt' WHERE id = ? AND match->>'commentExcerpt' IS NOT NULL" + UNCLAIMED,
+                Arrays.asList(eventId, timestamp(now)), false);
     }
 
     static String where(AlertEventFilter f, List<Object> params) {

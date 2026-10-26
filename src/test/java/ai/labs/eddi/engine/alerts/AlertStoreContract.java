@@ -162,12 +162,12 @@ public interface AlertStoreContract {
         assertEquals(List.of(mine.id()), eventStore().findOutputValuesBySubject("owner-1", 10).stream().map(AlertEvent::id).toList());
         assertTrue(eventStore().findOutputValuesBySubject("nobody", 10).isEmpty());
 
-        assertEquals(1, eventStore().redactOutputValues("owner-1"));
+        assertEquals(1, eventStore().redactOutputValues("owner-1", Instant.now()));
         AlertEvent erased = eventStore().read(mine.id()).orElseThrow();
         assertNull(erased.match().value());
         assertEquals(List.of("properties.note exists"), erased.match().matched(), "only the value goes");
         assertTrue(eventStore().findOutputValuesBySubject("owner-1", 10).isEmpty(), "the subject goes with it");
-        assertEquals(0, eventStore().redactOutputValues("owner-1"));
+        assertEquals(0, eventStore().redactOutputValues("owner-1", Instant.now()));
         assertEquals("their value", eventStore().read(theirs.id()).orElseThrow().match().value());
         assertNull(eventStore().read(noValue.id()).orElseThrow().match().value());
     }
@@ -196,11 +196,52 @@ public interface AlertStoreContract {
     default void redactOneRatingComment() {
         AlertEvent a = eventStore().insert(event(AGENT, "ra", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow();
         AlertEvent b = eventStore().insert(event(AGENT, "rb", AlertEvent.State.INBOX_ONLY, NOW, null)).orElseThrow();
-        assertEquals(1, eventStore().redactRatingComment(a.id()));
+        assertEquals(1, eventStore().redactRatingComment(a.id(), Instant.now()));
         assertNull(eventStore().read(a.id()).orElseThrow().match().commentExcerpt());
         assertEquals(0.0, eventStore().read(a.id()).orElseThrow().match().normalizedScore());
         assertEquals("It took forever", eventStore().read(b.id()).orElseThrow().match().commentExcerpt());
-        assertEquals(0, eventStore().redactRatingComment(a.id()));
+        assertEquals(0, eventStore().redactRatingComment(a.id(), Instant.now()));
+    }
+
+    @Test
+    default void sendClaimIsConditionalTokenCheckedAndExpires() {
+        AlertEvent e = eventStore().insert(event(AGENT, "claim", AlertEvent.State.PENDING, NOW, null)).orElseThrow();
+        Instant t0 = Instant.now();
+        assertTrue(eventStore().claimSend(e.id(), "A", t0, t0.plusSeconds(30)));
+        assertFalse(eventStore().claimSend(e.id(), "B", t0.plusSeconds(1), t0.plusSeconds(31)), "a live claim is not taken");
+        assertFalse(eventStore().releaseSend(e.id(), "B"), "only the holder releases");
+        assertTrue(eventStore().claimSend(e.id(), "C", t0.plusSeconds(30), t0.plusSeconds(60)), "an expired claim is taken over");
+        assertFalse(eventStore().releaseSend(e.id(), "A"), "the old holder no longer releases");
+        assertTrue(eventStore().releaseSend(e.id(), "C"));
+        assertTrue(eventStore().claimSend(e.id(), "D", t0, t0.plusSeconds(30)), "free again after the release");
+        assertFalse(eventStore().claimSend("6aba70011a25f8be7920eeee", "E", t0, t0.plusSeconds(30)), "no such event");
+        assertEquals(e, eventStore().read(e.id()).orElseThrow().withVersion(e.version()), "the claim is never read into the event");
+    }
+
+    @Test
+    default void redactionSkipsClaimedEventsUntilReleased() {
+        AlertEvent rated = eventStore().insert(event(AGENT, "rc", AlertEvent.State.PENDING, NOW, null)).orElseThrow();
+        AlertEvent t = event(AGENT, "x", AlertEvent.State.INBOX_ONLY, NOW, null);
+        AlertEvent output = eventStore().insert(new AlertEvent(null, t.ruleId(), t.ruleName(), AlertSource.OUTPUT_MATCH, t.kind(), t.agentId(),
+                t.agentVersion(), t.conversationId(), t.firedAt(), "Escalations", AlertMatch.output("properties.note exists", "secret"),
+                t.deliveries(), t.state(), t.nextAttemptAt(), "oc", 0, null, null, null, null, 0, "owner-9", null)).orElseThrow();
+        Instant now = Instant.now();
+        assertTrue(eventStore().claimSend(rated.id(), "A", now, now.plusSeconds(30)));
+        assertTrue(eventStore().claimSend(output.id(), "B", now, now.plusSeconds(30)));
+
+        assertEquals(0, eventStore().redactRatingComments(List.of("rating-1"), now));
+        assertEquals(0, eventStore().redactRatingComment(rated.id(), now));
+        assertEquals(0, eventStore().redactOutputValues("owner-9", now));
+        assertEquals(1, eventStore().countRatingComments(List.of("rating-1")));
+        assertEquals(1, eventStore().countOutputValues("owner-9"));
+
+        assertTrue(eventStore().releaseSend(rated.id(), "A"));
+        assertEquals(1, eventStore().redactRatingComments(List.of("rating-1"), now));
+        assertEquals(0, eventStore().countRatingComments(List.of("rating-1")));
+        // An expired claim does not hold a redaction back either.
+        assertEquals(1, eventStore().redactOutputValues("owner-9", now.plusSeconds(30)));
+        assertEquals(0, eventStore().countOutputValues("owner-9"));
+        assertNull(eventStore().read(output.id()).orElseThrow().match().value());
     }
 
     @Test
@@ -345,11 +386,11 @@ public interface AlertStoreContract {
         assertEquals(1, eventStore().deleteFiredBefore(NOW.minus(Duration.ofDays(90))));
         assertTrue(eventStore().read(old.id()).isEmpty());
 
-        assertEquals(1, eventStore().redactRatingComments(List.of("rating-1")));
+        assertEquals(1, eventStore().redactRatingComments(List.of("rating-1"), Instant.now()));
         AlertEvent redacted = eventStore().read(recent.id()).orElseThrow();
         assertNull(redacted.match().commentExcerpt());
         assertEquals(List.of("Too slow"), redacted.match().tags());
-        assertEquals(0, eventStore().redactRatingComments(List.of("rating-1")));
+        assertEquals(0, eventStore().redactRatingComments(List.of("rating-1"), Instant.now()));
         assertEquals(Optional.empty(), eventStore().read("6aba70011a25f8be7920effff"));
         assertEquals(ErrorKind.TURN_ERROR, AlertMatch.error(ErrorKind.TURN_ERROR).errorKind());
     }

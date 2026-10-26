@@ -58,6 +58,8 @@ class AlertDeliveryServiceTest {
         service = new AlertDeliveryService(store, senders, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()),
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(store.updateDelivery(any(), anyLong())).thenAnswer(inv -> Optional.of(inv.getArgument(0)));
+        // Each send is claimed first; by default the claim is free.
+        when(store.claimSend(any(), any(), any(), any())).thenReturn(true);
         // Delivery reloads the event before each send; by default the store holds it
         // unchanged.
         when(store.read(anyString()))
