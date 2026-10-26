@@ -93,8 +93,15 @@ public interface IAlertEventStore {
     /** Deletes events fired before {@code cutoff}; returns how many. */
     long deleteFiredBefore(Instant cutoff);
 
-    /** GDPR: blanks the comment excerpt of every event about these ratings. */
-    long redactRatingComments(Collection<String> ratingIds);
+    /**
+     * GDPR: blanks the comment excerpt of every event about these ratings — except
+     * an event whose send claim is live at {@code now}, which is left for the next
+     * pass (see {@link #claimSend}).
+     */
+    long redactRatingComments(Collection<String> ratingIds, Instant now);
+
+    /** How many events about these ratings still hold a comment excerpt. */
+    long countRatingComments(Collection<String> ratingIds);
 
     /** GDPR: forgets {@code userId} as the acknowledger of events. */
     long clearAcknowledger(String userId);
@@ -112,9 +119,17 @@ public interface IAlertEventStore {
      * GDPR erasure: blanks the stored {@code OUTPUT_MATCH} value of every event
      * that came from a conversation of {@code userId}, and forgets the subject.
      *
+     * An event whose send claim is live at {@code now} is skipped.
+     *
      * @return how many events changed
      */
-    long redactOutputValues(String userId);
+    long redactOutputValues(String userId, Instant now);
+
+    /**
+     * How many events still hold an output value from a conversation of
+     * {@code userId}.
+     */
+    long countOutputValues(String userId);
 
     /**
      * GDPR export: the events holding a stored {@code OUTPUT_MATCH} value from a
@@ -127,5 +142,19 @@ public interface IAlertEventStore {
      * Blanks one event's rating comment excerpt — a rating erased while its alert
      * was being written.
      */
-    long redactRatingComment(String eventId);
+    long redactRatingComment(String eventId, Instant now);
+
+    /**
+     * Claims the right to send {@code eventId} until {@code until}: an atomic
+     * conditional write that succeeds only when no claim is live at {@code now}
+     * (none, or an expired one). While the claim is live, the GDPR redactions skip
+     * the event, so a send never starts from content an erasure has already
+     * finished with; the erasure waits for the release (or the expiry) instead.
+     *
+     * @return {@code true} when this caller holds the claim
+     */
+    boolean claimSend(String eventId, String token, Instant now, Instant until);
+
+    /** Releases the claim — only if it is still {@code token}'s. */
+    boolean releaseSend(String eventId, String token);
 }

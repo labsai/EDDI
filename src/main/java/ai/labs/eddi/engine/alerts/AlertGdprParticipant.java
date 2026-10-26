@@ -58,11 +58,13 @@ public class AlertGdprParticipant implements IGdprParticipant {
 
     private final IAlertEventStore eventStore;
     private final IAlertRuleStore ruleStore;
+    private final AlertErasureRedactor redactor;
 
     @Inject
-    public AlertGdprParticipant(IAlertEventStore eventStore, IAlertRuleStore ruleStore) {
+    public AlertGdprParticipant(IAlertEventStore eventStore, IAlertRuleStore ruleStore, AlertErasureRedactor redactor) {
         this.eventStore = eventStore;
         this.ruleStore = ruleStore;
+        this.redactor = redactor;
     }
 
     @Override
@@ -72,7 +74,9 @@ public class AlertGdprParticipant implements IGdprParticipant {
 
     @Override
     public long erase(String userId) {
-        return eventStore.redactOutputValues(userId) + eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
+        // Waits for deliveries holding a send claim on one of the events (see
+        // AlertErasureRedactor).
+        return redactor.redactOutputValues(userId) + eventStore.clearAcknowledger(userId) + ruleStore.clearAuthor(userId);
     }
 
     @Override

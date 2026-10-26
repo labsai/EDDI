@@ -15,10 +15,12 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -38,6 +40,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class AlertDeliveryService {
 
     private static final Logger LOGGER = Logger.getLogger(AlertDeliveryService.class);
+
+    /**
+     * How long one send holds its claim on the event — well above the webhook
+     * timeout, so a send that starts with the lease check passed ends inside it.
+     */
+    public static final Duration SEND_CLAIM_LEASE = Duration.ofSeconds(30);
 
     private final IAlertEventStore eventStore;
     private final AlertSenders senders;
@@ -93,18 +101,44 @@ public class AlertDeliveryService {
             return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now,
                     rule == null ? "The rule was deleted" : "The target is no longer on the rule", null);
         }
-        // Send what is stored now, not the copy this attempt started with: an
-        // erasure may have blanked a comment excerpt or an output value since. No
-        // cross-node lock: the remaining window is between this read and the send,
-        // and a send already on the wire cannot be recalled.
-        Optional<AlertEvent> current = eventStore.read(event.id());
-        if (current.isEmpty()) {
-            metrics.delivery(delivery.type(), "gave_up");
-            return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now,
-                    "The alert no longer exists", null);
+        // Claim the event for this send, then read it, then send it: while the claim
+        // is live the GDPR redactions skip the event and the erasure waits, so a send
+        // never starts from content an erasure has already finished with. A send
+        // that starts before the erasure finishes cannot be recalled.
+        String token = UUID.randomUUID().toString();
+        Instant claimedAt = clock.instant();
+        Instant until = claimedAt.plus(SEND_CLAIM_LEASE);
+        if (!eventStore.claimSend(event.id(), token, claimedAt, until)) {
+            // Another node is sending this event right now: leave it for the next pass.
+            return skipped(delivery, now);
         }
         try {
-            senders.send(current.get(), target);
+            Optional<AlertEvent> current = eventStore.read(event.id());
+            if (current.isEmpty()) {
+                metrics.delivery(delivery.type(), "gave_up");
+                return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.FAILED, attempts, now,
+                        "The alert no longer exists", null);
+            }
+            if (Duration.between(clock.instant(), until).compareTo(settings.webhookTimeout()) <= 0) {
+                // Too little lease left to finish the send inside it (a slow store): retry
+                // later.
+                return skipped(delivery, now);
+            }
+            return send(current.get(), delivery, target, attempts, now);
+        } finally {
+            eventStore.releaseSend(event.id(), token);
+        }
+    }
+
+    /** The delivery left as it was, due again after one lease. */
+    private static Delivery skipped(Delivery delivery, Instant now) {
+        return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.PENDING, delivery.attempts(),
+                delivery.lastAttemptAt(), delivery.lastError(), now.plus(SEND_CLAIM_LEASE));
+    }
+
+    private Delivery send(AlertEvent event, Delivery delivery, DeliveryTarget target, int attempts, Instant now) {
+        try {
+            senders.send(event, target);
             metrics.delivery(delivery.type(), "success");
             return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.DELIVERED, attempts, now, null, null);
         } catch (AlertDeliveryException e) {

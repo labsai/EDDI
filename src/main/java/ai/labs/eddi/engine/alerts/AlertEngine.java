@@ -132,7 +132,11 @@ public class AlertEngine {
         if (!erased) {
             return stored;
         }
-        eventStore.redactRatingComment(stored.id());
+        // Runs before this event's first delivery and before the maintenance pass may
+        // retry it (its nextAttemptAt is a claim lease away), so no send claim exists
+        // yet: the conditional redaction cannot be skipped, and nothing waits on
+        // itself.
+        eventStore.redactRatingComment(stored.id(), clock.instant());
         AlertMatch m = stored.match();
         AlertMatch blanked = new AlertMatch(m.matched(), m.errorKind(), m.ratingId(), m.stepIndex(), m.scale(), m.score(), m.normalizedScore(),
                 m.tags(), null, m.value());
@@ -188,7 +192,8 @@ public class AlertEngine {
         if (stored.match() == null || stored.match().value() == null || !fenced(snapshot.userId(), snapshot.capturedAt())) {
             return stored;
         }
-        eventStore.redactOutputValues(snapshot.userId());
+        // Before delivery, as above: no send claim on this event can exist yet.
+        eventStore.redactOutputValues(snapshot.userId(), clock.instant());
         AlertMatch m = stored.match();
         AlertMatch blanked = new AlertMatch(m.matched(), m.errorKind(), m.ratingId(), m.stepIndex(), m.scale(), m.score(), m.normalizedScore(),
                 m.tags(), m.commentExcerpt(), null);

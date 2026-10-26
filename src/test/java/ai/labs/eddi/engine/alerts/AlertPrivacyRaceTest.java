@@ -122,7 +122,7 @@ class AlertPrivacyRaceTest {
 
             var order = inOrder(store, delivery);
             order.verify(store).insert(any());
-            order.verify(store).redactRatingComment(EVENT_ID);
+            order.verify(store).redactRatingComment(eq(EVENT_ID), any());
             ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
             order.verify(delivery).deliver(delivered.capture(), eq(rule));
             assertNull(delivered.getValue().match().commentExcerpt(), "the erased comment never reaches Slack or a webhook");
@@ -134,7 +134,7 @@ class AlertPrivacyRaceTest {
         void stillThere() {
             when(ratings.readById(low.id())).thenReturn(Optional.of(low));
             engine.evaluateRating(low);
-            verify(store, never()).redactRatingComment(any());
+            verify(store, never()).redactRatingComment(any(), any());
             ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
             verify(delivery).deliver(delivered.capture(), eq(rule));
             assertEquals("It kept looping on my order number.", delivered.getValue().match().commentExcerpt());
@@ -276,7 +276,7 @@ class AlertPrivacyRaceTest {
 
             var order = inOrder(store, delivery);
             order.verify(store).insert(any());
-            order.verify(store).redactOutputValues(OWNER);
+            order.verify(store).redactOutputValues(eq(OWNER), any());
             ArgumentCaptor<AlertEvent> delivered = ArgumentCaptor.forClass(AlertEvent.class);
             order.verify(delivery).deliver(delivered.capture(), any());
             assertNull(delivered.getValue().match().value());
