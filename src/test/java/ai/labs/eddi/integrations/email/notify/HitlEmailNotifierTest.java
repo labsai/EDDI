@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.connections.ConnectionsConfig;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -51,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -306,6 +308,41 @@ class HitlEmailNotifierTest {
             assertEquals(State.SUPPRESSED, ledger.all().get(0).state());
             assertEquals(1.0, outbound("suppressed"));
             verify(mailer, times(1)).send(any(), anyList());
+        }
+
+        @Test
+        @DisplayName("a pause that cannot be read on a retry is retried with backoff, then FAILED at max-attempts — never SUPPRESSED")
+        void unreadableBeforeRetry() throws Exception {
+            notifyTo("ops@example.com");
+            doThrow(new MailSendException(MailSendException.Category.CONNECT, false, "refused", null)).doAnswer(i -> {
+                sent.add(i.getArgument(0));
+                return new SystemMailer.SendResult("250 ok");
+            }).when(mailer).send(any(), anyList());
+            var notifier = notifier(6);
+            notifier.notifyPause(CONVERSATION, PAUSE, NOW);
+            var snapshot = conversations.loadConversationMemorySnapshot(CONVERSATION);
+            doThrow(new IResourceStore.ResourceStoreException("db down")).when(conversations).loadConversationMemorySnapshot(CONVERSATION);
+
+            notifier.sweep(NOW.plus(Duration.ofMinutes(1)));
+
+            LedgerEntry row = ledger.all().get(0);
+            assertEquals(State.PENDING, row.state(), "an unreadable pause is not a resolved one");
+            assertTrue(row.lastError().startsWith("UNREADABLE"), row.lastError());
+            assertEquals(0.0, outbound("suppressed"));
+
+            doReturn(snapshot).when(conversations).loadConversationMemorySnapshot(CONVERSATION);
+            notifier.sweep(row.nextAttemptAt());
+            assertEquals(State.SENT, ledger.all().get(0).state(), "sent once the store answers again");
+            assertEquals(1, sent.size());
+
+            ledger = new InMemoryEmailMessageLedger();
+            doThrow(new MailSendException(MailSendException.Category.CONNECT, false, "refused", null)).when(mailer).send(any(), anyList());
+            var bounded = notifier(2);
+            bounded.notifyPause(CONVERSATION, PAUSE, NOW);
+            assertEquals(State.PENDING, ledger.all().get(0).state());
+            doThrow(new IResourceStore.ResourceStoreException("still down")).when(conversations).loadConversationMemorySnapshot(CONVERSATION);
+            bounded.sweep(ledger.all().get(0).nextAttemptAt());
+            assertEquals(State.FAILED, ledger.all().get(0).state(), "bounded by max-attempts");
         }
 
         @Test

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -366,7 +367,24 @@ public class HitlEmailNotifier {
      * just read it (the first attempt); retries read it again.
      */
     void attempt(LedgerEntry row, PauseContext known, Instant now) {
-        Optional<PauseContext> context = known != null ? Optional.of(known) : loadPause(row.conversationId(), row.sourceRef());
+        Optional<PauseContext> context;
+        try {
+            context = known != null ? Optional.of(known) : loadPause(row.conversationId(), row.sourceRef());
+        } catch (IllegalStateException e) {
+            // The store could not answer: retried with the send backoff, bounded by the
+            // same attempt limit, never suppressed as a resolved pause.
+            String error = "UNREADABLE: " + truncate(e.getMessage(), 300);
+            if (row.attempts() >= maxAttempts) {
+                if (ledger.complete(row.id(), row.claimToken(), State.FAILED, null, error, now)) {
+                    count("failed");
+                    LOGGER.warnf("HITL notification %s for conversation %s FAILED after %d attempt(s): its pause could not be read", row.id(),
+                            sanitize(row.conversationId()), row.attempts());
+                }
+            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
+                count("retry");
+            }
+            return;
+        }
         if (context.isEmpty()) {
             if (ledger.complete(row.id(), row.claimToken(), State.SUPPRESSED, null, PAUSE_RESOLVED, now)) {
                 count("suppressed");
@@ -473,10 +491,14 @@ public class HitlEmailNotifier {
                     snapshot.getHitlPausedAt(), snapshot.getHitlTimeoutPolicy(), snapshot.getHitlApprovalTimeout(), conversationId,
                     snapshot.getHitlPendingToolCalls());
             return Optional.of(new PauseContext(pause, agent, snapshot));
-        } catch (Exception e) {
+        } catch (IResourceStore.ResourceNotFoundException e) {
             // A missing conversation or agent is a pause nobody can act on any more.
-            LOGGER.debugf("Pause %s of conversation %s cannot be read: %s", pauseId, sanitize(conversationId), e.getMessage());
+            LOGGER.debugf("Pause %s of conversation %s is gone: %s", pauseId, sanitize(conversationId), e.getMessage());
             return Optional.empty();
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            // Not knowing is not "resolved": a retry that took this for a decided pause
+            // would suppress a live notice for good.
+            throw new IllegalStateException("Pause " + pauseId + " of conversation " + conversationId + " could not be read", e);
         }
     }
 
