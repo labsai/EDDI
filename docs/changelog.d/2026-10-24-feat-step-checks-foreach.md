@@ -54,3 +54,12 @@ mcpcalls are not in this change; the plan is in the PR description.
 | 2026-10-24 | `forEach.maxConcurrency` defaults to 1 | Sequential sends the same load as the calls written one after another; parallel is opt-in for APIs that allow it | A small default such as 4 |
 | 2026-10-24 | A `forEach` item that threw (timeout) is never retried | The request may have been processed and billed | Retrying timeouts with the response retry policy |
 ```
+
+### End-to-end proof
+
+`ForEachHttpCallsIT` drives a deployed agent over REST against WireMock: one request per element (templated into path
+and body, source order, read back from the stored conversation), a filter leaving index gaps, `maxItems` refusing the
+whole call before anything is sent, the total-size budget counting UTF-8 bytes of a non-ASCII payload, an empty list
+sending nothing, a 500 and a timeout not stopping or being retried, `207` gating of `postResponse`, `onItemFailure:
+"fail"` running every item first, and the concurrency bound (1 by default, 2 when configured) observed from WireMock's
+arrival times.
