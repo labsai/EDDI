@@ -700,7 +700,10 @@ tampered, forwarded or list mail, or forged mail — **or a DNS problem**: a key
 out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no other signature passes (if one
 does, the verdict is `pass_unaligned` instead). Such a verdict is marked temporary and the mail is retried, so a `fail`
 rise that comes with a rise in `tempfail` points at DNS, and one that comes with `budget_exhausted` at the lookup
-limit, rather than at the senders. No tag carries a domain or an address. For
+limit, rather than at the senders. An unexpected error inside the verifier is counted as `fail` as well (the mail is
+treated as unauthenticated, not retried) and logs the WARN `Sender authentication failed internally`, so a `fail` rise
+with neither DNS signal is worth checking against that log before blaming the senders. No tag carries a domain or an
+address. For
 `eddi_email_dns_lookups_total`, `cached=true` is an answer served from the cache (no query sent); a sustained
 `tempfail` means TXT lookups are failing temporarily, of which an unreachable resolver (`eddi.email.dns.servers`) is
 one possible cause; `budget_exhausted` is a local limit, not a DNS failure: a message needed more DKIM key and DMARC
