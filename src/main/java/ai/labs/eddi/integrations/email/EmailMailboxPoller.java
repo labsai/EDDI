@@ -244,14 +244,26 @@ public class EmailMailboxPoller {
      * conversation was started. It was marked or moved already, so the cursor no
      * longer lists it: it is found again by its Message-ID, in the polled folder or
      * the move folder, and processed once more, in that conversation. Mail that
-     * cannot be found any more is refused as lost.
+     * cannot be found any more is refused as lost; mail now over
+     * {@code maxMessageBytes} is refused as too large.
      *
      * @return how many were found and processed
      */
     int resubmit(IntegrationContext context, MailboxSession session, EmailChannelSettings settings) throws MailboxException {
         int done = 0;
         for (var row : processor.pendingResubmissions(context.integrationId(), Instant.now())) {
-            var found = session.findByMessageId(row.messageId(), settings, settings.maxMessageBytes());
+            Optional<MailTransport.FoundMessage> found;
+            try {
+                found = session.findByMessageId(row.messageId(), settings, settings.maxMessageBytes());
+            } catch (MailboxException e) {
+                if (e.getCategory() != MailboxException.Category.TOO_LARGE) {
+                    throw e;
+                }
+                // Found, but over maxMessageBytes (lowered since the mail first ran): refused
+                // like any oversized mail, and the poll goes on with the next row.
+                processor.resubmissionTooLarge(context, row, Instant.now());
+                continue;
+            }
             if (found.isEmpty()) {
                 processor.resubmissionLost(context, row, Instant.now());
                 continue;

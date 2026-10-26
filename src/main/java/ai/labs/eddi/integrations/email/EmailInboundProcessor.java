@@ -535,6 +535,20 @@ public class EmailInboundProcessor {
     }
 
     /**
+     * A mail to be resubmitted was found but is over {@code maxMessageBytes} (the
+     * limit was lowered since its first turn): it is refused as too large, like a
+     * new mail of that size — not as lost, since it is still in the mailbox.
+     */
+    public void resubmissionTooLarge(IntegrationContext ctx, LedgerEntry row, Instant now) {
+        if (ledger.transition(row.id(), State.RECEIVED, State.REFUSED, null, null, "too_large", false, now)) {
+            count(ctx, EmailMetrics.TOO_LARGE);
+            audit(ctx, row, "too_large", row.recipient());
+            LOGGER.infof("Email integration %s: mail %s was to be submitted again but is larger than maxMessageBytes; refused",
+                    sanitize(ctx.integrationId()), row.id());
+        }
+    }
+
+    /**
      * What an existing row means for a re-polled message: settled (mark it),
      * deferred (not due yet), or null when it is due and must be processed now.
      */

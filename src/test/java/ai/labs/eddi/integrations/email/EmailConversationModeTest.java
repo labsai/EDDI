@@ -382,6 +382,23 @@ class EmailConversationModeTest {
     }
 
     @Test
+    @DisplayName("a resubmission found over maxMessageBytes is refused as too large, once")
+    void resubmissionTooLarge() {
+        Instant now = Instant.now();
+        ledger.put(new LedgerEntry("row-big", INTEGRATION, Kind.TRIGGER, Direction.IN, "<big@supplier.com>", "conv-7", "imap:INBOX:1:1", "in:big",
+                ALICE, State.RECEIVED, 1, now, null, null, EmailInboundSweeper.RESUBMIT, now, now, now.plus(Duration.ofDays(30))));
+        var row = ledger.findById("row-big").orElseThrow();
+
+        processor.resubmissionTooLarge(context(Map.of()), row, now);
+        processor.resubmissionTooLarge(context(Map.of()), row, now);
+
+        var refused = ledger.findById("row-big").orElseThrow();
+        assertEquals(State.REFUSED, refused.state());
+        assertEquals("too_large", refused.lastError());
+        assertTrue(processor.pendingResubmissions(INTEGRATION, now.plusSeconds(1)).isEmpty());
+    }
+
+    @Test
     @DisplayName("older due resubmissions of a deleted integration never crowd out this integration's")
     void resubmissionScopedToIntegration() {
         Instant now = Instant.now();

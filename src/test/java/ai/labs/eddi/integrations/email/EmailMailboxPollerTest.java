@@ -8,6 +8,10 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.integrations.email.EmailInboundProcessor.Disposition;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.transport.MailTransport;
 import ai.labs.eddi.integrations.email.transport.MailboxException;
@@ -194,6 +198,11 @@ class EmailMailboxPollerTest {
         int opened;
         MailboxException failure;
         final List<EmailTestMail.Polled> messages = new ArrayList<>();
+        /**
+         * What findByMessageId answers per Message-ID: a FoundMessage or a
+         * MailboxException.
+         */
+        final Map<String, Object> byMessageId = new HashMap<>();
 
         EmailTestMail.Polled add(long uid, Instant internalDate) {
             var polled = new EmailTestMail.Polled(uid, EmailTestMail.mail().bytes(), null, internalDate, false);
@@ -229,6 +238,15 @@ class EmailMailboxPollerTest {
                 }
 
                 @Override
+                public Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings s, long maxBytes) throws MailboxException {
+                    Object answer = byMessageId.get(messageId);
+                    if (answer instanceof MailboxException e) {
+                        throw e;
+                    }
+                    return Optional.ofNullable((FoundMessage) answer);
+                }
+
+                @Override
                 public MarkResult markProcessed(MailboxMessage message, EmailChannelSettings s) {
                     events.add("mark:" + message.uid());
                     return MarkResult.FLAGGED;
@@ -240,6 +258,28 @@ class EmailMailboxPollerTest {
                 }
             };
         }
+    }
+
+    @Test
+    @DisplayName("a resubmission now over maxMessageBytes is refused as too large; the poll goes on and does not back off")
+    void oversizedResubmission() {
+        initialise(0);
+        Instant now = Instant.now();
+        var big = new LedgerEntry("row-big", ID, Kind.TRIGGER, Direction.IN, "<big@x.com>", "conv-1", "imap:INBOX:1:1", "in:big", "a@x.com",
+                State.RECEIVED, 1, now, null, null, "resubmit", now, now, now.plus(Duration.ofDays(30)));
+        var fits = new LedgerEntry("row-ok", ID, Kind.TRIGGER, Direction.IN, "<ok@x.com>", "conv-2", "imap:INBOX:1:2", "in:ok", "a@x.com",
+                State.RECEIVED, 1, now, null, null, "resubmit", now, now, now.plus(Duration.ofDays(30)));
+        when(processor.pendingResubmissions(eq(ID), any())).thenReturn(List.of(big, fits));
+        transport.byMessageId.put("<big@x.com>", new MailboxException(MailboxException.Category.TOO_LARGE, "too large", null));
+        transport.byMessageId.put("<ok@x.com>", new MailTransport.FoundMessage(EmailTestMail.mail().bytes(), now, "imap:INBOX:1:2"));
+
+        var report = poller.poll(ID);
+
+        assertFalse(report.failed(), report.message());
+        assertEquals(0, state.read(ID).orElseThrow().failures(), "no back-off");
+        verify(processor).resubmissionTooLarge(any(), eq(big), any());
+        verify(processor, never()).resubmissionLost(any(), eq(big), any());
+        verify(processor).process(any(), argThat(m -> m != null && "<ok@x.com>".equals(m.envelopeMessageId())), any());
     }
 
     @Test
