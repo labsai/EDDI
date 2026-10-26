@@ -144,4 +144,13 @@ describe("email conversation mode rules", () => {
     expect(emailMode({ mode: "conversation" })).toBe("conversation");
     expect(emailMode({})).toBe("trigger");
   });
+
+  it("reads the mode case-insensitively, as the backend does, and keeps an API-saved CONVERSATION integration's reply settings", () => {
+    expect(emailMode({ mode: "CONVERSATION" })).toBe("conversation");
+    expect(emailMode({ mode: " Conversation " })).toBe("conversation");
+    const saved = withEmailFixedKeys({ ...VALID, mode: "CONVERSATION", smtpHost: "smtp.example.com", honorReplyTo: "true" });
+    expect(saved.mode).toBe("conversation");
+    expect(saved.smtpHost).toBe("smtp.example.com");
+    expect(saved.honorReplyTo).toBe("true");
+  });
 });

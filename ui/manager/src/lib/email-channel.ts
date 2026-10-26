@@ -41,9 +41,13 @@ export const EMAIL_MAX_REPLY_TEMPLATE_CHARS = 4000;
 export const EMAIL_MAX_AI_DISCLOSURE_CHARS = 500;
 export const EMAIL_MAX_FROM_NAME_CHARS = 100;
 
-/** The mode of a platformConfig: `conversation` when it says so, else `trigger`. */
+/**
+ * The mode of a platformConfig: `conversation` when it says so, in any case (the
+ * backend's `Mode.fromId` trims and lower-cases, so an API-saved `"CONVERSATION"`
+ * is conversation mode), else `trigger`.
+ */
 export function emailMode(pc: Record<string, string>): EmailMode {
-  return (pc.mode ?? "").trim() === "conversation" ? "conversation" : "trigger";
+  return (pc.mode ?? "").trim().toLowerCase() === "conversation" ? "conversation" : "trigger";
 }
 
 /**
