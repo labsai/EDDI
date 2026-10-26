@@ -29,6 +29,7 @@ import {
   ArrowRightLeft,
   ShieldUser,
   Briefcase,
+  Palette,
   type LucideIcon,
 } from "lucide-react";
 
@@ -114,6 +115,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { path: "/manage/orphans", icon: Link2Off, labelKey: "nav.orphans", fallback: "Orphans" },
       { path: "/manage/sync", icon: ArrowRightLeft, labelKey: "nav.sync", fallback: "Sync" },
       { path: "/manage/gdpr", icon: ShieldUser, labelKey: "nav.gdpr", fallback: "Privacy" },
+      // eddi-admin only (lib/roles.ts), so it is hidden from everyone else —
+      // unlike the entries above, the page has nothing to show a non-admin.
+      { path: "/manage/branding", icon: Palette, labelKey: "nav.branding", fallback: "Branding" },
       { path: "/manage/updates", icon: ArrowUpCircle, labelKey: "nav.updates", fallback: "Updates" },
     ],
   },
@@ -166,6 +170,7 @@ const SEGMENT_LABELS: Record<string, LabelRef> = {
   capabilities: ["nav.capabilities", "Capabilities"],
   sync: ["nav.sync", "Sync"],
   gdpr: ["nav.gdpr", "Privacy"],
+  branding: ["nav.branding", "Branding"],
   connections: ["nav.connections", "Connections"],
   "linked-accounts": ["pages.linkedAccounts.title", "Linked accounts"],
   updates: ["nav.updates", "Updates"],

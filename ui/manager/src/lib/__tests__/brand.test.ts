@@ -1,7 +1,11 @@
 import { describe, it, expect, afterEach } from "vitest";
 import i18n from "@/i18n/config";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
+  brandAssetUrl,
   DEFAULT_BRAND,
+  UPDATES_PATH,
   getBrand,
   isUpdateUiVisible,
   readBrand,
@@ -19,6 +23,7 @@ const ZEBRA = {
   poweredBy: false,
   showUpdateCheck: false,
   chat: { accent: "#0f766e" },
+  assets: { logo: true, logoDark: false, icon: true, favicon: false, ogImage: false },
 };
 
 afterEach(() => setBrand(undefined));
@@ -85,5 +90,33 @@ describe("isUpdateUiVisible", () => {
     expect(isUpdateUiVisible(DEFAULT_BRAND)).toBe(true);
     expect(isUpdateUiVisible(readBrand(ZEBRA))).toBe(false);
     expect(isUpdateUiVisible(readBrand({ ...ZEBRA, showUpdateCheck: true }))).toBe(true);
+  });
+});
+
+describe("asset flags", () => {
+  it("default to no image of the brand's own, and ignore non-boolean values", () => {
+    expect(readBrand({ branded: true }).assets).toEqual(DEFAULT_BRAND.assets);
+    expect(readBrand({ assets: { logo: "yes", icon: true } }).assets).toEqual({
+      ...DEFAULT_BRAND.assets,
+      icon: true,
+    });
+  });
+});
+
+describe("brandAssetUrl", () => {
+  it("keeps the shells' plain URL until a brand document exists", () => {
+    expect(brandAssetUrl("logo", DEFAULT_BRAND)).toBe("/branding/logo");
+  });
+
+  it("busts the five-minute image cache with the revision", () => {
+    expect(brandAssetUrl("logo-dark", readBrand(ZEBRA))).toBe("/branding/logo-dark?r=7");
+  });
+});
+
+describe("UPDATES_PATH", () => {
+  it("is the Updates route app.tsx declares literally (route-integrity reads it as text)", () => {
+    expect(UPDATES_PATH).toBe("/manage/updates");
+    const app = readFileSync(join(__dirname, "../../app.tsx"), "utf8");
+    expect(app).toContain(`path="${UPDATES_PATH}"`);
   });
 });

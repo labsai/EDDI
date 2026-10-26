@@ -94,7 +94,8 @@
     "breadcrumb": "Fil d'Ariane",
     "checkingVersion": "Vérification de la version...",
     "expandSidebar": "Développer la barre latérale",
-    "collapseSidebar": "Réduire la barre latérale"
+    "collapseSidebar": "Réduire la barre latérale",
+    "branding": "Image de marque"
   },
   "theme": {
     "light": "Clair",
@@ -6731,5 +6732,119 @@
     "noCases": "Aucune conversation pour l’instant. Une suite a besoin d’au moins un cas pour s’exécuter.",
     "addCase": "Ajouter une conversation",
     "turnCount": "Tours : {{n}}"
+  },
+  "branding": {
+    "title": "Image de marque",
+    "subtitle": "Exploitez {{productName}} sous votre propre nom, logo et couleurs.",
+    "reset": "Rétablir les valeurs par défaut",
+    "forbidden": "Seul un administrateur (eddi-admin) peut modifier l’image de marque.",
+    "sourceLabel": "L’image de marque active provient de :",
+    "updated": "Dernier enregistrement {{when}} par {{who}}, révision {{revision}}",
+    "saveFailed": "L’image de marque n’a pas été enregistrée : {{reason}}",
+    "warningsTitle": "Enregistré, avec un avertissement du serveur :",
+    "toast": {
+      "applyFailed": "Enregistré, mais cet onglet n’a pas pu charger la nouvelle image de marque. Rechargez la page pour la voir.",
+      "saved": "Image de marque enregistrée",
+      "reset": "Image de marque rétablie par défaut"
+    },
+    "validation": {
+      "blank": "Ne doit pas contenir que des espaces. Laissez vide pour la valeur par défaut.",
+      "tooLong": "{{max}} caractères au maximum.",
+      "angleBrackets": "Ne doit contenir ni < ni >.",
+      "control": "Ne doit pas contenir de caractères de contrôle.",
+      "color": "Utilisez une couleur comme #0f766e, #fff, rgb(15 118 110), hsl(…) ou oklch(…), avec des nombres simples uniquement."
+    },
+    "source": {
+      "database": "Enregistrée sur cette page",
+      "properties": "Propriétés de configuration",
+      "default": "Valeurs par défaut intégrées"
+    },
+    "locked": {
+      "title": "L’image de marque est verrouillée",
+      "body": "Ce déploiement définit eddi.branding.locked=true : l’image de marque provient des propriétés eddi.branding.* ({{source}}) et ne peut pas être modifiée ici. Modifiez ces propriétés et redémarrez."
+    },
+    "conflict": {
+      "body": "Quelqu’un d’autre a enregistré l’image de marque entre-temps (révision {{revision}}). Vos modifications n’ont pas été enregistrées. Rechargez la dernière version et appliquez-les à nouveau.",
+      "reload": "Recharger la dernière version"
+    },
+    "names": {
+      "title": "Nom",
+      "description": "Les champs vides reprennent les propriétés de configuration, puis les valeurs par défaut.",
+      "productName": "Nom du produit",
+      "productNameHint": "Remplace le nom du produit dans chaque écran et chaque titre.",
+      "shortName": "Nom court",
+      "shortNameHint": "Pour les espaces restreints. Le nom du produit est utilisé s’il est vide.",
+      "shortNamePlaceholder": "Identique au nom du produit",
+      "tagline": "Slogan",
+      "taglineHint": "Affiché dans « À propos » et dans les descriptions de page."
+    },
+    "colors": {
+      "title": "Couleurs",
+      "description": "La couleur principale pilote les boutons, les accents et toute la gamme de la marque. Les avertissements gardent leur propre couleur.",
+      "primary": "Principale",
+      "defaultPlaceholder": "Par défaut",
+      "primaryForeground": "Texte sur la couleur principale",
+      "darkPrimary": "Principale en mode sombre",
+      "followsLight": "Comme en mode clair",
+      "darkPrimaryForeground": "Texte sur la couleur principale en mode sombre",
+      "chatAccent": "Accent du widget de chat",
+      "followsPrimary": "Comme la couleur principale",
+      "picker": "Choisir : {{name}}"
+    },
+    "contrast": {
+      "light": "Contraste en mode clair",
+      "dark": "Contraste en mode sombre",
+      "unknown": "Contraste non vérifié",
+      "pass": "{{ratio}}:1 — conforme WCAG AA",
+      "fail": "{{ratio}}:1 — sous le seuil WCAG AA (4,5:1)"
+    },
+    "options": {
+      "title": "Options",
+      "poweredBy": "Afficher la mention « Powered by »",
+      "poweredByHint": "La boîte « À propos » nomme le moteur open source et sa licence.",
+      "updateCheck": "Afficher la vérification des mises à jour",
+      "updateCheckHint": "La page Mises à jour et la bannière renvoient au projet amont. Masquées pour un déploiement personnalisé, sauf si cette option est activée."
+    },
+    "preview": {
+      "title": "Aperçu",
+      "unsaved": "Modifications non enregistrées — enregistrez pour les appliquer partout.",
+      "saved": "Ce que tous les utilisateurs voient maintenant.",
+      "light": "Clair",
+      "dark": "Sombre",
+      "button": "Action principale",
+      "badge": "Mise en avant",
+      "agentMessage": "Bonjour ! Comment puis-je vous aider aujourd’hui ?",
+      "userMessage": "Montre-moi mes agents."
+    },
+    "assets": {
+      "title": "Images",
+      "description": "PNG, WebP ou SVG, jusqu’à 512 Ko ; ICO pour le favicon uniquement. Une image s’applique dès son envoi.",
+      "uploaded": "Envoyée",
+      "default": "Par défaut",
+      "dropLabel": "Envoyer : {{slot}}",
+      "replace": "Déposez ou cliquez pour remplacer",
+      "upload": "Déposez ou cliquez pour envoyer",
+      "remove": "Retirer",
+      "logo": "Logo",
+      "logoHint": "Le logotype de la barre latérale en mode clair. Doit être lisible sur fond clair.",
+      "logoDark": "Logo pour le mode sombre",
+      "logoDarkHint": "Facultatif. Utilisé en mode sombre ; le logo est utilisé s’il est vide.",
+      "icon": "Icône",
+      "iconHint": "Carrée. Barre latérale réduite, page d’accueil et « À propos ».",
+      "favicon": "Favicon",
+      "faviconHint": "L’icône de l’onglet du navigateur. L’icône est utilisée s’il est vide.",
+      "ogImage": "Image d’aperçu de lien",
+      "ogImageHint": "Affichée quand un lien de chat est partagé. Le logo est utilisé si elle est vide.",
+      "noLogoNote": "Aucun logo envoyé : la barre latérale affiche « {{name}} » en texte. Les pages affichées avant la connexion gardent le logo par défaut.",
+      "noIconNote": "Aucune icône envoyée : l’application affiche la première lettre du nom court, et l’onglet du navigateur garde l’icône par défaut.",
+      "errorInvalid": "L’image a été refusée : {{reason}}",
+      "errorTooLarge": "L’image dépasse 512 Ko.",
+      "errorType": "Ce type de fichier n’est pas accepté ici. Utilisez PNG, WebP ou SVG (ICO pour le favicon uniquement).",
+      "errorLocked": "L’image de marque est verrouillée : les images ne peuvent pas être modifiées ici."
+    },
+    "resetDialog": {
+      "title": "Réinitialiser l’image de marque ?",
+      "description": "Cela efface tous les noms, couleurs, options et images enregistrés. Les propriétés de configuration, ou les valeurs par défaut, s’appliquent de nouveau pour tous les utilisateurs."
+    }
   }
 }

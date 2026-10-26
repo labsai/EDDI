@@ -21,12 +21,19 @@ export interface ApiError {
 export class ApiClientError extends Error implements ApiError {
   readonly status: number;
   readonly url?: string;
+  /**
+   * The error body, parsed, when it was JSON — for the endpoints whose refusal
+   * carries more than a sentence: per-field `violations`, or the
+   * `currentRevision` of a 409 the caller should offer to reload.
+   */
+  readonly body?: unknown;
 
-  constructor(status: number, message: string, url?: string) {
+  constructor(status: number, message: string, url?: string, body?: unknown) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     if (url !== undefined) this.url = url;
+    if (body !== undefined) this.body = body;
   }
 }
 
@@ -50,13 +57,20 @@ export async function apiErrorFromResponse(
   url: string = response.url,
 ): Promise<ApiClientError> {
   let message = fallbackMessage;
+  let body: unknown;
   try {
-    const extracted = extractErrorMessage(await response.text());
+    const text = await response.text();
+    const extracted = extractErrorMessage(text);
     if (extracted) message = extracted;
+    try {
+      body = text.trim() ? JSON.parse(text) : undefined;
+    } catch {
+      // Not JSON — the message above is all there is.
+    }
   } catch {
     // Body unreadable — keep the fallback.
   }
-  return new ApiClientError(response.status, message, url);
+  return new ApiClientError(response.status, message, url, body);
 }
 
 /** Type guard to check if an error is an ApiError from our client */
@@ -310,9 +324,11 @@ class ApiClient {
       return await fetch(url, {
         method,
         headers: mergedHeaders,
-        body: body !== undefined
-          ? (typeof body === "string" ? body : JSON.stringify(body))
-          : undefined,
+        body: body === undefined
+          ? undefined
+          : typeof body === "string" || body instanceof Blob || body instanceof ArrayBuffer
+            ? body
+            : JSON.stringify(body),
       });
     } catch (networkError) {
       // Network failure (offline, DNS, CORS, etc.)

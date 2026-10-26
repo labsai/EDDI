@@ -153,7 +153,8 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
       <div className="flex h-16 items-center justify-center border-b border-sidebar-border px-4">
         {collapsed ? (
           brand.branded ? (
-            <BrandIcon className="h-7 w-7 shrink-0 rounded-md" testId="sidebar-brand-icon" />
+            // BrandIcon draws the short name's initial when no icon is uploaded.
+            <BrandIcon className="h-7 w-7 shrink-0 rounded-md text-base" testId="sidebar-brand-icon" />
           ) : (
             <svg
               width="28"

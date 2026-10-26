@@ -11,7 +11,7 @@
  * Kept in step with the `@RolesAllowed` on the resource each screen calls
  * (`IRestLogAdmin`, `IRestCoordinatorAdmin`, `IRestAuditStore`,
  * `IRestSecretStore`, `IRestConnectionStore` admin CRUD, `IRestTenantQuota`,
- * `IRestOrphanAdmin`, `IRestGdprAdmin`, `IRestUserMemoryStore` /
+ * `IRestOrphanAdmin`, `IRestGdprAdmin`, `IRestBrandingAdmin`, `IRestUserMemoryStore` /
  * `IRestPropertiesStore`).
  */
 
@@ -40,6 +40,8 @@ const SCREEN_ROLES: ReadonlyArray<readonly [prefix: string, roles: readonly stri
   ["/manage/quotas", [ROLE_ADMIN]],
   ["/manage/orphans", [ROLE_ADMIN]],
   ["/manage/gdpr", [ROLE_ADMIN]],
+  // `IRestBrandingAdmin`: eddi-admin only — a brand is deployment identity.
+  ["/manage/branding", [ROLE_ADMIN]],
   ["/manage/userdata", [ROLE_ADMIN, ROLE_USER]],
 ];
 

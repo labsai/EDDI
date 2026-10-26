@@ -7,8 +7,8 @@ import {
 const ORIGIN = "http://localhost:3000";
 
 /** The first handler that claims `url`, or undefined if none does. */
-async function firstMatch(url: string) {
-  const request = new Request(url);
+async function firstMatch(url: string, method = "GET") {
+  const request = new Request(url, { method });
   for (const handler of browserHandlers) {
     if (await handler.test({ request })) return handler;
   }
@@ -64,6 +64,24 @@ describe("browser MSW handlers — dev asset passthrough", () => {
       const handler = await firstMatch(url);
       expect(handler, url).toBeDefined();
       expect(devAssetPassthrough, url).not.toContain(handler);
+    }
+  });
+
+  it("answers the brand files from the branding mock, and leaves the admin API to its handlers", async () => {
+    const origin = window.location.origin;
+    for (const path of ["/branding/__brand__.js", "/branding/brand.css", "/branding/logo"]) {
+      expect(devAssetPassthrough, path).toContain(await firstMatch(`${origin}${path}`));
+    }
+    // A leading-wildcard mask once swallowed these and sent uploads to the
+    // (absent) backend.
+    for (const [method, path] of [
+      ["PUT", "/administration/branding/assets/logo"],
+      ["DELETE", "/administration/branding/assets/logo"],
+      ["GET", "/administration/branding"],
+    ] as const) {
+      const handler = await firstMatch(`${origin}${path}`, method);
+      expect(handler, `${method} ${path}`).toBeDefined();
+      expect(devAssetPassthrough, `${method} ${path}`).not.toContain(handler);
     }
   });
 });
