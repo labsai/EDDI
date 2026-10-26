@@ -155,22 +155,9 @@ public final class SecretRedactionFilter {
     // redactConnectionStringPasswords.
 
     /**
-     * A whole vault reference, as an OPTIONAL, possessive prefix on an unquoted
-     * value.
-     * <p>
-     * The unquoted rules stop their value at {@code {}, which is what keeps them
-     * off a reference — and is also a bypass: {@code password: ${vault:key}SECRET}
-     * matched nothing, because the value was one character long at the brace.
-     * Letting the value BEGIN with a reference means reference-plus-tail is matched
-     * and replaced as a whole, while a bare reference still falls short of the
-     * length floor that follows it and survives. Possessive on both counts, so a
-     * reference is never given back to be re-read as value material.
-     */
-    private static final String OPTIONAL_VAULT_REFERENCE = "(?:\\$\\{(?:vault|eddivault):[^}]*+\\})?+";
-
-    /**
      * Rules applied after {@link #redactQuotedValues}, for values that are not a
-     * quoted string.
+     * quoted string. Each pattern is the key, separator and guards only — the value
+     * behind it is found by {@link #redactUnquotedValues}, which explains why.
      */
     private static final List<RedactionRule> RULES = List.of(
             // A JSON value that carries no quotes of its own — a
@@ -188,8 +175,7 @@ public final class SecretRedactionFilter {
             // not a JSON key at all, and the loose rule below still sees the value.
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)((?:\\\\{7}|\\\\{3}|\\\\)?+)([\"'])(\\s*+:\\s*+)"
-                            + "(?!\\\\*+[\"'])" + notAlreadyRedacted("(?=[\\s,;}{\\]\"']|$)")
-                            + OPTIONAL_VAULT_REFERENCE + "[^\\s,;}{\\]\"'\\\\]{8,}+"),
+                            + "(?!\\\\*+[\"'])" + notAlreadyRedacted("(?=[\\s,;}{\\]\"']|$)")),
                     "$1$2$3$4$2$3" + REDACTED + "$2$3"),
 
             // Everything that is not JSON: query strings (?api_key=…), log lines
@@ -207,8 +193,7 @@ public final class SecretRedactionFilter {
             // `:12378901`, and left a bare marker where the pair had been.
             new RedactionRule(Pattern.compile(
                     "(?i)(api[_-]?key|token|secret|password|authorization)((?:\\\\*+[\"'])?+\\s*+[=:]\\s*+)"
-                            + notAlreadyRedacted("(?=['\"\\\\\\s,;}{\\]]|$)")
-                            + OPTIONAL_VAULT_REFERENCE + "[^'\"\\\\\\s,;}{\\]]{8,}+"),
+                            + notAlreadyRedacted("(?=['\"\\\\\\s,;}{\\]]|$)")),
                     "$1$2" + REDACTED));
 
     // A `${vault:...}` reference is DELIBERATELY NOT redacted. It is a pointer to
@@ -233,9 +218,10 @@ public final class SecretRedactionFilter {
     // prefix check is a bypass — `${vault:key}SECRET-TAIL` is a secret wearing a
     // pointer as a hat — and AgentSetupService moved off the contains-style
     // isVaultReference for the same reason. shouldRedact() uses the repository's
-    // canonical SecretReference pattern, and the two unquoted rules carry
-    // OPTIONAL_VAULT_REFERENCE so that reference-plus-tail is redacted as a whole
-    // while a bare reference still falls short of the length floor and survives.
+    // canonical SecretReference pattern, and the two unquoted rules let their value
+    // begin with a whole reference (see redactUnquotedValues) so that
+    // reference-plus-tail is redacted as a whole while a bare reference still falls
+    // short of the length floor and survives.
 
     /**
      * A credential named by its key, up to and including its value's opening quote.
@@ -694,10 +680,134 @@ public final class SecretRedactionFilter {
         }
         result = redactConnectionStringPasswords(result);
         result = redactQuotedValues(result);
-        for (RedactionRule rule : RULES) {
-            result = rule.pattern.matcher(result).replaceAll(rule.replacement);
-        }
+        result = redactUnquotedValues(result);
         return redactBareBasicCredentials(result);
+    }
+
+    /** The {@link #RULES} pass of {@link #redact}, in order. */
+    static String redactUnquotedValues(String text) {
+        String result = text;
+        for (RedactionRule rule : RULES) {
+            result = redactUnquotedValues(rule, result);
+        }
+        return result;
+    }
+
+    /** Shortest unquoted value the {@link #RULES} redact. */
+    private static final int UNQUOTED_VALUE_FLOOR = 8;
+
+    /**
+     * One of {@link #RULES}: every match of its key pattern whose value is long
+     * enough is replaced, as {@code replaceAll} would.
+     * <p>
+     * The value is an optional whole vault reference followed by at least
+     * {@link #UNQUOTED_VALUE_FLOOR} {@linkplain #isUnquotedValueChar value
+     * characters}. The unquoted rules stop their value at <code>{</code>, which is
+     * what keeps them off a reference — and is also a bypass:
+     * <code>password: ${vault:key}SECRET</code> matched nothing, because the value
+     * was one character long at the brace. Letting the value BEGIN with a reference
+     * means reference-plus-tail is replaced as a whole, while a bare reference
+     * still falls short of the floor and survives. A reference, once found, is
+     * never given back to be re-read as value material.
+     * <p>
+     * That used to be the regex prefix
+     * <code>(?:\$\{(?:vault|eddivault):[^}]*+\})?+</code>, which means the same —
+     * and searched for the closing brace afresh at every key. A message of repeated
+     * <code>token:${vault:</code> with no brace after them scanned the rest of the
+     * message once per key: quadratic work on conversation text. Here the closing
+     * brace is found by a forward-only search whose result is reused by every later
+     * key it still lies ahead of, so the whole pass is linear.
+     */
+    private static String redactUnquotedValues(RedactionRule rule, String text) {
+        Matcher key = rule.pattern().matcher(text);
+        StringBuilder out = null;
+        int copied = 0;
+        int searchFrom = 0;
+        // the next '}' at or after braceSearchedFrom, or -1 when there is none
+        int braceSearchedFrom = -1;
+        int braceAt = -1;
+        while (searchFrom <= text.length() && key.find(searchFrom)) {
+            int valueStart = key.end();
+            int tailStart = valueStart;
+            if (opensVaultReference(text, valueStart)) {
+                if (braceSearchedFrom < 0 || valueStart < braceSearchedFrom || (braceAt >= 0 && braceAt < valueStart)) {
+                    braceSearchedFrom = valueStart;
+                    braceAt = text.indexOf('}', valueStart);
+                }
+                if (braceAt >= 0) {
+                    tailStart = braceAt + 1;
+                }
+            }
+            int tailEnd = tailStart;
+            while (tailEnd < text.length() && isUnquotedValueChar(text.charAt(tailEnd))) {
+                tailEnd++;
+            }
+            if (tailEnd - tailStart < UNQUOTED_VALUE_FLOOR) {
+                searchFrom = key.start() + 1;
+                continue;
+            }
+            if (out == null) {
+                out = new StringBuilder(text.length());
+            }
+            out.append(text, copied, key.start());
+            appendReplacement(out, rule.replacement(), key);
+            copied = tailEnd;
+            searchFrom = tailEnd;
+        }
+        if (out == null) {
+            return text;
+        }
+        return out.append(text, copied, text.length()).toString();
+    }
+
+    /**
+     * Whether <code>${vault:</code> or <code>${eddivault:</code> starts at
+     * {@code at}, case folded the way the rules' {@code (?i)} folds: ASCII only.
+     */
+    private static boolean opensVaultReference(String text, int at) {
+        return startsWithAsciiIgnoreCase(text, at, "${vault:") || startsWithAsciiIgnoreCase(text, at, "${eddivault:");
+    }
+
+    private static boolean startsWithAsciiIgnoreCase(String text, int at, String prefix) {
+        if (at + prefix.length() > text.length()) {
+            return false;
+        }
+        for (int i = 0; i < prefix.length(); i++) {
+            char c = text.charAt(at + i);
+            if (c >= 'A' && c <= 'Z') {
+                c = (char) (c + ('a' - 'A'));
+            }
+            if (c != prefix.charAt(i)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * A character an unquoted value may carry: not regex {@code \s} (ASCII
+     * whitespace), a quote, a backslash, or a separator or bracket that ends it.
+     */
+    private static boolean isUnquotedValueChar(char c) {
+        return switch (c) {
+            case ' ', '\t', '\n', '\u000B', '\f', '\r', ',', ';', '}', '{', ']', '"', '\'', '\\' -> false;
+            default -> true;
+        };
+    }
+
+    /** The rule's replacement with each {@code $n} expanded from the key match. */
+    private static void appendReplacement(StringBuilder out, String replacement, Matcher key) {
+        for (int i = 0; i < replacement.length(); i++) {
+            char c = replacement.charAt(i);
+            if (c == '$' && i + 1 < replacement.length() && Character.isDigit(replacement.charAt(i + 1))) {
+                String group = key.group(replacement.charAt(++i) - '0');
+                if (group != null) {
+                    out.append(group);
+                }
+            } else {
+                out.append(c);
+            }
+        }
     }
 
     /**

@@ -13,7 +13,8 @@ import java.util.regex.Pattern;
  * <p>
  * The pattern language is deliberately minimal: {@code *} is the only wildcard
  * (matches any run of characters, including empty); every other character is a
- * quoted literal, so compilation is ReDoS-safe. Patterns may be qualified by a
+ * quoted literal, and {@link #compile} builds a regex whose matching work is
+ * bounded by pattern length times input length. Patterns may be qualified by a
  * known source prefix (e.g. {@code mcp:read_*}) or match the bare tool name.
  */
 public final class ToolApprovalPatterns {
@@ -38,20 +39,47 @@ public final class ToolApprovalPatterns {
     }
 
     /**
-     * '*' is the only wildcard; every other char is a quoted literal (ReDoS-safe).
+     * '*' is the only wildcard; every other char is a quoted literal.
+     * <p>
+     * The naive translation, one greedy {@code .*} per star, is not ReDoS-safe even
+     * with every literal quoted: {@code a*a*a*…*b} against a run of {@code a}s
+     * backtracks through every way of splitting the run between the stars, which
+     * grows as input length to the power of the star count, and a 256-character
+     * pattern can hold over a hundred stars. The regex built here means the same
+     * and its matching work is bounded by pattern length times input length:
+     * <ul>
+     * <li>the segment before the first star is anchored at the start, the one after
+     * the last star at the end ({@code .*Z$} backs off at most once across the
+     * input);</li>
+     * <li>every segment between two stars is matched at its <em>earliest</em>
+     * occurrence inside an atomic group, {@code (?>.*?B)}, so it is never
+     * revisited. Committing to the earliest occurrence loses no match: a star
+     * absorbs anything, so the earliest placement leaves the longest remainder for
+     * the segments after it, and any match that places the segment later also
+     * exists with it placed earlier.</li>
+     * </ul>
+     * Adjacent stars collapse, since the empty segment between them adds nothing.
      */
     public static Pattern compile(String glob) {
         String[] parts = glob.split("\\*", -1);
         StringBuilder sb = new StringBuilder("^");
-        for (int i = 0; i < parts.length; i++) {
-            if (i > 0) {
-                sb.append(".*");
+        appendLiteral(sb, parts[0]);
+        if (parts.length > 1) {
+            for (int i = 1; i < parts.length - 1; i++) {
+                if (!parts[i].isEmpty()) {
+                    sb.append("(?>.*?").append(Pattern.quote(parts[i])).append(')');
+                }
             }
-            if (!parts[i].isEmpty()) {
-                sb.append(Pattern.quote(parts[i]));
-            }
+            sb.append(".*");
+            appendLiteral(sb, parts[parts.length - 1]);
         }
         return Pattern.compile(sb.append("$").toString());
+    }
+
+    private static void appendLiteral(StringBuilder sb, String literal) {
+        if (!literal.isEmpty()) {
+            sb.append(Pattern.quote(literal));
+        }
     }
 
     /** Returns an actionable error message, or empty if the pattern is valid. */

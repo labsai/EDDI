@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.PropertyExpectation;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.TestCase;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.ToolMock;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Turn;
+import ai.labs.eddi.engine.agenttests.BoundedRegex;
 
 import java.util.List;
 import java.util.Set;
@@ -215,6 +216,9 @@ public final class AgentTestSuiteValidator {
         } catch (PatternSyntaxException e) {
             throw new IllegalArgumentException(where + " is not a valid regular expression: " + e.getDescription());
         }
+        BoundedRegex.excessiveRepetition(regex).ifPresent(reason -> {
+            throw new IllegalArgumentException(where + " " + reason + ".");
+        });
     }
 
     private static boolean isBlank(String value) {
