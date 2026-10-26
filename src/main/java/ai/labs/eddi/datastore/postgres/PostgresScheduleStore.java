@@ -549,6 +549,22 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT COUNT(*) FROM eddi_schedules WHERE name = ? AND (enabled = true OR disabled_reason = ?)")) {
+            ps.setString(1, name);
+            ps.setString(2, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count pending schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         int count = deleteWithCascade("name", name, null, "Failed to delete schedules by name: " + name);

@@ -388,21 +388,30 @@ public class ConversationContinuations {
     }
 
     /**
-     * Deletes every pending continuation of the conversation — on end and cancel,
+     * Deletes every continuation schedule of the conversation — on end and cancel,
      * so a stopped job does not start again. Never throws.
+     * <p>
+     * A continuation that already ran stays behind as a disabled one-shot under the
+     * same name ({@code markCompleted} disables a fired one-shot rather than
+     * deleting it), so the rows deleted here are not what was pending. The count
+     * returned is the pending ones only: a cancel of a job that has finished must
+     * find nothing to cancel, not report the job's spent schedules as cancelled.
      *
-     * @return how many schedules were deleted
+     * @return how many pending continuations were withdrawn
      */
     public int disarm(String conversationId) {
         if (conversationId == null || scheduleStore == null) {
             return 0;
         }
         try {
-            int deleted = scheduleStore.deleteSchedulesByName(scheduleName(conversationId));
-            if (deleted > 0) {
-                LOGGER.infof("Withdrew %d pending continuation(s) of conversation %s", deleted, sanitize(conversationId));
+            String name = scheduleName(conversationId);
+            int pending = scheduleStore.countPendingSchedulesByName(name);
+            int deleted = scheduleStore.deleteSchedulesByName(name);
+            int withdrawn = Math.min(pending, deleted);
+            if (withdrawn > 0) {
+                LOGGER.infof("Withdrew %d pending continuation(s) of conversation %s", withdrawn, sanitize(conversationId));
             }
-            return deleted;
+            return withdrawn;
         } catch (Exception e) {
             LOGGER.warnf("Could not withdraw the pending continuation of conversation %s: %s", sanitize(conversationId), e.getMessage());
             return 0;

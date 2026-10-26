@@ -1,0 +1,48 @@
+{
+  "behaviorGroups": [
+    {
+      "name": "start",
+      "behaviorRules": [
+        {
+          "name": "Start the job",
+          "actions": [
+            "job_step",
+            "CONTINUE_CONVERSATION"
+          ],
+          "conditions": [
+            {
+              "type": "inputmatcher",
+              "configs": {
+                "expressions": "start_job(*)",
+                "occurrence": "currentStep"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "continue",
+      "behaviorRules": [
+        {
+          "name": "Next job step",
+          "actions": [
+            "job_step",
+            "CONTINUE_CONVERSATION"
+          ],
+          "conditions": [
+            {
+              "type": "actionmatcher",
+              "configs": {
+                "actions": "job_step",
+                "occurrence": "lastStep"
+              },
+              "conditions": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

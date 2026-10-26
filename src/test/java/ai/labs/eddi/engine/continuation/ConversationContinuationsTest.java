@@ -306,11 +306,26 @@ class ConversationContinuationsTest {
         @Test
         @DisplayName("disarm withdraws every pending continuation of the conversation, by name, and never throws")
         void disarm() throws Exception {
-            doReturn(2).when(scheduleStore).deleteSchedulesByName(ConversationContinuations.scheduleName(CONVERSATION_ID));
-            assertEquals(2, continuations.disarm(CONVERSATION_ID));
+            doReturn(1).when(scheduleStore).countPendingSchedulesByName(ConversationContinuations.scheduleName(CONVERSATION_ID));
+            doReturn(1).when(scheduleStore).deleteSchedulesByName(ConversationContinuations.scheduleName(CONVERSATION_ID));
+            assertEquals(1, continuations.disarm(CONVERSATION_ID));
 
             doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).deleteSchedulesByName(anyString());
             assertEquals(0, continuations.disarm(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("disarm deletes the spent continuations of a finished job but reports nothing withdrawn (found by ConversationContinuationIT)")
+        void disarmOfAFinishedJobWithdrawsNothing() throws Exception {
+            // A fired one-shot is disabled, not deleted: a job that ran three
+            // continuations leaves three disabled rows and nothing pending. Counting the
+            // deleted rows made a cancel of the finished job answer CANCELLED, not 409.
+            String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
+            doReturn(0).when(scheduleStore).countPendingSchedulesByName(name);
+            doReturn(3).when(scheduleStore).deleteSchedulesByName(name);
+
+            assertEquals(0, continuations.disarm(CONVERSATION_ID));
+            verify(scheduleStore).deleteSchedulesByName(name);
         }
     }
 

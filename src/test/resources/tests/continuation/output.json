@@ -1,0 +1,18 @@
+{
+  "outputSet": [
+    {
+      "action": "job_step",
+      "timesOccurred": 0,
+      "outputs": [
+        {
+          "valueAlternatives": [
+            {
+              "type": "text",
+              "text": "Job step done."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

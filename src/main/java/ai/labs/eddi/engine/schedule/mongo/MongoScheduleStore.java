@@ -433,6 +433,16 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        try {
+            return (int) scheduleCollection.countDocuments(and(eq(NAME, name),
+                    or(eq(ENABLED, true), eq(DISABLED_REASON, ScheduleConfiguration.DISABLED_BY_UNDEPLOY))));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count pending schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException {
         try {
             Document doc = scheduleCollection.find(eq(NAME, name)).first();

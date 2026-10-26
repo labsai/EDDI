@@ -139,6 +139,17 @@ public interface IScheduleStore {
     int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
 
     /**
+     * How many schedules with the given name can still fire: enabled ones, and
+     * those switched off only because their agent was undeployed (a redeploy
+     * restores them). A one-shot that already fired is disabled by
+     * {@link #markCompleted} and stays behind under its name, so a plain count by
+     * name cannot tell "something is pending" from "something ran".
+     *
+     * @return number of pending schedules with that name
+     */
+    int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
+
+    /**
      * The schedule with the given name, for the system schedules whose name is
      * their identity (an ingestion source's {@code rag-ingestion:<kb>:<source>}).
      * When several share the name — which their writers prevent by deleting by name
