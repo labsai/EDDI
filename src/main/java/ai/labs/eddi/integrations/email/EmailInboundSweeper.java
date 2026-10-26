@@ -5,6 +5,8 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -201,9 +203,24 @@ public class EmailInboundSweeper {
                 ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, null, now.plus(strandedAfter), null, false, now);
                 continue;
             }
-            // Unreadable: resolved as before, without a resubmission — when in doubt the
-            // mail is not run a second time.
-            SimpleConversationMemorySnapshot snapshot = readFull(row.conversationId());
+            // Gone (null): resolved as before, without a resubmission — when in doubt the
+            // mail is not run a second time. A store that cannot be read is not "gone":
+            // closing the row would leave the reply to nobody, so it is kept for a later
+            // sweep, bounded like a failed rebuild.
+            SimpleConversationMemorySnapshot snapshot;
+            try {
+                snapshot = readFull(row.conversationId());
+            } catch (IllegalStateException e) {
+                int failures = rebuildFailures(row) + 1;
+                if (failures < MAX_REBUILD_ATTEMPTS) {
+                    ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, null, now.plus(strandedAfter), REBUILD_FAILED + failures,
+                            false, now);
+                    continue;
+                }
+                LOGGER.warnf("Email integration %s: the conversation of inbound mail %s could not be read in %d sweeps; the mail is closed "
+                        + "without its reply", sanitize(row.integrationId()), row.id(), failures);
+                snapshot = null;
+            }
             boolean idle = state == ConversationState.READY || state == ConversationState.AWAITING_HUMAN;
             int step = snapshot == null ? -1 : EmailReplyThread.mailStep(snapshot.getConversationOutputs(), row.messageId());
             if (snapshot != null && step < 0 && idle) {
@@ -280,11 +297,19 @@ public class EmailInboundSweeper {
         }
     }
 
+    /**
+     * The detailed conversation, or null when it is gone.
+     *
+     * @throws IllegalStateException
+     *             when the store cannot be read
+     */
     private SimpleConversationMemorySnapshot readFull(String conversationId) {
         try {
             return conversationService.readConversation(conversationId, true, false, List.of());
-        } catch (Exception e) {
+        } catch (ResourceNotFoundException e) {
             return null;
+        } catch (ResourceStoreException e) {
+            throw new IllegalStateException("Could not read conversation " + conversationId, e);
         }
     }
 

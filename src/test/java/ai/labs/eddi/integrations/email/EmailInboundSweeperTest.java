@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -224,6 +225,50 @@ class EmailInboundSweeperTest {
         }
         sweeper.resolveStranded(at);
         assertEquals(State.DONE, ledger.findById("hopeless").orElseThrow().state(), "given up after the last attempt");
+    }
+
+    @Test
+    @DisplayName("conversation mode: a conversation that cannot be read keeps the row submitted, a bounded number of times; a gone one closes it")
+    void snapshotReadFailureKeepsRow() throws Exception {
+        submitted("answered", "c-answered", now.minusSeconds(1));
+        when(conversations.getConversationState("c-answered")).thenReturn(ConversationState.READY);
+        var configuration = EmailInboundProcessorTest.integration(Map.of("mode", "conversation", "smtpHost", "smtp.contoso.com"));
+        var settings = EmailChannelSettings.from(configuration.getPlatformConfig());
+        when(directory.find("int-1")).thenReturn(Optional.of(new EmailIntegration("int-1", configuration, settings)));
+        EmailReplySender replies = mock(EmailReplySender.class);
+        when(replies.ensureFor(any(), any(), any(), any())).thenReturn(true);
+        sweeper.replies = replies;
+        when(conversations.readConversation("c-answered", true, false, List.of())).thenThrow(new IResourceStore.ResourceStoreException("db down"))
+                .thenReturn(conversation("<answered@x.com>"));
+
+        sweeper.resolveStranded(now);
+
+        var kept = ledger.findById("answered").orElseThrow();
+        assertEquals(State.TURN_SUBMITTED, kept.state(), "an unreadable store is not a gone conversation");
+        assertEquals(EmailInboundSweeper.REBUILD_FAILED + 1, kept.lastError());
+        verify(replies, never()).ensureFor(any(), any(), any(), any());
+
+        sweeper.resolveStranded(now.plus(Duration.ofMinutes(31)));
+        assertEquals(State.DONE, ledger.findById("answered").orElseThrow().state(), "read on the next sweep, reply ensured, closed");
+        verify(replies).ensureFor(any(), any(), any(), any());
+
+        submitted("hopeless", "c-hopeless", now.minusSeconds(1));
+        when(conversations.getConversationState("c-hopeless")).thenReturn(ConversationState.READY);
+        when(conversations.readConversation("c-hopeless", true, false, List.of())).thenThrow(new IResourceStore.ResourceStoreException("never"));
+        Instant at = now;
+        for (int i = 1; i < EmailInboundSweeper.MAX_REBUILD_ATTEMPTS; i++) {
+            sweeper.resolveStranded(at);
+            assertEquals(State.TURN_SUBMITTED, ledger.findById("hopeless").orElseThrow().state());
+            at = at.plus(Duration.ofMinutes(31));
+        }
+        sweeper.resolveStranded(at);
+        assertEquals(State.DONE, ledger.findById("hopeless").orElseThrow().state(), "given up after the last attempt");
+
+        submitted("gone", "c-gone", now.minusSeconds(1));
+        when(conversations.getConversationState("c-gone")).thenReturn(ConversationState.READY);
+        when(conversations.readConversation("c-gone", true, false, List.of())).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        sweeper.resolveStranded(at);
+        assertEquals(State.DONE, ledger.findById("gone").orElseThrow().state(), "a conversation that is gone is closed at once");
     }
 
     @Test

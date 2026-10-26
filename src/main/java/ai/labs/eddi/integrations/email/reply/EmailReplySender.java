@@ -718,12 +718,19 @@ public class EmailReplySender {
 
     // --- Reading the conversation --------------------------------------------
 
+    /**
+     * The detailed conversation, or null when it is gone. A store that cannot be
+     * read throws: a reply row's retry then lets its lease run out and tries again
+     * instead of failing for good, and a reply rebuild reports failure.
+     */
     private SimpleConversationMemorySnapshot readFull(String conversationId) {
         try {
             return conversationService.readConversation(conversationId, true, false, List.of());
-        } catch (Exception e) {
-            LOGGER.debugf("Conversation %s could not be read for a reply: %s", sanitize(conversationId), e.getMessage());
+        } catch (ResourceNotFoundException e) {
+            LOGGER.debugf("Conversation %s is gone; no reply is built from it", sanitize(conversationId));
             return null;
+        } catch (ResourceStoreException e) {
+            throw new IllegalStateException("Could not read conversation " + conversationId + " for a reply", e);
         }
     }
 

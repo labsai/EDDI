@@ -334,6 +334,27 @@ class EmailReplySenderTest {
         }
 
         @Test
+        @DisplayName("a conversation that cannot be read on a retry is retried later, not failed for good; a gone one is")
+        void retryStoreFailure() throws Exception {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+            var row = sender.onTurnCompleted(INTEGRATION, settings(), inbound, CONVERSATION, answered("Ships Monday."), NOW).orElseThrow();
+            Instant due = ledger.findById(row.id()).orElseThrow().nextAttemptAt();
+            doThrow(new IResourceStore.ResourceStoreException("db down")).when(conversations).readConversation(CONVERSATION, true, false, List.of());
+
+            sender.sweep(due.plusSeconds(1));
+
+            assertNotEquals(State.FAILED, ledger.findById(row.id()).orElseThrow().state(), "a read failure is not missing content");
+            assertTrue(transport.recipients.isEmpty());
+
+            doReturn(answered("Ships Monday.")).when(conversations).readConversation(CONVERSATION, true, false, List.of());
+            sender.sweep(due.plus(EmailReplySender.LEASE).plusSeconds(2));
+
+            assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
+            assertEquals(List.of(SENDER), transport.recipients);
+        }
+
+        @Test
         @DisplayName("a permanent refusal ends FAILED and notifies the owners; so does the last attempt")
         void failed() {
             LedgerEntry inbound = storedInbound(State.DONE);
