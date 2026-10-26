@@ -85,6 +85,11 @@ public class RestRuleSetStore implements IRestRuleSetStore {
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return behaviorStore.getCurrentResourceId(id);
     }

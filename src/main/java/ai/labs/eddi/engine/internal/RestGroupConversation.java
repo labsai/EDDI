@@ -455,6 +455,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // to drive — not every authenticated caller's, as requireOwnerOrAdmin would
             // have it (L9 of the 2026-10-15 security review).
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // A follow-up runs a member agent at the group's cost, like a continuation:
+            // owning the transcript is not the same as still being allowed to run it.
+            requireGroupUseAccess(groupId);
             GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -793,8 +796,14 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
-        var listener = createStreamingListener(eventSink, sse);
         try {
+            // Deciding a pause and reading the resumed discussion are separate rights
+            // (as on the agent resume: "a reply is a read"). An approver-only caller
+            // gets the outcome of their decision, not the member turns that follow it.
+            var owner = groupConversationService.readGroupConversation(gcId).getUserId();
+            var listener = hitlAccessGuard.mayReadResumedDiscussion(owner)
+                    ? createStreamingListener(eventSink, sse)
+                    : createApproverStreamingListener(eventSink, sse);
             groupConversationService.resumeDiscussion(gcId, request, listener);
         } catch (IResourceStore.ResourceModifiedException e) {
             // Curated messages throughout (parity with the non-streaming
@@ -927,11 +936,15 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : "");
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
             // I6: a human-turn pause carries WHO is up and WHAT they were asked —
-            // the summary is that member's working view, no transcript needed.
+            // the summary is that member's working view, no transcript needed. The
+            // prompt itself is discussion content, so only the member, the owner,
+            // admins (and an approver inside an APPROVAL pause) receive it.
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                    summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                }
             }
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -1131,6 +1144,44 @@ public class RestGroupConversation implements IRestGroupConversation {
             public void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
                 // Not terminal — liveness signal while a member's tool loop runs.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
+            }
+        };
+    }
+
+    /**
+     * The stream an approver-only caller (neither owner nor admin) gets from
+     * {@code approve/stream}: the outcome of their decision and nothing after it.
+     * The {@code hitl_resume} event confirms the decision was applied and ends the
+     * stream; a rejection ends it with the terminal state but no synthesized
+     * answer; errors and cancellation are forwarded as usual. Every content-bearing
+     * event of the resumed run (member responses, decisions, artifacts, stances,
+     * the synthesis) falls through to the listener's no-op defaults.
+     */
+    private GroupDiscussionEventListener createApproverStreamingListener(SseEventSink eventSink, Sse sse) {
+        return new GroupDiscussionEventListener() {
+            @Override
+            public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(event));
+                closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
+                        toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null)));
+                closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+                closeQuietly(eventSink);
+            }
+
+            @Override
+            public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
+                closeQuietly(eventSink);
             }
         };
     }
