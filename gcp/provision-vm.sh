@@ -712,6 +712,13 @@ services:
   keycloak:
     environment:
       KC_HOSTNAME: "https://\${KC_DOMAIN}"
+      # docker-compose.auth.yml sets KC_HOSTNAME_BACKCHANNEL_DYNAMIC, which builds
+      # the token, jwks and userinfo URLs in Keycloak's discovery document from
+      # the request - plain http behind this nginx. Trusting the X-Forwarded-*
+      # headers nginx sets makes them https; without it MCP clients (Claude Code)
+      # refuse to send credentials to the http token endpoint. Keycloak listens
+      # on localhost only, so nothing can reach it without passing nginx.
+      KC_PROXY_HEADERS: "xforwarded"
 OVERRIDE_EOF
 
   # Register the override in the eddi CLI config so "eddi restart" uses it too
