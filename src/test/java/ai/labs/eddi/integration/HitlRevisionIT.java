@@ -56,8 +56,13 @@ public class HitlRevisionIT extends BaseIntegrationIT {
     private static final String CHAT_PATH = "/v1/chat/completions";
     private static final String CANDIDATE_KEY = "hitl:revision:candidate";
     private static final String OUTCOME_KEY = "hitl:revision:outcome";
+    private static final String AUDIT_COMPILED_PROMPT_KEY = "audit:compiled_prompt";
 
-    private static final String SYSTEM_MESSAGE = "You draft customer replies for the refunds desk.";
+    /**
+     * Unique marker: the system prompt must reach the model and never a raw read.
+     */
+    private static final String SYSTEM_PROMPT_MARKER = "SYSPROMPT-7Q4Z";
+    private static final String SYSTEM_MESSAGE = SYSTEM_PROMPT_MARKER + " You draft customer replies for the refunds desk.";
     private static final String DRAFT = "DRAFT-ALPHA: your refund is on its way.";
     private static final String REVISION = "REVISED-BRAVO: your refund of 40 EUR arrives on 12 March.";
     private static final String NOTE = "Mention the refund date, which is 12 March.";
@@ -134,8 +139,9 @@ public class HitlRevisionIT extends BaseIntegrationIT {
         assertTrue(candidate.path("lifecycleIndex").asInt(-1) >= 0, "the candidate is stamped with its pipeline position");
         assertFalse(candidate.path("workflowId").asText("").isBlank(), "the candidate names its workflow");
         assertEquals("draft-reply", candidate.path("llmTaskId").asText(), "the candidate names the LLM task");
-        assertTrue(candidate.path("transcriptJson").asText("").contains("refunds desk"),
-                "the frozen request (system message included) is kept with the pause");
+        // The frozen request is kept in the store (the revision below is asked over
+        // it), but the raw read must not serve it: it holds the compiled system prompt.
+        assertRawReadWithholdsFrozenRequest(stored, candidate);
 
         // ... but never served by the detailed conversation view.
         String detailedWhilePaused = getConversationLog(agentResourceId.id(), conversationId, true).then().statusCode(200).extract().asString();
@@ -151,7 +157,8 @@ public class HitlRevisionIT extends BaseIntegrationIT {
         JsonNode revisionRequest = JSON.readTree(requests.get(1).getBodyAsString());
         String revisionBody = revisionRequest.toString();
         assertTrue(revisionBody.contains(NOTE), "the reviewer's note must reach the model: " + revisionBody);
-        assertTrue(revisionBody.contains("refunds desk"), "the revision is asked over the frozen system message");
+        assertTrue(revisionBody.contains(SYSTEM_PROMPT_MARKER),
+                "the revision is asked over the frozen system message — so the store kept the transcript the raw read withheld");
         assertFalse(revisionRequest.has("tools"), "the revision is tool-less");
         JsonNode messages = revisionRequest.path("messages");
         JsonNode draftTurn = messages.get(messages.size() - 2);
@@ -162,8 +169,10 @@ public class HitlRevisionIT extends BaseIntegrationIT {
         assertTrue(noteTurn.path("content").asText().contains(NOTE));
 
         // The second pause keeps the revision, with the round counted, in the store.
-        JsonNode secondCandidate = lastStepData(readRaw(conversationId), CANDIDATE_KEY);
+        JsonNode secondStored = readRaw(conversationId);
+        JsonNode secondCandidate = lastStepData(secondStored, CANDIDATE_KEY);
         assertNotNull(secondCandidate, "the second pause must persist a candidate for the revision");
+        assertRawReadWithholdsFrozenRequest(secondStored, secondCandidate);
         assertEquals(REVISION, secondCandidate.path("draft").asText());
         assertEquals(1, secondCandidate.path("roundsUsed").asInt(-1), "the round count rides on the stored candidate");
         JsonNode pausedOutput = lastConversationOutput(JSON.readTree(getConversationLog(agentResourceId.id(), conversationId, true)
@@ -259,6 +268,40 @@ public class HitlRevisionIT extends BaseIntegrationIT {
                 .body(decisionJson)
                 .post("agents/" + conversationResourceId.id() + "/resume?returnCurrentStepOnly=true")
                 .then().assertThat().statusCode(200);
+    }
+
+    /**
+     * The raw read serves the candidate's draft and bookkeeping but not its frozen
+     * request: no {@code transcriptJson} on the candidate, and the system prompt
+     * nowhere in the response (possibleResults copies included).
+     */
+    private static void assertRawReadWithholdsFrozenRequest(JsonNode rawResponse, JsonNode candidate) {
+        assertFalse(candidate.has("transcriptJson"), "the raw read must withhold the candidate's frozen request: " + candidate);
+        String raw = rawResponse.toString();
+        assertFalse(raw.contains("transcriptJson"), "no copy of the candidate may carry the transcript: " + raw);
+        List<JsonNode> candidates = new ArrayList<>();
+        collect(rawResponse, CANDIDATE_KEY, candidates);
+        for (JsonNode entry : candidates) {
+            assertFalse(entry.toString().contains(SYSTEM_PROMPT_MARKER),
+                    "no candidate entry (result or possibleResults) may carry the system prompt: " + entry);
+        }
+        // The one other place the prompt is stored is the LLM task's own audit entry,
+        // which the raw read served before E2 and still serves (see the changelog).
+        // Every occurrence of the prompt must be accounted for by it, so the revision
+        // machinery adds no copy of its own.
+        List<JsonNode> auditPrompts = new ArrayList<>();
+        collect(rawResponse, AUDIT_COMPILED_PROMPT_KEY, auditPrompts);
+        int inAudit = auditPrompts.stream().mapToInt(entry -> occurrences(entry.toString(), SYSTEM_PROMPT_MARKER)).sum();
+        assertEquals(inAudit, occurrences(raw, SYSTEM_PROMPT_MARKER),
+                "the system prompt may appear in the raw read only inside " + AUDIT_COMPILED_PROMPT_KEY + ": " + raw);
+    }
+
+    private static int occurrences(String text, String marker) {
+        int count = 0;
+        for (int at = text.indexOf(marker); at >= 0; at = text.indexOf(marker, at + marker.length())) {
+            count++;
+        }
+        return count;
     }
 
     private JsonNode readRaw(String conversationId) throws Exception {

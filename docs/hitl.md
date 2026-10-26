@@ -171,7 +171,7 @@ The approval API is unchanged: the reviewer rejects with a note, over REST `POST
 - **No tool runs again.** The revision is one model call with no tools. A draft that came from a tool loop is re-asked over its tool results, the way an output guardrail re-asks a final answer.
 - **The same checks apply.** The revision passes `responseValidation` and the task's output guardrails, and the spend gate is asked first (`maxCostPerConversationUsd`, the tenant budget). The revision's tokens and cost are recorded on the step like any answer's.
 - **Tasks after the model's run again**, from the one after the model's task up to and past the pause. Output that the draft and those tasks wrote is cut back first, so nothing appears twice. Keep side effects (an `httpcall` that sends something) **after** the pause, which is the usual design anyway.
-- **Templates can tell.** `{memory.current.hitlDecision}` stays `REJECTED` (it is the decision on the draft), and `{memory.current.hitlRevision}` holds the revision's number.
+- **Templates can tell.** `{memory.current.hitlRevision}` holds the revision's number. `{memory.current.hitlDecision}` reads `REJECTED` (the decision on the draft) while the revision runs and awaits review, and is overwritten by the next decision on the same turn: once the revision is approved, the step reads `APPROVED`.
 
 **When a rejection still skips.** In all of these cases the rejection behaves exactly as under `SKIP`:
 
@@ -185,7 +185,7 @@ The approval API is unchanged: the reviewer rejects with a note, over REST `POST
 
 **Which pauses.** Only behavior-rule (`RULE`) pauses. A rejected **tool call** (`TOOL_CALL` pause) is not a rejected answer: the model already receives the rejection, with the note, as that call's tool result and answers from there, under either policy. Group discussions are not affected either (a member's own pause is cancelled inside a group, see [Group members](#group-members)).
 
-**Records.** The step keeps `hitl:revision:outcome` (`{outcome, round}`) as part of the turn's HITL record, the `hitl.approval` audit entry carries `onRejection: REVISE` for a rejection under the policy, and the revision itself is an ordinary LLM task entry in the audit ledger (model, response, tokens, cost). The counter `eddi_hitl_revision_total{outcome}` counts the outcomes. The request kept with the pause (`hitl:revision:candidate`) is internal: it is withheld from `returnDetailed` and from an approver's `approval-status?detail=full`, it is scrubbed of secret input and secret context like the rest of the step, and it is removed from the step when the pause is decided.
+**Records.** The step keeps `hitl:revision:outcome` (`{outcome, round}`) as part of the turn's HITL record, the `hitl.approval` audit entry carries `onRejection: REVISE` for a rejection under the policy, and the revision itself is an ordinary LLM task entry in the audit ledger (model, response, tokens, cost). The counter `eddi_hitl_revision_total{outcome}` counts the outcomes. The request kept with the pause (`hitl:revision:candidate`) is internal: it is withheld from `returnDetailed` and from an approver's `approval-status?detail=full`, the raw read `GET /conversationstore/conversations/{conversationId}` serves only its draft and bookkeeping (never `transcriptJson`, the frozen request with the compiled system prompt), it is scrubbed of secret input and secret context like the rest of the step, and it is removed from the step when the pause is decided.
 
 ### Secret context on resume
 
