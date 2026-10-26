@@ -61,3 +61,25 @@
 ### Tests
 
 486 unit tests across the alert, output-match, REST, MCP, step-runner, GDPR, rating and cluster-handler classes pass, including the fence cases in `AlertPrivacyRaceTest` (captured before the fence stores no value, fence up between check and insert blanks before delivery, captured after keeps the value, expiry, set by hash, fenced rating not evaluated) and `AlertDeliveryServiceTest` (first delivery and a retry send the redacted stored version, a deleted event is not sent). Mutation check: 7 of 7 killed.
+
+## fix(alerts): a per-event send claim closes the erasure-vs-delivery window (2026-10-26)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138)
+
+### What changed and why
+
+A delivery could read an event, an erasure redact it and finish, and the delivery then send what it had read. Now **no send starts with erased content after an erasure has completed**.
+
+- **Send claim.** `IAlertEventStore.claimSend(eventId, token, now, until)` is an atomic conditional write that succeeds only when no claim is live (none, or an expired one); `releaseSend(eventId, token)` clears it only for its own token. Both stores keep the claim in internal fields (`sendClaimToken` / `sendClaimUntil`; `send_claim_token` / `send_claim_until`) that no read maps into an event. `AlertDeliveryService` — the one path for first deliveries and retries — claims for `SEND_CLAIM_LEASE` (30 s, three times the webhook timeout), reads the event, checks that more than the send timeout is left of the lease, sends, and releases in a `finally`. A claim it cannot take, or a lease too short to finish in, leaves the delivery pending, due again after one lease; the worker never blocks.
+- **Erasure waits for live claims.** The redactions erasure uses (`redactOutputValues`, `redactRatingComments`, and the engine's `redactRatingComment`) take `now` and skip an event whose claim is live. [`AlertErasureRedactor`](../../src/main/java/ai/labs/eddi/engine/alerts/AlertErasureRedactor.java) — used by `AlertGdprParticipant` and `ConversationRatingGdprParticipant` — repeats the redaction with a short pause until `countOutputValues` / `countRatingComments` report nothing left, so the erasure completes only after every send that had read the content has finished or its claim has expired.
+- **The engine's own post-insert redactions cannot wait on themselves:** they run before the event's first delivery and before the maintenance pass may pick it up (its `nextAttemptAt` is a claim lease away), so no claim on it can exist yet (said in the code).
+- [Alerts → Privacy](../alerts.md#privacy) states the guarantee and its one limit: a send that started before the erasure completed cannot be recalled.
+
+### Design decisions
+
+- **Claim per send, not per event delivery:** an event with five targets would otherwise hold one claim across up to five webhook timeouts.
+- **The erasure's wait is bounded** by ten leases (5 minutes). A claim always expires within one lease, so only a store that keeps failing the update — or deliveries re-claiming without pause, which the backoff rules out — reaches the bound; the step is then reported failed instead of hanging the erasure. This is the one place the implementation is stricter than "keep going until the claims expire".
+
+### Tests
+
+`AlertSendClaimTest` drives the races with latches, not sleeps: a send paused after its final read holds the erasure (asserted not complete after two redaction passes), the erasure completes once the send finishes, and a retry then sends the redacted event; erasure first, then delivery, sends the redacted event; a live claim makes the attempt skip, an expired one is taken over; a lease too short after the read releases and skips; the erasure's bound fails the step. Store contract (both ITs): conditional claim, token-checked release, expiry takeover, redaction skipping a claimed event until it is released or expired.
