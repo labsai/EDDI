@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -79,6 +80,17 @@ class EmailIntegrationDirectoryTest {
     void storeFailurePropagates() throws Exception {
         when(channelStore.read(eq(SECOND), any())).thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
 
-        assertThrows(IllegalStateException.class, directory::scan);
+        var thrown = assertThrows(EmailIntegrationDirectory.StoreUnavailableException.class, directory::scan);
+        assertInstanceOf(IResourceStore.ResourceStoreException.class, thrown.getCause());
+    }
+
+    @Test
+    @DisplayName("a failure listing the descriptors fails the scan as a store failure")
+    void descriptorListingFailurePropagates() throws Exception {
+        when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
+
+        var thrown = assertThrows(EmailIntegrationDirectory.StoreUnavailableException.class, directory::scan);
+        assertInstanceOf(IResourceStore.ResourceStoreException.class, thrown.getCause());
     }
 }

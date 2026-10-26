@@ -107,8 +107,10 @@ public class EmailIntegrationDirectory {
                     LOGGER.debugf("Skipping a channel descriptor while listing email integrations: %s", e.getMessage());
                 }
             }
+        } catch (StoreUnavailableException e) {
+            throw e;
         } catch (Exception e) {
-            throw new IllegalStateException("The channel integrations could not be listed", e);
+            throw new StoreUnavailableException("The channel integrations could not be listed", e);
         }
         return found;
     }
