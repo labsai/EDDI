@@ -87,6 +87,14 @@ class BrandDeliveryTest {
         assertEquals("/* brand revision 3 */\n:root{--chat-accent:#123;}\n", css);
     }
 
+    @Test
+    void darkColoursAloneStillReachTheDarkTheme() {
+        String css = BrandDelivery.stylesheet(brand("Acme", BrandingService.resolveColors(new BrandColors(null, null, "#2dd4bf", "#042f2e", null))));
+        assertEquals("/* brand revision 3 */\n:root{}\n"
+                + ".dark{--color-primary:#2dd4bf;--color-ring:#2dd4bf;--color-sidebar-accent:#2dd4bf;"
+                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;}\n", css);
+    }
+
     /**
      * Defence in depth: a value that somehow bypassed validation (a hand-edited
      * database document) is never emitted, and with nothing safe left the sheet is

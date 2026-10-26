@@ -127,11 +127,13 @@ The admin endpoints need the `eddi-admin` role. REST has no role hierarchy and a
 
 ```bash
 curl -X PUT http://localhost:7070/administration/branding \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"revision": 7, "productName": "Acme Assist", "tagline": "AI teams for Acme",
        "colors": {"primary": "#0f766e", "primaryForeground": "#ffffff"}}'
 
 curl -X PUT http://localhost:7070/administration/branding/assets/logo \
+  -H "Authorization: Bearer $TOKEN" \
   --data-binary @logo.svg
 ```
 

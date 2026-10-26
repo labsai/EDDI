@@ -59,7 +59,7 @@ public final class BrandDelivery {
         String darkPrimary = safe(colors.darkPrimary());
         String darkForeground = safe(colors.darkPrimaryForeground());
         String accent = safe(colors.chatAccent());
-        if (primary == null && foreground == null && accent == null) {
+        if (primary == null && foreground == null && darkPrimary == null && darkForeground == null && accent == null) {
             return "";
         }
         StringBuilder css = new StringBuilder("/* brand revision ").append(brand.revision()).append(" */\n");

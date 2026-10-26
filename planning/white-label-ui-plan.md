@@ -78,7 +78,7 @@ An admin can run EDDI under their own product name, logo, icon and colours. Afte
 
 ## 3. Design in one paragraph
 
-A single **brand document** (product name, short name, tagline, colours, toggles and up to five small image assets) is stored in the database. An admin edits it on **Settings → Branding** in the Manager. `eddi.branding.*` properties seed it while no document exists and, with `eddi.branding.locked=true`, override it permanently. A `BrandingService` validates every value on write and serves the current brand from a short-TTL cache keyed on a revision number. The brand reaches every UI in three ways, all same-origin:
+A single **brand document** (product name, short name, tagline, colours, toggles and up to five small image assets) is stored in the database. An admin edits it on **Settings → Branding** in the Manager. `eddi.branding.*` properties seed it field by field (a field the document leaves unset falls back to its property, then to the EDDI default) and, with `eddi.branding.locked=true`, override it permanently. A `BrandingService` validates every value on write and serves the current brand from a short-TTL cache keyed on a revision number. The brand reaches every UI in three ways, all same-origin:
 
 - **Fixed asset URLs** under `/branding/*`, which serve the uploaded image or fall back to the bundled EDDI one, so the CSP never widens.
 - **A runtime script and a stylesheet**: `/branding/__brand__.js` sets `window.__EDDI_BRAND__`, and `/branding/brand.css` holds validated CSS custom properties.
@@ -111,7 +111,7 @@ The UIs read the product name from one place, i18next interpolates it into every
 }
 ```
 
-- **Fields.** Every field is optional, and `null` means "the EDDI default".
+- **Fields.** Every field is optional. `null` means "unset": the matching `eddi.branding.*` seed property applies, and without one the EDDI default.
   - `chatAccent: null` follows `primary`.
   - The dark colours, when unset, follow the light ones.
   - Asset bytes live in a separate collection or table keyed by slot and hash. The document holds only the hash, which doubles as the ETag.
