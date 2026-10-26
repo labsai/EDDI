@@ -5,6 +5,8 @@
 package ai.labs.eddi.integrations.email.reply;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -725,12 +727,20 @@ public class EmailReplySender {
         }
     }
 
+    /**
+     * The conversation's current pause id, or null when the conversation is gone. A
+     * store that cannot be read is not "no pause": it throws, so the PAUSE row's
+     * lease runs out and it is retried, and a reply rebuild reports failure,
+     * instead of a live pause notice being suppressed for good.
+     */
     private String currentPauseId(String conversationId) {
         try {
             ConversationMemorySnapshot stored = conversationService.getConversationMemorySnapshot(conversationId);
             return stored == null ? null : HitlDecision.pauseIdOf(stored.getHitlPausedAt());
-        } catch (Exception e) {
+        } catch (ResourceNotFoundException e) {
             return null;
+        } catch (ResourceStoreException e) {
+            throw new IllegalStateException("Could not read conversation " + conversationId + " to check its pause", e);
         }
     }
 

@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.email.reply;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -66,12 +67,15 @@ import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.settin
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.snapshot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -406,6 +410,29 @@ class EmailReplySenderTest {
             paused("A refund over 100 EUR needs a person.");
 
             assertTrue(sender.onPauseCommitted(CONVERSATION, "1700000000000", NOW).isPresent(), "the latest mail is found");
+            assertEquals(List.of(SENDER), transport.recipients);
+        }
+
+        @Test
+        @DisplayName("a store that cannot be read on a pause retry is retried later, not taken for a resolved pause")
+        void pauseRetryStoreFailure() throws Exception {
+            ledger.put(inbound(State.TURN_SUBMITTED));
+            paused("A refund over 100 EUR needs a person.");
+            transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+            var row = sender.onPauseCommitted(CONVERSATION, "1700000000000", NOW).orElseThrow();
+            Instant due = ledger.findById(row.id()).orElseThrow().nextAttemptAt();
+            var stored = conversations.getConversationMemorySnapshot(CONVERSATION);
+            doThrow(new IResourceStore.ResourceStoreException("db down")).when(conversations).getConversationMemorySnapshot(CONVERSATION);
+
+            sender.sweep(due.plusSeconds(1));
+
+            assertNotEquals(State.SUPPRESSED, ledger.findById(row.id()).orElseThrow().state(), "a read failure is not a resolved pause");
+            assertTrue(transport.recipients.isEmpty());
+
+            doReturn(stored).when(conversations).getConversationMemorySnapshot(CONVERSATION);
+            sender.sweep(due.plus(EmailReplySender.LEASE).plusSeconds(2));
+
+            assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
             assertEquals(List.of(SENDER), transport.recipients);
         }
 
