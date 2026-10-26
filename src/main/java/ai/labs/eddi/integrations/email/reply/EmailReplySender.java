@@ -298,7 +298,7 @@ public class EmailReplySender {
     /**
      * The stranded sweep found {@code inbound} submitted past its deadline with its
      * step in {@code snapshot}: makes sure the reply — or, for a paused turn, the
-     * pause notice — exists. Idempotent; never sends twice.
+     * pause notice — exists. Idempotent: never writes a second row.
      *
      * @return whether this call wrote a row
      */

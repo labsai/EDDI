@@ -461,8 +461,10 @@ conversation. A mail for a conversation that is busy or waiting for an approval 
 ### Delivery, retries, limits
 
 Each reply is an outbound `REPLY` row in the [message ledger](#the-message-ledger), keyed by conversation, the step it
-answers and its kind (reply, pause notice, continuation, group synthesis), so it is sent **once** however many
-observers see the turn complete. The first attempt starts as soon as the turn ends; a failure that may be transient is
+answers and its kind (reply, pause notice, continuation, group synthesis), so there is **one** reply however many
+observers see the turn complete. The ledger deduplicates rows, not deliveries: a node that dies after the relay
+accepted a reply but before the row was marked `SENT` leaves a claim whose lease runs out, and the retry sends the
+reply again, under the same Message-ID. The first attempt starts as soon as the turn ends; a failure that may be transient is
 retried with backoff until `eddi.email.outbound.max-attempts`; a permanent refusal (5xx) or the last attempt ends the
 row `FAILED`, and the owners get the once-a-day `reply_failed` notice. The ledger holds no body: a retry re-reads the
 conversation and re-renders the reply under the Message-ID the row was given. A conversation over
@@ -501,7 +503,7 @@ When the turn of a mail pauses for approval ([hitl.md](hitl.md#email-conversatio
 notice: the agent's output so far, a fixed sentence that a person must approve the next step, and the pause reason
 the agent designer wrote — **never the tool or its arguments**. When the pause is decided, the sender gets the
 continuation after an approval, or a plain notice after a rejection, a cancellation or a timeout; the approver is
-never named. Both go through the ledger like any reply, so a second observer or a node failover sends them once. A
+never named. Both go through the ledger like any reply, so a second observer or a node failover writes no second row (a crash between the relay's acceptance and the row's completion can still deliver one twice, as for any reply). A
 pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn, sends no notice; the mail waits
 in the mailbox until the conversation continues.
 

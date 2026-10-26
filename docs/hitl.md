@@ -663,9 +663,12 @@ continuation push:
   does: after an approval the sender gets the resumed turn's output; after a rejection, a cancellation or a timeout a
   plain notice that the step was not carried out; after a resume that failed, that it could not be completed. Who
   decided is never named — approvers are staff, the correspondent is outside.
-- **Exactly once, any node.** Both are reply rows in the email ledger, keyed by conversation and pause (or by the
+- **One row, any node.** Both are reply rows in the email ledger, keyed by conversation and pause (or by the
   continuation's verdict and text), retried like every reply and rebuilt from the conversation if a node dies; a
-  second observer of the event sends nothing. A pause decided before its notice went out ends `SUPPRESSED`.
+  second observer of the event sends nothing. The ledger deduplicates rows, not deliveries: a node that dies after
+  the relay accepted a notice but before its row was marked `SENT` leaves a row whose lease runs out, and the retry
+  sends it again (same Message-ID, so most mail clients show it once). A pause decided before its notice went out
+  ends `SUPPRESSED`.
 - Mail the sender writes while the conversation is paused waits in the mailbox until the decision, then runs.
 - A pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn ran, sends no notice.
 
