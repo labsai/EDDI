@@ -26,6 +26,7 @@ Three places where a check already ran but its verdict could not repair anything
 ### Verification
 
 New tests: `LlmTaskHitlRevisionTest`, `ConversationHitlRevisionTest` (including a resume after a JSON and a BSON round trip of the paused snapshot), `LifecycleManagerRevisionTest`, `HitlRejectionPolicyConfigTest`, `TaskForceEngineReworkTest`, `ConvergenceVerdictModeTest`, plus Manager tests for the three editors. Nine mutants (revision bound, default policy, note requirement, automated decisions, per-task rework bound, `maxReworks` default, rework turn budget, convergence default mode, boolean-only verdict) are each killed.
+- End-to-end ITs on MongoDB and PostgreSQL (`HitlRevisionIT`, `GroupVerdictIT` and their `postgres/` twins), with WireMock as the model: a rejection with a note revises over the frozen request (the note and the draft reach the model, the candidate and its round count survive the store across both pauses, approval delivers the revision only), `no_note` and `exhausted` skip; VERDICT convergence stops on a JSON `"passed": true` while prose, a string `"true"` or a failing judge run every repeat, and an unknown mode is a 400; TASK_FORCE `maxReworks` sends a failed task back with the verifier's feedback and persists `taskList.reworkCounts`. Not persisting the candidate, dropping the rework feedback and never passing a verdict each fail them.
 
 ### What's next
 
