@@ -87,7 +87,7 @@ function stateI18nKey(state: GroupConversationState): string {
 const BG_TO_BORDER: Record<string, string> = {
   "bg-blue-500": "border-s-blue-500",
   "bg-emerald-500": "border-s-emerald-500",
-  "bg-amber-500": "border-s-amber-500",
+  "bg-ochre-500": "border-s-ochre-500",
   "bg-purple-500": "border-s-purple-500",
   "bg-rose-500": "border-s-rose-500",
   "bg-cyan-500": "border-s-cyan-500",
@@ -358,8 +358,8 @@ function SynthesisEntryCard({
     <div
       className={cn(
         "rounded-xl border border-s-4 p-4",
-        "bg-amber-50 border-amber-300 border-s-amber-500",
-        "dark:bg-amber-500/10 dark:border-amber-700 dark:border-s-amber-500",
+        "bg-brand-50 border-brand-300 border-s-brand-500",
+        "dark:bg-brand-500/10 dark:border-brand-700 dark:border-s-brand-500",
       )}
       style={{
         animation: "br-message-in 250ms ease-out both",
@@ -367,12 +367,12 @@ function SynthesisEntryCard({
       }}
     >
       <div className="flex items-center gap-2 mb-2">
-        <Sparkles className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-        <span className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+        <Sparkles className="h-4 w-4 text-brand-600 dark:text-brand-400" />
+        <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
           {t("Workforce.history.synthesis", "Synthesis")}
         </span>
         {entry.speakerDisplayName && (
-          <span className="text-xs text-amber-600/70 dark:text-amber-400/70">
+          <span className="text-xs text-brand-600/70 dark:text-brand-400/70">
             — {entry.speakerDisplayName}
           </span>
         )}
@@ -401,7 +401,7 @@ function SynthesisEntryCard({
           </p>
         )}
         {isCollapsible && !isExpanded && (
-          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-amber-50 dark:from-amber-500/10 to-transparent pointer-events-none" />
+          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-brand-50 dark:from-brand-500/10 to-transparent pointer-events-none" />
         )}
       </div>
       {isCollapsible && (
@@ -513,14 +513,14 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
   return (
     <div
       className={cn(
-        "rounded-xl border-2 border-amber-400/50 p-5 mt-4",
-        "bg-gradient-to-b from-amber-50 to-amber-100/50",
-        "dark:from-amber-500/10 dark:to-amber-500/5 dark:border-amber-500/30",
+        "rounded-xl border-2 border-brand-400/50 p-5 mt-4",
+        "bg-gradient-to-b from-brand-50 to-brand-100/50",
+        "dark:from-brand-500/10 dark:to-brand-500/5 dark:border-brand-500/30",
       )}
     >
       <div className="flex items-center gap-2 mb-3">
-        <Sparkles className="h-5 w-5 text-amber-600 dark:text-amber-400" />
-        <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200">
+        <Sparkles className="h-5 w-5 text-brand-600 dark:text-brand-400" />
+        <h3 className="text-sm font-bold text-brand-800 dark:text-brand-200">
           {t("Workforce.history.finalAnswer", "Final Synthesized Answer")}
         </h3>
       </div>
@@ -541,7 +541,7 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
           )}
         </div>
         {isCollapsible && !isExpanded && (
-          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-amber-100/50 dark:from-amber-500/5 to-transparent pointer-events-none" />
+          <div className="absolute bottom-0 inset-x-0 h-10 bg-gradient-to-t from-brand-100/50 dark:from-brand-500/5 to-transparent pointer-events-none" />
         )}
       </div>
       {isCollapsible && (

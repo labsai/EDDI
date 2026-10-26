@@ -19,7 +19,7 @@ export function TaskToolApprovalsSection({ task, onChange, readOnly }: TaskSecti
     <EditorSection
       label={t("llmEditor.toolApprovals", "Tool Approval Gating (per-task)")}
       icon={Wrench}
-      accent="text-amber-500"
+      accent="text-warn-500"
       defaultOpen={enabled}
     >
       <div className="space-y-3" data-testid="task-tool-approvals-section">

@@ -377,7 +377,7 @@ export function GroupAdvancedEditor({
                   />
                 </div>
                 {summarizerIncomplete && (
-                  <p className="text-[10px] text-amber-600 dark:text-amber-400" data-testid="adv-window-summarizer-warning">
+                  <p className="text-[10px] text-warn-600 dark:text-warn-400" data-testid="adv-window-summarizer-warning">
                     {t(
                       "groups.contextWindowSummarizerMissing",
                       "Without a summarizer model, overflow silently falls back to the plain truncation marker.",

@@ -121,7 +121,7 @@ function ConversationStateBadge({
 }) {
   const colors: Record<string, string> = {
     READY: "bg-emerald-500/15 text-emerald-600",
-    IN_PROGRESS: "bg-amber-500/15 text-amber-600",
+    IN_PROGRESS: "bg-warn-500/15 text-warn-600",
     ENDED: "bg-muted text-muted-foreground",
     ERROR: "bg-destructive/15 text-destructive",
   };

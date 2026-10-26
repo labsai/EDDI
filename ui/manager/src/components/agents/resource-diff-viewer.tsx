@@ -178,7 +178,7 @@ export function ResourceDiffViewer({
       </div>
       {diff.rawComparison && showRawComparisonNotice && (
         <p
-          className="flex items-start gap-1.5 border-b bg-amber-500/10 px-3 py-1.5 text-[10px] font-sans text-amber-700 dark:text-amber-400"
+          className="flex items-start gap-1.5 border-b bg-warn-500/10 px-3 py-1.5 text-[10px] font-sans text-warn-700 dark:text-warn-400"
           data-testid="diff-raw-comparison"
         >
           <AlertTriangle className="mt-px h-3 w-3 shrink-0" aria-hidden="true" />

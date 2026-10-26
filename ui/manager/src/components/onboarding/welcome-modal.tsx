@@ -36,7 +36,7 @@ const CAPABILITIES = [
     icon: BarChart3,
     titleKey: "onboarding.welcome.monitorOperate",
     descKey: "onboarding.welcome.monitorOperateDesc",
-    gradient: "from-amber-500 to-orange-600",
+    gradient: "from-ochre-500 to-orange-600",
   },
 ];
 

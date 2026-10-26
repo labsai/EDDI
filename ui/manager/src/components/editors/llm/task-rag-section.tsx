@@ -211,10 +211,10 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
 
         {/* ── Legacy (backward compat, collapsed) ── */}
         {task.retrievalAugmentor && (
-          <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+          <div className="rounded-md border border-warn-500/30 bg-warn-500/5 p-3 space-y-2">
             <div className="flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
-              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5 text-warn-500" />
+              <span className="text-xs font-semibold text-warn-600 dark:text-warn-400">
                 {t("llmEditor.legacyRag", "Legacy RAG (deprecated)")}
               </span>
             </div>
@@ -239,7 +239,7 @@ export function TaskRagSection({ task, onChange, readOnly }: TaskSectionProps) {
               <button
                 type="button"
                 onClick={() => onChange({ ...task, retrievalAugmentor: undefined })}
-                className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                className="inline-flex items-center gap-1 rounded px-2 py-1 text-[10px] text-warn-600 dark:text-warn-400 hover:bg-warn-500/10 transition-colors"
               >
                 <Trash2 className="h-3 w-3" />
                 {t("llmEditor.removeLegacyRag", "Remove Legacy Config")}

@@ -120,7 +120,7 @@ describe("PipelineRailroad", () => {
     const stage0Icon = screen.getByTestId("stage-0").querySelector(".h-9")!;
 
     // Stage 1 was running, then failed → error: no longer amber/running
-    expect(stage1Icon.className).not.toContain("bg-amber-500/10");
+    expect(stage1Icon.className).not.toContain("bg-warn-500/10");
     expect(stage1Icon.className).not.toContain("animate-pulse");
     // The error did NOT land on the payload's index (0) — stage 0 stays idle
     expect(stage0Icon.className).toContain("bg-muted/50");

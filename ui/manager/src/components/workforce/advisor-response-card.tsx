@@ -303,7 +303,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 text-muted-foreground hover:text-amber-500 dark:hover:text-amber-400"
+                className="h-6 w-6 text-muted-foreground hover:text-brand-500 dark:hover:text-brand-400"
                 onClick={handleTogglePin}
                 aria-label={
                   pinned
@@ -314,7 +314,7 @@ const AdvisorResponseCard = memo(function AdvisorResponseCard({
                 <Star
                   className={cn(
                     "h-3 w-3",
-                    pinned && "fill-amber-400 text-amber-400",
+                    pinned && "fill-brand-400 text-brand-400",
                   )}
                 />
               </Button>

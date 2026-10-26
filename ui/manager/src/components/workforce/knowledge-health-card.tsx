@@ -25,9 +25,9 @@ const STATUS_CONFIG: Record<
     icon: CheckCircle2,
   },
   moderate: {
-    badgeClass: "bg-amber-500/10 text-amber-500 border-amber-500/20",
-    barColor: "bg-amber-500",
-    bannerClass: "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400",
+    badgeClass: "bg-warn-500/10 text-warn-500 border-warn-500/20",
+    barColor: "bg-warn-500",
+    bannerClass: "bg-warn-500/10 border-warn-500/20 text-warn-600 dark:text-warn-400",
     icon: AlertTriangle,
   },
   "at-risk": {

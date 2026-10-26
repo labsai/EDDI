@@ -48,7 +48,7 @@ interface GroupConfigPanelProps {
 
 /** Style-specific accent colors for the config panel */
 const PANEL_STYLE_COLORS: Record<DiscussionStyle, { bg: string; border: string; text: string }> = {
-  ROUND_TABLE: { bg: "bg-amber-500/10", border: "border-amber-500/30", text: "text-amber-600 dark:text-amber-400" },
+  ROUND_TABLE: { bg: "bg-ochre-500/10", border: "border-ochre-500/30", text: "text-ochre-600 dark:text-ochre-400" },
   PEER_REVIEW: { bg: "bg-teal-500/10", border: "border-teal-500/30", text: "text-teal-600 dark:text-teal-400" },
   DEVIL_ADVOCATE: { bg: "bg-rose-500/10", border: "border-rose-500/30", text: "text-rose-600 dark:text-rose-400" },
   DELPHI: { bg: "bg-violet-500/10", border: "border-violet-500/30", text: "text-violet-600 dark:text-violet-400" },
@@ -409,10 +409,10 @@ export function GroupConfigPanel({
           written — the engine substitutes the first member by speaking order. */}
       {moderatorlessPhases.length > 0 && (
         <div
-          className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5"
+          className="flex items-start gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-2.5"
           data-testid="group-moderatorless-warning"
         >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn-500" />
           <p className="text-[10px] leading-relaxed text-muted-foreground">
             {t(
               "groups.moderatorlessWarning",
@@ -450,10 +450,10 @@ export function GroupConfigPanel({
       {roleGaps.map((gap) => (
         <div
           key={gap.role}
-          className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5"
+          className="flex items-start gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-2.5"
           data-testid="group-role-coverage-warning"
         >
-          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warn-500" />
           <p className="text-[10px] leading-relaxed text-muted-foreground">
             {t(
               "groups.roleCoverageWarning",
@@ -493,7 +493,7 @@ export function GroupConfigPanel({
               onDone={() => setEditingHitl(false)}
             />
           ) : hasHitl ? (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1">
+            <div className="rounded-lg border border-warn-500/30 bg-warn-500/5 p-2.5 space-y-1">
               {approvalPhaseNames.length > 0 && (
                 <InfoRow
                   label={t("groups.hitlApprovalPoints", "Approval at")}

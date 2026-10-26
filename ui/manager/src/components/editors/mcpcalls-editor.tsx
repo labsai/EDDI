@@ -683,7 +683,7 @@ function McpCallEditor({
             <ChevronRight className="h-4 w-4" />
           )}
         </button>
-        <Zap className="h-4 w-4 text-amber-500" />
+        <Zap className="h-4 w-4 text-ochre-500" />
         <input
           type="text"
           value={call.name ?? ""}
@@ -898,7 +898,7 @@ function McpCallEditor({
                 className="h-3.5 w-3.5 rounded border-input accent-primary"
                 data-testid="mcp-continue-on-error"
               />
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+              <AlertTriangle className="h-3.5 w-3.5 text-warn-500" />
               {t("mcpcallsEditor.continueOnError", "Continue on Error")}
             </label>
             {call.continueOnError && (

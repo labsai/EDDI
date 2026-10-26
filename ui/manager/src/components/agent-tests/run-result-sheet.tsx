@@ -30,12 +30,12 @@ function FailureRow({ failure }: { failure: ExpectationFailure }) {
   const unmocked = failure.expectation === "unmockedTool";
   return (
     <div
-      className={`rounded-md border p-2 ${unmocked ? "border-amber-500/50 bg-amber-500/10" : "border-destructive/30 bg-destructive/5"}`}
+      className={`rounded-md border p-2 ${unmocked ? "border-warn-500/50 bg-warn-500/10" : "border-destructive/30 bg-destructive/5"}`}
       data-testid="expectation-failure"
       data-failure={failure.expectation}
     >
       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold text-foreground">
-        {unmocked && <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />}
+        {unmocked && <AlertTriangle className="h-3.5 w-3.5 text-warn-600" aria-hidden="true" />}
         <code className="rounded bg-background/70 px-1">{failure.expectation}</code>
         {unmocked && (
           <span className="font-normal text-muted-foreground">
@@ -134,7 +134,7 @@ function TurnRow({ turn, unmocked }: { turn: TurnResult; unmocked: string[] }) {
                       key={`${c}-${i}`}
                       className={
                         isUnmocked
-                          ? "inline-flex items-center gap-1 rounded bg-amber-500/20 px-1 font-semibold text-amber-800 ring-1 ring-amber-500/50 dark:text-amber-300"
+                          ? "inline-flex items-center gap-1 rounded bg-warn-500/20 px-1 font-semibold text-warn-800 ring-1 ring-warn-500/50 dark:text-warn-300"
                           : "rounded bg-secondary px-1"
                       }
                       data-unmocked={isUnmocked || undefined}
@@ -185,13 +185,13 @@ function AttemptBlock({ attempt, showHeader }: { attempt: AttemptResult; showHea
       )}
       {unmocked.length > 0 && (
         <p
-          className="flex flex-wrap items-center gap-1.5 rounded-md border border-amber-500/50 bg-amber-500/10 p-2 text-xs text-foreground"
+          className="flex flex-wrap items-center gap-1.5 rounded-md border border-warn-500/50 bg-warn-500/10 p-2 text-xs text-foreground"
           data-testid="attempt-unmocked"
         >
-          <AlertTriangle className="h-3.5 w-3.5 text-amber-600" aria-hidden="true" />
+          <AlertTriangle className="h-3.5 w-3.5 text-warn-600" aria-hidden="true" />
           {t("agentTests.result.unmockedCalls", "Tool calls with no mock (not executed):")}
           {unmocked.map((u, i) => (
-            <code key={`${u}-${i}`} className="rounded bg-amber-500/20 px-1 font-semibold">
+            <code key={`${u}-${i}`} className="rounded bg-warn-500/20 px-1 font-semibold">
               {u}
             </code>
           ))}

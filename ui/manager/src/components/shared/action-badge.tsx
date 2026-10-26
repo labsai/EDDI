@@ -32,7 +32,7 @@ export function ActionBadge({ action }: { action: string }) {
       );
     case "REMOVE":
       return (
-        <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-500">
+        <span className="inline-flex items-center gap-1 text-xs font-medium text-warn-500">
           <Minus className="h-3 w-3" /> {t("sync.actionRemove", "Remove")}
         </span>
       );

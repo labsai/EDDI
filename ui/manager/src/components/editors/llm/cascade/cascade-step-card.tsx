@@ -206,7 +206,7 @@ export function CascadeStepCard({
         <label className="mb-0.5 block text-[10px] text-muted-foreground">
           {t("llmEditor.cascadeStepApiKey", "API Key")}
           {isCrossProvider && (
-            <span className="ms-1 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase text-amber-600 dark:text-amber-400">
+            <span className="ms-1 rounded bg-warn-500/15 px-1 py-0.5 text-[9px] font-semibold uppercase text-warn-600 dark:text-warn-400">
               {t("llmEditor.cascadeCrossProvider", "cross-provider")}
             </span>
           )}

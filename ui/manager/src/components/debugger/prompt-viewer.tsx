@@ -259,7 +259,7 @@ const ROLE_CONFIG = {
   system: { labelKey: "promptViewer.roleSystem", fallback: "SYSTEM", borderClass: "border-primary", textClass: "text-primary" },
   user: { labelKey: "promptViewer.roleUser", fallback: "USER", borderClass: "border-blue-500", textClass: "text-blue-500" },
   assistant: { labelKey: "promptViewer.roleAssistant", fallback: "ASSISTANT", borderClass: "border-emerald-500", textClass: "text-emerald-500" },
-  tool: { labelKey: "promptViewer.roleTool", fallback: "TOOL", borderClass: "border-amber-500", textClass: "text-amber-500" },
+  tool: { labelKey: "promptViewer.roleTool", fallback: "TOOL", borderClass: "border-ochre-500", textClass: "text-ochre-500" },
 } as const;
 
 function MessageCard({ role, content }: { role: string; content: string }) {
@@ -339,7 +339,7 @@ function ToolCallsSection({
 }) {
   const { t } = useTranslation();
   return (
-    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1">
+    <div className="rounded-lg border border-ochre-500/30 bg-ochre-500/5 p-2.5 space-y-1">
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80">
         <Wrench className="h-3.5 w-3.5" />
         {t("promptViewer.toolCalls", "Tool Calls")} ({toolCalls.length})

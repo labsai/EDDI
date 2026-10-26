@@ -262,7 +262,7 @@ export function ToolApprovalsEditor({
 
       {showDemotionWarn && (
         <p
-          className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-[10px] text-amber-600"
+          className="flex items-start gap-1.5 rounded-md border border-warn-500/30 bg-warn-500/5 px-2 py-1.5 text-[10px] text-warn-600"
           data-testid={`${idPrefix}-demotion-warning`}
         >
           <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" aria-hidden="true" />

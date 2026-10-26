@@ -123,7 +123,7 @@ export function RetrievalTester({
       </form>
 
       {hasUnsavedChanges && (
-        <p className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+        <p className="flex items-start gap-1.5 text-[11px] text-warn-700 dark:text-warn-400">
           <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
           {t(
             "ragEditor.retrieval.unsaved",

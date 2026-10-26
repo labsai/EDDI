@@ -17,15 +17,15 @@ export const STYLE_THEME: Record<DiscussionStyle, {
   progressBorder: string;
 }> = {
   ROUND_TABLE: {
-    accent: "text-amber-500",
-    dotColor: "bg-amber-500",
-    phaseAccent: "border-amber-500/30 bg-amber-500/5",
-    questionBg: "bg-amber-500/5 border-b-amber-500/20",
-    flowBg: "bg-amber-500/10",
-    flowText: "text-amber-600 dark:text-amber-400",
-    progressBg: "bg-amber-500/5",
-    progressText: "text-amber-600 dark:text-amber-400",
-    progressBorder: "border-amber-500/20",
+    accent: "text-ochre-500",
+    dotColor: "bg-ochre-500",
+    phaseAccent: "border-ochre-500/30 bg-ochre-500/5",
+    questionBg: "bg-ochre-500/5 border-b-ochre-500/20",
+    flowBg: "bg-ochre-500/10",
+    flowText: "text-ochre-600 dark:text-ochre-400",
+    progressBg: "bg-ochre-500/5",
+    progressText: "text-ochre-600 dark:text-ochre-400",
+    progressBorder: "border-ochre-500/20",
   },
   PEER_REVIEW: {
     accent: "text-teal-500",

@@ -386,8 +386,8 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                   </div>
                 )}
                 {style === "DEVIL_ADVOCATE" && (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2 mt-2">
-                    <Info className="h-3.5 w-3.5 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="flex items-start gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-2 mt-2">
+                    <Info className="h-3.5 w-3.5 text-warn-500 shrink-0 mt-0.5" />
                     <p className="text-[11px] text-muted-foreground">
                       {t("groupWizard.hintDevilAdvocate", "Assign the role DEVIL_ADVOCATE to at least one member. They will challenge the group's consensus.")}
                     </p>
@@ -640,7 +640,7 @@ export function CreateGroupDialog({ open, onClose, template: initialTemplate }: 
                           onChange={(e) => updateMember(idx, { agentId: e.target.value })}
                           className={cn(
                             "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
-                            !member.agentId ? "border-amber-400/50" : "border-input"
+                            !member.agentId ? "border-warn-400/50" : "border-input"
                           )}
                         >
                           <option value="">{t("groups.selectAgent", "Select agent…")}</option>
@@ -796,10 +796,10 @@ function ReviewStep({
       <GroupSaveProblems problems={saveProblems} testId="dialog-save-problems" />
       {/* Warning banner for unassigned members */}
       {unassignedCount > 0 && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5">
-          <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+        <div className="flex items-start gap-2.5 rounded-lg border border-warn-400/40 bg-warn-400/10 px-3 py-2.5">
+          <AlertTriangle className="h-4 w-4 text-warn-500 shrink-0 mt-0.5" />
           <p className="text-xs">
-            <span className="font-semibold text-amber-500">
+            <span className="font-semibold text-warn-500">
               {t("groups.reviewUnassignedWarning", {
                 defaultValue: "{{count}} member unassigned",
                 defaultValue_other: "{{count}} members unassigned",
@@ -816,12 +816,12 @@ function ReviewStep({
       {/* Role coverage — a phase addressed to a role nobody carries */}
       {roleGaps.length > 0 && (
         <div
-          className="flex flex-col gap-1.5 rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2.5"
+          className="flex flex-col gap-1.5 rounded-lg border border-warn-400/40 bg-warn-400/10 px-3 py-2.5"
           data-testid="dialog-role-coverage-warning"
         >
           {roleGaps.map((gap) => (
             <div key={gap.role} className="flex items-start gap-2.5">
-              <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+              <AlertTriangle className="h-4 w-4 text-warn-500 shrink-0 mt-0.5" />
               <p className="text-xs text-muted-foreground">
                 {t(
                   "groups.roleCoverageWarning",
@@ -893,7 +893,7 @@ function ReviewStep({
                 className={cn(
                   "flex items-center gap-2 px-3 py-2 text-xs",
                   i > 0 && "border-t border-border",
-                  isUnassigned && "bg-amber-400/5"
+                  isUnassigned && "bg-warn-400/5"
                 )}
               >
                 {/* Speaking order */}
@@ -920,7 +920,7 @@ function ReviewStep({
                 {/* Agent assignment status */}
                 <div className="shrink-0 flex items-center gap-1">
                   {isUnassigned ? (
-                    <span className="flex items-center gap-1 text-amber-500 font-medium">
+                    <span className="flex items-center gap-1 text-warn-500 font-medium">
                       <AlertTriangle className="h-3 w-3" />
                       {t("groups.reviewUnassigned", "Unassigned")}
                     </span>
@@ -1005,8 +1005,8 @@ function GroupPickerSelect({
 
   if (!hasGroups) {
     return (
-      <div className="rounded-md border border-dashed border-amber-400/50 bg-amber-400/5 px-2 py-2 text-center">
-        <p className="text-[10px] font-medium text-amber-600 dark:text-amber-400">
+      <div className="rounded-md border border-dashed border-warn-400/50 bg-warn-400/5 px-2 py-2 text-center">
+        <p className="text-[10px] font-medium text-warn-600 dark:text-warn-400">
           {t("groupWizard.noGroupsYet", "No groups available")}
         </p>
         <p className="text-[9px] text-muted-foreground mt-0.5">
@@ -1022,7 +1022,7 @@ function GroupPickerSelect({
       onChange={(e) => onChange(e.target.value)}
       className={cn(
         "w-full rounded-md border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring",
-        !value ? "border-amber-400/50" : "border-input"
+        !value ? "border-warn-400/50" : "border-input"
       )}
     >
       <option value="">{t("groupWizard.selectGroup", "Select existing group…")}</option>

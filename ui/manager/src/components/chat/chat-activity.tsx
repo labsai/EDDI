@@ -489,7 +489,7 @@ function TaskRow({ task }: { task: TaskSummary }) {
           <button
             type="button"
             onClick={() => setToolsExpanded(!toolsExpanded)}
-            className="inline-flex items-center gap-0.5 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-colors"
+            className="inline-flex items-center gap-0.5 rounded-full bg-ochre-500/10 px-1.5 py-0.5 text-[9px] font-medium text-ochre-600 dark:text-ochre-400 hover:bg-ochre-500/20 transition-colors"
           >
             <Wrench className="h-2.5 w-2.5" />
             {toolRows.length}
@@ -576,7 +576,7 @@ function ToolCallRow({
         className="flex w-full items-center gap-1.5 rounded px-1.5 py-0.5 text-[10px] text-start hover:bg-muted/50 transition-colors"
         data-testid="tool-call-row"
       >
-        <Wrench className="h-2.5 w-2.5 shrink-0 text-amber-500" />
+        <Wrench className="h-2.5 w-2.5 shrink-0 text-ochre-500" />
         <span className="font-medium text-foreground">
           {call?.tool ?? error?.tool ?? "—"}
         </span>
