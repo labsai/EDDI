@@ -61,6 +61,9 @@ class ModelOutputParserTest {
                 Arguments.of("{\"a\":\"it\\'s\",\"b\":[\"don\\'t\"]}", Map.of("a", "it's", "b", List.of("don't")), true),
                 Arguments.of("```json\n{\"a\":\"it\\'s\"}\n```", Map.of("a", "it's"), true),
                 Arguments.of("Here: {\"a\":\"it\\'s\"} done", Map.of("a", "it's"), true),
+                // an unmatched quote in the prose before the object does not shift the string
+                // tracking
+                Arguments.of("Intro \"note: {\"a\":\"it\\'s\"}", Map.of("a", "it's"), true),
                 // an escaped backslash followed by a quote is valid JSON and stays as it is
                 Arguments.of("{\"a\":\"x\\\\'y\"}", Map.of("a", "x\\'y"), false),
                 // an escaped double quote does not end the string, so the \' after it is still

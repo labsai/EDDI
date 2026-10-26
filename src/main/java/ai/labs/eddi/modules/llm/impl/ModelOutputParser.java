@@ -156,11 +156,12 @@ public final class ModelOutputParser {
             return new JsonOutcome(Kind.EMPTY, raw, false, null, raw);
         }
 
-        String unfenced = dropApostropheEscapes(stripFence(trimmed));
+        String unfenced = stripFence(trimmed);
+        String whole = dropApostropheEscapes(unfenced);
         // A stripped fence or a dropped \' escape: either way the reply was repaired.
-        boolean normalised = !unfenced.equals(trimmed);
+        boolean normalised = !whole.equals(trimmed);
 
-        Object parsed = tryParseWhole(unfenced);
+        Object parsed = tryParseWhole(whole);
         if (parsed != null) {
             return new JsonOutcome(Kind.VALID, parsed, normalised, null, raw);
         }
@@ -179,8 +180,10 @@ public final class ModelOutputParser {
                 break;
             }
             String candidate = unfenced.substring(open, scan.end() + 1);
-            // The whole text was already tried above; do not parse it a second time.
-            Object value = candidate.equals(unfenced) ? null : tryParse(candidate);
+            // The whole text was already tried above; do not parse it a second time. A
+            // candidate is repaired on its own: a stray quote in the prose before it must
+            // not decide what counts as "inside a string" within the object.
+            Object value = candidate.equals(unfenced) ? null : tryParse(dropApostropheEscapes(candidate));
             // An extracted fragment (there was text around it) is only trusted when it is
             // a non-empty object: prose such as "Pick option [1] or [2]." or "The empty
             // set {} is..." must stay the user's answer, not become a List or empty Map.

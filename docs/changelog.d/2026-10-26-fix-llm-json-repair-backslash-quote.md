@@ -9,6 +9,7 @@ Gemini sometimes escapes an apostrophe inside a JSON string the way JavaScript a
 [`ModelOutputParser`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ModelOutputParser.java) now drops the backslash of `\'` inside JSON strings, after the fence strip and before parsing. This is the one exception to its "invalid JSON is never fixed" rule, and the class Javadoc says so. It is safe because `\'` is never valid JSON and can only mean `'`.
 
 - The pass is string-aware and linear. It copies every other escape as the pair it is, so `\\'` (an escaped backslash, then a quote) stays valid JSON and `\"` does not end the string. Outside strings nothing changes.
+- The whole reply is repaired once; when the object has to be extracted from prose, each candidate is repaired on its own, so an unmatched `"` in the text before the object cannot shift what counts as inside a string.
 - A reply without `\'` is not copied.
 - A repaired reply reports `repaired`, like a stripped fence.
 - A reply that is still invalid keeps its raw text, and a second, real syntax error is not hidden.
@@ -16,8 +17,10 @@ Gemini sometimes escapes an apostrophe inside a JSON string the way JavaScript a
 ### Tests
 
 `ModelOutputParserTest`:
-- accepted: the observed case, several `\'` in one object and inside an array, fenced, and with prose around it;
+- accepted: the observed case, several `\'` in one object and inside an array, fenced, with prose around it, and with an unmatched quote in the prose before it;
 - left alone: `\\'` stays valid and unrepaired, and an escaped double quote does not end the string;
 - still rejected: prose containing `\'` is `not JSON` with the raw text kept, and `\'` plus a trailing comma is still `invalid JSON syntax`.
 
-Mutation check: with the repair switched off, exactly the five acceptance cases that contain `\'` fail; the `\\'` case passes either way, as it should.
+Mutation checks:
+- With the repair switched off entirely, the acceptance cases that contain `\'` fail, and the `\\'` case passes either way, as it should.
+- With only the per-candidate repair removed, the two extraction cases fail: prose around the object, and the unmatched quote before it.
