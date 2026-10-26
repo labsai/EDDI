@@ -401,7 +401,9 @@ class ToolLoopRunner {
             // spent so far — its tokens at the task's prices and its tool cost. Without
             // it one tool-heavy turn could run far past the ceiling, since the task-level
             // gate only sees a loop's cost once the whole loop has finished.
-            OptionalDouble costCeiling = memory.getConversationCostCeilingUsd();
+            // A scheduled fire's maxCostPerFire tightens it
+            // (LlmSpendGate.effectiveCeiling).
+            OptionalDouble costCeiling = LlmSpendGate.effectiveCeiling(memory);
             boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
             double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
             double toolCostAtLoopStart = ceilingApplies ? conversationToolCost(conversationId) : 0.0;

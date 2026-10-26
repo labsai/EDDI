@@ -6,8 +6,11 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -136,6 +139,24 @@ class ToolLoopRunnerCostCeilingTest {
         run(memory(0.025, 0.01, 0.01));
 
         assertEquals(1, modelCalls);
+    }
+
+    @Test
+    @DisplayName("a scheduled fire's maxCostPerFire stops the loop like the agent's own ceiling")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void maxCostPerFireStopsTheLoop() throws Exception {
+        // No agent ceiling; $0.05 spent by earlier steps; the fire may spend $0.025.
+        IConversationMemory memory = memory(null, 0.05);
+        IWritableConversationStep step = mock(IWritableConversationStep.class);
+        IData<Object> allowance = mock(IData.class);
+        when(allowance.getResult()).thenReturn(new Context(Context.ContextType.object, 0.025));
+        when(step.getData("context:" + ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE)).thenReturn((IData) allowance);
+        when(memory.getCurrentStep()).thenReturn(step);
+
+        var result = run(memory);
+
+        assertEquals(3, modelCalls);
+        assertEquals(ToolLoopRunner.costCeilingReachedMessage(), result.response());
     }
 
     @Test

@@ -1461,6 +1461,29 @@ class ScheduleFireExecutorTest {
         return s;
     }
 
+    /**
+     * maxCostPerFire was accepted, stored and shown, but never reached the turn, so
+     * it capped nothing. The fire now hands its turn the allowance, which the LLM
+     * spend gate and the tool loop enforce (see LlmSpendGateTest).
+     */
+    @Test
+    void fire_maxCostPerFire_reachesTheTurn() throws Exception {
+        var schedule = makeCronSchedule("sched-cap", "new");
+        schedule.setMaxCostPerFire(0.5);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-cap", null));
+        sayCompletes("conv-cap");
+
+        executor.fire(schedule, "instance-1", 1);
+
+        ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), any(), eq("conv-cap"), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(),
+                any());
+        var allowance = input.getValue().getContext().get(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+        assertNotNull(allowance, "the per-fire ceiling must travel with the scheduled input");
+        assertEquals(0.5, ((Number) allowance.getValue()).doubleValue(), 1e-9);
+    }
+
     private static void setField(Object target, String fieldName, Object value) {
         try {
             var field = target.getClass().getDeclaredField(fieldName);
