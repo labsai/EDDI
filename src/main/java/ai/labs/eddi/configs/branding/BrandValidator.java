@@ -197,6 +197,17 @@ public final class BrandValidator {
         if (color == null || !isSafeColor(color)) {
             return Optional.empty();
         }
+        // isSafeColor admits only hex digits and plain decimals, so the parses
+        // below cannot fail today; the catch keeps a future grammar change from
+        // turning a contrast check into a 500.
+        try {
+            return parseValidatedSrgb(color);
+        } catch (NumberFormatException e) {
+            return Optional.empty();
+        }
+    }
+
+    private static Optional<double[]> parseValidatedSrgb(String color) {
         if (color.startsWith("#")) {
             String hex = color.substring(1);
             if (hex.length() == 3) {
