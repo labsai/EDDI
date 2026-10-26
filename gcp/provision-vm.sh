@@ -680,6 +680,8 @@ server {
         proxy_set_header   X-Forwarded-Proto https;
         proxy_set_header   X-Forwarded-Host \$host;
         proxy_set_header   X-Forwarded-Port 443;
+        # No path prefix here; an empty value makes nginx drop the client's.
+        proxy_set_header   X-Forwarded-Prefix "";
         proxy_buffer_size  128k;
         proxy_buffers      4 256k;
     }

@@ -684,7 +684,7 @@ The [Quick Start](#quick-start) configurations above assume an instance with aut
 
 #### The client signs itself in (preferred)
 
-EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. The shipped realm removes that limit: `eddi-mcp` issues **offline tokens**, which outlive the SSO session and Keycloak restarts and expire only after **30 days without use** (`offlineSessionIdleTimeout`; set *Offline Session Max Limited* on the realm for a hard cap as well). An MCP client then signs in once and keeps refreshing. Keycloak issues an offline token only when three things hold, and each was verified against Keycloak 26.8.0 with this realm imported: (1) `offline_access` is a **Default** client scope of `eddi-mcp` — not *Optional*, because a client requests exactly the scopes the protected-resource document lists in `scopes_supported`, which is `openid`, so an optional scope is never asked for. Do not add `offline_access` to `quarkus.oidc.resource-metadata.scopes` instead: on a realm whose client lacks the scope, Keycloak fails the whole login with `invalid_scope`. (2) The `offline_access` role is in `eddi-mcp`'s **scope mapping** — the client has `fullScopeAllowed=false`, and without the mapping Keycloak answers *Offline tokens not allowed for the user or client*. (3) The **user** holds the `offline_access` role. Users created later get it from `default-roles-eddi`; the seed users carry explicit roles, so it is listed on each of them. The Manager's `eddi-frontend` client deliberately does not get offline tokens — they would sit in browser storage. An offline token is a 30-day credential on the client's disk: revoke one under *Users* → the user → *Sessions* (or *Consents*). To opt out, remove `offline_access` from `eddi-mcp`'s default client scopes; MCP logins then end with the SSO session again, and raising the realm's `ssoSessionIdleTimeout` is the remaining lever.
+EDDI advertises `/mcp` as an **OAuth 2.0 protected resource** ([RFC 9728](https://datatracker.ietf.org/doc/html/rfc9728)), which is what lets an MCP client obtain its own token and keep refreshing it — no shared credential, nothing for an operator to rotate. What ends that chain is not the 5-minute access token but the realm's **SSO session idle timeout** (Keycloak's default is 30 minutes): a client idle longer than that runs the browser flow again. The shipped realm removes that limit: `eddi-mcp` issues **offline tokens**, which outlive the SSO session and Keycloak restarts and expire only after **30 days without use** (`offlineSessionIdleTimeout`; set *Offline Session Max Limited* on the realm for a hard cap as well). An MCP client then signs in once and keeps refreshing. Keycloak issues an offline token only when three things hold, and each was verified against Keycloak 26.8.0 with this realm imported: (1) `offline_access` is a **Default** client scope of `eddi-mcp` — not *Optional*, because a client requests exactly the scopes the protected-resource document lists in `scopes_supported`, which is `openid`, so an optional scope is never asked for. Do not add `offline_access` to `quarkus.oidc.resource-metadata.scopes` instead: on a realm whose client lacks the scope, Keycloak fails the whole login with `invalid_scope`. (2) The `offline_access` role is in `eddi-mcp`'s **scope mapping** — the client has `fullScopeAllowed=false`, and without the mapping Keycloak answers *Offline tokens not allowed for the user or client*. (3) The **user** holds the `offline_access` role. Users created later get it from `default-roles-eddi`; the seed users carry explicit roles, so it is listed on each of them. The Manager's `eddi-frontend` client deliberately does not get offline tokens — they would sit in browser storage. An offline token is a 30-day credential on the client's disk: revoke one under *Users* → the user → *Consents* → `eddi-mcp` → *Revoke*. To opt out, remove `offline_access` from `eddi-mcp`'s default client scopes; MCP logins then end with the SSO session again, and raising the realm's `ssoSessionIdleTimeout` is the remaining lever.
 
 A client that supports the MCP authorization flow needs only the URL:
 
@@ -727,14 +727,17 @@ Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified ag
 > above all, because **without it every token authenticates and every tool answers "requires
 > role"**.
 >
-> For **long-lived MCP logins** on an existing realm, add the offline-token wiring too — the
-> import will not: on `eddi-mcp`, *Client scopes* → *Add client scope* → `offline_access` as
-> **Default**, and *Client scopes* → `eddi-mcp-dedicated` → *Scope* → assign the realm role
-> `offline_access`; then make sure every user who connects over MCP holds the `offline_access`
-> realm role (*Realm roles* → `default-roles-eddi` → *Add associated role* covers users
-> created from now on; existing users with explicit roles need it assigned directly).
-> Missing any of the three, Keycloak answers *Offline tokens not allowed for the user or
-> client* and the login fails — so do all three before reconnecting.
+> **Optional: long-lived MCP logins on an existing realm.** Without these steps MCP logins
+> still work; they just end with the SSO session. The import will not add them, so in this
+> order: (1) make sure every user who connects over MCP holds the `offline_access` realm
+> role (*Realm roles* → `default-roles-eddi` → *Add associated role* covers users created
+> from now on; existing users with explicit roles need it assigned directly); (2) on
+> `eddi-mcp`, *Client scopes* → `eddi-mcp-dedicated` → *Scope* → assign the realm role
+> `offline_access`; (3) last, *Client scopes* → *Add client scope* → `offline_access` as
+> **Default**. The order matters: the Default scope is what makes Keycloak issue an
+> offline token, and once it is there a user or client without the role is refused with
+> *Offline tokens not allowed for the user or client* — the login fails instead of falling
+> back to an ordinary token.
 
 #### Supplying a token by hand (fallback)
 

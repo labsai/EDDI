@@ -73,9 +73,14 @@ browser step. Fix: `KC_PROXY_HEADERS=xforwarded`.
 
 ### Upgrade note
 
-`--import-realm` does not touch an existing realm. Existing deployments add the
-three pieces by hand (steps in `docs/mcp-server.md`, "Upgrading an existing
-realm") — all three, or the MCP login fails with *Offline tokens not allowed*.
+`--import-realm` does not touch an existing realm. Existing deployments keep
+working with ordinary 30-minute MCP logins; for long-lived ones they add the three
+pieces by hand (steps in `docs/mcp-server.md`, "Upgrading an existing realm"),
+the Default scope **last** — with the scope in place but the role missing from
+the user or the client's scope mapping, Keycloak refuses the login with *Offline
+tokens not allowed* rather than falling back to an ordinary token. Revoke a
+single offline token under *Users* → the user → *Consents*. The nginx Keycloak
+location also clears `X-Forwarded-Prefix` (review finding).
 The `quarkus.oidc.roles.role-claim-path=realm_access/roles` fix for "requires
 role" on every tool is already in the image since 6.6.0; deployments on older
 images should pin it as `QUARKUS_OIDC_ROLES_ROLE_CLAIM_PATH`.
