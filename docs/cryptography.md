@@ -38,6 +38,7 @@ Two attacks follow from that:
 | Agent identity and signed inter-agent envelopes | **Ed25519** | `configs/agents/AgentSigningService`, `configs/agents/crypto/SignedEnvelope`, `engine/internal/groups/GroupSigningGuard` | ❌ Classical signature |
 | Agent signature on audit entries | **Ed25519**, over the entry's HMAC | `engine/audit/AuditLedgerService` (via `AgentSigningService`) | ❌ Classical signature |
 | Slack request verification | `HmacSHA256` (scheme defined by Slack) | `integrations/slack/SlackSignatureVerifier` | ✅ |
+| Inbound mail sender authentication: DKIM signature **verification** only (EDDI never signs mail) | RSA-SHA256 (`Signature` `SHA256withRSA`, keys from `KeyFactory` `RSA`, at least 1024 bits; `rsa-sha1` refused) and **Ed25519** (RFC 8463), body hash `SHA-256` | `engine/mail/DkimVerifier` | ❌ Classical signature, chosen by the sending domain rather than by EDDI |
 | Content hashes, cache keys, idempotency and dedup keys | `SHA-256` | `MessageDigest` call sites across the codebase | ✅ Not used for secrecy |
 | NATS client TLS context | `SSLContext` `TLS` with the JDK's default trust and key managers | `engine/cluster/NatsConnectionManager` | ❌ Classical key exchange, from the JDK (see below) |
 | OIDC / JWT verification | RS256, ES256 and similar, as chosen by the issuer (for example Keycloak) | `quarkus-oidc` configuration | ❌ Classical signature, decided by the identity provider rather than by EDDI |
