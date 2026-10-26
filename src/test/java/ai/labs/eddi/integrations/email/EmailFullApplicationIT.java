@@ -81,13 +81,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestProfile(EmailFullApplicationIT.Profile.class)
 public class EmailFullApplicationIT extends BaseIntegrationIT {
 
+    private static final int HTTP_PORT = 8471;
+
     /** The IT's profile: the integration-test settings plus the two mail seams. */
     public static class Profile extends IntegrationTestProfile {
         @Override
         public Map<String, String> getConfigOverrides() {
             Map<String, String> overrides = new HashMap<>(super.getConfigOverrides());
-            overrides.put("quarkus.http.test-port", "8471");
-            overrides.put("quarkus.http.port", "8471");
+            overrides.put("quarkus.http.test-port", String.valueOf(HTTP_PORT));
+            overrides.put("quarkus.http.port", String.valueOf(HTTP_PORT));
             return overrides;
         }
 
@@ -141,6 +143,15 @@ public class EmailFullApplicationIT extends BaseIntegrationIT {
 
     @AfterAll
     static void stopMailServers() throws Exception {
+        // Delete the channels first: that removes their poll schedules, so none fires
+        // against a stopped GreenMail while the application is still up. RestAssured
+        // is back on its default port outside a test, hence the explicit one.
+        for (String channel : new String[]{triggerId, conversationId}) {
+            if (channel != null) {
+                given().port(HTTP_PORT).delete("/channelstore/channels/" + channel + "?version=1&permanent=true").then()
+                        .statusCode(oneOf(200, 204, 404));
+            }
+        }
         if (greenMail != null) {
             greenMail.stop();
         }
