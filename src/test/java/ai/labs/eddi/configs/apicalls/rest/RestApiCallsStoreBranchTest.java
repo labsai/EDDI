@@ -212,6 +212,22 @@ class RestApiCallsStoreBranchTest {
         }
 
         /**
+         * The check was a prefix match, so a literal credential stapled after (or
+         * around) a reference passed and was copied into every generated call's
+         * Authorization header.
+         */
+        @Test
+        @DisplayName("an authHeaderRef must be exactly one reference — a literal before or after one is refused")
+        void referenceWithLiteralAroundItIsRefused() {
+            for (String value : List.of("${vault:partner-api}sk-live-abcdef", "${vault:a} Bearer sk-live-abcdef", "Bearer ${vault:partner-api}",
+                    "${vault:a}${vault:b}", "${caller:token}x", "${vars:}")) {
+                Response response = restApiCallsStore
+                        .discoverEndpoints(new ApiEndpointDiscoveryRequest("https://example.com/openapi.json", null, value));
+                assertEquals(400, response.getStatus(), value);
+            }
+        }
+
+        /**
          * Security review 2026-10-17, H1 (follow-up to the discover-tools fix): the
          * spec URL and the base URL are the caller's, so resolving authHeaderRef here
          * would send the secret's plaintext wherever the request points. Discovery

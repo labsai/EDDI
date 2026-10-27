@@ -229,8 +229,14 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     /**
      * Values accepted in {@code authHeaderRef} — every one of them a reference the
      * engine resolves at call time, never a credential at rest.
+     * <p>
+     * Exactly one reference, the whole value: {@code ${vault:partner-api}} passes,
+     * {@code ${vault:x}sk-live-…} and {@code sk-live-…${vault:x}} do not. A prefix
+     * check let a literal credential follow the reference and be copied, verbatim,
+     * into every generated call's header — and from there into stored
+     * configuration.
      */
-    private static final List<String> ALLOWED_AUTH_REFERENCE_PREFIXES = List.of("${vault:", "${eddivault:", "${vars:", "${caller:");
+    private static final Pattern AUTH_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|vars|caller):[^${}\\s]+}");
 
     @Override
     public Response discoverEndpoints(ApiEndpointDiscoveryRequest request) {
@@ -240,7 +246,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
 
         String authHeaderRef = trimToNull(request.authHeaderRef());
         if (authHeaderRef != null && !isReference(authHeaderRef)) {
-            return badRequest("authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential. "
+            return badRequest("authHeaderRef must be exactly one ${vault:…}, ${vars:…} or ${caller:…} reference, with nothing before or after "
+                    + "it — not a literal credential. "
                     + "Store the key with PUT /secretstore/secrets/{tenantId}/{keyName} and reference it here.");
         }
 
@@ -345,7 +352,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     }
 
     private static boolean isReference(String value) {
-        return ALLOWED_AUTH_REFERENCE_PREFIXES.stream().anyMatch(value::startsWith);
+        return AUTH_REFERENCE.matcher(value).matches();
     }
 
     private static String trimToNull(String value) {

@@ -179,6 +179,73 @@ class VaultHostAllowlistTest {
         }
     }
 
+    /**
+     * An entry names a host, not a scheme, so {@code http://api.openai.com} matched
+     * {@code api.openai.com} and the key went out unencrypted to the right host.
+     */
+    @Nested
+    @DisplayName("encrypted transport")
+    class EncryptedTransport {
+
+        @Test
+        @DisplayName("plain http or ws to an allowed remote host is refused for a restricted secret, naming the opt-out")
+        void plaintextToAllowedRemoteHostRefused() throws Exception {
+            secretAllowedAt(List.of("api.openai.com"));
+
+            var error = assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://api.openai.com/v1", "LLM provider 'openai'"));
+            assertTrue(error.getMessage().contains(VaultHostAllowlist.ALLOW_PLAINTEXT_PROPERTY), error.getMessage());
+            assertTrue(error.getMessage().contains("api.openai.com:80"), error.getMessage());
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "ws://api.openai.com/realtime", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://api.openai.com/v1", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "wss://api.openai.com/realtime", "x"));
+        }
+
+        @Test
+        @DisplayName("an explicit host:port entry does not admit plaintext either")
+        void explicitPortEntryStillNeedsEncryption() throws Exception {
+            secretAllowedAt(List.of("internal.example:8080"));
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://internal.example:8080/api", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://internal.example:8080/api", "x"));
+        }
+
+        @Test
+        @DisplayName("loopback is exempt: http://localhost never leaves the machine")
+        void loopbackExempt() throws Exception {
+            secretAllowedAt(List.of("localhost", "127.0.0.1", "[::1]"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://localhost:11434/v1", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://127.0.0.1:8080/", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://[::1]:8080/", "x"));
+        }
+
+        @Test
+        @DisplayName("a destination without an http-family scheme is not judged by scheme")
+        void bareHostPortAndOtherSchemesUnaffected() throws Exception {
+            secretAllowedAt(List.of("pg.internal:5432", "cluster0.example.net"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "pg.internal:5432", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "mongodb+srv://cluster0.example.net/db", "x"));
+        }
+
+        @Test
+        @DisplayName("an unrestricted secret is unchanged — the rule follows the operator's restriction")
+        void unrestrictedSecretUnchanged() throws Exception {
+            secretAllowedAt(null);
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://anywhere.example/", "x"));
+        }
+
+        @Test
+        @DisplayName("eddi.vault.allow-plaintext-remote-hosts=true accepts plaintext to an allowed host, and still only an allowed one")
+        void deploymentOptOut() throws Exception {
+            var permissive = new VaultHostAllowlist(provider, true);
+            secretAllowedAt(List.of("api.openai.com"));
+            assertDoesNotThrow(() -> permissive.requireAllowed(List.of(OPENAI_REF), "http://api.openai.com/v1", "x"));
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> permissive.requireAllowed(List.of(OPENAI_REF), "http://attacker.example/v1", "x"));
+        }
+    }
+
     @Test
     @DisplayName("referencesIn collects every distinct reference, in both spellings")
     void referencesIn() {
