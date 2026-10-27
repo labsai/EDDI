@@ -1,7 +1,7 @@
 // Keeps every URL docs.labs.ai has ever served working on the new site.
 //
-// legacy-urls.txt lists them; this turns the list into the "redirects" block of
-// vercel.json (`npm run redirects`), and answers "does this path work on the new
+// legacy-urls.txt lists them; this turns the list into the "redirects" block of the
+// repository-root vercel.json (`npm run redirects`), and answers "does this path work on the new
 // site?" for the tests and for the guard over docs links in the repository.
 //
 // Vercel evaluates redirects in order, before the file system, so the order is:
@@ -248,7 +248,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const e of errors) console.error(`  - ${e}`);
     process.exit(1);
   }
-  const file = path.join(siteDir, 'vercel.json');
+  // At the repository root, not here: Vercel reads vercel.json from the project's Root
+  // Directory, which is the repository root (docs-site/README.md, Deployment, says why).
+  const file = path.join(siteDir, '..', 'vercel.json');
   const config = JSON.parse(fs.readFileSync(file, 'utf8'));
   config.redirects = buildRedirects(resolved, index);
   fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);

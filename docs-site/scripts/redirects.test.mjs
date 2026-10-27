@@ -162,8 +162,21 @@ describe('the real site', () => {
   });
 
   it('has vercel.json redirects generated from the current list (run `npm run redirects`)', () => {
-    const committed = JSON.parse(fs.readFileSync(path.join(siteDir, 'vercel.json'), 'utf8')).redirects;
+    const committed = JSON.parse(fs.readFileSync(path.join(repoRoot, 'vercel.json'), 'utf8')).redirects;
     assert.deepEqual(committed, buildRedirects(resolved, realIndex));
+  });
+
+  // The project's Root Directory is the repository root because it exists on every branch.
+  // With docs-site as the Root Directory, Vercel failed every push to a branch without it —
+  // the orphan `metrics` data branch, every 10-35 minutes — before any ignore step could run.
+  it('builds from the repository root and skips branches that have no docs-site', () => {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'vercel.json'), 'utf8'));
+    assert.equal(config.installCommand, 'cd docs-site && npm ci');
+    assert.equal(config.buildCommand, 'cd docs-site && npm run build');
+    assert.equal(config.outputDirectory, 'docs-site/.generated/dist');
+    assert.match(config.ignoreCommand, /^test ! -d docs-site \|\| git diff --quiet HEAD\^ HEAD -- /);
+    for (const p of ['docs-site', 'docs', 'PRIVACY.md', 'vercel.json']) assert.ok(config.ignoreCommand.split(' ').includes(p), p);
+    assert.equal(fs.existsSync(path.join(siteDir, 'vercel.json')), false, 'docs-site/vercel.json would be ignored by Vercel');
   });
 
   // The backend and the Manager print docs links (startup banners, the coordinator page), and

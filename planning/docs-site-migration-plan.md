@@ -110,9 +110,13 @@ jar are unaffected.
 
 ### 3.4 Deployment — Vercel, a second project next to the website
 
-- New Vercel project on `labsai/EDDI`, **Root Directory `docs-site`**, with "include files
+- Vercel project **`eddi-docs`** (team `eddi`, created 2026-10-27) on `labsai/EDDI`. **Root Directory: the
+  repository root**, not `docs-site` — revised 2026-10-27, see `docs-site/README.md` → Deployment: with
+  `docs-site` as Root Directory, Vercel failed (and emailed) every push to the orphan `metrics` data
+  branch before any ignore step could run. Originally planned with "include files
   outside the root directory" enabled (the build reads `../docs` and `../PRIVACY.md`).
-- `ignoreCommand` in `docs-site/vercel.json` skips the build unless `docs/`, `docs-site/` or
+- `ignoreCommand` in the root `vercel.json` (and the same command in the project settings) skips
+  a branch without `docs-site/`, and otherwise the build unless `docs/`, `docs-site/` or
   `PRIVACY.md` changed — `labsai/EDDI` gets far more Java PRs than docs PRs.
 - Vercel's PR comments switched off in the project settings; the deployment status alone is
   enough, and this repo's PRs already carry ~27 checks.
@@ -127,7 +131,7 @@ jar are unaffected.
 ```
 docs-site/
   astro.config.mjs          # Starlight; sidebar from .generated/sidebar.json
-  vercel.json               # phase 3/4: headers, redirects, ignoreCommand
+  (vercel.json lives at the repository root — see §3.4 — headers, redirects, ignoreCommand)
   scripts/sync-docs.mjs     # docs/ → .generated/{content,public,sidebar.json}
   scripts/sync-docs.test.mjs
   legacy-urls.txt           # phase 3: every URL that ever worked (§5)
@@ -203,7 +207,7 @@ chatbot-era names → their agent-era pages, the Agent/Bot Father pages → `/ag
 (the Platform Operator replaced it in 6.3.0), pages with no successor → the closest page or `/`.
 
 [`scripts/redirects.mjs`](../docs-site/scripts/redirects.mjs) generates the `redirects` of
-`docs-site/vercel.json` (`npm run redirects`), in this order:
+the root `vercel.json` (`npm run redirects`), in this order:
 
 1. host `docs.labs.ai`, any path → the same path on `docs.eddi.technology`, **301** (one rule — the
    old domain stays attached to the project for good, because released images print its links);
@@ -280,9 +284,8 @@ phone width, the 404 page.
 
 ### Phase 5 — cutover checklist
 
-1. **Vercel project** (team of the website project): import `labsai/EDDI`, Root Directory
-   `docs-site`, enable "Include source files outside of the Root Directory". Everything else is
-   in `vercel.json`. Check the plan tier: Hobby is non-commercial.
+1. ✅ **Vercel project** `eddi-docs` (team `eddi`, Pro) on `labsai/EDDI`, Root Directory = repository
+   root, settings mirroring the root `vercel.json`. Done 2026-10-27.
 2. **Preview:** open the project's latest deployment and run
    `npm run check-live -- https://<deployment-url>` in `docs-site/` — it must report 0 failures.
    Open a page with a Mermaid diagram and use search, with the console open: the CSP must not

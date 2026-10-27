@@ -1,10 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "astro",
-  "installCommand": "npm ci",
-  "buildCommand": "npm run build",
-  "outputDirectory": ".generated/dist",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../docs ../PRIVACY.md",
+  "framework": null,
+  "installCommand": "cd docs-site && npm ci",
+  "buildCommand": "cd docs-site && npm run build",
+  "outputDirectory": "docs-site/.generated/dist",
+  "ignoreCommand": "test ! -d docs-site || git diff --quiet HEAD^ HEAD -- docs-site docs PRIVACY.md vercel.json",
   "trailingSlash": true,
   "headers": [
     {
