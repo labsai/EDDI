@@ -1153,6 +1153,22 @@ your tool schemas do not cover it, not as a routine first step:
   maxResponseSizeInBytes (characters, default 2,000,000).
 - Groups seat each agent once: a member repeated by agentId, whatever its member
   type, is refused on save with 400 — a second seat needs a second agent.
+- Rejected rule pauses: an agent's hitlConfig.onRejection is "SKIP" (default:
+  the rest of the turn is skipped and the note shown) or "REVISE": a rejection
+  WITH a note has the same model revise the answer it gave before the pause (one
+  tool-less re-ask, the note as feedback, the same output guardrails), then the
+  tasks after the model's run again, so the rule pauses again on the revision.
+  maxRevisionsPerTurn (1-10, default 3) bounds it. A rejection without a note, a
+  timeout, a Slack button, a pause before any answer, a spend limit or a failed
+  revision still skips; the step's hitl:revision:outcome says which. Rejected
+  tool calls are unaffected (they reach the model as a tool result anyway).
+- TASK_FORCE groups: maxReworks (0-5, default 0) sends a task that fails VERIFY
+  back to its member with the verifier's feedback, up to that many times per
+  task, within protocol.maxTurns and the cost ceiling; it is not applied when the
+  EXECUTE phase gates tasks for approval. An unparseable verdict still
+  auto-verifies, counted as eddi_group_verify_unparseable_total. A repeating
+  phase's convergence.mode "VERDICT" ends it once the moderator's review of the
+  latest repeat passes (default "SIMILARITY", the agreement score).
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
   configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).

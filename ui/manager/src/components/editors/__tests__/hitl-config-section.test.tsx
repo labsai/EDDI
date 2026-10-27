@@ -150,6 +150,49 @@ describe("HitlConfigSection", () => {
     });
   });
 
+  describe("onRejection (E2)", () => {
+    it("defaults to SKIP and shows no revision bound", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+
+      expect(screen.getByTestId("hitl-on-rejection")).toHaveValue("SKIP");
+      expect(screen.queryByTestId("hitl-max-revisions")).not.toBeInTheDocument();
+    });
+
+    it("REVISE seeds the default bound in the same patch", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.change(screen.getByTestId("hitl-on-rejection"), { target: { value: "REVISE" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ onRejection: "REVISE", maxRevisionsPerTurn: 3 }),
+      }));
+    });
+
+    it("back to SKIP stores the default by leaving both fields empty", () => {
+      const agent: Agent = { hitlConfig: { onRejection: "REVISE", maxRevisionsPerTurn: 2 } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.change(screen.getByTestId("hitl-on-rejection"), { target: { value: "SKIP" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ onRejection: null, maxRevisionsPerTurn: null }),
+      }));
+    });
+
+    it("clamps the bound to what the backend accepts (1..10)", () => {
+      const agent: Agent = { hitlConfig: { onRejection: "REVISE", maxRevisionsPerTurn: 2 } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.change(screen.getByTestId("hitl-max-revisions"), { target: { value: "42" } });
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ maxRevisionsPerTurn: 10 }),
+      }));
+      fireEvent.change(screen.getByTestId("hitl-max-revisions"), { target: { value: "0" } });
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ maxRevisionsPerTurn: 1 }),
+      }));
+    });
+  });
+
   describe("email notifications (hitlConfig.notify.email)", () => {
     it("an agent without notify shows the switch off and no recipients field", () => {
       const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };

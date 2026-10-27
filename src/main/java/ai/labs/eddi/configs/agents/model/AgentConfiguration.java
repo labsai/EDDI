@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.agents.model;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 
+import ai.labs.eddi.configs.hitl.HitlRejectionAction;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
@@ -1684,6 +1685,53 @@ public class AgentConfiguration {
 
         public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
             this.toolApprovals = toolApprovals;
+        }
+
+        /** Default for {@link #maxRevisionsPerTurn} when the field is absent. */
+        public static final int DEFAULT_MAX_REVISIONS_PER_TURN = 3;
+
+        /**
+         * What a {@code REJECTED} decision on a behavior-rule pause does. {@code SKIP}
+         * (default) is the behaviour before 6.6: the remaining tasks are skipped and
+         * the note is shown. {@code REVISE}: a rejection carrying a note makes the
+         * model revise the answer it gave before the pause (see
+         * {@link HitlRejectionAction}). Tool-call pauses are unaffected.
+         *
+         * @since 6.6.0
+         */
+        private HitlRejectionAction onRejection = HitlRejectionAction.SKIP;
+
+        /**
+         * How many times one turn may be revised under {@code onRejection: REVISE}
+         * before a further rejection skips, {@code 1}..{@code 10}. Absent = 3.
+         *
+         * @since 6.6.0
+         */
+        private Integer maxRevisionsPerTurn;
+
+        public HitlRejectionAction getOnRejection() {
+            return onRejection;
+        }
+
+        public void setOnRejection(HitlRejectionAction onRejection) {
+            // "onRejection": null keeps the default, like timeoutPolicy
+            if (onRejection != null) {
+                this.onRejection = onRejection;
+            }
+        }
+
+        public Integer getMaxRevisionsPerTurn() {
+            return maxRevisionsPerTurn;
+        }
+
+        public void setMaxRevisionsPerTurn(Integer maxRevisionsPerTurn) {
+            this.maxRevisionsPerTurn = maxRevisionsPerTurn;
+        }
+
+        /** {@link #maxRevisionsPerTurn}, or its default when absent. */
+        @JsonIgnore
+        public int effectiveMaxRevisionsPerTurn() {
+            return maxRevisionsPerTurn != null ? maxRevisionsPerTurn : DEFAULT_MAX_REVISIONS_PER_TURN;
         }
 
         /**
