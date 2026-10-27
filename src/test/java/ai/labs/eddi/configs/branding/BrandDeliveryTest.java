@@ -135,9 +135,11 @@ class BrandDeliveryTest {
     @Test
     void darkColoursAloneStillReachTheDarkTheme() {
         String css = BrandDelivery.stylesheet(brand("Acme", BrandingService.resolveColors(new BrandColors(null, null, "#2dd4bf", "#042f2e", null))));
-        assertEquals("/* brand revision 3 */\n:root{}\n"
-                + ".dark{--color-primary:#2dd4bf;--color-ring:#2dd4bf;--color-sidebar-accent:#2dd4bf;"
-                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;}\n", css);
+        // The light theme stays EDDI; the loader, on its dark background, takes the
+        // dark primary.
+        assertTrue(css.contains(":root{--brand-loader-accent:#2dd4bf;}\n"), css);
+        assertTrue(css.contains(".dark{--color-primary:#2dd4bf;--color-ring:#2dd4bf;--color-sidebar-accent:#2dd4bf;"
+                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;--color-brand-50:"), css);
     }
 
     /**

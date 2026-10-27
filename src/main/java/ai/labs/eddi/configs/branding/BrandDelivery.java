@@ -93,7 +93,7 @@ public final class BrandDelivery {
         StringBuilder css = new StringBuilder("/* brand revision ").append(brand.revision()).append(" */\n");
         css.append(":root{");
         managerTokens(css, primary, foreground);
-        if (primary != null) {
+        if (primary != null || darkPrimary != null) {
             css.append("--brand-loader-accent:").append(darkPrimary != null ? darkPrimary : primary).append(';');
         }
         if (accent != null) {
