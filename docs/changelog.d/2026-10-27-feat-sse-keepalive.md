@@ -15,13 +15,17 @@ nothing for `eddi.streaming.keepalive-interval-seconds` (default `15`, `0` turns
   stream has been silent for the whole interval, so a stream of tokens carries no extra frames.
 - Writes to the sink are serialised, so a comment never lands between the lines of an event.
 - The tick stops when the stream ends (`done`, `error`, start failure) or the client is gone.
-- A tick that finds the sink closed is handled like any send to a vanished client: with
-  `cancel-on-client-disconnect` on, the turn is cancelled during the silent stretch instead of at its next event. A
-  send that fails on a sink that is still open is not taken for a disconnect, as before.
+- A tick that finds the sink closed, once the turn has written an event of its own, is handled like any send to a
+  vanished client: with `cancel-on-client-disconnect` on, the turn is cancelled during the silent stretch instead of
+  at its next event, on a separate thread so the cancel's store work does not delay other streams' ticks. Before its
+  first event a turn may still be queued behind another turn of the same conversation, whose cancel would hit that
+  other turn, so the tick then only stops and the turn's own first event handles the disconnect, as before. A send
+  that fails on a sink that is still open is not taken for a disconnect, as before.
+- The tick runs every quarter interval, so the longest silence is about 1.25 intervals.
 - SSE clients ignore comment lines by definition, so no consumer changes. `docs/rest-api-reference.md` notes that a
   hand-written parser must skip lines starting with `:`.
 
-**Files.** `RestAgentEngineStreaming.java`, new `RestAgentEngineStreamingKeepAliveTest` (8 tests, the scheduler and
+**Files.** `RestAgentEngineStreaming.java`, new `RestAgentEngineStreamingKeepAliveTest` (9 tests, the scheduler and
 clock replaced so each tick runs by hand), [`configuration-reference.md`](../configuration-reference.md),
 [`rest-api-reference.md`](../rest-api-reference.md).
 

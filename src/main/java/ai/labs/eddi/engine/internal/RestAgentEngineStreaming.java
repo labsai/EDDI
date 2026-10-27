@@ -148,10 +148,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * on, that close also discards the turn. The comment line keeps bytes moving;
      * SSE clients ignore comments by definition, so no consumer has to know about
      * it. It is only written when nothing else was sent for the whole interval, so
-     * a stream of tokens carries no extra frames. A failed write on a closed sink
-     * is treated like any other send to a vanished client, so a dropped connection
-     * is now noticed during the silent stretch too, not only at the next real
-     * event.
+     * a stream of tokens carries no extra frames. Once the turn has written an
+     * event of its own, a tick that finds the sink closed is treated like any other
+     * send to a vanished client, so a dropped connection is noticed during the
+     * silent stretch too. Before that the turn may still be queued behind another
+     * turn of the same conversation, so the tick only stops; the turn's own first
+     * event handles the disconnect, as it always did.
      * </p>
      */
     private final int keepAliveIntervalSeconds;
@@ -578,6 +580,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         /** When the last frame was written; guarded by {@link #writeLock}. */
         private long lastWriteMillis;
         private volatile ScheduledFuture<?> keepAlive;
+        /**
+         * Set once one of this turn's own events was written, which proves the turn is
+         * the one running. Until then it may still be queued behind another turn of the
+         * same conversation, and a conversation-wide cancel would interrupt that other
+         * turn instead.
+         */
+        private volatile boolean turnEventSent;
 
         private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse) {
             this.conversationId = conversationId;
@@ -634,7 +643,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             }
             if (gone) {
                 stopKeepAlive();
-                clientGoneExecutor.execute(this::onClientGone);
+                // Only a turn that has started may be cancelled from here: a stream still
+                // queued behind another turn of the same conversation would otherwise
+                // interrupt that turn. A queued turn's own first event finds the sink
+                // closed and cancels it then, as before.
+                if (turnEventSent) {
+                    clientGoneExecutor.execute(this::onClientGone);
+                }
             }
         }
 
@@ -663,6 +678,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     try {
                         eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, padDataLines(data)).build());
                         lastWriteMillis = clockMillis.getAsLong();
+                        turnEventSent = true;
                     } catch (Exception e) {
                         LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
                         // RESTEasy Reactive throws IllegalStateException synchronously when the

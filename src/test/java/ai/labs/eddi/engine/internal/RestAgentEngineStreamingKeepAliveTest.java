@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.InputData;
@@ -149,8 +150,9 @@ class RestAgentEngineStreamingKeepAliveTest {
     @Test
     @DisplayName("a client that vanished during the silence is noticed by the tick and the turn is cancelled")
     void closedSinkDuringSilenceCancelsTurn() throws Exception {
-        startTurn(streaming(true, INTERVAL_SECONDS));
+        var handler = startTurn(streaming(true, INTERVAL_SECONDS));
         Runnable tick = scheduledTick();
+        handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
 
         when(eventSink.isClosed()).thenReturn(true);
         now.addAndGet(INTERVAL_MS);
@@ -169,10 +171,33 @@ class RestAgentEngineStreamingKeepAliveTest {
     }
 
     @Test
+    @DisplayName("a stream still queued behind another turn is not cancelled by the tick; its own first event cancels it")
+    void closedSinkBeforeTurnStartedDoesNotCancelOtherTurn() throws Exception {
+        var handler = startTurn(streaming(true, INTERVAL_SECONDS));
+        Runnable tick = scheduledTick();
+
+        when(eventSink.isClosed()).thenReturn(true);
+        now.addAndGet(INTERVAL_MS);
+        tick.run();
+
+        // No event of this turn was written yet: it may be queued, and a
+        // conversation-wide cancel would hit the turn that is running.
+        assertEquals(0, clientGone.size());
+        verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        verify(future, atLeastOnce()).cancel(false);
+
+        // When this turn starts, its first event finds the sink closed and cancels it.
+        handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
+        verify(conversationService).cancelConversation("conv-1", ControlSignal.CANCEL_GRACEFUL,
+                RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
+    }
+
+    @Test
     @DisplayName("with cancel-on-client-disconnect off, a vanished client stops the tick but not the turn")
     void closedSinkWithoutCancelKeepsTurn() throws Exception {
-        startTurn(streaming(false, INTERVAL_SECONDS));
+        var handler = startTurn(streaming(false, INTERVAL_SECONDS));
         Runnable tick = scheduledTick();
+        handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
 
         when(eventSink.isClosed()).thenReturn(true);
         now.addAndGet(INTERVAL_MS);
