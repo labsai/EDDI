@@ -422,10 +422,11 @@ public class RestSecretStore implements IRestSecretStore {
         response.put("createdAt", after.createdAt());
         response.put("lastRotatedAt", after.lastRotatedAt());
         response.put("agentsLosingAccess", losingAccess);
-        // Said in the payload, not only in the docs: on a cluster the list covers the
-        // agents deployed on the node that answered, and an API consumer should not
-        // mistake it for the whole fleet.
-        response.put("agentsLosingAccessScope", "this-node");
+        // Said in the payload, not only in the docs: the list covers every recorded
+        // deployment in the shared database plus this node's runtime registry. An
+        // autoDeploy=false deployment made on another node is unrecorded, and is seen
+        // here once that node's announcement has deployed it on this one too.
+        response.put("agentsLosingAccessScope", "cluster");
         // False when an environment could not be listed. A caller must be able to
         // tell "nothing breaks" from "could not tell", or it will read the empty
         // list as the former and narrow the grant on that basis.
