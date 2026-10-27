@@ -1025,6 +1025,7 @@ export function AgentDetailPage() {
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection
+        key={`${id}-${resolvedVersion}`}
         agent={doc}
         onChange={editAgent}
         disabled={isSaving}

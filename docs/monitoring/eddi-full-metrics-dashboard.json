@@ -6983,7 +6983,7 @@
           "description": "How long the oldest pending approval has waited. Alert EddiApprovalWaitingLong fires past 24 h."
         },
         {
-          "id": 264,
+          "id": 267,
           "type": "timeseries",
           "title": "HITL email notifications",
           "datasource": {
@@ -7031,7 +7031,7 @@
           "description": "Approval notification mails by outcome: sent, retry (deferred, will be retried), failed (gave up), suppressed (the pause was decided before it went out). A rising failed or retry rate means the system mailer's relay is refusing or unreachable."
         },
         {
-          "id": 265,
+          "id": 268,
           "type": "stat",
           "title": "Email ledger pending",
           "datasource": {

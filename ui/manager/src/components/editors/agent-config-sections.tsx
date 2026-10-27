@@ -1174,7 +1174,9 @@ export const HitlConfigSection = memo(function HitlConfigSection({
         return null;
     }
   }
-  const recipientsError = notifyOn ? recipientsProblem() : null;
+  // Only a field the user can see can block the save: switching HITL off hides
+  // the recipients (and drops hitlConfig), whatever notifyOn last said.
+  const recipientsError = enabled && notifyOn ? recipientsProblem() : null;
   const recipientsInvalid = recipientsError !== null;
   useEffect(() => {
     onValidityChange?.(recipientsInvalid);

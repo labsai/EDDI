@@ -302,6 +302,9 @@ public class SystemMailer {
         } else {
             properties.setProperty("mail.smtp.auth", "false");
         }
+        // angusProperties already set it under the protocol's prefix; stated here as a
+        // literal so the guarantee is visible where the session is built.
+        properties.setProperty("mail.smtp.ssl.checkserveridentity", "true");
         Session session = Session.getInstance(properties);
         Transport transport = null;
         try {
