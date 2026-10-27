@@ -612,7 +612,8 @@ const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
   filter matches ONE version exactly, so it cannot express "since". Say how many
   ratings each bucket holds: a version with fewer than about 10 is too few to
   judge. For a trend over time use \`groupBy=week\` (or \`day\`) with
-  \`from\`/\`to\` (ISO dates, UTC; \`to\` is exclusive).
+  \`from\`/\`to\` (UTC; an instant \`to\` is exclusive, a date-only \`to\` includes
+  that whole day).
 - To show what people complained about, list with \`sort=lowest\` or
   \`hasComment=true\` and quote the comments briefly; a row's
   \`canOpenTranscript\` says whether the conversation itself can be read.
