@@ -1870,11 +1870,25 @@ public class LlmTask implements ILifecycleTask {
                 : createToolLoopStreamingBridge(memory.getEventSink(),
                         "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
 
+        // Spend gate: the same preflight as the live path, asked before the approved
+        // tools run and before the first resumed model request. A conversation (or a
+        // scheduled fire's maxCostPerFire) that was spent while the turn waited for
+        // approval gets the fallback answer; the approved calls do not run.
+        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+
         AgentOrchestrator.ExecutionResult result = null;
         try {
+            if (spendRefusal != null) {
+                throw new LlmSpendGate.SpendRefusedException(spendRefusal);
+            }
             result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                     toolHitlEnabled, jsonPolicy);
             result = reaskResumedAnswer(result, retryPolicy, retryListener, chatModel, task, memory, jsonPolicy, currentStep);
+        } catch (LlmSpendGate.SpendRefusedException refused) {
+            // Not a failure of the model phase — it never started — so onError is not
+            // involved: the fallback answer is served unconditionally (live-path parity).
+            fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
+            result = null;
         } catch (ToolApprovalRequiredException rePause) {
             // The continuation hit another gated call and paused again. The loop
             // builds that batch from scratch, and it knows nothing about cascades, so

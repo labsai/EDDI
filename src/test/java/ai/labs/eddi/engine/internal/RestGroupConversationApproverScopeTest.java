@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.PendingHumanInput;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -212,6 +213,30 @@ class RestGroupConversationApproverScopeTest {
             assertEquals(List.of(GroupConversationEventSink.EVENT_HITL_RESUME), sentEvents);
             assertTrue(serialized.stream().noneMatch(GroupConversationEventSink.SpeakerCompleteEvent.class::isInstance),
                     "no member response may reach an approver-only stream: " + serialized);
+            verify(eventSink).close();
+        }
+
+        @Test
+        @DisplayName("an approver-only caller whose resume could not be enqueued gets the error, not hitl_resume")
+        void approverStreamReportsAFailedSubmit() throws Exception {
+            as(APPROVER_ID, "eddi-approver");
+            gc(GroupConversationState.AWAITING_APPROVAL);
+            when(eventSink.isClosed()).thenAnswer(inv -> closed);
+            doAnswer(inv -> {
+                closed = true;
+                return null;
+            }).when(eventSink).close();
+            // The coordinator announces the committed resume, then fails to submit the
+            // resumed run, restores the pause and throws.
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any())).thenAnswer(inv -> {
+                GroupDiscussionEventListener l = inv.getArgument(2);
+                l.onHitlResume(new GroupConversationEventSink.HitlResumeEvent("APPROVED", null, APPROVER_ID));
+                throw new IResourceStore.ResourceStoreException("Failed to submit resumed group discussion: rejected");
+            });
+
+            rest.approveGroupPhaseStreaming(GROUP_ID, GC_ID, approval(), eventSink, sse);
+
+            assertEquals(List.of(GroupConversationEventSink.EVENT_GROUP_ERROR), sentEvents);
             verify(eventSink).close();
         }
 

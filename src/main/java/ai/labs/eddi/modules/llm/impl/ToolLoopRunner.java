@@ -201,7 +201,7 @@ class ToolLoopRunner {
         double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
-        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
+        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0, toolCostBefore,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, ClearedToolCalls.none(), transcriptMaxBytes, tokenHolder,
                 jsonPolicy,
                 finalTranscript, exchangeRecorder);
@@ -314,6 +314,10 @@ class ToolLoopRunner {
      *            verdict-applied tool results
      * @param startIteration
      *            first loop index — carries budget continuity across a pause
+     * @param toolCostBefore
+     *            the conversation's tracked tool cost before this run's first tool
+     *            ran — for a resume, before the approved calls, so the cost ceiling
+     *            counts what they charged
      * @param clearedCalls
      *            calls a human already approved this pause, bound to id, tool and
      *            arguments and consumed on first match
@@ -332,7 +336,8 @@ class ToolLoopRunner {
      *            survives a pause, a failure or a cancellation of this run
      */
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
-                           List<Map<String, Object>> trace, int startIteration, AgentOrchestrator.ToolSetup setup, boolean isLazy,
+                           List<Map<String, Object>> trace, int startIteration, double toolCostBefore, AgentOrchestrator.ToolSetup setup,
+                           boolean isLazy,
                            LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
                            int llmTaskIndex, ClearedToolCalls clearedCalls, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                            JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut, ToolExchangeRecorder exchangeRecorder)
@@ -406,14 +411,18 @@ class ToolLoopRunner {
             OptionalDouble costCeiling = LlmSpendGate.effectiveCeiling(memory);
             boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
             double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
-            double toolCostAtLoopStart = ceilingApplies ? conversationToolCost(conversationId) : 0.0;
+            // The live path's first request was gated by the task-level preflight, so
+            // the check starts once the model has answered. A resume (startIteration
+            // > 0) has already run the approved calls, whose cost no preflight saw:
+            // its first request is checked too.
+            boolean resumed = startIteration > 0;
 
             for (int i = startIteration; i < maxIterations; i++) {
-                if (ceilingApplies && modelAnswered) {
+                if (ceilingApplies && (modelAnswered || resumed)) {
                     double spent = costBeforeLoop
                             + TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
                                     tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
-                            + toolCostDelta(conversationId, toolCostAtLoopStart);
+                            + toolCostDelta(conversationId, toolCostBefore);
                     if (spent >= costCeiling.getAsDouble()) {
                         String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
                                 spent);

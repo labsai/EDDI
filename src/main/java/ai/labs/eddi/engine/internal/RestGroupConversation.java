@@ -801,10 +801,15 @@ public class RestGroupConversation implements IRestGroupConversation {
             // (as on the agent resume: "a reply is a read"). An approver-only caller
             // gets the outcome of their decision, not the member turns that follow it.
             var owner = groupConversationService.readGroupConversation(gcId).getUserId();
-            var listener = hitlAccessGuard.mayReadResumedDiscussion(owner)
-                    ? createStreamingListener(eventSink, sse)
-                    : createApproverStreamingListener(eventSink, sse);
-            groupConversationService.resumeDiscussion(gcId, request, listener);
+            if (hitlAccessGuard.mayReadResumedDiscussion(owner)) {
+                groupConversationService.resumeDiscussion(gcId, request, createStreamingListener(eventSink, sse));
+            } else {
+                var approverListener = new ApproverStreamingListener(eventSink, sse);
+                groupConversationService.resumeDiscussion(gcId, request, approverListener);
+                // Only now is the resumed run enqueued: a submit failure throws
+                // above with the pause restored, and the catch below reports it.
+                approverListener.resumeEnqueued();
+            }
         } catch (IResourceStore.ResourceModifiedException e) {
             // Curated messages throughout (parity with the non-streaming
             // approveGroupPhase): never forward e.getMessage() over SSE — it can
@@ -1156,34 +1161,71 @@ public class RestGroupConversation implements IRestGroupConversation {
      * answer; errors and cancellation are forwarded as usual. Every content-bearing
      * event of the resumed run (member responses, decisions, artifacts, stances,
      * the synthesis) falls through to the listener's no-op defaults.
+     * <p>
+     * {@code onHitlResume} fires when the resume is committed, before the resumed
+     * run is submitted, and a submit failure rolls the pause back and throws. So
+     * the event is held until {@link #resumeEnqueued()} — called once
+     * {@code resumeDiscussion} has returned — and only then sent with the stream
+     * closed behind it. Until then the stream stays open for the error the endpoint
+     * sends when the submit fails. A terminal event that lands in that window is
+     * the run's real outcome and is reported as such: completion means the resume
+     * ran, so the held {@code hitl_resume} ends the stream; an error or a
+     * cancellation (a cancel signalled during a rolled-back submit, say) replaces
+     * it.
      */
-    private GroupDiscussionEventListener createApproverStreamingListener(SseEventSink eventSink, Sse sse) {
-        return new GroupDiscussionEventListener() {
-            @Override
-            public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(event));
-                closeQuietly(eventSink);
-            }
+    private final class ApproverStreamingListener implements GroupDiscussionEventListener {
 
-            @Override
-            public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
-                        toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null)));
-                closeQuietly(eventSink);
-            }
+        private final SseEventSink eventSink;
+        private final Sse sse;
+        private GroupConversationEventSink.HitlResumeEvent pendingResume;
 
-            @Override
-            public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
-                closeQuietly(eventSink);
-            }
+        private ApproverStreamingListener(SseEventSink eventSink, Sse sse) {
+            this.eventSink = eventSink;
+            this.sse = sse;
+        }
 
-            @Override
-            public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
-                closeQuietly(eventSink);
+        @Override
+        public synchronized void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+            pendingResume = event;
+        }
+
+        /**
+         * The resumed run is enqueued: send the held {@code hitl_resume} and end the
+         * stream.
+         */
+        synchronized void resumeEnqueued() {
+            if (pendingResume == null) {
+                return;
             }
-        };
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(pendingResume));
+            pendingResume = null;
+            closeQuietly(eventSink);
+        }
+
+        @Override
+        public synchronized void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
+            if (pendingResume != null) {
+                resumeEnqueued();
+                return;
+            }
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
+                    toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null)));
+            closeQuietly(eventSink);
+        }
+
+        @Override
+        public synchronized void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
+            pendingResume = null;
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+            closeQuietly(eventSink);
+        }
+
+        @Override
+        public synchronized void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+            pendingResume = null;
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
+            closeQuietly(eventSink);
+        }
     }
 
     private void sendEvent(SseEventSink eventSink, Sse sse, String eventName, String data) {
