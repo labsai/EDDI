@@ -59,13 +59,39 @@ export default defineConfig({
 				light: './src/assets/eddi-logo-light.svg',
 				replacesTitle: true,
 			},
+			// The website's favicons (eddi.technology/public), so a docs tab looks like a site tab.
 			favicon: '/favicon.svg',
-			social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/labsai/EDDI' }],
+			head: [{ tag: 'link', attrs: { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico', sizes: '48x48' } }],
+			// The right side of the website's header, and its sun/moon toggle instead of a <select>.
+			components: {
+				SocialIcons: './src/components/HeaderActions.astro',
+				ThemeSelect: './src/components/ThemeToggle.astro',
+			},
+			// Fonts and colours: the website's global.css; see the header of eddi.css.
 			customCss: [
 				'@fontsource-variable/outfit',
 				'@fontsource/jetbrains-mono/400.css',
+				'@fontsource/jetbrains-mono/500.css',
 				'./src/styles/eddi.css',
 			],
+			// Code blocks as the website renders them: Astro's default github-dark theme in both
+			// colour schemes, 0.5rem radius, the site's border, 1rem/1.25rem padding, 0.875rem/1.6.
+			expressiveCode: {
+				themes: ['github-dark'],
+				useStarlightUiThemeColors: false,
+				defaultProps: { frame: 'none' },
+				styleOverrides: {
+					// Expressive Code adds the 1px border to the radius; the website's <pre> is 8px overall.
+					borderRadius: 'calc(0.5rem - 1px)',
+					borderColor: 'var(--eddi-border)',
+					codeFontFamily: 'var(--eddi-font-mono)',
+					codeFontSize: '0.875rem',
+					codeLineHeight: '1.6',
+					codePaddingBlock: '1rem',
+					codePaddingInline: '1.25rem',
+					uiFontFamily: 'var(--eddi-font-sans)',
+				},
+			},
 			sidebar,
 			plugins: [
 				starlightLinksValidator({

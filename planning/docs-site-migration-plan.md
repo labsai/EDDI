@@ -239,6 +239,7 @@ generator bug that turned an external `…/CONTRIBUTING.md` target into `…/CON
   plugins grouped (the plugins declare peer ranges on both). This matters beyond the site: CI's
   Trivy filesystem scan reads every lockfile in the repository, so an unpatched advisory in
   `docs-site/package-lock.json` would fail every backend PR. `npm audit` is clean today.
+- **Branding** matches the website and the Manager value for value (`docs-site/src/styles/eddi.css` names the source of each rule; `HeaderActions.astro` and `ThemeToggle.astro` are the website's header right side and toggle). Two deliberate differences: light-mode links use accent-700 (the website's accent-400 is ~1.9:1 there), and Outfit/JetBrains Mono actually load — the live website asks for `Outfit` while fontsource registers `Outfit Variable`, so it renders the system font. That is a one-line fix in the website repo.
 - **No `sharp`** (found by Dependency Review on the PR): Astro's default image service needs it,
   and its libvips binaries are LGPL-3.0, which `dependency-review.yml` denies. The site has no
   raster images, so it uses the pass-through image service and `package.json` overrides `sharp`

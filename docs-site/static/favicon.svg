@@ -1,5 +1,10 @@
-<svg version="1.1" id="Layer_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
-	 width="100%" viewBox="0 0 352 348" enable-background="new 0 0 352 348" xml:space="preserve">
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+	 width="100%" viewBox="0 0 512 512" xml:space="preserve">
+<!-- App-icon rounded background -->
+<rect x="0" y="0" width="512" height="512" rx="96" ry="96" fill="#050505"/>
+
+<!-- Original EDDI logo artwork, centered with padding -->
+<g transform="translate(80, 82)">
 <path fill="#050505" opacity="1.000000" stroke="none" 
 	d="
 M1.000000,124.000000 
@@ -390,4 +395,5 @@ M162.638580,242.865326
 	C194.744446,217.040939 182.986404,223.922211 172.290710,234.349167 
 	C169.312531,237.252502 166.071548,239.886322 162.638580,242.865326 
 z"/>
+</g>
 </svg>
