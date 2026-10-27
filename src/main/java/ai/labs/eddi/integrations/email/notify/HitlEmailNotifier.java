@@ -85,8 +85,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * meanwhile is not mailed — the row ends {@code SUPPRESSED}.
  * <p>
  * Every terminal outcome is counted ({@code eddi.email.outbound}) and every
- * sent or failed notification audited (kind, conversation, a hash and the
- * domain of the recipient, Message-ID — never the body).
+ * sent or failed notification audited (kind, conversation, the keyed
+ * {@link GdprPseudonymizer} pseudonym and the domain of the recipient,
+ * Message-ID — never the body).
  */
 @ApplicationScoped
 public class HitlEmailNotifier {
