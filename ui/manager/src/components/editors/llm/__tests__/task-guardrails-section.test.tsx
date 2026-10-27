@@ -4,7 +4,7 @@ import { screen, fireEvent, within } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import type { ReactElement } from "react";
 import { TaskGuardrailsSection } from "../task-guardrails-section";
-import type { LlmTask } from "../types";
+import type { GuardrailConfig, LlmTask } from "../types";
 
 function Harness({
   initial,
@@ -68,6 +68,7 @@ describe("TaskGuardrailsSection", () => {
       "regex-filter",
       "max-length",
       "classifier",
+      "judge",
       "json-object",
       "expression",
     ]);
@@ -410,6 +411,155 @@ describe("TaskGuardrailsSection", () => {
         timeoutMs: "2000",
         risk: "jailbreak",
         inputPricePer1M: "0.10",
+      });
+    });
+  });
+
+  describe("onExhausted", () => {
+    const withReprompt = (extra: Partial<GuardrailConfig> = {}): LlmTask => ({
+      ...base,
+      outputGuardrails: [{ type: "json-object", action: "reprompt", ...extra }],
+    });
+
+    it("is offered only for an output reprompt, stores deliver-best and drops block (the default)", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withReprompt()} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.change(screen.getByTestId("guardrail-on-exhausted"), { target: { value: "deliver-best" } });
+      expect(last(spy).outputGuardrails).toEqual([{ type: "json-object", action: "reprompt", onExhausted: "deliver-best" }]);
+      fireEvent.change(screen.getByTestId("guardrail-on-exhausted"), { target: { value: "block" } });
+      expect(last(spy).outputGuardrails).toEqual([{ type: "json-object", action: "reprompt" }]);
+    });
+
+    it("is dropped when the action stops being reprompt, and hidden", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withReprompt({ maxRetries: 1, onExhausted: "deliver-best" })} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.change(screen.getByTestId("guardrail-action"), { target: { value: "block" } });
+      expect(last(spy).outputGuardrails).toEqual([{ type: "json-object", action: "block" }]);
+      expect(screen.queryByTestId("guardrail-on-exhausted")).toBeNull();
+    });
+
+    it("is not offered on the input side", () => {
+      show(<Harness initial={{ ...base, inputGuardrails: [{ type: "max-length", action: "reprompt" }] }} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
+      expect(screen.queryByTestId("guardrail-on-exhausted")).toBeNull();
+    });
+
+    it("warns when a safety classifier would deliver what it flagged", () => {
+      show(
+        <Harness
+          initial={{
+            ...base,
+            outputGuardrails: [{ type: "classifier", action: "reprompt", onExhausted: "deliver-best", parameters: { provider: "ollama" } }],
+          }}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      expect(screen.getByTestId("guardrail-deliver-best-classifier")).toBeInTheDocument();
+    });
+  });
+
+  describe("judge", () => {
+    const withJudge = (parameters: Record<string, string> = {}): LlmTask => ({
+      ...base,
+      outputGuardrails: [{ type: "judge", action: "reprompt", parameters }],
+    });
+    const complete = {
+      provider: "gemini",
+      promptTemplate: "Answer:\n{output}",
+      issues: '{"UNSUPPORTED_CLAIM": "Remove every claim the sources do not state."}',
+      inputPricePer1M: "0.15",
+    };
+
+    it("is offered on the output side only", () => {
+      show(<Harness initial={base} />);
+      const input = within(screen.getByTestId("guardrail-add-type-input")).getAllByRole("option");
+      expect(input.map((o) => (o as HTMLOptionElement).value)).not.toContain("judge");
+    });
+
+    it("says what the deploy requires until it is there", () => {
+      show(<Harness initial={withJudge()} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      expect(screen.getByTestId("guardrail-judge-provider-required")).toBeInTheDocument();
+      expect(screen.getByTestId("guardrail-judge-prompt-required")).toBeInTheDocument();
+      expect(screen.getByTestId("guardrail-judge-issues-problem")).toHaveTextContent(/at least one issue code/);
+      expect(screen.getByTestId("guardrail-judge-unpriced")).toBeInTheDocument();
+    });
+
+    it("shows no warning for a complete configuration", () => {
+      show(<Harness initial={withJudge(complete)} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      for (const id of ["provider-required", "prompt-required", "issues-problem", "unpriced"]) {
+        expect(screen.queryByTestId(`guardrail-judge-${id}`)).toBeNull();
+      }
+      expect(screen.getByTestId("guardrail-judge-issue-code-0")).toHaveValue("UNSUPPORTED_CLAIM");
+    });
+
+    it("writes issue rows as one JSON object string, upper-casing codes, and drops it when emptied", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withJudge({ provider: "gemini" })} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.click(screen.getByTestId("guardrail-judge-issue-add"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-code-0"), { target: { value: "missing_citation" } });
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-fix-0"), { target: { value: "Cite your sources." } });
+      const issues = last(spy).outputGuardrails![0]!.parameters!.issues!;
+      expect(JSON.parse(issues)).toEqual({ MISSING_CITATION: "Cite your sources." });
+
+      fireEvent.click(screen.getByTestId("guardrail-judge-issue-remove-0"));
+      expect(last(spy).outputGuardrails![0]!.parameters).toEqual({ provider: "gemini" });
+    });
+
+    it("keeps a duplicate row visible and reports it instead of collapsing it", () => {
+      show(<Harness initial={withJudge(complete)} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.click(screen.getByTestId("guardrail-judge-issue-add"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-code-1"), { target: { value: "UNSUPPORTED_CLAIM" } });
+      expect(screen.getByTestId("guardrail-judge-issue-code-1")).toHaveValue("UNSUPPORTED_CLAIM");
+      expect(screen.getByTestId("guardrail-judge-issues-problem")).toHaveTextContent(/only once/);
+    });
+
+    it("shows a stored value that is not an object of strings as raw text, without rewriting it", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withJudge({ ...complete, issues: '["UNSUPPORTED_CLAIM"]' })} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      expect(screen.getByTestId("guardrail-judge-issues-raw")).toHaveValue('["UNSUPPORTED_CLAIM"]');
+      expect(screen.getByTestId("guardrail-judge-issues-invalid")).toBeInTheDocument();
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("seeds the rows from raw text once it becomes valid, so the next Add keeps the fixed codes", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withJudge({ ...complete, issues: '["UNSUPPORTED_CLAIM"]' })} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-issues-raw"), {
+        target: { value: '{"UNSUPPORTED_CLAIM": "Remove every claim the sources do not state."}' },
+      });
+      expect(screen.getByTestId("guardrail-judge-issue-code-0")).toHaveValue("UNSUPPORTED_CLAIM");
+
+      fireEvent.click(screen.getByTestId("guardrail-judge-issue-add"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-code-1"), { target: { value: "MISSING_CITATION" } });
+      fireEvent.change(screen.getByTestId("guardrail-judge-issue-fix-1"), { target: { value: "Cite your sources." } });
+      expect(JSON.parse(last(spy).outputGuardrails![0]!.parameters!.issues!)).toEqual({
+        UNSUPPORTED_CLAIM: "Remove every claim the sources do not state.",
+        MISSING_CITATION: "Cite your sources.",
+      });
+    });
+
+    it("writes the model call parameters under the judge's own keys", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withJudge({ provider: "openai" })} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.change(screen.getByTestId("guardrail-judge-model"), { target: { value: "gpt-5-mini" } });
+      fireEvent.change(screen.getByTestId("guardrail-judge-timeout"), { target: { value: "4000" } });
+      fireEvent.change(screen.getByTestId("guardrail-judge-output-price"), { target: { value: "0.6" } });
+      fireEvent.click(screen.getByTestId("guardrail-judge-context"));
+      expect(last(spy).outputGuardrails![0]!.parameters).toEqual({
+        provider: "openai",
+        modelName: "gpt-5-mini",
+        timeoutMs: "4000",
+        outputPricePer1M: "0.6",
+        includeRetrievedContext: "true",
       });
     });
   });

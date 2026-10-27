@@ -245,14 +245,18 @@ export interface LlmTask {
 /** What a guardrail finding does. Mirrors the backend `GuardrailAction`. */
 export type GuardrailActionName = "block" | "redact" | "reprompt" | "warn";
 
+/** What a `reprompt` guardrail does once its retries are spent. */
+export type GuardrailOnExhausted = "block" | "deliver-best";
+
 /**
  * One input or output guardrail of an LLM task. Mirrors the backend
  * `LlmConfiguration.GuardrailConfig`. Built-in `type`s: `prompt-injection`
  * (input), `pii-redaction`, `regex-filter`, `max-length`, `classifier` (both),
- * `json-object`, `expression` (output); an unknown type is skipped by the engine
- * with a WARN. `expression` takes `expr`, `issue` and `fix` parameters.
- * `classifier` calls an author-configured safety-classifier model; its
- * `parameters` take `provider` plus that provider's own model parameters.
+ * `judge`, `json-object`, `expression` (output); an unknown type is skipped by
+ * the engine with a WARN. `expression` takes `expr`, `issue` and `fix`
+ * parameters. `classifier` calls an author-configured safety-classifier model,
+ * `judge` a model that grades the answer with author-declared issue codes;
+ * their `parameters` take `provider` plus that provider's own model parameters.
  */
 export interface GuardrailConfig {
   type: string;
@@ -260,6 +264,12 @@ export interface GuardrailConfig {
   action?: GuardrailActionName;
   /** `reprompt` only: extra model calls allowed. Default 2, clamped 0–5. */
   maxRetries?: number;
+  /**
+   * Output `reprompt` only (EDDI 6.7+): what happens once the retries are spent.
+   * Absent = `block`; `deliver-best` delivers the attempt this guardrail rated
+   * best, still screened by every other guardrail.
+   */
+  onExhausted?: GuardrailOnExhausted;
   /** The answer when this guardrail blocks; used verbatim (never templated). */
   blockMessage?: string;
   /** Per-type settings as plain strings, e.g. `{ patterns: "email,ssn" }`. */

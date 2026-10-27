@@ -11,7 +11,9 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.caching.CacheImpl;
+import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Context;
@@ -278,5 +280,242 @@ class WebhookEventHandlerTest {
 
         assertEquals(CONV_2, dispatch.conversationId());
         verify(conversationService).endConversation(CONV_1, "system:lost-create-race");
+    }
+
+    @Test
+    void inFlightRepeatCarriesTheInProgressReason() throws Exception {
+        Dispatch[] repeat = new Dispatch[1];
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenAnswer(inv -> {
+                    repeat[0] = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-21", "{}"), null);
+                    return new IConversationService.ConversationResult(CONV_1, URI.create("eddi://c/" + CONV_1));
+                });
+        handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-21", "{}"), null);
+        assertEquals(409, repeat[0].status());
+        assertEquals(WebhookEventHandler.REASON_IN_PROGRESS, repeat[0].reason());
+    }
+
+    @Test
+    void approvalWaitIs409WithItsOwnReason() throws Exception {
+        doThrow(new IConversationService.ConversationAwaitingApprovalException("waiting")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        Dispatch dispatch = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-22", "{}"), null);
+        assertEquals(409, dispatch.status());
+        assertFalse(dispatch.duplicate());
+        assertEquals(WebhookEventHandler.REASON_AWAITING_APPROVAL, dispatch.reason());
+    }
+
+    @Test
+    void refusedTurnEndsTheConversationItJustCreated() throws Exception {
+        doThrow(new QuotaExceededException("api calls")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+
+        assertEquals(429, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-23", "{}"), null).status());
+
+        // One conversation per retry would otherwise be left behind, empty.
+        verify(conversationService).endConversation(eq(CONV_1), anyString());
+    }
+
+    @Test
+    void sameSignedBodyUnderAnotherEventTypeIsADuplicate() throws Exception {
+        // The event-type header is not covered by the MAC. Replaying the captured body
+        // under a different one must not start a second turn.
+        InboundEvent push = event(null, "{}");
+        InboundEvent ping = parser.parse(settings(Map.of()), INTEGRATION_ID, "application/json", Map.of("x-github-event", "ping"),
+                "{}".getBytes(StandardCharsets.UTF_8));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), push, "b:abc").status());
+
+        Dispatch replay = handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), ping, "b:abc");
+
+        assertEquals(200, replay.status());
+        assertTrue(replay.duplicate());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    private static final String OTHER_ID = "76543210fedcba9876543210";
+
+    private WebhookEventHandler handlerWithRefuseAt(long refuseAt, SimpleMeterRegistry meters) throws Exception {
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.getCache(anyString(), any(Duration.class)))
+                .thenReturn(new CacheImpl<>("dedup", Caffeine.newBuilder().build()));
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenAnswer(inv -> new IConversationService.ConversationResult(CONV_1, URI.create("eddi://c/" + CONV_1)));
+        return new WebhookEventHandler(router, conversationService, groupService, userConversationStore, templating, cacheFactory,
+                meters, refuseAt);
+    }
+
+    @Test
+    void integrationOverItsOwnBudgetIsRefusedWhileOthersAreStillAccepted() throws Exception {
+        SimpleMeterRegistry meters = new SimpleMeterRegistry();
+        handler = handlerWithRefuseAt(1_000_000, meters);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "2"));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-40", "{}"), "b:1").status());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-41", "{}"), "b:2").status());
+
+        Dispatch over = handler.dispatch(INTEGRATION_ID, integration, budget, event("d-42", "{}"), "b:3");
+        Dispatch other = handler.dispatch(OTHER_ID, integration, budget, event("d-43", "{}"), "b:4");
+
+        assertEquals(503, over.status());
+        assertEquals(202, other.status(), "one integration at its cap must not refuse another");
+        assertEquals(1.0, meters.counter("eddi.webhook.events", "outcome", "refused_capacity").count());
+        assertEquals(0.0, meters.counter("eddi.webhook.events", "outcome", "refused_503").count());
+        // A repeat of something already remembered is still answered, not refused.
+        Dispatch repeat = handler.dispatch(INTEGRATION_ID, integration, budget, event("d-40", "{}"), "b:1");
+        assertEquals(200, repeat.status());
+        assertTrue(repeat.duplicate());
+    }
+
+    @Test
+    void budgetWindowRollsOverAfterTenMinutes() throws Exception {
+        handler = handlerWithRefuseAt(1_000_000, new SimpleMeterRegistry());
+        long[] now = {1_000_000_000L};
+        handler.setClock(() -> now[0]);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "1"));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-50", "{}"), "b:1").status());
+        assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-51", "{}"), "b:2").status());
+
+        now[0] += 11 * 60_000L;
+
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-52", "{}"), "b:3").status());
+    }
+
+    @Test
+    void sharedCachePastTheBackstopRefusesOnlyTheIntegrationCrowdingItOut() throws Exception {
+        // Backstop at 4 keys: with two active integrations each one's fair share is 1.
+        handler = handlerWithRefuseAt(4, new SimpleMeterRegistry());
+        handler.setActiveFloor(1);
+        WebhookChannelSettings roomy = settings(Map.of());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, roomy, event("d-60", "{}"), "b:1").status());
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, roomy, event("d-61", "{}"), "b:2").status());
+        assertEquals(202, handler.dispatch(OTHER_ID, integration, roomy, event("d-62", "{}"), "b:3").status());
+        // The cache now holds 6 keys, past the backstop.
+
+        assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, roomy, event("d-63", "{}"), "b:4").status(),
+                "the integration holding two deliveries is above its share");
+        assertEquals(202, handler.dispatch("00000000000000000000000a", integration, roomy, event("d-64", "{}"), "b:5").status(),
+                "an integration with no deliveries is not refused for someone else's volume");
+    }
+
+    @Test
+    void refusalStormWarnsOncePerMinute() throws Exception {
+        handler = handlerWithRefuseAt(1_000_000, new SimpleMeterRegistry());
+        long[] now = {5_000_000_000L};
+        handler.setClock(() -> now[0]);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "1"));
+        handler.dispatch(INTEGRATION_ID, integration, budget, event("d-70", "{}"), "b:1");
+        for (int i = 0; i < 5; i++) {
+            assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, budget, event("d-7" + (i + 1), "{}"), "b:x" + i).status());
+        }
+        assertEquals(1, handler.capacityWarningsLogged(), "five refusals inside a minute are one log line");
+        now[0] += 61_000L;
+        // The window (10 min) still holds the first delivery, so this is refused and
+        // warns again.
+        handler.dispatch(INTEGRATION_ID, integration, budget, event("d-79", "{}"), "b:y");
+        assertEquals(2, handler.capacityWarningsLogged());
+    }
+
+    @Test
+    void refusalThresholdLeavesHeadroomInTheCache() {
+        assertTrue(WebhookEventHandler.DEDUP_REFUSE_AT * 2 <= CacheFactory.maximumSizeFor(WebhookEventHandler.DEDUP_CACHE_NAME,
+                WebhookEventHandler.DEDUP_TTL), "the backstop must sit at or below half the capacity");
+        assertTrue(WebhookEventHandler.DEDUP_REFUSE_AT > 0);
+    }
+
+    @Test
+    void orphanedConversationIsEndedWithItsOwnReason() throws Exception {
+        doThrow(new QuotaExceededException("api calls")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("d-80", "{}"), null);
+        verify(conversationService).endConversation(CONV_1, "system:webhook-turn-refused");
+    }
+
+    @Test
+    void dedupWindowIsTheSharedBucketTtlOfSlack() {
+        assertEquals(Duration.ofMinutes(10), WebhookEventHandler.DEDUP_TTL);
+        assertEquals("webhook-event-dedup", WebhookEventHandler.DEDUP_CACHE_NAME);
+    }
+
+    private static String id(int n) {
+        return String.format("%024x", n);
+    }
+
+    @Test
+    void nearlyFullCacheRefusesEveryNewDeliveryWhateverItsIntegrationHolds() throws Exception {
+        // Backstop 4, hard stop 7. Integrations that each hold little keep being
+        // admitted by the fair share, until the cache itself is nearly full.
+        handler = handlerWithRefuseAt(4, new SimpleMeterRegistry());
+        handler.setActiveFloor(1);
+        WebhookChannelSettings roomy = settings(Map.of());
+        for (int i = 1; i <= 4; i++) {
+            assertEquals(202, handler.dispatch(id(i), integration, roomy, event("h-" + i, "{}"), "b:h" + i).status(), "delivery " + i);
+        }
+        // 8 keys held, at or past the hard stop (7): even an idle integration waits.
+        Dispatch idle = handler.dispatch(id(99), integration, roomy, event("h-99", "{}"), "b:h99");
+        assertEquals(503, idle.status());
+        // Repeats are still answered.
+        assertEquals(200, handler.dispatch(id(1), integration, roomy, event("h-1", "{}"), "b:h1").status());
+    }
+
+    @Test
+    void deliveryStillCountsUntilItsKeysCouldHaveExpired() throws Exception {
+        handler = handlerWithRefuseAt(1_000_000, new SimpleMeterRegistry());
+        long[] now = {1_000_000_000L};
+        handler.setClock(() -> now[0]);
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "1"));
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("w-1", "{}"), "b:w1").status());
+
+        // Ten minutes on, the first delivery's keys can still be in the cache (they
+        // were
+        // written up to a minute after the start of its bucket).
+        now[0] += 10 * 60_000L;
+        assertEquals(503, handler.dispatch(INTEGRATION_ID, integration, budget, event("w-2", "{}"), "b:w2").status());
+
+        now[0] += 60_000L;
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, budget, event("w-3", "{}"), "b:w3").status());
+    }
+
+    @Test
+    void manyIntegrationsWithOneDeliveryEachDoNotShrinkAnotherOnesShare() throws Exception {
+        // Backstop 40, hard stop 72, floor 5. A holds 4 deliveries (8 keys) of its
+        // share; 20 throwaway integrations each send one delivery.
+        handler = handlerWithRefuseAt(40, new SimpleMeterRegistry());
+        handler.setActiveFloor(5);
+        WebhookChannelSettings roomy = settings(Map.of());
+        for (int i = 1; i <= 20; i++) {
+            assertEquals(202, handler.dispatch(id(1000 + i), integration, roomy, event("t-" + i, "{}"), "b:t" + i).status());
+        }
+        // 40 keys: the backstop is reached. A (used 0) delivers; share is 40/2/1 = 20,
+        // not 40/2/21.
+        for (int i = 1; i <= 8; i++) {
+            assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, roomy, event("a-" + i, "{}"), "b:a" + i).status(),
+                    "A's delivery " + i + " is within a share the throwaway integrations must not shrink");
+        }
+    }
+
+    @Test
+    void admittedDeliveryDoesNoExtraCacheRead() throws Exception {
+        CacheImpl<String, String> spy = spy(new CacheImpl<String, String>("dedup", Caffeine.newBuilder().build()));
+        ICacheFactory cacheFactory = mock(ICacheFactory.class);
+        when(cacheFactory.getCache(anyString(), any(Duration.class))).thenReturn((ICache) spy);
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenReturn(new IConversationService.ConversationResult(CONV_1, URI.create("eddi://c/" + CONV_1)));
+        handler = new WebhookEventHandler(router, conversationService, groupService, userConversationStore, templating, cacheFactory,
+                new SimpleMeterRegistry(), 1_000_000);
+
+        assertEquals(202, handler.dispatch(INTEGRATION_ID, integration, settings(Map.of()), event("g-1", "{}"), "b:g1").status());
+
+        verify(spy, never()).get(any());
+    }
+
+    @Test
+    void refusedDeliveriesDoNotSpendTheBudget() throws Exception {
+        handler = handlerWithRefuseAt(1_000_000, new SimpleMeterRegistry());
+        when(conversationService.startConversation(any(), anyString(), anyString(), anyMap()))
+                .thenThrow(new QuotaExceededException("conversations per day"));
+        WebhookChannelSettings budget = settings(Map.of("maxDeliveriesPerWindow", "1"));
+        for (int i = 0; i < 3; i++) {
+            assertEquals(429, handler.dispatch(INTEGRATION_ID, integration, budget, event("r-" + i, "{}"), "b:r" + i).status(),
+                    "a sender looping on a quota refusal must keep seeing the real 429, not a capacity 503");
+        }
     }
 }

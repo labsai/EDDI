@@ -1,6 +1,7 @@
 import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePendingApprovals, useAllGroupPendingApprovals } from "@/hooks/use-hitl";
+import { useAttentionCount } from "@/hooks/use-ratings";
 import {
   PanelLeftClose,
   PanelLeft,
@@ -16,7 +17,7 @@ import {
   Languages,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth, useMayOpenScreen } from "@/hooks/use-auth";
+import { useAuth, useIsAdminOrUnknown, useMayOpenScreen } from "@/hooks/use-auth";
 import { userDisplayName, userInitials, userSecondaryEmail } from "@/lib/user-display";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -97,6 +98,14 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
     ...(pendingApprovals ?? []).map((a) => a.conversationId),
     ...(groupPendings ?? []).map((a) => a.conversationId),
   ]).size;
+
+  // Ratings that still need a look (NEW and low or commented). Without an agent
+  // the count spans every agent, which only an administrator may ask for — so
+  // only they get the badge; everyone else sees the count per agent on the
+  // Feedback page. Shares its key with the dashboard tile: one poll.
+  const mayCountAllRatings = useIsAdminOrUnknown() && mayOpen("/manage/feedback");
+  const { data: feedbackAttention } = useAttentionCount(undefined, mayCountAllRatings);
+  const feedbackAttentionCount = mayCountAllRatings ? (feedbackAttention ?? 0) : 0;
 
   /** Avatar initials and label — both empty when the token carries no profile claims */
   const initials = showUser ? userInitials(user) : "";
@@ -262,6 +271,23 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
                         })}
                       >
                         {!collapsed && (pendingApprovalCount > 99 ? "99+" : pendingApprovalCount)}
+                      </span>
+                    )}
+                    {item.path === "/manage/feedback" && feedbackAttentionCount > 0 && (
+                      <span
+                        className={cn(
+                          "ms-auto inline-flex items-center justify-center rounded-full bg-amber-500 font-semibold text-white",
+                          collapsed
+                            ? "absolute top-1.5 end-1.5 h-2 w-2"
+                            : "h-5 min-w-5 px-1.5 text-[11px]",
+                        )}
+                        data-testid="nav-feedback-badge"
+                        aria-label={t("feedback.attentionCount", {
+                          n: feedbackAttentionCount,
+                          defaultValue: "Ratings needing attention: {{n}}",
+                        })}
+                      >
+                        {!collapsed && (feedbackAttentionCount > 99 ? "99+" : feedbackAttentionCount)}
                       </span>
                     )}
                   </NavLink>

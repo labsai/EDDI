@@ -193,8 +193,8 @@ class ConnectionResolverAccessTokenTest {
         }
 
         @Test
-        @DisplayName("a mail origin is refused today: the allowlist holds http(s) origins only, and that fails closed")
-        void mailOriginRefusedUntilTheModelLearnsIt() {
+        @DisplayName("an https origin of the API does not cover a mail origin: the allowlist must name the mail server itself")
+        void mailOriginNotCoveredByHttpsEntry() {
             // The same host as the target, so only the scheme and port can be what refuses
             // it.
             var connection = oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE);
@@ -209,6 +209,21 @@ class ConnectionResolverAccessTokenTest {
         }
 
         @Test
+        @DisplayName("a mail origin on the allowlist releases the token for that server; the default port folds")
+        void mailOriginAllowed() {
+            var connection = oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE);
+            connection.setBaseUrlAllowlist(List.of("smtps://smtp.office365.com"));
+            register(connection);
+            when(accessTokenSupplier.accessToken(any(), anyString())).thenReturn("eyJ.mail");
+
+            assertEquals("eyJ.mail",
+                    resolver().resolveAccessToken("${connection:exo}", URI.create("smtps://smtp.office365.com:465"), null));
+            var other = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("smtp://smtp.office365.com:587"), null));
+            assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, other.getReason());
+        }
+
+        @Test
         @DisplayName("a blank token from the supplier is refused, not handed to XOAUTH2")
         void blankTokenRefused() {
             register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
@@ -217,6 +232,57 @@ class ConnectionResolverAccessTokenTest {
             var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
 
             assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
+        }
+    }
+
+    @Nested
+    @DisplayName("resolveBasicLogin: username and password for a mail login")
+    class BasicLogins {
+
+        private static final URI RELAY = URI.create("smtp://relay.example.com:587");
+
+        private ConnectionConfiguration basic() {
+            var connection = headerConnection(AuthType.BASIC);
+            connection.setBaseUrlAllowlist(List.of("smtp://relay.example.com"));
+            return connection;
+        }
+
+        @Test
+        @DisplayName("a BASIC connection yields its username and the vault-resolved password")
+        void basicResolves() {
+            register(basic());
+            when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+            when(secretResolver.resolveValue("${vault:app-password}")).thenReturn("app-pw");
+
+            var login = resolver().resolveBasicLogin("${connection:exo}", RELAY);
+
+            assertEquals("mailbox@example.com", login.username());
+            assertEquals("app-pw", login.password());
+            assertTrue(!login.toString().contains("app-pw"), "toString must not print the password");
+        }
+
+        @Test
+        @DisplayName("the allowlist is checked before the password is resolved")
+        void targetChecked() {
+            register(basic());
+
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveBasicLogin("${connection:exo}", URI.create("smtp://elsewhere.example.com:587")));
+
+            assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
+            verifyNoInteractions(secretResolver);
+        }
+
+        @Test
+        @DisplayName("OAuth and STATIC connections are refused: there is no username/password to give")
+        void otherTypesRefused() {
+            register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
+            assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    assertThrows(ConnectionException.class, () -> resolver().resolveBasicLogin("${connection:exo}", RELAY)).getReason());
+            register(headerConnection(AuthType.STATIC));
+            assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    assertThrows(ConnectionException.class, () -> resolver().resolveBasicLogin("${connection:exo}", RELAY)).getReason());
+            verifyNoInteractions(secretResolver);
         }
     }
 
