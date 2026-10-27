@@ -4522,6 +4522,7 @@
     "budgetTitle": "Budget de coût mensuel",
     "budgetUnlimited": "Aucun budget de coût mensuel n'est défini : la dépense est mesurée mais jamais limitée.",
     "budgetNotEnforced": "Un budget de {{limit}} est défini, mais l'application est désactivée : il n'est pas appliqué.",
+    "budgetDisabled": "L'application est désactivée : la dépense n'est ni mesurée ni limitée.",
     "budgetReached": "Budget atteint ({{spent}} sur {{limit}}). Les tâches LLM renvoient leur réponse de repli au lieu d'appeler le modèle et les appels d'outils sont refusés, jusqu'au changement de mois ou à l'augmentation de la limite.",
     "budgetRemaining": "{{spent}} sur {{limit}} utilisés ce mois-ci. Il reste {{remaining}} avant que les modèles ne soient plus appelés.",
     "budgetNote": "Compte les appels de modèle tarifés et le coût des outils suivis, par mois calendaire UTC. Les modèles sans prix, les résumés de conversation et les embeddings ne sont pas mesurés. Un tour qui franchit la limite se termine quand même : le total peut la dépasser légèrement. Les appels refusés sont comptés dans la métrique eddi.llm.spend.refused.",

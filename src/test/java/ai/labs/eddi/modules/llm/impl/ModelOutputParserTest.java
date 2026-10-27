@@ -54,7 +54,21 @@ class ModelOutputParserTest {
                 // nested structures
                 Arguments.of("x {\"a\":{\"b\":[1,{\"c\":2}]}} y", Map.of("a", Map.of("b", List.of(1, Map.of("c", 2)))), true),
                 // a first balanced candidate that is not JSON does not hide the real one
-                Arguments.of("Use {name} here: {\"a\":1}", Map.of("a", 1), true));
+                Arguments.of("Use {name} here: {\"a\":1}", Map.of("a", 1), true),
+                // \' is not a JSON escape; inside a string it can only mean ' (Gemini,
+                // 2026-10-26)
+                Arguments.of("{\"a\":\"Japan\\'s ruling class\"}", Map.of("a", "Japan's ruling class"), true),
+                Arguments.of("{\"a\":\"it\\'s\",\"b\":[\"don\\'t\"]}", Map.of("a", "it's", "b", List.of("don't")), true),
+                Arguments.of("```json\n{\"a\":\"it\\'s\"}\n```", Map.of("a", "it's"), true),
+                Arguments.of("Here: {\"a\":\"it\\'s\"} done", Map.of("a", "it's"), true),
+                // an unmatched quote in the prose before the object does not shift the string
+                // tracking
+                Arguments.of("Intro \"note: {\"a\":\"it\\'s\"}", Map.of("a", "it's"), true),
+                // an escaped backslash followed by a quote is valid JSON and stays as it is
+                Arguments.of("{\"a\":\"x\\\\'y\"}", Map.of("a", "x\\'y"), false),
+                // an escaped double quote does not end the string, so the \' after it is still
+                // inside
+                Arguments.of("{\"a\":\"say \\\"hi\\\" it\\'s\"}", Map.of("a", "say \"hi\" it's"), true));
     }
 
     @ParameterizedTest(name = "[{index}] {0}")
@@ -84,6 +98,11 @@ class ModelOutputParserTest {
                 Arguments.of("The empty set {} is a set.", ModelOutputParser.REASON_NO_OBJECT),
                 Arguments.of("{\"a\":1,}", ModelOutputParser.REASON_INVALID_SYNTAX),
                 Arguments.of("{'a':1}", ModelOutputParser.REASON_INVALID_SYNTAX),
+                // prose with \' outside any string is not JSON, and the raw reply is kept
+                // untouched
+                Arguments.of("It\\'s not JSON", ModelOutputParser.REASON_NOT_JSON),
+                // dropping \' does not paper over a second, real syntax error
+                Arguments.of("{\"a\":\"it\\'s\",}", ModelOutputParser.REASON_INVALID_SYNTAX),
                 Arguments.of("```json\n{\"a\":1,}\n```", ModelOutputParser.REASON_INVALID_SYNTAX));
     }
 

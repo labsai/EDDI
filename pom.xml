@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>ai.labs</groupId>
     <artifactId>eddi</artifactId>
-    <version>6.6.0</version>
+    <version>6.7.0</version>
     <properties>
         <compiler-plugin.version>3.16.0</compiler-plugin.version>
         <maven.compiler.source>25</maven.compiler.source>
@@ -29,8 +29,8 @@
         <langchain4j-beta.version>1.22.0-beta32</langchain4j-beta.version>
         <jandex-maven-plugin.version>3.6.0</jandex-maven-plugin.version>
         <maven.compiler.parameters>true</maven.compiler.parameters>
-        <surefire-plugin.version>3.6.0</surefire-plugin.version>
-        <failsafe-plugin.version>3.6.0</failsafe-plugin.version>
+        <surefire-plugin.version>3.6.1</surefire-plugin.version>
+        <failsafe-plugin.version>3.6.1</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <quarkus-mcp-server.version>2.0.3</quarkus-mcp-server.version>
         <skipITs>true</skipITs>
@@ -95,7 +95,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-core</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.4</version>
             </dependency>
             <!-- Override jackson-databind to fix GHSA-5gvw-p9qm-jgwh (@JsonView bypassed for
                  @JsonUnwrapped containers) and GHSA-5jmj-h7xm-6q6v (case-insensitive
@@ -109,7 +109,7 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.core</groupId>
                 <artifactId>jackson-databind</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.4</version>
             </dependency>
             <!-- Keep the two jackson-dataformat modules we declare on the same patch
                  as jackson-core/databind above. The Quarkus BOM manages the whole
@@ -118,12 +118,12 @@
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-csv</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.4</version>
             </dependency>
             <dependency>
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
                 <artifactId>jackson-dataformat-xml</artifactId>
-                <version>2.22.3</version>
+                <version>2.22.4</version>
             </dependency>
             <!-- Override reactor-netty-http to fix CVE-2025-22227 (pulled by langchain4j-azure-open-ai).
                  Stay on the 1.2 line while Quarkus manages Netty 4.1 (4.1.138.Final in 3.39.5):
@@ -396,6 +396,22 @@
             <groupId>org.jsoup</groupId>
             <artifactId>jsoup</artifactId>
             <version>1.23.2</version>
+        </dependency>
+        <!-- Mail core (engine/mail): MIME parsing and rendering, and later the
+             IMAP/SMTP clients, which take their sockets from
+             SafeSocketConnector. Angus Mail is the Jakarta Mail implementation;
+             EPL-2.0 OR GPL-2.0-with-Classpath-exception OR BSD-3-Clause (EDL 1.0).
+             Pinned to the versions the Quarkus BOM manages, so there is one copy
+             on the classpath. -->
+        <dependency>
+            <groupId>jakarta.mail</groupId>
+            <artifactId>jakarta.mail-api</artifactId>
+            <version>2.1.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.angus</groupId>
+            <artifactId>angus-mail</artifactId>
+            <version>2.0.5</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>

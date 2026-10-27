@@ -15,6 +15,7 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 /**
  * Built-in LLM tool for reading the current conversation's uploaded attachments
@@ -24,7 +25,10 @@ import java.util.Locale;
  * The conversation is implicit: the tool is constructed with the conversation
  * id by {@code AgentOrchestrator}, so the LLM never supplies a
  * userId/conversationId — it can only see attachments belonging to (or granted
- * to) its own conversation, enforced by {@link IAttachmentStore}.
+ * to) its own conversation, enforced by {@link IAttachmentStore}. Files of a
+ * turn an input guardrail refused are left out (the {@code withheldRefs} the
+ * provider passes): the store still holds them, but their content must not come
+ * back to a model as an unscreened tool result.
  * <p>
  * Constructed per-invocation — NOT a CDI bean.
  *
@@ -38,18 +42,39 @@ public class ReadAttachmentTool {
     private final IAttachmentStore attachmentStore;
     private final AttachmentTextExtractor textExtractor;
     private final String conversationId;
+    private final Set<String> withheldRefs;
 
     public ReadAttachmentTool(IAttachmentStore attachmentStore, AttachmentTextExtractor textExtractor,
             String conversationId) {
+        this(attachmentStore, textExtractor, conversationId, Set.of());
+    }
+
+    /**
+     * @param withheldRefs
+     *            storage references never listed nor read — the files of turns an
+     *            input guardrail refused
+     */
+    public ReadAttachmentTool(IAttachmentStore attachmentStore, AttachmentTextExtractor textExtractor,
+            String conversationId, Set<String> withheldRefs) {
         this.attachmentStore = attachmentStore;
         this.textExtractor = textExtractor;
         this.conversationId = conversationId;
+        this.withheldRefs = withheldRefs != null ? Set.copyOf(withheldRefs) : Set.of();
+    }
+
+    /** The conversation's attachments, minus the withheld ones. */
+    private List<Attachment> accessible() {
+        List<Attachment> attachments = attachmentStore.listAccessible(conversationId);
+        if (withheldRefs.isEmpty()) {
+            return attachments;
+        }
+        return attachments.stream().filter(a -> !withheldRefs.contains(a.storageRef())).toList();
     }
 
     @Tool("Lists the files attached to this conversation. Returns each attachment's name, type and size. "
             + "Use this to discover what is available before calling readAttachment.")
     public String listAttachments() {
-        List<Attachment> attachments = attachmentStore.listAccessible(conversationId);
+        List<Attachment> attachments = accessible();
         if (attachments.isEmpty()) {
             return "No attachments are available in this conversation.";
         }
@@ -116,7 +141,7 @@ public class ReadAttachmentTool {
         if (nameOrRef == null || nameOrRef.isBlank()) {
             return null;
         }
-        List<Attachment> attachments = attachmentStore.listAccessible(conversationId);
+        List<Attachment> attachments = accessible();
         // Prefer an exact storageRef match, then an exact file-name match, then
         // case-insensitive name.
         for (Attachment a : attachments) {

@@ -491,7 +491,19 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
 
     @Override
     public double getMonthlyCost(String tenantId) {
-        Document doc = usage.find(Filters.eq(FIELD_TENANT_ID, tenantId)).first();
+        Document doc;
+        try {
+            doc = usage.find(Filters.eq(FIELD_TENANT_ID, tenantId)).first();
+        } catch (MongoException e) {
+            // The pre-call cost gate reads this before every LLM task and tool call. A
+            // driver exception escaping here failed the turn instead of serving the
+            // fallback answer, while PostgreSQL answered the same outage by allowing the
+            // call. Raise the outage the way getQuota does, so TenantQuotaService refuses
+            // it as accounting-unavailable on every backend.
+            LOGGER.errorf("Failed to read monthly cost for tenant '%s': %s",
+                    LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
         if (doc == null) {
             return 0.0;
         }
