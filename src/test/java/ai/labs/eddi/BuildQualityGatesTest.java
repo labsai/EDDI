@@ -927,13 +927,14 @@ class BuildQualityGatesTest {
         assertTrue(expected.remove("ui/**"),
                 "the `code` filter no longer lists ui/**, but the frontends ship inside the image. Found: " + expected);
         expected.addAll(
-                List.of("ui/**/*.md", "README.md", "AGENTS.md", ".githooks/**", ".github/dependabot.yml",
-                        ".gitignore"));
+                List.of("ui/**/*.md", "docs-site/**/*.md", "README.md", "AGENTS.md", ".githooks/**",
+                        ".github/dependabot.yml", ".gitignore"));
         List<String> backend = ciFilterPatterns("backend");
 
         assertEquals(expected.stream().sorted().toList(), backend.stream().sorted().toList(),
                 "the `backend` filter in " + CI_WORKFLOW + " must be the `code` filter without ui/** and with"
-                        + " ui/**/*.md, README.md, AGENTS.md, .githooks/**, .github/dependabot.yml and .gitignore (only tests read"
+                        + " ui/**/*.md, docs-site/**/*.md, README.md, AGENTS.md, .githooks/**, .github/dependabot.yml"
+                        + " and .gitignore (only tests read"
                         + " those). Build & Test gates on it for"
                         + " pull requests, so a path that is in `code` but not here skips the Java suite on every PR"
                         + " that touches only that path.");
@@ -1561,10 +1562,10 @@ class BuildQualityGatesTest {
     }
 
     /**
-     * One Node version, written three times: {@code pom.xml}'s {@code node.version}
+     * One Node version, written four times: {@code pom.xml}'s {@code node.version}
      * (what the shipped UI is built with), ci.yml's {@code NODE_VERSION} (every
-     * {@code setup-node}), and {@code mise.toml}. CI used a floating {@code 22}
-     * while the jar was built with a pinned 22.x.
+     * {@code setup-node}), {@code mise.toml} and {@code docs-site/.nvmrc}. CI used
+     * a floating {@code 22} while the jar was built with a pinned 22.x.
      * <p>
      * And the archive frontend-maven-plugin unpacks for the shipped build is
      * checked against a pinned SHA-256 first, because the plugin verifies nothing
@@ -1584,6 +1585,10 @@ class BuildQualityGatesTest {
 
         assertEquals(pomVersion.group(1), ciVersion.group(1), "ci.yml NODE_VERSION must equal pom.xml node.version");
         assertEquals(pomVersion.group(1), miseVersion.group(1), "mise.toml's node must equal pom.xml node.version");
+        // The docs site builds locally with nvm and on Vercel; .nvmrc is the version
+        // both read.
+        assertEquals(pomVersion.group(1), read(Path.of("docs-site", ".nvmrc")).strip(),
+                "docs-site/.nvmrc must equal pom.xml node.version");
 
         // Any workflow, not just ci.yml. `env.NODE_VERSION` resolves only inside the
         // workflow that declares it — an undeclared one is an empty string, which

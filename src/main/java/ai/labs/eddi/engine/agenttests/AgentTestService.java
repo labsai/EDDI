@@ -12,6 +12,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -42,7 +43,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * exactly what a deploy takes: the deploy itself goes through
  * {@link IRestAgentAdministration#deployAgent}, which checks EDIT on the agent,
  * the space-reference guard and the tenant agent quota against the caller. The
- * suite must be readable by the caller. Reading a run takes VIEW on its agent.
+ * suite must be readable by the caller. Reading a run takes VIEW on its agent;
+ * cancelling one takes EDIT on it, what starting one takes.
  * <h3>The production environment is never touched</h3> Only {@code test} is
  * deployed to, without recording the deployment ({@code autoDeploy=false}), and
  * every test conversation runs there.
@@ -63,13 +65,14 @@ public class AgentTestService {
     private final ResourceAccessGuard accessGuard;
     private final Instance<SecurityIdentity> identity;
     private final ClusterConfig clusterConfig;
+    private final NodeIdentity nodeIdentity;
     private final Semaphore concurrentRuns;
     private final int maxConcurrentRuns;
 
     @Inject
     public AgentTestService(IAgentTestSuiteStore suiteStore, IAgentTestRunStore runStore, AgentTestRunner runner,
             IRestAgentAdministration agentAdministration, IAgentFactory agentFactory, IAgentStore agentStore, ResourceAccessGuard accessGuard,
-            Instance<SecurityIdentity> identity, ClusterConfig clusterConfig,
+            Instance<SecurityIdentity> identity, ClusterConfig clusterConfig, NodeIdentity nodeIdentity,
             @ConfigProperty(name = "eddi.agent-tests.max-concurrent-runs", defaultValue = "2") int maxConcurrentRuns) {
         this.suiteStore = suiteStore;
         this.runStore = runStore;
@@ -80,6 +83,7 @@ public class AgentTestService {
         this.accessGuard = accessGuard;
         this.identity = identity;
         this.clusterConfig = clusterConfig;
+        this.nodeIdentity = nodeIdentity;
         this.maxConcurrentRuns = Math.max(1, maxConcurrentRuns);
         this.concurrentRuns = new Semaphore(this.maxConcurrentRuns);
     }
@@ -122,18 +126,24 @@ public class AgentTestService {
         }
 
         int resolvedAgentVersion = agentVersion != null ? agentVersion : currentVersion(agentStore, agentId, "Agent");
-        deployToTest(agentId, resolvedAgentVersion);
 
+        // The slot first, the deploy second: a request that is going to be refused
+        // for capacity must not first deploy a version to `test` — which changes what
+        // every other client of that environment talks to — and then be turned away.
         if (!concurrentRuns.tryAcquire()) {
             throw new ClientErrorException("At most " + maxConcurrentRuns + " agent test runs may execute at once "
                     + "(eddi.agent-tests.max-concurrent-runs). Retry when one has finished.", Response.Status.TOO_MANY_REQUESTS);
         }
         AgentTestRun run;
         try {
+            deployToTest(agentId, resolvedAgentVersion);
             var pending = new AgentTestRun(null, suiteId, resolvedSuiteVersion, suite.name(), agentId, resolvedAgentVersion,
                     AgentTestRun.Status.RUNNING, principal(), System.currentTimeMillis(), null, null, null, suite.effectiveMaxCostPerRun(),
-                    null, null, null, null, null, null, keepConversations, null);
+                    null, null, null, null, null, null, keepConversations, null, owner(), System.currentTimeMillis());
             run = pending.withId(runStore.create(pending));
+        } catch (RuntimeException e) {
+            concurrentRuns.release();
+            throw e;
         } catch (Exception e) {
             concurrentRuns.release();
             throw new IllegalStateException("Could not record the test run: " + e.getMessage(), e);
@@ -168,6 +178,38 @@ public class AgentTestService {
             throw new IllegalStateException("Could not read the test run: " + e.getMessage(), e);
         }
         accessGuard.requireAccess(run.agentId(), AccessLevel.VIEW, "agent");
+        return run;
+    }
+
+    /**
+     * Asks a running run to stop; EDIT on its agent, like starting one. The run
+     * stops cooperatively — no further turn starts, a waiting turn is abandoned,
+     * its conversations are ended and deleted — and is stored {@code CANCELLED}
+     * moments later, which a poll of the run shows.
+     *
+     * @return the run as it is now (still {@code RUNNING})
+     */
+    public AgentTestRun cancelRun(String runId) {
+        AgentTestRun run;
+        try {
+            run = runStore.read(runId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("Agent test run " + runId + " not found.");
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new IllegalStateException("Could not read the test run: " + e.getMessage(), e);
+        }
+        accessGuard.requireAccess(run.agentId(), AccessLevel.EDIT, "agent");
+        if (run.status() != AgentTestRun.Status.RUNNING) {
+            throw new ClientErrorException("Agent test run " + runId + " has already finished (" + run.status() + ").",
+                    Response.Status.CONFLICT);
+        }
+        if (!runner.cancel(runId, principal())) {
+            throw new ClientErrorException("Agent test run " + runId + " is not executing on this node"
+                    + (run.ownerNode() != null ? " (it runs on " + run.ownerNode() + ")" : "")
+                    + ". Cancel it on the node that runs it; a run whose node has stopped is closed as ABORTED automatically.",
+                    Response.Status.CONFLICT);
+        }
+        LOGGER.infof("Agent test run %s cancelled by %s", sanitize(runId), sanitize(principal()));
         return run;
     }
 
@@ -219,6 +261,11 @@ public class AgentTestService {
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException(label + " " + id + " not found.");
         }
+    }
+
+    /** The node and boot that execute runs started here. */
+    private String owner() {
+        return nodeIdentity != null ? nodeIdentity.toString() : null;
     }
 
     private String principal() {

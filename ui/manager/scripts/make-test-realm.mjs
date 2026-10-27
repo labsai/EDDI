@@ -51,9 +51,15 @@ export const ROLE_FIXTURES = {
   // eddi-viewer is in there deliberately: EDDI has no role hierarchy, so an
   // account without it is refused every MCP read tool (McpToolUtils.requireRole
   // is a literal hasRole). The realm grants the administrator all three.
-  admin: { username: ADMIN_USER, password: ADMIN_PASSWORD, roles: ["eddi-admin", "eddi-editor", "eddi-viewer"] },
-  user: { username: "user", password: "e2e-user-password", roles: ["eddi-user"] },
-  viewer: { username: "viewer", password: "e2e-viewer-password", roles: ["eddi-viewer"] },
+  // offline_access on every account: eddi-mcp issues offline tokens, which
+  // Keycloak refuses to a user without the role.
+  admin: {
+    username: ADMIN_USER,
+    password: ADMIN_PASSWORD,
+    roles: ["eddi-admin", "eddi-editor", "eddi-viewer", "offline_access"],
+  },
+  user: { username: "user", password: "e2e-user-password", roles: ["eddi-user", "offline_access"] },
+  viewer: { username: "viewer", password: "e2e-viewer-password", roles: ["eddi-viewer", "offline_access"] },
 };
 
 /** The public client the backend's __auth_config__.js names. */

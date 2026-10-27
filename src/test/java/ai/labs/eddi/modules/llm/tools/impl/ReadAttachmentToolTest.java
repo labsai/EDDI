@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -60,6 +61,23 @@ class ReadAttachmentToolTest {
         assertTrue(out.contains("application/pdf"));
         assertTrue(out.contains("notes.txt"));
         assertTrue(out.contains("r2"));
+    }
+
+    @Test
+    void withheldFiles_areNeitherListedNorRead() throws Exception {
+        var withheld = new ReadAttachmentTool(store, new AttachmentTextExtractor(10_000), CONV, Set.of("r-blocked"));
+        when(store.listAccessible(CONV)).thenReturn(List.of(
+                att("r-blocked", "payload.txt", "text/plain", 40),
+                att("r2", "notes.txt", "text/plain", 12)));
+        when(store.load("r2", CONV)).thenReturn("fine".getBytes(StandardCharsets.UTF_8));
+
+        String listed = withheld.listAttachments();
+        assertFalse(listed.contains("payload.txt"), listed);
+        assertTrue(listed.contains("notes.txt"));
+        assertTrue(withheld.readAttachment("payload.txt", 0).startsWith("No attachment named"));
+        assertTrue(withheld.readAttachment("r-blocked", 0).startsWith("No attachment named"));
+        assertTrue(withheld.readAttachment("notes.txt", 0).contains("fine"));
+        verify(store, never()).load(eq("r-blocked"), any());
     }
 
     // ==================== readAttachment ====================
