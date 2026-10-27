@@ -2616,7 +2616,7 @@ jobs:
 
       - name: Generate SLSA provenance attestation
         if: steps.docker-push.outputs.digest != ''
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-name: docker.io/${{ env.DOCKER_IMAGE }}
           subject-digest: ${{ steps.docker-push.outputs.digest }}
@@ -2678,7 +2678,7 @@ jobs:
       # statement is stored in GitHub's attestation store and verifiable with
       # `gh attestation verify SHA256SUMS --repo labsai/EDDI`.
       - name: Generate SLSA provenance attestation (SHA256SUMS)
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: SHA256SUMS
 
