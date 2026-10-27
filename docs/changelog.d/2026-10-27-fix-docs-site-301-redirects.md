@@ -10,8 +10,6 @@
 
 **`main`'s Docs Site check was red.** #1136 (conversation ratings) linked `mcp-server.md` to `conversation-ratings.md#mcp-tools-and-the-platform-operator`, a section that page does not have, so the docs build has failed on every push to `main` since. The link now points to the section that describes the same scoping — "Analyzing and triaging (the people running the agent)". The ratings page's status note says it covers the MCP rating tools, but it has no section on them; adding one is for the ratings work, not this fix.
 
-**`main`'s Build & Test was red too.** #1145 (branding) and #1140 (mail) merged the same day and each added a `"sha256:"` entry to the `Map.ofEntries` in `ReservedPrincipalsTest`; together the map has a duplicate key, the class fails to initialize, and all three of its tests error on every build of `main` and of every branch cut from it. The two entries are now one, carrying both reasons.
-
 ### Verification
 
 - `npm test` in `docs-site/`: 55 tests, including the new 301 test.
