@@ -658,6 +658,44 @@ validateUrl(url); // throws IllegalArgumentException if blocked
 
 ---
 
+## Mail Sockets — `SafeSocketConnector`
+
+IMAP and SMTP are raw TCP, which the HTTP client's SSRF policy does not cover. A mail host that a channel or
+knowledge-base author types in would otherwise be an internal port scanner ("does `10.0.0.5:993` answer?").
+`SafeSocketConnector` (`engine/net`) is the only way EDDI opens such a socket, and it applies the same address rules
+as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` rather than keeping a copy:
+
+| Rule | Detail |
+|---|---|
+| Host is a DNS name | IP literals are refused in every spelling resolvers accept (`127.0.0.1`, `2130706433`, `0x7f.0.0.1`, `[::1]`), as are single-label names. A mail server has a name, and TLS validates that name |
+| Internal names refused before lookup | `localhost`, `*.local`, `*.internal`, cloud metadata host names |
+| Allowed ports only | IMAP `993` (TLS) or `143` (STARTTLS, required); SMTP `465` (TLS) or `587` (STARTTLS, required). No port 25, no plaintext session |
+| Deployment allowlist | When `eddi.email.allowed-hosts` is set, the host must match an entry (`host` or `*.domain`; the wildcard does not match the domain itself). Empty allows any public host |
+| Resolved once, every address checked | One DNS answer with a private, loopback, link-local, CGNAT, ULA, metadata, multicast or unspecified address — or an IPv6 form embedding one — refuses the host |
+| Pinned | The socket connects to the first address of that one resolution. A mail library re-resolving the name (DNS rebinding) is ignored: the socket accepts only the vetted host and port and connects to the pinned address |
+| TLS always verified | Certificate chain against the JVM trust store and host name against the certificate. There is no setting that turns either off |
+| Timeouts | 10 s connect, 60 s per read |
+
+The allowlist does **not** exempt private addresses: an on-premises mail server on a private network is refused
+today. Allowing one would be its own, explicit deployment setting.
+
+For Angus Mail, `angusProperties(endpoint)` installs the pinned factory for both plain and TLS connections, turns
+`socketFactory.fallback` off (otherwise a refusal inside the factory makes Angus retry with an unguarded socket of
+its own), requires STARTTLS where it is used, and keeps `ssl.checkserveridentity` on. Callers add only their
+authentication settings, never `*.ssl.trust`, socket-factory, proxy or SOCKS properties.
+
+The mail core it serves (`engine/mail`) treats every message as untrusted: size, header, nesting, part and
+attachment limits are enforced before the work they bound, executables never carry content, archives are never
+expanded, HTML is converted with hidden content removed (`display:none`, `hidden`, zero opacity, zero-size or
+transparent text, text the colour of its background, off-screen positioning, `<style>` hiding rules, comments —
+`HiddenContentFilter` in mail mode; web and file ingestion use its conservative page mode, which keeps
+script-revealed content and drops only comments, 1px text, transparent text and explicitly same-coloured text),
+a `multipart/alternative` whose plain and HTML parts say different things is flagged `ALTERNATIVES_DIVERGE`, and
+the plain-text renderer refuses any header value containing a line break. Every one of these passes is linear in
+the input — style blocks are read by a single forward scan, never by a backtracking regular expression.
+
+---
+
 ## Sandboxed Math Evaluation — `SafeMathParser`
 
 **Applies to:** Calculator tool.

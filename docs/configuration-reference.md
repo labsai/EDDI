@@ -534,6 +534,15 @@ Full guide: [slack-integration.md](slack-integration.md).
 | `eddi.slack.hitl.approval-record-retention` | `30d` | How long a posted HITL approval card's binding record is kept. A decision (Approve/Reject) on a card older than this is refused; the pause can still be resolved via REST/MCP, and a new message in the thread posts a fresh card. Zero/negative falls back to `30d` |
 | `eddi.webhook.max-body-bytes` | `262144` | Largest body, in bytes, the signed inbound webhook endpoint (`POST /integrations/webhook/{integrationId}`) reads before answering 413. The cap is applied to the raw bytes before the signature is checked, so it also bounds what an unauthenticated caller can make EDDI buffer |
 
+### Email
+
+There is no email channel yet; this setting governs the mail socket guard that the coming IMAP/SMTP transports
+will connect through. Details: [security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.email.allowed-hosts` | *(empty — any public host)* | Comma-separated mail servers (IMAP/SMTP) that channel and knowledge-base authors may name: exact host names, or `*.domain` for its subdomains (not the domain itself). Applied on top of the always-on refusal of private, loopback, link-local and metadata addresses, which an entry here does not lift. An entry that is not a host name fails the first mail connection rather than being ignored |
+
 ### OpenAI-compatible API
 
 Full guide: [open-webui-integration.md](open-webui-integration.md).
