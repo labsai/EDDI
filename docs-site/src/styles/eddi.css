@@ -395,3 +395,103 @@ starlight-toc a[aria-current='true']:hover {
 .pagination-links a .link-title {
 	color: var(--eddi-text);
 }
+
+/* ── Resizable, hideable sidebars (LayoutToggle.astro, src/lib/sidebar-layout.mjs) ─────
+   Starlight sizes both sidebars from one --sl-sidebar-width. Each side gets its own width
+   here (--eddi-left-w / --eddi-right-w, set by the reader and restored before first paint),
+   and can be hidden. Screen only, and only where Starlight shows the side at all: the
+   navigation from 50rem, the table of contents from 72rem. Print and phones are untouched. */
+
+:root {
+	--eddi-left-w: 18.75rem;
+	--eddi-right-w: 18.75rem;
+}
+
+@media screen and (min-width: 50rem) {
+	:root[data-has-sidebar] {
+		--sl-content-inline-start: var(--eddi-left-w);
+	}
+	.sidebar-pane {
+		width: var(--eddi-left-w);
+	}
+	:root[data-has-sidebar][data-eddi-left-hidden] {
+		--sl-content-inline-start: 0px;
+	}
+	:root[data-eddi-left-hidden] .sidebar-pane {
+		display: none;
+	}
+}
+
+@media screen and (min-width: 72rem) {
+	.right-sidebar-container {
+		width: var(--eddi-right-w);
+	}
+	/* Starlight's .right-sidebar is position: fixed at width: 100% — of the viewport — and leaves
+	   the clipping to a fixed-width inner container; with a variable width it needs its own. */
+	.right-sidebar {
+		width: var(--eddi-right-w);
+	}
+	:root[data-has-sidebar][data-has-toc] .main-pane {
+		width: calc(100% - var(--eddi-right-w));
+		--sl-content-margin-inline: auto;
+	}
+	.right-sidebar-panel .sl-container {
+		width: auto;
+		max-width: none;
+	}
+	:root[data-eddi-right-hidden] .right-sidebar-container {
+		display: none;
+	}
+	:root[data-has-sidebar][data-has-toc][data-eddi-right-hidden] .main-pane {
+		width: 100%;
+	}
+}
+
+/* The drag handles: a thin strip on each sidebar's inner edge, an accent line on hover,
+   focus and while dragging. */
+.eddi-resizer {
+	display: none;
+	position: fixed;
+	z-index: calc(var(--sl-z-index-menu) + 1);
+	top: var(--sl-nav-height);
+	bottom: 0;
+	width: 9px;
+	cursor: col-resize;
+	touch-action: none;
+}
+.eddi-resizer::after {
+	content: '';
+	position: absolute;
+	inset-block: 0;
+	inset-inline-start: 4px;
+	width: 1px;
+	background: transparent;
+	transition: background 0.15s, box-shadow 0.15s;
+}
+.eddi-resizer:hover::after,
+.eddi-resizer:focus-visible::after,
+:root[data-eddi-resizing] .eddi-resizer::after {
+	background: var(--eddi-accent);
+	box-shadow: 0 0 0 1px var(--eddi-accent);
+}
+.eddi-resizer:focus-visible {
+	outline: none;
+}
+@media screen and (min-width: 50rem) {
+	:root[data-has-sidebar]:not([data-eddi-left-hidden]) .eddi-resizer[data-side='left'] {
+		display: block;
+		left: calc(var(--eddi-left-w) - 5px);
+	}
+}
+@media screen and (min-width: 72rem) {
+	:root[data-has-toc]:not([data-eddi-right-hidden]) .eddi-resizer[data-side='right'] {
+		display: block;
+		right: calc(var(--eddi-right-w) - 5px);
+	}
+}
+/* While dragging: no text selection, and the cursor stays a resize cursor everywhere. */
+:root[data-eddi-resizing],
+:root[data-eddi-resizing] * {
+	user-select: none;
+	cursor: col-resize !important;
+}

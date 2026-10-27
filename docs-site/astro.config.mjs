@@ -5,6 +5,7 @@ import { defineConfig, passthroughImageService } from 'astro/config';
 import mermaid from 'astro-mermaid';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightLlmsTxt from 'starlight-llms-txt';
+import { preloadScript } from './src/lib/sidebar-layout.mjs';
 
 // Written by scripts/sync-docs.mjs from docs/SUMMARY.md (npm run sync, which
 // dev and build run first). Everything generated lives under .generated/.
@@ -61,9 +62,14 @@ export default defineConfig({
 			},
 			// The website's favicons (eddi.technology/public), so a docs tab looks like a site tab.
 			favicon: '/favicon.svg',
-			head: [{ tag: 'link', attrs: { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico', sizes: '48x48' } }],
+			head: [
+				{ tag: 'link', attrs: { rel: 'icon', type: 'image/x-icon', href: '/favicon.ico', sizes: '48x48' } },
+				// The reader's sidebar widths and hidden sides, applied before first paint (LayoutToggle.astro).
+				{ tag: 'script', content: preloadScript() },
+			],
 			// The right side of the website's header, and its sun/moon toggle instead of a <select>.
 			components: {
+				SiteTitle: './src/components/SiteTitle.astro',
 				SocialIcons: './src/components/HeaderActions.astro',
 				ThemeSelect: './src/components/ThemeToggle.astro',
 			},
