@@ -631,8 +631,17 @@ class ToolLoopRunner {
                                     pinResolvers);
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
-                            throw new ToolApprovalRequiredException(
+                            var pause = new ToolApprovalRequiredException(
                                     ToolApprovalGateSupport.buildPauseReason(effectiveToolApprovals, gateResult, governingRule), batch);
+                            // What this run spent up to the pause — its model rounds at the
+                            // task's prices and its tool calls (for a resume, from before the
+                            // approved calls). LlmTask records it on the step as the pause
+                            // passes, so the resume's spend checks count it.
+                            Map<String, Object> usageSoFar = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
+                            pause.addSpend(usageSoFar,
+                                    TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), usageSoFar)
+                                            + toolCostDelta(conversationId, toolCostBefore));
+                            throw pause;
                         }
                     }
 

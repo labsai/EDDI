@@ -350,9 +350,30 @@ public class LlmTask implements ILifecycleTask {
                 }
             }
 
+        } catch (ToolApprovalRequiredException pause) {
+            // A tool loop paused for approval. What it spent up to here really happened
+            // but no result will carry it, so record it on the step now: the pause
+            // snapshot persists the step, the pause's settle meters it, and the resume
+            // counts it once through audit:cost — in its spend preflight, its loop
+            // ceiling and its total. Recorded here and only here, for the live path and
+            // a resume that pauses again alike.
+            recordPrePauseSpend(memory.getCurrentStep(), pause);
+            throw pause;
         } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException | IOException | LifecycleException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Folds a pausing run's spend so far into the step's {@code audit:token_usage}
+     * and {@code audit:cost} (see {@link ToolApprovalRequiredException#addSpend}).
+     */
+    private void recordPrePauseSpend(IWritableConversationStep currentStep, ToolApprovalRequiredException pause) {
+        if (currentStep == null) {
+            return;
+        }
+        accumulateTokenUsage(currentStep, pause.getTokenUsageSoFar());
+        accumulateCost(currentStep, pause.getCostSoFarUsd());
     }
 
     /**
@@ -1965,11 +1986,10 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // === Store the result EXACTLY like the normal path (executeTask) ===
-        // Surface metadata the same way executeTask does. Note the continuation's
-        // tokenUsage covers only the post-resume model calls: the usage accumulated
-        // before the pause dies with ToolApprovalRequiredException and resumeToolLoop
-        // starts a fresh accumulator, so a paused turn under-reports by its pre-pause
-        // segment.
+        // Surface metadata the same way executeTask does. The continuation's
+        // tokenUsage covers only the post-resume model calls; the pre-pause segment
+        // was recorded on this step's audit totals when the pause passed through
+        // execute (recordPrePauseSpend), so it is not added again here.
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
         if (!isNullOrEmpty(responseMetadataObjectName)) {
             templateDataObjects.put(responseMetadataObjectName, responseMetadata);
@@ -2014,9 +2034,8 @@ public class LlmTask implements ILifecycleTask {
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
-            // Known gap: the continuation's tokenUsage covers only the post-resume model
-            // calls (see the comment above) — the pre-pause segment is not recoverable
-            // here, so a paused turn's ledger entry under-reports by that segment.
+            // Adds the post-resume spend to the step totals, which already hold the
+            // pre-pause segment (see the comment above).
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
         } else {
             // The turn's token counts are also the caller's: the OpenAI-compatible /v1

@@ -2073,7 +2073,11 @@ tool cost. It is checked
 - **when a tool-call approval resumes the turn**: the same check runs before the approved calls
   execute, so a conversation spent while it waited serves the fallback answer and the approved
   calls do not run; and the resumed loop checks again before its first model request, counting
-  what the approved calls charged.
+  what the approved calls charged. What the turn spent *before* the pause counts too: when a tool
+  loop pauses, its model rounds so far (at the task's prices, as in the loop check above, and any
+  earlier cascade steps at theirs) and its tool cost are added to the step's `audit:cost` and
+  `audit:token_usage` right away, so the resume's checks and its final total include them exactly
+  once.
 
 The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
