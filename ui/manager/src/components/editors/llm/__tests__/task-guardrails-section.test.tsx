@@ -70,6 +70,7 @@ describe("TaskGuardrailsSection", () => {
       "classifier",
       "judge",
       "json-object",
+      "expression",
     ]);
   });
 
@@ -269,6 +270,72 @@ describe("TaskGuardrailsSection", () => {
       fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
       fireEvent.change(screen.getByTestId("guardrail-type"), { target: { value: "regex-filter" } });
       expect(last(spy).inputGuardrails).toEqual([{ type: "regex-filter", parameters: { failMode: "closed" } }]);
+    });
+  });
+
+  describe("expression", () => {
+    const withExpression = (parameters?: Record<string, string>): LlmTask => ({
+      ...base,
+      outputGuardrails: [{ type: "expression", action: "reprompt", ...(parameters ? { parameters } : {}) }],
+    });
+
+    it("is offered on the output side only", () => {
+      show(<Harness initial={base} />);
+      const input = within(screen.getByTestId("guardrail-add-type-input")).getAllByRole("option");
+      expect(input.map((o) => (o as HTMLOptionElement).value)).not.toContain("expression");
+    });
+
+    it("says each required parameter is missing, the way the deploy check would", () => {
+      show(<Harness initial={withExpression()} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      expect(screen.getByTestId("guardrail-expression")).toBeInTheDocument();
+      expect(screen.getByTestId("guardrail-expr-required")).toBeInTheDocument();
+      expect(screen.getByTestId("guardrail-expr-issue-required")).toBeInTheDocument();
+      expect(screen.getByTestId("guardrail-expr-fix-required")).toBeInTheDocument();
+    });
+
+    it("writes expr, issue and fix verbatim, and the warnings clear once they are valid", () => {
+      const spy = vi.fn();
+      show(<Harness initial={withExpression()} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      fireEvent.change(screen.getByTestId("guardrail-expr"), { target: { value: "sum(lines[*].amount) == total" } });
+      fireEvent.change(screen.getByTestId("guardrail-expr-issue"), { target: { value: "line_sum" } });
+      expect(screen.getByTestId("guardrail-expr-issue-invalid")).toBeInTheDocument();
+      fireEvent.change(screen.getByTestId("guardrail-expr-issue"), { target: { value: "LINE_SUM" } });
+      fireEvent.change(screen.getByTestId("guardrail-expr-fix"), { target: { value: "Make total equal the sum." } });
+      expect(last(spy).outputGuardrails![0]!.parameters).toEqual({
+        expr: "sum(lines[*].amount) == total",
+        issue: "LINE_SUM",
+        fix: "Make total equal the sum.",
+      });
+      for (const id of [
+        "guardrail-expr-required",
+        "guardrail-expr-too-long",
+        "guardrail-expr-issue-required",
+        "guardrail-expr-issue-invalid",
+        "guardrail-expr-fix-required",
+        "guardrail-expr-fix-too-long",
+      ]) {
+        expect(screen.queryByTestId(id)).toBeNull();
+      }
+    });
+
+    it("warns about an expression or fix text over the backend's length caps", () => {
+      show(<Harness initial={withExpression({ expr: "x".repeat(2001), issue: "A", fix: "y".repeat(1001) })} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      expect(screen.getByTestId("guardrail-expr-too-long")).toBeInTheDocument();
+      expect(screen.getByTestId("guardrail-expr-fix-too-long")).toBeInTheDocument();
+    });
+
+    it("shows the issue code and the expression in the list row", () => {
+      show(<Harness initial={withExpression({ expr: "total > 0", issue: "POSITIVE", fix: "f" })} />);
+      expect(screen.getByText("POSITIVE · total > 0")).toBeInTheDocument();
+    });
+
+    it("warns that redact blocks: there is nothing to rewrite with", () => {
+      show(<Harness initial={{ ...base, outputGuardrails: [{ type: "expression", action: "redact" }] }} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-output-0"));
+      expect(screen.getByTestId("guardrail-no-rewrite")).toBeInTheDocument();
     });
   });
 
