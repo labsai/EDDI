@@ -700,8 +700,11 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
             }
             Instant now = clock.instant();
             meantToBeDeployed.stream()
-                    .filter(deploymentInfo -> !this.deploymentInfos.contains(deploymentInfo))
                     .filter(deploymentInfo -> isRetryDue(deploymentInfo, now)).forEach(deploymentInfo -> {
+                        boolean trackedLocally;
+                        synchronized (sweepLock) {
+                            trackedLocally = this.deploymentInfos.contains(deploymentInfo);
+                        }
                         try {
                             // A deployment record can outlive its Agent. deployAgent reports that by
                             // logging an ERROR and returning normally, so the catch blocks below never
@@ -717,6 +720,18 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                                 // records for versions nobody looked at.
                                 deploymentStore.deleteDeploymentInfo(deploymentInfo.getEnvironment().toString(), deploymentInfo.getAgentId(),
                                         deploymentInfo.getAgentVersion());
+                                // A row this node already tracks is checked too: when the delete
+                                // cascade could not remove the shared row, the local set would
+                                // otherwise keep it out of this check forever, and the vault
+                                // grant analyzer keeps scanning a row for an Agent that is gone.
+                                if (trackedLocally) {
+                                    undeployLocally(deploymentInfo.getEnvironment(), deploymentInfo.getAgentId(), deploymentInfo.getAgentVersion(),
+                                            "its config no longer exists");
+                                }
+                                return;
+                            }
+
+                            if (trackedLocally) {
                                 return;
                             }
 

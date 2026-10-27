@@ -145,6 +145,31 @@ class AgentDeploymentManagementTest {
             verify(deploymentStore, never()).deleteDeploymentInfos(any());
         }
 
+        @Test
+        @DisplayName("retires the record of a locally tracked deployment whose Agent config is gone")
+        void retiresStaleRecordOfLocallyTrackedDeployment() throws Exception {
+            var info = new DeploymentInfo();
+            info.setEnvironment(Environment.production);
+            info.setAgentId("deletedLater");
+            info.setAgentVersion(1);
+
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
+            when(agentStore.read("deletedLater", 1)).thenReturn(new AgentConfiguration());
+            // First sweep deploys it, so this node tracks the row.
+            management.checkDeployments();
+            verify(agentFactory).deployAgent(Environment.production, "deletedLater", 1, null);
+
+            // The Agent is then deleted but the shared row survives (cascade delete
+            // failed).
+            when(agentStore.read("deletedLater", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+            management.checkDeployments();
+
+            verify(deploymentStore).deleteDeploymentInfo("production", "deletedLater", 1);
+            verify(agentFactory).undeployAgent(Environment.production, "deletedLater", 1);
+            // No second deploy happened.
+            verify(agentFactory, times(1)).deployAgent(Environment.production, "deletedLater", 1, null);
+        }
+
         /**
          * The sweep runs on its own ten-second schedule, not after the startup
          * migrations. Until the 6.x rename migration has completed, the agent configs

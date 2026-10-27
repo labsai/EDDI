@@ -22,3 +22,5 @@ Docs: [`secrets-vault.md`](../secrets-vault.md) ("What counts as granted", and t
 - `VaultKeySafetyTest.StaleReplicaRace`: a checksum key inserted after a KEK rotation, via `rotateDek` and via `store`, is taken back and a node on the new master key can store.
 - `VaultKeySafetyTest.rotationRetiresLegacyChecksums`.
 - `PostgresSecretPersistenceUnitTest` follows the new parameter order.
+
+**Stale deployment rows.** The deployment sweep now checks for a missing Agent config before skipping rows this node already tracks, so a shared row that the agent-delete cascade could not remove is retired (and the agent undeployed locally) instead of lingering and making the grant analyzer answer UNKNOWN for it.
