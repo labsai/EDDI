@@ -221,7 +221,7 @@ public final class MemoryKeys {
      * Deliberately NOT {@code "audit:cost:..."}: step lookups by key are prefix
      * matches (see {@link #AUDIT_METERED_COST}).
      *
-     * @since 6.6.0
+     * @since 6.7.0
      */
     public static final String AUDIT_DISCARDED_COST = "audit:discarded_cost";
 
