@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.BatchRequestBuildingInstruction;
+import ai.labs.eddi.configs.apicalls.model.ForEachInstruction;
 import ai.labs.eddi.configs.apicalls.model.HttpPreRequest;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
@@ -87,6 +88,24 @@ class RestApiCallsStoreBatchLimitTest {
         store.maxBatchSizeCeiling = 50;
 
         assertEquals(400, store.createApiCalls(configWithBatch(51)).getStatus());
+    }
+
+    @Test
+    void forEachMaxItemsAboveCeilingIsRefused() throws Exception {
+        var forEach = new ForEachInstruction();
+        forEach.setPathToTargetArray("properties.items");
+        forEach.setMaxItems(1001);
+        var call = new ApiCall();
+        call.setName("loop");
+        call.setForEach(forEach);
+        var configuration = new ApiCallsConfiguration();
+        configuration.setHttpCalls(List.of(call));
+
+        Response response = store.createApiCalls(configuration);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(response.getEntity().toString().contains("forEach.maxItems"), response.getEntity().toString());
+        verify(apiCallsStore, never()).create(any());
     }
 
     private static ApiCallsConfiguration configWithBatch(int maxBatchSize) {
