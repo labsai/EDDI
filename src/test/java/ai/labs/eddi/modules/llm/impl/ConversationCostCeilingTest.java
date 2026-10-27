@@ -140,7 +140,7 @@ class ConversationCostCeilingTest {
     void tenantCheckThatThrowsFailsClosed() {
         TenantQuotaService tenant = mock(TenantQuotaService.class);
         when(tenant.getDefaultTenantId()).thenReturn("default");
-        when(tenant.checkCostBudget("default")).thenThrow(new IllegalStateException("driver exploded"));
+        when(tenant.checkCostBudget(eq("default"), anyDouble())).thenThrow(new IllegalStateException("driver exploded"));
         var registry = new SimpleMeterRegistry();
         var gate = new LlmSpendGate(tenant, registry);
 

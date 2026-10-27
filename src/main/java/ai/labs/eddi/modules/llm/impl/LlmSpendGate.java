@@ -452,6 +452,11 @@ public class LlmSpendGate {
     }
 
     private Refusal refused(IConversationMemory memory, Refusal refusal) {
+        if (REASON_TENANT_CHECK_ERROR.equals(refusal.reason())) {
+            // Already counted and logged by tenantCheckFailed (rate-limited stack trace):
+            // counting it again here would double every defect refusal.
+            return refusal;
+        }
         (meterRegistry != null ? meterRegistry : Metrics.globalRegistry).counter(METRIC, "reason", refusal.reason()).increment();
         LOGGER.warnf("LLM call skipped in conversation %s (%s): %s", sanitize(memory != null ? memory.getConversationId() : null),
                 refusal.reason(), refusal.detail());
