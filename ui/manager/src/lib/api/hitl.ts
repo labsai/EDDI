@@ -274,7 +274,21 @@ export interface AgentHitlConfig {
   pauseReason?: string | null;
   /** Tool-level approval gating applied to every LLM task in the agent (surface 3). */
   toolApprovals?: ToolApprovalsConfig | null;
+  /** Who is told when this agent pauses — `notify.email.recipients` today
+   *  (backend `HitlNotifyConfig`). Absent = nobody is notified. */
+  notify?: HitlNotifyConfig | null;
 }
+
+/** `hitlConfig.notify` — needs the deployment's system mailer (`eddi.mail.smtp.*`). */
+export interface HitlNotifyConfig {
+  email?: {
+    /** 1–20 plain ASCII addresses; the backend refuses an empty list (400). */
+    recipients: string[];
+  } | null;
+}
+
+/** Mirrors `HitlConfigValidation.MAX_NOTIFY_RECIPIENTS`. */
+export const MAX_NOTIFY_RECIPIENTS = 20;
 
 /** Group-level HITL configuration (extends agent-level with granularity). */
 export interface GroupHitlConfig {

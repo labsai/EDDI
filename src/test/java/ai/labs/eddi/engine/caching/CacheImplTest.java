@@ -564,4 +564,17 @@ class CacheImplTest {
             assertEquals("again", plain.get("key1"), "without variable expiry there is nothing to expire the entry");
         }
     }
+
+    @Test
+    @DisplayName("size() does not count entries that have expired")
+    void sizeIgnoresExpiredEntries() {
+        FakeTicker clock = new FakeTicker();
+        ICache<String, String> cache = TestCaches.expiring("expiring", clock);
+        cache.put("k", "v", 60, TimeUnit.SECONDS);
+        assertEquals(1, cache.size());
+
+        clock.advanceSeconds(61);
+
+        assertEquals(0, cache.sizeExact(), "a capacity check must not outlast the data");
+    }
 }

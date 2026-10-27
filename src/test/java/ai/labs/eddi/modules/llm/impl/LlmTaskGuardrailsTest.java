@@ -29,12 +29,15 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.impl.ClassifierGuardrail;
+import ai.labs.eddi.modules.llm.guardrails.impl.JudgeGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.JsonObjectGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PromptInjectionGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CircuitBreakerConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel;
 import ai.labs.eddi.modules.llm.testing.FaultInjectingChatModel.Step;
@@ -1147,5 +1150,195 @@ class LlmTaskGuardrailsTest {
         assertTrue(prompt.startsWith("Q: When does the shop open?\nA: At 9.\nDocs: "), prompt);
         assertTrue(prompt.contains("Opening hours: 9-17"), prompt);
         assertEquals("At 9.", outputItem().getText());
+    }
+
+    // === judge guardrail and onExhausted deliver-best (E1) ===
+
+    private static final String JUDGE_ISSUES = "{\"UNSUPPORTED_CLAIM\": \"Remove every claim the sources do not state.\", "
+            + "\"MISSING_CITATION\": \"Cite the source of each fact you state.\"}";
+
+    /**
+     * A judge model: one UNSUPPORTED_CLAIM per "guess" in the graded answer, and
+     * MISSING_CITATION when there is no "[1]".
+     */
+    private static final class JudgeModel implements ChatModel {
+        final List<ChatRequest> requests = new ArrayList<>();
+
+        @Override
+        public ChatResponse doChat(ChatRequest request) {
+            requests.add(request);
+            String prompt = ((UserMessage) request.messages().get(0)).singleText();
+            String answer = prompt.substring(prompt.indexOf("Answer:\n") + 8, prompt.indexOf("\n\nCheck."));
+            List<String> issues = new ArrayList<>();
+            if (answer.contains("guess")) {
+                issues.add("\"UNSUPPORTED_CLAIM\"");
+            }
+            if (!answer.contains("[1]")) {
+                issues.add("\"MISSING_CITATION\"");
+            }
+            return ChatResponse.builder().aiMessage(AiMessage.from("{\"issues\": [" + String.join(",", issues) + "]}"))
+                    .tokenUsage(new TokenUsage(1_000_000, 0)).build();
+        }
+    }
+
+    private JudgeModel useJudge() throws Exception {
+        var judge = new JudgeGuardrail(chatModelRegistry, new TemplatingEngine(Engine.builder().addDefaults().build()),
+                new JsonSerialization(new ObjectMapper()), meterRegistry);
+        llmTask.guardrailService = new GuardrailService(List.of(judge, new PiiRedactionGuardrail()), meterRegistry);
+        var judgeModel = new JudgeModel();
+        when(chatModelRegistry.getOrCreate(eq("gemini"), any())).thenReturn(judgeModel);
+        return judgeModel;
+    }
+
+    private static GuardrailConfig judgeGuardrail(int maxRetries, String onExhausted) {
+        var cfg = guardrail(JudgeGuardrail.TYPE, "reprompt");
+        cfg.setMaxRetries(maxRetries);
+        cfg.setOnExhausted(onExhausted);
+        cfg.setBlockMessage("Withheld by the judge.");
+        var p = new HashMap<String, String>();
+        p.put("provider", "gemini");
+        p.put("modelName", "gemini-3.7-flash");
+        p.put("promptTemplate", "Question:\n{input}\n\nAnswer:\n{output}\n\nCheck.");
+        p.put("issues", JUDGE_ISSUES);
+        p.put("inputPricePer1M", "0.15");
+        cfg.setParameters(p);
+        return cfg;
+    }
+
+    private List<Map<String, Object>> auditRecords(String key) {
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory, atLeastOnce()).createData(eq(key), captor.capture());
+        List<Map<String, Object>> records = new ArrayList<>();
+        for (Object value : captor.getAllValues()) {
+            for (Object record : (List<?>) value) {
+                records.add((Map<String, Object>) record);
+            }
+        }
+        return records;
+    }
+
+    @Test
+    @DisplayName("judge (plain chat): reprompts once with the author's fix text for the flagged code and serves the corrected answer")
+    void judge_repromptsWithAuthorFixText() throws Exception {
+        var judgeModel = useJudge();
+        var model = FaultInjectingChatModel.script(Step.text("We open at 9 [1], I guess."), Step.text("We open at 9 [1]."));
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(model);
+        var task = task();
+        task.setOutputGuardrails(List.of(judgeGuardrail(1, null)));
+
+        run(task);
+
+        assertEquals(2, model.callCount());
+        assertEquals(2, judgeModel.requests.size());
+        String corrective = lastUserText(model.requests().get(1).messages());
+        assertEquals("Your previous reply needs these corrections:\n- Remove every claim the sources do not state.\n"
+                + "Write a new reply that applies them. Reply with the answer only.", corrective);
+        assertEquals("We open at 9 [1].", outputItem().getText());
+        var records = auditRecords("audit:guardrail:output:judge");
+        assertEquals("reprompt", records.get(0).get("action"));
+        assertEquals("judge_failed:UNSUPPORTED_CLAIM", records.get(0).get("reason"));
+        // two judge calls at 1M input tokens and $0.15 per 1M
+        verify(dataFactory).createData(MemoryKeys.AUDIT_COST, 0.30);
+    }
+
+    @Test
+    @DisplayName("judge deliver-best (plain chat): a judge that never passes delivers the best attempt, still PII-redacted, with a warn record")
+    void judgeDeliverBest_plain_redacted() throws Exception {
+        useJudge();
+        when(memory.getEventSink()).thenReturn(sink);
+        var model = FaultInjectingChatModel.script(Step.text("Mail jane@example.org, I guess [1]."), Step.text("Mail john@example.org, a guess."));
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(model);
+        var task = task();
+        task.setOutputGuardrails(List.of(judgeGuardrail(1, "deliver-best"), guardrail("pii-redaction", "redact")));
+
+        run(task);
+
+        assertEquals(2, model.callCount());
+        var item = outputItem();
+        assertEquals("Mail [REDACTED:email], I guess [1].", item.getText());
+        assertFalse(Boolean.TRUE.equals(item.getFallback()));
+        verify(sink).onToken("Mail [REDACTED:email], I guess [1].");
+        verify(sink, never()).onToken("Mail jane@example.org, I guess [1].");
+        verify(sink).onGuardrailTriggered(JudgeGuardrail.TYPE, "output", "warn", TASK_ID);
+        var records = auditRecords("audit:guardrail:output:judge");
+        var warn = records.get(records.size() - 1);
+        assertEquals("warn", warn.get("action"));
+        assertEquals("judge_failed:UNSUPPORTED_CLAIM" + GuardrailService.DELIVERED_BEST_SUFFIX, warn.get("reason"));
+        assertEquals(1, warn.get("retryCount"));
+        assertEquals("redact", auditRecords("audit:guardrail:output:pii-redaction").get(0).get("action"));
+        verify(dataFactory, never()).createData("llm:fallback:" + TASK_ID, Boolean.TRUE);
+        assertEquals(1.0, meterRegistry.counter(GuardrailService.METRIC_TRIGGERED, "phase", "output", "type", "judge", "action", "warn").count());
+    }
+
+    @Test
+    @DisplayName("judge deliver-best (tool loop): only the final answer is re-asked; the best attempt is delivered")
+    void judgeDeliverBest_toolLoop() throws Exception {
+        useJudge();
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(FaultInjectingChatModel.script(Step.text("unused")));
+        var call = ToolExecutionRequest.builder().id("call-1").name("lookup").arguments("{}").build();
+        List<ChatMessage> exchange = List.of(AiMessage.from(call), ToolExecutionResultMessage.from(call, "{\"open\":9}"));
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenReturn(
+                        new AgentOrchestrator.ExecutionResult("At 9 [1].  A guess: 10 too, guess.", new ArrayList<>(), new HashMap<>(), exchange));
+        when(agentOrchestrator.reaskFinalAnswer(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("At 9, a guess.", List.of(), Map.of()));
+        var task = task();
+        task.setOutputGuardrails(List.of(judgeGuardrail(1, "deliver-best")));
+
+        run(task);
+
+        verify(agentOrchestrator, times(1)).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
+        verify(agentOrchestrator, times(1)).reaskFinalAnswer(any(), any(), any(), any(), any(), any());
+        // first: UNSUPPORTED_CLAIM (1 issue); second: UNSUPPORTED_CLAIM +
+        // MISSING_CITATION (2) — the first is best
+        assertEquals("At 9 [1].  A guess: 10 too, guess.", outputItem().getText());
+        var records = auditRecords("audit:guardrail:output:judge");
+        assertEquals("warn", records.get(records.size() - 1).get("action"));
+    }
+
+    @Test
+    @DisplayName("judge deliver-best (cascade): the accepted step is re-asked; the best attempt is delivered")
+    void judgeDeliverBest_cascade() throws Exception {
+        useJudge();
+        var stepModel = FaultInjectingChatModel.script(Step.text("We open at 9, I guess."), Step.text("We open at 9 [1], I guess."));
+        when(chatModelRegistry.getOrCreate(eq("openai"), any())).thenReturn(stepModel);
+        var task = task();
+        var cascade = new ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setEvaluationStrategy("heuristic");
+        var step = new CascadeStep();
+        step.setType("openai");
+        cascade.setSteps(List.of(step));
+        task.setModelCascade(cascade);
+        task.setOutputGuardrails(List.of(judgeGuardrail(1, "deliver-best")));
+
+        run(task);
+
+        assertEquals(2, stepModel.callCount(), "the cascade step answered once and was re-asked once");
+        assertEquals("We open at 9 [1], I guess.", outputItem().getText());
+        var records = auditRecords("audit:guardrail:output:judge");
+        assertEquals("judge_failed:UNSUPPORTED_CLAIM" + GuardrailService.DELIVERED_BEST_SUFFIX, records.get(records.size() - 1).get("reason"));
+    }
+
+    @Test
+    @DisplayName("configure refuses deliver-best on a non-reprompt action and a judge without issues")
+    void judgeConfigure_validates() throws Exception {
+        useJudge();
+        var task = task();
+        var onBlock = judgeGuardrail(1, "deliver-best");
+        onBlock.setAction("block");
+        var noIssues = judgeGuardrail(1, null);
+        noIssues.getParameters().remove("issues");
+        task.setOutputGuardrails(List.of(onBlock, noIssues));
+        var config = new LlmConfiguration(List.of(task));
+        when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
+        var uri = Map.<String, Object>of("uri", "eddi://ai.labs.llm/llmstore/llms/0123456789abcdef01234567?version=1");
+
+        var ex = assertThrows(WorkflowConfigurationException.class, () -> llmTask.configure(uri, null));
+        assertTrue(ex.getMessage().contains("outputGuardrails[0]: onExhausted") && ex.getMessage().contains("outputGuardrails[1]: judge guardrail"),
+                ex.getMessage());
+
+        task.setOutputGuardrails(List.of(judgeGuardrail(1, "deliver-best")));
+        assertEquals(config, llmTask.configure(uri, null));
     }
 }

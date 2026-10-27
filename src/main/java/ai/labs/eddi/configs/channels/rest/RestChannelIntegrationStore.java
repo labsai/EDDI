@@ -17,6 +17,8 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -32,6 +34,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -65,15 +68,60 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
+    private final SecretResolver secretResolver;
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, null);
+    }
 
     @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard,
+            SecretResolver secretResolver) {
+        this.secretResolver = secretResolver;
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.resourceAccessGuard = resourceAccessGuard;
+    }
+
+    /**
+     * Refuses a webhook whose vault secret already exists but is shorter than
+     * {@link WebhookChannelSettings#MIN_SECRET_LENGTH}: the endpoint would answer
+     * 401 to every request. A secret that is not in the vault yet (or cannot be
+     * read) cannot be judged here - the vault reference alone is checked by
+     * {@link WebhookChannelSettings#validate}, and the router re-checks the
+     * resolved value on every refresh.
+     */
+    private void requireUsableWebhookSecret(Map<String, String> platformConfig) {
+        String reference = platformConfig == null ? null : platformConfig.get(WebhookChannelSettings.KEY_SIGNING_SECRET);
+        if (secretResolver == null || reference == null) {
+            return;
+        }
+        try {
+            // Only the default tenant's vault is read at save time: resolving another
+            // tenant's reference for any editor would tell them whether that secret
+            // exists and whether it is short. Such references are left to the router's
+            // runtime check.
+            if (!SecretReference.DEFAULT_TENANT.equals(SecretReference.parse(reference.trim()).tenantId())) {
+                return;
+            }
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        String resolved;
+        try {
+            resolved = secretResolver.resolveValue(reference.trim());
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (resolved != null && !resolved.equals(reference.trim()) && resolved.length() < WebhookChannelSettings.MIN_SECRET_LENGTH) {
+            throw new BadRequestException("The vault secret behind platformConfig.signingSecret is shorter than "
+                    + WebhookChannelSettings.MIN_SECRET_LENGTH + " characters - use 32 random bytes.");
+        }
     }
 
     /**
@@ -293,6 +341,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             if (!webhookErrors.isEmpty()) {
                 throw new BadRequestException(String.join(" ", webhookErrors));
             }
+            requireUsableWebhookSecret(config.getPlatformConfig());
         }
 
         // Default target must reference an existing target

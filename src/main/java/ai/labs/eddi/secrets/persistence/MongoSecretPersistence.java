@@ -253,7 +253,8 @@ public class MongoSecretPersistence implements ISecretPersistence {
 
             var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()), Updates.set(FIELD_IV, secret.getIv()),
                     Updates.set(FIELD_DEK_ID, secret.getDekId()),
-                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())));
+                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
+                    Updates.set(FIELD_CHECKSUM, secret.getChecksum()));
 
             // matchedCount, not modifiedCount: winning the guard is what matters, and a
             // rewrite that happens to produce identical bytes still won it.
@@ -539,6 +540,15 @@ public class MongoSecretPersistence implements ISecretPersistence {
     public void deleteMetaValue(String key) {
         try {
             metaCollection.deleteOne(eq("key", key));
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to delete meta value: " + key, e);
+        }
+    }
+
+    @Override
+    public boolean deleteMetaValueIfEquals(String key, String expected) {
+        try {
+            return metaCollection.deleteOne(and(eq("key", key), eq("value", expected))).getDeletedCount() == 1;
         } catch (MongoException e) {
             throw new PersistenceException("Failed to delete meta value: " + key, e);
         }

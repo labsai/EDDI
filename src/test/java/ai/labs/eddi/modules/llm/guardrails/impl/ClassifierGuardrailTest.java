@@ -681,7 +681,7 @@ class ClassifierGuardrailTest {
         @Test
         @DisplayName("an unpriced classifier expects nothing")
         void unpricedExpectsNothing() {
-            assertEquals(0.0, ClassifierGuardrail.expectedCost(List.of(UserMessage.from("hello")), input(params())));
+            assertEquals(0.0, GuardrailModelClient.expectedCost(List.of(UserMessage.from("hello")), input(params())));
         }
     }
 }

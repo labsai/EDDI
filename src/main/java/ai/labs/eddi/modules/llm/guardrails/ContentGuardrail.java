@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.guardrails;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -59,5 +60,14 @@ public interface ContentGuardrail {
      */
     default String validate(Map<String, String> parameters) {
         return null;
+    }
+
+    /**
+     * Configuration that works but deserves a word at deploy time (logged as a
+     * WARN, never refused) — e.g. a model-backed guardrail without prices, whose
+     * calls the turn's cost ceilings cannot see.
+     */
+    default List<String> warnings(Map<String, String> parameters) {
+        return List.of();
     }
 }

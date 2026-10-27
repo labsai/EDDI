@@ -13,6 +13,17 @@ public interface ICache<K, V> extends ConcurrentMap<K, V> {
     String getCacheName();
 
     /**
+     * Entry count with expired entries swept first. {@link #size()} may be a cheap
+     * estimate that still counts them; a caller that refuses work on a capacity
+     * threshold should read {@code size()} first and call this only when the
+     * estimate is at the threshold, so refusals never outlast the data and the
+     * sweep is not paid on every call.
+     */
+    default int sizeExact() {
+        return size();
+    }
+
+    /**
      * An overloaded form of {@link #put(Object, Object)}, which takes in lifespan
      * parameters.
      *

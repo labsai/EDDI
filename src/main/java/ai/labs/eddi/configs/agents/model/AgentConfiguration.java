@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.agents.model;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -1683,6 +1684,24 @@ public class AgentConfiguration {
 
         public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
             this.toolApprovals = toolApprovals;
+        }
+
+        /**
+         * Who is told when this agent pauses a conversation for approval —
+         * {@code notify.email.recipients} today. Absent = nobody is notified. The
+         * notification links to the Manager's approvals page and carries no
+         * conversation content; it confers no right to decide.
+         *
+         * @since 6.6.0
+         */
+        private HitlNotifyConfig notify;
+
+        public HitlNotifyConfig getNotify() {
+            return notify;
+        }
+
+        public void setNotify(HitlNotifyConfig notify) {
+            this.notify = notify;
         }
     }
 }
