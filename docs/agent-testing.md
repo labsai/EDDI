@@ -11,10 +11,12 @@ strongest assertions do not depend on how an LLM words its answer: *"the
 `store_city` action fired and `city` is `Vienna`"* holds or it does not. Output
 regexes are there too, as the secondary signal.
 
-> **Scope.** This page describes Phase 6.1: suites, runs, tool mocks, REST and MCP.
-> Generating a suite from a recorded conversation, an LLM-as-judge expectation, a
-> Manager page and a deployment gate are planned follow-ups. Suites are not yet
-> included in agent export ZIPs.
+> **Scope.** This page describes suites, runs, tool mocks, REST, MCP and the
+> Manager: suites are edited under **Resources → Test Suites**, and an agent's
+> detail page has a **Golden conversations** section that starts a run, cancels
+> one in progress and shows its results. Generating a suite from a recorded
+> conversation, an LLM-as-judge expectation and a deployment gate are planned
+> follow-ups. Suites are not yet included in agent export ZIPs.
 
 ## Concepts
 
@@ -35,7 +37,10 @@ regexes are there too, as the secondary signal.
    never touched. If a *newer* version of the agent is also deployed to `test`, the
    run is refused with 409 — new conversations always start on the newest ready
    version, so the run would silently test the wrong one.
-3. The run is recorded as `RUNNING` and the call returns **202** with the run id.
+3. The run is recorded as `RUNNING`, with the node executing it (`ownerNode`), and
+   the call returns **202** with the run id. A node runs at most
+   `eddi.agent-tests.max-concurrent-runs` at once; that is checked *before* the
+   deploy of step 2, so a request refused with 429 has deployed nothing.
 4. In the background, every case runs once per repetition, each in its own
    conversation (environment `test`, user id `agent-test:<runId>:<case>:<repetition>`).
    Up to `eddi.agent-tests.max-parallel-cases` conversations run at once.
@@ -43,8 +48,10 @@ regexes are there too, as the secondary signal.
    expectations are checked.
 6. Every test conversation is ended and **permanently deleted** afterwards, unless
    the run asked for `keepConversations: true`.
-7. The run record is updated to `PASSED`, `FAILED` or `ERROR`, and one summary entry
-   is written to the [audit ledger](audit-ledger.md) (`taskId: ai.labs.agenttest`).
+7. The run record is updated to `PASSED`, `FAILED`, `ERROR` or `CANCELLED`, and one
+   summary entry is written to the [audit ledger](audit-ledger.md)
+   (`taskId: ai.labs.agenttest`). While it runs, the record's `heartbeatAt` is
+   refreshed every 30 seconds (see [Known limitations](#known-limitations)).
 
 ### What a test conversation does not do
 
@@ -168,7 +175,8 @@ Mocks apply at the three places a pipeline reaches the outside world:
 
 | Path | How the mock is applied |
 |---|---|
-| LLM tool calls (http, MCP, A2A, built-in, dynamic, recall) | Before the executor runs. An httpcall tool's mock reaches the model in the httpcall result shape, `{"httpCode": …, "body": …}`; any other tool gets `body` (a string as-is, anything else as JSON) |
+| LLM tool calls of an httpcall tool | The mock **is** the HTTP response, exactly as for a rule-triggered httpcall below: no request is built or sent, and `saveResponse`, retries and `postResponse` property instructions run on the mocked `{httpCode, body}` — so a property an agent sets from a tool's response is set in a test too. The model gets the executor's result, `{"httpCode": …, "body": …}` |
+| LLM tool calls of every other source (MCP, A2A, built-in, dynamic, recall) | Before the executor runs: the tool gets `body` (a string as-is, anything else as JSON) |
 | Rule-triggered httpcalls (`httpcalls` step) | The mock **is** the HTTP response: `saveResponse`, retries and `postResponse` property instructions run on the mocked `{httpCode, body}` exactly as on a real one. An unmocked call is answered `501` with the NOT_EXECUTED body. Fire-and-forget calls are not dispatched |
 | Rule-triggered MCP calls (`mcpcalls` step) | The mock's `body` is the tool result. With nothing allowed to run live, the MCP server is not contacted at all — not even to list its tools |
 
@@ -187,7 +195,13 @@ Exceptions:
 - A tool call made on the start turn (`CONVERSATION_START`) has no turn result of
   its own; an unmocked one still fails the attempt and is listed in the attempt's
   `unmockedToolCalls`.
-- Mocked calls cost $0.
+- Mocked calls cost $0, and are never served from or stored in the tool-result cache.
+- A call is recorded once, however often it is retried — a retried live call is one
+  tool call too — so a retry does not count against `maxToolCalls` again. An LLM
+  tool call that goes through its executor (an httpcall tool's mock, or any call
+  the suite runs live) is recorded only once the loop's own gates — tool budget,
+  tenant quota, turn deadline — have let it through; one they refuse was never
+  made and is not counted.
 - Listing an MCP server's tools to build an LLM's tool set still happens in a test
   (it reads a schema, it does not call a tool).
 
@@ -216,9 +230,23 @@ A run record (`GET /agenttests/runs/{runId}`):
 ```
 
 `status` is `PASSED` when every case met its pass rate, `FAILED` otherwise (or when
-the cost ceiling stopped the run), `ERROR` when the run could not execute, and
-`ABORTED` when the node running it stopped before it finished. The
-newest `eddi.agent-tests.max-runs-per-agent` runs per agent are kept.
+the cost ceiling stopped the run), `ERROR` when the run could not execute,
+`ABORTED` when the node running it stopped before it finished, and `CANCELLED`
+when it was [cancelled](#cancelling-a-run). `error` gives the reason for the last
+three. The newest `eddi.agent-tests.max-runs-per-agent` runs per agent are kept.
+
+### Cancelling a run
+
+`POST /agenttests/runs/{runId}/cancel` (MCP: `cancel_agent_test_run`; Manager: the
+**Cancel run** button on a running run) stops a run that is `RUNNING` on the node
+that receives the call. It takes the rights starting one takes: EDIT on the agent.
+The stop is cooperative: no further conversation or turn starts, a turn waiting for
+the engine is abandoned, and every test conversation is ended and deleted (unless
+the run keeps them). The call returns **202** with the record as it is; it reads
+`CANCELLED` moments later, with the cases that finished and the reason
+(`Cancelled by <principal> …`). The cases that did not run to the end are failed.
+409 means the run has already finished, or executes on another node — the message
+names it.
 
 ## REST API
 
@@ -233,14 +261,16 @@ agent, because a run deploys to `test`.
 | `DELETE /testsuitestore/testsuites/{id}?version=N` | Delete |
 | `GET /testsuitestore/testsuites/descriptors` | List suites |
 | `POST /agenttests/runs` | Start a run — body `{"suiteId", "agentId", "suiteVersion"?, "agentVersion"?, "keepConversations"?}`; 202 with the `RUNNING` record |
+| `POST /agenttests/runs/{runId}/cancel` | Cancel a `RUNNING` run — see [Cancelling a run](#cancelling-a-run); 202 |
 | `GET /agenttests/runs/{runId}` | Read a run |
 | `GET /agenttests/runs?agentId=…&index=0&limit=20` | An agent's runs, newest first |
 
 Suite URIs follow the v6 scheme: `eddi://ai.labs.testsuite/testsuitestore/testsuites/{id}?version=N`.
 
-Errors: 400 (invalid suite, missing ids, empty suite), 404 (suite or agent not
+Errors: 400 (invalid suite, missing ids, empty suite), 404 (suite, agent or run not
 found), 409 (the version could not be deployed to `test`, a newer version is
-deployed there, or the deployment runs in cluster mode), 429 (more than `eddi.agent-tests.max-concurrent-runs` runs at once).
+deployed there, the deployment runs in cluster mode; on cancel: the run has
+finished or executes on another node), 429 (more than `eddi.agent-tests.max-concurrent-runs` runs at once).
 
 ### CI recipe
 
@@ -256,7 +286,7 @@ RUN_ID=$(curl -sf -X POST "$EDDI/agenttests/runs" -H "$AUTH" -H 'Content-Type: a
 
 while :; do
   STATUS=$(curl -sf "$EDDI/agenttests/runs/$RUN_ID" -H "$AUTH" | python3 -c 'import json,sys; print(json.load(sys.stdin)["status"])')
-  [ "$STATUS" != "RUNNING" ] && break   # PASSED, FAILED, ERROR or ABORTED
+  [ "$STATUS" != "RUNNING" ] && break   # PASSED, FAILED, ERROR, ABORTED or CANCELLED
   sleep 5
 done
 
@@ -266,8 +296,9 @@ echo "Agent test run $RUN_ID: $STATUS"
 
 ## MCP tools
 
-`run_agent_tests`, `get_agent_test_run` and `list_agent_test_runs`, at the same tier
-as `deploy_agent` — see [MCP Server](mcp-server.md#agent-test-tools-3).
+`run_agent_tests`, `get_agent_test_run`, `list_agent_test_runs` and
+`cancel_agent_test_run`, at the same tier as `deploy_agent` — see
+[MCP Server](mcp-server.md#agent-test-tools-4).
 
 ## LLM nondeterminism
 
@@ -307,10 +338,40 @@ Metrics: `eddi_agent_tests_runs_total{status}`, `eddi_agent_tests_turns_total`,
   conversation, its result says so —
   `"reason":"no agent-test session on this node (…)"` — rather than *no mock
   defined in test mode*, so the two causes cannot be confused.
-- A run executes on the node that accepted it. If that node stops mid-run, the
-  record is marked **`ABORTED`** (with the reason in `error`) at the node's next
-  startup, and the run's test conversations are deleted. Start the run again.
-- Test conversations count against the tenant's conversation quota and appear in
-  conversation metrics while they run.
-- A rule-triggered httpcall is still *built* before its mock answers it, so one whose
-  headers need `${caller:token}` fails in a test (there is no caller) even when mocked.
+- A run executes on the node that accepted it, and can be cancelled only there. If
+  that node stops mid-run, the record is marked **`ABORTED`** (with the reason in
+  `error`) and the run's test conversations are deleted. Start the run again.
+  Every node sharing the database checks, every minute, whether the `heartbeatAt`
+  of each `RUNNING` run it does not execute itself has *changed* since it last
+  looked; a run whose heartbeat has stood still for three minutes (90 seconds when
+  the owner carries this node's id — a restart of this process, or a second
+  process on the same host) is closed. Only equality of the owner's timestamp is
+  compared, on the observer's own clock, so clock skew between nodes does not
+  matter, and a live run is never closed while its heartbeat moves. The close is a
+  compare-and-swap on the heartbeat that stood still: a heartbeat arriving in
+  between wins. A run recorded before the owner and heartbeat fields existed is
+  closed once it has been seen unchanged for three minutes.
+- The flip side: an owner that cannot write its heartbeat for three minutes (a
+  database outage on its side) loses the run. Another node closes it, the owner's
+  next heartbeat finds the record changed, and the owner stops the run without
+  writing anything back — the record stays `ABORTED`, and no result is audited.
+- A turn that times out, or is abandoned by a cancel, may still be running in the
+  engine after its conversation was ended and deleted. When it completes (or after
+  another turn timeout), the conversation is deleted again, in case the turn wrote
+  it back.
+- Test conversations count against the tenant's conversation quota and, while a
+  run is in progress, appear in conversation listings and conversation metrics —
+  and in what is computed from them — like any other conversation of the agent (environment `test`, user id
+  `agent-test:…`). They are deleted when the run ends unless it keeps them.
+- User ids starting with `agent-test:` (in any case) are reserved: starting a
+  conversation with one through REST, MCP or a group conversation is refused with
+  403, for an admin and with authorization off too — whether it is requested or is
+  the caller's own identity — a schedule with one is refused when it is saved over
+  REST (400), and any schedule with one, however it was stored, is not fired. A
+  signed-in principal with such a name is refused at authentication. A run's mocks
+  and its record of tool calls are keyed on those ids, so an outside conversation
+  must not join them.
+- A mocked httpcall — rule-triggered or an LLM tool — is never *built*: its
+  `${vault:}`, `${connection:}` and `${caller:}` references are not resolved, so a
+  mocked call whose headers need `${caller:token}` works in a test although there
+  is no caller.

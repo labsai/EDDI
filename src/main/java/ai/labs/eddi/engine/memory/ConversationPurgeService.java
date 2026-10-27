@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -23,7 +24,8 @@ import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
 /**
  * Permanently deletes a conversation: resolves a pending approval, then removes
- * its vault slots, attachments, memory and descriptor.
+ * its vault slots, attachments, memory checkpoints, HITL tool-journal entries,
+ * memory and descriptor.
  * <p>
  * <b>This service checks nobody's rights.</b> It deliberately lives outside the
  * REST layer, so that the resource class exposes only caller-checked methods:
@@ -48,15 +50,26 @@ public class ConversationPurgeService {
     private final IConversationService conversationService;
     private final Instance<AutoVaultedSecrets> autoVaultedSecrets;
     private final Instance<IAttachmentStore> attachmentStore;
+    private final Instance<IConversationCheckpointStore> checkpointStore;
+    private final Instance<IHitlToolJournalStore> toolJournalStore;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
-            IConversationService conversationService, Instance<AutoVaultedSecrets> autoVaultedSecrets, Instance<IAttachmentStore> attachmentStore) {
+            IConversationService conversationService, Instance<AutoVaultedSecrets> autoVaultedSecrets, Instance<IAttachmentStore> attachmentStore,
+            Instance<IConversationCheckpointStore> checkpointStore, Instance<IHitlToolJournalStore> toolJournalStore) {
         this.conversationMemoryStore = conversationMemoryStore;
         this.conversationDescriptorStore = conversationDescriptorStore;
         this.conversationService = conversationService;
         this.autoVaultedSecrets = autoVaultedSecrets;
         this.attachmentStore = attachmentStore;
+        this.checkpointStore = checkpointStore;
+        this.toolJournalStore = toolJournalStore;
+    }
+
+    /** Without a checkpoint store: for callers that build the service by hand. */
+    public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
+            IConversationService conversationService, Instance<AutoVaultedSecrets> autoVaultedSecrets, Instance<IAttachmentStore> attachmentStore) {
+        this(conversationMemoryStore, conversationDescriptorStore, conversationService, autoVaultedSecrets, attachmentStore, null, null);
     }
 
     /** Thrown when a purge is asked for a conversation the caller does not own. */
@@ -132,6 +145,8 @@ public class ConversationPurgeService {
                     + "; the conversation was not deleted. Retry once the secrets vault is reachable.");
         }
         deleteAttachments(conversationId);
+        deleteCheckpoints(conversationId);
+        deleteToolJournal(conversationId);
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
@@ -170,6 +185,42 @@ public class ConversationPurgeService {
             LOGGER.warnf("Failed to delete auto-vaulted secrets for conversation %s; keeping the conversation for a retry: %s",
                     sanitize(conversationId), e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Deletes the conversation's memory checkpoints; best effort. The tool loop
+     * writes one before every tool call, each a full copy of the conversation's
+     * memory — left behind, a deleted conversation would live on in them.
+     */
+    public void deleteCheckpoints(String conversationId) {
+        if (checkpointStore != null && checkpointStore.isResolvable()) {
+            try {
+                long deleted = checkpointStore.get().deleteByConversationId(conversationId);
+                if (deleted > 0) {
+                    LOGGER.debugf("Deleted %d memory checkpoints for conversation %s", deleted, sanitize(conversationId));
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Failed to delete memory checkpoints for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            }
+        }
+    }
+
+    /**
+     * Deletes the conversation's HITL tool-journal entries (the record of each
+     * gated tool call's execution); best effort, as GDPR erasure does.
+     */
+    public void deleteToolJournal(String conversationId) {
+        if (toolJournalStore != null && toolJournalStore.isResolvable()) {
+            try {
+                long deleted = toolJournalStore.get().deleteByConversationId(conversationId);
+                if (deleted > 0) {
+                    LOGGER.debugf("Deleted %d HITL tool-journal entries for conversation %s", deleted, sanitize(conversationId));
+                }
+            } catch (Exception e) {
+                LOGGER.warnf("Failed to delete HITL tool-journal entries for conversation %s: %s", sanitize(conversationId),
+                        sanitize(e.getMessage()));
+            }
         }
     }
 

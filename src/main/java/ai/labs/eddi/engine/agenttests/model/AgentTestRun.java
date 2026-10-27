@@ -58,14 +58,22 @@ import java.util.List;
  * @param keepConversations
  *            whether the test conversations were kept after the run
  * @param error
- *            why the run could not complete, for {@link Status#ERROR}
+ *            why the run could not complete, for {@link Status#ERROR},
+ *            {@link Status#ABORTED} and {@link Status#CANCELLED}
+ * @param ownerNode
+ *            the node executing the run, as {@code <nodeId>/<bootId>}; absent
+ *            on runs recorded before 6.6
+ * @param heartbeatAt
+ *            epoch milliseconds of the owner's last sign of life while the run
+ *            is {@code RUNNING}; a run whose heartbeat has gone stale is an
+ *            orphan any node may close
  * @since 6.5.0
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AgentTestRun(String id, String suiteId, Integer suiteVersion, String suiteName, String agentId, Integer agentVersion,
         Status status, String startedBy, Long startedAt, Long finishedAt, Long durationMs, Double totalCostUsd, Double maxCostPerRun,
         Boolean costCeilingReached, List<String> models, Integer casesTotal, Integer casesPassed, Integer casesFailed,
-        List<CaseResult> cases, Boolean keepConversations, String error) {
+        List<CaseResult> cases, Boolean keepConversations, String error, String ownerNode, Long heartbeatAt) {
 
     public enum Status {
         /** Accepted and executing. */
@@ -80,20 +88,36 @@ public record AgentTestRun(String id, String suiteId, Integer suiteVersion, Stri
          * The node executing the run stopped before it finished (restart, crash); found
          * {@code RUNNING} at the next startup. Its results are incomplete.
          */
-        ABORTED
+        ABORTED,
+        /**
+         * Stopped on request ({@code POST /agenttests/runs/{runId}/cancel}). The cases
+         * that finished keep their results; the rest did not run to the end.
+         */
+        CANCELLED
     }
 
-    /** This run, finished as {@link Status#ABORTED} with {@code reason}. */
+    /**
+     * This run, finished as {@link Status#ABORTED} with {@code reason}. The
+     * heartbeat is cleared, so the owner's next compare-and-swap on it fails and
+     * the owner learns its run was closed.
+     */
     public AgentTestRun aborted(String reason, long now) {
         return new AgentTestRun(id, suiteId, suiteVersion, suiteName, agentId, agentVersion, Status.ABORTED, startedBy, startedAt, now,
                 startedAt != null ? now - startedAt : null, totalCostUsd, maxCostPerRun, costCeilingReached, models, casesTotal, casesPassed,
-                casesFailed, cases, keepConversations, reason);
+                casesFailed, cases, keepConversations, reason, ownerNode, null);
     }
 
     public AgentTestRun withId(String newId) {
         return new AgentTestRun(newId, suiteId, suiteVersion, suiteName, agentId, agentVersion, status, startedBy, startedAt, finishedAt,
                 durationMs, totalCostUsd, maxCostPerRun, costCeilingReached, models, casesTotal, casesPassed, casesFailed, cases,
-                keepConversations, error);
+                keepConversations, error, ownerNode, heartbeatAt);
+    }
+
+    /** This run with a fresh heartbeat. */
+    public AgentTestRun withHeartbeat(long now) {
+        return new AgentTestRun(id, suiteId, suiteVersion, suiteName, agentId, agentVersion, status, startedBy, startedAt, finishedAt,
+                durationMs, totalCostUsd, maxCostPerRun, costCeilingReached, models, casesTotal, casesPassed, casesFailed, cases,
+                keepConversations, error, ownerNode, now);
     }
 
     /**
