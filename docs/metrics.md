@@ -711,6 +711,20 @@ passes the text records nothing. Unknown guardrail types are skipped before they
 counted, so `type` only ever carries a registered guardrail. See
 [Input and Output Guardrails](langchain.md#input-and-output-guardrails).
 
+### Conversation Rating Metrics
+
+```text
+eddi_conversation_ratings_total             # Ratings people gave; tags: kind (conversation|message), scale (THUMBS|FIVE_STAR), bucket (low|neutral|high), agentId
+eddi_conversation_ratings_normalized        # Distribution summary of the normalized score (0..1); tags: agentId, kind (_count, _sum, _max)
+eddi_conversation_ratings_withdrawn_total   # Ratings withdrawn by the person who gave them; tag: kind
+```
+
+The counter measures rating *events*: a person who changes a rating counts twice.
+The current state — one rating per conversation and per reply — is what
+`GET /ratings/summary` reports. `bucket` is `low` below a normalized 0.4 (one or
+two stars, thumbs down), `neutral` below 0.6 (three stars) and `high` otherwise.
+See [Conversation Ratings](conversation-ratings.md).
+
 ### Agent Identity & Signing Metrics
 
 ```text

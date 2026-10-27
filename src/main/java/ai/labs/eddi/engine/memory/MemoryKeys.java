@@ -266,6 +266,20 @@ public final class MemoryKeys {
     public static final String LLM_FALLBACK_PREFIX = "llm:fallback:";
 
     /**
+     * Prefix of the step flag {@code llm:input_withheld:<taskId>} = {@code true},
+     * set when an input guardrail of the LLM task blocked the turn's message, or
+     * redacted it with a guardrail that does not re-screen history (a
+     * {@code classifier}). Every history the engine builds for a model — the
+     * message window, the rolling summary's input and the recall tool — replaces
+     * that turn's user message (text, attachment extracts and input files) with a
+     * placeholder, so a refused message never reaches a model on a later turn.
+     * Conversation memory itself keeps the message as the user sent it.
+     *
+     * @since 6.6.0
+     */
+    public static final String LLM_INPUT_WITHHELD_PREFIX = "llm:input_withheld:";
+
+    /**
      * Prefix of {@code llm:spend_refused:<taskId>} = {@code {reason, detail}},
      * recorded when the LLM task skipped its model call because a spend limit was
      * already reached ({@code LlmSpendGate}) and served its fallback answer
