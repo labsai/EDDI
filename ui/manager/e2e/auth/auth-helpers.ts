@@ -37,10 +37,10 @@ export const USERS = {
     // eddi-viewer alongside the other two: there is no role hierarchy, so an
     // administrator without it is refused every MCP read tool. Kept in step with
     // ROLE_FIXTURES in scripts/make-test-realm.mjs, which fails the run otherwise.
-    roles: ["eddi-admin", "eddi-editor", "eddi-viewer"],
+    roles: ["eddi-admin", "eddi-editor", "eddi-viewer", "offline_access"],
   },
-  user: { username: "user", password: "e2e-user-password", roles: ["eddi-user"] },
-  viewer: { username: "viewer", password: "e2e-viewer-password", roles: ["eddi-viewer"] },
+  user: { username: "user", password: "e2e-user-password", roles: ["eddi-user", "offline_access"] },
+  viewer: { username: "viewer", password: "e2e-viewer-password", roles: ["eddi-viewer", "offline_access"] },
 } as const;
 
 export type Fixture = keyof typeof USERS;

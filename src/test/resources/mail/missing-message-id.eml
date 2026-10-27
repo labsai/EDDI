@@ -1,0 +1,8 @@
+From: Jack Example <jack@example.com>
+To: support@example.org
+Subject: No id
+Date: not a date at all
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This message has no Message-ID.

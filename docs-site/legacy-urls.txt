@@ -1,0 +1,186 @@
+# Every URL docs.labs.ai has served (GitBook), so that none of them 404s after the move.
+#
+# Sources, collected 2026-10-26: GitBook's sitemap-pages.xml at the time (section-prefixed
+# URLs), the Wayback Machine's record of docs.labs.ai (older flat and chatbot-era URLs),
+# and the docs links in this repo and in the website repo. The website links the .md form
+# (/protocols-and-integration/mcp-server.md); every path below also gets its .md and
+# trailing-slash forms redirected, so those are not listed separately.
+#
+# A line is `<path>` or `<path> <target>`. Without a target, the longest trailing part of the
+# path that is a page slug decides it (/agent-configuration/langchain/llm-parameters ->
+# /llm-parameters/); a path that is a page itself needs no redirect and is listed so the
+# test keeps it that way. Give a target only where that rule cannot work. A target is a
+# page route, / or an https:// URL.
+#
+# scripts/redirects.mjs turns this into the "redirects" block of vercel.json
+# (npm run redirects); its test fails if any line resolves to nothing or vercel.json is stale.
+
+# --- Current GitBook sitemap -------------------------------------------------------------
+/
+/getting-started/getting-started
+/getting-started/developer-quickstart
+/getting-started/agent-manager-gui
+/getting-started/creating-your-first-agent
+/getting-started/putting-it-all-together
+/getting-started/import-export-an-agent
+/getting-started/troubleshooting
+/architecture-and-concepts/architecture
+/architecture-and-concepts/project-philosophy
+/architecture-and-concepts/conversation-memory
+/architecture-and-concepts/memory-policy
+/architecture-and-concepts/properties
+/architecture-and-concepts/user-memory
+/architecture-and-concepts/extensions
+/agent-configuration/agent-config-authoring
+/agent-configuration/behavior-rules
+/agent-configuration/httpcalls
+/agent-configuration/langchain
+/agent-configuration/langchain/llm-parameters
+/agent-configuration/rag
+/agent-configuration/model-cascade
+/agent-configuration/llm-resilience
+/agent-configuration/prompt-snippets-guide
+/agent-configuration/output-configuration
+/agent-configuration/output-templating
+/agent-configuration/semantic-parser
+/agent-configuration/passing-context-information
+/agent-configuration/attachments-guide
+/conversations-and-orchestration/conversations
+/conversations-and-orchestration/rest-api-reference
+/conversations-and-orchestration/group-conversations
+/conversations-and-orchestration/hitl
+/conversations-and-orchestration/managed-agents
+/conversations-and-orchestration/scheduling
+/conversations-and-orchestration/capability-match-guide
+/conversations-and-orchestration/deployment-management-of-agents
+/conversations-and-orchestration/agent-testing
+/conversations-and-orchestration/agent-sync-guide
+/protocols-and-integration/mcp-server
+/protocols-and-integration/mcp-client
+/protocols-and-integration/a2a-protocol
+/protocols-and-integration/connections
+/protocols-and-integration/slack-integration
+/protocols-and-integration/webhook-triggers
+/protocols-and-integration/open-webui-integration
+/protocols-and-integration/chat-ui-embedding
+/security-and-compliance/security
+/security-and-compliance/cryptography
+/security-and-compliance/workspaces
+/security-and-compliance/secrets-vault
+/security-and-compliance/global-variables
+/security-and-compliance/audit-ledger
+/security-and-compliance/tenant-quotas
+/security-and-compliance/gdpr-compliance
+/security-and-compliance/hipaa-compliance
+/security-and-compliance/baa-template
+/security-and-compliance/eu-ai-act-compliance
+/security-and-compliance/compliance-data-flow
+/security-and-compliance/incident-response
+/security-and-compliance/security-review
+/security-and-compliance/privacy
+/deployment-and-infrastructure/configuration-reference
+/deployment-and-infrastructure/upgrading-from-5x
+/deployment-and-infrastructure/upgrading-from-6.4
+/deployment-and-infrastructure/upgrading-from-6.5
+/deployment-and-infrastructure/docker
+/deployment-and-infrastructure/kubernetes
+/deployment-and-infrastructure/clustering
+/deployment-and-infrastructure/redhat-openshift
+/deployment-and-infrastructure/setup-eddi-on-aws-with-mongodb-atlas
+/deployment-and-infrastructure/release-versioning
+/deployment-and-infrastructure/release-signing
+/deployment-and-infrastructure/release-notes
+/deployment-and-infrastructure/release-notes/release-notes-6.0.2
+/deployment-and-infrastructure/metrics
+/deployment-and-infrastructure/monitoring-guide
+/deployment-and-infrastructure/log-administration
+/deployment-and-infrastructure/coordinator-admin
+/reference/agent-sync-architecture
+/reference/code-review-standards
+/reference/build-reproducibility
+/reference/changelog
+/reference/changelog/2026-10
+/reference/changelog/2026-09
+/reference/changelog/2026-08
+/reference/changelog/2026-07
+/reference/changelog/2026-06
+/reference/changelog/2026-05
+/reference/changelog/2026-04
+/reference/changelog/2026-03
+/reference/changelog/changelog.d /changelog/pending/
+/reference/how-to... /faq/
+/archive/handoff-v6.0-snapshot
+
+# --- Section roots (GitBook served each SUMMARY heading as a page) -----------------------
+# Generated from docs/SUMMARY.md by scripts/redirects.mjs: each goes to its section's first page.
+
+# --- Older URLs, from the Wayback Machine -------------------------------------------------
+# Flat URLs from before the SUMMARY sections existed — pages again under the flat scheme.
+/architecture
+/behavior-rules
+/conversation-memory
+/conversations
+/developer-quickstart
+/docker
+/extensions
+/httpcalls
+/langchain
+/metrics
+/output-configuration
+/output-templating
+/passing-context-information
+/putting-it-all-together
+/redhat-openshift
+/security
+/semantic-parser
+/setup-eddi-on-aws-with-mongodb-atlas
+/how-to... /faq/
+/deployment-and-infrastructure/how-to... /faq/
+
+# GitBook's numbered duplicates of the tutorial.
+/getting-started/creating-your-first-agent/creating-your-first-agent /creating-your-first-agent/
+/getting-started/creating-your-first-agent/creating-your-first-agent-1 /creating-your-first-agent/
+/getting-started/your-first-agent /creating-your-first-agent/
+/getting-started/your-first-agent/understanding-your-first-agent /creating-your-first-agent/
+
+# Chatbot-era names of pages that still exist.
+/creating-your-first-chatbot /creating-your-first-agent/
+/creating-your-first-chatbot/creating-your-first-chatbot /creating-your-first-agent/
+/creating-your-first-chatbot/creating-your-first-chatbot-1 /creating-your-first-agent/
+/your-first-bot /creating-your-first-agent/
+/your-first-bot/understanding-your-first-bot /creating-your-first-agent/
+/bot-manager-gui /agent-manager-gui/
+/import-export-a-chatbot /import-export-an-agent/
+/deployement-management-of-chatbots /deployment-management-of-agents/
+/deployment-management-of-chatbots /deployment-management-of-agents/
+/managed-bots /managed-agents/
+
+# The Agent Father (Bot Father before it) was replaced by the Platform Operator in 6.3.0,
+# which lives in the Manager.
+/advanced-concepts/agent-father-conversation-flow /agent-manager-gui/
+/advanced-concepts/agent-father-deep-dive /agent-manager-gui/
+/advanced-concepts/agent-father-implementation-summary /agent-manager-gui/
+/advanced-concepts/agent-father-langchain-tools-guide /agent-manager-gui/
+/advanced-concepts/agent-father-langchain-updates /agent-manager-gui/
+/advanced-concepts/agent-father-tools-configuration-fix /agent-manager-gui/
+/advanced-concepts/bot-father-conversation-flow /agent-manager-gui/
+/advanced-concepts/bot-father-deep-dive /agent-manager-gui/
+/advanced-concepts/bot-father-implementation-summary /agent-manager-gui/
+/advanced-concepts/bot-father-langchain-tools-guide /agent-manager-gui/
+/advanced-concepts/bot-father-langchain-updates /agent-manager-gui/
+/advanced-concepts/bot-father-tools-configuration-fix /agent-manager-gui/
+
+# Pages with no successor: the closest page, or the start page.
+/http2-and-ssl /security/
+/facebook-channel-setup /
+/git-support /
+/deployment-and-infrastructure/tasks /changelog/
+/deployment-and-infrastructure/git-commit-guide https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md
+
+# --- Linked from code -----------------------------------------------------------------------
+# The backend and the Manager print these; flat, so they are pages under the new scheme.
+/secrets-vault
+/hipaa-compliance
+/clustering
+# An old release-notes link.
+/Release.Notes /release-notes/
