@@ -71,10 +71,10 @@ class ReservedPrincipalsTest {
             Map.entry("v4:", "ciphertext/HMAC format version"),
             Map.entry("v5:", "ciphertext/HMAC format version"),
             Map.entry("data:", "data URL scheme"),
-            // Two features use it (#1145 and #1140, merged the same day); one key, both
-            // reasons.
-            Map.entry("sha256:",
-                    "content-hash prefix: brand image hash and ETag (BrandAssetValidator.hash), synthetic Message-ID (MimeMessageParser, email ledger)"),
+            // One entry for two uses: Map.ofEntries rejects a duplicate key, and two
+            // features each adding their own "sha256:" broke class init.
+            Map.entry("sha256:", "content hash prefix: brand image hash and ETag (BrandAssetValidator.hash); "
+                    + "synthetic Message-ID / hash prefix (MimeMessageParser, email ledger)"),
             Map.entry("retro:", "RETRO memory entry key"),
             Map.entry("rag-ingestion:", "schedule name"),
             Map.entry("audit-key-id:", "audit key id record"),
