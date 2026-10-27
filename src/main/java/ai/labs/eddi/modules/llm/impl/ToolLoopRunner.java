@@ -23,6 +23,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -1183,7 +1184,23 @@ class ToolLoopRunner {
 
         // Check tenant-level monthly cost budget (MCP governance)
         if (tenantQuotaService != null) {
-            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            QuotaCheckResult costCheck;
+            try {
+                costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            } catch (RuntimeException e) {
+                // Same guard as LlmSpendGate: a check that throws is a defect, not an
+                // outage (the service answers those) — refuse the tool call (fail
+                // closed) under the tenant_check_error reason instead of failing the turn.
+                String checkError = LlmSpendGate.tenantCheckFailed(null, conversationId, "tool call", e);
+                Map<String, Object> errorStep = new HashMap<>();
+                errorStep.put("type", "tool_error");
+                errorStep.put("tool", toolRequest.name());
+                errorStep.put("error", checkError);
+                trace.add(errorStep);
+                // The exception class stays in the trace and the log; the model gets
+                // generic wording.
+                return new ToolCallResult("Error: " + LlmSpendGate.TENANT_CHECK_ERROR_MESSAGE);
+            }
             if (!costCheck.allowed()) {
                 // The reason string already distinguishes the two, but the log line
                 // in front of it did not: an operator grepping for "cost budget
