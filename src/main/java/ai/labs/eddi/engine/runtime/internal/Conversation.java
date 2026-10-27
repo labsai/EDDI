@@ -700,7 +700,12 @@ public class Conversation implements IConversation {
             clearStepScopedPropertiesUnlessPaused(paused);
             if (auditBuffer != null) {
                 auditBuffer.addSecretInputForms(secretInputForms);
-                auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
+                boolean handedOver = auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
+                // The ledger owns the prompt and the model response now; the stored step
+                // keeps no second copy. A paused turn keeps them: it resumes from this step.
+                if (handedOver && !paused) {
+                    TurnAuditBuffer.releaseLedgerOwnedEvidence(conversationMemory);
+                }
             }
             // BEFORE the persist decision below, and on every exit including the
             // exception path: note which longTerm properties this turn changed. If the
@@ -1771,11 +1776,15 @@ public class Conversation implements IConversation {
             // First, as on the say path: nothing below — the audit flush, the longTerm
             // write, the stored snapshot, the rendered output — may see the value.
             scrubSecretContextValues();
-            if (auditBuffer != null) {
-                auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
-            }
+            boolean evidenceHandedOver = auditBuffer != null
+                    && auditBuffer.flush(conversationMemory, searchableSecretContextValues(), exactSecretContextValues());
             checkActionsForConversationEnd();
             ConversationState finalState = getConversationState();
+            // The ledger owns the prompt and the model response now; a turn that paused
+            // again keeps them in the step it resumes from.
+            if (evidenceHandedOver && finalState != ConversationState.AWAITING_HUMAN) {
+                TurnAuditBuffer.releaseLedgerOwnedEvidence(conversationMemory);
+            }
             if (finalState == ConversationState.IN_PROGRESS)
                 setConversationState(ConversationState.READY);
             clearStepScopedPropertiesUnlessPaused(finalState == ConversationState.AWAITING_HUMAN);

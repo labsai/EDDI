@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -1464,7 +1465,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
                     String envName = environment.toString();
-                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                    memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
                 }
 
                 final IConversation conversation = agent.continueConversation(memory,
