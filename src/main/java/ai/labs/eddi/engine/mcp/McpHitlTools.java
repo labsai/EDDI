@@ -438,7 +438,10 @@ public class McpHitlTools {
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                // Same rule as the REST summary — see HitlAccessGuard.
+                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                    summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                }
             }
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {

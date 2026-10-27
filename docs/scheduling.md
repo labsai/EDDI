@@ -64,8 +64,14 @@ the waiting conversation (see [hitl.md](hitl.md)).
 
 With workspaces enforced, every fire re-checks that the schedule's **creator** may still use its
 agent — the USE gate runs at create time, but a fire runs with server identity. The check honours
-shares with the teams the creator belonged to when the schedule was created; it cannot see them
-leave a team later, since nothing server-side knows that without their token. A fire whose creator
+shares with the teams the creator belonged to when the schedule was created, narrowed by the user
+directory: when the creator has signed in since the schedule was created, a team their latest token
+no longer lists stops counting, so leaving a team revokes a schedule that relied on it. The
+narrowing only ever removes teams, and a creator who has not signed in since keeps the create-time
+snapshot — EDDI has no live view of anybody's groups outside their own request. The same holds for
+an administrator: `creatorAdmin` is the role the creator's token carried at create time, and the
+directory records teams, not roles, so a creator who loses `eddi-admin` keeps an admin-created
+schedule firing until it is disabled or re-created. A fire whose creator
 lost access (grant revoked, agent unshared or unpublished) is recorded `FAILED` with the reason and
 the schedule is disabled (`disabledReason: "access-revoked"`); it does not come back on a redeploy —
 re-enable it once access is restored, and the next fire checks again. Schedules with no recorded
@@ -157,7 +163,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence. Two consequences of that (Vixie cron) rule: two fixed times that both land on the transition fire once — `0 2,3 * * *` fires a single time, at 03:00, on the spring-forward day — and a fixed hour *range* such as `0 0-23 * * *` or `0 1-5 * * *` counts as fixed-time, so on the 25-hour fall-back day it fires 24 times and does not repeat the doubled hour. Use `0 * * * *` for a truly hourly cadence |
 | `environment` | string | `production` | Deployment environment |
 | `enabled` | boolean | `true` | Whether the schedule is active. Set on create only: a `PUT` ignores it and keeps the stored value — change it with `/enable` and `/disable` (see [Enabling and disabling](#enabling-and-disabling)) |
-| `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per fire |
+| `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per agent fire. The fire's turn carries it, and the LLM spend gate and tool loop hold the turn to what the conversation had spent before it plus this amount — the priced-spend ceiling `maxCostPerConversationUsd` sets, the tighter of the two winning — so a `persistent` schedule is capped per fire, not over its lifetime. A model call or tool round that would start past it does not run, exactly as with `maxCostPerConversationUsd`. Priced spend needs model prices configured, as for `maxCostPerConversationUsd`. `0` or below means unlimited (PostgreSQL stores `0` as no value). Dream and team-cadence schedules use their own `maxCostPerRun` |
 | `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
 | `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `"metadata": null` or `{}` to clear it. A `PUT` to a RAG-ingestion schedule is refused (`409`) — change the source's cron on the knowledge base — and one to a team-cadence schedule needs EDIT on the group |
 

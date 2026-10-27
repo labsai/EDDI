@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Loader2, OctagonX, XCircle } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, Loader2, OctagonX, XCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import type { AgentTestRun, RunStatus } from "@/lib/api/agent-tests";
@@ -8,6 +8,7 @@ const VARIANT: Record<RunStatus, "success" | "destructive" | "warning" | "second
   FAILED: "destructive",
   ERROR: "destructive",
   ABORTED: "warning",
+  CANCELLED: "warning",
   RUNNING: "secondary",
 };
 
@@ -16,6 +17,7 @@ const ICON = {
   FAILED: XCircle,
   ERROR: OctagonX,
   ABORTED: AlertTriangle,
+  CANCELLED: Ban,
   RUNNING: Loader2,
 } as const;
 
@@ -27,6 +29,7 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
     FAILED: t("agentTests.status.FAILED", "Failed"),
     ERROR: t("agentTests.status.ERROR", "Error"),
     ABORTED: t("agentTests.status.ABORTED", "Aborted"),
+    CANCELLED: t("agentTests.status.CANCELLED", "Cancelled"),
     RUNNING: t("agentTests.status.RUNNING", "Running"),
   }[status];
   return (
@@ -38,7 +41,7 @@ export function RunStatusBadge({ status }: { status: RunStatus }) {
 }
 
 /**
- * What a non-green outcome means and what to do about it. ERROR and ABORTED are
+ * What a non-green outcome means and what to do about it. ERROR, ABORTED and CANCELLED are
  * not test failures — nothing about the agent was judged — so they say so, and
  * name the next step, rather than showing only the raw `error` text.
  */
@@ -51,7 +54,21 @@ export function RunOutcomeNotice({ run }: { run: AgentTestRun }) {
         <p>
           {t(
             "agentTests.notice.abortedBody",
-            "The node running this test stopped before it finished, so the run was closed at the next startup and its test conversations were deleted. Start the run again."
+            "The node running this test stopped before it finished, so the run was closed and its test conversations were deleted. Start the run again."
+          )}
+        </p>
+        {run.error && <Reason text={run.error} />}
+      </Notice>
+    );
+  }
+
+  if (run.status === "CANCELLED") {
+    return (
+      <Notice tone="warning" testId="run-notice-cancelled" title={t("agentTests.notice.cancelledTitle", "This run was cancelled — the agent was not fully judged")}>
+        <p>
+          {t(
+            "agentTests.notice.cancelledBody",
+            "The run was stopped before it finished. Cases that completed keep their results; the rest count as failed. Start the run again for a full verdict."
           )}
         </p>
         {run.error && <Reason text={run.error} />}
