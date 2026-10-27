@@ -115,8 +115,10 @@ jar are unaffected.
   `docs-site` as Root Directory, Vercel failed (and emailed) every push to the orphan `metrics` data
   branch before any ignore step could run. Originally planned with "include files
   outside the root directory" enabled (the build reads `../docs` and `../PRIVACY.md`).
-- `ignoreCommand` in the root `vercel.json` (and the same command in the project settings) skips
-  a branch without `docs-site/`, and otherwise the build unless `docs/`, `docs-site/` or
+- **Only `main` deploys** (decided 2026-10-27): the `ignoreCommand` in the root `vercel.json` (and
+  the same command in the project settings) skips every non-production deployment, so branches
+  and PRs get no Vercel build — the `Docs Site` check validates them instead. On `main` it skips
+  the build unless `docs/`, `docs-site/` or
   `PRIVACY.md` changed — `labsai/EDDI` gets far more Java PRs than docs PRs.
 - Vercel's PR comments switched off in the project settings; the deployment status alone is
   enough, and this repo's PRs already carry ~27 checks.

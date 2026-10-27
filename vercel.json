@@ -4,7 +4,7 @@
   "installCommand": "cd docs-site && npm ci",
   "buildCommand": "cd docs-site && npm run build",
   "outputDirectory": "docs-site/.generated/dist",
-  "ignoreCommand": "test ! -d docs-site || git diff --quiet HEAD^ HEAD -- docs-site docs PRIVACY.md vercel.json",
+  "ignoreCommand": "test \"$VERCEL_ENV\" != production || test ! -d docs-site || git diff --quiet HEAD^ HEAD -- docs-site docs PRIVACY.md vercel.json",
   "trailingSlash": true,
   "headers": [
     {

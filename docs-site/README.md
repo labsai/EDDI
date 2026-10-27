@@ -58,12 +58,17 @@ the repository-root [`vercel.json`](../vercel.json) — install, build and outpu
 && …`), headers, redirects, and the ignore step — because Vercel reads `vercel.json` from the
 project's Root Directory, and **the Root Directory is the repository root, not `docs-site/`**.
 
-That is deliberate. Vercel checks that the Root Directory exists before it runs any ignore step,
+**Only `main` deploys.** The ignore step skips every deployment that is not production
+(`test "$VERCEL_ENV" != production || …`), so branches and pull requests get no Vercel build — no
+previews, and no failure emails when a branch carries a broken `main`. Pull requests are still
+validated by the `Docs Site` check (`docs-site.yml`), which builds the site and checks every link.
+
+The Root Directory is the repository root on purpose. Vercel checks that the Root Directory exists before it runs any ignore step,
 so with `docs-site` as the Root Directory every push to a branch without it failed: the orphan
 `metrics` data branch (written by `docker-pull-notify.yml` every 10–35 minutes) and every branch
 cut before the site existed, each with a failure email. The repository root exists everywhere,
-and the ignore step `test ! -d docs-site || git diff --quiet HEAD^ HEAD -- …` skips a branch
-without `docs-site/` and any commit that does not touch the docs. The project settings carry the
+and the rest of the ignore step, `test ! -d docs-site || git diff --quiet HEAD^ HEAD -- …`, skips
+a commit on `main` that does not touch the docs. The project settings carry the
 same commands, for branches that have no root `vercel.json`.
 
 Domains: `docs.eddi.technology`, and `docs.labs.ai`, whose requests the first redirect rule
