@@ -22,7 +22,4 @@ Next step of the [white-labeling plan](../../planning/white-label-ui-plan.md) af
 
 ### Fixed on the way
 
-Two breakages already on `main`, both outside this series' own code, which turned this PR's required and docs checks red:
-
-- `ReservedPrincipalsTest` listed `sha256:` twice, once for the brand image hash (#1145) and once for the mail Message-ID (#1140), so `Map.ofEntries` threw at class init. The two are now one entry naming both uses.
-- `docs/mcp-server.md` linked to an anchor `docs/conversation-ratings.md` does not have. It now points at the page's "Analyzing and triaging" section, where the rating tools are described.
+`docs/mcp-server.md` linked to an anchor `docs/conversation-ratings.md` does not have, which failed the docs-site build on `main` and on every PR. It now points at the page's "Analyzing and triaging" section, where the rating tools are described.
