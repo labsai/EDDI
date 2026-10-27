@@ -257,10 +257,14 @@ jobs:
             exit 0
           fi
           git fetch --no-tags --depth=1 origin "$BASE_REF"
-          CHANGED=$(git diff --name-only "origin/${BASE_REF}" HEAD)
+          CHANGED=$(git diff --no-renames --name-only "origin/${BASE_REF}" HEAD)
           OTHER=$(printf '%s\n' "$CHANGED" \
             | grep -vE '^docs/(changelog\.md|changelog\.d/[^/]+|changelog/[^/]+\.md|SUMMARY\.md)$' || true)
-          if [ -n "$CHANGED" ] && [ -z "$OTHER" ]; then
+          # Register rows (Decision Log / Regression Notes) carry links that
+          # DocumentationLinksTest grades only once they sit in docs/changelog.md,
+          # so a collation that adds any keeps the Java suite.
+          ROWS=$(git diff --no-renames -U0 "origin/${BASE_REF}" HEAD -- docs/changelog.md             | grep -E '^\+\| [0-9]{4}-[0-9]{2}-[0-9]{2} \|' || true)
+          if [ -n "$CHANGED" ] && [ -z "$OTHER" ] && [ -z "$ROWS" ]; then
             echo "only=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -285,14 +289,15 @@ jobs:
           else
             echo "code=${{ steps.filter.outputs.code }}" >> "$GITHUB_OUTPUT"
             echo "scripts=${{ steps.filter.outputs.scripts }}" >> "$GITHUB_OUTPUT"
-            if [ "$COLLATION_ONLY" = "true" ]; then
-              echo "operator_docs=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "operator_docs=${{ steps.filter.outputs.operator_docs }}" >> "$GITHUB_OUTPUT"
-            fi
+            echo "operator_docs=${{ steps.filter.outputs.operator_docs }}" >> "$GITHUB_OUTPUT"
             echo "release_pointers=${{ steps.filter.outputs.release_pointers }}" >> "$GITHUB_OUTPUT"
             echo "ui=${{ steps.filter.outputs.ui }}" >> "$GITHUB_OUTPUT"
             echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
+          fi
+          # Outside the tag/else split on purpose: DeploymentManifestsTest reads that
+          # split positionally. A later write to the same output key wins.
+          if [ "$COLLATION_ONLY" = "true" ]; then
+            echo "operator_docs=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Resolve E2E databases
