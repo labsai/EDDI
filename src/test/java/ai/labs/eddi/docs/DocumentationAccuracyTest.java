@@ -63,8 +63,12 @@ class DocumentationAccuracyTest {
         }
     }
 
-    /** Directories with no documentation to check (or not ours to check). */
-    private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn");
+    /**
+     * Directories with no documentation to check (or not ours to check).
+     * {@code .generated} is docs-site's build output: a transformed copy of docs/
+     * with site-relative links, which only exists after a local site build.
+     */
+    private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn", ".generated");
 
     private static List<Path> markdownFiles() {
         Path root = repoRoot();

@@ -71,6 +71,7 @@ class ReservedPrincipalsTest {
             Map.entry("v4:", "ciphertext/HMAC format version"),
             Map.entry("v5:", "ciphertext/HMAC format version"),
             Map.entry("data:", "data URL scheme"),
+            Map.entry("sha256:", "brand image content hash and ETag (BrandAssetValidator.hash)"),
             Map.entry("retro:", "RETRO memory entry key"),
             Map.entry("rag-ingestion:", "schedule name"),
             Map.entry("audit-key-id:", "audit key id record"),
@@ -78,7 +79,8 @@ class ReservedPrincipalsTest {
             Map.entry("eddi-attachments-quota:", "advisory lock key"),
             Map.entry("system-value:", "template value tag"),
             Map.entry("pii:", "guardrail audit reason code (PiiRedactionGuardrail: pii:<kinds>)"),
-            Map.entry("unknown:", "in-memory dedupe key for the unknown-guardrail-type WARN (GuardrailService)"));
+            Map.entry("unknown:", "in-memory dedupe key for the unknown-guardrail-type WARN (GuardrailService)"),
+            Map.entry("sha256:", "synthetic Message-ID / hash prefix (MimeMessageParser, email ledger)"));
 
     @Test
     @DisplayName("every principal-shaped prefix in src/main is either reserved or known not to be a principal")

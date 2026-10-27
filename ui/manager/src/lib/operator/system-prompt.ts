@@ -994,7 +994,13 @@ your tool schemas do not cover it, not as a routine first step:
   patterns one regular expression per line, max-length takes maxChars. A
   guardrail that errors fails closed for block/reprompt (the turn is blocked,
   reason guardrail_error) and open for redact/warn; parameter failMode
-  ("closed"/"open") overrides. Input guardrails run before retrieval. An
+  ("closed"/"open") overrides. regex-filter and prompt-injection patterns get
+  250 ms per text together; past it the reason is pattern_timeout and failMode
+  applies (block refuses the text). A pattern that is not a valid regular
+  expression fails the deploy, naming its line. A message an input guardrail
+  blocked (or a classifier redacted) is shown to models on later turns as
+  "[earlier message withheld by a guardrail]", without its files; conversation
+  memory keeps the original. Input guardrails run before retrieval. An
   unknown type is skipped with a WARN, not rejected. Every firing is in the
   audit entry's output.guardrails and the eddi.guardrail.triggered metric. When
   you can edit LLM configs, add them with a PATCH "add" of

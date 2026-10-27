@@ -83,7 +83,9 @@ class SkillToolReferencesTest {
     private static final Set<String> NOT_ARGUMENTS = Set.of(
             "defaultToolTimeoutMs", "toolTimeoutsMs", // LLM task config fields
             "executeUntilFirstSuccess", "lastStep", "valueString", // behavior-rule and template terms
-            "failedSteps", "omittedCategories" // GDPR tool result fields
+            "failedSteps", "omittedCategories", // GDPR tool result fields
+            "ratingConfig", // agent configuration field (SKILL.md, Feedback from users)
+            "canOpenTranscript" // list_conversation_ratings result field
     );
 
     private static Path repoRoot() {
