@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
+import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -245,6 +246,15 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     ConversationContinuations conversationContinuations;
+
+    /**
+     * {@link HitlPauseCommittedEvent}, fired once a pause is durable (see
+     * {@link #firePauseCommitted}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} (a directly constructed instance)
+     * fires nothing.
+     */
+    @Inject
+    Event<HitlPauseCommittedEvent> hitlPauseCommittedEvent;
 
     /**
      * Verifies a {@code groupId} found only on an earlier step before group memory
@@ -748,6 +758,12 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
             armContinuation(conversationId, conversationMemory, environment);
+            // Announced only once the conversation is final: a failed descriptor write
+            // discards it again, and an observer (the email notifier) must not have
+            // been told about a pause that no longer exists.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                firePauseCommitted(conversationId, conversationMemory);
+            }
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (AgentNotReadyException e) {
@@ -791,6 +807,27 @@ public class ConversationService implements IConversationService, UserErasurePar
                         sanitize(conversationId));
             }
             throw e;
+        }
+    }
+
+    /**
+     * Announces a pause that is now durable ({@link HitlPauseCommittedEvent}) to
+     * asynchronous observers — the HITL email notifier today. Called at each place
+     * a pause is committed, after the commit; never throws, since the pause is
+     * already persisted and an observer's trouble is not the turn's.
+     */
+    void firePauseCommitted(String conversationId, IConversationMemory memory) {
+        if (hitlPauseCommittedEvent == null) {
+            return;
+        }
+        try {
+            String pauseId = HitlDecision.pauseIdOf(memory.getHitlPausedAt());
+            if (pauseId == null) {
+                return; // no bookmark time: nothing an observer could match against
+            }
+            hitlPauseCommittedEvent.fireAsync(new HitlPauseCommittedEvent(conversationId, pauseId));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not announce the committed pause of conversation %s: %s", sanitize(conversationId), e.getMessage());
         }
     }
 

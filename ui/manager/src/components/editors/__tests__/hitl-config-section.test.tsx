@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
@@ -146,6 +147,166 @@ describe("HitlConfigSection", () => {
       expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
             hitlConfig: expect.objectContaining({ toolApprovals: null }),
           }));
+    });
+  });
+
+  describe("onRejection (E2)", () => {
+    it("defaults to SKIP and shows no revision bound", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+
+      expect(screen.getByTestId("hitl-on-rejection")).toHaveValue("SKIP");
+      expect(screen.queryByTestId("hitl-max-revisions")).not.toBeInTheDocument();
+    });
+
+    it("REVISE seeds the default bound in the same patch", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.change(screen.getByTestId("hitl-on-rejection"), { target: { value: "REVISE" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ onRejection: "REVISE", maxRevisionsPerTurn: 3 }),
+      }));
+    });
+
+    it("back to SKIP stores the default by leaving both fields empty", () => {
+      const agent: Agent = { hitlConfig: { onRejection: "REVISE", maxRevisionsPerTurn: 2 } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.change(screen.getByTestId("hitl-on-rejection"), { target: { value: "SKIP" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ onRejection: null, maxRevisionsPerTurn: null }),
+      }));
+    });
+
+    it("clamps the bound to what the backend accepts (1..10)", () => {
+      const agent: Agent = { hitlConfig: { onRejection: "REVISE", maxRevisionsPerTurn: 2 } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.change(screen.getByTestId("hitl-max-revisions"), { target: { value: "42" } });
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ maxRevisionsPerTurn: 10 }),
+      }));
+      fireEvent.change(screen.getByTestId("hitl-max-revisions"), { target: { value: "0" } });
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ maxRevisionsPerTurn: 1 }),
+      }));
+    });
+  });
+
+  describe("email notifications (hitlConfig.notify.email)", () => {
+    it("an agent without notify shows the switch off and no recipients field", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      expect(screen.getByTestId("hitl-notify-email-enabled")).not.toBeChecked();
+      expect(screen.queryByTestId("hitl-notify-email-recipients")).not.toBeInTheDocument();
+    });
+
+    it("a valid list is written as notify.email.recipients", () => {
+      const agent: Agent = { hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(mockOnChange).not.toHaveBeenCalled();
+
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), {
+        target: { value: "approvers@example.com, ops-lead@example.com" },
+      });
+
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({
+          notify: { email: { recipients: ["approvers@example.com", "ops-lead@example.com"] } },
+        }),
+      }));
+    });
+
+    it("an invalid list never reaches the draft and says what is wrong", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      expect(screen.getByTestId("hitl-notify-email-enabled")).toBeChecked();
+      expect(screen.getByTestId("hitl-notify-email-recipients")).toHaveValue("ops@example.com");
+
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "ops@example.com, not-an-address" } });
+
+      expect(mockOnChange).not.toHaveBeenCalled();
+      expect(screen.getByTestId("hitl-notify-email-hint")).toHaveClass("text-destructive");
+    });
+
+    it("reports an invalid list to the page, so an earlier valid edit cannot be saved under it", () => {
+      const onValidityChange = vi.fn();
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} onValidityChange={onValidityChange} />);
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+      const field = screen.getByTestId("hitl-notify-email-recipients");
+
+      fireEvent.change(field, { target: { value: "ops@example.com, lead@example.com" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+      fireEvent.change(field, { target: { value: "ops@example.com, lead@example.com, not-an-address" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+      fireEvent.change(field, { target: { value: "ops@example.com" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("an invalid list stops counting once notifications are switched off", () => {
+      const onValidityChange = vi.fn();
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} onValidityChange={onValidityChange} />);
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "not-an-address" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("an empty list stops counting once HITL itself is switched off", () => {
+      const onValidityChange = vi.fn();
+      function Host() {
+        const [agent, setAgent] = useState<Agent>({
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+        });
+        return <HitlConfigSection agent={agent} onChange={setAgent} onValidityChange={onValidityChange} />;
+      }
+      renderWithProviders(<Host />);
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+      fireEvent.click(screen.getByTestId("hitl-config-enabled"));
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("names the recipients field by its label", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      expect(screen.getByLabelText("Recipients (comma or one per line)")).toBe(screen.getByTestId("hitl-notify-email-recipients"));
+    });
+
+    it("the hint says a tool-call mail carries the redacted, shortened arguments", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      const hint = screen.getByTestId("hitl-notify-email-hint").textContent ?? "";
+      expect(hint).toContain("arguments redacted and shortened");
+      expect(hint).not.toContain("carries no conversation content");
+    });
+
+    it("switching it off removes notify", () => {
+      const agent: Agent = {
+        hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+      };
+      renderWithProviders(<HitlConfigSection agent={agent} onChange={mockOnChange} />);
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+
+      expect(mockOnChange).toHaveBeenCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ notify: null }),
+      }));
     });
   });
 });

@@ -66,6 +66,21 @@ import java.util.regex.Pattern;
  * the allowlist: an on-premises mail server on a private network is a real
  * deployment, but the decision to allow one belongs in its own, explicit
  * setting, not in a side effect of naming a host.
+ * <h2>Two policies</h2> Everything above is {@link Policy#AUTHOR}: the rules
+ * for a host a config author typed into a channel or a knowledge source, which
+ * {@link #resolve} applies. {@link Policy#OPERATOR} is for a host the
+ * deployment's operator set in {@code application.properties} — today only the
+ * system mailer's {@code eddi.mail.smtp.host} — and is reached only through
+ * {@link #resolveOperator}. The operator already controls the network the
+ * process runs in, so the rules that stop an author from probing it do not
+ * apply: a private or loopback address (an on-premises relay, a Postfix
+ * sidecar), an IP literal, a single-label name and any port, including 25, are
+ * allowed, and {@code eddi.email.allowed-hosts}, which confines authors, is not
+ * consulted. What stays: the host is resolved once and the socket pinned to
+ * that address; cloud metadata and other link-local addresses are refused (no
+ * mail server lives there, and a typo should not reach one); TLS is verified as
+ * for authors; and the TLS mode is the operator's explicit choice — including
+ * {@link TlsMode#PLAINTEXT}, which no author endpoint can ever carry.
  * <p>
  * The transports of later phases use {@link #angusProperties(Endpoint)} to give
  * Angus Mail this connector's socket factory; nothing else in EDDI should open
@@ -110,7 +125,28 @@ public class SafeSocketConnector {
         /** TLS from the first byte (993, 465). */
         IMPLICIT,
         /** Plaintext greeting, then {@code STARTTLS}, which is required (143, 587). */
-        STARTTLS
+        STARTTLS,
+        /**
+         * No TLS at all. Only {@link #resolveOperator} creates an endpoint with this
+         * mode, and only because the operator chose it explicitly — never an author
+         * endpoint, whatever its port.
+         */
+        PLAINTEXT
+    }
+
+    /** Whose configuration named the host — which decides the rules that apply. */
+    public enum Policy {
+        /**
+         * A config author (channels, knowledge sources): DNS names only, the protocol's
+         * TLS ports, {@code eddi.email.allowed-hosts}, no private address.
+         */
+        AUTHOR,
+        /**
+         * The deployment operator ({@code application.properties}): private and
+         * loopback addresses, IP literals and any port allowed; still pinned, still no
+         * metadata address, TLS as the operator chose it.
+         */
+        OPERATOR
     }
 
     /**
@@ -124,13 +160,29 @@ public class SafeSocketConnector {
         private final Protocol protocol;
         private final TlsMode tlsMode;
         private final InetAddress address;
+        private final Policy policy;
 
         Endpoint(String host, int port, Protocol protocol, TlsMode tlsMode, InetAddress address) {
+            this(host, port, protocol, tlsMode, address, Policy.AUTHOR);
+        }
+
+        Endpoint(String host, int port, Protocol protocol, TlsMode tlsMode, InetAddress address, Policy policy) {
+            if (tlsMode == TlsMode.PLAINTEXT && policy != Policy.OPERATOR) {
+                // The constructor is the last place this can be refused: an Endpoint is
+                // proof of the check, so a plaintext author endpoint must not exist.
+                throw new IllegalArgumentException("Only an operator endpoint may be plaintext.");
+            }
             this.host = host;
             this.port = port;
             this.protocol = protocol;
             this.tlsMode = tlsMode;
             this.address = address;
+            this.policy = policy;
+        }
+
+        /** The policy the endpoint was vetted under. */
+        public Policy policy() {
+            return policy;
         }
 
         /** The normalised (lower-case, ASCII) host name. */
@@ -160,7 +212,7 @@ public class SafeSocketConnector {
          */
         @Override
         public String toString() {
-            return "Endpoint[" + protocol + " " + host + ":" + port + " " + tlsMode + "]";
+            return "Endpoint[" + protocol + " " + host + ":" + port + " " + tlsMode + " " + policy + "]";
         }
     }
 
@@ -251,6 +303,103 @@ public class SafeSocketConnector {
     }
 
     /**
+     * Resolves a host the <b>operator</b> configured ({@link Policy#OPERATOR}): a
+     * private, loopback or IP-literal host and any port are allowed, because the
+     * operator owns the network this process runs in — but the host is still
+     * resolved once and pinned, cloud-metadata and other link-local addresses are
+     * still refused, and TLS still verifies the certificate unless the operator
+     * chose {@link TlsMode#PLAINTEXT}.
+     * <p>
+     * Never call this with a host a config author supplied: that is what
+     * {@link #resolve} is for. The only caller is the system mailer, whose host is
+     * {@code eddi.mail.smtp.host}.
+     *
+     * @param tlsMode
+     *            the operator's explicit choice; for {@code PLAINTEXT} the caller
+     *            must already have checked the operator's opt-out
+     * @throws SocketPolicyException
+     *             naming the rule the host or port broke
+     */
+    public Endpoint resolveOperator(String host, int port, Protocol protocol, TlsMode tlsMode) throws SocketPolicyException {
+        if (tlsMode == null) {
+            throw new IllegalArgumentException("An operator endpoint needs an explicit TLS mode.");
+        }
+        if (port < 1 || port > 65535) {
+            throw new SocketPolicyException(SocketPolicyException.Reason.PORT_NOT_ALLOWED, "Port " + port + " is not a TCP port.");
+        }
+        InetAddress literal = ipLiteral(host);
+        String normalized;
+        InetAddress[] addresses;
+        if (literal != null) {
+            normalized = literal.getHostAddress();
+            addresses = new InetAddress[]{literal};
+        } else {
+            normalized = normalizeOperatorHost(host);
+            try {
+                addresses = resolver.resolveAll(normalized);
+            } catch (UnknownHostException e) {
+                throw new SocketPolicyException(SocketPolicyException.Reason.UNRESOLVABLE, "Host " + normalized + " does not resolve.");
+            }
+            if (addresses == null || addresses.length == 0) {
+                throw new SocketPolicyException(SocketPolicyException.Reason.UNRESOLVABLE, "Host " + normalized + " does not resolve.");
+            }
+        }
+        for (InetAddress address : addresses) {
+            if (UrlValidationUtils.isMetadataAddress(address)) {
+                throw new SocketPolicyException(SocketPolicyException.Reason.PRIVATE_ADDRESS,
+                        "Host " + normalized + " is, or resolves to, a link-local or cloud-metadata address, where no mail server lives.");
+            }
+        }
+        return new Endpoint(normalized, port, protocol, tlsMode, addresses[0], Policy.OPERATOR);
+    }
+
+    /** The address an IP literal spells, or null when {@code host} is not one. */
+    private static InetAddress ipLiteral(String host) {
+        if (host == null) {
+            return null;
+        }
+        String candidate = host.strip();
+        if (candidate.startsWith("[") && candidate.endsWith("]")) {
+            candidate = candidate.substring(1, candidate.length() - 1);
+        }
+        try {
+            // Parses literals only — never a DNS lookup.
+            return InetAddress.ofLiteral(candidate);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * An operator host name: lower-case ASCII, trailing dot removed, one label or
+     * more ({@code localhost} and a bare {@code relay} are fine).
+     */
+    static String normalizeOperatorHost(String host) throws SocketPolicyException {
+        if (host == null || host.isBlank()) {
+            throw invalidHost("Host is empty.");
+        }
+        String candidate = host.strip();
+        if (candidate.endsWith(".")) {
+            candidate = candidate.substring(0, candidate.length() - 1);
+        }
+        String ascii;
+        try {
+            ascii = IDN.toASCII(candidate, IDN.USE_STD3_ASCII_RULES).toLowerCase(Locale.ROOT);
+        } catch (IllegalArgumentException e) {
+            throw invalidHost("Host is not a valid host name.");
+        }
+        if (ascii.isEmpty() || ascii.length() > 253) {
+            throw invalidHost("Host is not a valid host name.");
+        }
+        for (String label : ascii.split("\\.", -1)) {
+            if (!LABEL.matcher(label).matches()) {
+                throw invalidHost("Host is not a valid host name.");
+            }
+        }
+        return ascii;
+    }
+
+    /**
      * A plain socket factory whose sockets connect only to the endpoint's pinned
      * address. TLS is layered on top by the caller (or by Angus Mail, see
      * {@link #angusProperties}).
@@ -284,12 +433,19 @@ public class SafeSocketConnector {
         properties.setProperty(prefix + ".socketFactory.fallback", "false");
         properties.setProperty(prefix + ".ssl.checkserveridentity", "true");
         properties.setProperty(prefix + ".ssl.protocols", String.join(" ", TLS_PROTOCOLS));
-        if (endpoint.tlsMode() == TlsMode.IMPLICIT) {
-            properties.setProperty(prefix + ".ssl.enable", "true");
-        } else {
-            properties.setProperty(prefix + ".ssl.enable", "false");
-            properties.setProperty(prefix + ".starttls.enable", "true");
-            properties.setProperty(prefix + ".starttls.required", "true");
+        switch (endpoint.tlsMode()) {
+            case IMPLICIT -> properties.setProperty(prefix + ".ssl.enable", "true");
+            case STARTTLS -> {
+                properties.setProperty(prefix + ".ssl.enable", "false");
+                properties.setProperty(prefix + ".starttls.enable", "true");
+                properties.setProperty(prefix + ".starttls.required", "true");
+            }
+            case PLAINTEXT -> {
+                // Operator endpoints only: the Endpoint constructor refuses the rest.
+                properties.setProperty(prefix + ".ssl.enable", "false");
+                properties.setProperty(prefix + ".starttls.enable", "false");
+                properties.setProperty(prefix + ".starttls.required", "false");
+            }
         }
         properties.setProperty(prefix + ".connectiontimeout", Integer.toString(connectTimeoutMillis));
         properties.setProperty(prefix + ".timeout", Integer.toString(readTimeoutMillis));

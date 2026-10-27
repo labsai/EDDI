@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.lifecycle.IAnswerRevisingTask;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -18,6 +19,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
 import ai.labs.eddi.engine.memory.ConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -289,6 +291,72 @@ public class LifecycleManager implements ILifecycleManager {
     }
 
     /**
+     * Has the task at {@code absoluteIndex} revise the answer it gave before a RULE
+     * pause ({@code hitlConfig.onRejection: REVISE}). Not a pipeline run: only that
+     * task's revision, recorded in the audit ledger like a task execution. The
+     * caller continues the pipeline from {@code absoluteIndex + 1} when it returns
+     * {@code true}.
+     *
+     * @return whether a revision was stored; {@code false} also when the task at
+     *         that index cannot revise (the workflow changed since the pause)
+     */
+    @Override
+    public boolean reviseAnswerAt(IConversationMemory conversationMemory, int absoluteIndex, HitlRevisionRequest request)
+            throws LifecycleException, ConversationPauseException {
+        checkNotNull(conversationMemory, "conversationMemory");
+        if (request == null || absoluteIndex < 0 || absoluteIndex >= this.lifecycleTasks.size()) {
+            return false;
+        }
+        ILifecycleTask task = this.lifecycleTasks.get(absoluteIndex);
+        if (!(task instanceof IAnswerRevisingTask reviser) || task.getId() == null) {
+            return false;
+        }
+        var components = componentCache.getComponentMap(task.getId().name());
+        var component = components.getOrDefault(createComponentKey(workflowId.getId(), workflowId.getVersion(), absoluteIndex), null);
+        var eventSink = conversationMemory.getEventSink();
+        if (eventSink != null) {
+            eventSink.onTaskStart(task.getId(), task.getType(), absoluteIndex);
+        }
+        long start = System.nanoTime();
+        boolean revised;
+        try {
+            revised = reviser.reviseAnswer(conversationMemory, component, request);
+        } catch (ToolApprovalRequiredException tare) {
+            // A later task of the same configuration hit a gated tool call: the same
+            // tool pause as in a pipeline run (see executeTaskRange).
+            throw new ConversationPauseException(workflowId.getId(), absoluteIndex, tare.getPauseReason(),
+                    ConversationPauseException.PauseOrigin.TOOL_CALL);
+        }
+        long durationMs = (System.nanoTime() - start) / 1_000_000;
+        if (!revised) {
+            return false;
+        }
+        stampRevisionCandidate(conversationMemory, absoluteIndex);
+        Map<String, Object> summary = buildTaskSummary(conversationMemory, task);
+        if (eventSink != null) {
+            eventSink.onTaskComplete(task.getId(), task.getType(), durationMs, summary);
+        }
+        var auditCollector = conversationMemory.getAuditCollector();
+        if (auditCollector != null) {
+            auditCollector.collect(buildAuditEntry(conversationMemory, task, absoluteIndex, durationMs, summary));
+        }
+        return true;
+    }
+
+    /**
+     * Records where the LLM task that just answered sits, on the revision candidate
+     * it left on memory (see {@code HitlRevisionCandidate}). Only an unstamped
+     * candidate is stamped: one left by an earlier LLM task keeps its own position.
+     */
+    private void stampRevisionCandidate(IConversationMemory conversationMemory, int absoluteIndex) {
+        var candidate = conversationMemory.getHitlRevisionCandidate();
+        if (candidate != null && candidate.getLifecycleIndex() < 0) {
+            candidate.setWorkflowId(workflowId.getId());
+            candidate.setLifecycleIndex(absoluteIndex);
+        }
+    }
+
+    /**
      * Shared task execution loop used by both executeLifecycle and
      * executeLifecycleFromIndex. Iterates tasks from startIndex, applying
      * cancel/interrupt checks, action snapshots, tracing, metrics, strict-write
@@ -385,6 +453,9 @@ public class LifecycleManager implements ILifecycleManager {
 
                 // Execute the task, transforming the conversation memory
                 task.execute(conversationMemory, component);
+                if (isLlmTask(task)) {
+                    stampRevisionCandidate(conversationMemory, absoluteIndex);
+                }
 
                 // Emit task_complete event if streaming
                 long durationMs = (System.nanoTime() - taskStartTime) / 1_000_000;

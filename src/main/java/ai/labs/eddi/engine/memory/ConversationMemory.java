@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -787,6 +789,31 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlResumeDecision(HitlDecision decision) {
         this.hitlResumeDecision = decision;
+    }
+
+    // onRejection: REVISE — the turn's policy and its latest revisable answer.
+    // Neither is persisted from here (see HitlRevisionCandidate#STEP_KEY).
+    private transient HitlRevisionPolicy hitlRevisionPolicy;
+    private transient HitlRevisionCandidate hitlRevisionCandidate;
+
+    @Override
+    public HitlRevisionPolicy getHitlRevisionPolicy() {
+        return hitlRevisionPolicy;
+    }
+
+    @Override
+    public void setHitlRevisionPolicy(HitlRevisionPolicy policy) {
+        this.hitlRevisionPolicy = policy;
+    }
+
+    @Override
+    public HitlRevisionCandidate getHitlRevisionCandidate() {
+        return hitlRevisionCandidate;
+    }
+
+    @Override
+    public void setHitlRevisionCandidate(HitlRevisionCandidate candidate) {
+        this.hitlRevisionCandidate = candidate;
     }
 
     public static final class ConversationStepStack implements IConversationStepStack {

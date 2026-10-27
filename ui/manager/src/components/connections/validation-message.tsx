@@ -113,7 +113,7 @@ function messageFor(
     case "originScheme":
       return t(
         "connections.validation.originScheme",
-        "An origin needs an http:// or https:// scheme.",
+        "An origin needs an http://, https:// or mail (smtps://, smtp://, imaps://, imap://) scheme.",
       );
     case "originHost":
       return t("connections.validation.originHost", "An origin needs a host name.");
