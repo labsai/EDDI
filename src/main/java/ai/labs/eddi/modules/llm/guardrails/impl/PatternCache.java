@@ -55,6 +55,25 @@ final class PatternCache {
     }
 
     /**
+     * The first line of a multi-pattern parameter that is not a valid regular
+     * expression, as a deploy-time problem message naming its line number (never
+     * the pattern, which may be long); null when every line compiles.
+     */
+    static String firstInvalidLine(String parameter) {
+        if (parameter == null || parameter.isBlank()) {
+            return null;
+        }
+        String[] lines = parameter.split("\\R");
+        for (int i = 0; i < lines.length; i++) {
+            String source = lines[i].strip();
+            if (!source.isEmpty() && compile(source).isEmpty()) {
+                return "parameter 'patterns' line " + (i + 1) + " is not a valid regular expression";
+            }
+        }
+        return null;
+    }
+
+    /**
      * Splits a multi-pattern parameter: one pattern per line (a regular expression
      * may itself contain commas, so commas are not separators). Blank lines are
      * skipped.
