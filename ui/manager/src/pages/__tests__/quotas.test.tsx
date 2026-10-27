@@ -643,6 +643,35 @@ describe("QuotasPage", () => {
     expect(screen.getByTestId("usage-cost")).toHaveTextContent("$0.00/ $0.00004");
   });
 
+  it("keeps the decimals that tell spend and budget apart above a dollar", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: 1.004,
+          enabled: true,
+        }),
+      ),
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 0,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 1.003,
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$1.003 of $1.004 used this month"));
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.001 left");
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("$1.003/ $1.004");
+  });
+
   it("describes the saved quota, not an unsaved edit of the form", async () => {
     renderQuotas();
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$2500.00"));
