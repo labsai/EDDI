@@ -94,7 +94,10 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      *
      * @see #keepAliveIntervalSeconds
      */
-    static final String DEFAULT_KEEPALIVE_INTERVAL_SECONDS = "15";
+    static final int DEFAULT_KEEPALIVE_INTERVAL = 15;
+
+    /** {@link #DEFAULT_KEEPALIVE_INTERVAL} as the config annotation needs it. */
+    static final String DEFAULT_KEEPALIVE_INTERVAL_SECONDS = "" + DEFAULT_KEEPALIVE_INTERVAL;
 
     /** The SSE comment text of a keep-alive frame ({@code : keep-alive}). */
     static final String KEEPALIVE_COMMENT = "keep-alive";
@@ -205,7 +208,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard, boolean cancelOnClientDisconnect) {
         this(conversationService, conversationAccessGuard, cancelOnClientDisconnect,
-                Integer.parseInt(DEFAULT_KEEPALIVE_INTERVAL_SECONDS));
+                DEFAULT_KEEPALIVE_INTERVAL);
     }
 
     /**
