@@ -560,7 +560,8 @@ not already in the cache, so an empty cache with no egress fails rather than deg
 **Note**: Jlama runs models locally in Java without requiring external services like
 Ollama. It is CPU inference — there is no GPU path — so it suits small quantized models
 (1B–8B) rather than large ones. For a GPU or a larger model, serve it with vLLM or
-`llama-server` and point the `openai` provider at it via `baseUrl`.
+`llama-server` and reach it with type `openai-compatible`
+([Self-hosted OpenAI-compatible servers](#self-hosted-openai-compatible-servers)).
 
 **`modelName` must be a Hugging Face repository id in `owner/name` form** — for
 example `tjake/Llama-3.2-1B-Instruct-JQ4` or
@@ -1121,7 +1122,7 @@ Patterns in `parameters` are author configuration evaluated against untrusted te
 } ]
 ```
 
-The classifier is called the way an LLM task calls its model: `provider` is an EDDI provider type (`openai` for any OpenAI-compatible server such as vLLM, `ollama`, `azure-openai`, …), and **every parameter that is not one of the classifier's own is passed to that provider unchanged**, in the same vocabulary as a task's `parameters` — `baseUrl`, `apiKey`, `modelName` (`openai`) or `model` (`ollama`), `maxTokens`, `customParameters`, and so on. `apiKey` should be a `${vault:…}` reference; vault and `${vars.…}` references are resolved as they are for a task, and the vault grant check covers them. The endpoint is reached through the provider client, not through EDDI's SSRF-guarded HTTP client, because a classifier is normally an in-cluster service on a private address: it is the same trust class as a task's own `baseUrl`, so only people who may edit agent configuration can point it anywhere.
+The classifier is called the way an LLM task calls its model: `provider` is an EDDI provider type (`openai-compatible` for a self-hosted OpenAI-compatible server such as vLLM or `llama-server`, `ollama`, `openai`, `azure-openai`, …), and **every parameter that is not one of the classifier's own is passed to that provider unchanged**, in the same vocabulary as a task's `parameters` — `baseUrl`, `apiKey`, `modelName` (`openai-compatible`, `openai`) or `model` (`ollama`), `maxTokens`, `customParameters`, and so on. `apiKey` should be a `${vault:…}` reference; vault and `${vars.…}` references are resolved as they are for a task, and the vault grant check covers them. The endpoint is reached through the provider client, not through EDDI's SSRF-guarded HTTP client, because a classifier is normally an in-cluster service on a private address: it is the same trust class as a task's own `baseUrl`, so only people who may edit agent configuration can point it anywhere.
 
 | Parameter | Meaning | Default |
 |---|---|---|
@@ -1144,7 +1145,7 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
 
 #### Example: Granite Guardian 3.3 on vLLM
 
-[Granite Guardian 3.3](https://huggingface.co/ibm-granite/granite-guardian-3.3-8b) (Apache 2.0) takes the risk to check as a chat-template argument and answers in a `<score> yes </score>` / `<score> no </score>` tag (`yes` = the risk is present). Served with `vllm serve ibm-granite/granite-guardian-3.3-8b`, it is reached through the `openai` provider; the risk goes in through vLLM's `chat_template_kwargs` request field, set with `customParameters`, and no `promptTemplate` is needed:
+[Granite Guardian 3.3](https://huggingface.co/ibm-granite/granite-guardian-3.3-8b) (Apache 2.0) takes the risk to check as a chat-template argument and answers in a `<score> yes </score>` / `<score> no </score>` tag (`yes` = the risk is present). Served with `vllm serve ibm-granite/granite-guardian-3.3-8b`, it is reached through the [`openai-compatible`](#self-hosted-openai-compatible-servers) provider (`baseUrl` and `modelName` are required; `serverName` names it in the LLM telemetry); the risk goes in through vLLM's `chat_template_kwargs` request field, set with `customParameters`, and no `promptTemplate` is needed:
 
 ```json
 {
@@ -1152,9 +1153,10 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
   "action": "block",
   "blockMessage": "I can't help with that request.",
   "parameters": {
-    "provider": "openai",
+    "provider": "openai-compatible",
     "baseUrl": "http://vllm.guardrails.svc:8000/v1",
     "modelName": "ibm-granite/granite-guardian-3.3-8b",
+    "serverName": "vllm",
     "customParameters": "{\"chat_template_kwargs\": {\"guardian_config\": {\"criteria_id\": \"jailbreak\"}, \"think\": false}}",
     "maxTokens": "20",
     "labelPattern": "<score>\\s*(\\w+)\\s*</score>",
@@ -2073,7 +2075,15 @@ tool cost. It is checked
   task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
   answers that the conversation reached its cost limit — the tool calls already made have taken
   effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
-  cascade's own step prices apply at the next task-level check.
+  cascade's own step prices apply at the next task-level check;
+- **when a tool-call approval resumes the turn**: the same check runs before the approved calls
+  execute, so a conversation spent while it waited serves the fallback answer and the approved
+  calls do not run; and the resumed loop checks again before its first model request, counting
+  what the approved calls charged. What the turn spent *before* the pause counts too: when a tool
+  loop pauses, its model rounds so far (at the task's prices, as in the loop check above, and any
+  earlier cascade steps at theirs) and its tool cost are added to the step's `audit:cost` and
+  `audit:token_usage` right away, so the resume's checks and its final total include them exactly
+  once.
 
 The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as

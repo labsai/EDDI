@@ -143,6 +143,11 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         accessGuard.requireAccess(id, AccessLevel.VIEW, resourceTypeLabel);
     }
 
+    @Override
+    public void requireCurrentVersionAccess(String id) {
+        requireViewAccess(id);
+    }
+
     /** Asserts the caller may modify this resource. */
     public void requireEditAccess(String id) {
         accessGuard.requireAccess(id, AccessLevel.EDIT, resourceTypeLabel);
