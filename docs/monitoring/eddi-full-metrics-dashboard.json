@@ -6983,7 +6983,7 @@
           "description": "How long the oldest pending approval has waited. Alert EddiApprovalWaitingLong fires past 24 h."
         },
         {
-          "id": 264,
+          "id": 267,
           "type": "timeseries",
           "title": "Rejections under onRejection: REVISE",
           "datasource": {
@@ -7962,7 +7962,7 @@
           }
         },
         {
-          "id": 265,
+          "id": 268,
           "type": "timeseries",
           "title": "Tasks returned for rework",
           "datasource": {
@@ -8037,7 +8037,7 @@
           }
         },
         {
-          "id": 266,
+          "id": 269,
           "type": "timeseries",
           "title": "Unparseable VERIFY verdicts",
           "datasource": {
