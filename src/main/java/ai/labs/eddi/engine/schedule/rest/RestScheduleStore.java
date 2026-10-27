@@ -892,6 +892,18 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private Response guardManagedSchedule(ScheduleConfiguration stored) {
         Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        // A continuation schedule is the engine's own next turn of a conversation:
+        // changing its input or timing, or clearing its marker with an empty metadata
+        // object, would let an editor steer or orphan another user's job. Judged on the
+        // STORED row, since the request body can omit or blank the marker.
+        if (ConversationContinuations.isContinuationSchedule(md)) {
+            LOGGER.warnf("Refused update of continuation schedule %s — it is managed by the conversation engine",
+                    sanitize(stored.getId()));
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is the next turn of a self-continuing conversation and cannot be updated. "
+                            + "End or cancel the conversation to stop it.")
+                    .build();
+        }
         if (RagIngestionSchedules.isIngestionSchedule(md)) {
             LOGGER.warnf("Refused update of ingestion schedule %s — it is managed by knowledge base %s",
                     sanitize(stored.getId()), sanitize(RagIngestionSchedules.ragConfigId(md)));

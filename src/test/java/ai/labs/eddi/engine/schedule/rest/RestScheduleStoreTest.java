@@ -36,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -167,6 +168,50 @@ class RestScheduleStoreTest {
         Response response = rest.updateSchedule("s1", forgedContinuation());
 
         assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    private ScheduleConfiguration storedContinuation() throws Exception {
+        var stored = new ScheduleConfiguration();
+        stored.setId("cont1");
+        stored.setName(ConversationContinuations.scheduleName("conv-c1"));
+        stored.setAgentId("agent-1");
+        stored.setUserId("someone");
+        stored.setMetadata(ConversationContinuations.metadata("conv-c1", 2, 5));
+        when(scheduleStore.readSchedule("cont1")).thenReturn(stored);
+        return stored;
+    }
+
+    @Test
+    void update_ofAStoredContinuationSchedule_isRefused_evenForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        storedContinuation();
+        var body = new ScheduleConfiguration();
+        body.setAgentId("agent-1");
+        body.setName("renamed");
+        body.setMessage("different input");
+        body.setOneTimeAt(Instant.now().plusSeconds(60).toString());
+
+        Response response = rest.updateSchedule("cont1", body);
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    @Test
+    void update_withEmptyMetadata_cannotClearTheContinuationMarker() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        storedContinuation();
+        var body = new ScheduleConfiguration();
+        body.setAgentId("agent-1");
+        body.setName("plain");
+        body.setMessage("x");
+        body.setOneTimeAt(Instant.now().plusSeconds(60).toString());
+        body.setMetadata(new HashMap<>());
+
+        Response response = rest.updateSchedule("cont1", body);
+
+        assertEquals(409, response.getStatus());
         verify(scheduleStore, never()).updateSchedule(any(), any());
     }
 
