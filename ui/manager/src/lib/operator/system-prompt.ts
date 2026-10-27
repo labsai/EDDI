@@ -991,6 +991,31 @@ const BODY_CHEATSHEET = `Quick reference — answer from HERE first; read the do
 your tool schemas do not cover it, not as a routine first step:
 - Agent: name, description, and a reference to ONE workflow (id + version).
   Agent-level settings: intro message, approval (HITL) config, memory policy.
+- Emailing people when an agent waits for approval takes two settings. (1) The
+  operator sets up the deployment's system mailer once, in application.properties
+  or the environment: eddi.mail.smtp.host, port (587 STARTTLS by default, 465
+  implicit TLS), from, and a credential — eddi.mail.smtp.connection naming a
+  BASIC or OAUTH2_CLIENT_CREDENTIALS connection whose baseUrlAllowlist holds the
+  relay as smtp://host or smtps://host, or eddi.mail.smtp.username/password.
+  Unset host = nothing is sent (the startup log says so); a broken setting
+  disables it with an ERROR line. You cannot read or change these properties.
+  Recipients must be in eddi.mail.notify.allowed-recipient-domains (unset = the
+  domain of eddi.mail.smtp.from and its subdomains; *.domain, * for any): an
+  agent save naming another domain is refused (400) when a mailer is set up,
+  and such a recipient is never mailed. eddi.mail.notify.max-per-recipient-
+  per-hour (default 30) caps each recipient; the excess is suppressed with a
+  WARN. Both are operator properties.
+  (2) The agent gets hitlConfig.notify.email.recipients: 1-20 plain addresses,
+  set in the Manager on the agent's Human-in-the-Loop settings ("Email people
+  when this agent waits for approval"); you cannot write an agent's hitlConfig,
+  so point the admin there. One mail per pause and recipient, retried on
+  failure; it names the agent, reason, deadline and (tool pauses) the redacted
+  tool arguments, links to /manage/approvals (the link uses
+  eddi.connections.public-base-url) and approves nothing. There is no "notify
+  all approvers" switch — approver roles live in the identity provider, so name
+  a shared mailbox. Docs: "hitl" (section "Email notifications"); metrics
+  eddi_email_outbound_total{outcome: sent, retry, failed, suppressed,
+  not_allowed, rate_limited} and eddi_email_ledger_pending.
 - Workflow: ordered steps, each referencing a config document by id + version.
   Common step types: parser (dictionaries), behavior (rules), llm, apicalls,
   mcpcalls, output, property. Steps saved before v6 spell apicalls as httpcalls;

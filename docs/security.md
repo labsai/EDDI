@@ -691,8 +691,30 @@ as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` 
 | TLS always verified | Certificate chain against the JVM trust store and host name against the certificate. There is no setting that turns either off |
 | Timeouts | 10 s connect, 60 s per read |
 
-The allowlist does **not** exempt private addresses: an on-premises mail server on a private network is refused
-today. Allowing one would be its own, explicit deployment setting.
+The allowlist does **not** exempt private addresses: an on-premises mail server named by a channel or knowledge-base
+author is refused.
+
+### The operator policy — the system mailer's relay
+
+The rules above are the **author** policy (`resolve`). A host the deployment's **operator** set in
+`application.properties` — today only the [system mailer](configuration-reference.md#email)'s
+`eddi.mail.smtp.host` — goes through `resolveOperator` instead. The operator already controls the network the process
+runs in, so the rules that stop an author probing it are lifted, and nothing an author or an agent writes can reach
+this path:
+
+| Rule | Author (`resolve`) | Operator (`resolveOperator`) |
+|---|---|---|
+| Private, loopback, CGNAT, ULA addresses | refused | allowed (an on-premises relay, a Postfix sidecar) |
+| IP literals, single-label names (`localhost`, `relay`) | refused | allowed |
+| Ports | 993/143, 465/587 | any (25 included) |
+| `eddi.email.allowed-hosts` | applied | not consulted — it confines authors |
+| Link-local and cloud-metadata addresses | refused | **refused** |
+| Resolved once and pinned | yes | **yes** |
+| TLS certificate and host name verified | always | **always**, when TLS is used |
+| Plaintext session | never | only `eddi.mail.smtp.tls=none` with `eddi.mail.smtp.allow-plaintext=true`, and never with a credential |
+
+`TlsMode.PLAINTEXT` cannot exist on an author endpoint: the `Endpoint` constructor refuses it. STARTTLS on the system
+mailer is required, not opportunistic — a relay that does not offer it gets no message and no credential.
 
 For Angus Mail, `angusProperties(endpoint)` installs the pinned factory for both plain and TLS connections, turns
 `socketFactory.fallback` off (otherwise a refusal inside the factory makes Angus retry with an unguarded socket of

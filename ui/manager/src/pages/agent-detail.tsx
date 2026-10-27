@@ -271,6 +271,8 @@ export function AgentDetailPage() {
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
   const [ceilingInvalid, setCeilingInvalid] = useState(false);
+  /** Whether the approval-email recipients box holds a list that cannot be saved (see `HitlConfigSection`). */
+  const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
   /** Whether the Ratings section holds a value the backend would refuse (see `RatingConfigSection`). */
   const [ratingInvalid, setRatingInvalid] = useState(false);
 
@@ -281,6 +283,15 @@ export function AgentDetailPage() {
     // leave-page guard — so this is the one place that can refuse them all.
     if (ceilingInvalid) {
       toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
+      return false;
+    }
+    if (hitlNotifyInvalid) {
+      toast.error(
+        t(
+          "agentDetail.hitlNotifyFixBeforeSave",
+          "Fix the approval email recipients, or switch email notifications off, before saving.",
+        ),
+      );
       return false;
     }
     if (ratingInvalid) {
@@ -319,7 +330,19 @@ export function AgentDetailPage() {
       }
       return false;
     }
-  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t, ceilingInvalid, ratingInvalid]);
+  }, [
+    draft,
+    isDirty,
+    agent,
+    updateAgentMutation,
+    id,
+    resolvedVersion,
+    queryClient,
+    t,
+    ceilingInvalid,
+    hitlNotifyInvalid,
+    ratingInvalid,
+  ]);
 
   useEffect(() => {
     if (!rebaseFrom || !agent || agent === rebaseFrom) return;
@@ -1034,7 +1057,14 @@ export function AgentDetailPage() {
       <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
 
       {/* Human-in-the-Loop */}
-      <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />
+      <HitlConfigSection
+        key={`${id}-${resolvedVersion}`}
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("hitlConfig")}
+        onValidityChange={setHitlNotifyInvalid}
+      />
 
       {/* Channel Connectors */}
       <ChannelsSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("channels")} />

@@ -615,6 +615,86 @@ Behavior:
 
 **Delegated/managed conversations** (agent-to-agent tools, MCP `chat_managed`): when a nested conversation pauses, the calling tool receives a structured `PAUSED_FOR_APPROVAL` result naming the conversation and reason instead of hanging — the delegated approval stays pending (it is *not* auto-cancelled; a reviewer decides, then the tool can be re-invoked).
 
+## Email notifications
+
+An agent can name people to email when one of its conversations pauses for approval — whatever channel the
+conversation came from (Manager, REST, `/v1`, Slack, MCP). The mail says that something is waiting and links to the
+Manager's **Approvals** page; it decides nothing. Two settings, one per audience:
+
+1. **The operator** configures the deployment's system mailer once (`eddi.mail.smtp.*`, see
+   [configuration-reference.md → Email](configuration-reference.md#email)). Without `eddi.mail.smtp.host` nothing is
+   sent and the startup log says so.
+2. **The agent designer** opts the agent in with `hitlConfig.notify.email`:
+
+```json
+{
+  "hitlConfig": {
+    "approvalTimeout": "PT4H",
+    "timeoutPolicy": "AUTO_REJECT",
+    "pauseReason": "Refunds over 500 EUR need a manager",
+    "notify": {
+      "email": {
+        "recipients": ["refund-approvers@example.com", "ops-lead@example.com"]
+      }
+    }
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `notify` | absent — nobody is notified | Who is told when this agent pauses. A config without it behaves exactly as before |
+| `notify.email.recipients` | — (required when `email` is present) | 1–20 plain `local@domain` addresses, ASCII, no display names, no duplicates (compared case-insensitively), each in a domain the operator allows (below). Refused at save time (400) otherwise, naming the position, never the address. For more people, use a distribution list |
+
+**Which addresses — the operator decides.** Anyone who may edit an agent can set its recipients, but the mail goes out through the operator's relay, from the operator's sender address, carrying text an author (agent name, pause reason) and an end user (tool arguments) can influence. So the operator bounds it with `eddi.mail.notify.allowed-recipient-domains` (exact domains, `*.domain` for subdomains, `*` for any); **unset, only the domain of `eddi.mail.smtp.from` and its subdomains are allowed.** With a mailer configured, a recipient outside is refused at save time; without one it is accepted with a WARN, since the operator may configure the mailer later. Either way it is checked again at every send and never mailed: its ledger row ends `SUPPRESSED`.
+
+**Flood brake.** An end user can drive an agent into a pause every turn, or in many conversations at once. Each recipient gets at most `eddi.mail.notify.max-per-recipient-per-hour` (default 30) notifications in any hour, counted from the ledger across all instances; the rest are `SUPPRESSED` (`rate_limited`), and each instance logs one WARN per recipient per hour. Pending approvals stay on the Approvals page either way.
+
+
+**One mail per pause and recipient**, across every pod: each recipient's notification is a row in the email ledger
+under a unique key derived from the conversation, the pause and the address, so a pause observed twice — or on two
+pods — mails once. A new pause of the same conversation is a new notification. A resume that restores a pause after
+a failed attempt is the same pause and is not mailed again.
+
+**What the mail contains** follows the [Slack approval card](#slack-integration)'s data-minimisation rule: the agent's
+name, the pause type (approval rule or tool call), the designer's `pauseReason`, when it started, the deadline and
+what happens then, the conversation id, and for a `TOOL_CALL` pause each pending tool's name with its **redacted,
+300-character-truncated** arguments (at most 5 calls, then `+N more`) — the same lines the Slack card shows, from
+the same code. Never anything a user or the model wrote: no input, no output, no transcript. The subject is
+`[EDDI] Approval needed: <agent name>`, and nothing else. Mails are `text/plain` and carry `Auto-Submitted:
+auto-generated` and `X-Auto-Response-Suppress: All`, so out-of-office replies stay quiet.
+
+**What it does not do.** The link is `<public base URL>/manage/approvals` — no token, no conversation-specific
+action, nothing that happens on opening it (Safe Links and Proofpoint open every link in a mail). Replying does
+nothing either. Who may decide is unchanged: the Approvals page needs a sign-in, and the [rules above](#who-may-decide)
+apply. The base URL is the deployment's public origin, `eddi.connections.public-base-url` (the setting OAuth
+callbacks already use); without one the mail names the page instead of guessing a host.
+
+**Delivery and retries.** The first attempt happens as soon as the pause is committed. A failure that may be
+transient (relay unreachable, TLS or login trouble, a 4xx deferral) is retried by a sweeper on every instance
+(`eddi.email.ledger.sweep-interval`, default 30 s) with exponential backoff (`eddi.email.outbound.retry-backoff`,
+default 1 min, doubling, capped at 1 h), up to `eddi.email.outbound.max-attempts` (default 6); a 5xx refusal fails it
+at once. Each retry re-reads the pause and re-renders the mail — the ledger stores no body — and a pause decided in
+the meantime ends `SUPPRESSED` instead of being mailed. Rows are kept for `eddi.email.ledger-retention` (default
+`30d`).
+
+**Who is notified — recipients only, not "all approvers".** EDDI's approvers are the conversation's owner and
+holders of the `eddi-admin` / `eddi-approver` roles in the identity provider. The roles live in the identity
+provider, not in EDDI's user directory, so EDDI cannot list who holds them — and a list it built from past sign-ins
+would keep mailing a revoked approver forever. Name the approvers' shared mailbox or distribution list in
+`recipients` instead.
+
+**Observability and audit.** `eddi_email_outbound_total{kind="notify",outcome="sent|retry|failed|suppressed|not_allowed|rate_limited"}` and
+the `eddi_email_ledger_pending` gauge ([metrics.md](metrics.md#hitl-metrics)). Every sent or failed notification
+writes an `email.notify` audit-ledger entry with the conversation, the outcome, the Message-ID, the relay's reply and
+the recipient as a SHA-256 hash plus its domain — the audit ledger is write-once, so the address itself is not
+written there. Ledger rows (which do hold the address) are erased and exported with the person's other data by
+`DELETE /admin/gdpr/{userId}` and the export, matched through the user id when it is an address and the email the
+user directory recorded for that principal.
+
+**Not yet:** group conversations (`AWAITING_APPROVAL` discussions) are not notified by email; their approvals
+appear on the Approvals page and in Slack as before.
+
 ## MCP Surface
 
 The HITL operations are also exposed over the MCP server (`McpHitlTools`), so an MCP client that drives a conversation (`talk_to_agent` / `chat_managed`) and receives a `PAUSED_FOR_APPROVAL` result can resolve the gate over the **same transport** instead of switching to REST. That paused payload names the tool to call next (`"suggestNextTool": "resume_conversation"`).

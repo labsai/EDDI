@@ -627,6 +627,7 @@ class ConversationHitlService {
                             counterHitlPause.increment();
                             counterToolPause(prePauseWasToolCall);
                             scheduleHitlTimeout(conversationId, memory);
+                            conversationService.firePauseCommitted(conversationId, memory);
                         } else {
                             // Resume settled to a non-paused outcome — notify channel
                             // observers (Slack, …) so the originating surface can push
