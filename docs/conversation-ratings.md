@@ -10,9 +10,9 @@ configuration (`ratingConfig`). They live in a store of their own
 conversation memory: memory is loaded on every turn and must stay small, and
 ratings must be aggregated across conversations.
 
-> **Status.** This page describes the backend (REST API, storage, metrics, GDPR)
-> and the MCP rating tools. Rating controls in the Chat UI, the Manager's Feedback
-> page and push alerts follow in later releases.
+> **Status.** The backend (REST API, storage, metrics, GDPR), the Chat UI's
+> rating controls, the Manager's Feedback page, the MCP tools and the Platform
+> Operator's read access are in place. Push alerts follow in a later release.
 
 ## Switching ratings on
 
@@ -103,6 +103,37 @@ A rating writes only the rating store, never conversation memory or the
 descriptor, so it does not go through the conversation coordinator and may be
 given while a turn is running.
 
+## In the Chat UI
+
+The standalone Chat UI (`/chat`) reads the profile's `rating` object and renders
+**nothing** when it is absent — an agent without `ratingConfig`, or an EDDI too old
+to send it, looks exactly as before.
+
+- **Reply thumbs** (`messageRating.enabled`). Under the last agent bubble of each
+  step, shown on hover or keyboard focus on desktop, always on touch screens, and
+  always once a reply is rated. One tap rates; tapping the pressed thumb again
+  withdraws. Thumbs down rates at once and then opens a small optional form with
+  the reason tags and, when comments are accepted, a comment box.
+- **Rating card** (`conversationRating.enabled`). Stars (a radio group) or thumbs,
+  per `scale`. It offers itself when the conversation ends (`askOnEnd`) and/or after
+  `askAfterTurns` agent replies — **at most once per conversation**, never to
+  somebody who already rated, and never again once closed (remembered in the
+  browser; without storage, for the page's lifetime). A "Rate this conversation"
+  entry in the header always opens it. One tap on a score rates; tags and the
+  comment (only below `comment.askBelowScore`, when set) appear after it. The card
+  then says *"Thanks — your feedback goes to the team running this assistant."*
+  and the rating stays changeable and removable. It sits in the transcript and
+  never blocks the message box.
+- **State.** Ratings are read back when a conversation opens, so a reload shows
+  what was rated. Every change is applied at once and rolled back, with a short
+  notice, when the server refuses it; each error code above has its own wording in
+  every shipped language.
+- **Steps.** A reply rating names its step. The widget takes it from the
+  conversation read (every step of a full snapshot is stamped) and counts live
+  turns from there — step 0 is the greeting, each message sent opens the next.
+- **Demo.** `/chat/demo/showcase` asks for every control (five stars, reply thumbs,
+  tags, comment, the card after three replies) against an in-memory backend.
+
 ## Analyzing and triaging (the people running the agent)
 
 Roles: `eddi-admin`, `eddi-editor` (enumerated — REST has no role hierarchy, and
@@ -134,7 +165,9 @@ user wrote *to the team running the agent*, so it is visible to them.
 `environment`, `from`, `to` (ISO-8601 instant, or a date read as UTC; `to` is
 exclusive and a date there includes the whole day), `minScore` / `maxScore`
 (normalized, 0..1), `kind=conversation|message`, `tag`, `hasComment`,
-`reviewStatus=NEW|REVIEWED`, `needsAttention=true`.
+`reviewStatus=NEW|REVIEWED`, `needsAttention=true`, `conversationId` (one
+conversation's ratings — it narrows the scope, never widens it: an editor still
+names the agent).
 
 **Summary** buckets carry `count`, `avgNormalized`, `distribution` (thumbs up/down,
 stars 1–5), `csat` (share of five-star ratings scored 4–5), `thumbsUpRate`,
@@ -165,6 +198,69 @@ who rated).
 - **A re-rating resets the triage**: status back to `NEW`, reviewer, time and note
   cleared — the note was about the old rating.
 
+## In the Manager
+
+- **Feedback page** (`/manage/feedback`, sidebar "Feedback", admins and editors).
+  Opens on **Needs attention** — NEW ratings that are low or carry a comment,
+  newest first — with *Mark reviewed*, an internal *Note* and *Open conversation*
+  (only where `canOpenTranscript`) per row, plus bulk review (the selected rows, or
+  everything needing attention for the chosen agent). **All ratings** adds a filter
+  bar (period, version, environment, kind, score, comment, review status, reason),
+  KPI tiles with the change against the previous period, a per-day trend, the score
+  distribution, the most picked reasons (click to filter) and a by-version table in
+  which versions with fewer than 10 ratings are greyed. Filters live in the URL.
+  Export downloads the CSV and warns when the 100,000-row cap cut it short. A
+  non-administrator picks an agent first (the backend's `AGENT_ID_REQUIRED` shows
+  as that prompt, not an error). A triage that collides with a re-rating (409
+  `RATING_CHANGED`) reloads the list and says so.
+- **Sidebar badge and dashboard tile.** For administrators, the attention count
+  (`GET /ratings/attention-count`) shows as a badge on the Feedback entry and, when
+  above zero, as a "Feedback needing attention" tile on the dashboard. Both share one
+  query and poll it every 30 seconds.
+- **Agent configuration.** A **Ratings** section beside "Usage & conversation
+  review" edits every `ratingConfig` field, with the backend's limits checked as you
+  type; the page refuses to save values the backend would reject.
+- **Agent detail.** A compact "Feedback, last 30 days" line (ratings, average,
+  satisfaction, how many need attention) links to the Feedback page filtered to the
+  agent. It appears when the agent asks for ratings or has some.
+- **Conversation detail.** The conversation's rating, its review status and note,
+  and each rated reply's thumb at its step — for a caller the rating list admits.
+- **Manager chat.** The same rating controls as the Chat UI (thumbs, the card from
+  the header, after `askAfterTurns` replies, and after *End conversation* when the
+  agent asks on end), so a designer can try the flow; ratings sent from there carry
+  `channel: "manager"`.
+
+## MCP tools and the Platform Operator
+
+**MCP.** Four tools cover the read and triage half of `/ratings` — see
+[MCP Server](mcp-server.md#rating-tools-4):
+
+| Tool | REST counterpart |
+| --- | --- |
+| `list_conversation_ratings` | `GET /ratings` (same filters, `sort`, `index`, `limit`) |
+| `summarize_conversation_ratings` | `GET /ratings/summary` (`groupBy`) |
+| `count_ratings_needing_attention` | `GET /ratings/attention-count` |
+| `review_conversation_rating` | `PATCH /ratings/{ratingId}` |
+
+They run the same resource in-process, so the rules above hold for the MCP caller
+unchanged: tier `eddi-admin` / `eddi-editor` (`eddi-viewer` is refused), an editor
+names an agent it holds `EDIT` on, only administrators see `userId`, and the
+reviewer is the caller's principal — the same name the Feedback page records, never
+an argument. Refusals carry the REST code as `errorCode` (`AGENT_ID_REQUIRED`,
+`RATING_CHANGED`, …). Export and bulk review are REST and Manager only. The
+`eddi-admin` Claude Code skill teaches the tools.
+
+**Platform Operator.** The operator may read `GET /ratings`, `GET /ratings/summary`
+and `GET /ratings/attention-count`, and its prompt explains `ratingConfig` and its
+defaults, needs-attention, the `AGENT_ID_REQUIRED` rule and how to answer "how is
+agent X rated since version N" (the summary grouped by `agentVersion`, with each
+bucket's count — the `agentVersion` filter matches one version exactly). It holds
+**no** rating write and no export: a review records the caller as the person who
+looked at the feedback, and that judgement stays with a human on the Feedback page;
+the export is a CSV of up to 100,000 rows that no chat answer needs. Operators
+activated before this change get the reads with the upgrade the Manager offers
+(revision 39).
+
 ## Lifetime and privacy
 
 - Ratings **outlive conversation purges** (analytics); the transcript link then
@@ -176,13 +272,13 @@ who rated).
   export lists their ratings without the reviewer's identity. Processing
   restriction blocks new ratings.
 - Group conversations, the `/v1` API and channel reactions (Slack, Teams) do not
-  capture ratings yet; `/v1` and MCP clients can call the REST endpoints directly.
+  capture ratings yet; a `/v1` client can call the REST endpoints directly.
 
 ## Known limitations
 
 - **Rerun.** Rerunning a step does not delete that step's reply rating on the
-  server; the chat client clears its local thumb. A stale thumb on a rerun reply is
-  a minor analytics skew.
+  server; the Chat UI clears its local thumb (a reload shows the stored one again).
+  A stale thumb on a rerun reply is a minor analytics skew.
 - **Undo.** Ratings of undone steps stay stored and count in summaries (they rated
   what the person saw).
 - **Reply version.** A reply rating records the agent version of the conversation

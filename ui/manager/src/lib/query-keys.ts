@@ -128,3 +128,19 @@ export const groupKeys = {
 export function agentWriteInvalidations(agentId: AgentId) {
   return [agentKeys.detail(agentId), agentKeys.descriptor(agentId), agentKeys.all];
 }
+
+/**
+ * Conversation ratings. Everything sits under `ratingKeys.all`, so a triage
+ * change (one row, or a bulk review) refreshes the list, the summaries, the
+ * conversation view and the sidebar's attention badge at once.
+ */
+export const ratingKeys = {
+  all: ["ratings"] as const,
+  list: (query: object, sort: string, index: number, limit: number) =>
+    [...ratingKeys.all, "list", query, sort, index, limit] as const,
+  summary: (query: object, groupBy: string) => [...ratingKeys.all, "summary", query, groupBy] as const,
+  /** The sidebar badge and the dashboard tile share this one entry. */
+  attention: (agentId?: string) => [...ratingKeys.all, "attention", agentId ?? null] as const,
+  conversation: (conversationId: string | undefined, agentId: string | undefined) =>
+    [...ratingKeys.all, "conversation", conversationId, agentId ?? null] as const,
+} as const;

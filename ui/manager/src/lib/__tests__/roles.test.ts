@@ -22,6 +22,9 @@ describe("rolesForScreen", () => {
     ["/manage/connections/abc123", [ROLE_ADMIN, ROLE_EDITOR]],
     // IRestUserMemoryStore / IRestPropertiesStore: eddi-admin and eddi-user.
     ["/manage/userdata", [ROLE_ADMIN, ROLE_USER]],
+    // IRestConversationRatingAdmin: eddi-admin and eddi-editor, no viewer.
+    ["/manage/feedback", [ROLE_ADMIN, ROLE_EDITOR]],
+    ["/manage/feedback?agentId=a1", [ROLE_ADMIN, ROLE_EDITOR]],
   ])("%s needs one of %j", (path, roles) => {
     expect(rolesForScreen(path)).toEqual(roles);
   });
