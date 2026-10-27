@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.SpendReservations;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
@@ -79,6 +81,32 @@ class LlmSpendGateAdmitTest {
 
     private double refusals(String reason) {
         return meterRegistry.counter(LlmSpendGate.METRIC, "reason", reason).count();
+    }
+
+    @Test
+    @DisplayName("a scheduled fire whose maxCostPerFire is spent is refused by admit(), though the agent's ceiling is not reached")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void fireAllowanceSpentRefusesEveryAttempt() {
+        ceiling(5.00);
+        // $1.00 before the fire, $0.60 by its first call; allowance $0.50.
+        IConversationMemory.IWritableConversationStep step = mock(IConversationMemory.IWritableConversationStep.class);
+        when(memory.getCurrentStep()).thenReturn(step);
+        IData<Object> allowance = mock(IData.class);
+        when(allowance.getResult()).thenReturn(new Context(Context.ContextType.object, 0.5));
+        when(step.getData("context:" + ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE)).thenReturn((IData) allowance);
+        IData<Object> prior = mock(IData.class);
+        when(prior.getResult()).thenReturn(1.0);
+        IData<Object> current = mock(IData.class);
+        when(current.getResult()).thenReturn(0.6);
+        when(step.getData(AUDIT_COST)).thenReturn((IData) current);
+        IConversationMemory.IConversationStepStack steps = mock(IConversationMemory.IConversationStepStack.class);
+        when(steps.getExactDataPerStep(AUDIT_COST)).thenReturn((List) List.of(prior, current));
+        when(memory.getAllSteps()).thenReturn(steps);
+
+        try (var admission = gate.admit(memory, 0.0, 0.0)) {
+            assertFalse(admission.allowed());
+            assertEquals(LlmSpendGate.REASON_CONVERSATION_CEILING, admission.refusal().reason());
+        }
     }
 
     @Nested

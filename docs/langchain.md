@@ -1288,7 +1288,7 @@ Every guardrail that fires produces:
 - an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
-Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
+Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
 
 ### Compatibility
 
@@ -2171,6 +2171,11 @@ tool cost. It is checked
   Each refusal is also counted by `eddi_llm_spend_refused_total{reason}` with the same reasons as the
   primary call (`conversation_ceiling`, `tenant_budget`, `tenant_accounting_unavailable`): the
   tenant's monthly budget is checked before these calls too.
+
+  A refusal is a safety stop: a refused guardrail reprompt blocks the answer even when that
+  guardrail's `onExhausted` is `deliver-best`, because delivering a "best" attempt after the spend
+  checks said stop would defeat the ceiling. `deliver-best` applies only to a guardrail that ran out
+  of retries, or whose reprompt could not start for lack of time or a model.
 
 **The call that crosses the ceiling completes.** A call is admitted while the conversation's spend
 so far — recorded `audit:cost`, plus what the running task has spent and not yet recorded, plus the
