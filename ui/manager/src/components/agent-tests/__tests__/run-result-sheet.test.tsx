@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
 import { RunResultBody } from "@/components/agent-tests/run-result-sheet";
 import type { AgentTestRun } from "@/lib/api/agent-tests";
 import { buildMockRuns } from "@/test/mocks/agent-test-fixtures";
@@ -66,5 +68,36 @@ describe("RunResultBody", () => {
   it("says a RUNNING run is in progress", () => {
     renderWithProviders(<RunResultBody run={{ ...passing!, status: "RUNNING", cases: [] }} />);
     expect(screen.getByTestId("run-in-progress")).toBeInTheDocument();
+  });
+
+  it("offers Cancel on a RUNNING run, posts the cancel once, and then holds the button disabled", async () => {
+    const cancelled: string[] = [];
+    server.use(
+      http.post("*/agenttests/runs/:runId/cancel", ({ params }) => {
+        cancelled.push(String(params.runId));
+        return HttpResponse.json({ ...passing!, status: "RUNNING" }, { status: 202 });
+      })
+    );
+    renderWithProviders(<RunResultBody run={{ ...passing!, id: "run-live", status: "RUNNING", cases: [] }} />);
+
+    const button = screen.getByTestId("run-cancel-btn");
+    await userEvent.click(button);
+
+    await waitFor(() => expect(cancelled).toEqual(["run-live"]));
+    await waitFor(() => expect(screen.getByTestId("run-cancel-btn")).toBeDisabled());
+  });
+
+  it("offers no Cancel once a run has finished", () => {
+    renderWithProviders(<RunResultBody run={passing!} />);
+    expect(screen.queryByTestId("run-cancel-btn")).not.toBeInTheDocument();
+  });
+
+  it("explains CANCELLED as not a full verdict and shows who cancelled it", () => {
+    renderWithProviders(
+      <RunResultBody run={{ ...passing!, status: "CANCELLED", error: "Cancelled by bob before it finished." }} />
+    );
+    expect(screen.getByTestId("run-status-CANCELLED")).toBeInTheDocument();
+    expect(screen.getByTestId("run-notice-cancelled")).toHaveTextContent("not fully judged");
+    expect(screen.getByTestId("run-notice-reason")).toHaveTextContent("bob");
   });
 });

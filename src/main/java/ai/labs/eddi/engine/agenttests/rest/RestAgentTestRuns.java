@@ -43,6 +43,11 @@ public class RestAgentTestRuns implements IRestAgentTestRuns {
     }
 
     @Override
+    public Response cancelRun(String runId) {
+        return Response.accepted(service.cancelRun(runId)).build();
+    }
+
+    @Override
     public AgentTestRun readRun(String runId) {
         return service.readRun(runId);
     }

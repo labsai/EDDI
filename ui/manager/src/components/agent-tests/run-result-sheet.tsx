@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Loader2, XCircle } from "lucide-react";
+import { toast } from "sonner";
+import { AlertTriangle, Ban, CheckCircle2, ChevronDown, ChevronRight, Loader2, XCircle } from "lucide-react";
 import { ClusterDrawer } from "@/components/cluster/cluster-drawer";
-import { useAgentTestRun } from "@/hooks/use-agent-tests";
+import { Button } from "@/components/ui/button";
+import { useAgentTestRun, useCancelAgentTestRun } from "@/hooks/use-agent-tests";
+import { getErrorMessage } from "@/lib/api-client";
 import { formatDuration, formatUsd } from "@/lib/utils";
 import { renderValue } from "@/lib/agent-test-utils";
 import type {
@@ -263,7 +266,7 @@ function Stat({ label, value, testId }: { label: string; value: React.ReactNode;
 }
 
 function announcesItself(run: AgentTestRun): boolean {
-  return run.status === "ABORTED" || run.status === "ERROR" || run.costCeilingReached === true;
+  return run.status === "ABORTED" || run.status === "ERROR" || run.status === "CANCELLED" || run.costCeilingReached === true;
 }
 
 export function RunResultBody({ run }: { run: AgentTestRun }) {
@@ -272,7 +275,7 @@ export function RunResultBody({ run }: { run: AgentTestRun }) {
   return (
     <div className="space-y-4" data-testid="run-result">
       <div className="flex flex-wrap items-center gap-2">
-        {/* ABORTED/ERROR/ceiling are announced by their notice; the rest here. */}
+        {/* ABORTED/ERROR/CANCELLED/ceiling are announced by their notice; the rest here. */}
         <span role={announcesItself(run) ? undefined : "status"}>
           <RunStatusBadge status={run.status} />
         </span>
@@ -309,10 +312,13 @@ export function RunResultBody({ run }: { run: AgentTestRun }) {
       </div>
 
       {run.status === "RUNNING" && (
-        <p className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="run-in-progress">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          {t("agentTests.result.inProgress", "Running — results appear here when the run finishes.")}
-        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <p className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="run-in-progress">
+            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            {t("agentTests.result.inProgress", "Running — results appear here when the run finishes.")}
+          </p>
+          <CancelRunButton runId={run.id} />
+        </div>
       )}
 
       <div className="space-y-2">
@@ -321,6 +327,35 @@ export function RunResultBody({ run }: { run: AgentTestRun }) {
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * Stops a RUNNING run. The backend only flags it: the run ends after the turn in
+ * flight is abandoned and reads CANCELLED on the next poll, so the button stays
+ * disabled from the click until then.
+ */
+function CancelRunButton({ runId }: { runId: string }) {
+  const { t } = useTranslation();
+  const cancel = useCancelAgentTestRun();
+  const requested = cancel.isPending || cancel.isSuccess;
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      disabled={requested}
+      onClick={() =>
+        cancel.mutate(runId, {
+          onSuccess: () => toast.success(t("agentTests.cancelRequested", "Cancellation requested — the run stops in a moment.")),
+          // 409: already finished, or running on another node — the message says which.
+          onError: (err) => toast.error(getErrorMessage(err)),
+        })
+      }
+      data-testid="run-cancel-btn"
+    >
+      {cancel.isPending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Ban className="h-4 w-4" aria-hidden="true" />}
+      {t("agentTests.cancel", "Cancel run")}
+    </Button>
   );
 }
 
