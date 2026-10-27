@@ -240,7 +240,7 @@ public final class BoundedRegex {
                     index += 2;
                     if (e >= '1' && e <= '9') {
                         // a back-reference to a group that matched empty matches empty
-                        while (index < length && Character.isDigit(regex.charAt(index))) {
+                        while (index < length && isAsciiDigit(regex.charAt(index))) {
                             index++;
                         }
                         atom(WEIGHTED_ATOM, 0);
@@ -294,6 +294,15 @@ public final class BoundedRegex {
         }
 
         /**
+         * The digits {@link Pattern} reads in a quantifier or a back-reference: ASCII
+         * only. {@link Character#isDigit} also accepts other scripts' digits, which
+         * Pattern does not treat as a count.
+         */
+        private static boolean isAsciiDigit(char c) {
+            return c >= '0' && c <= '9';
+        }
+
+        /**
          * Applies {@code {n}}, {@code {n,}} or {@code {n,m}} at the index, if one is
          * there.
          */
@@ -301,7 +310,7 @@ public final class BoundedRegex {
             int length = regex.length();
             int cursor = index + 1;
             int digitsStart = cursor;
-            while (cursor < length && Character.isDigit(regex.charAt(cursor))) {
+            while (cursor < length && isAsciiDigit(regex.charAt(cursor))) {
                 cursor++;
             }
             if (cursor == digitsStart || cursor >= length) {
