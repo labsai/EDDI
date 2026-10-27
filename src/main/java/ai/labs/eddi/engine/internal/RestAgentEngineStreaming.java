@@ -42,6 +42,7 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -168,6 +169,14 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /** Monotonic clock in milliseconds; replaceable in unit tests. */
     LongSupplier clockMillis = () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+
+    /**
+     * Runs the disconnect handling a keep-alive tick discovers. Cancelling a turn
+     * reads and writes the store, so it must not run on the one tick thread every
+     * stream shares; a virtual thread per (rare) disconnect keeps the ticks on
+     * time. Replaceable in unit tests.
+     */
+    Executor clientGoneExecutor = runnable -> Thread.ofVirtual().name("eddi-sse-client-gone").start(runnable);
 
     /**
      * Removes the engine-reserved keys from client-supplied context. Field-injected
@@ -588,8 +597,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                 return;
             }
             try {
-                keepAlive = keepAliveScheduler.scheduleAtFixedRate(this::keepAliveTick, keepAliveIntervalSeconds,
-                        keepAliveIntervalSeconds, TimeUnit.SECONDS);
+                // A tick only writes after a whole silent interval, so ticking once per
+                // interval could leave a gap of almost two. A quarter interval caps it at
+                // about 1.25.
+                long tickMillis = Math.max(1L, TimeUnit.SECONDS.toMillis(keepAliveIntervalSeconds) / 4);
+                keepAlive = keepAliveScheduler.scheduleAtFixedRate(this::keepAliveTick, tickMillis, tickMillis,
+                        TimeUnit.MILLISECONDS);
             } catch (Exception e) {
                 // A rejected schedule (shutting down) must not fail the turn.
                 LOGGER.debugf("SSE keep-alive not scheduled for conversation %s: %s", safeConversationId, e.getMessage());
@@ -621,7 +634,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             }
             if (gone) {
                 stopKeepAlive();
-                onClientGone();
+                clientGoneExecutor.execute(this::onClientGone);
             }
         }
 

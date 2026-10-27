@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.lang.annotation.Annotation;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -43,6 +44,10 @@ class RestAgentEngineStreamingKeepAliveTest {
     private ScheduledExecutorService scheduler;
     private ScheduledFuture<?> future;
     private final AtomicLong now = new AtomicLong(1_000_000L);
+    /**
+     * Disconnect handling handed off by a tick, run by the test when it chooses.
+     */
+    private final List<Runnable> clientGone = new ArrayList<>();
 
     private SseEventSink eventSink;
     private Sse sse;
@@ -74,6 +79,7 @@ class RestAgentEngineStreamingKeepAliveTest {
         streaming.shutdownKeepAlive();
         streaming.keepAliveScheduler = scheduler;
         streaming.clockMillis = now::get;
+        streaming.clientGoneExecutor = clientGone::add;
         return streaming;
     }
 
@@ -88,8 +94,8 @@ class RestAgentEngineStreamingKeepAliveTest {
 
     private Runnable scheduledTick() {
         var tick = ArgumentCaptor.forClass(Runnable.class);
-        verify(scheduler).scheduleAtFixedRate(tick.capture(), eq((long) INTERVAL_SECONDS), eq((long) INTERVAL_SECONDS),
-                eq(TimeUnit.SECONDS));
+        verify(scheduler).scheduleAtFixedRate(tick.capture(), eq(INTERVAL_MS / 4), eq(INTERVAL_MS / 4),
+                eq(TimeUnit.MILLISECONDS));
         return tick.getValue();
     }
 
@@ -150,6 +156,12 @@ class RestAgentEngineStreamingKeepAliveTest {
         now.addAndGet(INTERVAL_MS);
         tick.run();
 
+        // The tick only hands the cancel off: the store work must not run on the
+        // one thread that ticks every stream.
+        verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        assertEquals(1, clientGone.size());
+        clientGone.forEach(Runnable::run);
+
         verify(conversationService).cancelConversation("conv-1", ControlSignal.CANCEL_GRACEFUL,
                 RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
         verify(future, atLeastOnce()).cancel(false);
@@ -165,6 +177,7 @@ class RestAgentEngineStreamingKeepAliveTest {
         when(eventSink.isClosed()).thenReturn(true);
         now.addAndGet(INTERVAL_MS);
         tick.run();
+        clientGone.forEach(Runnable::run);
 
         verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
         verify(future, atLeastOnce()).cancel(false);
