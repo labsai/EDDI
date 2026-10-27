@@ -63,7 +63,7 @@ function Field({
 function Warning({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
     <p
-      className="flex items-start gap-1.5 text-[10px] text-amber-700 dark:text-amber-400"
+      className="flex items-start gap-1.5 text-[10px] text-warn-700 dark:text-warn-400"
       role="status"
       data-testid={testId}
     >

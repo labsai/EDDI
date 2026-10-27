@@ -58,7 +58,7 @@ export function CostDashboard({ conversationId, isActive = false }: CostDashboar
     <div className="flex flex-col gap-3 p-3" data-testid="cost-dashboard">
       {partial && (
         <p
-          className="rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[10px] text-amber-600"
+          className="rounded-md border border-warn-500/30 bg-warn-500/10 px-2 py-1 text-[10px] text-warn-600"
           data-testid="cost-dashboard-partial"
         >
           {t(

@@ -429,7 +429,7 @@ function KeyValueEditor({
           data-testid={`${testIdPrefix}-value-${key}`}
         />
         {isVaultPlaceholder(value) && (
-          <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-amber-500" />
+          <Lock className="absolute inset-e-2 top-1.5 h-3.5 w-3.5 text-warn-500" />
         )}
       </div>
     );
@@ -488,7 +488,7 @@ function KeyValueEditor({
                 which the backend uses as the value instead of its default. */}
             {stored === "" && (
               <p
-                className="mt-0.5 flex items-center gap-1 ps-1 text-[10px] text-amber-600 dark:text-amber-400"
+                className="mt-0.5 flex items-center gap-1 ps-1 text-[10px] text-warn-600 dark:text-warn-400"
                 data-testid={`${testIdPrefix}-empty-${hint.key}`}
               >
                 <AlertCircle className="h-3 w-3 shrink-0" />
@@ -763,7 +763,7 @@ function IngestionPanel({
     <div className="space-y-3" data-testid="ingestion-panel">
       {hasUnsavedChanges && (
         <p
-          className="text-xs text-amber-700 dark:text-amber-400"
+          className="text-xs text-warn-700 dark:text-warn-400"
           role="alert"
           data-testid="ingestion-save-first"
         >
@@ -1130,7 +1130,7 @@ export function RagEditor({
       <Section
         label={t("ragEditor.chunking", "Document Chunking")}
         icon={Scissors}
-        accent="text-amber-500"
+        accent="text-ochre-500"
         defaultOpen={false}
       >
         <div className="space-y-3" data-testid="chunking-section">
@@ -1246,7 +1246,7 @@ export function RagEditor({
                     />
                     {(data.chunkOverlap ?? 64) > 0 && i < 5 && (
                       <div
-                        className="bg-amber-500/30 rounded-sm -mt-0.5"
+                        className="bg-ochre-500/30 rounded-sm -mt-0.5"
                         style={{
                           height: `${Math.max(2, ((data.chunkOverlap ?? 64) / (data.chunkSize ?? 512)) * 16)}px`,
                         }}
@@ -1315,7 +1315,7 @@ export function RagEditor({
                   (data.minScore ?? 0.6) >= 0.8
                     ? "text-emerald-500"
                     : (data.minScore ?? 0.6) >= 0.5
-                      ? "text-amber-500"
+                      ? "text-warn-500"
                       : "text-red-500",
                 )}
               >
@@ -1335,7 +1335,7 @@ export function RagEditor({
             />
             <div className="flex justify-between text-[9px] mt-0.5">
               <span className="text-red-400">0.0 (any)</span>
-              <span className="text-amber-400">0.5</span>
+              <span className="text-warn-400">0.5</span>
               <span className="text-emerald-400">1.0 (exact)</span>
             </div>
           </div>

@@ -463,7 +463,7 @@ function KeyValueRow({
               className={cn(
                 "truncate text-xs font-mono block",
                 type === "string" && "text-emerald-600 dark:text-emerald-400 font-normal",
-                type === "number" && "text-amber-600 dark:text-amber-400 font-semibold",
+                type === "number" && "text-ochre-600 dark:text-ochre-400 font-semibold",
                 type === "boolean" && "text-blue-600 dark:text-blue-400 font-semibold",
                 type === "array" && "text-purple-600 dark:text-purple-400",
                 type === "object" && "text-indigo-600 dark:text-indigo-400",
@@ -535,7 +535,7 @@ function getValueType(val: unknown): ValueType {
 function TypeBadge({ type }: { type: ValueType }) {
   const styles: Record<ValueType, string> = {
     string: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-    number: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+    number: "bg-ochre-500/10 text-ochre-600 dark:text-ochre-400 border-ochre-500/20",
     boolean: "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
     array: "bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20",
     object: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-500/20",

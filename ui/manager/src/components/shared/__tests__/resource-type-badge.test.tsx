@@ -22,12 +22,12 @@ describe("ResourceTypeBadge", () => {
     expect(span).not.toBeNull();
   });
 
-  it("renders rules type with amber color", () => {
+  it("renders rules type with the warn (fixed amber) color", () => {
     const { container } = renderWithProviders(
       <ResourceTypeBadge type="rules" />
     );
     expect(screen.getByText("rules")).toBeInTheDocument();
-    const span = container.querySelector(".bg-amber-500\\/10");
+    const span = container.querySelector(".bg-ochre-500\\/10");
     expect(span).not.toBeNull();
   });
 

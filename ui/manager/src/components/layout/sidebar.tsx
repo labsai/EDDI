@@ -251,7 +251,7 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
                     {item.path === "/manage/approvals" && pendingApprovalCount > 0 && (
                       <span
                         className={cn(
-                          "ms-auto inline-flex items-center justify-center rounded-full bg-amber-500 font-semibold text-white",
+                          "ms-auto inline-flex items-center justify-center rounded-full bg-warn-500 font-semibold text-white",
                           collapsed
                             ? "absolute top-1.5 end-1.5 h-2 w-2"
                             : "h-5 min-w-5 px-1.5 text-[11px]",

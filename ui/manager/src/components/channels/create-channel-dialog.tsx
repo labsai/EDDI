@@ -218,10 +218,10 @@ export function CreateChannelDialog({
           {/* Step 3: Default Target */}
           {step === "target" && (
             <>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-950/30">
+              <div className="rounded-lg border border-warn-200 bg-warn-50 p-3 dark:border-warn-800 dark:bg-warn-950/30">
                 <div className="flex items-start gap-2">
-                  <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                  <p className="text-xs text-amber-700 dark:text-amber-300">
+                  <AlertCircle className="h-4 w-4 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
+                  <p className="text-xs text-warn-700 dark:text-warn-300">
                     {isWebhook
                       ? t("webhook.defaultTargetHint", "The default target handles every event that no other target's event type matches. You can add more targets after creation.")
                       : t("channels.defaultTargetHint", "The default target handles all messages that don't match a trigger keyword. You can add more targets after creation.")}

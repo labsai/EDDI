@@ -762,7 +762,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   <button
                     onClick={handleRerun}
                     disabled={rerunConversation.isPending}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/5 px-4 py-1.5 text-xs font-medium text-amber-600 transition-colors hover:bg-amber-500/15 disabled:opacity-50 dark:text-amber-400"
+                    className="inline-flex items-center gap-1.5 rounded-full border border-warn-500/30 bg-warn-500/5 px-4 py-1.5 text-xs font-medium text-warn-600 transition-colors hover:bg-warn-500/15 disabled:opacity-50 dark:text-warn-400"
                     data-testid="rerun-btn"
                   >
                     <RefreshCw className={cn("h-3.5 w-3.5", rerunConversation.isPending && "animate-spin")} />

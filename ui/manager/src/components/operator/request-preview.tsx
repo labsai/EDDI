@@ -143,7 +143,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           className={
             pinned
               ? "rounded bg-emerald-500/10 px-1 py-0.5 font-sans text-[10px] font-medium text-emerald-600"
-              : "rounded bg-amber-500/10 px-1 py-0.5 font-sans text-[10px] font-medium text-amber-600"
+              : "rounded bg-warn-500/10 px-1 py-0.5 font-sans text-[10px] font-medium text-warn-600"
           }
           title={
             pinned
@@ -196,7 +196,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
       )}
       {escalationCheckIncomplete && (
         <p
-          className="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-400"
+          className="flex items-center gap-1 rounded border border-warn-500/40 bg-warn-500/10 p-2 text-[11px] text-warn-700 dark:text-warn-400"
           data-testid={`request-preview-escalation-unchecked-${callId}`}
           role="alert"
         >
@@ -290,7 +290,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           />
           {bodyHasRedactions(preview.body) && (
             <p
-              className="mt-1 text-[10px] text-amber-700 dark:text-amber-400"
+              className="mt-1 text-[10px] text-warn-700 dark:text-warn-400"
               data-testid={`request-preview-diff-redaction-note-${callId}`}
             >
               {t(

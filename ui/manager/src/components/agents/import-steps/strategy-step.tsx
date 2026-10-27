@@ -76,7 +76,7 @@ export function StrategyStep({
           value="upgrade"
           current={strategy}
           onChange={onStrategyChange}
-          icon={<Upload className="h-4 w-4 text-amber-500" />}
+          icon={<Upload className="h-4 w-4 text-ochre-500" />}
           label={t("importDialog.upgradeExisting", "Upgrade existing agent")}
           desc={t("importDialog.upgradeDesc", "Match resources structurally against a target agent. Best for promoting across environments.")}
           testId="strategy-upgrade"

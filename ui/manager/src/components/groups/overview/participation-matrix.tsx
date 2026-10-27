@@ -116,7 +116,7 @@ export function ParticipationMatrix({
 
 const CELL_STYLES: Record<CellKind, string> = {
   spoke: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
-  dissent: "bg-amber-500/20 text-amber-700 dark:text-amber-400",
+  dissent: "bg-warn-500/20 text-warn-700 dark:text-warn-400",
   failed: "bg-destructive/15 text-destructive",
   abstained: "bg-secondary text-muted-foreground",
   pending: "border border-dashed border-primary/50",

@@ -309,7 +309,7 @@ export function GroupPhaseEditor({
                     attention, unlike the general explanation in the legend. */}
                 {convergenceInert && (
                   <span
-                    className="block text-[10px] text-amber-600 dark:text-amber-400"
+                    className="block text-[10px] text-warn-600 dark:text-warn-400"
                     data-testid={`phase-convergence-inert-${idx}`}
                   >
                     {t(

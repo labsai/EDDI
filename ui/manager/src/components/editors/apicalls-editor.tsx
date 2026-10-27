@@ -389,7 +389,7 @@ function HttpCodeValidatorEditor({
         </div>
       </div>
       {runsOnNothing && (
-        <div className="flex flex-wrap items-center gap-2 text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="http-code-filter-runs-on-nothing">
+        <div className="flex flex-wrap items-center gap-2 text-[10px] text-warn-700 dark:text-warn-400" role="alert" data-testid="http-code-filter-runs-on-nothing">
           <span className="flex-1">
             {t(
               "apiCallsEditor.runOnNoCodes",
@@ -400,7 +400,7 @@ function HttpCodeValidatorEditor({
             <button
               type="button"
               onClick={() => onChange({ ...validator, runOnHttpCode: undefined })}
-              className="rounded border border-current px-1.5 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/30"
+              className="rounded border border-current px-1.5 py-0.5 font-medium hover:bg-warn-100 dark:hover:bg-warn-900/30"
               data-testid="http-code-filter-use-defaults"
             >
               {t("apiCallsEditor.useDefaultCodes", "Use defaults")}
@@ -409,7 +409,7 @@ function HttpCodeValidatorEditor({
         </div>
       )}
       {blocked.length > 0 && (
-        <p className="text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="http-code-filter-conflict">
+        <p className="text-[10px] text-warn-700 dark:text-warn-400" role="alert" data-testid="http-code-filter-conflict">
           {t(
             "apiCallsEditor.runSkipConflict",
             "{{codes}} is also in the skip list, so this instruction never runs on it.",
@@ -536,7 +536,7 @@ function PropertyInstructionRow({
       </div>
 
       {instruction.scope === "secret" && (
-        <p className="text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="property-instruction-secret-warning">
+        <p className="text-[10px] text-warn-700 dark:text-warn-400" role="alert" data-testid="property-instruction-secret-warning">
           {t(
             "apiCallsEditor.scopeSecretWarning",
             "The secret scope is not vaulted on this instruction: the value is stored in plain text. Choose another scope, and keep credentials in the Secrets vault.",
@@ -1420,7 +1420,7 @@ function HttpCallEditor({
               : request.method === "POST"
                 ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                 : request.method === "PUT"
-                  ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                  ? "bg-ochre-100 text-ochre-700 dark:bg-ochre-900/30 dark:text-ochre-400"
                   : request.method === "DELETE"
                     ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                     : "bg-muted text-muted-foreground"
@@ -1797,7 +1797,7 @@ function DiscoveredEndpointsPanel({
                     : method === "POST"
                       ? "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
                       : method === "PUT"
-                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                        ? "bg-ochre-100 text-ochre-700 dark:bg-ochre-900/30 dark:text-ochre-400"
                         : method === "DELETE"
                           ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                           : "bg-muted text-muted-foreground";
@@ -2204,11 +2204,11 @@ export function ApiCallsEditor({
               {/* Replace confirmation inline */}
               {showReplaceConfirm && (
                 <div
-                  className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2.5"
+                  className="flex items-center gap-2 rounded-lg border border-warn-500/40 bg-warn-500/10 px-3 py-2.5"
                   data-testid="replace-confirm"
                 >
-                  <ShieldAlert className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <p className="flex-1 text-xs text-amber-700 dark:text-amber-300">
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-warn-600 dark:text-warn-400" />
+                  <p className="flex-1 text-xs text-warn-700 dark:text-warn-300">
                     {/* i18next interpolation, not a template literal: baking the
                         count into the FALLBACK means any locale that translates
                         this key loses the number entirely. */}
@@ -2221,14 +2221,14 @@ export function ApiCallsEditor({
                   <button
                     type="button"
                     onClick={() => setShowReplaceConfirm(false)}
-                    className="rounded px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 transition-colors"
+                    className="rounded px-2 py-1 text-xs font-medium text-warn-700 dark:text-warn-300 hover:bg-warn-500/20 transition-colors"
                   >
                     {t("common.cancel", "Cancel")}
                   </button>
                   <button
                     type="button"
                     onClick={handleImportReplace}
-                    className="rounded bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700 transition-colors"
+                    className="rounded bg-warn-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-warn-700 transition-colors"
                     data-testid="replace-confirm-yes"
                   >
                     {t("apiCallsEditor.confirmReplace", "Yes, Replace All")}

@@ -296,7 +296,7 @@ function StatusIcon({ run }: { run: IngestionRun }) {
   if (run.status === "COMPLETED") {
     // A completed run that lost documents is not the same green tick as a clean one.
     return run.documentsFailed > 0 ? (
-      <AlertCircle className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+      <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warn-600 dark:text-warn-400" />
     ) : (
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
     );

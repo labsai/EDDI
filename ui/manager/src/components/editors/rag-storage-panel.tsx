@@ -72,7 +72,7 @@ export function RagStoragePanel<T extends StorageConfig>({
         <div
           className={
             unchanged && problem !== "reference"
-              ? "flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs"
+              ? "flex items-start gap-2 rounded-lg border border-warn-500/40 bg-warn-500/10 px-3 py-2 text-xs"
               : "flex items-start gap-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs"
           }
           role={unchanged && problem !== "reference" ? "status" : "alert"}
@@ -80,12 +80,12 @@ export function RagStoragePanel<T extends StorageConfig>({
           data-saved={unchanged || undefined}
         >
           <AlertTriangle
-            className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${unchanged && problem !== "reference" ? "text-amber-600 dark:text-amber-400" : "text-destructive"}`}
+            className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${unchanged && problem !== "reference" ? "text-warn-600 dark:text-warn-400" : "text-destructive"}`}
             aria-hidden="true"
           />
           <div className="space-y-0.5">
             <p
-              className={`font-semibold ${unchanged && problem !== "reference" ? "text-amber-700 dark:text-amber-400" : "text-destructive"}`}
+              className={`font-semibold ${unchanged && problem !== "reference" ? "text-warn-700 dark:text-warn-400" : "text-destructive"}`}
             >
               {!unchanged
                 ? t("ragEditor.location.refused", {

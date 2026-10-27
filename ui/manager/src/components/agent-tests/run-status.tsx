@@ -111,7 +111,7 @@ function Notice({
   const classes =
     tone === "danger"
       ? "border-destructive/40 bg-destructive/10"
-      : "border-amber-500/40 bg-amber-500/10";
+      : "border-warn-500/40 bg-warn-500/10";
   const Icon = tone === "danger" ? OctagonX : AlertTriangle;
   return (
     <div role="status" className={`rounded-lg border p-3 text-sm ${classes}`} data-testid={testId}>

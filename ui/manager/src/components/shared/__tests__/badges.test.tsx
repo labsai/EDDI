@@ -34,8 +34,8 @@ describe("ResourceTypeBadge", () => {
   it.each([
     ["agent", "purple"],
     ["workflow", "blue"],
-    ["behavior", "amber"],
-    ["rules", "amber"],
+    ["behavior", "ochre"],
+    ["rules", "ochre"],
     ["httpcalls", "green"],
     ["apicalls", "green"],
     ["langchain", "pink"],

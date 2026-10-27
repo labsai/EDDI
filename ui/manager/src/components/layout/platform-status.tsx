@@ -148,7 +148,7 @@ export function PlatformStatus({ compact = false }: { compact?: boolean } = {}) 
                 <span className="text-muted-foreground">{t("platform.latency", "Latency")}</span>
                 <span className={cn(
                   "font-medium tabular-nums",
-                  latencyMs < 100 ? "text-emerald-600 dark:text-emerald-400" : latencyMs < 500 ? "text-amber-600 dark:text-amber-400" : "text-red-600 dark:text-red-400",
+                  latencyMs < 100 ? "text-emerald-600 dark:text-emerald-400" : latencyMs < 500 ? "text-warn-600 dark:text-warn-400" : "text-red-600 dark:text-red-400",
                 )}>
                   {latencyMs}ms
                 </span>

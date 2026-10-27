@@ -453,7 +453,7 @@ export function AgentDetailsPanel({
             <div className="rounded-lg border border-border/60 bg-card p-3 space-y-2">
               <div className="flex items-center justify-between">
                 <h5 className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  <Sparkles className="h-3.5 w-3.5 text-amber-500" />
+                  <Sparkles className="h-3.5 w-3.5 text-ochre-500" />
                   {t("Workforce.agentEditor.capabilities", "Capabilities")}
                 </h5>
                 <span className="text-[10px] font-medium text-muted-foreground rounded-full bg-muted px-1.5 py-0.5">
@@ -576,10 +576,10 @@ export function AgentDetailsPanel({
               {agentData?.memoryPolicy?.strictWriteDiscipline?.enabled && (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1.5">
-                    <Database className="h-3 w-3 text-amber-400" />
+                    <Database className="h-3 w-3 text-ochre-400" />
                     {t("Workforce.agentEditor.strictMemory", "Strict Memory")}
                   </span>
-                  <Badge variant="outline" className="text-[10px] border-amber-500/30 text-amber-500">
+                  <Badge variant="outline" className="text-[10px] border-ochre-500/30 text-ochre-500">
                     Active
                   </Badge>
                 </div>
@@ -589,7 +589,7 @@ export function AgentDetailsPanel({
               {agentData?.hitlConfig?.timeoutPolicy && (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-muted-foreground flex items-center gap-1.5">
-                    <Lock className="h-3 w-3 text-amber-400" />
+                    <Lock className="h-3 w-3 text-warn-400" />
                     {t("Workforce.agentEditor.hitlMode", "Approval Policy")}
                   </span>
                   <Badge variant="warning" className="text-[10px]">

@@ -155,7 +155,7 @@ function PropertyRow({
           value read through fromObjectPath, or given as valueObject /
           valueList / a number or boolean, is stored under the scope as-is. */}
       {prop.scope === "secret" && storesSecretInPlainText(prop) && (
-        <p className="ps-2 text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid="property-secret-from-path-warning">
+        <p className="ps-2 text-[10px] text-warn-700 dark:text-warn-400" role="alert" data-testid="property-secret-from-path-warning">
           {t(
             "propertySetterEditor.secretFromPathWarning",
             "A secret is vaulted only when it comes from the value field. Read from a \"From path\" or given any other way, it is stored in plain text — enter it in the value field or choose another scope.",

@@ -214,7 +214,7 @@ export function OperatorDrawer() {
             waits, with nothing anywhere saying so. */}
         {operatorHasPendingApproval && !isOpen && (
           <span
-            className="absolute end-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-card bg-amber-500"
+            className="absolute end-1 top-1 h-2.5 w-2.5 rounded-full border-2 border-card bg-warn-500"
             data-testid="operator-drawer-pending-dot"
             aria-hidden="true"
           />

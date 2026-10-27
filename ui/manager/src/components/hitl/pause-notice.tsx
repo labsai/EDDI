@@ -69,11 +69,11 @@ export function PauseNotice({
 
   return (
     <div
-      className="flex flex-wrap items-center gap-2 border-t border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-xs"
+      className="flex flex-wrap items-center gap-2 border-t border-warn-500/30 bg-warn-500/5 px-4 py-2.5 text-xs"
       data-testid={`${testIdBase}-banner`}
     >
-      <Hand className="h-4 w-4 shrink-0 text-amber-500" aria-hidden="true" />
-      <span className="text-amber-600 dark:text-amber-400">{reason}</span>
+      <Hand className="h-4 w-4 shrink-0 text-warn-500" aria-hidden="true" />
+      <span className="text-warn-600 dark:text-warn-400">{reason}</span>
       {tools.length > 0 && (
         <span className="font-mono text-muted-foreground" data-testid={`${testIdBase}-tools`}>
           {t("hitl.noticeWaitingFor", "Waiting for approval: {{tools}}", { tools: tools.join(", ") })}
@@ -86,7 +86,7 @@ export function PauseNotice({
       )}
       <Link
         to={href}
-        className="ms-auto rounded-md bg-amber-500/10 px-2.5 py-1 font-medium text-amber-600 hover:bg-amber-500/20 transition-colors dark:text-amber-400"
+        className="ms-auto rounded-md bg-warn-500/10 px-2.5 py-1 font-medium text-warn-600 hover:bg-warn-500/20 transition-colors dark:text-warn-400"
         data-testid={reviewTestId ?? `${testIdBase}-review`}
       >
         {t("hitl.review", "Review")}

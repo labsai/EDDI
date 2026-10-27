@@ -463,7 +463,7 @@ export function TestSuiteEditor({ data, onChange, readOnly }: TestSuiteEditorPro
         </div>
       </EditorSection>
 
-      <EditorSection label={t("testSuiteEditor.toolMocks", "Tool mocks")} defaultOpen={mocks.length > 0} icon={Wrench} accent="text-amber-500">
+      <EditorSection label={t("testSuiteEditor.toolMocks", "Tool mocks")} defaultOpen={mocks.length > 0} icon={Wrench} accent="text-ochre-500">
         <p className="mb-3 text-xs text-muted-foreground">
           {t(
             "testSuiteEditor.toolMocksHelp",

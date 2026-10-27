@@ -294,7 +294,7 @@ export function MessageAttachments({ attachments }: { attachments: MessageAttach
             )}
             {tooLarge && (
               <span
-                className="inline-flex items-center gap-1 text-[10px] text-amber-200/90"
+                className="inline-flex items-center gap-1 text-[10px] text-warn-200/90"
                 data-testid="attachment-not-forwarded"
               >
                 <AlertTriangle className="h-3 w-3" />
