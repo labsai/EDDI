@@ -1164,18 +1164,18 @@ function LlmStep({
             data-testid="wizard-jlama-note"
           >
             <p className="font-medium text-foreground">
-              {t("setupWizard.jlamaNoteTitle", "Jlama runs inside EDDI")}
+              {t("setupWizard.jlamaNoteTitle", "Jlama runs inside {{productName}}")}
             </p>
             <p className="mt-1.5">
               {t(
                 "setupWizard.jlamaNoteBody",
-                "There is no model server to point at — EDDI loads the model into its own process and downloads the weights from Hugging Face on first use, so the first message can take a while."
+                "There is no model server to point at — {{productName}} loads the model into its own process and downloads the weights from Hugging Face on first use, so the first message can take a while."
               )}
             </p>
             <p className="mt-1.5">
               {t(
                 "setupWizard.jlamaNoteTuning",
-                "Running EDDI in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model may be re-downloaded after the container is removed or replaced. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too."
+                "Running {{productName}} in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model may be re-downloaded after the container is removed or replaced. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too."
               )}
             </p>
           </div>
@@ -1591,7 +1591,7 @@ function FeaturesStep({
             <FeatureToggle
               icon={Wrench}
               label={t("setupWizard.builtInTools", "Built-in Tools")}
-              description={t("setupWizard.builtInToolsDesc", "Enable EDDI's built-in tool library (calculator, datetime, etc.)")}
+              description={t("setupWizard.builtInToolsDesc", "Enable {{productName}}'s built-in tool library (calculator, datetime, etc.)")}
               checked={state.enableBuiltInTools}
               onChange={(on) => onChange({ enableBuiltInTools: on })}
               data-testid="wizard-toggle-tools"

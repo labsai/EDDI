@@ -24,12 +24,12 @@ export function UpdatesPage() {
           data-testid="updates-page-title"
         >
           <ArrowUpCircle className="h-8 w-8 text-primary" aria-hidden="true" />
-          {t("updates.title", "EDDI Updates")}
+          {t("updates.title", "{{productName}} Updates")}
         </h1>
         <p className="mt-1 text-muted-foreground" data-testid="updates-page-description">
           {t(
             "updates.description",
-            "Check whether a newer EDDI release is available. Nothing is sent until you ask.",
+            "Check whether a newer {{productName}} release is available. Nothing is sent until you ask.",
           )}
         </p>
       </div>

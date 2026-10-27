@@ -307,7 +307,7 @@ export class SecretsError extends Error {
 async function throwVaultError(res: Response, action: string): Promise<never> {
   if (res.status === 503) {
     throw new SecretsError(
-      "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+      "Secrets vault is not configured. Set up a secret provider on the server.",
       VAULT_NOT_CONFIGURED,
       503,
     );
@@ -554,7 +554,7 @@ export async function findSecret(
     if (err instanceof ApiClientError && err.status === 404) return null;
     if (err instanceof ApiClientError && err.status === 503) {
       throw new SecretsError(
-        "Secrets vault is not configured. Set up a secret provider in the EDDI backend.",
+        "Secrets vault is not configured. Set up a secret provider on the server.",
         VAULT_NOT_CONFIGURED,
         503,
       );

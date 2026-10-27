@@ -173,7 +173,7 @@ export function ConnectionsPage() {
           <p className="mt-1 text-muted-foreground">
             {t(
               "pages.connections.subtitle",
-              "How EDDI authenticates to the systems your agents reach",
+              "How {{productName}} authenticates to the systems your agents reach",
             )}
           </p>
         </div>
@@ -189,7 +189,7 @@ export function ConnectionsPage() {
         <p className="text-sm text-foreground">
           {t(
             "connections.guidance",
-            "A connection is a credential plus the list of origins it may be sent to. Agents refer to one by name — ${connection:jira} — and EDDI resolves it per request, so the same connection can carry an organisation-wide API key or each person's own account.",
+            "A connection is a credential plus the list of origins it may be sent to. Agents refer to one by name — ${connection:jira} — and {{productName}} resolves it per request, so the same connection can carry an organisation-wide API key or each person's own account.",
           )}
         </p>
       </div>

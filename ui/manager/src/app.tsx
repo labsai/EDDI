@@ -9,6 +9,8 @@ import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { LandingPage } from "@/pages/landing-page";
 import { NotFoundPage } from "@/pages/not-found";
 import { lazyPage } from "@/lib/lazy-page";
+import { isUpdateUiVisible, UPDATES_PATH } from "@/lib/brand";
+import { useBrand } from "@/hooks/use-brand";
 
 /**
  * Route components are code-split; the layouts, the landing page and the command
@@ -122,6 +124,7 @@ function WorkforceRedirect() {
 }
 
 export function App() {
+  const brand = useBrand();
   const location = useLocation();
   return (
     <ErrorBoundary resetKey={location.key}>
@@ -198,7 +201,11 @@ export function App() {
                 suggest otherwise to anyone reading the route table. */}
             <Route path="/manage/linked-accounts" element={<LinkedAccountsPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
-            <Route path="/manage/updates" element={<UpdatesPage />} />
+            {/* Hidden under a brand unless it opts in (white-label plan, R5). */}
+            <Route
+              path={UPDATES_PATH}
+              element={isUpdateUiVisible(brand) ? <UpdatesPage /> : <Navigate to="/manage" replace />}
+            />
             {/* Redirects from old standalone user-data pages */}
             <Route
               path="/manage/memories"

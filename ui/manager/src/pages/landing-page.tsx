@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/components/layout/theme-provider";
+import { BrandIcon } from "@/components/layout/brand-logo";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -146,17 +147,13 @@ export function LandingPage() {
         <header className="text-center space-y-3">
           <div className="flex items-center justify-center">
             <div className="relative">
-              <img
-                src="/eddi-icon.svg"
-                alt="EDDI"
-                className="h-14 w-14 rounded-xl"
-              />
+              <BrandIcon className="h-14 w-14 rounded-xl" testId="landing-brand-icon" />
               <Sparkles className="absolute -top-1 -end-1 h-4 w-4 text-primary/50" />
             </div>
           </div>
 
           <h1 className="text-2xl md:text-3xl font-bold text-foreground tracking-tight">
-            {t("landing.title", "Welcome to EDDI")}
+            {t("landing.title", "Welcome to {{productName}}")}
           </h1>
           <p className="text-muted-foreground text-base max-w-md ms-auto me-auto leading-relaxed">
             {t(

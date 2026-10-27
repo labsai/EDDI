@@ -14,8 +14,16 @@
     "confirmDeleteAllDesc": "Permanently deletes every file this conversation owns. This cannot be undone."
   },
   "app": {
-    "title": "EDDI Manager",
-    "description": "Admin dashboard for the EDDI conversational AI platform"
+    "title": "{{productName}} Manager",
+    "description": "Admin dashboard for the {{productName}} conversational AI platform"
+  },
+  "about": {
+    "title": "About {{productName}}",
+    "versionLabel": "Version",
+    "versionUnknown": "Version unknown",
+    "poweredBy": "Powered by EDDI",
+    "license": "EDDI is open-source software, licensed under the Apache License 2.0.",
+    "licenseLink": "Read the license"
   },
   "auth": {
     "login": "Login",
@@ -111,7 +119,7 @@
   "pages": {
     "dashboard": {
       "title": "Dashboard",
-      "subtitle": "Overview of your EDDI agents and conversations",
+      "subtitle": "Overview of your {{productName}} agents and conversations",
       "activeAgents": "Active Agents",
       "totalWorkflows": "Workflows",
       "totalResources": "Resources",
@@ -163,11 +171,11 @@
     "approvalsSubtitle": "Review and decide on conversations awaiting human input",
     "connections": {
       "title": "Connections",
-      "subtitle": "How EDDI authenticates to the systems your agents reach"
+      "subtitle": "How {{productName}} authenticates to the systems your agents reach"
     },
     "linkedAccounts": {
       "title": "Linked accounts",
-      "subtitle": "Services you have allowed EDDI to use on your behalf"
+      "subtitle": "Services you have allowed {{productName}} to use on your behalf"
     }
   },
   "common": {
@@ -232,7 +240,7 @@
     "deletePermanently": "Delete permanently",
     "deletePermanentlyHint": "Cannot be undone. Without this, the item is only marked deleted and stays recoverable until it is purged.",
     "errors": {
-      "network": "Can't reach EDDI. Check your connection and try again.",
+      "network": "Can't reach {{productName}}. Check your connection and try again.",
       "unauthorized": "Your session has expired. Sign in again.",
       "forbidden": "You don't have permission to view this.",
       "notFound": "Not found — it may have been deleted."
@@ -325,7 +333,7 @@
     "a2aDescription": "Agent Description",
     "a2aEnable": "Enable A2A",
     "a2aEnabled": "Enabled",
-    "a2aEnabledDesc": "Make this agent discoverable by other agents via the A2A protocol. Other EDDI instances can find and call this agent as a tool.",
+    "a2aEnabledDesc": "Make this agent discoverable by other agents via the A2A protocol. Other {{productName}} instances can find and call this agent as a tool.",
     "a2aEndpoints": "Endpoints",
     "a2aNoSkills": "No skills — a default 'chat' skill will be used",
     "a2aSection": "Agent-to-Agent (A2A)",
@@ -473,9 +481,9 @@
     "slackWebhookUrl": "Webhook URL",
     "slackWebhookCopied": "Webhook URL copied",
     "slackStep1": "Create a Slack App at api.slack.com/apps and install it to your workspace.",
-    "slackStep2": "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.",
+    "slackStep2": "Copy the Bot Token (xoxb-…) and Signing Secret into the {{productName}} vault and configure channels below.",
     "slackStep3": "Then enable Event Subscriptions in your Slack App, paste the Webhook URL above, and subscribe to:",
-    "slackSetupNote": "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.",
+    "slackSetupNote": "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in {{productName}}.",
     "slackRequiredScopes": "Required Bot Token Scopes",
     "hitlConfig": "Human-in-the-Loop",
     "hitlConfigDesc": "When this agent pauses a conversation for human approval, these settings control how long to wait and what happens if no decision is made in time.",
@@ -533,9 +541,9 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "Only needed if using a proxy, private deployment, or Azure OpenAI endpoint",
-    "jlamaNoteTitle": "Jlama runs inside EDDI",
-    "jlamaNoteBody": "There is no model server to point at — EDDI loads the model into its own process and downloads the weights from Hugging Face on first use, so the first message can take a while.",
-    "jlamaNoteTuning": "Running EDDI in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model may be re-downloaded after the container is removed or replaced. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too.",
+    "jlamaNoteTitle": "Jlama runs inside {{productName}}",
+    "jlamaNoteBody": "There is no model server to point at — {{productName}} loads the model into its own process and downloads the weights from Hugging Face on first use, so the first message can take a while.",
+    "jlamaNoteTuning": "Running {{productName}} in a container? Open the agent's LLM configuration afterwards and set modelCachePath to a mounted volume — the default cache lives on the container's ephemeral layer, so the model may be re-downloaded after the container is removed or replaced. quantizeModelAtRuntime, workingDirectory and workingQuantizedType can be tuned there too.",
     "baseUrlHintLocal": "Required — the URL where your local model server is running",
     "modelHint": "Type any model name supported by your provider, or pick one from the suggestions",
     "modelHintSelfHosted": "The model id exactly as your server serves it (its /v1/models list). There is no default.",
@@ -602,7 +610,7 @@
     "structuredOutputDesc": "LLM responds with a JSON object instead of plain text",
     "structuredOutputInfo": "Enabling this changes how the LLM responds: instead of plain text, it returns a JSON object with structured fields. A JSON schema is appended to your system prompt, and the model is set to JSON response mode.",
     "builtInTools": "Built-in Tools",
-    "builtInToolsDesc": "Enable EDDI's built-in tool library (calculator, datetime, etc.)",
+    "builtInToolsDesc": "Enable {{productName}}'s built-in tool library (calculator, datetime, etc.)",
     "toolsWhitelist": "Whitelist (empty = all tools)",
     "allTools": "All Tools",
     "selectSpecific": "Select Specific",
@@ -1263,7 +1271,7 @@
     "argumentInvalidJson": "Not valid JSON — the last valid value is kept",
     "removeArgument": "Remove argument",
     "maxResponseSize": "Max stored response size (characters)",
-    "maxResponseSizeHint": "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later."
+    "maxResponseSizeHint": "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs server version 6.6 or later."
   },
   "llmEditor": {
     "addCustomInstruction": "Add Instruction",
@@ -1538,7 +1546,7 @@
     "maxToolCallsPerIterationDefault": "(default {{n}})",
     "maxToolCallsPerTurn": "Max tool calls per turn",
     "maxToolCallsPerTurnDefault": "(default {{n}})",
-    "maxToolCallsHint": "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs EDDI 6.6 or later — leave blank on an older server.",
+    "maxToolCallsHint": "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs server version 6.6 or later — leave blank on an older server.",
     "maxToolCallsUncapped": "A cap is switched off: the model can run any number of tool calls there, bounded only by Max Tool Iterations.",
     "repeatGuardTitle": "Repeated failing tool calls",
     "repeatGuardEnabled": "Block repeated failing calls",
@@ -1546,7 +1554,7 @@
     "maxRefusalsPerTurn": "Refusals before stopping",
     "maxIdenticalCalls": "Max identical successful calls",
     "exemptTools": "Exempt tools (comma-separated)",
-    "repeatGuardHint": "A tool call that already failed identically, with nothing succeeding since, is answered NOT_EXECUTED instead of being run again; after the refusal limit the turn ends with a fixed message. On by default; leave fields blank to keep the defaults. A terminal failure (for example HTTP 403/404) is refused on the very next identical call, a retryable one after the failures allowed. Max identical successful calls is off unless set (-1 or 0 = unlimited). Needs EDDI 6.6 or later - leave untouched on an older server.",
+    "repeatGuardHint": "A tool call that already failed identically, with nothing succeeding since, is answered NOT_EXECUTED instead of being run again; after the refusal limit the turn ends with a fixed message. On by default; leave fields blank to keep the defaults. A terminal failure (for example HTTP 403/404) is refused on the very next identical call, a retryable one after the failures allowed. Max identical successful calls is off unless set (-1 or 0 = unlimited). Needs server version 6.6 or later - leave untouched on an older server.",
     "toggleTask": "Show or hide task details",
     "noActionsWarning": "This task has no trigger action, so it never runs. Add the action your behavior rules emit, for example send_message.",
     "model": "Model",
@@ -1568,7 +1576,7 @@
       "title": "Model settings",
       "rejectedBy": "Rejected by {{model}}",
       "noEffectOn": "No effect on {{model}}",
-      "droppedHint": "EDDI removes it before each request, so this value is never sent.",
+      "droppedHint": "{{productName}} removes it before each request, so this value is never sent.",
       "removeKey": "Remove {{key}}",
       "remove": "Remove",
       "providerDefault": "Provider default",
@@ -1619,7 +1627,7 @@
       "groupTotal": "Settings in this group: {{count}}",
       "unavailable_one": "{{count}} setting that {{model}} rejects or ignores",
       "unavailable_other": "{{count}} settings that {{model}} rejects or ignores",
-      "variableModel": "The model is a variable reference ({{model}}), so the checks below cannot know it yet; EDDI applies the model-specific rules once the variable is resolved.",
+      "variableModel": "The model is a variable reference ({{model}}), so the checks below cannot know it yet; {{productName}} applies the model-specific rules once the variable is resolved.",
       "badgeMigrated": "Sent as {{key}}",
       "migratedTo": "Sent as {{key}} for {{model}}",
       "group": {
@@ -1648,7 +1656,7 @@
     "grTypeJson": "JSON object",
     "grTypeJsonDesc": "Finds an answer that is not exactly one JSON object (a Markdown code fence is tolerated). Checks the shape only.",
     "grTypeClassifier": "Safety classifier model",
-    "grTypeClassifierDesc": "Asks a safety-classifier model you run (Granite Guardian, ShieldGemma, a moderation API) for a verdict. EDDI ships no classifier model.",
+    "grTypeClassifierDesc": "Asks a safety-classifier model you run (Granite Guardian, ShieldGemma, a moderation API) for a verdict. {{productName}} ships no classifier model.",
     "grActionBlock": "Block",
     "grActionRedact": "Redact",
     "grActionReprompt": "Reprompt",
@@ -1724,7 +1732,7 @@
     "grClfOutputPrice": "Output $/1M tokens",
     "grClfContext": "Give the template this turn's retrieved RAG context as {context} (for a groundedness check). Has no effect without a prompt template.",
     "grSectionTitle": "Guardrails",
-    "grIntro": "Screen the user's message before the model is called, and the model's answer before it is stored or delivered. Nothing is screened unless you add a guardrail. Needs EDDI 6.6 or later: an older server ignores these lists and runs the agent unguarded.",
+    "grIntro": "Screen the user's message before the model is called, and the model's answer before it is stored or delivered. Nothing is screened unless you add a guardrail. Needs server version 6.6 or later: an older server ignores these lists and runs the agent unguarded.",
     "grInput": "Input guardrails",
     "grOutput": "Output guardrails",
     "grInputHint": "Run in order on the user's message, before retrieval and the model call.",
@@ -2070,8 +2078,8 @@
     "kekNewKeyLabel": "New master key",
     "kekNewKeyPlaceholder": "New key — at least 8 characters",
     "kekNewKeyTooShort": "New master key must be at least 8 characters.",
-    "kekRestartHint": "After rotation you must update EDDI_VAULT_MASTER_KEY to the new key and restart EDDI.",
-    "kekResultInstruction": "Action required: set the EDDI_VAULT_MASTER_KEY environment variable to the NEW master key and restart EDDI. Until you do, the running instance still uses the old key in memory.",
+    "kekRestartHint": "After rotation you must update EDDI_VAULT_MASTER_KEY to the new key and restart {{productName}}.",
+    "kekResultInstruction": "Action required: set the EDDI_VAULT_MASTER_KEY environment variable to the NEW master key and restart {{productName}}. Until you do, the running instance still uses the old key in memory.",
     "resetTenantTitle": "Reset vault for this tenant",
     "resetTenantBlurb": "Destructive last resort. Permanently deletes all secrets and the DEK so the vault can start fresh — use after a lost or changed master key.",
     "resetTenantAction": "Reset vault",
@@ -2243,7 +2251,7 @@
       "noMatch": "No administrative actions match these filters",
       "empty": "No administrative actions recorded yet",
       "noMatchLoadOlder": "Only the newest rows are loaded — load older ones to search further back.",
-      "emptyHint": "EDDI records them from version 6.6 on, unless eddi.audit.admin-actions.enabled is false. An older server shows nothing here.",
+      "emptyHint": "The server records them from version 6.6 on, unless eddi.audit.admin-actions.enabled is false. An older server shows nothing here.",
       "caption": "Administrative actions, newest first",
       "colTime": "Time",
       "colActor": "Actor",
@@ -2255,8 +2263,8 @@
       "loadOlder": "Load older",
       "forbidden": "Only administrators can read administrative actions",
       "forbiddenHint": "The log records every administrator's changes, so reading it needs the eddi-admin role.",
-      "unsupported": "This EDDI does not record administrative actions",
-      "unsupportedHint": "They are recorded from EDDI 6.6 on.",
+      "unsupported": "This server does not record administrative actions",
+      "unsupportedHint": "They are recorded from server version 6.6 on.",
       "loadError": "Could not load the administrative actions.",
       "shown": "{{shown}} of {{loaded}} loaded rows shown",
       "windowAny": "Any time",
@@ -2398,15 +2406,15 @@
     },
     "totalCappedHint": "The server returned a full page, so there may be more schedules than this.",
     "systemManaged": "System",
-    "systemManagedHint": "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
+    "systemManagedHint": "Managed by {{productName}} (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here.",
     "persistentConversationIdLocked": "Set when the schedule is created. The server keeps the conversation the fires have been appending to.",
     "failedScheduleGone": "Schedule no longer exists",
-    "disabledByPerson": "Disabled by a person. A schedule an undeploy switched off before EDDI 6.6 also shows this: enable it once by hand.",
+    "disabledByPerson": "Disabled by a person. A schedule an undeploy switched off before server version 6.6 also shows this: enable it once by hand.",
     "disabledUndeployed": "Agent undeployed",
     "disabledUndeployedHint": "Switched off when its agent was undeployed. It comes back on by itself at the agent's next successful deploy — no action needed.",
     "disabledAccessRevoked": "Access revoked",
     "disabledAccessRevokedHint": "Its creator can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
-    "disabledOtherHint": "Switched off by EDDI for the reason shown.",
+    "disabledOtherHint": "Switched off by {{productName}} for the reason shown.",
     "serverRefusedUpdate": "The server refused this change:",
     "serverRefusedCreate": "The server refused this schedule:",
     "disabledAccessRevokedHintBy": "Its creator ({{user}}) can no longer use this agent, so it stopped firing. Share the agent with them again — or recreate the schedule as someone who may use it — then enable it.",
@@ -2740,7 +2748,7 @@
       "reference": "A store location must be written out, not a ${…} reference. The location decides whose documents an agent reads, and a reference is resolved only when the store is built — after every check — from variables any editor can change, so it could point at another knowledge base's store or at SQL. A knowledge base already saved with a reference stops ingesting and retrieving until it is saved once with the literal name.",
       "pgIdentifier": "A pgvector table must be a plain name, optionally schema-qualified (letters, digits, _ and $). The store puts it into SQL as it is, so quotes, spaces and punctuation are refused.",
       "refused": "The server refuses {{param}} = {{value}}",
-      "reserved": "Names starting with {{prefix}} (in any part, any case) are reserved: EDDI derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
+      "reserved": "Names starting with {{prefix}} (in any part, any case) are reserved: {{productName}} derives every knowledge base's own location from that prefix, so this name could address another knowledge base's store. Choose another name, or leave it blank to get a location of this knowledge base's own.",
       "savedReference": "The saved {{param}} = {{value}} no longer works",
       "refusedIfChanged": "{{param}} = {{value}} keeps working as saved, but the server would refuse it if it were changed"
     },
@@ -2748,10 +2756,10 @@
       "idTitle": "Own store (addressed by id)",
       "nameTitle": "Name-based store (6.5 layout)",
       "idBody": "This knowledge base has a store of its own: every chunk is tagged with its id and retrieval sees only its own chunks, even in a shared table.",
-      "nameBody": "Created before EDDI 6.6: its store is found by the knowledge base's name, so any other knowledge base with the same name shares it. It keeps working as it is.",
+      "nameBody": "Created before server version 6.6: its store is found by the knowledge base's name, so any other knowledge base with the same name shares it. It keeps working as it is.",
       "defaultUnsaved": "Location: eddi_kbid_<id> (default, assigned when saved)",
       "migrate": "Move to its own store…",
-      "renameNote": "Renaming this knowledge base moves it the same way. Needs EDDI 6.6 or later.",
+      "renameNote": "Renaming this knowledge base moves it the same way. Needs server version 6.6 or later.",
       "migrateTitle": "Move this knowledge base to its own store?",
       "migrateBodyExplicit": "It keeps its table, but only chunks tagged with its id are retrieved from now on — none of the chunks already there carry that tag, so it starts EMPTY. Its sources re-ingest by themselves on their next run; documents added through /ingest must be ingested again. Nothing is deleted. The change takes effect when you save, and cannot be switched back.",
       "migrateBody": "It moves to a new, EMPTY store of its own. Its sources re-ingest by themselves on their next run; documents added through /ingest must be ingested again. The old store is left in place, untouched. The change takes effect when you save, and cannot be switched back.",
@@ -2857,9 +2865,9 @@
   },
   "onboarding": {
     "welcome": {
-      "title": "Welcome to EDDI",
+      "title": "Welcome to {{productName}}",
       "subtitle": "Your AI Agent Command Center",
-      "introText": "EDDI Manager is your command center for building, testing, and operating conversational AI agents.",
+      "introText": "{{productName}} Manager is your command center for building, testing, and operating conversational AI agents.",
       "capabilitiesTitle": "What You Can Do",
       "capabilitiesSubtitle": "Everything you need to build production-ready AI agents",
       "buildAgents": "Build Agents",
@@ -2891,7 +2899,7 @@
         "step3Title": "Quick Actions",
         "step3Desc": "Jump straight to common tasks. The Agent Wizard is the fastest way to create your first agent — it takes under 2 minutes.",
         "step4Title": "Make It Yours",
-        "step4Desc": "Switch between light, dark, and system themes. EDDI Manager speaks 11 languages — pick yours from the language selector."
+        "step4Desc": "Switch between light, dark, and system themes. {{productName}} Manager speaks 11 languages — pick yours from the language selector."
       },
       "agents": {
         "title": "Agents Tour",
@@ -3006,7 +3014,7 @@
         "step1Title": "Cluster health",
         "step1Desc": "The verdict — healthy, degraded, partitioned or single node — with the reasons behind it and the next step.",
         "step2Title": "Nodes",
-        "step2Desc": "Every EDDI replica: heartbeat, NATS round trip, running turns and leases, and whether it is drained or lost.",
+        "step2Desc": "Every {{productName}} replica: heartbeat, NATS round trip, running turns and leases, and whether it is drained or lost.",
         "step3Title": "Dead Letters",
         "step3Desc": "Inspect failed tasks and systematically discard or retry them to maintain system stability."
       },
@@ -3993,7 +4001,7 @@
     "upgradeExisting": "Upgrade existing agent",
     "upgradeDesc": "Match resources structurally against a target agent. Best for promoting across environments.",
     "syncRemote": "Sync from remote instance",
-    "syncDesc": "Connect to another EDDI instance and sync a specific agent live.",
+    "syncDesc": "Connect to another {{productName}} instance and sync a specific agent live.",
     "importNow": "Import Now",
     "previewChanges": "Preview Changes",
     "selectTargetAgent": "Select target agent",
@@ -4042,11 +4050,11 @@
   },
   "syncPage": {
     "title": "Agent Sync",
-    "subtitle": "Synchronize agents between EDDI instances",
+    "subtitle": "Synchronize agents between {{productName}} instances",
     "connection": "Source Instance",
     "loadingLocalAgents": "Loading all local agents before matching…",
     "localAgentsError": "The local agent list could not be loaded completely, so agents cannot be matched by name. Syncing now would create duplicates.",
-    "sourceUrl": "Source EDDI Instance URL",
+    "sourceUrl": "Source {{productName}} Instance URL",
     "authToken": "Authorization Token",
     "authHint": "Optional. Sent as X-Source-Authorization header.",
     "connect": "Connect",
@@ -4369,7 +4377,7 @@
     "userLookup": "User Lookup",
     "exportIncomplete": "Downloaded, but this bundle is NOT complete — do not send it as a fulfilled Art. 15/20 request.",
     "exportIncompleteTitle": "Incomplete export bundle",
-    "exportIncompleteBody": "This bundle does not cover everything EDDI holds on this user. It must not be handed over as a fulfilled Art. 15/20 request.",
+    "exportIncompleteBody": "This bundle does not cover everything {{productName}} holds on this user. It must not be handed over as a fulfilled Art. 15/20 request.",
     "omittedCategories": "Not exported",
     "resultsPartialTitle": "Erasure Incomplete",
     "resultsPartialBody": "Some of this user's data may still exist. Do not report the erasure as fulfilled until these steps succeed.",
@@ -4386,7 +4394,7 @@
     "failedConversations_other": "{{count}} conversations could not be read and are absent from the bundle.",
     "deleteIncomplete": "Erasure incomplete — some of this user's data may still exist. Do not report it as fulfilled.",
     "auditRedacted": "Audit Entries Redacted",
-    "auditLegacy": "This EDDI only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. EDDI 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
+    "auditLegacy": "This server only replaces the user id in the audit ledger: the prompts and responses recorded there are kept. Server versions 6.6 and later redact them too, unless the server runs with eddi.audit.erasure-mode=pseudonymize.",
     "auditPseudonymizeMode": "Audit content was kept: this server runs with eddi.audit.erasure-mode=pseudonymize (for example under a legal hold), so only the user id in the audit ledger was replaced.",
     "auditRedactionFailed": "No audit content was redacted: the redaction step failed (see above), so the prompts and responses recorded in the ledger are still there. Run the erasure again.",
     "auditRedactedExplanation": "The user's audit rows are kept for record-keeping, but their prompts, responses, model details and tool calls were replaced by a redaction marker and the user id was pseudonymised. Rows that verified before were re-signed; a row that had already been tampered with stays marked invalid.",
@@ -4403,7 +4411,7 @@
     "confirmTypeLabel": "Type the user id \"{{userId}}\" to confirm"
   },
   "mockBanner": {
-    "message": "Demo Mode — Displaying sample data. Connect an EDDI backend for real data."
+    "message": "Demo Mode — Displaying sample data. Connect an {{productName}} backend for real data."
   },
   "orphans": {
     "description": "Find and clean up resources not referenced by any agent or package.",
@@ -4424,7 +4432,7 @@
     "scanIncomplete": "This scan did not finish",
     "scanIncompleteBody": "Resources that are still in use may be listed as orphans. Purging is blocked until a scan completes.",
     "confirmPurge": "Permanently delete all {{count}} orphaned resources? This cannot be undone.",
-    "purgeIncompleteScan": "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
+    "purgeIncompleteScan": "Nothing was deleted: {{productName}} could not finish checking which resources are still in use. Re-scan and try again.",
     "purgeFailed": "Purge failed",
     "scanFailed": "The scan failed: {{reason}}",
     "reviewHint": "Open a resource from the list to inspect it first; every orphan on the list is deleted.",
@@ -4475,11 +4483,11 @@
     "noMatch": "No keys matching \"{{filter}}\"",
     "pickFromVault": "Pick from vault",
     "placeholder": "API key or ${vault:key-name}",
-    "vaultDown": "Vault is not configured — set up a secret provider in the EDDI backend",
+    "vaultDown": "Vault is not configured — set up a secret provider in the {{productName}} backend",
     "referencePlaceholder": "${vault:key-name}",
     "mustBeReference": "This field takes a reference — ${vault:key} or ${vars:key} — not the secret itself. Pick a key, or store the value in the vault first.",
     "connectionChip": "Connection",
-    "connectionChipTitle": "A connection reference — EDDI resolves it to the credential on every request",
+    "connectionChipTitle": "A connection reference — {{productName}} resolves it to the credential on every request",
     "clearConnection": "Clear connection reference",
     "pickConnection": "Insert a connection reference",
     "connectionFilterPlaceholder": "Search connections…",
@@ -4489,7 +4497,7 @@
     "connectionForbidden": "Your role cannot list connections. If you know its name, type ${connection:name} by hand.",
     "connectionUnavailable": "This backend does not offer connections.",
     "connectionFailed": "Could not load connections.",
-    "connectionHint": "Inserts ${connection:name} as the whole value. EDDI resolves it to the credential on every request.",
+    "connectionHint": "Inserts ${connection:name} as the whole value. {{productName}} resolves it to the credential on every request.",
     "restricted_one": "Restricted to {{count}} agent",
     "restricted_other": "Restricted to {{count}} agents",
     "restrictedTooltip": "Allowed for: {{agents}}",
@@ -5084,7 +5092,7 @@
   },
   "operator": {
     "title": "Platform Operator",
-    "subtitle": "Ask about this EDDI deployment — it looks things up for you.",
+    "subtitle": "Ask about this {{productName}} deployment — it looks things up for you.",
     "readOnlyChip": "Read-only",
     "readWriteChip": "Read & write",
     "configError": "Couldn't load the operator configuration",
@@ -5109,12 +5117,12 @@
       "baseUrl": "Base URL",
       "apiKey": "Model API key",
       "apiKeyOptional": "Model API key (optional)",
-      "apiKeyHint": "The key for your LLM provider. This is not an EDDI credential.",
+      "apiKeyHint": "The key for your LLM provider. This is not an {{productName}} credential.",
       "apiKeyPlaceholder": "Paste your API key, or pick a vault key",
       "vaultDown": "The secrets vault is unavailable, so keys cannot be stored in it right now. A key entered here is passed through to the backend, which vaults it if it can.",
       "environment": "Environment",
       "authMode": "How the operator authenticates",
-      "authModeHint": "The operator calls your EDDI admin API. This decides what credentials those calls carry.",
+      "authModeHint": "The operator calls your {{productName}} admin API. This decides what credentials those calls carry.",
       "authNoneBlocked": "This deployment has authentication enabled, so unauthenticated tool calls would be rejected. The operator would deploy successfully and then fail every lookup. Choose \"Your identity\" instead.",
       "scope": {
         "label": "Capability",
@@ -5136,14 +5144,14 @@
       "promptBodyHint": "Edit how the operator introduces itself and how it works.",
       "tools": "Tools it will be given ({{toolCount}})",
       "activate": "Activate & deploy",
-      "callerIdentityNote": "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
+      "callerIdentityNote": "{{productName}} substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.",
       "rebuildWarning": "Saving REPLACES the operator: a new agent is built and the current one ({{agentId}}) is undeployed and deleted. Your existing operator conversation will not carry over, and this screen will address the new agent from then on.",
       "environmentHint": "Where the operator agent itself runs. It can still read any environment.",
       "platformBaseUrl": "Platform base URL",
-      "platformBaseUrlHint": "The address EDDI can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
+      "platformBaseUrlHint": "The address {{productName}} can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
       "platformBaseUrlInvalid": "This must be an absolute http:// or https:// URL, for example http://127.0.0.1:7070.",
-      "platformBaseUrlUnknown": "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
-      "platformBaseUrlLoopback": "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
+      "platformBaseUrlUnknown": "This {{productName}} deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and {{productName}} — otherwise enter the address here.",
+      "platformBaseUrlLoopback": "Derived from this deployment's HTTP port. Override it if {{productName}} must be addressed by a service name or through in-process TLS.",
       "platformBaseUrlAuto": "resolved from the server",
       "platformBaseUrlDiffers": "This deployment currently reports its own address as {{serverUrl}}. The value above differs — keep it only if you set it on purpose.",
       "platformBaseUrlQueryFailed": "The server could not be asked for its own address. Activation will fail unless you enter it here — or reload to try again.",
@@ -5156,7 +5164,7 @@
     "authMode": {
       "none": {
         "label": "No credentials",
-        "description": "Tool calls carry no Authorization header. Works only when this EDDI deployment has authentication disabled."
+        "description": "Tool calls carry no Authorization header. Works only when this {{productName}} deployment has authentication disabled."
       },
       "caller-identity": {
         "label": "Your identity",
@@ -5243,9 +5251,9 @@
       "diffFailed": "Couldn't load the stored version to compare against — the full proposed document is below.",
       "diffForbidden": "Comparing against the stored version needs editor access — the full proposed document is below.",
       "diffRedactionNote": "Credential values are redacted in the proposed version, so they appear as changes here even when unchanged.",
-      "proposedNotJson": "The proposed document is not valid JSON, so EDDI will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
-      "proposedNotJsonRedacted": "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so EDDI will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
-      "proposedTrailingText": "The proposed document has extra text after its end. EDDI may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
+      "proposedNotJson": "The proposed document is not valid JSON, so {{productName}} will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+      "proposedNotJsonRedacted": "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so {{productName}} will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+      "proposedTrailingText": "The proposed document has extra text after its end. {{productName}} may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
       "diffStored": "Stored v{{version}}",
       "diffProposed": "Proposed",
       "showFullRequest": "Show the full proposed document",
@@ -5454,8 +5462,8 @@
     "title": "New Team"
   },
   "updates": {
-    "title": "EDDI Updates",
-    "description": "Check whether a newer EDDI release is available. Nothing is sent until you ask.",
+    "title": "{{productName}} Updates",
+    "description": "Check whether a newer {{productName}} release is available. Nothing is sent until you ask.",
     "installed": "Installed",
     "githubRelease": "GitHub release",
     "dockerImage": "Docker image",
@@ -5467,7 +5475,7 @@
     "privacyNote": "Checks contact api.github.com directly from your browser — no other host, and no deployment data is sent.",
     "neverChecked": "No check run yet.",
     "upToDate": "You are running the latest release ({{version}}).",
-    "updateAvailable": "EDDI {{version}} is available",
+    "updateAvailable": "{{productName}} {{version}} is available",
     "updateAvailableDetail": "You are running {{installed}}.",
     "ahead": "You are running {{installed}}, which is newer than the latest release ({{version}}).",
     "unknownInstalled": "The latest release is {{version}}. The installed version could not be determined, so there is nothing to compare it against.",
@@ -5573,7 +5581,7 @@
       "title": "Manager"
     },
     "subtitle": "Choose your workspace to get started.",
-    "title": "Welcome to EDDI",
+    "title": "Welcome to {{productName}}",
     "workforce": {
       "description": "Assemble AI teams that debate, analyze, and solve complex challenges together.",
       "feature1": "Assemble agent task forces",
@@ -5628,7 +5636,7 @@
     "count": "{{shown}} shown",
     "empty": "No connections yet",
     "emptyDesc": "Create one to give your agents a way to authenticate to an external system.",
-    "guidance": "A connection is a credential plus the list of origins it may be sent to. Agents refer to one by name — ${connection:jira} — and EDDI resolves it per request, so the same connection can carry an organisation-wide API key or each person's own account.",
+    "guidance": "A connection is a credential plus the list of origins it may be sent to. Agents refer to one by name — ${connection:jira} — and {{productName}} resolves it per request, so the same connection can carry an organisation-wide API key or each person's own account.",
     "howItAuthenticates": "How it authenticates",
     "confirmDelete": "Delete this connection?",
     "confirmDeleteDesc": "Every account linked through it is unlinked at the same time — tokens must not outlive the connection that produced them. Agents referring to it by name will stop being able to authenticate.",
@@ -5646,7 +5654,7 @@
     },
     "choice": {
       "staticBody": "One fixed header, the same for everyone — X-Api-Key, or Authorization: Bearer …",
-      "basicBody": "HTTP Basic. EDDI does the encoding, so the password stays a separate vault entry you can rotate on its own.",
+      "basicBody": "HTTP Basic. {{productName}} does the encoding, so the password stays a separate vault entry you can rotate on its own.",
       "clientCredentialsBody": "The agent signs in as itself. One access token shared by everyone, refreshed automatically.",
       "authorizationCodeBody": "Each person connects their own account and the agent acts as them. Needs sign-in to be switched on, and a vault."
     },
@@ -5701,7 +5709,7 @@
     "removeOrigin": "Remove {{origin}}",
     "moreOrigins": "+{{more}}",
     "mineTitle": "Your linked accounts",
-    "mineSubtitle": "Services you have allowed EDDI to use on your behalf. Nobody else can use them, and EDDI never shows you the credentials.",
+    "mineSubtitle": "Services you have allowed {{productName}} to use on your behalf. Nobody else can use them, and {{productName}} never shows you the credentials.",
     "noneLinked": "No linked accounts",
     "noneLinkedDesc": "When an agent needs to act as you in another service, you will be asked to connect it. Accounts you connect appear here, and you can unlink them at any time.",
     "connect": "Connect",
@@ -5711,7 +5719,7 @@
     "unlinked": "\"{{name}}\" is no longer linked to your account.",
     "unlinkFailed": "Could not unlink that account.",
     "confirmUnlink": "Unlink this account?",
-    "confirmUnlinkDesc": "EDDI will forget the credentials you granted and can no longer act as you in that service. You can connect again whenever you like.",
+    "confirmUnlinkDesc": "{{productName}} will forget the credentials you granted and can no longer act as you in that service. You can connect again whenever you like.",
     "linked": "Connected — \"{{name}}\" is now linked to your account.",
     "linkStartFailed": "Could not start linking.",
     "loadMineFailed": "Could not load your linked accounts",
@@ -5729,7 +5737,7 @@
       "active": "Working normally.",
       "connectedOn": "Connected on {{date}}.",
       "expired": "The access token has expired and will be renewed automatically on the next use — nothing for you to do.",
-      "revoked": "This access was revoked. Reconnect if you still want EDDI to use it.",
+      "revoked": "This access was revoked. Reconnect if you still want {{productName}} to use it.",
       "refreshFailed": "The service stopped accepting the stored credentials. Reconnect to grant access again.",
       "expiresAt": "Access token valid until {{date}}"
     },
@@ -5765,7 +5773,7 @@
       "nameTooLong": "A name is at most 64 characters.",
       "timeoutRange": "The timeout must be a whole number between 1 and 60000 milliseconds. Leave it empty for the default.",
       "templateLiteralCredential": "The text around the reference looks like a credential itself. Only a short scheme prefix such as “Bearer ” belongs outside ${vault:…} — store the rest in the vault.",
-      "paramReserved": "One of these parameters is set by EDDI itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
+      "paramReserved": "One of these parameters is set by {{productName}} itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
       "paramValueReference": "Parameter values are sent exactly as written — a ${…} reference here is not resolved, and would put a vault pointer in a URL. Use plain protocol values only.",
       "paramValueTooLong": "A parameter value is at most 512 characters.",
       "paramValueCredentialShaped": "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here."
@@ -5775,20 +5783,20 @@
     "discardNewTitle": "Discard this connection?",
     "discardNewBody": "What you have filled in so far will be lost. Nothing has been created yet.",
     "confirmReconnect": "Connect this account again?",
-    "confirmReconnectDesc": "This account is working, so there is nothing to repair. Continuing takes you out of EDDI to the provider's sign-in page and replaces the access you granted before.",
+    "confirmReconnectDesc": "This account is working, so there is nothing to repair. Continuing takes you out of {{productName}} to the provider's sign-in page and replaces the access you granted before.",
     "paramDuplicate": "Another parameter already uses this name. Only the last one is saved.",
     "bindingChooser": "Where the key comes from",
     "bindingChoice": {
       "serviceBody": "One key in the vault, sent for everyone. Simple — but the agent can reach everything that key can.",
-      "callerSuppliedBody": "EDDI stores nothing. The system calling EDDI sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary."
+      "callerSuppliedBody": "{{productName}} stores nothing. The system calling {{productName}} sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary."
     },
     "callerSuppliedHeaderTitle": "What the calling system sends",
     "callerSuppliedHeaderBody": "One header per request: the connection name, a space, then the whole value to send as {{header}} — scheme included, so “Bearer abc” needs no escaping. The credential lives for that request only and is never stored.",
-    "callerSuppliedNeedsAuth": "The caller must be signed in to EDDI. A request without the credential fails rather than going out unauthenticated — including when a paused tool call is resumed — and this connection is withheld from MCP and A2A discovery.",
+    "callerSuppliedNeedsAuth": "The caller must be signed in to {{productName}}. A request without the credential fails rather than going out unauthenticated — including when a paused tool call is resumed — and this connection is withheld from MCP and A2A discovery.",
     "bindingCallerSuppliedTitle": "Resolves as whoever is calling",
-    "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and EDDI stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
+    "bindingCallerSuppliedBody": "The calling system hands over each user's own credential with the request and {{productName}} stores nothing. The agent can do only what that user can do at the target, and this connection is withheld from MCP and A2A discovery.",
     "confirmAuthChange": "Change how this connection authenticates?",
-    "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. EDDI refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
+    "confirmAuthChangeDesc": "Accounts linked through this connection will stop resolving — a grant belongs to the flow that produced it. {{productName}} refuses the change while any account is still linked and says how many; unlink them first, or create a new connection and let people link that instead.",
     "confirmAuthChangeAccept": "Change it",
     "deleted": "Connection \"{{name}}\" deleted",
     "confirmDeleteNamed": "Delete connection \"{{name}}\"?"
@@ -6057,7 +6065,7 @@
     "valueLabel": "Value",
     "intRange": "Outside the Integer range (±2,147,483,647). Choose Long integer for this value.",
     "unsafeLong": "Beyond 9,007,199,254,740,991 the browser cannot hold this whole number exactly; edit it in the JSON tab.",
-    "needs66": "Long integer and Decimal need EDDI 6.6 or later.",
+    "needs66": "Long integer and Decimal need server version 6.6 or later.",
     "conflict": "This row sets {{fields}}. Only {{winner}} is used; choosing a type here keeps that one value and removes the rest.",
     "kindString": "Text / template",
     "kindInt": "Integer",
@@ -6415,11 +6423,11 @@
       "docs": "Read the clustering guide",
       "failover": "Failover: a crashed node's conversations continue on another node within the lease TTL; dead letters, caches, deployments and cancel work cluster-wide.",
       "leases": "Conversation leases with fencing tokens: turns of one conversation never overlap anywhere, and a node that lost its lease cannot overwrite newer turns.",
-      "scale": "Any number of EDDI replicas behind a plain round-robin load balancer, sharing one database and a NATS JetStream cluster.",
+      "scale": "Any number of {{productName}} replicas behind a plain round-robin load balancer, sharing one database and a NATS JetStream cluster.",
       "title": "What cluster mode adds"
     },
     "staleNotice": "The latest refresh failed — this is the view from {{age}} ago.",
-    "subtitle": "Health, nodes, leases and failed turns across every EDDI replica — and what you can safely do about them",
+    "subtitle": "Health, nodes, leases and failed turns across every {{productName}} replica — and what you can safely do about them",
     "tab": {
       "activity": "Activity",
       "deadLetters": "Dead letters",
@@ -6443,7 +6451,7 @@
       "partitioned": "Partitioned",
       "partitionedText": "A NATS server holding a replica of a stream or bucket is offline: the NATS cluster itself is split. Writes continue while a quorum remains.",
       "singleNode": "Single node",
-      "singleNodeText": "This deployment runs one EDDI node with the in-memory coordinator. There is nothing to coordinate between nodes."
+      "singleNodeText": "This deployment runs one {{productName}} node with the in-memory coordinator. There is nothing to coordinate between nodes."
     }
   },
   "grantRequired": {

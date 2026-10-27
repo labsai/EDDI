@@ -218,16 +218,16 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           {bodyIssue === "trailingText"
             ? t(
                 "operator.approval.proposedTrailingText",
-                "The proposed document has extra text after its end. EDDI may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
+                "The proposed document has extra text after its end. {{productName}} may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
               )
             : bodyIssue === "notJsonRedacted"
               ? t(
                   "operator.approval.proposedNotJsonRedacted",
-                  "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so EDDI will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+                  "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so {{productName}} will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
                 )
               : t(
                   "operator.approval.proposedNotJson",
-                  "The proposed document is not valid JSON, so EDDI will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+                  "The proposed document is not valid JSON, so {{productName}} will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
                 )}
         </p>
       )}

@@ -2,6 +2,7 @@ import i18n, { type BackendModule, type ReadCallback } from "i18next";
 import { initReactI18next } from "react-i18next";
 import LanguageDetector from "i18next-browser-languagedetector";
 import en from "./locales/en.json";
+import { brandVariables, getBrand, subscribeBrand } from "@/lib/brand";
 
 /**
  * Every locale this app ships a translation for. Single source of truth: it
@@ -164,6 +165,12 @@ export const i18nReady: Promise<unknown> = i18n
     nonExplicitSupportedLngs: true,
     interpolation: {
       escapeValue: false,
+      // `{{productName}}` / `{{shortName}}` in any string, from the deployment's
+      // brand (src/lib/brand.ts). Set here, before `i18nReady` resolves, so the
+      // first render already carries the brand. React escapes the result, and
+      // the server rejects `<` and `>` in brand names, so `escapeValue: false`
+      // stays safe for these too (white-label plan, R11).
+      defaultVariables: brandVariables(getBrand()),
     },
     detection: {
       order: ["localStorage", "navigator"],
@@ -179,5 +186,17 @@ updateDirection(renderedLanguage());
 // Update direction on language change. The event carries the REQUESTED language,
 // which is not necessarily the one that ends up rendered — read the resolved one.
 i18n.on("languageChanged", () => updateDirection(renderedLanguage()));
+
+// A brand applied at runtime (the settings page, after a save): i18next reads
+// `defaultVariables` on every `t()` call, so replacing them is enough for new
+// renders, and re-announcing the current language makes react-i18next re-render
+// every mounted `useTranslation` consumer now.
+subscribeBrand(() => {
+  // In place: the translator and the interpolator hold this same options object.
+  if (i18n.options.interpolation) {
+    i18n.options.interpolation.defaultVariables = brandVariables(getBrand());
+  }
+  i18n.emit("languageChanged", i18n.language);
+});
 
 export default i18n;

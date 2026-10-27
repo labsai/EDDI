@@ -368,7 +368,7 @@ export function LinkedAccountsPanel({
         title={t("connections.confirmReconnect", "Connect this account again?")}
         description={t(
           "connections.confirmReconnectDesc",
-          "This account is working, so there is nothing to repair. Continuing takes you out of EDDI to the provider's sign-in page and replaces the access you granted before.",
+          "This account is working, so there is nothing to repair. Continuing takes you out of {{productName}} to the provider's sign-in page and replaces the access you granted before.",
         )}
         onConfirm={() => {
           const name = reconnectTarget;
@@ -385,7 +385,7 @@ export function LinkedAccountsPanel({
         title={t("connections.confirmUnlink", "Unlink this account?")}
         description={t(
           "connections.confirmUnlinkDesc",
-          "EDDI will forget the credentials you granted and can no longer act as you in that service. You can connect again whenever you like.",
+          "{{productName}} will forget the credentials you granted and can no longer act as you in that service. You can connect again whenever you like.",
         )}
         // Warning, not destructive: nothing is lost that cannot be granted
         // again, and dressing a reversible act in red teaches people to click
@@ -411,7 +411,7 @@ export function LinkedAccountsPanel({
         <p className="mt-1 text-sm text-muted-foreground">
           {t(
             "connections.mineSubtitle",
-            "Services you have allowed EDDI to use on your behalf. Nobody else can use them, and EDDI never shows you the credentials.",
+            "Services you have allowed {{productName}} to use on your behalf. Nobody else can use them, and {{productName}} never shows you the credentials.",
           )}
         </p>
       </div>
@@ -568,7 +568,7 @@ function statusDetail(
     case "REVOKED":
       return t(
         "connections.detail.revoked",
-        "This access was revoked. Reconnect if you still want EDDI to use it.",
+        "This access was revoked. Reconnect if you still want {{productName}} to use it.",
       );
     case "EXPIRED":
       return t(

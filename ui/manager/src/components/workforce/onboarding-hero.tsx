@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { BrandIcon } from "@/components/layout/brand-logo";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { getGroupTemplates, type GroupTemplate } from "@/lib/group-templates";
 import { useAvailableStyles } from "@/hooks/use-groups";
@@ -263,12 +264,7 @@ function OnboardingHero() {
         <div className="flex items-center justify-center">
           <div className="relative">
             <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-              <img
-                src="/eddi-icon.svg"
-                alt=""
-                aria-hidden="true"
-                className="h-10 w-10 rounded-lg"
-              />
+              <BrandIcon className="h-10 w-10 rounded-lg" alt="" />
             </div>
             <Sparkles className="absolute -top-1 -end-1 h-4 w-4 text-primary/60" />
           </div>

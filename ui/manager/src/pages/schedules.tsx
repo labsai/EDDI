@@ -229,7 +229,7 @@ function DisabledReasonNotice({ schedule }: { schedule: ScheduleConfiguration })
       >
         {t(
           "schedules.disabledByPerson",
-          "Disabled by a person. A schedule an undeploy switched off before EDDI 6.6 also shows this: enable it once by hand.",
+          "Disabled by a person. A schedule an undeploy switched off before server version 6.6 also shows this: enable it once by hand.",
         )}
       </p>
     );
@@ -288,7 +288,7 @@ function disabledReasonText(
   }
   return {
     label: reason,
-    explanation: t("schedules.disabledOtherHint", "Switched off by EDDI for the reason shown."),
+    explanation: t("schedules.disabledOtherHint", "Switched off by {{productName}} for the reason shown."),
   };
 }
 
@@ -1878,7 +1878,7 @@ export function SchedulesPage() {
                                 className="ms-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground"
                                 title={t(
                                   "schedules.systemManagedHint",
-                                  "Managed by EDDI (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here."
+                                  "Managed by {{productName}} (knowledge-base ingestion, memory consolidation or a team cadence). Change it where it is defined, not here."
                                 )}
                                 data-testid={`system-schedule-badge-${s.id}`}
                               >

@@ -10,6 +10,8 @@ import { GuidedTour } from "@/components/onboarding/guided-tour";
 import { TourOfferBar } from "@/components/onboarding/tour-offer-bar";
 import { MockDataBanner } from "./mock-data-banner";
 import { UpdateBanner } from "./update-banner";
+import { useBrand } from "@/hooks/use-brand";
+import { isUpdateUiVisible } from "@/lib/brand";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useRouteEntityName } from "@/hooks/use-route-entity-name";
 
@@ -29,6 +31,8 @@ function readSidebarCollapsed(): boolean {
 export function AppLayout() {
   const { t } = useTranslation();
   const location = useLocation();
+  // A brand hides the update UI unless it opts in (white-label plan, R5).
+  const updateUi = isUpdateUiVisible(useBrand());
   useDocumentTitle(useRouteEntityName());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -163,7 +167,7 @@ export function AppLayout() {
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <MockDataBanner />
-        <UpdateBanner />
+        {updateUi && <UpdateBanner />}
         <TopBar
           onMenuClick={() => setMobileSidebarOpen(true)}
           sidebarVisible={mobileSidebarOpen}

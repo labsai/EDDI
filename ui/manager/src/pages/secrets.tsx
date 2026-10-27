@@ -801,7 +801,7 @@ export function SecretsPage() {
               <p className="text-xs text-foreground">
                 {t(
                   "secrets.kekResultInstruction",
-                  "Action required: set the EDDI_VAULT_MASTER_KEY environment variable to the NEW master key and restart EDDI. Until you do, the running instance still uses the old key in memory.",
+                  "Action required: set the EDDI_VAULT_MASTER_KEY environment variable to the NEW master key and restart {{productName}}. Until you do, the running instance still uses the old key in memory.",
                 )}
               </p>
             </div>
@@ -1009,7 +1009,7 @@ export function SecretsPage() {
           <p className="text-xs text-muted-foreground">
             {t(
               "secrets.kekRestartHint",
-              "After rotation you must update EDDI_VAULT_MASTER_KEY to the new key and restart EDDI.",
+              "After rotation you must update EDDI_VAULT_MASTER_KEY to the new key and restart {{productName}}.",
             )}
           </p>
         </div>

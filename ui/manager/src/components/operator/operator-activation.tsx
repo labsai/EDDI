@@ -407,7 +407,7 @@ export function OperatorActivation({
                     ? t("operator.activation.apiKeyOptional", "Model API key (optional)")
                     : t("operator.activation.apiKey", "Model API key")
                 }
-                hint={t("operator.activation.apiKeyHint", "The key for your LLM provider. This is not an EDDI credential.")}
+                hint={t("operator.activation.apiKeyHint", "The key for your LLM provider. This is not an {{productName}} credential.")}
                 asGroup
               >
                 {vaultDown && (
@@ -436,7 +436,7 @@ export function OperatorActivation({
               label={t("operator.activation.platformBaseUrl", "Platform base URL")}
               hint={t(
                 "operator.activation.platformBaseUrlHint",
-                "The address EDDI can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
+                "The address {{productName}} can reach itself at — the operator's tools call it from inside the server, so it is not the address your browser uses. Leave it as prefilled unless you know otherwise.",
               )}
               htmlFor="operator-platform-base-url"
             >
@@ -479,7 +479,7 @@ export function OperatorActivation({
                 <Notice tone="warning" icon={AlertTriangle} testId="operator-platform-base-url-unknown">
                   {t(
                     "operator.activation.platformBaseUrlUnknown",
-                    "This EDDI deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and EDDI — otherwise enter the address here.",
+                    "This {{productName}} deployment cannot report its own address, so it will fall back to your browser's origin. That is only correct when nothing (no tunnel, port mapping or reverse proxy) sits between your browser and {{productName}} — otherwise enter the address here.",
                   )}
                 </Notice>
               )}
@@ -496,7 +496,7 @@ export function OperatorActivation({
                 <p className="text-xs text-muted-foreground" data-testid="operator-platform-base-url-source">
                   {t(
                     "operator.activation.platformBaseUrlLoopback",
-                    "Derived from this deployment's HTTP port. Override it if EDDI must be addressed by a service name or through in-process TLS.",
+                    "Derived from this deployment's HTTP port. Override it if {{productName}} must be addressed by a service name or through in-process TLS.",
                   )}
                 </p>
               )}
@@ -808,7 +808,7 @@ function AuthModeField({ authMode, onChange, oidcEnabled }: AuthModeFieldProps) 
   return (
     <Field
       label={t("operator.activation.authMode", "How the operator authenticates")}
-      hint={t("operator.activation.authModeHint", "The operator calls your EDDI admin API. This decides what credentials those calls carry.")}
+      hint={t("operator.activation.authModeHint", "The operator calls your {{productName}} admin API. This decides what credentials those calls carry.")}
       asGroup
       groupRole="radiogroup"
     >
@@ -848,7 +848,7 @@ function AuthModeField({ authMode, onChange, oidcEnabled }: AuthModeFieldProps) 
 
       {authMode === "caller-identity" && (
         <Notice tone="info" icon={ShieldCheck}>
-          {t("operator.activation.callerIdentityNote", "EDDI substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.")}
+          {t("operator.activation.callerIdentityNote", "{{productName}} substitutes your token when it makes the call. It is never stored in the conversation, and is only ever sent back to this deployment.")}
         </Notice>
       )}
     </Field>

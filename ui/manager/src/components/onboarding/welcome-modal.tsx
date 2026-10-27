@@ -153,7 +153,7 @@ export function WelcomeModal() {
               <p className="mt-4 max-w-sm text-sm leading-relaxed text-sidebar-foreground/50">
                 {t(
                   "onboarding.welcome.introText",
-                  "EDDI Manager is your command center for building, testing, and operating conversational AI agents."
+                  "{{productName}} Manager is your command center for building, testing, and operating conversational AI agents."
                 )}
               </p>
             </div>
