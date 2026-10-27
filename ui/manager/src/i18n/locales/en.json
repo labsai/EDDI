@@ -4459,6 +4459,7 @@
     "budgetTitle": "Monthly cost budget",
     "budgetUnlimited": "No monthly cost budget is set, so spend is metered but never limited.",
     "budgetNotEnforced": "A budget of {{limit}} is set, but enforcement is off, so it is not applied.",
+    "budgetDisabled": "Enforcement is off, so spend is neither metered nor limited.",
     "budgetReached": "Budget reached ({{spent}} of {{limit}}). LLM tasks are serving their fallback answer instead of calling the model, and tool calls are refused, until the month rolls over or the limit is raised.",
     "budgetRemaining": "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.",
     "budgetNote": "Counts priced model calls and tracked tool cost, per UTC calendar month. Unpriced models, conversation summaries and embeddings are not metered. A turn that crosses the limit still finishes, so the total can end slightly above it. Refused calls are counted in the eddi.llm.spend.refused metric.",

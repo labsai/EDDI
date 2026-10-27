@@ -23,6 +23,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -1194,7 +1195,23 @@ class ToolLoopRunner {
 
         // Check tenant-level monthly cost budget (MCP governance)
         if (tenantQuotaService != null) {
-            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            QuotaCheckResult costCheck;
+            try {
+                costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            } catch (RuntimeException e) {
+                // Same guard as LlmSpendGate: a check that throws is a defect, not an
+                // outage (the service answers those) — refuse the tool call (fail
+                // closed) under the tenant_check_error reason instead of failing the turn.
+                String checkError = LlmSpendGate.tenantCheckFailed(null, conversationId, "tool call", e);
+                Map<String, Object> errorStep = new HashMap<>();
+                errorStep.put("type", "tool_error");
+                errorStep.put("tool", toolRequest.name());
+                errorStep.put("error", checkError);
+                trace.add(errorStep);
+                // The exception class stays in the trace and the log; the model gets
+                // generic wording.
+                return new ToolCallResult("Error: " + LlmSpendGate.TENANT_CHECK_ERROR_MESSAGE);
+            }
             if (!costCheck.allowed()) {
                 // The reason string already distinguishes the two, but the log line
                 // in front of it did not: an operator grepping for "cost budget
@@ -1296,6 +1313,19 @@ class ToolLoopRunner {
         // NO discovered tool was ever activated.
         String untruncatedResult = toolResult;
 
+        // Credentials out BEFORE anything leaves for a model. The result below is
+        // sent to the task's (possibly hosted) model, and the summarize truncation
+        // strategy sends it to a second one first. An administrator's tool reads
+        // configuration documents unredacted — that is their right — but the
+        // plaintext key in one is not the model provider's: until this line only
+        // the display trace was filtered, so the operator showed `<REDACTED>` while
+        // the provider received the key. Same scan as the trace, so the model never
+        // sees more than the person watching it does. Before truncation, because a
+        // cut can leave a key too short for the shape rules to recognise. The raw
+        // result stays internal: LAZY activation parses it and the repeat guard
+        // classifies it, and neither sends it anywhere.
+        toolResult = SecretRedactionFilter.redact(toolResult);
+
         // Apply response truncation (MCP governance).
         //
         // The provenance envelope is added AFTER this, so the budget handed to the
@@ -1311,8 +1341,8 @@ class ToolLoopRunner {
         resultStep.put("tool", toolRequest.name());
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
-        // The MODEL still receives the raw result — the return value below is
-        // untouched; only the display record is filtered.
+        // toolResult was redacted above; it is scanned again because truncation
+        // (summarize strategy) can produce new text.
         resultStep.put("result", SecretRedactionFilter.redact(toolResult));
         if (mockingExecutor != null) {
             resultStep.put("mocked", true);

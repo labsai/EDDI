@@ -297,6 +297,8 @@ Vault values belong to the administrator, so a configuration store does not hand
 
 A reference — `${vault:…}`, `${vars:…}`, `${connection:…}`, `${caller:…}` — or a template (`{properties.apiKey}`) is a pointer and is returned unchanged, also as `Bearer ${vault:k}`.
 
+**An administrator's read does not carry its credentials to a model.** Every LLM tool result passes through the same `SecretRedactionFilter` scan as the tool trace before it enters the model's context (and before the `summarize` truncation strategy hands it to a second model): credential-shaped values (`sk-…`, `Bearer …`, JWTs, provider keys, connection-string passwords) and values under credential-named keys (`apiKey`, `token`, `secret`, `password`, `authorization`) arrive as `<REDACTED>`. So an agent acting with an administrator's authority — the Platform Operator reading a configuration — sees what its trace shows, and the model provider never receives the key. The name rule matches the key's ending, so a field such as `nextPageToken` is redacted too; a model cannot page an API by a token it is never shown.
+
 **A document carrying the marker is never stored.** Every write to these five stores — create, update, JSON Patch, duplicate — and every import or upgrade that creates one directly answers `400` with `{"error": "bad_request", "message": …, "fields": [<paths>]}` when any string in the document contains `<redacted: ` (the whole-value marker and the in-string `<redacted: credential>` both begin with it), for administrators too. Re-enter the credential or replace it with a `${vault:…}` reference. Without this, an editor who opened a configuration in the Manager and saved it would silently replace the stored key with the marker. The store deliberately does not merge the stored literal back in either, because that would let an editor move the marker next to a host of their choosing. Move such literals into the vault.
 
 Server-side work started by an editor reads the unredacted document, with the same access check: RAG ingestion (so a knowledge base whose key is a literal still ingests) and agent upgrade and sync (`StructuralMatcher` compares against, and `UpgradeExecutor` writes back, the target's stored values — an export's `${vault:REDACTED}` placeholder is replaced by the target's own key, never by the marker). A sync **source** read from a peer through a non-admin credential does carry the marker, so its affected resources are refused rather than stored. The upgrade and sync **previews** those reads feed are redacted again at the REST boundary for anyone who is not `eddi-admin` (`PreviewRedaction`), so an editor's preview shows the marker where the stored document holds a literal.
@@ -646,6 +648,18 @@ Hostnames that indicate internal services are rejected:
 - `localhost`
 - Any hostname ending in `.local`
 - Any hostname ending in `.internal`
+
+### DNS rebinding
+
+The checks above resolve the host; the HTTP client then resolves it **again** to connect, and none of the clients EDDI uses can be handed the validated addresses (the JDK `HttpClient` has no resolver hook, and an IP-literal URL would break TLS SNI and certificate checks). Both lookups normally read the JVM's positive DNS cache — 30 seconds by default, and Vert.x resolves through the JDK because `quarkus.vertx.use-async-dns` is off — so they agree. A rebinding name aims for the instant that cache entry expires between the two, answering with a public address for the check and a private one for the connection. What each path does about it:
+
+| Path | Guard | What is left |
+| --- | --- | --- |
+| httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. | Nothing for the address check. With protection off, the per-hop "no step into a more private class" rule still compares by name |
+| `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
+| MCP servers (langchain4j transport, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again inside the transport's per-request header hook, before each request — handshake, `tools/list`, every tool call — is sent. | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
+
+Keep `networkaddress.cache.ttl` at its default or above 0: with the positive cache off every lookup is fresh and the two answers can differ at will.
 
 ### Usage
 
