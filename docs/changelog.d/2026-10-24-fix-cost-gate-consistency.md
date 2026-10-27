@@ -12,6 +12,7 @@ Follow-ups to the tenant monthly cost budget and the per-conversation cost ceili
 - **Dream charges lost to an outage** are carried in [`DreamService`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/DreamService.java) (node-local, in-process) and added to the next priced consolidation charge. The docs say a restart loses it.
 - **Manager quotas page.** The cost-budget status checked "unlimited" before "enforced", so a disabled tenant with no budget was told its spend was metered, although `recordCost` records nothing while enforcement is off. Enforcement is checked first, with a new `quotas.budgetDisabled` message in all 11 locales. Amounts under $1 keep up to four decimals, so $0.006 against a $0.01 cap no longer reads "$0.01 of $0.01 … $0.00 left".
 - `TurnCostMeterTest`'s outage test claimed the marker is left untouched. It advances, as the class documents, and the test now says so and asserts it.
+- `ReservedPrincipalsTest` (inherited from main) declared the `"sha256:"` prefix twice, once for brand image hashes and once for mail Message-IDs. `Map.ofEntries` rejects duplicate keys, so the class failed to initialise. The two entries are now one, whose description covers both uses.
 
 ### Decisions
 
