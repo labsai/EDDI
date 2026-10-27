@@ -79,6 +79,11 @@ class DeploymentManifestsTest {
     private static final List<String> STANDALONE_OVERLAYS = List.of("mongodb", "postgres");
 
     private static final Path COMPOSE_REALM = Path.of("keycloak", "eddi-realm.json");
+    /**
+     * The Keycloak realm role and client scope that make a refresh token an offline
+     * one.
+     */
+    private static final String OFFLINE_ACCESS = "offline_access";
     private static final Path KUSTOMIZE_REALM = K8S.resolve("overlays/auth/eddi-realm.json");
     private static final Path HELM_REALM = HELM.resolve("files/eddi-realm.json");
 
@@ -2374,12 +2379,73 @@ class DeploymentManifestsTest {
                     }
                 });
                 assertFalse(eddiRoles.isEmpty(), realmFile + ": no eddi-* realm roles found — the check would be vacuous");
-                assertEquals(eddiRoles, scoped, realmFile + ": with fullScopeAllowed=false, eddi-mcp's tokens carry only the "
-                        + "roles in its scope mapping — exactly the eddi-* roles, or MCP tools refuse their callers");
+                // offline_access is the one non-eddi role allowed: see
+                // mcpClientIssuesOfflineTokens.
+                Set<String> expected = new TreeSet<>(eddiRoles);
+                expected.add(OFFLINE_ACCESS);
+                assertEquals(expected, scoped, realmFile + ": with fullScopeAllowed=false, eddi-mcp's tokens carry only the "
+                        + "roles in its scope mapping — exactly the eddi-* roles plus offline_access, or MCP tools refuse "
+                        + "their callers and every MCP login idles out with the 30-minute SSO session");
 
                 for (JsonNode user : realm.path("users")) {
                     assertFalse(user.path("emailVerified").asBoolean(), realmFile + ": `" + user.path("username").asText()
                             + "` claims a verified e-mail (" + user.path("email").asText() + ") nobody verified");
+                }
+            }
+        }
+
+        /**
+         * Without offline tokens an MCP client's refresh token dies with the realm's
+         * SSO session — 30 idle minutes by default — and the user runs the browser flow
+         * again. Keycloak issues an offline token only when ALL of these hold, each
+         * verified against Keycloak 26.8 with this realm imported:
+         * <ul>
+         * <li>{@code offline_access} is a <em>Default</em> scope of the client. Not
+         * Optional: an MCP client requests exactly the {@code scopes_supported} EDDI
+         * advertises ({@code openid}), so an optional scope is never asked for — and
+         * advertising {@code offline_access} instead would fail every login with
+         * {@code invalid_scope} on a realm whose client lacks it.</li>
+         * <li>The role is in the client's scope mapping, since
+         * {@code fullScopeAllowed=false}. Otherwise: "Offline tokens not allowed for
+         * the user or client".</li>
+         * <li>The user holds the role. New users get it from
+         * {@code default-roles-eddi}; the seed users carry explicit realmRoles, do not
+         * hold the default role, and need it listed.</li>
+         * </ul>
+         */
+        @Test
+        @DisplayName("eddi-mcp issues offline tokens, so an MCP login outlives the 30-minute SSO session")
+        void mcpClientIssuesOfflineTokens() throws IOException {
+            for (Path realmFile : List.of(COMPOSE_REALM, KUSTOMIZE_REALM, HELM_REALM)) {
+                JsonNode realm = JSON.readTree(realmFile.toFile());
+                JsonNode mcp = client(realm, "eddi-mcp");
+                assertTrue(stringList(mcp.get("defaultClientScopes")).contains(OFFLINE_ACCESS),
+                        realmFile + ": offline_access must be a DEFAULT client scope of eddi-mcp — MCP clients request "
+                                + "only the scopes EDDI advertises, so an optional one is never granted");
+                assertFalse(stringList(client(realm, "eddi-frontend").get("defaultClientScopes")).contains(OFFLINE_ACCESS),
+                        realmFile + ": the Manager SPA must not get 30-day offline tokens in browser storage");
+
+                // The realm states default-roles-eddi twice, and the roles-list entry is the
+                // one an
+                // import keeps: with offline_access only under defaultRole, a new user was
+                // refused.
+                assertTrue(stringList(realm.path("defaultRole").path("composites").get("realm")).contains(OFFLINE_ACCESS),
+                        realmFile + ": defaultRole must include offline_access");
+                JsonNode defaultRoleEntry = null;
+                for (JsonNode role : realm.path("roles").path("realm")) {
+                    if ("default-roles-eddi".equals(role.path("name").asText())) {
+                        defaultRoleEntry = role;
+                    }
+                }
+                assertNotNull(defaultRoleEntry, realmFile + ": no default-roles-eddi in roles.realm to inspect");
+                assertTrue(stringList(defaultRoleEntry.path("composites").get("realm")).contains(OFFLINE_ACCESS),
+                        realmFile + ": the default-roles-eddi entry in roles.realm must include offline_access too — it "
+                                + "is the definition an import keeps, so users created later get 'Offline tokens not "
+                                + "allowed for the user or client'");
+                for (JsonNode user : realm.path("users")) {
+                    assertTrue(stringList(user.get("realmRoles")).contains(OFFLINE_ACCESS),
+                            realmFile + ": seed user `" + user.path("username").asText() + "` lists explicit realmRoles, "
+                                    + "so it does not inherit default-roles-eddi and needs offline_access itself");
                 }
             }
         }
@@ -3110,7 +3176,7 @@ class DeploymentManifestsTest {
          * The chart version this test is written against. Bump it in the same commit as
          * helm/eddi/Chart.yaml — see chartVersionRecordsTheBreakingChange.
          */
-        private static final String EXPECTED_CHART_VERSION = "2.10.0";
+        private static final String EXPECTED_CHART_VERSION = "2.12.0";
 
         /**
          * This release removes {@code manager.*}, {@code monitoring.*} and
