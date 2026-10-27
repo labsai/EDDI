@@ -341,7 +341,7 @@ export function useActivateOperator() {
         const missing = findMissingEndpoints(spec, endpointsForScope(config.scope));
         if (missing.length > 0) {
           throw new Error(
-            `This EDDI deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
+            `This deployment does not expose ${missing.length} endpoint(s) the operator needs: ${missing.join(", ")}`,
           );
         }
         // Present in the spec is not the same as usable: an endpoint whose request

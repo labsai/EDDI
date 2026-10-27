@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { AlertTriangle, Lock, Palette, RefreshCw, RotateCcw, Save } from "lucide-react";
+import { AlertTriangle, Download, Lock, Palette, RefreshCw, RotateCcw, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -21,13 +21,14 @@ import {
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   brandingErrorInfo,
+  downloadKeycloakTheme,
   type BrandDocument,
   type BrandingErrorInfo,
   type BrandingView,
   type BrandUpdate,
 } from "@/lib/api/branding";
 import { DEFAULT_BRAND, BRAND_ASSET_SLOTS, type BrandAssetFlags, type BrandAssetSlot } from "@/lib/brand";
-import { resolveBrandColors, type BrandColorValues } from "@/lib/brand-css";
+import { resolveBrandColors, UNBRANDED_COLORS, type BrandColorValues } from "@/lib/brand-css";
 import {
   checkBrandText,
   contrastRatio,
@@ -176,6 +177,24 @@ export function BrandingPage() {
   const [assetErrors, setAssetErrors] = useState<Partial<Record<BrandAssetSlot, string>>>({});
   const [busySlot, setBusySlot] = useState<BrandAssetSlot | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
+  const [themeDownloading, setThemeDownloading] = useState(false);
+
+  // A read, so it is offered while the brand is locked too. Built from the brand
+  // as saved, not from unsaved edits — the server renders it.
+  const handleThemeDownload = async () => {
+    setThemeDownloading(true);
+    try {
+      await downloadKeycloakTheme();
+    } catch (error) {
+      toast.error(
+        t("branding.loginTheme.failed", "The login theme could not be downloaded: {{reason}}", {
+          reason: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    } finally {
+      setThemeDownloading(false);
+    }
+  };
 
   /** Rebase the whole form on a document (load, save, reset, reload latest). */
   const adopt = useCallback((next: BrandingView) => {
@@ -428,6 +447,28 @@ export function BrandingPage() {
     );
   };
 
+  /**
+   * The hex the native picker shows for a field: its own value, else the one it
+   * falls back to — a dark colour shows its light counterpart, the chat accent
+   * shows the primary (or the Chat UI's own accent when no primary is set), and
+   * an empty light colour shows the unbranded default. Never black: that is no
+   * colour this field could ever resolve to.
+   */
+  const swatchFor = (key: ColorKey): string => {
+    const own = toColorInputValue((form?.colors[key] ?? "").trim());
+    if (own) return own;
+    switch (key) {
+      case "darkPrimary":
+        return swatchFor("primary");
+      case "darkPrimaryForeground":
+        return swatchFor("primaryForeground");
+      case "chatAccent":
+        return formColors.primary ? swatchFor("primary") : UNBRANDED_COLORS.chatAccent;
+      default:
+        return UNBRANDED_COLORS[key];
+    }
+  };
+
   const colorField = (key: ColorKey, label: string, placeholder: string) => {
     const field = `colors.${key}`;
     const err = fieldError(field);
@@ -436,7 +477,7 @@ export function BrandingPage() {
     // An empty field shows what it falls back to (dark follows light, the
     // accent follows the primary), dimmed; the native picker needs some hex.
     const own = toColorInputValue(value.trim());
-    const swatch = own ?? toColorInputValue(formColors[key]) ?? "#000000";
+    const swatch = swatchFor(key);
     return (
       <div className="space-y-1.5">
         <label htmlFor={id} className="text-sm font-medium text-foreground">
@@ -864,6 +905,37 @@ export function BrandingPage() {
                       }
                     />
                   ))}
+                </CardContent>
+              </Card>
+
+              {/* Keycloak login theme */}
+              <Card data-testid="branding-login-theme">
+                <CardHeader>
+                  <CardTitle>{t("branding.loginTheme.title", "Login page")}</CardTitle>
+                  <CardDescription>
+                    {t(
+                      "branding.loginTheme.description",
+                      "With sign-in through Keycloak, the login page is a Keycloak theme, which cannot read this brand. Download it as a theme with the saved brand applied, install it in Keycloak and set the realm values its README names. Download it again after a rebrand.",
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button
+                    variant="outline"
+                    onClick={handleThemeDownload}
+                    disabled={themeDownloading}
+                    data-testid="branding-login-theme-download"
+                  >
+                    <Download className="h-4 w-4" aria-hidden="true" />
+                    {themeDownloading
+                      ? t("branding.loginTheme.downloading", "Preparing…")
+                      : t("branding.loginTheme.download", "Download login theme")}
+                  </Button>
+                  {dirty && (
+                    <p className="mt-2 text-xs text-muted-foreground" data-testid="branding-login-theme-unsaved">
+                      {t("branding.loginTheme.unsaved", "It carries the saved brand. Save your changes first to include them.")}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             </div>

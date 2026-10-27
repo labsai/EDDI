@@ -156,8 +156,26 @@ function detectType(bytes: Uint8Array): string | null {
 
 const UNSAFE_SVG = /<\s*([\w-]+:)?(script|foreignObject|iframe|embed|object|animate|set)\b|\son[a-z]+\s*=|javascript:|<!ENTITY|&#/i;
 
+/**
+ * The smallest valid ZIP: an end-of-central-directory record and nothing else.
+ * Mock mode has no theme files to pack; the real archive is built by
+ * `KeycloakThemeExport` on the backend.
+ */
+export const MOCK_KEYCLOAK_THEME_ZIP = new Uint8Array([0x50, 0x4b, 0x05, 0x06, ...new Array(18).fill(0)]);
+
 export const brandingHandlers = [
   http.get("*/administration/branding", () => HttpResponse.json(view())),
+
+  http.get(
+    "*/administration/branding/keycloak-theme.zip",
+    () =>
+      new HttpResponse(MOCK_KEYCLOAK_THEME_ZIP, {
+        headers: {
+          "Content-Type": "application/zip",
+          "Content-Disposition": 'attachment; filename="brand-keycloak-theme.zip"',
+        },
+      }),
+  ),
 
   http.put("*/administration/branding", async ({ request }) => {
     if (isLocked()) return lockedResponse();

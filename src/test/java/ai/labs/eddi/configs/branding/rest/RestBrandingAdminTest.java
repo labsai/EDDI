@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.branding.rest;
 
 import ai.labs.eddi.configs.branding.BrandingService;
 import ai.labs.eddi.configs.branding.BrandingTestSupport;
+import ai.labs.eddi.configs.branding.KeycloakThemeExport;
 import ai.labs.eddi.configs.branding.model.BrandUpdate;
 import ai.labs.eddi.configs.branding.model.BrandingView;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -16,9 +17,12 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
 import java.util.Map;
+import java.util.zip.ZipInputStream;
 
 import static ai.labs.eddi.configs.branding.BrandingTestSupport.PNG;
 import static ai.labs.eddi.configs.branding.BrandingTestSupport.svg;
@@ -46,7 +50,8 @@ class RestBrandingAdminTest {
     }
 
     private RestBrandingAdmin rest() {
-        return new RestBrandingAdmin(new BrandingService(store, config), identity);
+        BrandingService branding = new BrandingService(store, config);
+        return new RestBrandingAdmin(branding, new KeycloakThemeExport(branding), identity);
     }
 
     @Test
@@ -104,6 +109,25 @@ class RestBrandingAdminTest {
         assertEquals(200, rest.deleteAsset("logoDark").getStatus());
         assertThrows(NotFoundException.class, () -> rest.uploadAsset("../logo", PNG));
         assertThrows(NotFoundException.class, () -> rest.deleteAsset("logo-dark"));
+    }
+
+    @Test
+    void theLoginThemeDownloadsAsANamedZip() throws IOException {
+        RestBrandingAdmin rest = rest();
+        rest.updateBrand(new BrandUpdate(0L, "Acme", null, null, null, null, null));
+
+        Response response = rest.downloadKeycloakTheme();
+
+        assertEquals(200, response.getStatus());
+        assertEquals("application/zip", response.getMediaType().toString());
+        assertEquals("attachment; filename=\"brand-keycloak-theme.zip\"", response.getHeaderString("Content-Disposition"));
+        try (var zip = new ZipInputStream(new ByteArrayInputStream((byte[]) response.getEntity()))) {
+            boolean readme = false;
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                readme |= entry.getName().equals("brand/README.md");
+            }
+            assertTrue(readme);
+        }
     }
 
     @Test

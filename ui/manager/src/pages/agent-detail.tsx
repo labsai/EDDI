@@ -5,6 +5,7 @@ import { isForbidden } from "@/lib/access";
 import { AgentTestsSection } from "@/components/agent-tests/agent-tests-section";
 import { useState, useEffect, useCallback, useMemo, useId } from "react";
 import { useTranslation } from "react-i18next";
+import { useBrand } from "@/hooks/use-brand";
 import { deployedEnvironments, isLiveAtRequestedVersion, preferredChatEnvironment } from "@/lib/deployment-environments";
 import type { Environment } from "@/lib/constants";
 import { useQueryClient } from "@tanstack/react-query";
@@ -1611,6 +1612,8 @@ function A2ASection({
   const [skillInput, setSkillInput] = useState("");
   const [showCard, setShowCard] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  // The card's defaults name the deployment's product, as AgentCardService does.
+  const { productName } = useBrand();
 
   const isEnabled = agent.a2aEnabled ?? false;
 
@@ -1653,10 +1656,10 @@ function A2ASection({
 
   // Build a preview of the Agent Card (mirrors AgentCardService.java)
   const agentCard = {
-    name: agentName || `EDDI Agent ${agentId}`,
-    description: agent.description || "EDDI conversational AI agent",
+    name: agentName || `${productName} Agent ${agentId}`,
+    description: agent.description || `${productName} conversational AI agent`,
     url: rpcUrl,
-    provider: "EDDI",
+    provider: productName,
     // The agent version being edited — the card the server serves carries the
     // platform's own version, which this page does not know.
     version: String(version),
@@ -1667,7 +1670,7 @@ function A2ASection({
           name: s,
           description: `Skill: ${s}`,
         }))
-      : [{ id: "chat", name: "Conversational AI", description: "General conversational AI agent powered by EDDI" }],
+      : [{ id: "chat", name: "Conversational AI", description: `General conversational AI agent powered by ${productName}` }],
   };
 
   const [isOpen, setIsOpen] = useState(false);

@@ -17,6 +17,7 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.enums.SchemaType;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
@@ -43,6 +44,19 @@ public interface IRestBrandingAdmin {
             + "eddi.branding.locked=true, and its source: database, properties or default.")
     @APIResponse(responseCode = "200", description = "The brand.", content = @Content(schema = @Schema(implementation = BrandingView.class)))
     BrandingView readBrand();
+
+    @GET
+    @Path("/keycloak-theme.zip")
+    @NoCache
+    @Produces("application/zip")
+    @Operation(summary = "Download the Keycloak login theme for the brand", description = "A ZIP of the Keycloak login theme "
+            + "EDDI ships, renamed 'brand', with the brand's validated colours (brand-overrides.css), its logo, dark logo and "
+            + "favicon, and a README giving the realm loginTheme, displayName and displayNameHtml to set. Keycloak cannot read "
+            + "the brand itself, so download it again after a rebrand. Unbranded, it is the shipped theme with an empty "
+            + "overrides file.")
+    @APIResponse(responseCode = "200", description = "The theme, as brand-keycloak-theme.zip.",
+                 content = @Content(mediaType = "application/zip", schema = @Schema(type = SchemaType.STRING, format = "binary")))
+    Response downloadKeycloakTheme();
 
     @PUT
     @Consumes(MediaType.APPLICATION_JSON)

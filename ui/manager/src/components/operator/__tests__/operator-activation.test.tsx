@@ -560,7 +560,7 @@ describe("OperatorActivation", () => {
   });
 
   it("surfaces an activation error instead of failing silently", async () => {
-    renderActivation({ error: "This EDDI deployment does not expose 2 endpoint(s)" });
+    renderActivation({ error: "This deployment does not expose 2 endpoint(s)" });
     await userEvent.type(screen.getByTestId("operator-api-key-input"), "sk-test-key");
     await userEvent.click(screen.getByTestId("operator-next"));
     expect(await screen.findByTestId("operator-activation-error")).toHaveTextContent(

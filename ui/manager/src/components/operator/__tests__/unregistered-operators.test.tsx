@@ -140,6 +140,27 @@ describe("UnregisteredOperators", () => {
     expect(screen.queryByTestId("operator-unregistered-deploy-op-legacy")).not.toBeInTheDocument();
   });
 
+  it("recognises a marked operator by its marker alone, whatever it is called (white-label)", async () => {
+    // A rebranded deployment names new operators "<product> Platform Operator",
+    // and an admin may rename one to anything. Neither may cost the Manager its
+    // operator: the marker decides, and the name is never read for a marked one.
+    server.use(
+      http.get("*/agentstore/agents/descriptors", () =>
+        HttpResponse.json([
+          {
+            resource: "eddi://ai.labs.agent/agentstore/agents/op-renamed?version=1",
+            name: "Acme Assist Helper",
+            description: OPERATOR_DESCRIPTOR_DESCRIPTION,
+            createdOn: 0,
+            lastModifiedOn: 0,
+          },
+        ]),
+      ),
+    );
+    renderWithProviders(<UnregisteredOperators config={null} registeredHealthy={false} />);
+    expect(await screen.findByTestId("operator-unregistered-op-renamed")).toBeInTheDocument();
+  });
+
   it("does not list the agent the config already points at", async () => {
     const config = { agentId: "op-legacy", version: 2, environment: "production", enabled: true } as OperatorConfig;
     renderWithProviders(<UnregisteredOperators config={config} registeredHealthy />);

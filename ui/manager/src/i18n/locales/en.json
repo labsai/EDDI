@@ -6771,6 +6771,14 @@
       "errorType": "This file type is not accepted here. Use PNG, WebP or SVG (ICO for the favicon only).",
       "errorLocked": "The brand is locked, so images cannot be changed here."
     },
+    "loginTheme": {
+      "title": "Login page",
+      "description": "With sign-in through Keycloak, the login page is a Keycloak theme, which cannot read this brand. Download it as a theme with the saved brand applied, install it in Keycloak and set the realm values its README names. Download it again after a rebrand.",
+      "download": "Download login theme",
+      "downloading": "Preparing…",
+      "unsaved": "It carries the saved brand. Save your changes first to include them.",
+      "failed": "The login theme could not be downloaded: {{reason}}"
+    },
     "resetDialog": {
       "title": "Reset the brand?",
       "description": "This clears every saved name, colour, option and image. The configuration properties, or the defaults, apply again for every user."

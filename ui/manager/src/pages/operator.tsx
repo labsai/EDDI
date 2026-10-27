@@ -41,7 +41,7 @@ import { RegisteredOperatorHealth, UnregisteredOperators } from "@/components/op
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useApprovalStatus } from "@/hooks/use-hitl";
 import { getErrorMessage } from "@/lib/api-client";
-import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
+import { fetchOpenApiSpec, operatorAgentName, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -249,7 +249,7 @@ export function OperatorPage() {
       setActivationError(null);
       activate.mutate(
         {
-          agentName: "EDDI Platform Operator",
+          agentName: operatorAgentName(),
           config: next,
           apiKey,
           baseUrl,
@@ -593,7 +593,7 @@ export function OperatorPage() {
         <Sparkles className="h-6 w-6 text-primary" />
         <div>
           <h1 className="text-xl font-semibold">{t("operator.title", "Platform Operator")}</h1>
-          <p className="text-sm text-muted-foreground">{t("operator.subtitle", "Ask about this EDDI deployment — it looks things up for you.")}</p>
+          <p className="text-sm text-muted-foreground">{t("operator.subtitle", "Ask about this {{productName}} deployment — it looks things up for you.")}</p>
         </div>
       </header>
 

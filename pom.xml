@@ -635,6 +635,14 @@
                     <include>operator-revision.json</include>
                 </includes>
             </resource>
+            <!-- The Keycloak login theme (keycloak/themes/eddi), which the Branding
+                 page's "Download login theme" serves as a ZIP with the brand applied
+                 (KeycloakThemeExport). Outside META-INF/resources, so it is read by
+                 that class only and never served as static content. -->
+            <resource>
+                <directory>keycloak/themes/eddi</directory>
+                <targetPath>keycloak-theme/eddi</targetPath>
+            </resource>
         </resources>
         <plugins>
             <plugin>

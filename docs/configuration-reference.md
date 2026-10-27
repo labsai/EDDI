@@ -626,6 +626,8 @@ The brand is normally edited at runtime (`/administration/branding`, `eddi-admin
 | `eddi.branding.show-update-check` | *(unset: `false`)* | Keep the Manager's update check UI while branded |
 | `eddi.branding.assets-dir` | *(unset)* | Directory of brand images under fixed names (`logo.svg\|png\|webp`, `logo-dark.*`, `icon.*`, `favicon.ico\|png\|svg`, `og-image.*`), each checked like an upload. A missing directory or a refused file fails startup |
 
+The Helm chart sets each of these from its `eddi.branding.*` values, and mounts a ConfigMap of images as `assets-dir` ([White-Labeling → Helm](white-labeling.md#helm)). The MCP server's `serverInfo` follows the product name unless `quarkus.mcp.server.server-info.name` is set.
+
 ---
 
 ## Logging & documentation surfaces

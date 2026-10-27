@@ -6842,6 +6842,14 @@
       "errorType": "Este tipo de ficheiro não é aceite aqui. Use PNG, WebP ou SVG (ICO apenas para o favicon).",
       "errorLocked": "A marca está bloqueada, por isso as imagens não podem ser alteradas aqui."
     },
+    "loginTheme": {
+      "title": "Página de login",
+      "description": "Com o login pelo Keycloak, a página de login é um tema do Keycloak, que não consegue ler esta marca. Baixe-o como um tema com a marca salva aplicada, instale-o no Keycloak e defina os valores do realm indicados no README. Baixe-o novamente após uma mudança de marca.",
+      "download": "Baixar tema de login",
+      "downloading": "Preparando…",
+      "unsaved": "Ele contém a marca salva. Salve suas alterações primeiro para incluí-las.",
+      "failed": "Não foi possível baixar o tema de login: {{reason}}"
+    },
     "resetDialog": {
       "title": "Repor a marca?",
       "description": "Isto apaga todos os nomes, cores, opções e imagens guardados. As propriedades de configuração, ou as predefinições, voltam a aplicar-se a todos os utilizadores."

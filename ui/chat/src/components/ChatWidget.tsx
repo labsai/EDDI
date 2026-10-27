@@ -209,6 +209,31 @@ export function isSafeFontFamily(value: string): boolean {
   return !!v && v.length <= 200 && /^[a-z0-9 ,'"_-]+$/i.test(v);
 }
 
+/**
+ * Apply one accent colour as CSS custom properties: the accent itself, the
+ * user bubble and the input focus ring (as COLOR_PARAM_MAP maps
+ * `?accentColor=`), plus the soft and quick-reply variants derived from it.
+ * Ignored unless it passes isSafeCssColor. The one path every accent source
+ * takes — `?accentColor=`, `ChatConfig.accentColor`, the deployment brand.
+ */
+export function applyAccentColor(value: string | null | undefined): void {
+  if (!value || !isSafeCssColor(value)) return;
+  const root = document.documentElement;
+  const color = value.trim();
+  for (const cssVar of COLOR_PARAM_MAP.accentColor) {
+    root.style.setProperty(cssVar, color);
+  }
+  // color-mix works for any CSS color — a named color, rgb(), hsl() — where
+  // appending a hex alpha only ever worked for a 6-digit #rrggbb.
+  const tint = (percent: number) =>
+    `color-mix(in srgb, ${color} ${percent}%, transparent)`;
+  root.style.setProperty("--chat-accent-soft", tint(13));
+  root.style.setProperty("--chat-qr-border", tint(40));
+  root.style.setProperty("--chat-qr-bg", tint(18));
+  root.style.setProperty("--chat-qr-text", color);
+  root.style.setProperty("--chat-qr-hover", tint(33));
+}
+
 /** Apply color overrides from query params as CSS custom properties */
 export function applyColorOverrides(params: URLSearchParams): void {
   const root = document.documentElement;
@@ -220,24 +245,14 @@ export function applyColorOverrides(params: URLSearchParams): void {
       console.warn(`[eddi-chat] ignoring ${param}: not a plain ${param === "fontFamily" ? "font list" : "colour"}`);
       continue;
     }
+    if (param === "accentColor") {
+      // Also derives the soft and quick-reply variants, from a valid accent only.
+      applyAccentColor(value);
+      continue;
+    }
     for (const cssVar of vars) {
       root.style.setProperty(cssVar, value.trim());
     }
-  }
-  // accentColor also derives soft/hover variants automatically, from a valid
-  // accent only.
-  const accent = params.get("accentColor");
-  if (accent && isSafeCssColor(accent)) {
-    const color = accent.trim();
-    // color-mix works for any CSS color — a named color, rgb(), hsl() — where
-    // appending a hex alpha only ever worked for a 6-digit #rrggbb.
-    const tint = (percent: number) =>
-      `color-mix(in srgb, ${color} ${percent}%, transparent)`;
-    root.style.setProperty("--chat-accent-soft", tint(13));
-    root.style.setProperty("--chat-qr-border", tint(40));
-    root.style.setProperty("--chat-qr-bg", tint(18));
-    root.style.setProperty("--chat-qr-text", color);
-    root.style.setProperty("--chat-qr-hover", tint(33));
   }
 }
 
@@ -443,15 +458,23 @@ export function ChatWidget() {
     Map<string, { text: string; attachments: typeof state.pendingAttachments; isSecret: boolean }>
   >(new Map());
 
-  /* ─── Apply query param config + colors on mount ── */
+  /* ─── Apply query param config on mount ──────── */
   useEffect(() => {
     const queryCfg = parseConfigFromQuery(searchParams);
     if (Object.keys(queryCfg).length > 0) {
       dispatch({ type: "SET_CONFIG", config: queryCfg });
     }
-    // Apply CSS custom property color overrides
-    applyColorOverrides(searchParams);
   }, [searchParams, dispatch]);
+
+  /* ─── Apply the accent, then the URL's colours ── */
+  // config.accentColor is the embedder's, the brand's, or `?accentColor=`'s
+  // (which SET_CONFIG above put there) — precedence in src/api/brand.ts. It was
+  // stored but never applied before. The URL's colour params go on last, so a
+  // `?userBg=` still beats the user-bubble colour the accent derives.
+  useEffect(() => {
+    applyAccentColor(state.config.accentColor);
+    applyColorOverrides(searchParams);
+  }, [state.config.accentColor, searchParams]);
 
 
   /* ─── Set base URL + auth on mount ──────────── */

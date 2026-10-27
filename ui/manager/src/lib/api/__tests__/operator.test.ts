@@ -25,8 +25,10 @@ import {
   CALLER_TOKEN_API_AUTH,
   type OperatorConfig,
   type FetchedSpec,
+  operatorAgentName,
 } from "../operator";
 import { safetyPreambleForScope } from "@/lib/operator/system-prompt";
+import { setBrand } from "@/lib/brand";
 import {
   READ_ENDPOINTS,
   WRITE_ENDPOINTS,
@@ -1059,8 +1061,8 @@ describe("runOperatorCanary", () => {
     const result = await runOperatorCanary(cfg({ apiBaseUrl: "http://localhost:7080" }));
     expect(result.ok).toBe(false);
     expect(result.error).toContain("http://localhost:7080");
-    expect(result.error).toMatch(/not an outage of EDDI/i);
-    expect(result.error).toMatch(/address EDDI can reach itself at/i);
+    expect(result.error).toMatch(/not an outage of the platform/i);
+    expect(result.error).toMatch(/address the server can reach itself at/i);
   });
 
   it("recognises the backend's own connect-failure wording too", async () => {
@@ -1308,5 +1310,19 @@ describe("normalizeBaseUrl and trailing slashes", () => {
     vi.stubGlobal("location", { ...globalThis.location, origin: "https://eddi.example" });
     await expect(resolveOperatorApiBaseUrl(config({ apiBaseUrl: null }))).rejects.toThrow(/cannot determine its own address/i);
     vi.unstubAllGlobals();
+  });
+});
+
+describe("operatorAgentName", () => {
+  afterEach(() => setBrand(undefined));
+
+  it("is the EDDI Platform Operator when nothing is branded, the name every fixture uses", () => {
+    expect(operatorAgentName()).toBe("EDDI Platform Operator");
+  });
+
+  it("follows the brand, and keeps the word discovery's pre-marker fallback looks for", () => {
+    setBrand({ branded: true, productName: "Acme Assist" });
+    expect(operatorAgentName()).toBe("Acme Assist Platform Operator");
+    expect(operatorAgentName()).toMatch(/operator/i);
   });
 });

@@ -197,6 +197,12 @@ export const READ_ENDPOINTS: readonly string[] = [
   //   live cluster rather than on a reviewable config document: the operator
   //   explains what is wrong and which action the admin should take in the
   //   console; the admin takes it.
+  // - Every `/administration/branding` endpoint, the reads included (`GET`
+  //   the brand, `GET …/keycloak-theme.zip`, the writes, the image uploads and
+  //   the reset), and the public `/branding/*` assets. A brand change is seen by
+  //   every user at once and is a one-click action on the Admin → Branding page,
+  //   so a tool would add risk without saving work (white-label plan, R9). The
+  //   prompt names the page instead; `tool-scopes.test.ts` keeps them out.
   //
   // Like the docs entries below, these raise the backend floor: activation
   // refuses a spec without them, i.e. an EDDI older than 6.6. The Manager ships

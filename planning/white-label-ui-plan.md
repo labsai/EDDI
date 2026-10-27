@@ -1,6 +1,6 @@
 # White-Labeling Every UI
 
-**Status:** Plan, revision 2 (2026-10-24). Phase 1 is in progress on `feat/white-label-ui`.
+**Status:** Implemented on `feat/white-label-ui` (phases 1–7, 2026-10-26). Plan revision 2 (2026-10-24). Current behaviour: [`docs/white-labeling.md`](../docs/white-labeling.md).
 **Scope:** the Manager (`/manage`, `/welcome`, `/workforce`), the Chat UI (`/chat`), the backend pages and documents a browser user sees (root redirect, Swagger UI, OpenAPI info, A2A agent cards), the Platform Operator's persona, and the Keycloak login theme. No change to engine behaviour.
 
 ---
@@ -78,7 +78,7 @@ An admin can run EDDI under their own product name, logo, icon and colours. Afte
 
 ## 3. Design in one paragraph
 
-A single **brand document** (product name, short name, tagline, colours, toggles and up to five small image assets) is stored in the database. An admin edits it on **Settings → Branding** in the Manager. `eddi.branding.*` properties seed it field by field (a field the document leaves unset falls back to its property, then to the EDDI default) and, with `eddi.branding.locked=true`, override it permanently. A `BrandingService` validates every value on write and serves the current brand from a short-TTL cache keyed on a revision number. The brand reaches every UI in three ways, all same-origin:
+A single **brand document** (product name, short name, tagline, colours, toggles and up to five small image assets) is stored in the database. An admin edits it on **Admin → Branding** (`/manage/branding`) in the Manager. `eddi.branding.*` properties seed it field by field (a field the document leaves unset falls back to its property, then to the EDDI default) and, with `eddi.branding.locked=true`, override it permanently. A `BrandingService` validates every value on write and serves the current brand from a short-TTL cache keyed on a revision number. The brand reaches every UI in three ways, all same-origin:
 
 - **Fixed asset URLs** under `/branding/*`, which serve the uploaded image or fall back to the bundled EDDI one, so the CSP never widens.
 - **A runtime script and a stylesheet**: `/branding/__brand__.js` sets `window.__EDDI_BRAND__`, and `/branding/brand.css` holds validated CSS custom properties.
@@ -200,7 +200,7 @@ The UIs read the product name from one place, i18next interpolates it into every
 - **Titles:** `` `${page} — ${productName} Manager` ``. The "Manager" and "Workforce" suffixes stay translatable.
 - **Update UI** (R5): hidden when `branded && !showUpdateCheck`. Unbranded behaviour is unchanged.
 - **About dialog** (sidebar footer): the product name and version, plus "Powered by EDDI" with the Apache 2.0 notice when `poweredBy` is set (R3).
-- **Settings → Branding page** (Phase 4):
+- **Admin → Branding page** (Phase 4):
   - fields with live preview: a mini sidebar, a primary button and a chat bubble in light and dark;
   - a contrast warning;
   - asset drop zones with type and size errors;
@@ -228,7 +228,7 @@ The UIs read the product name from one place, i18next interpolates it into every
 - One sentence keeps the engine's real name: "This platform is built on the EDDI engine; its documentation and `eddi.*` properties use that name." Without it, the operator would deny that its own docs and properties exist.
 - New operators are named `` `${productName} Platform Operator` ``. Identification must stay on the `[eddi-platform-operator]` marker only, never the name. Verify this first, because about 40 fixtures use the old name.
 - **The prompt is persisted at creation (R9).** Document that after a rebrand, the operator picks up the new name through *Upgrade*.
-- The branding endpoints stay **off** the allow-list (R9); the prompt names Settings → Branding instead.
+- The branding endpoints stay **off** the allow-list (R9); the prompt names Admin → Branding instead.
 - Bump `operator-revision.json`. Operator PRs land one at a time.
 
 ### 4.8 Backend-visible surfaces
@@ -266,7 +266,7 @@ All phases are on `feat/white-label-ui`, one commit per phase. They can be split
 | 1 | **Backend brand store and delivery** | `BrandingConfig` (seed and lock), the brand model, `IBrandingStore` plus Mongo and Postgres twins wired in `DataStoreProducers`, `BrandingService` (validation, cache, revision), the admin REST of §4.2 (except the Keycloak ZIP), the public `/branding/*` assets, `__brand__.js`, `brand.css`, head substitution in the five shells' resources, permit paths, the shared JS escaper adopted by the two config scripts, unit tests including §5, `docs/white-labeling.md` plus `SUMMARY.md`, and a changelog fragment. The shells gain the placeholders and the Vite dev plugin. **No visible change when unbranded** | L |
 | 2 | **Manager token cleanup** | Brand scale, amber classification, loader and scrollbar colours, the no-new-amber guard | L |
 | 3 | **Manager strings, logos, titles, update UI, About** | §4.4 except the settings page | L |
-| 4 | **Settings → Branding page** | §4.4 page, live update, mocks, contract snapshot | M |
+| 4 | **Admin → Branding page** | §4.4 page, live update, mocks, contract snapshot | M |
 | 5 | **Chat UI** | §4.5 | S |
 | 6 | **Operator, backend surfaces, Keycloak ZIP** | §4.7–4.9, operator revision bump, Helm | M |
 | 7 | **Brand-leak E2E** (§7) | Lands last, as the acceptance test | M |

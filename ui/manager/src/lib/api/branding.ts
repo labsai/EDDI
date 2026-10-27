@@ -123,3 +123,31 @@ export async function uploadBrandAsset(slot: BrandAssetSlot, file: Blob): Promis
 export function deleteBrandAsset(slot: BrandAssetSlot): Promise<BrandingView> {
   return api.delete<BrandingView>(`${BASE}/assets/${slot}`);
 }
+
+/** The file name the login theme is saved under. */
+export const KEYCLOAK_THEME_FILE_NAME = "brand-keycloak-theme.zip";
+
+/**
+ * Fetch the Keycloak login theme ZIP for the brand in effect
+ * (`GET /administration/branding/keycloak-theme.zip`). A blob, not JSON, so it
+ * goes through `fetch` with the same auth header `ApiClient` sends.
+ */
+export async function fetchKeycloakTheme(): Promise<Blob> {
+  const res = await fetch(`${api.getBaseUrl()}${BASE}/keycloak-theme.zip`, { headers: api.getAuthHeader() });
+  if (!res.ok) {
+    throw new ApiClientError(res.status, `Download failed: ${res.status} ${res.statusText}`.trim());
+  }
+  return res.blob();
+}
+
+/** Save the login theme ZIP through the browser's download. */
+export async function downloadKeycloakTheme(): Promise<void> {
+  const blob = await fetchKeycloakTheme();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = KEYCLOAK_THEME_FILE_NAME;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
