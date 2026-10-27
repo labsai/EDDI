@@ -383,7 +383,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
-eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling)
+eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect; also counts tool calls refused for it)
 ```
 
 `eddi_tenant_usage_cost_total` moves whenever a settled turn (or a Dream run) with
@@ -735,6 +735,20 @@ eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail 
 passes the text records nothing. Unknown guardrail types are skipped before they are
 counted, so `type` only ever carries a registered guardrail. See
 [Input and Output Guardrails](langchain.md#input-and-output-guardrails).
+
+### Conversation Rating Metrics
+
+```text
+eddi_conversation_ratings_total             # Ratings people gave; tags: kind (conversation|message), scale (THUMBS|FIVE_STAR), bucket (low|neutral|high), agentId
+eddi_conversation_ratings_normalized        # Distribution summary of the normalized score (0..1); tags: agentId, kind (_count, _sum, _max)
+eddi_conversation_ratings_withdrawn_total   # Ratings withdrawn by the person who gave them; tag: kind
+```
+
+The counter measures rating *events*: a person who changes a rating counts twice.
+The current state — one rating per conversation and per reply — is what
+`GET /ratings/summary` reports. `bucket` is `low` below a normalized 0.4 (one or
+two stars, thumbs down), `neutral` below 0.6 (three stars) and `high` otherwise.
+See [Conversation Ratings](conversation-ratings.md).
 
 ### Agent Identity & Signing Metrics
 

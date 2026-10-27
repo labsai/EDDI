@@ -735,6 +735,17 @@ class MongoTenantQuotaStoreTest {
         }
 
         @Test
+        @DisplayName("should refuse as accounting-unavailable when the read fails — the same signal the PostgreSQL store gives")
+        void driverFailure() {
+            when(usageCollection.find(any(Bson.class))).thenThrow(new MongoException("connection reset"));
+
+            var thrown = assertThrows(QuotaAccountingUnavailableException.class, () -> sut.getMonthlyCost(TENANT_ID));
+
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, thrown.getMessage());
+            assertInstanceOf(MongoException.class, thrown.getCause(), "the driver exception stays attached");
+        }
+
+        @Test
         @DisplayName("should return 0.0 when monthlyCostUsd is null in document")
         void nullCost() {
             Document doc = new Document()

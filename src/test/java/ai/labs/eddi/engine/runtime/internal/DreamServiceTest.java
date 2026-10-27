@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
@@ -1811,6 +1812,27 @@ class DreamServiceTest {
 
         // 1000 x $1/1M + 500 x $2/1M
         verify(quota).recordCost(eq("default"), doubleThat(d -> Math.abs(d - 0.002) < 1e-12));
+    }
+
+    @Test
+    void tenantCost_chargeLostToAnOutageIsCarriedToTheNextConsolidationCharge() throws Exception {
+        enableSummarization();
+        dreamConfig.setInputPricePer1M(1.0);
+        dreamConfig.setOutputPricePer1M(2.0);
+        TenantQuotaService quota = tenantQuotaWithBudget(true);
+        when(quota.recordCost(anyString(), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable())
+                .thenReturn(QuotaCheckResult.OK);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\": \"s1\", \"value\": \"v1\"}]", 1000, 500));
+
+        dreamService.process("user-1", "agent-1", dreamConfig); // store down: $0.002 not recorded
+        assertEquals(0.002, dreamService.pendingTenantCost(), 1e-12, "the unrecorded charge is kept, not dropped");
+
+        dreamService.process("user-1", "agent-1", dreamConfig); // store back: this run's $0.002 plus the carried $0.002
+
+        verify(quota).recordCost(eq("default"), doubleThat(d -> Math.abs(d - 0.004) < 1e-12));
+        assertEquals(0.0, dreamService.pendingTenantCost(), 1e-12);
     }
 
     @Test

@@ -38,6 +38,7 @@ public class AgentTestRunStore implements IAgentTestRunStore {
     private static final String FIELD_AGENT_ID = "agentId";
     private static final String FIELD_STARTED_AT = "startedAt";
     private static final String FIELD_STATUS = "status";
+    private static final String FIELD_HEARTBEAT_AT = "heartbeatAt";
 
     /**
      * Agent ids are hex ObjectIds or UUIDs. Anything else cannot have runs, and is
@@ -74,6 +75,19 @@ public class AgentTestRunStore implements IAgentTestRunStore {
         }
         try {
             storage.store(storage.newResource(run.id(), SINGLE_VERSION, run));
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to update agent test run: " + e.getMessage(), e);
+        }
+    }
+
+    @Override
+    public void updateIfHeartbeat(AgentTestRun run, long expectedHeartbeatAt)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        if (run.id() == null) {
+            throw new IllegalArgumentException("run.id is required to update a run");
+        }
+        try {
+            storage.storeIfFieldEquals(storage.newResource(run.id(), SINGLE_VERSION, run), FIELD_HEARTBEAT_AT, expectedHeartbeatAt);
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed to update agent test run: " + e.getMessage(), e);
         }

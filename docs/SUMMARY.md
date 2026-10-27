@@ -46,6 +46,7 @@
 - [Group Conversations](group-conversations.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
+- [Conversation Ratings](conversation-ratings.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)
@@ -85,6 +86,7 @@
 ## Deployment & Infrastructure
 
 - [Configuration Reference](configuration-reference.md)
+- [White-Labeling](white-labeling.md)
 - [Upgrading from EDDI 5.x](upgrading-from-5x.md)
 - [Upgrading from EDDI 6.4](upgrading-from-6.4.md)
 - [Upgrading from EDDI 6.5](upgrading-from-6.5.md)
