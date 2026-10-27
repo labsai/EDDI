@@ -134,6 +134,8 @@ jobs:
               - 'licenses/**'
               # The UI markdown DocumentationLinksTest and DocumentationAccuracyTest walk.
               - 'ui/**/*.md'
+              # And the docs site's (docs-site/README.md); its generated .generated/ is never committed.
+              - 'docs-site/**/*.md'
               # Graded by unit tests, so they are test inputs rather than prose:
               # ComposeStackTest parses README.md's compose commands, and
               # BuildQualityGatesTest reads AGENTS.md 4.7 to check it still describes

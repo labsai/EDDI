@@ -202,7 +202,9 @@ is advisory — which makes a red one *your* problem, not the button's. So:
   **GitHub Code Quality**, the same feature whose `github-code-quality` bot posts the inline
   threads in §4; CodeQL *default setup* is `not-configured` on this repo and `codeql.yml` is
   schedule-only, so do not go looking for it in settings. Also `Dependency Review` (its own
-  workflow, every PR) and `GitBook (docs)`.
+  workflow, every PR), `Docs Site` (`docs-site.yml`, every PR: the docs-site tests always, the site
+  build only when `docs/` or `docs-site/` changed) and `GitBook (docs)` (until the docs move off
+  GitBook — `planning/docs-site-migration-plan.md`).
 - `Backend E2E (mongodb)` and `Auth E2E (Keycloak)` feed `E2E Gate`; the UI jobs feed
   `UI Gate`.
 
