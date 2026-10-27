@@ -1059,6 +1059,7 @@ A task can screen the **user's message before the model is called** (`inputGuard
 | `type` | The guardrail (table below). An unknown type is skipped with a WARN in the log — never an error, so a config written for a newer EDDI still runs. | — |
 | `action` | `block`, `redact`, `reprompt` or `warn` (below). An unknown value is treated as `block`. | `block` |
 | `maxRetries` | `reprompt` only: how many times the model may be asked again. Clamped to 0–5. | `2` |
+| `onExhausted` | `reprompt` on output only: what happens once the retries are spent — `block`, or `deliver-best` to deliver the attempt this guardrail rated best, still screened by the guardrails after it. See [When the retries run out](#when-the-retries-run-out-onexhausted). | `block` |
 | `blockMessage` | The answer the user gets when this guardrail blocks. Used as-is — it is never run through the template engine. | `Request blocked by guardrail '<type>'.` / `Response withheld by guardrail '<type>'.` |
 | `parameters` | Per-type settings, plain strings (never templated). Two work for every type: `repromptMessage` overrides the corrective message of a reprompt (`{reason}` is replaced by the guardrail's reason), and `failMode` (`closed`/`open`) decides what a failing guardrail does — see below. | — |
 
@@ -1068,7 +1069,7 @@ A task can screen the **user's message before the model is called** (`inputGuard
 |---|---|---|
 | `block` | The model is **not called** and `preRequest` does not run; the block message is the turn's answer, and `postResponse` runs as after any other fallback. | The answer is replaced by the block message (not parsed as JSON, not recorded as the model's response). |
 | `redact` | The message the model sees is rewritten. Conversation memory keeps what the user sent. | The answer is rewritten before it is stored, parsed or delivered. A guardrail with no rewrite (a pure violation) is replaced by the block message. |
-| `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked. |
+| `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked — or, with `onExhausted: "deliver-best"`, the best attempt is delivered. |
 | `warn` | Recorded (audit, metric, SSE) — nothing else. | Same. |
 
 A block message is served the way an [`onError` fallback](#fallback-answers-and-onerror) is: the turn is flagged as a fallback, so later turns' history leaves the block message out, and a `convertToObject` task with `responseValidation.fallbackField` gets it wrapped as `{"<fallbackField>": "<block message>"}`. `postResponse` runs with that shape — on an input block exactly as on an output block, a spend refusal or an `onError` fallback — so a task with `addToOutput: false` whose `postResponse` builds the reply still answers the user.
@@ -1084,7 +1085,7 @@ Three limits. **The current turn** is not withheld by its own flag: a second LLM
 | `closed` | Treated as a finding that blocks: the turn is answered with the guardrail's `blockMessage` (an earlier history message is withheld). | `block`, `reprompt` — a guardrail that exists to keep something out must not let it through because it could not look (a `reprompt` cannot verify any answer either, so it blocks without re-asking) |
 | `open` | Recorded as a `warn`; the text passes. | `redact`, `warn` |
 
-Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) that could not decide, `classifier_unavailable` / `classifier_unparseable`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
+Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) or [`judge`](#the-judge-type-grading-the-answer-with-issue-codes) that could not decide, `classifier_unavailable` / `classifier_unparseable` or `judge_unavailable` / `judge_unparseable`, and for an [`expression`](#the-expression-type-a-deterministic-check-over-a-json-answer), `expression_unparseable` / `expression_undecided:<cause>`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
 
 A `block` is a returned value, never an exception, so a block message can never be mistaken for a transient provider error and retried.
 
@@ -1096,7 +1097,9 @@ A `block` is a returned value, never an exception, so a block message can never 
 | `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
+| `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
 | `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
+| `expression` | output | A JSON answer for which your boolean expression is false — arithmetic and cross-field rules such as `sum(lines[*].amount) == total`. See [below](#the-expression-type-a-deterministic-check-over-a-json-answer). | `expr`, `issue`, `fix` (all required) |
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
 
@@ -1201,6 +1204,137 @@ To check against your own policy instead of the model's default one, write the p
 
 > **Llama Guard.** Llama Guard 3 (`llama-guard3` on Ollama) works the same way with `"unsafeLabel": "unsafe"` and `"safeLabel": "safe"` (both required — the deploy refuses a custom `unsafeLabel` alone) (it answers `safe`, or `unsafe` followed by category codes on the next line). Its licence needs checking before you deploy it: Meta's Llama 3.2, 3.3 and 4 acceptable-use policies withhold the licence rights for their **multimodal** models from individuals domiciled in, and companies with their principal place of business in, the European Union — which covers Llama Guard 4 and Llama Guard 3 Vision. EDDI documents no Llama Guard example for that reason; whether a model's terms allow your deployment is your call, not EDDI's.
 
+### The `judge` type: grading the answer with issue codes
+
+`judge` (output only) asks a model whether the answer is **right**, not just whether it is safe or well-formed — grounded in the retrieved sources, complete, on topic, whatever your prompt asks it to check. It answers in a **closed vocabulary**: the issue codes you declare in `issues`, each with the text that tells the producing model how to fix it. Paired with `reprompt`, a flagged answer is re-asked with exactly your fix texts for the codes the judge found.
+
+```json
+"outputGuardrails": [ {
+  "type": "judge",
+  "action": "reprompt",
+  "maxRetries": 1,
+  "onExhausted": "deliver-best",
+  "parameters": {
+    "provider": "gemini",
+    "modelName": "gemini-3.7-flash",
+    "apiKey": "${vault:gemini-key}",
+    "thinkingLevel": "low",
+    "promptTemplate": "Sources:\n{context}\n\nQuestion:\n{input}\n\nAnswer:\n{output}\n\nCheck the answer against the sources.",
+    "includeRetrievedContext": "true",
+    "issues": "{\"UNSUPPORTED_CLAIM\": \"Remove every claim the sources do not state.\", \"MISSING_CITATION\": \"Cite the source of each fact you state.\"}",
+    "timeoutMs": "5000",
+    "inputPricePer1M": "0.15",
+    "outputPricePer1M": "0.60"
+  }
+} ]
+```
+
+The judge is called exactly like a [`classifier`](#the-classifier-type-a-safety-classifier-model) — the same machinery, not a copy of it: `provider` names an EDDI provider type, every parameter that is not the judge's own passes to that provider unchanged (`modelName`, `apiKey`, `baseUrl`, `thinkingLevel`, …), vault and `${vars.…}` references are resolved, `timeoutMs` is bounded by the turn's deadline, the call is priced, and `failMode` decides what "could not decide" does.
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `provider` | The EDDI provider type to call. Required — the deploy is refused without it. | — |
+| `promptTemplate` | A Qute template saying what to check, rendered with `{input}` (the user message the model answered), `{output}` (the answer) and `{context}` (with `includeRetrievedContext`). Required. The screened text is template **data**, never template source. | — |
+| `issues` | A JSON object (as a string) of **issue code → fix text**: 1–20 codes matching `[A-Z][A-Z0-9_]{0,39}`, each with non-blank fix text of at most 1000 characters. Required; the deploy is refused when it is malformed. | — |
+| `includeRetrievedContext` | Make this turn's retrieved RAG context (vector store and `httpCallRag`) available as `{context}`, for a groundedness check. | `false` |
+| `timeoutMs` | How long the call may take; the provider client is built with the same timeout. Capped at 60000; the turn's [deadline](#turn-deadline) wins when it is closer. | `5000` |
+| `failMode` | `closed` or `open` — what *could not decide* does. | `closed` for `block`/`reprompt` |
+| `jsonResponseFormat` | `on`, `off` or `auto`: whether the request asks the provider for JSON. `auto` follows the same provider matrix as a task's [`jsonResponseFormat`](#structured-output-json-mode); `on` forces it for a provider or gateway the matrix does not know. | `auto` |
+| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the judge reports. A judge without prices is logged at deploy time: its calls would be invisible to cost ceilings. | unpriced (free) |
+
+**The answer format is EDDI's, not yours.** After your rendered template EDDI appends a fixed instruction that lists the declared codes (with their fix texts, so the judge knows what each one means) and asks for exactly `{"issues": ["CODE", ...]}` — an empty list when nothing applies. The request asks for JSON where the provider takes it per request, with the codes as an `enum` where the provider enforces a schema (`openai`, `azure-openai`, `mistral`, `gemini`); nothing is baked into the cached model. The reply is read tolerantly — a Markdown code fence or prose around the object is fine, and a code is matched case-insensitively.
+
+**Safe is a positive finding.** Only a parsed `{"issues": []}` passes. A reply that is not that shape, or names a code you did not declare, is **could not decide** (`judge_unparseable`), as is an unreachable or slow judge (`judge_unavailable`); `failMode` applies, exactly as for a classifier.
+
+**Feedback without injection.** A finding carries reason `judge_failed:<CODE>[,<CODE>…]` — your codes, so they are safe in audit records and metrics — and the reprompt's corrective message is EDDI's frame around **your fix texts** for those codes:
+
+```text
+Your previous reply needs these corrections:
+- Remove every claim the sources do not state.
+Write a new reply that applies them. Reply with the answer only.
+```
+
+Nothing the judge wrote other than the codes — no critique, no reasoning — reaches the producing model, and the corrective message contains no text from the judge, the user or the model. The re-ask itself still carries the original request and the rejected answer, as every [`reprompt`](#actions) does; the closed vocabulary keeps the *judge* from adding to them. The judge reads untrusted content (retrieved documents, tool results, user input); its free text would be an injection path into the producer. `repromptMessage` still overrides the corrective message, as for every type.
+
+**Cost and latency.** Each screened answer is one judge call after the model answered, and any action but `warn` makes the task [buffer](#streaming) its answer. Keep `timeoutMs` short and the judge model small; each reprompt is one more model call **and** one more judge call. A model judging its own answers is biased — the deploy logs a note when the judge's provider and model equal the task's. The call is timed by `eddi.guardrail.judge.duration{provider, outcome}` (outcome `pass`, `fail`, `unparseable`, `unavailable` or `timeout`); watch `unparseable` and `unavailable`, which under `failMode: open` switch the check off silently.
+
+### When the retries run out: `onExhausted`
+
+A `reprompt` guardrail whose `maxRetries` are spent — or that cannot re-ask at all (the turn is out of time, the model's circuit is open, a resumed turn has no transcript) — blocks the answer. For a quality check that is often the wrong trade: an answer that is not perfect is still better than "Response withheld". `onExhausted` decides:
+
+| `onExhausted` | Effect |
+|---|---|
+| `block` (default) | The answer is replaced by the block message, as before. |
+| `deliver-best` | The attempt **this guardrail rated best** is delivered: fewest issue codes for a `judge` (a tie goes to the later attempt), the last attempt for a guardrail without codes. It is recorded as a `warn` with reason `<reason>:delivered_best` and the number of reprompts sent as `retryCount`. |
+
+**A quality check giving up does not override the guardrails around it, except itself.** The guardrails *before* the exhausted one already screened the delivered attempt in the pass that rated it (their redactions are in it, their findings recorded, and a blocking finding would have ended that pass). The guardrails *after* it had not, so they screen it once more, with no further reprompts: a `redact` (PII) still rewrites it, a `warn` is still recorded, and a `block` — or a `reprompt` finding, which may not re-ask now — blocks it. Each other guardrail therefore sees the delivered attempt exactly once, and a model-backed one is called once for it. A guardrail that *could not decide* is not "exhausted": its `failMode` applies as always.
+
+`onExhausted: "deliver-best"` is refused at deploy time on any action but `reprompt`, and on input guardrails (an input `reprompt` blocks). On a `classifier` it is allowed but logged as a warning — a safety check that delivers what it flagged defeats its purpose.
+
+### The `expression` type: a deterministic check over a JSON answer
+
+`expression` (output only) parses the answer as JSON and evaluates a boolean expression you write over it. It catches answers that are well-formed but wrong — a total that is not the sum of its lines, an end date before the start date — without calling another model, and reprompts with a fix you wrote.
+
+```json
+"outputGuardrails": [ {
+  "type": "expression",
+  "action": "reprompt",
+  "maxRetries": 1,
+  "blockMessage": "I could not produce a consistent invoice.",
+  "parameters": {
+    "expr": "sum(lines[*].amount) == total",
+    "issue": "LINE_SUM",
+    "fix": "Make total equal the sum of the line amounts, to the cent."
+  }
+} ]
+```
+
+Given the answer `{"total": 31.00, "lines": [{"amount": 10.10}, {"amount": 20.20}]}`, the expression is false: the model is asked again with exactly
+
+```
+Your previous reply needs these corrections:
+- Make total equal the sum of the line amounts, to the cent.
+Write a new reply that applies them. Reply with the answer only.
+```
+
+and a corrected answer (`"total": 30.30`) is delivered. With `action: "block"` a wrong total is never delivered. Pair it with a task's [`responseSchema`](#shape-validation-responseschema-and-nonblankfields) for the shape; `expression` checks the content.
+
+| Parameter | Meaning |
+|---|---|
+| `expr` | The expression (grammar below), at most 2000 characters. Required. |
+| `issue` | The issue code reported when the expression is false: upper-case letters, digits and underscores, starting with a letter, at most 40 characters. The audit reason is `expression_failed:<issue>`. Required. |
+| `fix` | The sentence a reprompt tells the model, at most 1000 characters. Required. |
+
+All three are checked at deploy time: a missing parameter, a bad issue code or an expression that does not parse is refused with a message naming the problem and its position (`parameter 'expr' is not valid at position 21: '=' is not an operator; compare with '=='`).
+
+**Grammar.** Literals: numbers (`12`, `12.50`), strings in single or double quotes (a backslash escapes only a backslash or a quote), `true`, `false`, `null`. Paths into the answer: `total`, `invoice.total`, `lines[0].amount`, `invoice['due-date']`, and the wildcard `lines[*].amount`, which yields the list of every line's amount (`orders[*].lines[*].amount` flattens). `$` is the answer itself — for an answer that is a JSON array, `count($) > 0` or `sum($[*].amount)`. Operators, from tightest to loosest: `!` and unary `-`; `*` `/` `%`; `+` `-`; `<` `<=` `>` `>=`; `==` `!=`; `&&`; `||`, with parentheses for grouping. Comparisons do not chain (`a < b < c` is refused; write `a < b && b < c`). Functions — no others exist:
+
+| Function | Result |
+|---|---|
+| `sum(list)`, `count(list)` | The sum of a list of numbers (0 for an empty list); the number of elements |
+| `min(list)`, `max(list)`, `min(a, b, …)`, `max(a, b, …)` | The smallest / largest number |
+| `len(x)` | Characters of a string, elements of a list, keys of an object |
+| `abs(x)`, `round(x, n)` | Absolute value; `x` rounded half-up to `n` decimals (0–20; default 0) |
+| `exists(path)` | Whether every step of the path is present — a key holding `null` is present. A path without `[*]` |
+| `approx(a, b, tolerance)` | `abs(a - b) <= tolerance` |
+
+**Numbers are decimal, not floating point.** `0.1 + 0.2 == 0.3` is true and money sums are exact; `1.0 == 1.00` is true. Arithmetic keeps 34 significant digits (division rounds half-even there). The answer's numbers are read exactly as written.
+
+**Null and missing values.** A path that does not exist is `null`, as is a JSON `null`; so is a wildcard over something that is not an array, and after a wildcard an element without the rest of the path contributes `null` to the list.
+
+- `x == null` and `x != null` test for it; any other comparison with `null` (`discount > 0` when there is no discount) is **false**.
+- Arithmetic, `&&`/`||`/`!`, or a function given `null` cannot decide — `sum(lines[*].amount)` over a line without an amount is not quietly skipped.
+- `&&` and `||` short-circuit, so `!exists(discount) || discount <= total` never looks at a missing discount.
+
+**Could not decide.** Safe is a positive finding: only an expression that evaluates to `true` passes. These are *could not decide*, and `failMode` applies (closed — the answer is withheld without a reprompt — by default for `block` and `reprompt`):
+
+- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals);
+- `expression_undecided:<cause>` — evaluation failed: `null_operand`, `type_mismatch` (a number compared with a string, `sum` over text), `division_by_zero`, `empty_aggregate` (`min`/`max` of nothing), `bad_argument`, `number_out_of_range` (more than 1000 digits or a scale beyond ±1000), `fan_out`, `step_budget`, or `not_boolean` (the expression produced a number, a string or a list).
+
+**Bounds.** An expression has at most 2000 characters, 32 levels of nesting, 500 parts and 32 segments per path. Evaluating it reads at most 10,000 values per path and takes at most 200,000 steps; past either, it cannot decide. Each distinct expression is compiled once and kept in a bounded cache (512 entries).
+
+**Feedback without injection.** The corrective message is EDDI's fixed frame around your `fix` text, and nothing else: no value from the answer, no computed sum, nothing the user wrote. A model cannot use the check to put words into its own next prompt. `repromptMessage` still overrides the whole message, as for every type.
+
 ### Where guardrails run
 
 - **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn.
@@ -1219,7 +1353,7 @@ Every guardrail that fires produces:
 - an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
-Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` call (`audit:cost`).
+Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
 
 ### Compatibility
 

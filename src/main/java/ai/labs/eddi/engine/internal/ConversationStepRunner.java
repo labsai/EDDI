@@ -831,6 +831,7 @@ class ConversationStepRunner {
                                 // M1: a durably-committed pause is counted and its timeout armed.
                                 conversationService.counterHitlPause.increment();
                                 conversationService.conversationHitlService.scheduleHitlTimeout(conversationId, conversationMemory);
+                                conversationService.firePauseCommitted(conversationId, conversationMemory);
                             } else {
                                 // Non-pause completion is unchanged: the normal say turn
                                 // settles to READY/ENDED/… and persists the full snapshot.

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
@@ -32,6 +33,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -761,6 +763,122 @@ public class TaskForceEngine {
         }
 
         GroupMember verifier = speakers.getFirst();
+        List<TaskItem> verified = completedTasks;
+        runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+
+        // E2 maxReworks: a task that failed this pass goes back to its member with the
+        // verifier's feedback and is checked again, up to maxReworks times per task.
+        // Bounded twice: by round (each round reworks at least one task) and per task.
+        int maxReworks = config.getMaxReworks();
+        for (int round = 1; round <= maxReworks; round++) {
+            List<TaskItem> toRework = failedThisPass(gc, verified, maxReworks);
+            if (toRework.isEmpty()) {
+                return;
+            }
+            DiscussionPhase executePhase = executePhaseBefore(gc, config, phaseIdx);
+            if (config.getHitlConfig() != null && config.getHitlConfig().getGranularity() == HitlGranularity.TASK
+                    && executePhase.requiresApproval()) {
+                LOGGER.warnf("VERIFY phase '%s': maxReworks is not applied — the EXECUTE phase '%s' gates each task for human approval",
+                        phase.name(), executePhase.name());
+                return;
+            }
+            // The rework needs a turn per task plus the verifier's; when either budget
+            // has no room left, the failed tasks stay FAILED rather than half-reworked.
+            if (GroupCostLedger.wouldExceedCeiling(gc, protocol) || (maxTurns > 0 && turnCounter.get() + toRework.size() + 1 > maxTurns)) {
+                addVerificationNote(gc, phase, phaseIdx,
+                        "Rework stopped: the turn budget or the cost ceiling leaves no room for another attempt");
+                return;
+            }
+            for (TaskItem failed : toRework) {
+                String feedback = failed.verificationNote() != null && !failed.verificationNote().isBlank()
+                        ? failed.verificationNote()
+                        : "The verifier did not accept this result.";
+                gc.getTaskList().reworkTask(failed.id(), feedback);
+                Metrics.counter(METER_TASK_REWORKS).increment();
+                addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — %s".formatted(
+                        gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject(), feedback));
+            }
+            executeTaskExecutionPhase(gc, config, speakers, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            // A rework that did not get to run (budget, cancel, a wave error) ends FAILED,
+            // never stranded ASSIGNED.
+            for (TaskItem failed : toRework) {
+                TaskItem live = gc.getTaskList().findById(failed.id());
+                if (live != null && (live.status() == TaskStatus.ASSIGNED || live.status() == TaskStatus.PENDING)) {
+                    gc.getTaskList().failTask(live.id(), live.verificationNote() + " (the rework did not run)");
+                }
+            }
+            verified = gc.getTaskList().all().stream().filter(t -> t.status() == TaskStatus.COMPLETED).toList();
+            if (verified.isEmpty() || GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)
+                    || (maxTurns > 0 && turnCounter.get() >= maxTurns)) {
+                return;
+            }
+            runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+        }
+    }
+
+    /** Micrometer name of the counter of tasks VERIFY sent back for rework (E2). */
+    static final String METER_TASK_REWORKS = "eddi.group.task.reworks";
+
+    /**
+     * Micrometer name of the counter of VERIFY verdicts that could not be parsed,
+     * on which every task was auto-verified (fail-open, as before E2).
+     */
+    static final String METER_VERIFY_UNPARSEABLE = "eddi.group.verify.unparseable";
+
+    /**
+     * The tasks of a verification pass that failed it and may still be reworked.
+     */
+    private static List<TaskItem> failedThisPass(GroupConversation gc, List<TaskItem> pass, int maxReworks) {
+        List<TaskItem> failed = new ArrayList<>();
+        for (TaskItem task : pass) {
+            TaskItem live = gc.getTaskList().findById(task.id());
+            if (live != null && live.status() == TaskStatus.FAILED && !live.verified()
+                    && gc.getTaskList().reworkCount(live.id()) < maxReworks) {
+                failed.add(live);
+            }
+        }
+        return failed;
+    }
+
+    /**
+     * The EXECUTE phase a rework runs again: the nearest one before this VERIFY in
+     * the list the discussion executes (a facilitator-diverged runtime list, the
+     * configured phases, or the style preset), or a default EXECUTE phase.
+     */
+    static DiscussionPhase executePhaseBefore(GroupConversation gc, AgentGroupConfiguration config, int phaseIdx) {
+        List<DiscussionPhase> phases;
+        if (gc.getRuntimePhases() != null && !gc.getRuntimePhases().isEmpty()) {
+            phases = gc.getRuntimePhases();
+        } else if (config.getPhases() != null && !config.getPhases().isEmpty()) {
+            phases = config.getPhases();
+        } else {
+            phases = DiscussionStylePresets.expand(config.getStyle() != null ? config.getStyle() : DiscussionStyle.TASK_FORCE,
+                    config.getMaxRounds());
+        }
+        for (int i = Math.min(phaseIdx - 1, phases.size() - 1); i >= 0; i--) {
+            DiscussionPhase candidate = phases.get(i);
+            if (candidate != null && candidate.type() == PhaseType.EXECUTE) {
+                return candidate;
+            }
+        }
+        return new DiscussionPhase("Rework", PhaseType.EXECUTE);
+    }
+
+    private static void addVerificationNote(GroupConversation gc, DiscussionPhase phase, int phaseIdx, String text) {
+        synchronized (gc.getTranscript()) {
+            gc.getTranscript().add(new TranscriptEntry("system", "System", text, phaseIdx, phase.name(), TranscriptEntryType.VERIFICATION,
+                    Instant.now(), null, null));
+        }
+    }
+
+    /**
+     * One verifier turn over {@code completedTasks}: the verdict is parsed and
+     * applied, and the transcript shows it in readable form.
+     */
+    private void runVerificationPass(GroupConversation gc, GroupMember verifier, List<TaskItem> completedTasks, DiscussionPhase phase,
+                                     String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
+                                     AtomicInteger turnCounter)
+            throws GroupDiscussionException {
         turnCounter.incrementAndGet();
 
         if (listener != null) {
@@ -872,6 +990,11 @@ public class TaskForceEngine {
         }
 
         // Fallback: mark all still-completed tasks as verified (safe default).
+        // Fail-open
+        // as before E2, but no longer silent: counted, and warned with the group.
+        Metrics.counter(METER_VERIFY_UNPARSEABLE).increment();
+        LOGGER.warnf("VERIFY verdict for group %s could not be parsed — auto-verifying %d task(s)",
+                LogSanitizer.sanitize(gc.getGroupId()), completedTasks.size());
         //
         // Status is re-read live rather than taken from `completedTasks`, which is a
         // snapshot taken before the verification phase ran, and TaskItem is

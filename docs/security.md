@@ -450,13 +450,15 @@ When an LLM is given access to tools, every argument it supplies must be treated
 
 ### Input and output screening
 
-Tool *arguments* are governed at the tool-execution layer, tool *results* by the tool-result guardrail. The user's message and the model's final answer are screened by **input and output guardrails** — opt-in per LLM task (`inputGuardrails`, `outputGuardrails`), see [Input and Output Guardrails](langchain.md#input-and-output-guardrails). The built-ins are deterministic and cheap: `prompt-injection` (instruction-override phrasings), `pii-redaction` (e-mail, SSN, payment card, phone), `regex-filter` (author patterns), `max-length` and `json-object`. Design points that matter for a security review:
+Tool *arguments* are governed at the tool-execution layer, tool *results* by the tool-result guardrail. The user's message and the model's final answer are screened by **input and output guardrails** — opt-in per LLM task (`inputGuardrails`, `outputGuardrails`), see [Input and Output Guardrails](langchain.md#input-and-output-guardrails). The built-ins are deterministic and cheap: `prompt-injection` (instruction-override phrasings), `pii-redaction` (e-mail, SSN, payment card, phone), `regex-filter` (author patterns), `max-length`, `json-object` and `expression` (an author-written check over a JSON answer). Design points that matter for a security review:
 
 - **A blocked input never reaches the model** — and no `preRequest` property mutation runs for it. Earlier messages of the history window are screened again on every turn, so a message blocked or redacted on its own turn is not replayed to the model later.
 - **Redaction changes what the model sees and what is delivered, not what is stored as the user's message.** Conversation memory keeps the user's input verbatim (it is the record); the ledger records the guardrail outcome and the delivered answer, never the guardrail's view of the screened text.
 - **Fail-safe vocabulary.** An unknown action is `block`; an unknown type is skipped with a WARN (configuration must keep loading on older versions). A guardrail that throws or returns no verdict **fails closed** when its action is `block` or `reprompt` (the turn is blocked, reason `guardrail_error`) and open when it is `redact` or `warn`; the per-guardrail `failMode` parameter overrides either way.
-- **No template injection.** Guardrail parameters, block messages and reprompt messages are author text used verbatim; the screened text is only ever data. The one guardrail that renders a template, `classifier`'s `promptTemplate`, receives the screened text as template *variables* (`{input}`, `{output}`, `{context}`), never as template source.
+- **No template injection.** Guardrail parameters, block messages and reprompt messages are author text used verbatim; the screened text is only ever data. The guardrails that render a template, `classifier` and `judge` (their `promptTemplate`), receive the screened text as template *variables* (`{input}`, `{output}`, `{context}`), never as template source. A `judge` reprompt is **closed-vocabulary**: the judge may only name issue codes the author declared (any other answer is undecided), and the corrective message is built from the author's fix texts for those codes alone. The corrective message therefore carries nothing the judge, the user or the model wrote, and nothing the judge wrote reaches the producing model except the codes it chose, as the author's text. Like every reprompt, the re-ask still sends the original request and the rejected answer (as the assistant's turn), so this narrows what the *judge* can inject; it does not isolate the producer from the conversation it is answering.
 - **Streaming.** An output guardrail that can change the answer forces the task to buffer it — streamed tokens cannot be retracted.
+- **A sandboxed evaluator, and a closed vocabulary.** The `expression` type runs an author's expression over the model's JSON answer with `SafeJsonExpression`, a small recursive-descent language of its own (paths, decimal arithmetic, comparisons, logic, nine fixed functions) — no script engine, no SpEL/OGNL-style language, no reflection, no method calls, no template engine; an unknown function is a deploy-time syntax error, so no name is ever looked up at run time. The expression is author configuration, but the data is model output, so evaluation is bounded on both sides: an expression of at most 2000 characters, 32 levels of nesting and 500 parts (refused at deploy, never a `StackOverflowError`); at most 10,000 values per path and 200,000 steps per evaluation; numbers beyond 1000 digits or a ±1000 scale are refused rather than materialised; an answer over 262,144 characters, or with a repeated key, is not evaluated. Anything it cannot evaluate is *could not decide* and `failMode` applies — never a pass. A failed check reprompts with EDDI's fixed frame around the author's `fix` text only: no value read or computed from the answer reaches the corrective message, so a model cannot steer its own next prompt through the check. The evaluator is fuzzed (`SafeJsonExpressionFuzzTest`, and a ClusterFuzzLite target).
+- **A quality check does not override the safety checks around it.** `onExhausted: "deliver-best"` lets a `reprompt` guardrail whose retries are spent deliver its best attempt instead of blocking. That attempt is first re-screened by every output guardrail **after** it in the list (the ones before it already screened it: redactions applied, a blocking finding blocks). The exhausted guardrail itself does not re-screen what it delivers, so on a `classifier` it delivers the very attempt it flagged: the deploy warns, and a safety classifier should keep `onExhausted: "block"`.
 - **Model-backed screening, and its availability trade-off.** The `classifier` type asks a safety-classifier model the agent designer configures (EDDI ships and endorses none). It reaches the model through the LLM provider client, not `SafeHttpClient`: classifier endpoints are typically in-cluster, and a configured classifier `baseUrl` is the same trust class as a task's own model `baseUrl` — only configuration authors can set either. A classifier that is unreachable, times out (`timeoutMs`, default 3 s, bounded by the turn deadline) or answers something that is not a label has not checked the text, and `failMode` decides: **`closed`** (the default for `block`/`reprompt`) refuses the turn, so a classifier outage becomes an outage of every guarded agent — the safe choice where letting unscreened text through is the worse failure; **`open`** records a `warn` (reason `classifier_unavailable` / `classifier_unparseable`) and lets the text through, keeping the agent available while the screen is down. Pick per guardrail, watch `eddi.guardrail.classifier.duration{outcome}` and the `classifier_unavailable` audit reasons, and size the classifier for the input path: it runs before the main model on every turn.
 - **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Input guardrails screen the user's message before retrieval, so a blocked message issues no RAG query and the query is the redacted text; an `httpCallRag` template that reads `memory.current.input` directly still sees the stored, unredacted text.
 
@@ -690,8 +692,30 @@ as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` 
 | TLS always verified | Certificate chain against the JVM trust store and host name against the certificate. There is no setting that turns either off |
 | Timeouts | 10 s connect, 60 s per read |
 
-The allowlist does **not** exempt private addresses: an on-premises mail server on a private network is refused
-today. Allowing one would be its own, explicit deployment setting.
+The allowlist does **not** exempt private addresses: an on-premises mail server named by a channel or knowledge-base
+author is refused.
+
+### The operator policy — the system mailer's relay
+
+The rules above are the **author** policy (`resolve`). A host the deployment's **operator** set in
+`application.properties` — today only the [system mailer](configuration-reference.md#email)'s
+`eddi.mail.smtp.host` — goes through `resolveOperator` instead. The operator already controls the network the process
+runs in, so the rules that stop an author probing it are lifted, and nothing an author or an agent writes can reach
+this path:
+
+| Rule | Author (`resolve`) | Operator (`resolveOperator`) |
+|---|---|---|
+| Private, loopback, CGNAT, ULA addresses | refused | allowed (an on-premises relay, a Postfix sidecar) |
+| IP literals, single-label names (`localhost`, `relay`) | refused | allowed |
+| Ports | 993/143, 465/587 | any (25 included) |
+| `eddi.email.allowed-hosts` | applied | not consulted — it confines authors |
+| Link-local and cloud-metadata addresses | refused | **refused** |
+| Resolved once and pinned | yes | **yes** |
+| TLS certificate and host name verified | always | **always**, when TLS is used |
+| Plaintext session | never | only `eddi.mail.smtp.tls=none` with `eddi.mail.smtp.allow-plaintext=true`, and never with a credential |
+
+`TlsMode.PLAINTEXT` cannot exist on an author endpoint: the `Endpoint` constructor refuses it. STARTTLS on the system
+mailer is required, not opportunistic — a relay that does not offer it gets no message and no credential.
 
 For Angus Mail, `angusProperties(endpoint)` installs the pinned factory for both plain and TLS connections, turns
 `socketFactory.fallback` off (otherwise a refusal inside the factory makes Angus retry with an unguarded socket of
@@ -951,7 +975,7 @@ EDDI's CI/CD pipeline enforces multiple automated security gates before any code
 | **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
 | **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
 | **CycloneDX** | SBOM | Maven dependency tree + both UIs’ npm production dependencies | Artifact generation | N/A |
-| **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities | JUnit integration | N/A |
+| **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities, SafeJsonExpression | JUnit integration | N/A |
 
 > **DAST is intentionally absent.** A ZAP API scan used to live in `ci.yml` and was removed rather than kept as decorative coverage: it ran *after* the image was pushed, it scanned an instance started with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (so the authorization layer under test was switched off), and it ran passive-only with `fail_action: false`. Re-adding it means fixing all three at once — build the image in a job that does not push, stand up Keycloak, drive an authenticated OpenAPI scan against it, and gate the publish job on the result.
 
@@ -1011,6 +1035,7 @@ Security-critical input parsers are tested with [Jazzer](https://github.com/Code
 
 - **`PathNavigator`** — Safe path navigation (replaced OGNL). Fuzz targets: `getValue`, `setValue`, arithmetic paths
 - **`MatchingUtilities`** — Condition evaluation for DynamicValueMatcher
+- **`SafeJsonExpression`** — The evaluator of the `expression` output guardrail. Fuzz targets: random expressions, and fixed expressions over random JSON
 
 In CI, fuzz tests run as standard JUnit regression tests. For deep coverage-guided fuzzing locally:
 

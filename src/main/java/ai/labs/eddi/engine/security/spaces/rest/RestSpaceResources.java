@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.security.spaces.SpaceTenants;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantGate;
+import ai.labs.eddi.secrets.VaultGrantImpactAnalyzer;
 import ai.labs.eddi.secrets.VaultGrantRequests;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -20,6 +21,7 @@ import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ClientErrorException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
@@ -54,6 +56,15 @@ public class RestSpaceResources implements IRestSpaceResources {
     private final GlobalVariableResolver variableResolver;
     /** See {@link VaultGrantRequests#requireGrantOnCreate}. */
     private final VaultGrantGate.Mode grantEnforcement;
+
+    /**
+     * Checks a new secret's grant against the agents already deployed with a
+     * reference to it (see {@link VaultGrantImpactAnalyzer#refusalToCreate}). Field
+     * injected, as the REST layer's other optional collaborators are; null only in
+     * tests that construct this class directly.
+     */
+    @Inject
+    VaultGrantImpactAnalyzer grantImpactAnalyzer;
 
     @Inject
     public RestSpaceResources(ResourceAccessGuard accessGuard, ISecretProvider secretProvider, SecretResolver secretResolver,
@@ -120,6 +131,12 @@ public class RestSpaceResources implements IRestSpaceResources {
                 if (allowedAgents == null) {
                     // warn / off: the convenience those modes opted into, said here.
                     allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
+                }
+                // Agents deployed while this secret was absent were never checked against
+                // its grant; this is that check.
+                String refusal = grantImpactAnalyzer != null ? grantImpactAnalyzer.refusalToCreate(reference, allowedAgents, grantEnforcement) : null;
+                if (refusal != null) {
+                    throw new ClientErrorException(refusal, Response.Status.CONFLICT);
                 }
             }
             secretProvider.store(reference, body.value(), body.description(), allowedAgents, allowedHosts);
