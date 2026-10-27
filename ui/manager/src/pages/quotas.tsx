@@ -485,12 +485,17 @@ function QuotaField({
  * Dollars for the budget status. Two decimals hide sub-cent spend — a $0.006
  * spend against a $0.01 cap read "$0.01 of $0.01 … $0.00 left" — so amounts
  * under a dollar keep up to four decimals, trailing zeros trimmed back to two.
+ * Smaller amounts get as many decimals as their first two significant digits
+ * need: a positive limit must never read as $0.00, because a zero limit blocks
+ * every call and a tiny one does not.
  */
 function formatUsd(n: number): string {
-  if (n !== 0 && Math.abs(n) < 1) {
-    return `$${n.toFixed(4).replace(/(\.\d\d\d?)0+$/, "$1").replace(/(\.\d\d)0$/, "$1")}`;
+  const abs = Math.abs(n);
+  if (n === 0 || !Number.isFinite(n) || abs >= 1) {
+    return `$${n.toFixed(2)}`;
   }
-  return `$${n.toFixed(2)}`;
+  const decimals = Math.min(20, Math.max(4, 1 - Math.floor(Math.log10(abs))));
+  return `$${n.toFixed(decimals).replace(/0+$/, "").replace(/\.(\d)$/, (_, d: string) => `.${d}0`).replace(/\.$/, ".00")}`;
 }
 
 /**
