@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import io.quarkus.security.ForbiddenException;
 import jakarta.annotation.security.RolesAllowed;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 
@@ -40,6 +41,7 @@ public interface IRestVersionInfo {
     @RolesAllowed({"eddi-admin", "eddi-editor"})
     @Operation(description = "Redirect to latest version.")
     default Response redirectToLatestVersion(@PathParam("id") String id) {
+        requireCurrentVersionAccess(id);
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
             String path = URI.create(getResourceURI()).getPath();
@@ -55,6 +57,7 @@ public interface IRestVersionInfo {
     @Produces(MediaType.TEXT_PLAIN)
     @Operation(description = "Get current version of this resource.")
     default Integer getCurrentVersion(@PathParam("id") String id) {
+        requireCurrentVersionAccess(id);
         try {
             IResourceStore.IResourceId currentResourceId = getCurrentResourceId(id);
             return currentResourceId.getVersion();
@@ -64,6 +67,23 @@ public interface IRestVersionInfo {
     }
 
     String getResourceURI();
+
+    /**
+     * The per-resource check the two {@code currentversion} endpoints run before
+     * resolving {@code id}: the caller must be able to VIEW the resource, exactly
+     * as for reading it. The role check above says only that the caller is an
+     * author; without this an editor could probe any known id — learning whether it
+     * exists and how often it was edited — in a workspace they cannot read.
+     * <p>
+     * Every store implements it by delegating to its
+     * {@code RestVersionInfo#requireViewAccess}. The default refuses, so a store
+     * that forgets fails closed rather than open. Not an endpoint (no HTTP method),
+     * and deliberately separate from {@link #getCurrentResourceId}, which
+     * in-process engine code calls as a trusted resolver and must stay unguarded.
+     */
+    default void requireCurrentVersionAccess(String id) {
+        throw new ForbiddenException("Access denied: this store does not define how its version info is authorized");
+    }
 
     default IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         throw new IllegalStateException("Method getCurrentVersion of interface IRestVersionInfo needs to be implemented");

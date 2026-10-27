@@ -207,6 +207,26 @@ class LlmTaskResumeModeTest {
         verify(memory).setHitlPauseType(null);
     }
 
+    @Test
+    @DisplayName("resume mode asks the spend gate first: a spent conversation runs neither the approved calls nor the model")
+    void resumeRefusedBySpendGate() throws Exception {
+        var b = batch("taskA", 0);
+        wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
+        var spendGate = mock(LlmSpendGate.class);
+        when(spendGate.check(memory)).thenReturn(new LlmSpendGate.Refusal("conversation_cost_ceiling", "spent"));
+        llmTask.spendGate = spendGate;
+
+        var t = task("taskA", List.of("action1"));
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        verify(agentOrchestrator, never()).resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(dataFactory).createData(eq(MemoryKeys.LLM_SPEND_REFUSED_PREFIX + "taskA"),
+                argThat(r -> r instanceof Map<?, ?> m && "conversation_cost_ceiling".equals(m.get("reason"))));
+        // The batch is consumed like any resolved resume, so the next turn is not a
+        // resume.
+        verify(memory).setHitlPendingToolCalls(null);
+    }
+
     // ============================================================
     // Pre-LLM bypass checklist — each of these MUST be skipped on resume
     // ============================================================

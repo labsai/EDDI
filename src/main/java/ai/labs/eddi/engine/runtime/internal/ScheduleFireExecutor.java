@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.runtime.internal;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -102,6 +104,14 @@ public class ScheduleFireExecutor {
      */
     @Inject
     ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * The freshest server-side record of the creator's teams, used to narrow the
+     * create-time snapshot — see {@link #currentCreatorTeams}. Null only in unit
+     * tests that do not exercise it.
+     */
+    @Inject
+    UserDirectory userDirectory;
 
     /**
      * How long a single conversation fire may take before it is abandoned as
@@ -252,6 +262,7 @@ public class ScheduleFireExecutor {
 
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
+            addMaxCostPerFire(inputData, schedule);
 
             // 3. Execute via ConversationService.say()
             // This enforces tenant quotas, audit trail, conversation ordering
@@ -420,7 +431,50 @@ public class ScheduleFireExecutor {
         if (schedule.getCreatorTeams() == null) {
             return null;
         }
-        return resourceAccessGuard.checkPrincipalUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin());
+        return resourceAccessGuard.checkPrincipalUse(agentId, creator, currentCreatorTeams(schedule), schedule.isCreatorAdmin());
+    }
+
+    /**
+     * The creator's team subjects as far as the server knows them now: the snapshot
+     * taken at create time, narrowed to the teams their most recent sign-in still
+     * listed.
+     * <p>
+     * The snapshot alone is historical authority — a creator removed from a team
+     * kept firing a schedule on an agent shared only with that team. EDDI has no
+     * live directory of anybody's groups outside their own request, but the user
+     * directory records the team subjects each signed-in token carried, refreshed
+     * every few minutes while the person is active. When that record is newer than
+     * the snapshot, a team it no longer lists is dropped. Only ever narrowing: a
+     * team the person joined later never widens what the schedule was authorized
+     * with. With no directory, no entry, or no entry newer than the snapshot (the
+     * creator has not signed in since), the snapshot stands — there is nothing
+     * fresher to go on.
+     */
+    List<String> currentCreatorTeams(ScheduleConfiguration schedule) {
+        List<String> snapshot = schedule.getCreatorTeams();
+        if (snapshot == null || snapshot.isEmpty() || userDirectory == null || schedule.getCreatedAt() == null) {
+            return snapshot;
+        }
+        try {
+            if (!userDirectory.isActive()) {
+                return snapshot;
+            }
+            DirectoryUser seen = userDirectory.lookup(List.of(schedule.getCreatedBy())).get(schedule.getCreatedBy());
+            if (seen == null || seen.lastSeen() == null || seen.lastSeen().isBefore(schedule.getCreatedAt())) {
+                return snapshot;
+            }
+            Set<String> current = new HashSet<>(seen.teams());
+            List<String> narrowed = snapshot.stream().filter(current::contains).toList();
+            if (narrowed.size() < snapshot.size()) {
+                LOGGER.infof("[SCHEDULE] Creator of schedule %s no longer lists team(s) %s at their last sign-in — not counted",
+                        sanitize(schedule.getId()),
+                        sanitize(String.valueOf(snapshot.stream().filter(t -> !current.contains(t)).toList())));
+            }
+            return narrowed;
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "[SCHEDULE] Could not read the user directory for schedule %s", sanitize(schedule.getId()));
+            return snapshot;
+        }
     }
 
     private static String revokedReason(ScheduleConfiguration schedule) {
@@ -978,6 +1032,24 @@ public class ScheduleFireExecutor {
         } catch (Exception e) {
             LOGGER.warnf(e, "[SCHEDULE] Conversation properties not carried into %s (schedule %s)", newConversationId, schedule.getId());
         }
+    }
+
+    /**
+     * Carries {@code maxCostPerFire} into the fire's turn, where the LLM spend gate
+     * and the tool loop hold it to the conversation's spend before the turn plus
+     * this allowance — the ceiling machinery an agent's
+     * {@code maxCostPerConversationUsd} already uses, so a
+     * {@code conversationStrategy=persistent} schedule is capped per fire, not for
+     * its lifetime. It travels in the input, so it applies on whichever node runs
+     * the turn. Zero or below means unlimited, as it always has (Postgres stores
+     * {@code 0} as NULL, so the two cannot be told apart).
+     */
+    static void addMaxCostPerFire(InputData inputData, ScheduleConfiguration schedule) {
+        double allowance = schedule.getMaxCostPerFire();
+        if (!(allowance > 0) || Double.isInfinite(allowance)) {
+            return;
+        }
+        inputData.getContext().put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {
