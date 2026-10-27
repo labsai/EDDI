@@ -403,7 +403,13 @@ class ConversationHistoryBuilder {
             var output = outputs.get(i);
             var input = output.get("input", String.class);
             if (input != null) {
-                var user = UserMessage.from(ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input));
+                // A message an input guardrail refused is withheld whole — whatever the
+                // guardrail type, and whether or not it re-screens history. Not the
+                // current turn: another task of this turn decides it with its own
+                // guardrails.
+                var user = UserMessage.from(i < outputs.size() - 1 && ConversationLogGenerator.isInputWithheldStep(allSteps, i)
+                        ? ConversationLogGenerator.WITHHELD_INPUT
+                        : ConversationLogGenerator.withAttachmentExtracts(allSteps, i, input));
                 if (mergeNextUser && !result.isEmpty() && result.getLast() instanceof UserMessage previous) {
                     // The assistant turn between them was a fallback and is gone: fold
                     // the inputs together so roles keep alternating.

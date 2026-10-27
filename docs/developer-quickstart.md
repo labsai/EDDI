@@ -62,7 +62,7 @@ git clone https://github.com/labsai/EDDI.git
 cd EDDI
 
 # Start EDDI + MongoDB on 127.0.0.1:7070 (pin a release; omit EDDI_VERSION to get :latest)
-EDDI_VERSION=6.5.0 docker compose up -d
+EDDI_VERSION=6.6.0 docker compose up -d
 
 # Access dashboard
 open http://localhost:7070/manage
