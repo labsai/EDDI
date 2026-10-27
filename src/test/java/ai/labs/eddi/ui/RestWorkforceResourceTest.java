@@ -10,8 +10,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -26,19 +24,16 @@ class RestWorkforceResourceTest {
 
     @BeforeEach
     void setUp() {
-        resource = new RestWorkforceResource();
+        resource = new RestWorkforceResource(ShellTestSupport.renderer());
     }
 
     /**
-     * Consumes the response entity stream fully and closes it, so the test does not
-     * leak the open classpath resource.
+     * The rendered shell (BrandedShellRenderer) as text.
      */
-    private static String readEntity(Response response) throws IOException {
+    private static String readEntity(Response response) {
         assertNotNull(response.getEntity(), "Entity must not be null");
-        assertInstanceOf(InputStream.class, response.getEntity());
-        try (InputStream stream = (InputStream) response.getEntity()) {
-            return new String(stream.readAllBytes(), StandardCharsets.UTF_8);
-        }
+        assertInstanceOf(String.class, response.getEntity(), "the shell is served rendered");
+        return (String) response.getEntity();
     }
 
     @Test
