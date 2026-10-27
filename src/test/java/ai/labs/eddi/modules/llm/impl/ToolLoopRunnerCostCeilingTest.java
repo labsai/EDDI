@@ -6,11 +6,16 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
+import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -60,9 +65,11 @@ class ToolLoopRunnerCostCeilingTest {
     private int modelCalls;
     private ChatModel model;
 
+    private ToolExecutionService toolExecutionService;
+
     @BeforeEach
     void setUp() {
-        ToolExecutionService toolExecutionService = mock(ToolExecutionService.class);
+        toolExecutionService = mock(ToolExecutionService.class);
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class),
                         nullable(String.class), any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
@@ -136,6 +143,69 @@ class ToolLoopRunnerCostCeilingTest {
         run(memory(0.025, 0.01, 0.01));
 
         assertEquals(1, modelCalls);
+    }
+
+    @Test
+    @DisplayName("a scheduled fire's maxCostPerFire stops the loop like the agent's own ceiling")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void maxCostPerFireStopsTheLoop() throws Exception {
+        // No agent ceiling; $0.05 spent by earlier steps; the fire may spend $0.025.
+        IConversationMemory memory = memory(null, 0.05);
+        IWritableConversationStep step = mock(IWritableConversationStep.class);
+        IData<Object> allowance = mock(IData.class);
+        when(allowance.getResult()).thenReturn(new Context(Context.ContextType.object, 0.025));
+        when(step.getData("context:" + ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE)).thenReturn((IData) allowance);
+        when(memory.getCurrentStep()).thenReturn(step);
+
+        var result = run(memory);
+
+        assertEquals(3, modelCalls);
+        assertEquals(ToolLoopRunner.costCeilingReachedMessage(), result.response());
+    }
+
+    /**
+     * A HITL resume's continuation: starts past iteration 0, after the approved
+     * calls ran.
+     */
+    private String resume(IConversationMemory memory, double toolCostBefore) throws Exception {
+        return runner.runToolCallLoop(model, List.of(UserMessage.from("go")), setup.builtInSpecs(), new ArrayList<>(), 1, toolCostBefore, setup,
+                false,
+                task, memory, null, -1, ClearedToolCalls.none(), 0, new TokenUsage[1], null, null, null);
+    }
+
+    @Test
+    @DisplayName("a resume whose conversation is already spent does not send its first request")
+    void resumeChecksBeforeItsFirstRequest() throws Exception {
+        String response = resume(memory(0.025, 0.03), 0.0);
+
+        assertEquals(0, modelCalls);
+        assertEquals(ToolLoopRunner.costCeilingReachedMessage(), response);
+    }
+
+    @Test
+    @DisplayName("what the approved calls of a resume charged counts towards the ceiling")
+    void approvedCallCostCounts() throws Exception {
+        // Nothing spent before the pause; the approved calls charged $0.03.
+        var tracker = mock(ToolCostTracker.class);
+        var metrics = mock(ToolCostTracker.ConversationCostMetrics.class);
+        when(metrics.getTotalCost()).thenReturn(0.03);
+        when(tracker.getConversationCosts(CONVERSATION_ID)).thenReturn(metrics);
+        when(toolExecutionService.getCostTracker()).thenReturn(tracker);
+
+        String response = resume(memory(0.025), 0.0);
+
+        assertEquals(0, modelCalls);
+        assertEquals(ToolLoopRunner.costCeilingReachedMessage(), response);
+    }
+
+    @Test
+    @DisplayName("a resume under the ceiling runs as before")
+    void resumeUnderTheCeilingRuns() throws Exception {
+        resume(memory(0.025, 0.01), 0.0);
+
+        // $0.01 before, then $0.02 after the first round; $0.03 after the second is not
+        // under.
+        assertEquals(2, modelCalls);
     }
 
     @Test
