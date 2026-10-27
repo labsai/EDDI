@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -38,6 +39,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import java.util.ArrayList;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -681,5 +683,38 @@ class AgentOrchestratorToolPauseTest {
 
         assertEquals(List.of("c2"), ex.getBatch().getCalls().stream().map(PendingToolCallBatch.PendingToolCall::getCallId).toList());
         verify(calculatorTool, never()).calculate(anyString());
+    }
+
+    @Test
+    @DisplayName("the pause carries what the run spent before it: priced model rounds and tracked tool cost")
+    void pauseCarriesTheSpendSoFar() {
+        var task = twoToolTask();
+        // 1M input tokens per round at $0.01/1M: each round costs $0.01.
+        task.setInputPricePer1M(0.01);
+        double[] trackedToolCost = {0.0};
+        var tracker = mock(ToolCostTracker.class);
+        var metrics = mock(ToolCostTracker.ConversationCostMetrics.class);
+        when(metrics.getTotalCost()).thenAnswer(inv -> trackedToolCost[0]);
+        when(tracker.getConversationCosts("conv-1")).thenReturn(metrics);
+        when(toolExecutionService.getCostTracker()).thenReturn(tracker);
+        // The ungated call of round 1 charges $0.005.
+        when(dateTimeTool.getCurrentDateTime(anyString())).thenAnswer(inv -> {
+            trackedToolCost[0] = 0.005;
+            return "2026-10-27T12:00:00Z";
+        });
+        ChatModel chatModel = mock(ChatModel.class);
+        var ungatedReq = ToolExecutionRequest.builder().id("c1").name("getCurrentDateTime").arguments("{\"timezone\":\"UTC\"}").build();
+        var gatedReq = ToolExecutionRequest.builder().id("c2").name("calculate").arguments("{\"expression\":\"6*7\"}").build();
+        when(chatModel.chat(any(ChatRequest.class))).thenReturn(
+                ChatResponse.builder().aiMessage(AiMessage.from(List.of(ungatedReq))).tokenUsage(new TokenUsage(1_000_000, 0)).build(),
+                ChatResponse.builder().aiMessage(AiMessage.from(List.of(gatedReq))).tokenUsage(new TokenUsage(1_000_000, 0)).build());
+
+        var ex = assertThrows(ToolApprovalRequiredException.class,
+                () -> orchestrator.executeIfToolsEnabled(chatModel, "sys", List.of(UserMessage.from("hi")), task, memory, gateCalculate(), 0));
+
+        // Two rounds at $0.01 plus the $0.005 tool call: LlmTask records this on the
+        // step, so the resume's ceiling checks see it.
+        assertEquals(0.025, ex.getCostSoFarUsd(), 1e-12);
+        assertEquals(2_000_000L, ((Number) ex.getTokenUsageSoFar().get("inputTokens")).longValue());
     }
 }

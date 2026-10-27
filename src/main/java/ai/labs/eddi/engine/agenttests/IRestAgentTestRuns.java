@@ -45,13 +45,24 @@ public interface IRestAgentTestRuns {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Start a test run", description = "Deploys the agent version to the test environment if needed and runs the suite "
             + "in the background. Returns 202 with the RUNNING run record; poll GET /agenttests/runs/{runId} until status is "
-            + "PASSED, FAILED, ERROR or ABORTED.")
+            + "PASSED, FAILED, ERROR, ABORTED or CANCELLED.")
     @APIResponse(responseCode = "202", description = "Run accepted; the body is the RUNNING record with its id.")
     @APIResponse(responseCode = "400", description = "Missing ids, or the suite has no cases.")
     @APIResponse(responseCode = "404", description = "Suite or agent not found.")
     @APIResponse(responseCode = "409", description = "The version could not be deployed to test, or a newer version is also deployed there.")
     @APIResponse(responseCode = "429", description = "Too many runs executing at once (eddi.agent-tests.max-concurrent-runs).")
     Response startRun(StartRunRequest request);
+
+    @POST
+    @Path("/runs/{runId}/cancel")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Cancel a test run", description = "Stops a RUNNING run cooperatively: no further turn starts, a turn in "
+            + "progress is abandoned, and every test conversation is ended and deleted (unless the run keeps them). Returns 202 with "
+            + "the record as it is now; it reads CANCELLED moments later. Takes the same rights as starting a run.")
+    @APIResponse(responseCode = "202", description = "Cancellation requested; poll GET /agenttests/runs/{runId}.")
+    @APIResponse(responseCode = "404", description = "Run not found.")
+    @APIResponse(responseCode = "409", description = "The run has already finished, or it is executing on another node.")
+    Response cancelRun(@PathParam("runId") String runId);
 
     @GET
     @NoCache

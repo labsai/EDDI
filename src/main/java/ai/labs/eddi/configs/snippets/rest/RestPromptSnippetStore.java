@@ -85,6 +85,11 @@ public class RestPromptSnippetStore implements IRestPromptSnippetStore {
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return snippetStore.getCurrentResourceId(id);
     }
