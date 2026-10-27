@@ -15489,6 +15489,183 @@
           }
         }
       ]
+    },
+    {
+      "id": 264,
+      "type": "row",
+      "title": "Conversation Ratings",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "panels": [
+        {
+          "id": 265,
+          "type": "timeseries",
+          "title": "Ratings by kind and bucket",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_conversation_ratings_total` — ratings people gave, per `kind` (conversation/message) and `bucket` (low/neutral/high on the normalized score). A re-rating counts again; withdrawals (`eddi_conversation_ratings_withdrawn_total`) are query B. Flat is normal when no agent has `ratingConfig` enabled.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind, bucket) (rate(eddi_conversation_ratings_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}} / {{bucket}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (kind) (rate(eddi_conversation_ratings_withdrawn_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "withdrawn {{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 266,
+          "type": "timeseries",
+          "title": "Average normalized rating by agent",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean of `eddi_conversation_ratings_normalized` (0..1) per `agentId` over the window, from its `_sum` and `_count`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (agentId) (rate(eddi_conversation_ratings_normalized_sum{job=~\"$job\"}[$__rate_interval])) / sum by (agentId) (rate(eddi_conversation_ratings_normalized_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{agentId}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
     }
   ],
   "preload": false,

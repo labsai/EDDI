@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -22,11 +23,20 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 public class ConversationLogGenerator {
     private static final String KEY_ROLE_USER = "user";
     private static final String KEY_ROLE_ASSISTANT = "assistant";
-    private static final Object OUTPUT_KEY_CONTEXT = "context";
+    private static final String OUTPUT_KEY_CONTEXT = "context";
     private static final String OUTPUT_KEY_INPUT = "input";
     private static final String KEY_INPUT_FILES = "inputFiles";
     private static final String KEY_TYPE = "type";
     private static final String KEY_URL = "url";
+
+    /**
+     * What a model sees in place of a user message an input guardrail refused
+     * ({@link MemoryKeys#LLM_INPUT_WITHHELD_PREFIX}): that something was withheld,
+     * not what.
+     */
+    public static final String WITHHELD_INPUT = "[earlier message withheld by a guardrail]";
+
+    private static final String AUDIT_GUARDRAIL_INPUT_PREFIX = MemoryKeys.AUDIT_GUARDRAIL_PREFIX + "input:";
 
     private IConversationMemory conversationMemory;
     private ConversationMemorySnapshot memorySnapshot;
@@ -120,7 +130,16 @@ public class ConversationLogGenerator {
                 if (input != null) {
                     var inputText = new Content();
                     inputText.setType(text);
-                    inputText.setValue(withAttachmentExtracts(extractSteps, index, input));
+                    if (skipFallbackOutputs && index < conversationOutputs.size() - 1 && isInputWithheldStep(allSteps, index)) {
+                        // An input guardrail refused this message: nothing of it — text,
+                        // extracts or files — reaches a model on a later turn. The current
+                        // turn is not "later": another task of this turn decides it with its
+                        // own guardrails.
+                        contentList.clear();
+                        inputText.setValue(WITHHELD_INPUT);
+                    } else {
+                        inputText.setValue(withAttachmentExtracts(extractSteps, index, input));
+                    }
                     var inputs = new ArrayList<>(contentList);
                     inputs.add(inputText);
                     var previous = conversationLog.getMessages().isEmpty() ? null : conversationLog.getMessages().getLast();
@@ -226,6 +245,77 @@ public class ConversationLogGenerator {
         IConversationMemory.IConversationStep step = allSteps.get(allSteps.size() - 1 - stepIndex);
         List<IData<Object>> flags = step.getAllData(MemoryKeys.LLM_FALLBACK_PREFIX);
         return flags != null && flags.stream().anyMatch(flag -> Boolean.TRUE.equals(flag.getResult()));
+    }
+
+    /**
+     * Whether the user message of the turn at {@code stepIndex} (a forward index
+     * into the conversation outputs) must be withheld from every model: an input
+     * guardrail blocked it, or redacted it with a guardrail that does not re-screen
+     * history. Reads the {@code llm:input_withheld:<taskId>} flag off the aligned
+     * step; a step written before that flag existed counts when it carries an input
+     * guardrail audit record with action {@code block}. False when there is no step
+     * stack or the index is out of range.
+     */
+    public static boolean isInputWithheldStep(IConversationMemory.IConversationStepStack allSteps, int stepIndex) {
+        if (allSteps == null || stepIndex < 0 || stepIndex >= allSteps.size()) {
+            return false;
+        }
+        return isInputWithheld(allSteps.get(allSteps.size() - 1 - stepIndex));
+    }
+
+    /** {@link #isInputWithheldStep} for a step at hand. */
+    public static boolean isInputWithheld(IConversationMemory.IConversationStep step) {
+        if (step == null) {
+            return false;
+        }
+        List<IData<Object>> flags = step.getAllData(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX);
+        if (flags != null && flags.stream().anyMatch(flag -> Boolean.TRUE.equals(flag.getResult()))) {
+            return true;
+        }
+        List<IData<Object>> records = step.getAllData(AUDIT_GUARDRAIL_INPUT_PREFIX);
+        return records != null && records.stream().anyMatch(ConversationLogGenerator::recordsInputBlock);
+    }
+
+    private static boolean recordsInputBlock(IData<Object> data) {
+        if (data == null || !(data.getResult() instanceof List<?> records)) {
+            return false;
+        }
+        return records.stream().anyMatch(record -> record instanceof Map<?, ?> map && "block".equals(map.get("action")));
+    }
+
+    /**
+     * The conversation outputs as a model may see them: a copy in which the input
+     * of every withheld turn ({@link #isInputWithheldStep}) is
+     * {@link #WITHHELD_INPUT} and its input files are gone. Every other output is
+     * the stored one, unchanged. For the model-facing renderings that read the
+     * outputs directly — the rolling summary and the recall tool.
+     */
+    public static List<ConversationOutput> modelFacingOutputs(IConversationMemory memory) {
+        List<ConversationOutput> outputs = memory.getConversationOutputs();
+        var allSteps = memory.getAllSteps();
+        if (outputs == null || allSteps == null) {
+            return outputs;
+        }
+        List<ConversationOutput> view = null;
+        for (int i = 0; i < outputs.size(); i++) {
+            ConversationOutput output = outputs.get(i);
+            if (output == null || output.get(OUTPUT_KEY_INPUT) == null || !isInputWithheldStep(allSteps, i)) {
+                continue;
+            }
+            if (view == null) {
+                view = new ArrayList<>(outputs);
+            }
+            var withheld = new ConversationOutput();
+            withheld.putAll(output);
+            withheld.put(OUTPUT_KEY_INPUT, WITHHELD_INPUT);
+            if (withheld.get(OUTPUT_KEY_CONTEXT) instanceof Map<?, ?> context && context.containsKey(KEY_INPUT_FILES)) {
+                var withoutFiles = new LinkedHashMap<Object, Object>(context);
+                withoutFiles.remove(KEY_INPUT_FILES);
+                withheld.put(OUTPUT_KEY_CONTEXT, withoutFiles);
+            }
+            view.set(i, withheld);
+        }
+        return view != null ? view : outputs;
     }
 
     /**
