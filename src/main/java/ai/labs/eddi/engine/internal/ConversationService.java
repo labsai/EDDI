@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -1018,7 +1019,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            var conversationMemorySnapshot = requireSnapshot(conversationId);
+            // The current step needs no history: read only the tail (see readConversation
+            // below).
+            var tail = Boolean.TRUE.equals(returnCurrentStepOnly) ? requireTail(conversationId) : null;
+            var conversationMemorySnapshot = tail != null ? tail.snapshot() : requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
 
@@ -1029,7 +1033,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentMismatchException(message);
             }
 
-            return convertSimpleConversationMemorySnapshot(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly, returningFields);
+            return tail != null
+                    ? convertSimpleConversationMemorySnapshot(tail, returnDetailed, returningFields)
+                    : convertSimpleConversationMemorySnapshot(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly, returningFields);
         } finally {
             recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
         }
@@ -1783,6 +1789,18 @@ public class ConversationService implements IConversationService, UserErasurePar
         checkNotNull(conversationId, "conversationId");
 
         try {
+            // The current-step read (a chat reload) needs the last step and output and
+            // a few totals, not the history: on a slow database link the whole document
+            // of a tool-using agent took tens of seconds to arrive. The tail gives the
+            // same response — see ConversationMemoryTail. Anything else, including a
+            // null returnCurrentStepOnly, takes the full read exactly as before.
+            if (Boolean.TRUE.equals(returnCurrentStepOnly)) {
+                var tail = requireTail(conversationId);
+                var snapshot = tail.snapshot();
+                contextLogger.setLoggingContext(contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(),
+                        conversationId, snapshot.getUserId()));
+                return convertSimpleConversationMemorySnapshot(tail, returnDetailed, returningFields);
+            }
             var snapshot = requireSnapshot(conversationId);
             var loggingContext = contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId,
                     snapshot.getUserId());
@@ -1822,6 +1840,15 @@ public class ConversationService implements IConversationService, UserErasurePar
             throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
         }
         return snapshot;
+    }
+
+    /** {@link #requireSnapshot}'s twin for the tail read — same 404. */
+    private ConversationMemoryTail requireTail(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var tail = conversationMemoryStore.loadConversationMemoryTail(conversationId);
+        if (tail == null) {
+            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return tail;
     }
 
     @Override
@@ -2942,6 +2969,26 @@ public class ConversationService implements IConversationService, UserErasurePar
     public ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         return conversationHitlService.getConversationMemorySnapshot(conversationId);
+    }
+
+    @Override
+    public ConversationMemoryTail getConversationMemoryTail(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var tail = conversationMemoryStore.loadConversationMemoryTail(conversationId);
+        if (tail == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        return tail;
+    }
+
+    @Override
+    public ConversationMemorySnapshot getConversationMemorySnapshotForApprover(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshotForApprover(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        return snapshot;
     }
 
     @Override

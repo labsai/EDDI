@@ -29,9 +29,14 @@ import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.bson.BsonArray;
 import org.bson.BsonDocument;
+import org.bson.BsonDocumentReader;
 import org.bson.BsonDocumentWriter;
+import org.bson.BsonNumber;
+import org.bson.BsonValue;
 import org.bson.Document;
+import org.bson.codecs.DecoderContext;
 import org.bson.codecs.EncoderContext;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -100,6 +105,23 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     private static final String KEY_FENCE = "_fence";
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
+    private static final String KEY_REDO_CACHE = "redoCache";
+    /**
+     * The totals the tail read computes on the server; never stored, and removed
+     * from the document before it is decoded.
+     */
+    private static final String KEY_TAIL_TOTALS = "__eddiTailTotals";
+    /**
+     * Pending-batch fields that only resume reads: the frozen LLM transcript, the
+     * gating assistant message, the running trace, the batch fingerprint and each
+     * call's raw arguments. Neither the simple projection (an allow-list without
+     * them) nor the approver projection (which nulls them) serves any of them, so
+     * the reads behind those projections leave them on the server — see
+     * {@link ConversationMemoryTail}.
+     */
+    private static final List<String> RESUME_ONLY_BATCH_FIELDS = List.of("hitlPendingToolCalls.chatTranscriptJson",
+            "hitlPendingToolCalls.gatingAssistantMessageJson", "hitlPendingToolCalls.traceSoFar", "hitlPendingToolCalls.fingerprint",
+            "hitlPendingToolCalls.calls.argumentsRaw");
     /**
      * Keys the append path handles with a dedicated operator, so they must not also
      * be {@code $set} or {@code $unset}: the two step/output arrays are pushed to,
@@ -533,8 +555,124 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         if (!isStorableId(conversationId)) {
             return null;
         }
-        var memorySnapshot = conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first();
+        return finishLoad(conversationId, conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId))).first());
+    }
 
+    /**
+     * The full snapshot minus {@link #RESUME_ONLY_BATCH_FIELDS} — see
+     * {@link IConversationMemoryStore#loadConversationMemorySnapshotForApprover}.
+     */
+    @Override
+    public ConversationMemorySnapshot loadConversationMemorySnapshotForApprover(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return null;
+        }
+        return finishLoad(conversationId, conversationCollectionObject.find(new Document(OBJECT_ID, new ObjectId(conversationId)))
+                .projection(Projections.exclude(RESUME_ONLY_BATCH_FIELDS)).first());
+    }
+
+    /**
+     * One aggregation that sends the document without its history: the last step
+     * and the last output, no redo cache, no resume-only batch fields — plus the
+     * totals the current-step projection needs from what was left behind (step,
+     * output and redo counts, and the spend entries' values for the conversation
+     * cost), computed on the server. See {@link ConversationMemoryTail}.
+     * <p>
+     * A document that still stores a step under EDDI 5's {@code packages} key
+     * (which the load's {@code @JsonAlias} reads, but these server-side expressions
+     * do not) is loaded in full instead, so its cost is never under-counted.
+     */
+    @Override
+    public ConversationMemoryTail loadConversationMemoryTail(String conversationId) {
+        if (!isStorableId(conversationId)) {
+            return null;
+        }
+        var document = conversationCollectionDocument.withDocumentClass(BsonDocument.class).aggregate(tailPipeline(new ObjectId(conversationId)))
+                .first();
+        if (document == null) {
+            return null;
+        }
+        var totals = document.getDocument(KEY_TAIL_TOTALS);
+        document.remove(KEY_TAIL_TOTALS);
+        if (totals.getBoolean("legacySteps").getValue()) {
+            var full = loadConversationMemorySnapshot(conversationId);
+            return full == null ? null : ConversationMemoryTail.ofFullSnapshot(full);
+        }
+        var codec = conversationCollectionObject.getCodecRegistry().get(ConversationMemorySnapshot.class);
+        var snapshot = finishLoad(conversationId, codec.decode(new BsonDocumentReader(document), DecoderContext.builder().build()));
+        return ConversationMemoryTail.ofProjection(snapshot, totals.getNumber("steps").intValue(), totals.getNumber("outputs").intValue(),
+                totals.getNumber("redo").intValue(), spendValues(totals.getArray("liveSpend")), spendValues(totals.getArray("redoSpend")));
+    }
+
+    private static List<Bson> tailPipeline(ObjectId conversationId) {
+        String steps = "$" + KEY_CONVERSATION_STEPS;
+        String outputs = "$" + KEY_CONVERSATION_OUTPUTS;
+        String redoCache = "$" + KEY_REDO_CACHE;
+        var totals = new Document("steps", new Document("$size", arrayOrEmpty(steps)))
+                .append("outputs", new Document("$size", arrayOrEmpty(outputs)))
+                .append("redo", new Document("$size", arrayOrEmpty(redoCache)))
+                .append("liveSpend", spendValuesExpression(steps))
+                .append("redoSpend", spendValuesExpression(redoCache))
+                .append("legacySteps", new Document("$or", List.of(storesLegacySteps(steps), storesLegacySteps(redoCache))));
+        // Only an array is cut down. Any other stored shape is left exactly as it is,
+        // so it decodes — or fails to — the way the full load would.
+        var set = new Document(KEY_TAIL_TOTALS, totals)
+                .append(KEY_CONVERSATION_STEPS, lastElementIfArray(steps))
+                .append(KEY_CONVERSATION_OUTPUTS, lastElementIfArray(outputs));
+        var unset = new ArrayList<>(RESUME_ONLY_BATCH_FIELDS);
+        unset.add(KEY_REDO_CACHE);
+        return List.of(Aggregates.match(Filters.eq(OBJECT_ID, conversationId)), new Document("$set", set), new Document("$unset", unset));
+    }
+
+    private static Document arrayOrEmpty(String path) {
+        return new Document("$cond", Arrays.asList(new Document("$isArray", path), path, List.of()));
+    }
+
+    private static Document lastElementIfArray(String path) {
+        return new Document("$cond", Arrays.asList(new Document("$isArray", path), new Document("$slice", Arrays.asList(path, -1)), path));
+    }
+
+    /**
+     * The {@code result} of every {@code audit:cost} and
+     * {@code audit:discarded_cost} entry of the steps at {@code path}, in document
+     * order (step, workflow, entry) — the order
+     * {@code ConversationMemoryUtilities#conversationCost} sums them in, so the
+     * Java-side sum is bit-identical. Unfiltered by type: the same
+     * finite-non-negative-number test is applied in Java.
+     */
+    private static Document spendValuesExpression(String path) {
+        var spendEntries = new Document("$filter", new Document("input", arrayOrEmpty("$$this.lifecycleTasks")).append("as", "entry")
+                .append("cond", new Document("$in", Arrays.asList("$$entry.key", List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST)))));
+        var perWorkflow = new Document("$map", new Document("input", spendEntries).append("as", "entry").append("in", "$$entry.result"));
+        var perStep = new Document("$reduce", new Document("input", arrayOrEmpty("$$this.workflows")).append("initialValue", List.of())
+                .append("in", new Document("$concatArrays", Arrays.asList("$$value", perWorkflow))));
+        return new Document("$reduce", new Document("input", arrayOrEmpty(path)).append("initialValue", List.of())
+                .append("in", new Document("$concatArrays", Arrays.asList("$$value", perStep))));
+    }
+
+    private static Document storesLegacySteps(String path) {
+        return new Document("$anyElementTrue", List.of(new Document("$map", new Document("input", arrayOrEmpty(path)).append("as", "step")
+                .append("in", new Document("$ne", Arrays.asList(new Document("$type", "$$step.packages"), "missing"))))));
+    }
+
+    /**
+     * The spend values as the full load's Jackson decoding sees them: a number
+     * stays a number (its {@code doubleValue()} is all the sum reads), anything
+     * else is not one.
+     */
+    private static List<Object> spendValues(BsonArray values) {
+        var spend = new ArrayList<Object>(values.size());
+        for (BsonValue value : values) {
+            spend.add(value instanceof BsonNumber number ? number.doubleValue() : null);
+        }
+        return spend;
+    }
+
+    /**
+     * What every snapshot load does after the query: restore the typed context
+     * entries and set the id.
+     */
+    private static ConversationMemorySnapshot finishLoad(String conversationId, ConversationMemorySnapshot memorySnapshot) {
         if (memorySnapshot == null) {
             return null;
         }

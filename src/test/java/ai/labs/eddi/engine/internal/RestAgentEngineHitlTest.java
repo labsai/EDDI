@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -345,6 +346,9 @@ class RestAgentEngineHitlTest {
             snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
             snapshot.setHitlPausedAt(Instant.ofEpochMilli(1_700_000_000_123L));
             doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+            lenient().doReturn(snapshot).when(conversationService).getConversationMemorySnapshotForApprover(CONVERSATION_ID);
+            lenient().doAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationService)
+                    .getConversationMemoryTail(CONVERSATION_ID);
 
             Response response = restAgentEngine.getApprovalStatus(CONVERSATION_ID, null);
 
@@ -390,6 +394,9 @@ class RestAgentEngineHitlTest {
             var snapshot = new ConversationMemorySnapshot();
             snapshot.setConversationState(state);
             doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+            lenient().doReturn(snapshot).when(conversationService).getConversationMemorySnapshotForApprover(CONVERSATION_ID);
+            lenient().doAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationService)
+                    .getConversationMemoryTail(CONVERSATION_ID);
             return snapshot;
         }
 
@@ -588,6 +595,10 @@ class RestAgentEngineHitlTest {
                     () -> restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary"));
 
             verify(conversationService, never()).getConversationMemorySnapshot(anyString());
+
+            verify(conversationService, never()).getConversationMemoryTail(anyString());
+
+            verify(conversationService, never()).getConversationMemorySnapshotForApprover(anyString());
         }
 
         @Test
@@ -596,6 +607,9 @@ class RestAgentEngineHitlTest {
             var snapshot = new ConversationMemorySnapshot();
             snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
             doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+            lenient().doReturn(snapshot).when(conversationService).getConversationMemorySnapshotForApprover(CONVERSATION_ID);
+            lenient().doAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationService)
+                    .getConversationMemoryTail(CONVERSATION_ID);
 
             restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary");
 

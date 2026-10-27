@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
@@ -130,7 +131,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void getApprovalStatus_notFound_returnsNotFound() throws Exception {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
-        when(conversationService.getConversationMemorySnapshot("c1"))
+        when(conversationService.getConversationMemoryTail("c1"))
                 .thenThrow(new ResourceNotFoundException("gone"));
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
@@ -139,7 +140,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void getApprovalStatus_genericException_returnsInternal() throws Exception {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
-        when(conversationService.getConversationMemorySnapshot("c1"))
+        when(conversationService.getConversationMemoryTail("c1"))
                 .thenThrow(new RuntimeException("boom"));
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("\"errorCode\":\"INTERNAL\""), out);
@@ -150,7 +151,9 @@ class McpHitlToolsCoverageTest {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.READY); // not paused
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         when(ownershipValidator.isOwner(identity, "alice")).thenReturn(true); // owner => gate passes
         when(json.serialize(any())).thenReturn("{\"full\":true}");
         String out = tools.getApprovalStatus("c1", "full");
@@ -162,7 +165,9 @@ class McpHitlToolsCoverageTest {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         // conversationState left null => the "" branch of state + not-paused fields
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         when(json.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("conversationId=c1"), out);

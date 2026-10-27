@@ -98,6 +98,45 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
     /**
+     * The conversation's current state without its history — see
+     * {@link ConversationMemoryTail} for exactly what it holds and what it may
+     * omit. For reads that show only the current step (a chat reload, the
+     * approval-status card); never for anything that persists, resumes or walks the
+     * history.
+     * <p>
+     * The default loads the conversation in full and is only there so a test fake
+     * keeps working; both stores override it with a projected read that does not
+     * transfer the step history.
+     *
+     * @return the tail, or {@code null} when the conversation does not exist
+     */
+    default ConversationMemoryTail loadConversationMemoryTail(String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        var snapshot = loadConversationMemorySnapshot(conversationId);
+        return snapshot == null ? null : ConversationMemoryTail.ofFullSnapshot(snapshot);
+    }
+
+    /**
+     * The full conversation for the approver view
+     * ({@code approval-status?detail=full}), which serves it through
+     * {@link ConversationMemoryUtilities#sanitizePendingToolCallsForApprover}. A
+     * store may leave out the pending batch's resume machinery that projection
+     * nulls anyway — {@code chatTranscriptJson},
+     * {@code gatingAssistantMessageJson}, {@code traceSoFar}, {@code fingerprint},
+     * each call's {@code argumentsRaw} — so a paused conversation's frozen LLM
+     * transcript is not transferred only to be discarded. Everything else is the
+     * full snapshot. Never persist or resume from it.
+     * <p>
+     * The default is the full load.
+     *
+     * @return the snapshot, or {@code null} when the conversation does not exist
+     */
+    default ConversationMemorySnapshot loadConversationMemorySnapshotForApprover(String conversationId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return loadConversationMemorySnapshot(conversationId);
+    }
+
+    /**
      * The listing fields of several conversations in one read — the conversation
      * listing asks for a descriptor page's worth at a time instead of loading each
      * conversation in full.
