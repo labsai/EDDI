@@ -632,6 +632,19 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public boolean deleteMetaValueIfEquals(String key, String expected) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM secret_vault_meta WHERE key = ? AND value = ?")) {
+            ps.setString(1, key);
+            ps.setString(2, expected);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete meta value: " + key, e);
+        }
+    }
+
     // ─── Conversion helpers ───
 
     @SuppressWarnings("unchecked")

@@ -1984,7 +1984,8 @@ public class VaultSecretProvider implements ISecretProvider {
         }
         byte[] raw = new byte[32];
         new SecureRandom().nextBytes(raw);
-        String winner = persistence.setMetaValueIfAbsent(CHECKSUM_KEY_META, wrapChecksumKey(raw, kek));
+        String wrapped = wrapChecksumKey(raw, kek);
+        String winner = persistence.setMetaValueIfAbsent(CHECKSUM_KEY_META, wrapped);
         if (winner == null) {
             // A store that keeps no metadata cannot hold the key durably. A key that
             // lived only for this process would make every h1: checksum it wrote
@@ -1992,7 +1993,46 @@ public class VaultSecretProvider implements ISecretProvider {
             throw new PersistenceException("The secret store keeps no vault metadata, so the keyed-checksum key cannot be "
                     + "persisted; refusing to write a checksum no restart could verify");
         }
+        if (winner.equals(wrapped)) {
+            takeBackChecksumKeyIfKekRetired(wrapped);
+        }
         return unwrapChecksumKey(winner);
+    }
+
+    /**
+     * Checks the KEK again <em>after</em> this node inserted the checksum key, and
+     * takes the key back if a KEK rotation announced a new KEK in between — the
+     * checksum-key twin of {@link #takeBackIfKekRetired}.
+     * <p>
+     * The check before the insert leaves the same window as for a DEK: a node on
+     * the old master key reads the old check value, stalls past
+     * {@link #rotateKek}'s final read of the checksum key, and then inserts a key
+     * wrapped under the retired KEK, which no node restarted with the new master
+     * key can open — every later store would fail. If the check still matches here,
+     * the insert preceded the announcement, and the rotation's last step, which
+     * re-reads the checksum key after announcing, re-wraps it. If it does not, the
+     * key is deleted — only while it is still the value this node wrote, so a key
+     * the rotation has already re-wrapped is kept — before anything is computed
+     * with it.
+     */
+    private void takeBackChecksumKeyIfKekRetired(String inserted) {
+        String check;
+        try {
+            check = persistence.getMetaValue(KEK_CHECK_META_KEY);
+        } catch (PersistenceException e) {
+            check = null;
+        }
+        if (check == null || kekCheckOpens(check, kek)) {
+            return;
+        }
+        try {
+            persistence.deleteMetaValueIfEquals(CHECKSUM_KEY_META, inserted);
+        } catch (PersistenceException e) {
+            LOGGER.error("[VAULT] Could not take back the keyed-checksum key, wrapped under a retired KEK", e);
+        }
+        errorCounter.increment();
+        throw new PersistenceException("A KEK rotation ran while this node was creating the keyed-checksum key. The key was taken back "
+                + "before any checksum was computed with it. Restart this node with the new master key.");
     }
 
     /**

@@ -689,6 +689,8 @@ class VaultKeySafetyTest {
     @DisplayName("stale replica racing a KEK rotation")
     class StaleReplicaRace {
 
+        private static final String CHECKSUM_KEY_META = "vault-checksum-key";
+
         @Test
         @DisplayName("a first DEK inserted after the announcement is taken back before anything is sealed with it")
         void firstDekIsTakenBack() throws Exception {
@@ -716,6 +718,52 @@ class VaultKeySafetyTest {
 
             assertEquals(1, persistence.listDeks("t9").size());
             assertEquals("nine", provider(NEW_MASTER).resolve(ref("t9", "key")));
+        }
+
+        /**
+         * The rotation re-reads the checksum key as its last step, so a key a stale
+         * replica inserts after that read — wrapped under the retired KEK — would be
+         * seen by nobody, and every node restarted with the new master key would fail
+         * on its next store. The DEK rotation reaches this through the legacy-checksum
+         * upgrade.
+         */
+        @Test
+        @DisplayName("a first checksum key a DEK rotation inserts after the KEK rotation is taken back")
+        void checksumKeyFromRotateDekIsTakenBack() throws Exception {
+            var rotating = provider(MASTER);
+            provider(MASTER).store(ref("t9", "key"), "nine", null, List.of("*"));
+            persistence.secrets.get("t9/key").setChecksum(VaultChecksum.legacy("nine"));
+            persistence.meta.remove(CHECKSUM_KEY_META);
+            var stale = provider(MASTER);
+
+            persistence.beforeNextSetIfAbsent = () -> rotate(rotating);
+            assertThrows(SecretProviderException.class, () -> stale.rotateDek("t9"));
+
+            assertNull(persistence.meta.get(CHECKSUM_KEY_META), "nothing may stay wrapped under the retired KEK");
+            assertNewMasterKeyNodeCanStore();
+            assertEquals("nine", provider(NEW_MASTER).resolve(ref("t9", "key")));
+        }
+
+        @Test
+        @DisplayName("a first checksum key a store inserts after the KEK rotation is taken back")
+        void checksumKeyFromStoreIsTakenBack() throws Exception {
+            var rotating = provider(MASTER);
+            rotating.store(ref("t1", "key"), "one", null, List.of("*"));
+            persistence.meta.remove(CHECKSUM_KEY_META);
+            var stale = provider(MASTER);
+
+            persistence.beforeNextSetIfAbsent = () -> rotate(rotating);
+            assertThrows(Exception.class, () -> stale.store(ref("t1", "other"), "two", null, List.of("*")));
+
+            assertNull(persistence.meta.get(CHECKSUM_KEY_META), "nothing may stay wrapped under the retired KEK");
+            assertNewMasterKeyNodeCanStore();
+        }
+
+        private void assertNewMasterKeyNodeCanStore() throws Exception {
+            var restarted = provider(NEW_MASTER);
+            restarted.store(ref("t1", "after-restart"), "fresh", null, List.of("*"));
+            String checksum = persistence.secrets.get("t1/after-restart").getChecksum();
+            assertTrue(restarted.matchesChecksum("t1", checksum, "fresh"));
         }
 
         private void rotate(VaultSecretProvider provider) {

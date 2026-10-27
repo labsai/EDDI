@@ -545,6 +545,15 @@ public class MongoSecretPersistence implements ISecretPersistence {
         }
     }
 
+    @Override
+    public boolean deleteMetaValueIfEquals(String key, String expected) {
+        try {
+            return metaCollection.deleteOne(and(eq("key", key), eq("value", expected))).getDeletedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to delete meta value: " + key, e);
+        }
+    }
+
     // ─── Document conversion ───
 
     private EncryptedSecret documentToSecret(Document doc) {

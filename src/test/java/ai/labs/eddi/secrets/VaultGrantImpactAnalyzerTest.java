@@ -18,6 +18,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -243,5 +245,57 @@ class VaultGrantImpactAnalyzerTest {
         assertFalse(impact.complete());
         // The readable agent is still reported; the unreadable one is not guessed at.
         assertEquals(List.of(new AffectedAgent("agentThree", 1, "production")), impact.agentsLosingAccess());
+    }
+
+    // ─── creating a secret that deployed agents already reference ───
+
+    /**
+     * The deploy gate lets a reference to an absent secret through (agent sync
+     * deploys before the target holds the secret). Creating it later with a grant
+     * that leaves such an agent out is the grant the gate would have refused.
+     */
+    @Test
+    @DisplayName("enforce: creating a secret whose grant leaves out a deployed agent referencing it is refused, naming the agent")
+    void creationLeavingOutAReferencingAgentIsRefused() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        String refusal = analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE);
+
+        assertNotNull(refusal);
+        assertTrue(refusal.contains("agentTwo"), refusal);
+        assertTrue(refusal.contains(SECRET.toReferenceString()), refusal);
+    }
+
+    @Test
+    @DisplayName("creating a secret is allowed when its grant names every referencing agent, or is the wildcard")
+    void creationNamingTheReferencingAgentsIsAllowed() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne", "agentTwo"), VaultGrantGate.Mode.ENFORCE));
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("*"), VaultGrantGate.Mode.ENFORCE));
+    }
+
+    @Test
+    @DisplayName("warn and off allow the creation; off does not even scan")
+    void creationFollowsTheEnforcementMode() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.WARN));
+        verify(checker).checkReferences(eq("agentTwo"), anyInt(), eq(SECRET));
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.OFF));
+        verify(checker).checkReferences(eq("agentTwo"), anyInt(), eq(SECRET));
+    }
+
+    @Test
+    @DisplayName("an agent whose configuration cannot be read does not block the creation — only a proven reference does")
+    void unreadableAgentDoesNotBlockCreation() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.UNKNOWN);
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE));
     }
 }

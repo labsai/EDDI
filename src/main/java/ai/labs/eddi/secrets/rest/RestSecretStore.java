@@ -189,6 +189,12 @@ public class RestSecretStore implements IRestSecretStore {
                     // than left to a persistence default.
                     allowedAgents = List.of(SecretMetadata.WILDCARD_AGENT);
                 }
+                // Agents deployed while this secret was absent were never checked against
+                // its grant; this is that check.
+                String refusal = grantImpactAnalyzer.refusalToCreate(ref, allowedAgents, grantEnforcement);
+                if (refusal != null) {
+                    return Response.status(Response.Status.CONFLICT).entity(Map.of("error", refusal)).build();
+                }
             }
 
             secretProvider.store(ref, body.value(), body.description(), allowedAgents, allowedHosts);

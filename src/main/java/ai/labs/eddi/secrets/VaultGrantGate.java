@@ -233,9 +233,8 @@ public class VaultGrantGate {
                     .append(" (add ?dryRun=true to preview), or add the agent to the key's grant on the Manager's Secrets page, then deploy again.");
         }
         if (endpoints.size() < secrets.size()) {
-            message.append(" A reference that is not a plain vault secret (an unreadable connection, one assembled from global "
-                    + "variables, or a secret that does not exist) has no single grant to change: fix the connection or the variables, "
-                    + "create the secret with this agent on its grant, or remove the reference.");
+            message.append(" A reference that is not a plain vault secret (an unreadable connection, or one assembled from global "
+                    + "variables) has no single grant to change: fix the connection or the variables, or remove the reference.");
         }
         return message.toString();
     }

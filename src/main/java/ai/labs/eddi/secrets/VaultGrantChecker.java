@@ -67,9 +67,12 @@ import java.util.Set;
  * <p>
  * <b>What it cannot do.</b> An agent already deployed before its grant was
  * narrowed keeps resolving until it is redeployed. This is a deploy-time gate,
- * not a revocation mechanism. That is also why a reference to a secret that
- * does not exist yet is refused rather than let through: nothing checks the
- * grant the secret is later created with until the next deployment.
+ * not a revocation mechanism. A reference to a secret that does not exist yet
+ * is let through — promoting a workflow to an instance that does not hold the
+ * source's secret, then creating it, is a supported flow — so the grant such a
+ * secret is later created with is checked at <em>creation</em> instead: the
+ * create endpoints refuse a new secret whose grant leaves out a deployed agent
+ * that already references it (see {@link VaultGrantImpactAnalyzer}).
  */
 @ApplicationScoped
 public class VaultGrantChecker {
@@ -84,14 +87,6 @@ public class VaultGrantChecker {
     static final String WILDCARD = SecretMetadata.WILDCARD_AGENT;
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    /**
-     * Appended to a reference whose secret does not exist. It also keeps the
-     * violation from parsing as a plain vault reference, so no response offers the
-     * append-grant call, which cannot grant a secret that is not there.
-     */
-    static final String MISSING_SECRET_NOTE = " (the secret does not exist, so no grant names this agent: create it with this agent on its "
-            + "allowedAgents, or remove the reference)";
 
     // Every finder below is a ReferenceScanner, not a regex: find() over these
     // patterns rescans the rest of the text at each unterminated opener, and the
@@ -159,18 +154,17 @@ public class VaultGrantChecker {
      * document could not be read.
      * <p>
      * Only a provable violation is reported for a <em>secret</em>. A secret whose
-     * metadata cannot be read — vault disabled, provider error — is skipped: "could
-     * not determine the grant" is not "the grant is missing", and a deployment gate
-     * that fires on a transient store failure is worse than the hole it closes.
+     * metadata cannot be read — vault disabled, secret absent, provider error — is
+     * skipped: "could not determine the grant" is not "the grant is missing", and a
+     * deployment gate that fires on a transient store failure is worse than the
+     * hole it closes.
      * <p>
-     * A secret that <em>does not exist</em> is the exception, and is reported. The
-     * vault answered, and its answer is that no grant names this agent. Letting it
-     * through used to mean the grant was never checked at all: the resolver does
-     * not check grants, so a secret created after the deployment — restricted to
-     * some other agent — was resolved for this one on its next turn. An editor
-     * could plant a reference to a name an administrator was about to create. The
-     * violation says the secret is missing, so the fix is to create it with this
-     * agent on its grant, or remove the reference.
+     * An absent secret has no grant to check yet, and deploying before it exists is
+     * a supported flow (agent sync promotes a workflow to an instance that does not
+     * hold the source's secrets). The resolver does not check grants, so the grant
+     * such a secret is later created with is checked when it is created: the create
+     * endpoints ask {@link VaultGrantImpactAnalyzer} which deployed agents already
+     * reference it, and refuse a grant that leaves one out.
      * <p>
      * A <em>connection</em> that cannot be read is the opposite case and fails
      * closed. The hop exists because a connection is an indirect vault reference;
@@ -190,9 +184,8 @@ public class VaultGrantChecker {
         // here, exactly as before: this is the deploy gate, and what it does with a
         // config it cannot read is its own decision, separate from reporting.
         for (String reference : collectVaultReferences(agentConfiguration, violations, new ArrayList<>())) {
-            String violation = violationOf(reference, agentId);
-            if (violation != null) {
-                violations.add(violation);
+            if (!isGranted(reference, agentId)) {
+                violations.add(reference);
             }
         }
         return violations;
@@ -417,33 +410,26 @@ public class VaultGrantChecker {
     }
 
     /**
-     * What is wrong with {@code agentId} using {@code reference}, or {@code null}
-     * when nothing is. Absent, empty and wildcard grant lists all allow — those are
-     * the shapes that mean "not restricted", and the wizard writes the wildcard for
-     * every key it vaults.
-     *
-     * @return the reference itself when the grant leaves the agent out; the
-     *         reference with a note when the secret does not exist (see
-     *         {@link #findUngrantedReferences(AgentConfiguration, String)}); null
-     *         when granted or when the grant could not be read
+     * Whether {@code agentId} may use {@code reference}. Absent, empty and wildcard
+     * grant lists all allow — those are the shapes that mean "not restricted", and
+     * the wizard writes the wildcard for every key it vaults. A secret that does
+     * not exist, or whose grant cannot be read, is not a violation (see
+     * {@link #findUngrantedReferences(AgentConfiguration, String)}).
      */
-    private String violationOf(String reference, String agentId) {
+    private boolean isGranted(String reference, String agentId) {
         SecretMetadata metadata;
         try {
             metadata = secretProvider.getMetadata(SecretReference.parse(reference));
-        } catch (ISecretProvider.SecretNotFoundException e) {
-            return reference + MISSING_SECRET_NOTE;
         } catch (Exception e) {
             LOGGER.debugf("Could not read grant metadata for %s (%s) — not treating it as a violation",
                     sanitize(reference), e.getClass().getSimpleName());
-            return null;
+            return true;
         }
         if (metadata == null || metadata.allowedAgents() == null || metadata.allowedAgents().isEmpty()) {
-            return null;
+            return true;
         }
-        boolean granted = metadata.allowedAgents().stream()
-                .anyMatch(agent -> WILDCARD.equals(agent) || (agent != null && agent.equals(agentId)));
-        return granted ? null : reference;
+        return metadata.allowedAgents().stream()
+                .anyMatch(granted -> WILDCARD.equals(granted) || (granted != null && granted.equals(agentId)));
     }
 
     /**

@@ -152,4 +152,47 @@ public class VaultGrantImpactAnalyzer {
         }
         return new GrantImpact(affected, complete);
     }
+
+    /**
+     * Why a secret that does not exist yet may not be <em>created</em> with
+     * {@code allowedAgents}, or null when it may.
+     * <p>
+     * The deploy-time check lets a reference to an absent secret through: agent
+     * sync promotes a workflow to an instance that does not hold the source's
+     * secrets, and deploys it before anyone creates them. The resolver checks no
+     * grants, so without this check a secret created later — restricted to some
+     * other agent — would resolve for every agent already deployed with a reference
+     * to it, until its next deployment. That is the grant the deploy gate would
+     * have refused, so it is refused here, at the first moment it exists: the
+     * creator either names those agents on the grant or undeploys them first.
+     * <p>
+     * Follows {@code eddi.vault.grant-enforcement} as the deploy gate does:
+     * {@code enforce} refuses, {@code warn} logs and allows, {@code off} does not
+     * look. Only an agent proven to reference the secret counts, as at deployment;
+     * the scan covers this node's deployed agents (see the class comment).
+     *
+     * @param mode
+     *            the deployment's grant-enforcement mode
+     * @return the refusal message, naming the agents, or null
+     */
+    public String refusalToCreate(SecretReference secret, List<String> allowedAgents, VaultGrantGate.Mode mode) {
+        if (mode == VaultGrantGate.Mode.OFF) {
+            return null;
+        }
+        List<AffectedAgent> leftOut = agentsLosingAccess(secret, allowedAgents).agentsLosingAccess();
+        if (leftOut.isEmpty()) {
+            return null;
+        }
+        Set<String> agentIds = new LinkedHashSet<>();
+        leftOut.forEach(agent -> agentIds.add(agent.agentId()));
+        String message = "Deployed agent(s) " + String.join(", ", agentIds) + " already reference " + secret.toReferenceString()
+                + ", and the grant this secret is being created with leaves them out. Deployed while the secret did not exist, they "
+                + "were never checked against its grant, so creating it like this would hand them the value. Add them to "
+                + "allowedAgents, or undeploy them first.";
+        if (mode == VaultGrantGate.Mode.WARN) {
+            LOGGER.warnf("%s (eddi.vault.grant-enforcement=warn: created anyway)", sanitize(message));
+            return null;
+        }
+        return message;
+    }
 }

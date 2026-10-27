@@ -137,6 +137,8 @@ public interface IRestSpaceResources {
                        + "explicitly; a create without them is a 400. A rotation may omit both and keeps the stored lists.")
     @APIResponse(responseCode = "200", description = "Stored.")
     @APIResponse(responseCode = "400", description = "No value, an invalid list, or a create without allowedAgents or allowedHosts under enforce.")
+    @APIResponse(responseCode = "409", description = "Under enforce, a create whose allowedAgents leaves out an agent already deployed with a "
+            + "reference to the secret.")
     @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
     Response storeSecret(@QueryParam("space") String space, @PathParam("keyName") String keyName, SecretWrite body);
 
