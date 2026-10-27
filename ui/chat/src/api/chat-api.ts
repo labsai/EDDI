@@ -385,6 +385,14 @@ export async function redoConversation(
 
 /* ─── Agent profile ─────────────────────────── */
 
+/** GET /agents/{agentId}/profile. `rating` is parsed by rating-api.ts. */
+export interface AgentProfile {
+  name?: string | null;
+  reviewNotice?: string | null;
+  /** How the deployed version asks for ratings; null/absent when it does not. */
+  rating?: unknown;
+}
+
 /**
  * What a chat window shows about an agent: its name, and whether the people
  * who maintain it may read this conversation.
@@ -397,8 +405,8 @@ export async function redoConversation(
 export async function fetchAgentProfile(
   agentId: string,
   environment = "production",
-): Promise<{ name?: string | null; reviewNotice?: string | null } | null> {
-  return requestJson<{ name?: string | null; reviewNotice?: string | null }>(
+): Promise<AgentProfile | null> {
+  return requestJson<AgentProfile>(
     `/agents/${encodeSegment(agentId)}/profile?environment=${encodeURIComponent(environment)}`,
     undefined,
     "Failed to read the agent profile",

@@ -25,7 +25,17 @@ import {
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
-import { MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import {
+  DEFAULT_MAX_REVISIONS_PER_TURN,
+  MAX_NOTIFY_RECIPIENTS,
+  MAX_PAUSE_REASON_LENGTH,
+  MAX_REVISIONS_PER_TURN,
+  MIN_REVISIONS_PER_TURN,
+  type AgentHitlConfig,
+  type HitlRejectionAction,
+  type ToolApprovalsConfig,
+} from "@/lib/api/hitl";
+import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
@@ -1075,8 +1085,18 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   onChange,
   disabled = false,
   modified = false,
-}: AgentSectionProps) {
+  onValidityChange,
+}: AgentSectionProps & {
+  /**
+   * Told whether the recipients box holds a list that cannot be saved. An
+   * invalid list is never written to the draft, so an earlier valid edit would
+   * otherwise stay in the draft and be saved while the field shows an error —
+   * the page refuses to save while this is true.
+   */
+  onValidityChange?: (invalid: boolean) => void;
+}) {
   const { t } = useTranslation();
+  const recipientsId = useId();
 
   const hitl: AgentHitlConfig = agent.hitlConfig ?? {};
   const enabled = !!agent.hitlConfig;
@@ -1107,6 +1127,70 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   // after a policy toggle, so stale typed text can't linger.
   useEffect(() => setTimeoutDraft(hitl.approvalTimeout ?? ""), [hitl.approvalTimeout, finite]);
   const invalid = finite && (!timeoutDraft.trim() || !isValidIsoDuration(timeoutDraft.trim()));
+
+  // Email notifications (hitlConfig.notify.email). Same rule as the timeout: an
+  // unsavable recipients list never enters the draft (the backend answers 400),
+  // the field shows what is typed and says what is wrong.
+  const savedRecipients = hitl.notify?.email?.recipients ?? [];
+  const [notifyOn, setNotifyOn] = useState(savedRecipients.length > 0);
+  const [recipientsDraft, setRecipientsDraft] = useState(savedRecipients.join(", "));
+  const savedRecipientsKey = savedRecipients.join(",");
+  useEffect(() => {
+    // Resync only when the stored list differs from what the draft says — a
+    // commit of the user's own typing must not reformat the field under them.
+    setRecipientsDraft((draft) =>
+      parseNotifyRecipients(draft).recipients.join(",") === savedRecipientsKey
+        ? draft
+        : savedRecipientsKey.split(",").filter(Boolean).join(", "),
+    );
+    if (savedRecipientsKey) setNotifyOn(true);
+  }, [savedRecipientsKey]);
+  const parsedRecipients = parseNotifyRecipients(recipientsDraft);
+
+  function commitRecipients(draft: string) {
+    setRecipientsDraft(draft);
+    const parsed = parseNotifyRecipients(draft);
+    if (parsed.error) return;
+    if (parsed.recipients.join(",") !== savedRecipientsKey) {
+      patchHitl({ notify: { email: { recipients: parsed.recipients } } });
+    }
+  }
+
+  function setNotify(on: boolean) {
+    setNotifyOn(on);
+    if (!on) {
+      patchHitl({ notify: null });
+      return;
+    }
+    const parsed = parseNotifyRecipients(recipientsDraft);
+    if (!parsed.error) patchHitl({ notify: { email: { recipients: parsed.recipients } } });
+  }
+
+  function recipientsProblem(): string | null {
+    const position = (parsedRecipients.index ?? 0) + 1;
+    switch (parsedRecipients.error) {
+      case "empty":
+        return t("agentDetail.hitlNotifyEmpty", "Add at least one address, or switch email notifications off.");
+      case "tooMany":
+        return t("agentDetail.hitlNotifyTooMany", "At most {{max}} addresses — use a distribution list for more.", {
+          max: MAX_NOTIFY_RECIPIENTS,
+        });
+      case "invalid":
+        return t("agentDetail.hitlNotifyInvalid", "Entry {{position}} is not a plain address like name@example.com.", { position });
+      case "duplicate":
+        return t("agentDetail.hitlNotifyDuplicate", "Entry {{position}} repeats an earlier address.", { position });
+      default:
+        return null;
+    }
+  }
+  // Only a field the user can see can block the save: switching HITL off hides
+  // the recipients (and drops hitlConfig), whatever notifyOn last said.
+  const recipientsError = enabled && notifyOn ? recipientsProblem() : null;
+  const recipientsInvalid = recipientsError !== null;
+  useEffect(() => {
+    onValidityChange?.(recipientsInvalid);
+    return () => onValidityChange?.(false);
+  }, [recipientsInvalid, onValidityChange]);
 
   return (
     <EditorSection
@@ -1216,6 +1300,67 @@ export const HitlConfigSection = memo(function HitlConfigSection({
               </div>
             )}
 
+            {/* onRejection (E2) — what a rejection with a note does on a rule pause. */}
+            <div>
+              <label htmlFor="hitl-on-rejection" className="mb-1 block text-[10px] text-muted-foreground">
+                {t("agentDetail.hitlOnRejection", "When a reviewer rejects")}
+              </label>
+              <select
+                id="hitl-on-rejection"
+                value={hitl.onRejection ?? "SKIP"}
+                onChange={(e) => {
+                  const onRejection = e.target.value as HitlRejectionAction;
+                  // SKIP is the default: store nothing rather than the default, and
+                  // drop the bound that only REVISE reads.
+                  patchHitl(
+                    onRejection === "REVISE"
+                      ? { onRejection, maxRevisionsPerTurn: hitl.maxRevisionsPerTurn ?? DEFAULT_MAX_REVISIONS_PER_TURN }
+                      : { onRejection: null, maxRevisionsPerTurn: null },
+                  );
+                }}
+                disabled={disabled}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="hitl-on-rejection"
+              >
+                <option value="SKIP">{t("agentDetail.hitlOnRejectionSkip", "Skip the rest of the turn and show the note")}</option>
+                <option value="REVISE">{t("agentDetail.hitlOnRejectionRevise", "Have the model revise its answer with the note")}</option>
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {t(
+                  "agentDetail.hitlOnRejectionHint",
+                  "Revise applies to a rule pause after the model answered, and only to a rejection with a note. Rejected tool calls already go back to the model with the note.",
+                )}
+              </p>
+            </div>
+
+            {hitl.onRejection === "REVISE" && (
+              <div>
+                <label htmlFor="hitl-max-revisions" className="mb-1 block text-[10px] text-muted-foreground">
+                  {t("agentDetail.hitlMaxRevisions", "Revisions per turn")}
+                </label>
+                <input
+                  id="hitl-max-revisions"
+                  type="number"
+                  min={MIN_REVISIONS_PER_TURN}
+                  max={MAX_REVISIONS_PER_TURN}
+                  step={1}
+                  value={hitl.maxRevisionsPerTurn ?? DEFAULT_MAX_REVISIONS_PER_TURN}
+                  onChange={(e) => {
+                    // min/max bound the spinner, not a pasted value: clamp to what
+                    // the backend accepts so the save cannot be refused.
+                    const v = e.currentTarget.valueAsNumber;
+                    if (!Number.isFinite(v)) return;
+                    patchHitl({
+                      maxRevisionsPerTurn: Math.min(MAX_REVISIONS_PER_TURN, Math.max(MIN_REVISIONS_PER_TURN, Math.trunc(v))),
+                    });
+                  }}
+                  disabled={disabled}
+                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  data-testid="hitl-max-revisions"
+                />
+              </div>
+            )}
+
             {/* Tool-level approval gating (surface 3) — pause when the model
                 invokes a matching tool, before it executes. */}
             <div className="border-t border-border pt-3">
@@ -1242,6 +1387,49 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                       })
                     }
                   />
+                </div>
+              )}
+            </div>
+
+            {/* Email notifications — sent through the deployment's system mailer.
+                The mail links to the Approvals page and decides nothing. */}
+            <div className="border-t border-border pt-3">
+              <label className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={notifyOn}
+                  onChange={(e) => setNotify(e.target.checked)}
+                  disabled={disabled}
+                  className="h-3.5 w-3.5 rounded border-input accent-primary"
+                  data-testid="hitl-notify-email-enabled"
+                />
+                {t("agentDetail.hitlNotifyEnable", "Email people when this agent waits for approval")}
+              </label>
+              {notifyOn && (
+                <div className="mt-3">
+                  <label htmlFor={recipientsId} className="mb-1 block text-[10px] text-muted-foreground">
+                    {t("agentDetail.hitlNotifyRecipients", "Recipients (comma or one per line)")}
+                  </label>
+                  <textarea
+                    id={recipientsId}
+                    value={recipientsDraft}
+                    onChange={(e) => commitRecipients(e.target.value)}
+                    disabled={disabled}
+                    rows={2}
+                    placeholder={t("agentDetail.hitlNotifyPlaceholder", "approvers@example.com, ops-lead@example.com")}
+                    className={`w-full rounded-md border bg-background px-2 py-1 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-ring ${recipientsError ? "border-destructive" : "border-input"}`}
+                    data-testid="hitl-notify-email-recipients"
+                  />
+                  <p
+                    className={`mt-1 text-[10px] leading-relaxed ${recipientsError ? "text-destructive" : "text-muted-foreground"}`}
+                    data-testid="hitl-notify-email-hint"
+                  >
+                    {recipientsError ??
+                      t(
+                        "agentDetail.hitlNotifyHint",
+                        "One email per pause, sent through this deployment's system mailer (eddi.mail.smtp.*, set by the operator), only to domains the operator allows. It links to the Approvals page and cannot approve anything. It carries no user messages or agent replies; for a tool-call pause it lists the pending tools with their arguments redacted and shortened.",
+                      )}
+                  </p>
                 </div>
               )}
             </div>

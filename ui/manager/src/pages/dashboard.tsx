@@ -21,6 +21,7 @@ import {
   Sparkles,
   Network,
   Users,
+  MessageSquareHeart,
 } from "lucide-react";
 import {
   useDashboardStats,
@@ -43,6 +44,7 @@ import { useOnboarding } from "@/hooks/use-onboarding";
 import { parseConversationUri } from "@/lib/api/conversations";
 import { useAgentDescriptors } from "@/hooks/use-agents";
 import { useOperatorConfig, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
+import { useAttentionCount } from "@/hooks/use-ratings";
 import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
 
 // ─── State badge color helper ────────────────────────────────────────────────
@@ -255,6 +257,9 @@ export function DashboardPage() {
 
       {/* ─── Platform Operator discovery ─── */}
       <OperatorDiscoveryCard />
+
+      {/* ─── Ratings that still need a look ─── */}
+      <FeedbackAttentionCard />
 
       {/* Stats cards */}
       {stats?.failed && stats.failed.length > 0 && (
@@ -574,6 +579,38 @@ function OperatorDiscoveryCard() {
         </div>
         <Button asChild>
           <Link to="/manage/operator">{t("operator.discovery.action", "Activate")}</Link>
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Ratings needing attention (NEW and low or commented), across every agent —
+ * which only an administrator may ask for, so only they see it. Hidden at zero
+ * so it never nags; shares its query (and its poll) with the sidebar badge.
+ */
+function FeedbackAttentionCard() {
+  const { t } = useTranslation();
+  const mayOpen = useMayOpenScreen();
+  const enabled = useIsAdminOrUnknown() && mayOpen("/manage/feedback");
+  const { data: count } = useAttentionCount(undefined, enabled);
+  if (!enabled || !count) return null;
+
+  return (
+    <Card className="border-amber-500/30 bg-amber-500/5" data-testid="feedback-attention-card">
+      <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+        <div className="flex items-start gap-3">
+          <MessageSquareHeart className="mt-0.5 h-6 w-6 shrink-0 text-amber-500" />
+          <div>
+            <p className="font-medium">{t("feedback.dashboardTitle", "Feedback needing attention")}</p>
+            <p className="text-sm text-muted-foreground" data-testid="feedback-attention-count">
+              {t("feedback.attentionCount", { n: count, defaultValue: "Ratings needing attention: {{n}}" })}
+            </p>
+          </div>
+        </div>
+        <Button asChild variant="outline">
+          <Link to="/manage/feedback">{t("feedback.review", "Review")}</Link>
         </Button>
       </CardContent>
     </Card>

@@ -94,6 +94,19 @@ describe("validateOrigin — a BARE origin, parsed rather than prefix-matched", 
     expect(validateOrigin("ftp://files.example.com")).toBe("originScheme");
   });
 
+  it("accepts the mail schemes a connection names for SMTP/IMAP login", () => {
+    expect(validateOrigin("smtps://smtp.office365.com")).toBeNull();
+    expect(validateOrigin("smtp://relay.example.com:587")).toBeNull();
+    expect(validateOrigin("imaps://outlook.office365.com:993")).toBeNull();
+    expect(validateOrigin("imap://mail.example.com")).toBeNull();
+  });
+
+  it("holds a mail origin to the same bare-origin rules", () => {
+    expect(validateOrigin("smtps://smtp.example.com/submit")).toBe("originNotBare");
+    expect(validateOrigin("smtps://user:pw@smtp.example.com")).toBe("originNotBare");
+    expect(validateOrigin("pop3s://mail.example.com")).toBe("originScheme");
+  });
+
   it("rejects an empty entry", () => {
     expect(validateOrigin("   ")).toBe("originHost");
   });
