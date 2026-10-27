@@ -13,6 +13,8 @@ import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.MigrationLogStore;
 import ai.labs.eddi.configs.migration.MigrationManager;
+import ai.labs.eddi.configs.branding.IBrandingStore;
+import ai.labs.eddi.configs.branding.mongo.BrandingStore;
 import ai.labs.eddi.configs.variables.IGlobalVariableStore;
 import ai.labs.eddi.configs.variables.mongo.GlobalVariableStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -20,12 +22,14 @@ import ai.labs.eddi.configs.properties.mongo.MongoUserMemoryStore;
 import ai.labs.eddi.datastore.mongo.GridFsAttachmentStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.postgres.PostgresAuditStore;
+import ai.labs.eddi.datastore.postgres.PostgresBrandingStore;
 import ai.labs.eddi.datastore.postgres.PostgresAttachmentStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationCheckpointStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
 import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
+import ai.labs.eddi.datastore.postgres.PostgresConversationRatingStore;
 import ai.labs.eddi.datastore.postgres.PostgresHitlToolJournalStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationLogStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationManager;
@@ -38,6 +42,8 @@ import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
+import ai.labs.eddi.engine.ratings.IConversationRatingStore;
+import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
@@ -147,6 +153,13 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IConversationRatingStore conversationRatingStore(Instance<ConversationRatingStore> mongo,
+                                                            Instance<PostgresConversationRatingStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IConversationMemoryStore conversationMemoryStore(Instance<ConversationMemoryStore> mongo,
                                                             Instance<PostgresConversationMemoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
@@ -250,6 +263,12 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IGlobalVariableStore globalVariableStore(Instance<GlobalVariableStore> mongo, Instance<PostgresGlobalVariableStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IBrandingStore brandingStore(Instance<BrandingStore> mongo, Instance<PostgresBrandingStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

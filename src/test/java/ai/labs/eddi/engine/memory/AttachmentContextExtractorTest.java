@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -563,6 +564,51 @@ class AttachmentContextExtractorTest {
         void shouldIgnoreNonAttachmentEntries() {
             IConversationMemory memory = memoryWithSteps(List.of("not an attachment", 42));
             assertTrue(AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty());
+        }
+
+        /**
+         * Flags previous step {@code index} (0 = most recent) as withheld by an input
+         * guardrail.
+         */
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        private static void withhold(IConversationMemory memory, int index) {
+            IData flag = mock(IData.class);
+            when(flag.getResult()).thenReturn(Boolean.TRUE);
+            IConversationMemory.IConversationStep step = memory.getPreviousSteps().get(index);
+            when(step.getAllData(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX)).thenReturn(List.of(flag));
+        }
+
+        @Test
+        void shouldSkipStepsAnInputGuardrailWithheld() {
+            IConversationMemory memory = memoryWithSteps(List.of(stored("ref-ok", "notes.pdf")), List.of(stored("ref-blocked", "payload.pdf")));
+            withhold(memory, 1);
+
+            List<Attachment> result = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
+
+            assertEquals(List.of("ref-ok"), result.stream().map(Attachment::getStorageRef).toList());
+        }
+
+        @Test
+        void withheldStorageRefs_namesOnlyFilesOfWithheldTurns() {
+            IConversationMemory memory = memoryWithSteps(List.of(stored("ref-ok", "notes.pdf")), List.of(stored("ref-blocked", "payload.pdf")));
+            withhold(memory, 1);
+
+            assertEquals(Set.of("ref-blocked"), AttachmentContextExtractor.withheldStorageRefs(memory));
+        }
+
+        @Test
+        void withheldStorageRefs_keepsAFileAlsoAttachedOnAnAcceptedTurn() {
+            IConversationMemory memory = memoryWithSteps(List.of(stored("ref-shared", "report.pdf")),
+                    List.of(stored("ref-shared", "report.pdf"), stored("ref-blocked", "payload.pdf")));
+            withhold(memory, 1);
+
+            assertEquals(Set.of("ref-blocked"), AttachmentContextExtractor.withheldStorageRefs(memory));
+        }
+
+        @Test
+        void withheldStorageRefs_emptyWithoutWithheldTurns() {
+            assertTrue(AttachmentContextExtractor.withheldStorageRefs(null).isEmpty());
+            assertTrue(AttachmentContextExtractor.withheldStorageRefs(memoryWithSteps(List.of(stored("ref-ok", "a.pdf")))).isEmpty());
         }
 
         private static Attachment stored(String ref, String fileName) {

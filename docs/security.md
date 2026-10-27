@@ -797,12 +797,13 @@ A render that exceeds a limit fails like any other malformed template: the outpu
 
 ## Parser and Matcher Bounds
 
-Three small parsers run on text an agent designer or a chatting user controls. Each one has a bound that makes its worst case cheap, and each bound fails closed in a way the caller can see:
+Four small parsers and matchers run on text an agent designer or a chatting user controls. Each one has a bound that makes its worst case cheap, and each bound fails closed in a way the caller can see:
 
 | Parser | Reached by | Bound | On exceeding it |
 |---|---|---|---|
 | Expression parser (`ExpressionProvider`) | Any client — a `context` entry of type `expressions` is parsed by the property-setter and by every `contextmatcher` rule; also dictionaries, `inputmatcher` text | `eddi.expressions.max-length` (32,768 characters) and `eddi.expressions.max-depth` (32 nested parentheses), checked in one linear scan before parsing; the parser itself works on index ranges of the one string | A client-sent context entry: `413` `input_too_large` before the turn starts. Inside a turn: the task fails, counted and audited like any other task failure |
 | Dictionary `regEx` (`RegEx`) | Every token of every user input, against every pattern of the deployed dictionaries | 200 ms per match, enforced through a deadline-checking `CharSequence` (`RegexDeadline`); the pattern must also compile when the dictionary is **saved** | A match past its budget is a miss (logged at WARN); an invalid pattern is refused with `400` at save time, naming the syntax error |
+| Guardrail `patterns` (`regex-filter`, `prompt-injection`) and the classifier's `labelPattern` | Every user message (input guardrails, including attachment text and the history window) and every answer (output guardrails) of a guarded LLM task | 250 ms per text for all of one guardrail's patterns together (one shared `RegexDeadline`); `labelPattern` 250 ms over the last 4 KB of the classifier's answer; every pattern must compile when the task is **deployed** | *Could not decide* (`pattern_timeout`; the classifier's answer is `classifier_unparseable`): the guardrail's `failMode` applies: a `block` guardrail failing closed refuses the text; failing open, what was already found is kept (a match still blocks, completed redactions still apply) and otherwise the text passes with a warning. An invalid pattern fails the deploy, naming its line |
 | Path expressions (`PathNavigator`) | `fromObjectPath` and the other property-instruction paths in `httpcalls`/`mcpcalls`/`property` configs | 64 `+`/`-` operands per expression (the longest-prefix search is quadratic in that count) | The expression resolves to nothing |
 
 A task that nevertheless overflows the stack — an `Error`, which the pipeline's failure handling did not catch before — is now treated as a task failure: counted under `error.type=stack_overflow`, announced as `task_failed`, audited, and rolled back under strict write.

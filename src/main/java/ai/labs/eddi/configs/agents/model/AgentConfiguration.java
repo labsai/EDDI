@@ -455,6 +455,260 @@ public class AgentConfiguration {
     }
 
     /**
+     * Whether the people chatting with this agent may rate the conversation and,
+     * optionally, single agent replies — see {@link RatingConfig}. Absent — the
+     * default — means the feature is off: no rating controls are shown, and the
+     * rating endpoints refuse every rating for conversations on this version.
+     *
+     * @since 6.5.0
+     */
+    private RatingConfig ratingConfig;
+
+    public RatingConfig getRatingConfig() {
+        return ratingConfig;
+    }
+
+    public void setRatingConfig(RatingConfig ratingConfig) {
+        this.ratingConfig = ratingConfig;
+    }
+
+    /**
+     * Conversation ratings: how (and whether) the people chatting with this agent
+     * are asked for feedback.
+     *
+     * <h3>Off unless switched on, twice</h3> A {@code null} {@code ratingConfig}
+     * means off, and so does one whose {@link #isEnabled() enabled} flag is not set
+     * — the same shape as {@link ConversationReview}. Ratings are checked against
+     * the agent <em>version the conversation runs on</em>, so switching them on in
+     * a new version does not open old conversations to ratings.
+     *
+     * <h3>What the server enforces</h3> The score must fit the scale, every tag
+     * must be one of {@link #getReasonTags()}, a comment is accepted only when
+     * {@link CommentSettings#isEnabled()} and up to its {@code maxLength}, and a
+     * rating arrives within {@link #getRatingWindowHours()} of the conversation's
+     * last activity. Everything else (when the card is shown, the prompt text, when
+     * the comment box opens) is presentation, read by the chat clients from
+     * {@code GET /agents/{agentId}/profile}.
+     */
+    public static class RatingConfig {
+
+        /** The scale a conversation rating uses. Reply ratings are always thumbs. */
+        public enum Scale {
+            /** Up (1) or down (0). */
+            THUMBS,
+            /** One to five stars. */
+            FIVE_STAR
+        }
+
+        /** Default for {@link #getRatingWindowHours()}: one week. */
+        public static final int DEFAULT_RATING_WINDOW_HOURS = 168;
+
+        private boolean enabled = false;
+        private Scale scale = Scale.THUMBS;
+        private ConversationRatingSettings conversationRating;
+        private MessageRatingSettings messageRating;
+        private CommentSettings comment;
+        private List<String> reasonTags = new ArrayList<>();
+        private int ratingWindowHours = DEFAULT_RATING_WINDOW_HOURS;
+
+        /**
+         * Whether ratings are on for this version. Defaults to {@code false}, so a
+         * {@code ratingConfig} written without it stays off.
+         */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /** {@link Scale#THUMBS} unless set. */
+        public Scale getScale() {
+            return scale;
+        }
+
+        public void setScale(Scale scale) {
+            // "scale": null must not wipe the default
+            this.scale = scale == null ? Scale.THUMBS : scale;
+        }
+
+        /**
+         * The rating of the conversation as a whole. Absent means on, with the defaults
+         * of {@link ConversationRatingSettings}.
+         */
+        public ConversationRatingSettings getConversationRating() {
+            return conversationRating;
+        }
+
+        public void setConversationRating(ConversationRatingSettings conversationRating) {
+            this.conversationRating = conversationRating;
+        }
+
+        /** Thumbs under single agent replies. Absent means off. */
+        public MessageRatingSettings getMessageRating() {
+            return messageRating;
+        }
+
+        public void setMessageRating(MessageRatingSettings messageRating) {
+            this.messageRating = messageRating;
+        }
+
+        /** The free-text comment. Absent means no comment is accepted. */
+        public CommentSettings getComment() {
+            return comment;
+        }
+
+        public void setComment(CommentSettings comment) {
+            this.comment = comment;
+        }
+
+        /**
+         * The closed list of reasons a person may pick ("Wrong answer", "Too slow", …).
+         * A tag not in this list is refused. Empty — the default — means no tags.
+         */
+        public List<String> getReasonTags() {
+            return reasonTags;
+        }
+
+        public void setReasonTags(List<String> reasonTags) {
+            this.reasonTags = reasonTags == null ? new ArrayList<>() : reasonTags;
+        }
+
+        /**
+         * How long after the conversation's last activity a rating is still accepted,
+         * in hours. {@code 0} means no limit; the default is one week.
+         */
+        public int getRatingWindowHours() {
+            return ratingWindowHours;
+        }
+
+        public void setRatingWindowHours(int ratingWindowHours) {
+            this.ratingWindowHours = ratingWindowHours;
+        }
+
+        /** Whether the conversation as a whole may be rated. */
+        @JsonIgnore
+        public boolean isConversationRatingEnabled() {
+            return enabled && (conversationRating == null || conversationRating.isEnabled());
+        }
+
+        /** Whether single agent replies may be rated. */
+        @JsonIgnore
+        public boolean isMessageRatingEnabled() {
+            return enabled && messageRating != null && messageRating.isEnabled();
+        }
+
+        /** Whether a comment is accepted at all. */
+        @JsonIgnore
+        public boolean isCommentEnabled() {
+            return comment != null && comment.isEnabled();
+        }
+    }
+
+    /** The conversation-level rating of {@link RatingConfig}. */
+    public static class ConversationRatingSettings {
+        private boolean enabled = true;
+        private String promptText;
+        private boolean askOnEnd = true;
+        private int askAfterTurns = 0;
+
+        /** On unless switched off. */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /** The question on the rating card; absent uses the client's own wording. */
+        public String getPromptText() {
+            return promptText;
+        }
+
+        public void setPromptText(String promptText) {
+            this.promptText = promptText;
+        }
+
+        /** Whether the chat client asks when the conversation ends. Default true. */
+        public boolean isAskOnEnd() {
+            return askOnEnd;
+        }
+
+        public void setAskOnEnd(boolean askOnEnd) {
+            this.askOnEnd = askOnEnd;
+        }
+
+        /**
+         * Also offer the card after this many agent replies, for conversations that
+         * never end. {@code 0} — the default — never does.
+         */
+        public int getAskAfterTurns() {
+            return askAfterTurns;
+        }
+
+        public void setAskAfterTurns(int askAfterTurns) {
+            this.askAfterTurns = askAfterTurns;
+        }
+    }
+
+    /** Thumbs under single agent replies, part of {@link RatingConfig}. */
+    public static class MessageRatingSettings {
+        private boolean enabled = false;
+
+        /** Off unless switched on. Always thumbs, whatever the scale. */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+    }
+
+    /** The free-text comment of {@link RatingConfig}. */
+    public static class CommentSettings {
+        /** Default for {@link #getMaxLength()}. */
+        public static final int DEFAULT_MAX_LENGTH = 1000;
+
+        private boolean enabled = false;
+        private int maxLength = DEFAULT_MAX_LENGTH;
+        private double askBelowScore = 0;
+
+        /** Off unless switched on. */
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        /** The longest comment accepted, in characters. At most 4000. */
+        public int getMaxLength() {
+            return maxLength;
+        }
+
+        public void setMaxLength(int maxLength) {
+            this.maxLength = maxLength;
+        }
+
+        /**
+         * Open the comment box only for ratings whose normalized score (0..1) is below
+         * this value. {@code 0} — the default — always offers it. Presentation only;
+         * the server accepts a comment at any score.
+         */
+        public double getAskBelowScore() {
+            return askBelowScore;
+        }
+
+        public void setAskBelowScore(double askBelowScore) {
+            this.askBelowScore = askBelowScore;
+        }
+    }
+
+    /**
      * Cryptographic identity for an agent. The public key is stored in the agent
      * configuration; the private key is in SecretsVault.
      *
