@@ -13,6 +13,7 @@ import {
   grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
+  grantsRatingReads,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -582,6 +583,49 @@ const BODY_KNOWLEDGE_BASES_NO_READS = `Knowledge bases (RAG):
  * section restates the four-step landing procedure operationally; this is the
  * mental model behind it.
  */
+/**
+ * Conversation ratings — gated on {@link grantsRatingReads}: every line below
+ * names one of the three rating reads, so the section is absent rather than
+ * wrong when they are not granted.
+ */
+const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
+- An agent version can ask the people chatting to rate the conversation and,
+  optionally, single replies. It is set in the agent document's
+  \`ratingConfig\`, which you do not edit: absent or \`enabled: false\` means
+  off (the default). Defaults when on: \`scale\` THUMBS (or FIVE_STAR) for the
+  conversation rating; a reply rating is always thumbs and off unless
+  \`messageRating.enabled\`; comments off unless \`comment.enabled\` (at most
+  \`comment.maxLength\`, default 1000); \`reasonTags\` a closed list, empty by
+  default; \`ratingWindowHours\` 168 after the last activity (0 = no limit).
+  The setting of the version the conversation RAN ON decides, so turning
+  ratings on in a new version does not open old conversations to them. Point
+  the admin at the agent's Ratings section in the manager to change it.
+- Every rating stores its raw score and a normalized score (0..1: thumbs 0 or
+  1, stars (score-1)/4), the agent version, environment and channel, optional
+  reason tags and comment, and a triage status: NEW or REVIEWED, with who
+  reviewed it and an internal note. A re-rating puts it back to NEW.
+- "Needs attention" means NEW and either low (normalized 0.5 or less) or
+  carrying a comment. Count it with the attention-count read; list it with the
+  rating list and \`needsAttention=true\`.
+- Scoping: an administrator sees every agent's ratings. Anyone else must pass
+  \`agentId\` and hold EDIT on that agent; without it the answer is 400
+  \`AGENT_ID_REQUIRED\` — ask which agent, never retry without one. Only
+  administrators see the rater's \`userId\`; do not repeat user ids unless asked.
+- "How is agent X rated since version N?": read the summary for the agent with
+  \`groupBy=agentVersion\` and compare the buckets from version N on with the
+  earlier ones (\`count\`, \`avgNormalized\`, \`csat\` = share of five-star
+  ratings scored 4-5, \`thumbsUpRate\`, \`topTags\`). The \`agentVersion\`
+  filter matches ONE version exactly, so it cannot express "since". Say how many
+  ratings each bucket holds: a version with fewer than about 10 is too few to
+  judge. For a trend over time use \`groupBy=week\` (or \`day\`) with
+  \`from\`/\`to\` (UTC; an instant \`to\` is exclusive, a date-only \`to\` includes
+  that whole day).
+- To show what people complained about, list with \`sort=lowest\` or
+  \`hasComment=true\` and quote the comments briefly; a row's
+  \`canOpenTranscript\` says whether the conversation itself can be read.
+- You cannot mark ratings reviewed, write review notes or export them: triage
+  is the admin's call on the Feedback page in the manager (/manage/feedback).`;
+
 const BODY_ARCHITECTURE = `How this platform is structured:
 - An agent references a workflow by id and version; the workflow's steps
   reference config documents (LLM config, behavior rules, output sets,
@@ -1013,9 +1057,10 @@ your tool schemas do not cover it, not as a routine first step:
   /tasks/<n>/inputGuardrails or /tasks/<n>/outputGuardrails.
 - The classifier guardrail asks a safety-classifier model the admin runs
   (EDDI ships and recommends none; the admin checks the model's licence).
-  Parameters: provider (an EDDI provider type: openai for any OpenAI-compatible
-  server such as vLLM, ollama, ...) plus that provider's own parameters exactly
-  as on an LLM task (baseUrl, apiKey, modelName for openai / model for ollama,
+  Parameters: provider (an EDDI provider type: openai-compatible for a
+  self-hosted server such as vLLM or llama-server, ollama, openai, ...) plus that
+  provider's own parameters exactly as on an LLM task (baseUrl, apiKey,
+  modelName for openai-compatible and openai / model for ollama,
   customParameters, maxTokens) — the admin sets apiKey in the editor as a vault
   reference; you never write one; unsafeLabel
   (default "yes") and safeLabel (default "no" only when unsafeLabel is "yes";
@@ -1261,6 +1306,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // Unconditional, but its CONTENT is derived: the section states either what
     // can be read or that nothing can. See buildKnowledgeBaseSection.
     buildKnowledgeBaseSection(endpoints),
+    ...(grantsRatingReads(endpoints) ? [BODY_RATINGS] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

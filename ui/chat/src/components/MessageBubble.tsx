@@ -17,6 +17,8 @@ import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import type { ChatMessage } from "@/types";
+import type { RatingInput, RatingProfile, StoredRating } from "@/api/rating-api";
+import { StepRating } from "./StepRating";
 import { useRichPlugins } from "./markdown-plugins";
 import { t } from "@/i18n";
 
@@ -34,6 +36,16 @@ interface MessageBubbleProps {
   enableCodeHighlight?: boolean;
   /** Who is speaking, for screen readers. Defaults to a generic "Assistant". */
   agentName?: string | null;
+  /**
+   * The step this bubble's thumbs rate — set only on the last agent bubble of
+   * a step, and only when the agent asks for reply ratings.
+   */
+  ratingStep?: number | null;
+  /** The stored rating of that step. */
+  rating?: StoredRating;
+  ratingProfile?: RatingProfile | null;
+  /** Stable across renders, or the memoised bubbles re-render. */
+  onRateStep?: (stepIndex: number, input: RatingInput | null) => Promise<boolean>;
 }
 
 /** How often a streaming bubble re-parses its markdown, at most. */
@@ -222,6 +234,10 @@ export const MessageBubble = memo(function MessageBubble({
   enableMath = true,
   enableCodeHighlight = true,
   agentName,
+  ratingStep,
+  rating,
+  ratingProfile,
+  onRateStep,
 }: MessageBubbleProps) {
   const isUser = message.role === "user";
   const images = message.images ?? [];
@@ -322,6 +338,13 @@ export const MessageBubble = memo(function MessageBubble({
             className="message__copy"
           />
         )}
+        {!isUser &&
+          ratingStep !== undefined &&
+          ratingStep !== null &&
+          ratingProfile?.messageRating &&
+          onRateStep && (
+            <StepRating stepIndex={ratingStep} rating={rating} profile={ratingProfile} onRate={onRateStep} />
+          )}
       </div>
     </div>
   );
