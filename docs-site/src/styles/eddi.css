@@ -47,6 +47,7 @@
 	--eddi-scrollbar-hover: #52525b;
 	/* Manager --color-sidebar-accent */
 	--eddi-sidebar-accent: #f59e0b;
+	--eddi-focus: var(--eddi-accent);
 }
 
 :root[data-theme='light'] {
@@ -62,6 +63,7 @@
 	--eddi-scrollbar: #e7e5e4;
 	--eddi-scrollbar-hover: #78716c;
 	--eddi-sidebar-accent: #b45309;
+	--eddi-focus: #b45309;
 }
 
 /* ── Starlight's semantic variables, pointed at the tokens ──────────────── */
@@ -114,9 +116,11 @@ body {
 	background: color-mix(in srgb, var(--eddi-accent) 30%, transparent);
 }
 
-/* Focus: website global.css. */
+/* Focus: website global.css — except in light mode, where its #f59e0b is ~2.1:1 on the
+   background, under the 3:1 WCAG asks of a focus indicator. The Manager's light accent
+   (#b45309, ~5:1) instead. */
 :is(a, button, summary, input, select, textarea, [tabindex]):focus-visible {
-	outline: 2px solid var(--eddi-accent);
+	outline: 2px solid var(--eddi-focus);
 	outline-offset: 2px;
 }
 

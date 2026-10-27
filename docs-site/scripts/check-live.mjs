@@ -66,6 +66,19 @@ for (const rule of buildRedirects(resolved, index)) {
   expect(base + rule.source, rule.destination);
   if (legacyBase) expect(legacyBase + rule.source, rule.destination, { canonical: true });
 }
+// The per-section fallback (/<section>/:slug, its slash and .md forms) has parameterised
+// sources, so the loop above skips it: probe each section with a page no explicit rule
+// covers under that section.
+const staticSources = new Set(buildRedirects(resolved, index).map((r) => r.source));
+for (const section of index.sections.keys()) {
+  if (index.slugs.has(section)) continue;
+  const slug = [...index.slugs].find((s) => s && !s.includes('.') && !s.includes('/') && !staticSources.has(`/${section}/${s}`));
+  if (!slug) continue;
+  expect(`${base}/${section}/${slug}`, `/${slug}/`);
+  expect(`${base}/${section}/${slug}/`, `/${slug}/`);
+  expect(`${base}/${section}/${slug}.md`, `/${slug}.md`);
+}
+
 // And paths no static redirect covers, which only the host rule can move.
 if (legacyBase) {
   for (const p of ['/', '/secrets-vault/', '/secrets-vault.md', '/llms.txt']) expect(legacyBase + p, p, { canonical: true });
