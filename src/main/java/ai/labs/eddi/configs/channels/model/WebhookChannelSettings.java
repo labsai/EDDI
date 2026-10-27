@@ -45,6 +45,11 @@ import java.util.regex.Pattern;
  *            {@code new} conversation per event, or {@code correlate}
  * @param correlationKeyPath
  *            JSON pointer (into the {@code event} map) of the correlation key
+ * @param maxDeliveriesPerWindow
+ *            most deliveries this integration may reserve replay-protection
+ *            keys for in one 10-minute window, per node; beyond it new
+ *            deliveries get a retryable 503 so one busy integration cannot fill
+ *            the shared replay-protection cache against the others
  *
  * @since 6.6.0
  */
@@ -59,7 +64,16 @@ public record WebhookChannelSettings(
         String eventIdHeader,
         String inputTemplate,
         Strategy conversationStrategy,
-        String correlationKeyPath) {
+        String correlationKeyPath,
+        int maxDeliveriesPerWindow) {
+
+    /** Settings with the default delivery budget. */
+    public WebhookChannelSettings(String signingSecret, Scheme scheme, String signatureHeader, String signatureEncoding,
+            String signaturePrefix, String eventTypeHeader, String eventTypePath, String eventIdHeader, String inputTemplate,
+            Strategy conversationStrategy, String correlationKeyPath) {
+        this(signingSecret, scheme, signatureHeader, signatureEncoding, signaturePrefix, eventTypeHeader, eventTypePath,
+                eventIdHeader, inputTemplate, conversationStrategy, correlationKeyPath, DEFAULT_MAX_DELIVERIES_PER_WINDOW);
+    }
 
     /** The channel type this applies to. */
     public static final String CHANNEL_TYPE = "webhook";
@@ -75,6 +89,17 @@ public record WebhookChannelSettings(
     public static final String KEY_INPUT_TEMPLATE = "inputTemplate";
     public static final String KEY_CONVERSATION_STRATEGY = "conversationStrategy";
     public static final String KEY_CORRELATION_KEY_PATH = "correlationKeyPath";
+    public static final String KEY_MAX_DELIVERIES_PER_WINDOW = "maxDeliveriesPerWindow";
+
+    /** Default delivery budget per 10-minute window and node (6,000 dedup keys). */
+    public static final int DEFAULT_MAX_DELIVERIES_PER_WINDOW = 3000;
+    /** Largest accepted {@code maxDeliveriesPerWindow}. */
+    public static final int MAX_DELIVERIES_PER_WINDOW_LIMIT = 100_000;
+    /**
+     * Shortest signing secret the endpoint will use. A minimum, not a
+     * recommendation: use 32 random bytes.
+     */
+    public static final int MIN_SECRET_LENGTH = 16;
 
     /** Default signature header of the {@code generic-hmac} scheme. */
     public static final String DEFAULT_GENERIC_SIGNATURE_HEADER = "X-Signature";
@@ -190,7 +215,20 @@ public record WebhookChannelSettings(
                 eventIdHeader != null ? eventIdHeader : DEFAULT_EVENT_ID_HEADER,
                 blankToNull(pc.get(KEY_INPUT_TEMPLATE)),
                 Strategy.fromId(pc.get(KEY_CONVERSATION_STRATEGY)),
-                blankToNull(pc.get(KEY_CORRELATION_KEY_PATH)));
+                blankToNull(pc.get(KEY_CORRELATION_KEY_PATH)),
+                positiveIntOrDefault(pc.get(KEY_MAX_DELIVERIES_PER_WINDOW)));
+    }
+
+    private static int positiveIntOrDefault(String value) {
+        if (value == null || value.isBlank()) {
+            return DEFAULT_MAX_DELIVERIES_PER_WINDOW;
+        }
+        try {
+            int parsed = Integer.parseInt(value.trim());
+            return parsed > 0 && parsed <= MAX_DELIVERIES_PER_WINDOW_LIMIT ? parsed : DEFAULT_MAX_DELIVERIES_PER_WINDOW;
+        } catch (NumberFormatException e) {
+            return DEFAULT_MAX_DELIVERIES_PER_WINDOW;
+        }
     }
 
     /**
@@ -247,6 +285,20 @@ public record WebhookChannelSettings(
         } else if (strategy == Strategy.CORRELATE && blankToNull(pc.get(KEY_CORRELATION_KEY_PATH)) == null) {
             errors.add("conversationStrategy 'correlate' requires platformConfig.correlationKeyPath (a JSON pointer into the event, "
                     + "e.g. /data/pull_request/number).");
+        }
+        String budget = pc.get(KEY_MAX_DELIVERIES_PER_WINDOW);
+        if (budget != null && !budget.isBlank()) {
+            boolean valid;
+            try {
+                int parsed = Integer.parseInt(budget.trim());
+                valid = parsed > 0 && parsed <= MAX_DELIVERIES_PER_WINDOW_LIMIT;
+            } catch (NumberFormatException e) {
+                valid = false;
+            }
+            if (!valid) {
+                errors.add("platformConfig." + KEY_MAX_DELIVERIES_PER_WINDOW + " must be an integer from 1 to "
+                        + MAX_DELIVERIES_PER_WINDOW_LIMIT + ".");
+            }
         }
         String template = pc.get(KEY_INPUT_TEMPLATE);
         if (template != null && template.length() > MAX_INPUT_TEMPLATE_LENGTH) {

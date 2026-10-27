@@ -147,6 +147,12 @@ class WebhookSignatureVerifierTest {
 
         @Test
         void unresolvedSecretFailsClosed() {
+            // A record built directly keeps the whitespace WebhookChannelSettings.from()
+            // would trim.
+            var padded = new WebhookChannelSettings(" ${vault:a-reference-that-is-long-enough}", WebhookChannelSettings.Scheme.EDDI_V1,
+                    "X-Signature", "hex", "", null, null, "X-Event-Id", null, WebhookChannelSettings.Strategy.NEW, null);
+            assertEquals(Result.NO_SECRET, verify(verifier, padded, BODY, Map.of("X-Eddi-Signature",
+                    eddiHeader(" ${vault:a-reference-that-is-long-enough}", NOW, BODY))));
             var unresolved = WebhookChannelSettings.from(Map.of("signingSecret", "${vault:missing}"));
             assertEquals(Result.NO_SECRET, verify(verifier, unresolved, BODY, Map.of("X-Eddi-Signature", eddiHeader("${vault:missing}", NOW, BODY))));
             var none = WebhookChannelSettings.from(Map.of());
