@@ -241,7 +241,9 @@ The check answers "is this provably ungranted?", and anything short of proof is 
 - contains the `*` wildcard, or
 - is `null` or empty — an unset list means unrestricted, not "deny all"
 
-Uncertainty likewise never becomes a violation: unreadable metadata, a disabled vault, or a secret that does not exist all resolve to *allowed*. A check that cannot run must not be able to take agents down.
+Uncertainty likewise never becomes a violation: unreadable metadata or a disabled vault resolve to *allowed*. A check that cannot run must not be able to take agents down.
+
+A secret that **does not exist** is not uncertainty, and is a violation. The vault answered, and no grant names the agent. Allowing it would leave the grant unchecked until the next deployment, because the resolver does not check grants: a secret created later and restricted to another agent would resolve for this one on its next turn. The violation reads `${vault:…} (the secret does not exist, …)`; the fix is to create the secret with this agent on its `allowedAgents`, or to remove the reference. It offers no append-grant call, since there is no grant to append to.
 
 ### What is scanned
 
@@ -797,7 +799,7 @@ It returns the vault reference:
 ]
 ```
 
-> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response.
+> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response. A row written before the keyed form still carries a bare SHA-256; the next `POST /{tenantId}/rotate-dek` replaces it with the keyed form as it re-seals the row.
 
 **`GET /health`** — returns vault provider status:
 

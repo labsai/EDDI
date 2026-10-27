@@ -181,6 +181,7 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         stored.setIv(secret.getIv());
         stored.setDekId(secret.getDekId());
         stored.setLastRotatedAt(secret.getLastRotatedAt());
+        stored.setChecksum(secret.getChecksum());
         return true;
     }
 

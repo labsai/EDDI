@@ -398,6 +398,29 @@ class VaultKeySafetyTest {
                     () -> EnvelopeCrypto.decrypt(migrated.getEncryptedValue(), migrated.getIv(), secondDek));
             assertEquals("legacy-value", provider.resolve(ref("acme", "legacy")));
         }
+
+        /**
+         * A bare SHA-256 checksum verifies plaintext guesses for anyone holding the row
+         * or a backup, with no key at all. The rotation has the authenticated plaintext
+         * in hand, so it is where the row moves onto the keyed form.
+         */
+        @Test
+        @DisplayName("a DEK rotation replaces a legacy bare SHA-256 checksum with the keyed one, and leaves a keyed one alone")
+        void rotationRetiresLegacyChecksums() throws Exception {
+            var provider = provider(MASTER);
+            provider.store(ref("acme", "old"), "guessable", null, List.of("*"));
+            provider.store(ref("acme", "new"), "already-keyed", null, List.of("*"));
+            persistence.secrets.get("acme/old").setChecksum(VaultChecksum.legacy("guessable"));
+            String keyed = persistence.secrets.get("acme/new").getChecksum();
+
+            provider.rotateDek("acme");
+
+            String upgraded = persistence.secrets.get("acme/old").getChecksum();
+            assertTrue(upgraded.startsWith(VaultChecksum.KEYED_PREFIX), upgraded);
+            assertTrue(provider.matchesChecksum("acme", upgraded, "guessable"), "the upgraded checksum still verifies the real value");
+            assertFalse(upgraded.contains(VaultChecksum.legacy("guessable")), "nothing of the unkeyed digest survives");
+            assertEquals(keyed, persistence.secrets.get("acme/new").getChecksum());
+        }
     }
 
     // ─── L-S3 ───

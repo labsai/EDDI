@@ -40,6 +40,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -507,6 +508,24 @@ class VaultGrantCheckerTest {
             when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretProviderException("vault down"));
 
             assertTrue(checker.findUngrantedReferences(agentReferencingTheVault(), "some-other-agent").isEmpty());
+        }
+
+        /**
+         * Absence is an answer, not uncertainty. Letting it through left the grant the
+         * secret is LATER created with unchecked for this agent until its next deploy,
+         * because the resolver does not check grants: an editor could plant a reference
+         * to a name an administrator was about to create for another agent.
+         */
+        @Test
+        @DisplayName("a secret that does not exist IS a violation, and says so")
+        void absentSecretIsAViolation() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("Secret not found"));
+
+            List<String> violations = checker.findUngrantedReferences(agentReferencingTheVault(), "some-other-agent");
+
+            assertEquals(List.of(VAULT_REF + VaultGrantChecker.MISSING_SECRET_NOTE), violations);
+            assertNull(VaultGrantGate.parseVaultReference(violations.get(0)),
+                    "no grant can be appended to a secret that does not exist, so the violation must not offer that fix");
         }
 
         @Test

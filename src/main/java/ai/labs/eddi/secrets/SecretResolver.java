@@ -6,6 +6,7 @@ package ai.labs.eddi.secrets;
 
 import ai.labs.eddi.engine.cluster.events.IClusterEventBus;
 import ai.labs.eddi.engine.cluster.events.ClusterEvent;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretReference;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -22,8 +23,6 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Resolves vault references in parameter maps and strings. Supports both the
@@ -52,7 +51,12 @@ import java.util.regex.Pattern;
 public class SecretResolver {
 
     private static final Logger LOGGER = Logger.getLogger(SecretResolver.class);
-    private static final Pattern VAULT_PATTERN = SecretReference.compiledPattern();
+    /**
+     * The linear-time finder, not {@code SecretReference.compiledPattern()}: the
+     * regex's {@code find()} rescans the rest of a value at every unterminated
+     * opener, and these values are editor-written parameters.
+     */
+    private static final ReferenceScanner VAULT_REFERENCES = SecretReference.scanner();
 
     private final ISecretProvider secretProvider;
     private final MeterRegistry meterRegistry;
@@ -176,8 +180,8 @@ public class SecretResolver {
         }
         for (var entry : resolvedParams.entrySet()) {
             if (SecretReference.isVaultReference(entry.getValue())) {
-                Matcher matcher = VAULT_PATTERN.matcher(entry.getValue());
-                String reference = matcher.find() ? matcher.group(0) : "a vault reference";
+                ReferenceScanner.Match match = VAULT_REFERENCES.findFirst(entry.getValue());
+                String reference = match != null ? match.text() : "a vault reference";
                 throw new UnresolvedSecretReferenceException(String.format(
                         "Parameter '%s' of %s references %s, which could not be resolved — the secret does not exist, the vault "
                                 + "failed, or the vault is not configured (EDDI_VAULT_MASTER_KEY). Refusing to send the "
@@ -224,52 +228,47 @@ public class SecretResolver {
             return value; // Passthrough
         }
 
-        Matcher matcher = VAULT_PATTERN.matcher(value);
-        StringBuilder result = new StringBuilder();
-        while (matcher.find()) {
-            String fullMatch = matcher.group(0);
+        return VAULT_REFERENCES.replaceAll(value, this::resolveReference);
+    }
 
-            // Parse using SecretReference — handles both short and full form
-            SecretReference ref = SecretReference.parse(fullMatch);
+    /**
+     * The plaintext for one reference found by {@link #resolveValue}, or the
+     * reference itself when it may not or cannot be resolved.
+     */
+    private String resolveReference(ReferenceScanner.Match match) {
+        String fullMatch = match.text();
+        SecretReference ref = SecretReference.of(match);
 
-            // Refuse EDDI-internal namespaces (e.g. agents' Ed25519 signing keys).
-            // These are granted to the agent itself, so the deploy-time grant check
-            // would pass a config that referenced one — but the only legitimate reader
-            // goes through ISecretProvider directly, never through this resolver. Left
-            // in place unresolved (never sent as a credential) and logged, so an LLM
-            // parameter carrying one fails closed via requireResolved().
-            if (SecretReference.isReservedKeyName(ref.keyName())) {
-                LOGGER.warnf("Refusing to resolve reserved vault reference %s via a configuration/template — this namespace is "
-                        + "readable only by the internal service that owns it", fullMatch);
-                resolveErrorCounter.increment();
-                matcher.appendReplacement(result, Matcher.quoteReplacement(fullMatch));
-                continue;
-            }
-
-            String cacheKey = ref.tenantId() + "/" + ref.keyName();
-
-            // Check cache first — only successful resolutions are cached
-            String resolved = cache.getIfPresent(cacheKey);
-            if (resolved != null) {
-                cacheHitCounter.increment();
-            } else {
-                cacheMissCounter.increment();
-                resolved = resolveFromProvider(ref, fullMatch);
-                if (resolved != null) {
-                    // Only cache successful resolutions — never cache failures
-                    cache.put(cacheKey, resolved);
-                }
-            }
-
-            if (resolved != null) {
-                matcher.appendReplacement(result, Matcher.quoteReplacement(resolved));
-            } else {
-                // Leave the original reference in place if resolution failed
-                matcher.appendReplacement(result, Matcher.quoteReplacement(fullMatch));
-            }
+        // Refuse EDDI-internal namespaces (e.g. agents' Ed25519 signing keys).
+        // These are granted to the agent itself, so the deploy-time grant check
+        // would pass a config that referenced one — but the only legitimate reader
+        // goes through ISecretProvider directly, never through this resolver. Left
+        // in place unresolved (never sent as a credential) and logged, so an LLM
+        // parameter carrying one fails closed via requireResolved().
+        if (SecretReference.isReservedKeyName(ref.keyName())) {
+            LOGGER.warnf("Refusing to resolve reserved vault reference %s via a configuration/template — this namespace is "
+                    + "readable only by the internal service that owns it", fullMatch);
+            resolveErrorCounter.increment();
+            return fullMatch;
         }
-        matcher.appendTail(result);
-        return result.toString();
+
+        String cacheKey = ref.tenantId() + "/" + ref.keyName();
+
+        // Check cache first — only successful resolutions are cached
+        String resolved = cache.getIfPresent(cacheKey);
+        if (resolved != null) {
+            cacheHitCounter.increment();
+            return resolved;
+        }
+        cacheMissCounter.increment();
+        resolved = resolveFromProvider(ref, fullMatch);
+        if (resolved == null) {
+            // Leave the original reference in place if resolution failed
+            return fullMatch;
+        }
+        // Only cache successful resolutions — never cache failures
+        cache.put(cacheKey, resolved);
+        return resolved;
     }
 
     /**

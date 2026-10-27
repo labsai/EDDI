@@ -769,6 +769,14 @@ public class VaultSecretProvider implements ISecretProvider {
             current.setIv(enc.iv());
             current.setDekId(activeDekId);
             current.setLastRotatedAt(now);
+            // A legacy bare SHA-256 checksum is an offline guessing oracle for anyone
+            // who can read the row or a backup. The plaintext is in hand and was just
+            // authenticated by the decryption, so the rotation replaces it with the
+            // keyed, tenant-bound form in the same guarded write — the next guess
+            // against this row needs the KEK-wrapped checksum key.
+            if (current.getChecksum() != null && !current.getChecksum().startsWith(VaultChecksum.KEYED_PREFIX)) {
+                current.setChecksum(VaultChecksum.compute(checksumKey(), tenantId, plaintext));
+            }
             if (persistence.updateSecretSealing(current, rowDekId)) {
                 return true;
             }

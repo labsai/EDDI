@@ -5,7 +5,6 @@
 package ai.labs.eddi.secrets.model;
 
 import java.util.List;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -94,6 +93,14 @@ public record SecretReference(String tenantId, String keyName) {
     private static final Pattern COMPILED_PATTERN = Pattern.compile(VAULT_PATTERN);
 
     /**
+     * Finds what {@link #VAULT_PATTERN} matches, in linear time. Use it, not
+     * {@code compiledPattern().matcher(...).find()}, on any text an editor, a
+     * variable or a model can make long: the regex rescans the rest of the text at
+     * every unterminated opener.
+     */
+    private static final ReferenceScanner SCANNER = ReferenceScanner.of("vault", "eddivault");
+
+    /**
      * Parse a vault reference string into a SecretReference. Supports both short
      * form ({@code ${vault:openaiKey}}) and full form
      * ({@code ${vault:myTenant/openaiKey}}). Also accepts the legacy
@@ -106,14 +113,17 @@ public record SecretReference(String tenantId, String keyName) {
      *             if the string doesn't match the expected format
      */
     public static SecretReference parse(String reference) {
-        Matcher matcher = COMPILED_PATTERN.matcher(reference);
-        if (!matcher.find()) {
+        ReferenceScanner.Match match = SCANNER.findFirst(reference);
+        if (match == null) {
             throw new IllegalArgumentException(
                     "Invalid vault reference: " + reference + ". Expected: ${vault:keyName} or ${vault:tenantId/keyName}");
         }
-        String tenant = matcher.group(1) != null ? matcher.group(1) : DEFAULT_TENANT;
-        String key = matcher.group(2);
-        return new SecretReference(tenant, key);
+        return of(match);
+    }
+
+    /** The reference a {@link #scanner()} match names. */
+    public static SecretReference of(ReferenceScanner.Match match) {
+        return new SecretReference(match.tenant() != null ? match.tenant() : DEFAULT_TENANT, match.name());
     }
 
     /**
@@ -140,5 +150,14 @@ public record SecretReference(String tenantId, String keyName) {
      */
     public static Pattern compiledPattern() {
         return COMPILED_PATTERN;
+    }
+
+    /**
+     * The linear-time finder for the same references {@link #VAULT_PATTERN}
+     * matches. Prefer it to {@link #compiledPattern()} for any search
+     * ({@code find}) over a configuration, a variable or a parameter.
+     */
+    public static ReferenceScanner scanner() {
+        return SCANNER;
     }
 }

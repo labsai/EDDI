@@ -89,8 +89,11 @@ public interface ISecretPersistence {
     List<EncryptedSecret> listSecretsByTenant(String tenantId);
 
     /**
-     * Rewrites one secret's ciphertext, IV and dekId, but only while the row still
-     * names {@code expectedDekId}.
+     * Rewrites one secret's ciphertext, IV, dekId, lastRotatedAt and checksum, but
+     * only while the row still names {@code expectedDekId}. The checksum is written
+     * because a rotation is what moves a legacy bare SHA-256 checksum onto the
+     * keyed form; it is the row's own checksum (or that upgrade), never another
+     * value's.
      *
      * @param expectedDekId
      *            the dekId read from the row, exactly as stored — a missing value

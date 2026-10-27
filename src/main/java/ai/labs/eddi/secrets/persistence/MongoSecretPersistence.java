@@ -253,7 +253,8 @@ public class MongoSecretPersistence implements ISecretPersistence {
 
             var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()), Updates.set(FIELD_IV, secret.getIv()),
                     Updates.set(FIELD_DEK_ID, secret.getDekId()),
-                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())));
+                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
+                    Updates.set(FIELD_CHECKSUM, secret.getChecksum()));
 
             // matchedCount, not modifiedCount: winning the guard is what matters, and a
             // rewrite that happens to produce identical bytes still won it.
