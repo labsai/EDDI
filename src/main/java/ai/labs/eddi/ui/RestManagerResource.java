@@ -4,14 +4,16 @@
  */
 package ai.labs.eddi.ui;
 
+import ai.labs.eddi.configs.branding.BrandRequest;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayDeque;
@@ -43,6 +45,8 @@ public class RestManagerResource implements IRestManagerResource {
      */
     private static final String INVALID_PATH_CHARS = "<>|:*?\"\\\0";
 
+    private final BrandedShellRenderer shellRenderer;
+
     @ConfigProperty(name = "eddi.keycloak.public.url")
     Optional<String> keycloakPublicUrl;
 
@@ -51,6 +55,11 @@ public class RestManagerResource implements IRestManagerResource {
 
     @ConfigProperty(name = "quarkus.oidc.tenant-enabled", defaultValue = "false")
     boolean oidcEnabled;
+
+    @Inject
+    public RestManagerResource(BrandedShellRenderer shellRenderer) {
+        this.shellRenderer = shellRenderer;
+    }
 
     @Override
     public Response fetchManagerResources() {
@@ -98,6 +107,13 @@ public class RestManagerResource implements IRestManagerResource {
                 return serveManagerIndex();
             }
 
+            // A shell asked for by its file name (/manage/manage.html) is the
+            // template with the brand placeholders in it: serve it rendered.
+            Optional<BrandedShell> shell = BrandedShell.fromFileName(normalized);
+            if (shell.isPresent()) {
+                return serveShell(shell.get());
+            }
+
             String resourcePath = RESOURCE_BASE + "/" + normalized;
 
             // Attempt to load the file from the resources folder
@@ -121,12 +137,14 @@ public class RestManagerResource implements IRestManagerResource {
     }
 
     /** The SPA entry point — every deep link falls back to it. */
-    private static Response serveManagerIndex() throws FileNotFoundException {
-        InputStream index = Thread.currentThread().getContextClassLoader().getResourceAsStream(RESOURCE_BASE + "/manage.html");
-        if (index == null) {
-            throw new FileNotFoundException("manage.html not found in META-INF/resources");
-        }
-        return Response.ok(index).build();
+    private Response serveManagerIndex() throws IOException {
+        return serveShell(BrandedShell.MANAGE);
+    }
+
+    private Response serveShell(BrandedShell shell) throws IOException {
+        return shellRenderer.render(shell, BrandRequest.NONE)
+                .map(page -> Response.ok(page, MediaType.TEXT_HTML_TYPE.withCharset("UTF-8")).build())
+                .orElseThrow(() -> new IOException(shell.fileName() + " not found in META-INF/resources"));
     }
 
     /**
@@ -161,22 +179,19 @@ public class RestManagerResource implements IRestManagerResource {
     }
 
     private String buildAuthConfigJs() {
+        JsGlobalScript script = JsGlobalScript.assign("__EDDI_AUTH__");
         if (!oidcEnabled) {
-            return "window.__EDDI_AUTH__={method:\"none\"};";
+            return script.put("method", "none").toJs();
         }
 
         String url = keycloakPublicUrl.filter(s -> !s.isBlank()).orElse("");
-        String realm = extractRealm(oidcAuthServerUrl);
-
-        StringBuilder sb = new StringBuilder("window.__EDDI_AUTH__={");
-        sb.append("method:\"keycloak\"");
+        script.put("method", "keycloak");
         if (!url.isBlank()) {
-            sb.append(",url:\"").append(escapeJs(url)).append("\"");
+            script.put("url", url);
         }
-        sb.append(",realm:\"").append(escapeJs(realm)).append("\"");
-        sb.append(",clientId:\"").append(SPA_CLIENT_ID).append("\"");
-        sb.append("};");
-        return sb.toString();
+        return script.put("realm", extractRealm(oidcAuthServerUrl))
+                .put("clientId", SPA_CLIENT_ID)
+                .toJs();
     }
 
     private static String extractRealm(String authServerUrl) {
@@ -202,14 +217,5 @@ public class RestManagerResource implements IRestManagerResource {
             return end > 0 ? realm.substring(0, end) : "eddi";
         }
         return "eddi";
-    }
-
-    private static String escapeJs(String value) {
-        return value
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-                .replace("\t", "\\t");
     }
 }

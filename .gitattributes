@@ -15,3 +15,8 @@ licenses/** linguist-generated
 # core.autocrlf cannot churn them. CRLF normalisation at commit time is what made
 # a committed chat bundle differ byte-for-byte from a fresh build of the same name.
 ui/*/package-lock.json text eol=lf
+
+# Mail fixtures are RFC 5322 messages: CRLF line endings and, in places, 8-bit
+# bytes in a declared (or deliberately wrong) charset. Byte-exact, never
+# normalised -- a DKIM fixture whose line endings changed no longer verifies.
+src/test/resources/mail/** -text

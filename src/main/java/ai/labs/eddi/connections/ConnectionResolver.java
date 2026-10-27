@@ -159,6 +159,82 @@ public class ConnectionResolver {
     }
 
     /**
+     * Resolves the <em>bare</em> OAuth access token a reference names, for a
+     * protocol that carries the token itself rather than an HTTP header — SASL
+     * {@code XOAUTH2} for IMAP and SMTP, where the client library builds the
+     * authentication string from the token.
+     * <p>
+     * Legal for the two OAuth auth types only. A {@code STATIC} or {@code BASIC}
+     * connection resolves to a header value, and there is no way to tell from that
+     * value whether it is a token, a {@code Basic} blob or an API key, so it is
+     * refused rather than guessed at — the same reason the LLM paths cannot take a
+     * connection (see {@code docs/connections.md}). A {@code CALLER_SUPPLIED}
+     * connection is refused too: its value is a header the calling system sent, not
+     * a token EDDI holds.
+     * <p>
+     * Everything else is exactly {@link #resolve}: the allowlist is checked against
+     * {@code targetUrl}, {@link Binding#PER_USER} still needs a verified principal
+     * bound to the turn, and the token comes from the same
+     * {@link AccessTokenSupplier}, so refresh and caching are shared with the HTTP
+     * paths. The allowlist only holds http(s) origins today, so a mail target such
+     * as {@code imaps://host:993} is refused until the connection model learns mail
+     * origins — fail closed, never "no check".
+     *
+     * @param reference
+     *            a value containing {@code ${connection:name}}
+     * @param targetUrl
+     *            where the token is going; checked against the connection's
+     *            {@code baseUrlAllowlist}
+     * @param principalOverride
+     *            as for {@link #resolve}: a cross-check only
+     * @return the live access token, never null or blank
+     * @throws ConnectionException
+     *             on every failure,
+     *             {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT} for a
+     *             connection that has no bare token to give
+     */
+    public String resolveAccessToken(String reference, URI targetUrl, String principalOverride) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            requireBareTokenAvailable(connection);
+            requireTargetAllowed(connection, targetUrl);
+            String accessToken = accessTokenSupplier.accessToken(connection, resolvePrincipal(connection, principalOverride));
+            if (accessToken == null || accessToken.isBlank()) {
+                // The supplier contract says never null — but a blank token handed to
+                // XOAUTH2 fails as an authentication error at the mail server, with
+                // nothing on this side naming the cause.
+                throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
+                        "Connection '" + connection.getName() + "' produced an empty access token.");
+            }
+            record(connection, "success", sample);
+            return accessToken;
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
+        AuthType authType = connection.getAuthType();
+        boolean oauth = authType == AuthType.OAUTH2_CLIENT_CREDENTIALS || authType == AuthType.OAUTH2_AUTHORIZATION_CODE;
+        if (!oauth || connection.getBinding() == Binding.CALLER_SUPPLIED) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is " + authType
+                            + (connection.getBinding() == Binding.CALLER_SUPPLIED ? " / CALLER_SUPPLIED" : "")
+                            + ", which resolves to a header value, not an OAuth access token. A bare token (for example for "
+                            + "IMAP/SMTP XOAUTH2) needs an OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE connection.");
+        }
+    }
+
+    /**
      * Resolves the credential for a <em>discovery</em> request — one whose result
      * is shared, not served to the user who happened to trigger it.
      * <p>
