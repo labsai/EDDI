@@ -28,7 +28,7 @@ const ASCII_DOMAIN = /^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]*$
 function asciiDomain(domain: string): string | null {
   // Non-ASCII labels go through the platform's IDNA (UTS 46) conversion, the
   // counterpart of the server's IDN.toASCII.
-  if (/[^\x00-\x7F]/.test(domain)) {
+  if (Array.from(domain).some((ch) => ch.charCodeAt(0) > 0x7f)) {
     try {
       const host = new URL(`http://${domain}`).hostname;
       return host.includes("@") || host.includes("/") ? null : host;
