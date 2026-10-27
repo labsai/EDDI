@@ -2057,6 +2057,15 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
                 ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
+        // A resumed cascade step ran on that step's model, so its tokens are priced at
+        // the step's rates (as the live cascade does), not the task's: set
+        // cascadeCostUsd — which pricedCost prefers — from the resumed token usage,
+        // for the output guardrails' spend checks and the audit cost alike.
+        if (cascadeStep != null && !responseMetadata.containsKey("cascadeCostUsd") && responseMetadata.get("tokenUsage") instanceof Map<?, ?> usage) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tokenUsage = (Map<String, Object>) usage;
+            responseMetadata.put("cascadeCostUsd", CascadingModelExecutor.computeCost(cascadeStep, task.getModelCascade(), tokenUsage));
+        }
 
         // responseValidation's actions (R6) apply to the resumed answer as to a live
         // one; the engine's own fallback text is not validated.

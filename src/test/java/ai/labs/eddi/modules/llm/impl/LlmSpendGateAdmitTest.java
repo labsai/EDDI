@@ -83,10 +83,8 @@ class LlmSpendGateAdmitTest {
         return meterRegistry.counter(LlmSpendGate.METRIC, "reason", reason).count();
     }
 
-    @Test
-    @DisplayName("a scheduled fire whose maxCostPerFire is spent is refused by admit(), though the agent's ceiling is not reached")
     @SuppressWarnings({"unchecked", "rawtypes"})
-    void fireAllowanceSpentRefusesEveryAttempt() {
+    private void fireWithSpentAllowance() {
         ceiling(5.00);
         // $1.00 before the fire, $0.60 by its first call; allowance $0.50.
         IConversationMemory.IWritableConversationStep step = mock(IConversationMemory.IWritableConversationStep.class);
@@ -102,8 +100,25 @@ class LlmSpendGateAdmitTest {
         IConversationMemory.IConversationStepStack steps = mock(IConversationMemory.IConversationStepStack.class);
         when(steps.getExactDataPerStep(AUDIT_COST)).thenReturn((List) List.of(prior, current));
         when(memory.getAllSteps()).thenReturn(steps);
+    }
+
+    @Test
+    @DisplayName("a scheduled fire whose maxCostPerFire is spent is refused by admit(), though the agent's ceiling is not reached")
+    void fireAllowanceSpentRefusesEveryAttempt() {
+        fireWithSpentAllowance();
 
         try (var admission = gate.admit(memory, 0.0, 0.0)) {
+            assertFalse(admission.allowed());
+            assertEquals(LlmSpendGate.REASON_CONVERSATION_CEILING, admission.refusal().reason());
+        }
+    }
+
+    @Test
+    @DisplayName("the format re-ask path (ReaskSpend) goes through the same admit(): a spent fire allowance refuses the re-ask")
+    void reaskIsRefusedWhenTheFireAllowanceIsSpent() {
+        fireWithSpentAllowance();
+
+        try (var admission = FormatRetryRunner.ReaskSpend.of(gate, memory).admit(0.0, 0.0)) {
             assertFalse(admission.allowed());
             assertEquals(LlmSpendGate.REASON_CONVERSATION_CEILING, admission.refusal().reason());
         }
