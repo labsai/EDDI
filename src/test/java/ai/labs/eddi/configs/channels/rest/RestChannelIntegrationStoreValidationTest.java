@@ -5,6 +5,9 @@
 package ai.labs.eddi.configs.channels.rest;
 
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
@@ -15,6 +18,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import ai.labs.eddi.secrets.SecretResolver;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -551,6 +555,39 @@ class RestChannelIntegrationStoreValidationTest {
                     webhook(Map.of("signingSecret", "${vault:hook}", "conversationStrategy", "correlate"))));
             assertThrows(BadRequestException.class, () -> store.validateConfiguration(
                     webhook(Map.of("signingSecret", "${vault:hook}", "signatureScheme", "generic-hmac", "signatureEncoding", "rot13"))));
+        }
+
+        @Test
+        @DisplayName("a vault secret that already exists but is shorter than 16 characters → BadRequest")
+        void shortVaultSecretRejected() {
+            var resolver = mock(SecretResolver.class);
+            when(resolver.resolveValue("${vault:short}")).thenReturn("a".repeat(15));
+            when(resolver.resolveValue("${vault:ok}")).thenReturn("a".repeat(16));
+            when(resolver.resolveValue("${vault:later}")).thenReturn("${vault:later}");
+            var strict = new RestChannelIntegrationStore(null, null, mock(ResourceAccessGuard.class), resolver);
+
+            var ex = assertThrows(BadRequestException.class,
+                    () -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:short}"))));
+            assertTrue(ex.getMessage().contains("16"));
+            assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:ok}"))));
+            // Not in the vault yet: cannot be judged here (the router re-checks at
+            // runtime).
+            assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:later}"))));
+            // Another tenant's reference is never resolved at save time (no
+            // existence/length oracle).
+            when(resolver.resolveValue("${vault:other/short}")).thenReturn("a".repeat(3));
+            assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:other/short}"))));
+            verify(resolver, never()).resolveValue("${vault:other/short}");
+        }
+
+        @Test
+        @DisplayName("maxDeliveriesPerWindow must be an integer from 1 to 100000")
+        void deliveryBudgetValidated() {
+            assertDoesNotThrow(() -> store.validateConfiguration(webhook(Map.of("signingSecret", "${vault:hook}", "maxDeliveriesPerWindow", "500"))));
+            for (String bad : new String[]{"0", "-1", "abc", "100001", "1.5"}) {
+                assertThrows(BadRequestException.class, () -> store.validateConfiguration(
+                        webhook(Map.of("signingSecret", "${vault:hook}", "maxDeliveriesPerWindow", bad))), bad);
+            }
         }
 
         @Test

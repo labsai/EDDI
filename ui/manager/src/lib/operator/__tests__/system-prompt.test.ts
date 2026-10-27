@@ -1152,3 +1152,32 @@ describe("batched changes: the plan shape the operator is taught", () => {
     expect(section(full)).not.toMatch(/\{/);
   });
 });
+
+describe("conversation ratings", () => {
+  const RATING_READS = ["GET /ratings", "GET /ratings/summary", "GET /ratings/attention-count"];
+
+  it("is taught when the three rating reads are granted — in both scopes", () => {
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain("Conversation ratings (feedback from the people chatting):");
+      expect(body).toContain("AGENT_ID_REQUIRED");
+      expect(body).toContain("groupBy=agentVersion");
+      expect(body).toContain("ratingWindowHours");
+      expect(body).toContain("needsAttention=true");
+    }
+  });
+
+  it("is absent when any one of the reads is missing — it names all three", () => {
+    for (const missing of RATING_READS) {
+      const endpoints = READ_ENDPOINTS.filter((e) => e !== missing);
+      expect(buildOperatorPromptBody(endpoints)).not.toContain("Conversation ratings (feedback");
+    }
+  });
+
+  it("says triage and export stay with the admin, because neither is granted", () => {
+    expect(buildOperatorPromptBody(WITH_A_WRITE)).toContain("You cannot mark ratings reviewed");
+  });
+
+  it("explains that the agentVersion filter cannot express 'since'", () => {
+    expect(buildOperatorPromptBody(READ_ENDPOINTS)).toContain("matches ONE version exactly");
+  });
+});

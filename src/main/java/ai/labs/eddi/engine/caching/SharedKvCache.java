@@ -339,6 +339,11 @@ public class SharedKvCache<K, V> implements ICache<K, V> {
     }
 
     @Override
+    public int sizeExact() {
+        return local.sizeExact();
+    }
+
+    @Override
     public boolean isEmpty() {
         return local.isEmpty();
     }

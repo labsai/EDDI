@@ -59,6 +59,9 @@ import {
 } from "@/hooks/use-hitl";
 import type { HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
 import { isPauseChanged, shownPauseOf } from "@/lib/hitl-pause-binding";
+import { ConversationRatingPanel, StepRatingBadge } from "@/components/feedback/conversation-rating-panel";
+import { useConversationRatings } from "@/hooks/use-ratings";
+import type { RatingRow } from "@/lib/api/ratings";
 
 /** Same redacted-preview render prop the approvals inbox uses. */
 function renderCallExtra(call: PendingToolCallView) {
@@ -104,6 +107,15 @@ export function ConversationDetailPage() {
 
   const { data: conversation, isLoading, isError, refetch } =
     useSimpleConversation(id!, true, false, true);
+
+  // Ratings of this conversation, for a caller the rating list admits (an
+  // administrator, or an editor holding EDIT on the agent); anyone else gets
+  // nothing, quietly — the transcript does not depend on it.
+  const { data: ratingPage } = useConversationRatings(id, conversation?.agentId, !!conversation);
+  const ratingRows = ratingPage?.ratings ?? [];
+  const stepRatings = new Map<number, RatingRow>(
+    ratingRows.filter((r) => r.kind === "message").map((r) => [r.stepIndex, r]),
+  );
 
   // Structured pause details (incl. TOOL_CALL per-call tool names + redacted
   // arguments) — fetched only while the conversation is actually paused.
@@ -458,6 +470,8 @@ export function ConversationDetailPage() {
         </section>
       )}
 
+      {ratingRows.length > 0 && <ConversationRatingPanel rows={ratingRows} />}
+
       {/* Chat-style conversation */}
       <section className="rounded-xl border bg-card shadow-sm" data-testid="conversation-chat">
         <div className="flex items-center gap-2 border-b border-border p-5">
@@ -516,6 +530,7 @@ export function ConversationDetailPage() {
                 stepNumber={index + 1}
                 isLast={index === stepCount - 1}
                 highlight={searchQuery}
+                stepRating={stepRatings.get(index)}
               />
             );
           })}
@@ -612,12 +627,15 @@ function ChatBubbleStep({
   stepNumber,
   isLast,
   highlight,
+  stepRating,
 }: {
   step: SimpleConversationStep;
   conversationOutput?: ConversationOutput;
   stepNumber: number;
   isLast: boolean;
   highlight?: string;
+  /** The reply rating of this step, when there is one and the caller may see it. */
+  stepRating?: RatingRow;
 }) {
   const { t } = useTranslation();
   const [showRaw, setShowRaw] = useState(false);
@@ -696,6 +714,7 @@ function ChatBubbleStep({
           </div>
         </div>
       )}
+      {stepRating && <StepRatingBadge row={stepRating} />}
 
       {/* Raw data toggle + processing time */}
       <div className="flex justify-center">
