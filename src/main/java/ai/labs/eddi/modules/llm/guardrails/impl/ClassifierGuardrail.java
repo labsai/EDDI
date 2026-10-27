@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.RegexDeadline;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -26,7 +27,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -300,13 +300,13 @@ public class ClassifierGuardrail implements ContentGuardrail {
                 return null;
             }
             String tail = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(answer.length() - MAX_LABEL_SCAN_CHARS) : answer;
-            Matcher matcher = pattern.get().matcher(BudgetedCharSequence.withBudget(tail, TimeUnit.MILLISECONDS.toNanos(LABEL_MATCH_BUDGET_MS)));
+            Matcher matcher = RegexDeadline.matcher(pattern.get(), tail, RegexDeadline.deadlineIn(LABEL_MATCH_BUDGET_MS));
             String found = null;
             try {
                 while (matcher.find()) {
                     found = matcher.groupCount() >= 1 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
                 }
-            } catch (MatchBudgetExceededException e) {
+            } catch (RegexDeadline.MatchDeadlineExceededException e) {
                 LOGGER.warnf("Classifier labelPattern exceeded its %d ms match budget — the answer is undecided", LABEL_MATCH_BUDGET_MS);
                 return null;
             }
@@ -332,56 +332,5 @@ public class ClassifierGuardrail implements ContentGuardrail {
 
     private static String lastUserText(List<ChatMessage> messages) {
         return GuardrailModelClient.lastUserText(messages);
-    }
-
-    /** Thrown from {@link BudgetedCharSequence} to abort a runaway match. */
-    private static final class MatchBudgetExceededException extends RuntimeException {
-        MatchBudgetExceededException() {
-            super(null, null, false, false);
-        }
-    }
-
-    /**
-     * A view of the text that gives up after a time budget: the regex engine reads
-     * it character by character, so a catastrophically backtracking pattern hits
-     * the check instead of running for minutes. The clock is read every 256 reads.
-     */
-    private static final class BudgetedCharSequence implements CharSequence {
-        private final CharSequence text;
-        private final long deadlineNanos;
-        private int reads;
-
-        /** {@code deadlineNanos} is an absolute {@link System#nanoTime()} value. */
-        private BudgetedCharSequence(CharSequence text, long deadlineNanos) {
-            this.text = text;
-            this.deadlineNanos = deadlineNanos;
-        }
-
-        static BudgetedCharSequence withBudget(CharSequence text, long budgetNanos) {
-            return new BudgetedCharSequence(text, System.nanoTime() + budgetNanos);
-        }
-
-        @Override
-        public char charAt(int index) {
-            if ((++reads & 0xFF) == 0 && System.nanoTime() - deadlineNanos > 0) {
-                throw new MatchBudgetExceededException();
-            }
-            return text.charAt(index);
-        }
-
-        @Override
-        public int length() {
-            return text.length();
-        }
-
-        @Override
-        public CharSequence subSequence(int start, int end) {
-            return new BudgetedCharSequence(text.subSequence(start, end), deadlineNanos);
-        }
-
-        @Override
-        public String toString() {
-            return text.toString();
-        }
     }
 }

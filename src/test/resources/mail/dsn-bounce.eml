@@ -1,0 +1,48 @@
+Return-Path: <>
+From: Mail Delivery System <MAILER-DAEMON@mx.example.org>
+To: support@example.org
+Subject: Undelivered Mail Returned to Sender
+Date: Sat, 24 Oct 2026 15:00:00 +0000
+Message-ID: <20261024150000.ABC123@mx.example.org>
+Auto-Submitted: auto-replied
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=delivery-status; boundary="DSN.boundary.1"
+
+--DSN.boundary.1
+Content-Description: Notification
+Content-Type: text/plain; charset=us-ascii
+
+This is the mail system at host mx.example.org.
+
+I'm sorry to have to inform you that your message could not
+be delivered to one or more recipients.
+
+<nobody@example.net>: host mx.example.net said: 550 5.1.1 User unknown
+
+--DSN.boundary.1
+Content-Description: Delivery report
+Content-Type: message/delivery-status
+
+Reporting-MTA: dns; mx.example.org
+X-Postfix-Queue-ID: ABC123
+Arrival-Date: Sat, 24 Oct 2026 14:59:58 +0000
+
+Final-Recipient: rfc822; Nobody@Example.net
+Original-Recipient: rfc822;nobody@example.net
+Action: failed
+Status: 5.1.1
+Remote-MTA: dns; mx.example.net
+Diagnostic-Code: smtp; 550 5.1.1 <nobody@example.net>: Recipient address
+    rejected: User unknown
+
+--DSN.boundary.1
+Content-Description: Undelivered Message Headers
+Content-Type: text/rfc822-headers
+
+From: Support <support@example.org>
+To: nobody@example.net
+Subject: Re: Your question
+Message-ID: <eddi.0b9d7a4e-1111-4222-8333-444455556666@example.org>
+Auto-Submitted: auto-replied
+
+--DSN.boundary.1--

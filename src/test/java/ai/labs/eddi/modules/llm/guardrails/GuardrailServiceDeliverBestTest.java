@@ -261,6 +261,26 @@ class GuardrailServiceDeliverBestTest {
         }
 
         @Test
+        @DisplayName("a fail-open redact that gave up part-way still applies its partial rewrite to the delivered attempt")
+        void partialFindingStillApplies() throws Exception {
+            // A pattern list that timed out after its first match: undecided, with the
+            // rewrite it managed. Failing open, the main pass applies that rewrite; so must
+            // the re-screen of a deliver-best attempt, or the attempt ships unredacted.
+            var partial = new Scripted("regex-filter", text -> {
+                throw new GuardrailUndecidedException("pattern_timeout", 0.0,
+                        GuardrailVerdict.rewrite(text.replace("secret", "[REDACTED]"), "regex_filter"));
+            });
+            var redact = config("regex-filter", "redact");
+            redact.setParameters(Map.of(GuardrailService.PARAM_FAIL_MODE, "open"));
+            var configs = List.of(deliverBest("judge", 0), redact);
+            var result = service(grading(), partial).runOutput(configs, "the secret BAD_A", null, CONTEXT, outcomes::add);
+
+            assertFalse(result.isBlocked());
+            assertEquals("the [REDACTED] BAD_A", result.text());
+            assertEquals(GuardrailAction.REDACT, last().action());
+        }
+
+        @Test
         @DisplayName("the exhausted guardrail itself is skipped, and a warn guardrail is still recorded")
         void exhaustedSkippedWarnRecorded() throws Exception {
             var configs = List.of(deliverBest("judge", 0), config("note", "warn"));
