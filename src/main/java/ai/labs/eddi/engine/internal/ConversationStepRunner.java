@@ -1073,7 +1073,7 @@ class ConversationStepRunner {
     void reportTurnOutcome(IConversationMemory memory, TurnWait wait) {
         try {
             ErrorKind kind = classifyTurnOutcome(memory, wait);
-            if (kind != null) {
+            if (kind != null && memory != null) {
                 conversationService
                         .reportTurnOutcome(new TurnOutcome(memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), kind));
             } else if (wait == TurnWait.COMPLETED && memory != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {

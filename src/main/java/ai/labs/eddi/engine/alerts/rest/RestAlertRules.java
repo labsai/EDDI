@@ -136,7 +136,10 @@ public class RestAlertRules implements IRestAlertRules {
     @Override
     public TestResult testRule(AlertRule body) {
         AlertRule rule = forStorage(body);
-        if (rule != null && rule.id() != null) {
+        if (rule == null) {
+            throw AlertErrors.badRequest(AlertErrors.INVALID_RULE, "A rule is required");
+        }
+        if (rule.id() != null) {
             // Testing a saved rule from the editor sends its URLs back masked: fill
             // them in from the stored rule, which the caller must be allowed to change.
             AlertRule current = ruleStore.read(rule.id()).orElse(null);

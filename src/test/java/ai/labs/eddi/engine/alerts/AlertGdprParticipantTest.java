@@ -48,7 +48,7 @@ class AlertGdprParticipantTest {
         participant = new AlertGdprParticipant(events, rules, redactor);
     }
 
-    private static AlertRule rule(String id, String name, String createdBy, String updatedBy) {
+    private static AlertRule rule(String id, String createdBy, String updatedBy) {
         return errorRule(List.of(ErrorKind.TURN_ERROR)).withId(id).withAudit(createdBy, NOW, updatedBy, NOW.plusSeconds(60));
     }
 
@@ -74,8 +74,8 @@ class AlertGdprParticipantTest {
     @DisplayName("the export lists the user's rules with their role and the events they acknowledged — nobody else's name, no content")
     @SuppressWarnings("unchecked")
     void export() {
-        when(rules.findByAuthor("erin", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(rule("r1", "Broken turns", "erin", "frank"),
-                rule("r2", "Edited by erin", "gina", "erin"), rule("r3", "Both", "erin", "erin")));
+        when(rules.findByAuthor("erin", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(rule("r1", "erin", "frank"),
+                rule("r2", "gina", "erin"), rule("r3", "erin", "erin")));
         when(events.findAcknowledgedBy("erin", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(acknowledged("e1", "erin")));
 
         Map<String, Object> export = (Map<String, Object>) participant.export("erin");
@@ -116,7 +116,7 @@ class AlertGdprParticipantTest {
     @Test
     @DisplayName("a row the store returned for somebody else is not exported; nothing to export is null")
     void defensiveAndEmpty() {
-        when(rules.findByAuthor("erin", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(rule("r9", "not hers", "frank", "frank")));
+        when(rules.findByAuthor("erin", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(rule("r9", "frank", "frank")));
         when(events.findAcknowledgedBy("erin", AlertGdprParticipant.MAX_EXPORTED)).thenReturn(List.of(acknowledged("e9", "frank")));
         assertNull(participant.export("erin"));
 
