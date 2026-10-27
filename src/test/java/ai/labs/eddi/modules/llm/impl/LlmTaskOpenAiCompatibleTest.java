@@ -533,7 +533,7 @@ class LlmTaskOpenAiCompatibleTest {
         llmTask.guardrailService = new GuardrailService(List.of(new PiiRedactionGuardrail()), new SimpleMeterRegistry());
         List<ChatMessage> before = List.of(UserMessage.from(TextContent.from("a"), TextContent.from("jane@example.org")));
         List<ChatMessage> after = List.of(UserMessage.from(TextContent.from("[REDACTED:email]")));
-        var screened = new GuardrailService.InputResult(after, null, null, 0.0);
+        var screened = new GuardrailService.InputResult(after, null, null, 0.0, false, 0);
         List<ChatMessage> forStep = List.of(
                 UserMessage.from(TextContent.from("a"), TextContent.from("jane@example.org"), ImageContent.from(IMAGE_B64, "image/png")));
 
