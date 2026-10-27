@@ -536,11 +536,28 @@ Full guide: [slack-integration.md](slack-integration.md).
 
 ### Email
 
-There is no email channel yet; this setting governs the mail socket guard that the coming IMAP/SMTP transports
-will connect through. Details: [security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector).
+There is no email channel yet. These settings govern the **system mailer** — the deployment's one SMTP sender, used
+today for [HITL email notifications](hitl.md#email-notifications) — its outbound message ledger, and the mail socket
+guard the coming IMAP/SMTP transports will connect through. Details:
+[security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector).
 
 | Property | Default | Description |
 |---|---|---|
+| `eddi.mail.smtp.host` | *(unset — disabled)* | The SMTP relay for system mail. Unset, no system mail is sent and one INFO line says so at startup. Operator configuration: a private address, a loopback sidecar, an IP literal and any port are allowed (`SafeSocketConnector`'s operator policy), the socket is still pinned to one resolution, and TLS still verifies the certificate |
+| `eddi.mail.smtp.port` | `587` | The relay port; `465` implies implicit TLS, `25` is allowed |
+| `eddi.mail.smtp.tls` | `starttls` (`implicit` on port 465) | `starttls` (required, never opportunistic), `implicit`, or `none` |
+| `eddi.mail.smtp.allow-plaintext` | `false` | **Must be `true` for `tls=none`**, which sends system mail unencrypted; without it the mailer is disabled with an ERROR. Even then no credential is sent over plaintext: a credential with `tls=none` disables the mailer |
+| `eddi.mail.smtp.from` | *(required when a host is set)* | The sender address of system mail. An invalid or missing value disables the mailer with an ERROR |
+| `eddi.mail.smtp.from-name` | `EDDI` | The sender's display name |
+| `eddi.mail.smtp.connection` | *(unset)* | Name of a connection holding the relay credential: `BASIC` (username + vault-backed password, `AUTH PLAIN/LOGIN`) or `OAUTH2_CLIENT_CREDENTIALS` (SASL `XOAUTH2`, e.g. Exchange Online, with the sender as the mailbox). Its `baseUrlAllowlist` must name the relay's mail origin (`smtp://smtp.office365.com`, `smtps://…`). Mutually exclusive with `username`/`password` |
+| `eddi.mail.smtp.username` | *(unset)* | SMTP username, together with `eddi.mail.smtp.password`. Neither this nor a connection means no `AUTH` (an IP-allowlisted relay) |
+| `eddi.mail.smtp.password` | *(unset)* | SMTP password. Supply it through the environment (`EDDI_MAIL_SMTP_PASSWORD`) or a secret-backed config source, not `application.properties` |
+| `eddi.mail.notify.allowed-recipient-domains` | *(unset — the domain of `eddi.mail.smtp.from` and its subdomains)* | Comma-separated domains HITL email notifications may be sent to: an exact domain (`example.com`), `*.domain` for its subdomains (not the domain itself), or `*` for any. Recipients come from agent configs that anyone with EDIT on an agent can change, while the mail leaves through this relay from this sender, so the default keeps it inside the sender's organisation. A recipient outside is refused at agent save time when a mailer is configured (accepted with a WARN when not) and is never mailed (ledger row `SUPPRESSED`, `outcome=not_allowed`). An entry that is not a domain makes notifications go to nobody, with an ERROR at startup |
+| `eddi.mail.notify.max-per-recipient-per-hour` | `30` | Flood brake: at most this many notifications per recipient in any hour, counted across the cluster from the email ledger (suppressed rows do not count). Over it, rows are `SUPPRESSED` (`outcome=rate_limited`) and each instance logs one WARN per recipient per hour, naming the recipient by hash. Concurrent pauses on several instances can overshoot by a few. `0` or less disables the limit |
+| `eddi.email.ledger-retention` | `30d` | How long an email ledger row (one per notification: recipient, state, Message-ID — never a body) is kept. Zero or negative falls back to `30d` |
+| `eddi.email.outbound.max-attempts` | `6` | Send attempts before a notification is marked `FAILED`. A 5xx refusal fails it at once |
+| `eddi.email.outbound.retry-backoff` | `1m` | Delay before the first retry; it doubles per attempt, capped at one hour |
+| `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so instances never send the same row twice |
 | `eddi.email.allowed-hosts` | *(empty — any public host)* | Comma-separated mail servers (IMAP/SMTP) that channel and knowledge-base authors may name: exact host names, or `*.domain` for its subdomains (not the domain itself). Applied on top of the always-on refusal of private, loopback, link-local and metadata addresses, which an entry here does not lift. An entry that is not a host name fails the first mail connection rather than being ignored |
 
 ### OpenAI-compatible API

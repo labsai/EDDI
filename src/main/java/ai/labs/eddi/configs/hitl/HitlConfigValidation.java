@@ -6,14 +6,19 @@ package ai.labs.eddi.configs.hitl;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.mail.AddressNormalizer;
+import ai.labs.eddi.engine.mail.NotifyRecipientPolicy;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.jboss.logging.Logger;
 
 /**
@@ -24,6 +29,8 @@ import org.jboss.logging.Logger;
  * Jackson at deserialization; only the ISO-8601 duration needs checking here.
  */
 public final class HitlConfigValidation {
+
+    private static final Logger LOGGER = Logger.getLogger(HitlConfigValidation.class);
 
     private HitlConfigValidation() {
     }
@@ -49,6 +56,91 @@ public final class HitlConfigValidation {
         }
         validateToolApprovals(hitlConfig.getToolApprovals(), "hitlConfig.toolApprovals");
         warnIfToolApprovalsInheritsAutoApprove(hitlConfig);
+        validateNotify(hitlConfig.getNotify(), "hitlConfig.notify");
+    }
+
+    /**
+     * Where save-time validation reads the recipient policy from: the live
+     * configuration. Replaced by tests only.
+     */
+    static Supplier<NotifyRecipientPolicy.Current> recipientPolicySource = NotifyRecipientPolicy::current;
+
+    /** Upper bound for {@code hitlConfig.notify.email.recipients}. */
+    public static final int MAX_NOTIFY_RECIPIENTS = 20;
+
+    /**
+     * Validates {@code hitlConfig.notify}: when {@code email} is present it needs
+     * one to {@value #MAX_NOTIFY_RECIPIENTS} distinct, plain ASCII addresses
+     * ({@code local@domain}, no display name). Addresses are compared after
+     * normalisation, so {@code Ops@Example.com} and {@code ops@example.com} are one
+     * duplicate. The refusal names the position, never the address.
+     */
+    public static void validateNotify(HitlNotifyConfig notify, String fieldPath) {
+        if (notify == null || notify.getEmail() == null) {
+            return;
+        }
+        List<String> recipients = notify.getEmail().getRecipients();
+        String path = fieldPath + ".email.recipients";
+        if (recipients == null || recipients.isEmpty()) {
+            throw new IllegalArgumentException(path + " is empty: name at least one address, or remove " + fieldPath + ".email");
+        }
+        if (recipients.size() > MAX_NOTIFY_RECIPIENTS) {
+            throw new IllegalArgumentException(path + " has " + recipients.size() + " entries; at most " + MAX_NOTIFY_RECIPIENTS
+                    + " are allowed — notify a shared mailbox or distribution list instead");
+        }
+        NotifyRecipientPolicy.Current current = currentRecipientPolicy();
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < recipients.size(); i++) {
+            String normalized = normalizeRecipient(recipients.get(i), path + "[" + i + "]");
+            if (!seen.add(normalized)) {
+                throw new IllegalArgumentException(path + "[" + i + "] repeats an earlier address");
+            }
+            if (current != null && !current.policy().allows(normalized)) {
+                String rule = path + "[" + i + "] is outside the domains this deployment may send notifications to ("
+                        + current.policy().describe() + "; operator setting " + NotifyRecipientPolicy.ALLOWED_DOMAINS + ")";
+                if (current.mailerConfigured()) {
+                    throw new IllegalArgumentException(rule + " — it would never be mailed");
+                }
+                // No mailer yet: the operator may configure one, and the policy with it,
+                // later. Saved, and refused again at send time if still outside.
+                LOGGER.warnf("%s. No system mailer is configured, so this is not refused now; it will not be mailed unless the "
+                        + "operator allows the domain.", rule);
+            }
+        }
+    }
+
+    /**
+     * The deployment's recipient policy, or null when it cannot be read (a bad
+     * {@code eddi.mail.notify.allowed-recipient-domains} entry is the operator's
+     * error, reported at startup and enforced closed at send time — it must not
+     * block every agent save).
+     */
+    private static NotifyRecipientPolicy.Current currentRecipientPolicy() {
+        try {
+            return recipientPolicySource.get();
+        } catch (IllegalArgumentException e) {
+            LOGGER.warnf("Recipient policy not applied at save time: %s", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * The normalised form of one configured recipient.
+     *
+     * @throws IllegalArgumentException
+     *             naming {@code where} and the rule, never the address
+     */
+    public static String normalizeRecipient(String recipient, String where) {
+        String normalized;
+        try {
+            normalized = AddressNormalizer.normalize(recipient);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(where + " is not a plain email address (local@domain): " + e.getMessage());
+        }
+        if (!StandardCharsets.US_ASCII.newEncoder().canEncode(normalized)) {
+            throw new IllegalArgumentException(where + " has a non-ASCII local part, which needs SMTPUTF8 and is not supported");
+        }
+        return normalized;
     }
 
     /**
