@@ -29,6 +29,7 @@ import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.impl.ClassifierGuardrail;
+import ai.labs.eddi.modules.llm.guardrails.impl.ExpressionGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.JudgeGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.JsonObjectGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
@@ -177,7 +178,8 @@ class LlmTaskGuardrailsTest {
                 counterweightService, identityMaskingService, agentOrchestrator, new ConversationHistoryBuilder(), meterRegistry,
                 new CallerIdentityContext(null, null));
         llmTask.guardrailService = new GuardrailService(
-                List.of(new PromptInjectionGuardrail(), new PiiRedactionGuardrail(), new JsonObjectGuardrail()), meterRegistry);
+                List.of(new PromptInjectionGuardrail(), new PiiRedactionGuardrail(), new JsonObjectGuardrail(), new ExpressionGuardrail()),
+                meterRegistry);
     }
 
     private void userSays(String text) {
@@ -641,6 +643,75 @@ class LlmTaskGuardrailsTest {
 
         assertEquals(2, model.callCount());
         assertEquals("Could not produce a valid answer.", outputItem().getText());
+    }
+
+    // === output phase: the expression guardrail ===
+
+    private static GuardrailConfig lineSum(String action) {
+        var cfg = guardrail("expression", action);
+        cfg.setParameters(
+                Map.of("expr", "sum(lines[*].amount) == total", "issue", "LINE_SUM", "fix", "Make total equal the sum of the line amounts."));
+        cfg.setBlockMessage("The invoice did not add up.");
+        return cfg;
+    }
+
+    private static final String WRONG_INVOICE = "{\"total\": 31.00, \"lines\": [{\"amount\": 10.10}, {\"amount\": 20.20}]}";
+    private static final String RIGHT_INVOICE = "{\"total\": 30.30, \"lines\": [{\"amount\": 10.10}, {\"amount\": 20.20}]}";
+
+    @Test
+    @DisplayName("expression reprompt: the re-ask carries only the author's fix text, and the corrected invoice is delivered")
+    void expressionReprompt_fixThenPass() throws Exception {
+        when(memory.getEventSink()).thenReturn(sink);
+        var model = FaultInjectingChatModel.script(Step.text(WRONG_INVOICE), Step.text(RIGHT_INVOICE));
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task();
+        task.setOutputGuardrails(List.of(lineSum("reprompt")));
+
+        run(task);
+
+        assertEquals(2, model.callCount());
+        var second = model.requests().get(1).messages();
+        assertEquals(WRONG_INVOICE, ((AiMessage) second.get(second.size() - 2)).text());
+        String corrective = lastUserText(second);
+        assertEquals("Your previous reply needs these corrections:\n- Make total equal the sum of the line amounts.\n"
+                + "Write a new reply that applies them. Reply with the answer only.", corrective);
+        assertFalse(corrective.contains("31.00") || corrective.contains("30.30"), "no computed or model value in the corrective message");
+        assertEquals(RIGHT_INVOICE, outputItem().getText());
+        verify(sink).onGuardrailTriggered("expression", "output", "reprompt", TASK_ID);
+        var records = ArgumentCaptor.forClass(Object.class);
+        verify(dataFactory).createData(eq("audit:guardrail:output:expression"), records.capture());
+        var record = (Map<String, Object>) ((List<?>) records.getValue()).get(0);
+        assertEquals("expression_failed:LINE_SUM", record.get("reason"));
+        assertEquals(1.0, meterRegistry.counter(GuardrailService.METRIC_TRIGGERED, "phase", "output", "type", "expression", "action", "reprompt")
+                .count());
+    }
+
+    @Test
+    @DisplayName("expression block: a wrong total is never delivered, and the model is not asked again")
+    void expressionBlock() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.text(WRONG_INVOICE)).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task();
+        task.setOutputGuardrails(List.of(lineSum("block")));
+
+        run(task);
+
+        assertEquals(1, model.callCount());
+        assertEquals("The invoice did not add up.", outputItem().getText());
+    }
+
+    @Test
+    @DisplayName("expression: a configuration that cannot work is refused at deploy time with the position")
+    void expressionInvalid_refusedAtDeploy() {
+        var task = task();
+        var cfg = guardrail("expression", "reprompt");
+        cfg.setParameters(Map.of("expr", "sum(lines[*].amount) = total", "issue", "LINE_SUM", "fix", "Fix it."));
+        task.setOutputGuardrails(List.of(cfg));
+
+        var e = assertThrows(WorkflowConfigurationException.class, () -> llmTask.validateGuardrails(new LlmConfiguration(List.of(task))));
+
+        assertTrue(e.getMessage().contains("outputGuardrails[0]: expression guardrail: parameter 'expr' is not valid at position 21"),
+                e.getMessage());
     }
 
     @Test

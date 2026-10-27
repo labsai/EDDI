@@ -1065,7 +1065,8 @@ your tool schemas do not cover it, not as a routine first step:
   user's message before the model runs, outputGuardrails the answer before it
   is delivered. Each entry is {type, action, maxRetries, onExhausted,
   blockMessage, parameters}; type is prompt-injection (input), pii-redaction,
-  regex-filter, max-length, classifier (both), judge or json-object (output);
+  regex-filter, max-length, classifier (both), judge, json-object or
+  expression (output);
   action is block (default), redact, reprompt (output: re-ask the same model,
   maxRetries default 2, max 5, then block) or warn. onExhausted (output
   reprompt only, EDDI 6.7+) is block (default) or deliver-best: once the
@@ -1127,6 +1128,27 @@ your tool schemas do not cover it, not as a routine first step:
   reached the classifier is not called at all and the reason is
   spend_refused, with the same failMode. It does not re-screen earlier history messages (cost). Point the
   admin at docs/langchain.md for worked examples.
+- The expression guardrail (output only, EDDI 6.7+) checks a JSON answer with
+  a deterministic expression — arithmetic and cross-field rules, no model
+  call. Parameters, all required and checked at deploy: expr (at most 2000
+  characters, e.g. "sum(lines[*].amount) == total"), issue (an issue code of
+  upper-case letters, digits and underscores, e.g. LINE_SUM) and fix (at most
+  1000 characters: the only sentence a reprompt tells the model). The
+  language: paths (total, invoice.total, lines[0].amount, the wildcard
+  lines[*].amount, $ for the whole answer), decimal arithmetic (0.1 + 0.2 ==
+  0.3 is true), == != < <= > >= (not chainable), && || ! (short-circuit), and
+  the functions sum, count, min, max, len, abs, round(x, n), exists(path),
+  approx(a, b, tolerance) — nothing else. A missing path is null: x == null
+  tests it, any other comparison with null is false, and arithmetic or a
+  function on null cannot decide. False is reason
+  "expression_failed:<issue>"; a reprompt sends EDDI's fixed frame around the
+  fix text only, never values from the answer. An answer that is not JSON is
+  expression_unparseable, an evaluation error (null or type mismatch, division
+  by zero) or a non-boolean result expression_undecided:<cause>; failMode
+  decides (closed by default for block and reprompt: the answer is withheld
+  without a re-ask). A deploy refusal names the position of a syntax error —
+  read it to the admin. Typical setup: action reprompt, maxRetries 1, after a
+  responseSchema for the shape.
 - The judge guardrail (output only, EDDI 6.7+) asks a model whether the answer
   is right by the admin's own criteria — e.g. grounded in the retrieved
   sources. Same model parameters as the classifier (provider plus the
