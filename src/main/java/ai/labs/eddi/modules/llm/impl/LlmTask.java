@@ -37,12 +37,14 @@ import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailOutcome;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.JudgeGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.Reprompter;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -3413,9 +3415,42 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             for (String problem : guardrailService.validate("outputGuardrails", task.getOutputGuardrails())) {
                 problems.add("task '" + taskId + "' " + problem);
             }
+            for (String warning : guardrailService.warnings("inputGuardrails", task.getInputGuardrails())) {
+                LOGGER.warnf("LLM task '%s' %s", taskId, warning);
+            }
+            for (String warning : guardrailService.warnings("outputGuardrails", task.getOutputGuardrails())) {
+                LOGGER.warnf("LLM task '%s' %s", taskId, warning);
+            }
+            warnSelfJudging(task, taskId);
         }
         if (!problems.isEmpty()) {
             throw new WorkflowConfigurationException("Invalid guardrail configuration: " + String.join("; ", problems));
+        }
+    }
+
+    /**
+     * A {@code judge} grading the task's own model is biased toward its own
+     * answers: worth a note at deploy time, not a refusal (a different prompt still
+     * catches a lot). Compared on the configured provider and model name.
+     */
+    private static void warnSelfJudging(Task task, String taskId) {
+        if (task.getOutputGuardrails() == null || task.getParameters() == null) {
+            return;
+        }
+        String taskModel = resolveModelName(task.getParameters());
+        if (task.getType() == null || taskModel == null) {
+            return;
+        }
+        for (GuardrailConfig guardrail : task.getOutputGuardrails()) {
+            if (guardrail == null || !JudgeGuardrail.TYPE.equals(guardrail.getType()) || guardrail.getParameters() == null) {
+                continue;
+            }
+            Map<String, String> p = guardrail.getParameters();
+            if (task.getType().trim().equalsIgnoreCase(String.valueOf(p.get("provider")).trim())
+                    && taskModel.trim().equals(String.valueOf(resolveModelName(p)).trim())) {
+                LOGGER.warnf("LLM task '%s' has a judge guardrail on its own model '%s' — a model grading its own answers is biased; "
+                        + "consider a different judge model", taskId, taskModel);
+            }
         }
     }
 

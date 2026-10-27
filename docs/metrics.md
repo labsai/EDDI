@@ -707,6 +707,7 @@ eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
 eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
 eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout)
+eddi_guardrail_judge_duration_seconds       # Timer: one `judge` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (pass|fail|unparseable|unavailable|timeout)
 ```
 
 `eddi_guardrail_triggered_total` counts findings, not evaluations: a guardrail that

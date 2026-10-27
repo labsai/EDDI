@@ -15713,6 +15713,83 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 267,
+          "type": "timeseries",
+          "title": "Judge guardrail latency and outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean `eddi_guardrail_judge_duration_seconds` by `provider` and `outcome` (pass, fail, unparseable, unavailable, timeout). A judge grades an LLM task's answer against the issue codes its author declared, after the model answered; only turns whose agent configures a judge guardrail record samples. Watch `unparseable` and `unavailable`: under failMode open they switch the check off without blocking anything. Empty (\"no samples yet\") when there is no judge traffic, because a mean latency has no honest value without calls.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 33
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, outcome) (rate(eddi_guardrail_judge_duration_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum by (provider, outcome) (rate(eddi_guardrail_judge_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },

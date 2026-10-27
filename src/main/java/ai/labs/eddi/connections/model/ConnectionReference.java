@@ -4,10 +4,10 @@
  */
 package ai.labs.eddi.connections.model;
 
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.List;
 
 /**
  * A {@code ${connection:name}} reference, optionally tenant-qualified as
@@ -33,7 +33,13 @@ public record ConnectionReference(String tenantId, String name) {
     /** {@code ${connection:name}} or {@code ${connection:tenant/name}}. */
     public static final String CONNECTION_PATTERN = "\\$\\{connection:(?:([^/}]+)/)?([^}]+)}";
 
-    private static final Pattern COMPILED = Pattern.compile(CONNECTION_PATTERN);
+    /**
+     * Finds what {@link #CONNECTION_PATTERN} matches, in linear time. The regex's
+     * {@code find()} rescans the rest of the value at every unterminated opener,
+     * and a global variable's value — scanned by {@link #contains} on every write —
+     * can carry thousands of them.
+     */
+    private static final ReferenceScanner SCANNER = ReferenceScanner.of("connection");
 
     /** How much of an offending literal a refusal quotes back to the author. */
     private static final int MAX_QUOTED_LITERAL_CHARS = 60;
@@ -49,7 +55,7 @@ public record ConnectionReference(String tenantId, String name) {
      * out as literal text.
      */
     public static boolean contains(String value) {
-        return value != null && COMPILED.matcher(value).find();
+        return SCANNER.containsReference(value);
     }
 
     /**
@@ -72,13 +78,13 @@ public record ConnectionReference(String tenantId, String name) {
      */
     public static void requireSole(String value, String where) {
         String candidate = value == null ? "" : value;
-        if (COMPILED.matcher(candidate.trim()).matches()) {
+        if (SCANNER.matchesWhole(candidate.trim())) {
             return;
         }
         // Bounded and redacted: what surrounds the reference is author-written text,
         // but it sits in the one field that carries credentials and may already have
         // had a ${vault:…} resolved into it by the time it reaches here.
-        String around = COMPILED.matcher(candidate).replaceAll(" ").trim();
+        String around = SCANNER.replaceAll(candidate, match -> " ").trim();
         if (around.length() > MAX_QUOTED_LITERAL_CHARS) {
             around = around.substring(0, MAX_QUOTED_LITERAL_CHARS) + "…";
         }
@@ -98,13 +104,22 @@ public record ConnectionReference(String tenantId, String name) {
         if (value == null) {
             throw new IllegalArgumentException("Not a connection reference: null");
         }
-        Matcher matcher = COMPILED.matcher(value);
-        if (!matcher.find()) {
+        ReferenceScanner.Match match = SCANNER.findFirst(value);
+        if (match == null) {
             throw new IllegalArgumentException("Invalid connection reference: " + value + ". Expected ${connection:name} "
                     + "or ${connection:tenantId/name}");
         }
-        String tenant = matcher.group(1) != null ? matcher.group(1) : DEFAULT_TENANT;
-        return new ConnectionReference(tenant, matcher.group(2));
+        return of(match);
+    }
+
+    /** Every reference in {@code value}, in order — the linear-time finder. */
+    public static List<ReferenceScanner.Match> findAll(String value) {
+        return SCANNER.findAll(value);
+    }
+
+    /** The reference a {@link #findAll} match names. */
+    public static ConnectionReference of(ReferenceScanner.Match match) {
+        return new ConnectionReference(match.tenant() != null ? match.tenant() : DEFAULT_TENANT, match.name());
     }
 
     /** The reference in its canonical written form. */

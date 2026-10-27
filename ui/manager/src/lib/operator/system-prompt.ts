@@ -1033,11 +1033,23 @@ your tool schemas do not cover it, not as a routine first step:
   maxRefusalsPerTurn (3), exemptTools (e.g. status-poll tools).
 - Guardrails on an LLM task (off unless configured): inputGuardrails screen the
   user's message before the model runs, outputGuardrails the answer before it
-  is delivered. Each entry is {type, action, maxRetries, blockMessage,
-  parameters}; type is prompt-injection (input), pii-redaction, regex-filter,
-  max-length, classifier (both) or json-object (output); action is block (default), redact,
-  reprompt (output: re-ask the same model, maxRetries default 2, max 5, then
-  block) or warn. block/redact/reprompt on the output side make the task buffer
+  is delivered. Each entry is {type, action, maxRetries, onExhausted,
+  blockMessage, parameters}; type is prompt-injection (input), pii-redaction,
+  regex-filter, max-length, classifier (both), judge or json-object (output);
+  action is block (default), redact, reprompt (output: re-ask the same model,
+  maxRetries default 2, max 5, then block) or warn. onExhausted (output
+  reprompt only, EDDI 6.7+) is block (default) or deliver-best: once the
+  retries are spent, deliver the attempt that guardrail rated best (fewest
+  issue codes for a judge, else the last attempt), recorded as a warn with
+  reason "<reason>:delivered_best" — and that attempt is still screened by
+  the output guardrails after it (the ones before it already screened it; a
+  redact rewrites it, a block or reprompt finding blocks it), so it cannot
+  bypass the PII redaction or classifiers after it. The exhausted guardrail
+  does not re-screen its own pick, so a classifier with deliver-best delivers
+  what it flagged; keep a safety classifier on onExhausted block. The
+  deploy refuses deliver-best on any other action or on input guardrails, and
+  logs a warning for deliver-best on a classifier (a safety check should not
+  deliver what it flagged). block/redact/reprompt on the output side make the task buffer
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
   strings, never templates: pii-redaction takes patterns
   ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
@@ -1083,6 +1095,30 @@ your tool schemas do not cover it, not as a routine first step:
   classifier then blocks every guarded turn; open lets the text through with a
   warning. It does not re-screen earlier history messages (cost). Point the
   admin at docs/langchain.md for worked examples.
+- The judge guardrail (output only, EDDI 6.7+) asks a model whether the answer
+  is right by the admin's own criteria — e.g. grounded in the retrieved
+  sources. Same model parameters as the classifier (provider plus the
+  provider's own keys; apiKey is a vault reference the admin sets — you never
+  write one), and its own: promptTemplate (required; {input}, {output},
+  {context} with includeRetrievedContext "true"), issues (required: a JSON
+  object as a string mapping 1-20 issue codes, upper-case letters, digits and
+  underscores, to the fix text a reprompt sends — e.g.
+  {"UNSUPPORTED_CLAIM": "Remove every claim the sources do not state."}),
+  timeoutMs (default 5000), inputPricePer1M/outputPricePer1M (an unpriced
+  judge is logged at deploy: its calls are not counted against cost ceilings),
+  jsonResponseFormat (on/off/auto). EDDI appends the reply format itself; the
+  judge may only answer {"issues": [declared codes]}, an empty list passes,
+  and a finding has reason "judge_failed:<CODES>". A reprompt tells the model
+  only the admin's fix texts for those codes — never the judge's own words,
+  so a judge cannot be used to inject instructions. Any other reply or an
+  undeclared code is judge_unparseable, an unreachable or slow judge
+  judge_unavailable; failMode decides (closed by default for reprompt, so the
+  answer is withheld — open lets it through with a warning). Typical setup:
+  action reprompt, maxRetries 1, onExhausted deliver-best. Each answer costs
+  one judge call, each reprompt one model call plus one more judge call;
+  eddi.guardrail.judge.duration{provider,outcome} shows pass, fail,
+  unparseable, unavailable and timeout. A judge on the task's own model is
+  biased (the deploy logs a note).
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
@@ -1147,8 +1183,9 @@ if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"; every model parameter per provider and which model rejects it: "llm-parameters"
-- input/output guardrails (prompt-injection, PII redaction, reprompt): "langchain"
-  (section "Input and Output Guardrails"), design and limits in "security"
+- input/output guardrails (prompt-injection, PII redaction, reprompt, classifier,
+  judge, onExhausted deliver-best): "langchain" (section "Input and Output
+  Guardrails"), design and limits in "security"
 - LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"

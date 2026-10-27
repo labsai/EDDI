@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.guardrails;
 
+import java.util.List;
+
 /**
  * What a {@link ContentGuardrail} found. The guardrail only reports; the
  * configured {@link GuardrailAction} decides what happens.
@@ -24,8 +26,13 @@ package ai.labs.eddi.modules.llm.guardrails;
  * @param costUsd
  *            what evaluating the guardrail itself cost (a guardrail that calls
  *            a model); 0 for the built-ins
+ * @param issues
+ *            the issue codes a guardrail that grades the text found
+ *            ({@code judge}), author-declared and therefore safe to record;
+ *            empty for every other type. Used to rate attempts for
+ *            {@code onExhausted: deliver-best}
  */
-public record GuardrailVerdict(Kind kind, String text, String reason, String repromptHint, double costUsd) {
+public record GuardrailVerdict(Kind kind, String text, String reason, String repromptHint, double costUsd, List<String> issues) {
 
     /** The three possible findings. */
     public enum Kind {
@@ -34,7 +41,13 @@ public record GuardrailVerdict(Kind kind, String text, String reason, String rep
 
     private static final GuardrailVerdict ALLOW_VERDICT = new GuardrailVerdict(Kind.ALLOW, null, null, null, 0.0);
 
+    /** A verdict without issue codes. */
+    public GuardrailVerdict(Kind kind, String text, String reason, String repromptHint, double costUsd) {
+        this(kind, text, reason, repromptHint, costUsd, List.of());
+    }
+
     public GuardrailVerdict {
+        issues = issues != null ? List.copyOf(issues) : List.of();
         if (kind == null) {
             throw new IllegalArgumentException("kind is required");
         }
@@ -64,8 +77,28 @@ public record GuardrailVerdict(Kind kind, String text, String reason, String rep
         return kind != Kind.ALLOW;
     }
 
+    /**
+     * A violation that names the issue codes found, with the reprompt hint built
+     * from the author's fix texts for them.
+     */
+    public static GuardrailVerdict issues(List<String> issues, String reason, String repromptHint) {
+        return new GuardrailVerdict(Kind.VIOLATION, null, reason, repromptHint, 0.0, issues);
+    }
+
     /** This verdict with the cost of evaluating it attached. */
     public GuardrailVerdict withCost(double cost) {
-        return new GuardrailVerdict(kind, text, reason, repromptHint, cost);
+        return new GuardrailVerdict(kind, text, reason, repromptHint, cost, issues);
+    }
+
+    /**
+     * How bad this verdict rates the text, for choosing the best of several
+     * attempts: 0 when nothing was found, the number of issue codes for a grading
+     * guardrail, 1 for any other finding.
+     */
+    public int severity() {
+        if (!triggered()) {
+            return 0;
+        }
+        return issues.isEmpty() ? 1 : issues.size();
     }
 }
