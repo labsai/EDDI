@@ -15,6 +15,8 @@ import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { StructuredEntryBody } from "@/components/groups/structured-entry-body";
 import { entryBodyToMarkdown, isStructuredBody, readMessageBody } from "@/lib/group-entry-body";
 import { isImageMime, formatBytes } from "@/lib/api/attachments";
+import type { OwnRating, RatingInput, RatingProfile } from "@/lib/api/ratings";
+import { ChatStepRating } from "./chat-rating";
 import { Bot, User, Copy, Check, FileText, AlertTriangle, ShieldAlert } from "lucide-react";
 
 // ==================== Helpers ====================
@@ -59,10 +61,20 @@ function formatFullTime(ts: number): string {
 
 interface ChatMessageProps {
   message: ChatMessageType;
+  /** The step this bubble's thumbs rate — only the last agent bubble of a step, only when the agent asks for reply ratings. */
+  ratingStep?: number | null;
+  rating?: OwnRating;
+  ratingProfile?: RatingProfile | null;
+  /** Stable across renders, or every memoised bubble re-renders. */
+  onRateStep?: (stepIndex: number, input: RatingInput | null) => Promise<boolean>;
 }
 
 export const ChatMessage = memo(function ChatMessage({
   message,
+  ratingStep,
+  rating,
+  ratingProfile,
+  onRateStep,
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const [hovered, setHovered] = useState(false);
@@ -208,6 +220,13 @@ export const ChatMessage = memo(function ChatMessage({
             </div>
           )}
         </div>
+
+        {/* Reply thumbs: shown on hover/focus, always once rated, always on touch */}
+        {!isUser && ratingStep !== undefined && ratingStep !== null && ratingProfile?.messageRating && onRateStep && (
+          <div className={cn("px-1 transition-opacity duration-150 [@media(hover:none)]:opacity-100", hovered || rating ? "opacity-100" : "opacity-0 focus-within:opacity-100")}>
+            <ChatStepRating stepIndex={ratingStep} rating={rating} profile={ratingProfile} onRate={onRateStep} />
+          </div>
+        )}
       </div>
     </div>
   );

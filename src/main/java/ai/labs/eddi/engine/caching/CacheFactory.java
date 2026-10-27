@@ -45,6 +45,7 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             "a2aTaskMapping:index", "A2A_INDEX",
             "paginated-tool-responses", "TOOL_PAGES",
             "slack-event-dedup", "DEDUP",
+            "webhook-event-dedup", "DEDUP",
             "channel-thread-locks", "CHANNEL");
 
     /**
@@ -208,7 +209,15 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // Floor only — the real capacity is derived from the TTL the cache is
             // asked for, see RATE_SIZED_CACHES. This entry applies solely if something
             // ever takes the nonce cache from the size-only getCache(name) overload.
-            Map.entry("nonce-replay-protection", 100_000L));
+            Map.entry("nonce-replay-protection", 100_000L),
+
+            // Floor only, like the nonce cache - the real capacity is derived from the
+            // TTL, see RATE_SIZED_CACHES. Shared by every webhook integration and
+            // holding up to two keys per delivery, and for the github / generic-hmac
+            // schemes the only replay protection there is: at the 1_000 default ~500
+            // deliveries in the 10-minute window from one tenant's integration
+            // evicted another's keys, and a captured request then ran again.
+            Map.entry("webhook-event-dedup", 10_000L));
 
     private static final long DEFAULT_MAX_SIZE = 1_000L;
 
@@ -217,6 +226,15 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
      * survive, in requests per second.
      */
     public static final int NONCE_PEAK_SIGNED_RPS = 300;
+
+    /**
+     * Peak sustained rate of dedup keys the webhook cache is sized to hold, per
+     * second across ALL webhook integrations (a delivery writes up to two keys, so
+     * this is 50 deliveries per second). The webhook handler refuses new deliveries
+     * once the cache is half full instead of evicting, see
+     * {@code WebhookEventHandler.DEDUP_REFUSE_AT}.
+     */
+    public static final int WEBHOOK_PEAK_DEDUP_KEYS_PER_SECOND = 100;
 
     /**
      * Head-room multiplier applied on top of the steady-state occupancy of a
@@ -243,7 +261,9 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
      * means a future change to {@code NonceCacheService}'s TTL cannot silently
      * outgrow a hard-coded capacity.
      */
-    private static final Map<String, Integer> RATE_SIZED_CACHES = Map.of("nonce-replay-protection", NONCE_PEAK_SIGNED_RPS);
+    private static final Map<String, Integer> RATE_SIZED_CACHES = Map.of(
+            "nonce-replay-protection", NONCE_PEAK_SIGNED_RPS,
+            "webhook-event-dedup", WEBHOOK_PEAK_DEDUP_KEYS_PER_SECOND);
 
     /**
      * Maximum entry count for {@code cacheName} when built with {@code ttl}

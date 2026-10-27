@@ -4,14 +4,23 @@
    ────────────────────────────────────────────── */
 
 import { useEffect } from "react";
-import { SunMoon } from "lucide-react";
+import { Star, SunMoon } from "lucide-react";
 
 import { useChatState } from "@/store/chat-store";
 import { DEFAULT_TITLE } from "@/store/chat-store";
 import { useTheme, nextTheme } from "@/hooks/useTheme";
 import { t } from "@/i18n";
 
-export function ChatHeader() {
+interface ChatHeaderProps {
+  /**
+   * Opens the conversation rating card. Absent when the agent does not ask
+   * for a conversation rating (or there is no conversation yet): then the
+   * entry is not shown.
+   */
+  onRateConversation?: () => void;
+}
+
+export function ChatHeader({ onRateConversation }: ChatHeaderProps = {}) {
   const { config, agentName } = useChatState();
   const { setTheme, getMode } = useTheme(config.theme ?? "dark");
 
@@ -55,6 +64,17 @@ export function ChatHeader() {
       </div>
 
       <div className="chat-header__actions">
+        {onRateConversation && (
+          <button
+            className="chat-header__btn"
+            onClick={onRateConversation}
+            title={t("rating.header")}
+            aria-label={t("rating.header")}
+            data-testid="rate-conversation"
+          >
+            <Star size="1em" aria-hidden="true" />
+          </button>
+        )}
         {/* Theme toggle */}
         <button
           className="chat-header__btn"
