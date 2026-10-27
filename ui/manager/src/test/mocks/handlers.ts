@@ -1,5 +1,6 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
+import { ratingHandlers } from "./rating-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
@@ -888,6 +889,9 @@ function nextWeekday9amUtc(from: number = Date.now()): number {
 }
 
 export const handlers = [
+  // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
+  ...ratingHandlers,
+
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
   // it never asked for.
