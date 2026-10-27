@@ -17,6 +17,8 @@ describe("rolesForScreen", () => {
     ["/manage/quotas", [ROLE_ADMIN]],
     ["/manage/orphans", [ROLE_ADMIN]],
     ["/manage/gdpr", [ROLE_ADMIN]],
+    // IRestBrandingAdmin: eddi-admin only.
+    ["/manage/branding", [ROLE_ADMIN]],
     // IRestConnectionStore: descriptors and reads admit eddi-editor too.
     ["/manage/connections", [ROLE_ADMIN, ROLE_EDITOR]],
     ["/manage/connections/abc123", [ROLE_ADMIN, ROLE_EDITOR]],

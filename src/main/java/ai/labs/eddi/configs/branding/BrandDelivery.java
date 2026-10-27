@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.branding;
 
+import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
 import ai.labs.eddi.configs.branding.model.BrandColors;
 import ai.labs.eddi.configs.branding.model.ResolvedBrand;
 import ai.labs.eddi.ui.JsGlobalScript;
@@ -48,6 +49,14 @@ public final class BrandDelivery {
      * {@code window.__EDDI_BRAND__}: what the UIs need before they render. Read by
      * each UI's {@code brand.ts}, which holds the same EDDI defaults for the dev
      * server and mock mode.
+     * <p>
+     * {@code assets} says, per slot, whether the brand has an image of its own
+     * (uploaded or from {@code assets-dir}), without the slot-to-slot fallbacks.
+     * The Manager needs it because {@code /branding/logo} always answers an image —
+     * the bundled EDDI one when nothing is uploaded — so a brand with a name and no
+     * logo would otherwise show the EDDI wordmark; with the flag it shows the
+     * product name as text instead, and the settings page can say what is missing.
+     * Booleans only: the hashes stay on the admin API.
      */
     public static String script(ResolvedBrand brand) {
         return JsGlobalScript.assign("__EDDI_BRAND__")
@@ -59,6 +68,11 @@ public final class BrandDelivery {
                 .put("poweredBy", brand.poweredBy())
                 .put("showUpdateCheck", brand.showUpdateCheck())
                 .putObject("chat", chat -> chat.put("accent", safe(brand.colors().chatAccent())))
+                .putObject("assets", assets -> {
+                    for (BrandAssetSlot slot : BrandAssetSlot.values()) {
+                        assets.put(slot.id(), brand.assets().get(slot) != null);
+                    }
+                })
                 .toJs();
     }
 

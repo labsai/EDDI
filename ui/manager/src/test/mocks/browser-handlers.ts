@@ -1,6 +1,12 @@
 import { http, passthrough } from "msw";
 import type { RequestHandler } from "msw";
-import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, variablesHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers, capabilityHandlers, userMemoryHandlers, propertiesHandlers, triggerHandlers, backupSyncHandlers, connectionHandlers, agentTestHandlers } from "./handlers";
+import { handlers, coordinatorHandlers, orphanHandlers, logAdminHandlers, secretsHandlers, variablesHandlers, auditHandlers, quotaHandlers, scheduleHandlers, gdprHandlers, capabilityHandlers, userMemoryHandlers, propertiesHandlers, triggerHandlers, backupSyncHandlers, connectionHandlers, agentTestHandlers, brandingHandlers } from "./handlers";
+import { brandingDeliveryResolver } from "./branding-handlers";
+
+/** The brand files, which mock mode answers itself (see devAssetPassthrough). */
+// Anchored at the origin: a leading `*` spans segments, so "*/branding/*" also
+// swallowed /administration/branding/assets/... and sent the admin API past MSW.
+const BRANDING_PATH = "/branding/*";
 
 /**
  * URL masks the dev server owns. Anything matching these must reach the
@@ -35,11 +41,18 @@ export const DEV_ASSET_PATHS = [
   // brand-defaults plugin does (scripts/vite-plugin-brand.mjs). The shells load
   // /branding/icon and /branding/logo, which have no file extension, so the
   // unhandled-request recorder would otherwise count them as API calls.
-  "*/branding/*",
+  BRANDING_PATH,
 ];
 
-export const devAssetPassthrough: RequestHandler[] = DEV_ASSET_PATHS.map(
-  (path) => http.all(path, () => passthrough()),
+/**
+ * The dev server's paths, passed through — except `/branding/*`, which in mock
+ * mode answers the mocked brand (`brandingDeliveryResolver`: the script, the
+ * stylesheet and uploaded images from the branding mock's state) and passes
+ * through everything else, so a save on the settings page updates the page live
+ * without a backend. It still ends the search, like the plain passthroughs.
+ */
+export const devAssetPassthrough: RequestHandler[] = DEV_ASSET_PATHS.map((path) =>
+  http.all(path, path === BRANDING_PATH ? brandingDeliveryResolver : () => passthrough()),
 );
 
 /**
@@ -66,4 +79,5 @@ export const browserHandlers: RequestHandler[] = [
   ...backupSyncHandlers,
   ...connectionHandlers,
   ...agentTestHandlers,
+  ...brandingHandlers,
 ];

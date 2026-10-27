@@ -94,7 +94,8 @@
     "breadcrumb": "面包屑导航",
     "checkingVersion": "正在检查版本...",
     "expandSidebar": "展开侧边栏",
-    "collapseSidebar": "收起侧边栏"
+    "collapseSidebar": "收起侧边栏",
+    "branding": "品牌"
   },
   "theme": {
     "light": "浅色",
@@ -6660,5 +6661,119 @@
     "noCases": "尚无对话。套件至少需要一个用例才能运行。",
     "addCase": "添加对话",
     "turnCount": "轮数：{{n}}"
+  },
+  "branding": {
+    "title": "品牌",
+    "subtitle": "以您自己的名称、标志和颜色运行 {{productName}}。",
+    "reset": "恢复默认",
+    "forbidden": "只有管理员（eddi-admin）可以更改品牌。",
+    "sourceLabel": "当前品牌来源：",
+    "updated": "{{who}} 于 {{when}} 最后保存，修订版 {{revision}}",
+    "saveFailed": "品牌未保存：{{reason}}",
+    "warningsTitle": "已保存，服务器给出警告：",
+    "toast": {
+      "applyFailed": "已保存，但此标签页无法加载新品牌。请重新加载页面查看。",
+      "saved": "品牌已保存",
+      "reset": "品牌已恢复为默认"
+    },
+    "validation": {
+      "blank": "不能只包含空格。留空则使用默认值。",
+      "tooLong": "最多 {{max}} 个字符。",
+      "angleBrackets": "不能包含 < 或 >。",
+      "control": "不能包含控制字符。",
+      "color": "请使用 #0f766e、#fff、rgb(15 118 110)、hsl(…) 或 oklch(…) 这样的颜色，且只能使用普通数字。"
+    },
+    "source": {
+      "database": "在此页面保存",
+      "properties": "配置属性",
+      "default": "内置默认值"
+    },
+    "locked": {
+      "title": "品牌已锁定",
+      "body": "此部署设置了 eddi.branding.locked=true，因此品牌来自 eddi.branding.* 属性（{{source}}），无法在此更改。请修改这些属性并重新启动。"
+    },
+    "conflict": {
+      "body": "在此期间其他人保存了品牌（修订版 {{revision}}）。您的更改未保存。请加载最新版本后重新应用。",
+      "reload": "加载最新版本"
+    },
+    "names": {
+      "title": "名称",
+      "description": "留空的字段会依次使用配置属性和默认值。",
+      "productName": "产品名称",
+      "productNameHint": "替换每个界面和标题中的产品名称。",
+      "shortName": "简称",
+      "shortNameHint": "用于空间狭小处。留空时使用产品名称。",
+      "shortNamePlaceholder": "与产品名称相同",
+      "tagline": "标语",
+      "taglineHint": "显示在“关于”和页面描述中。"
+    },
+    "colors": {
+      "title": "颜色",
+      "description": "主色决定按钮、强调色和整个品牌色阶。警告保留自己的颜色。",
+      "primary": "主色",
+      "defaultPlaceholder": "默认",
+      "primaryForeground": "主色上的文字",
+      "darkPrimary": "深色模式主色",
+      "followsLight": "与浅色模式相同",
+      "darkPrimaryForeground": "深色模式主色上的文字",
+      "chatAccent": "聊天组件强调色",
+      "followsPrimary": "与主色相同",
+      "picker": "选择{{name}}"
+    },
+    "contrast": {
+      "light": "浅色模式对比度",
+      "dark": "深色模式对比度",
+      "unknown": "未检查对比度",
+      "pass": "{{ratio}}:1 — 符合 WCAG AA",
+      "fail": "{{ratio}}:1 — 低于 WCAG AA（4.5:1）"
+    },
+    "options": {
+      "title": "选项",
+      "poweredBy": "显示“Powered by”声明",
+      "poweredByHint": "“关于”对话框会注明开源引擎及其许可证。",
+      "updateCheck": "显示更新检查",
+      "updateCheckHint": "“更新”页面和横幅会链接到上游项目。品牌化部署中默认隐藏，除非开启此项。"
+    },
+    "preview": {
+      "title": "预览",
+      "unsaved": "有未保存的更改 — 保存后才会全局生效。",
+      "saved": "所有用户当前看到的样子。",
+      "light": "浅色",
+      "dark": "深色",
+      "button": "主要操作",
+      "badge": "突出显示",
+      "agentMessage": "您好！今天我能帮您做什么？",
+      "userMessage": "显示我的智能体。"
+    },
+    "assets": {
+      "title": "图片",
+      "description": "PNG、WebP 或 SVG，最大 512 KB；ICO 仅限网站图标。图片上传后立即生效。",
+      "uploaded": "已上传",
+      "default": "默认",
+      "dropLabel": "上传{{slot}}",
+      "replace": "拖放或点击以替换",
+      "upload": "拖放或点击以上传",
+      "remove": "移除",
+      "logo": "标志",
+      "logoHint": "浅色模式下侧边栏的文字标志，应在浅色背景上清晰可读。",
+      "logoDark": "深色模式标志",
+      "logoDarkHint": "可选。用于深色模式；留空时使用标志。",
+      "icon": "图标",
+      "iconHint": "正方形。用于折叠的侧边栏、首页和“关于”。",
+      "favicon": "网站图标",
+      "faviconHint": "浏览器标签页图标。留空时使用图标。",
+      "ogImage": "链接预览图",
+      "ogImageHint": "分享聊天链接时显示。留空时使用标志。",
+      "noLogoNote": "未上传标志：侧边栏以文字显示“{{name}}”。登录前显示的页面仍使用默认标志。",
+      "noIconNote": "未上传图标：应用显示简称的首字母，浏览器标签页保留默认图标。",
+      "errorInvalid": "图片被拒绝：{{reason}}",
+      "errorTooLarge": "图片大于 512 KB。",
+      "errorType": "此处不接受该文件类型。请使用 PNG、WebP 或 SVG（ICO 仅限网站图标）。",
+      "errorLocked": "品牌已锁定，无法在此更改图片。"
+    },
+    "resetDialog": {
+      "title": "重置品牌？",
+      "description": "这将清除所有已保存的名称、颜色、选项和图片。所有用户将重新使用配置属性或默认值。"
+    }
   }
 }

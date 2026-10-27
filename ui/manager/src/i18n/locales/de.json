@@ -94,7 +94,8 @@
     "breadcrumb": "Brotkrümelnavigation",
     "checkingVersion": "Version wird geprüft...",
     "expandSidebar": "Seitenleiste erweitern",
-    "collapseSidebar": "Seitenleiste einklappen"
+    "collapseSidebar": "Seitenleiste einklappen",
+    "branding": "Markenauftritt"
   },
   "theme": {
     "light": "Hell",
@@ -6660,5 +6661,119 @@
     "noCases": "Noch keine Gespräche. Eine Suite braucht mindestens ein Gespräch, um zu laufen.",
     "addCase": "Gespräch hinzufügen",
     "turnCount": "Runden: {{n}}"
+  },
+  "branding": {
+    "title": "Markenauftritt",
+    "subtitle": "Betreiben Sie {{productName}} unter Ihrem eigenen Namen, Logo und Ihren Farben.",
+    "reset": "Auf Standard zurücksetzen",
+    "forbidden": "Nur ein Administrator (eddi-admin) kann den Markenauftritt ändern.",
+    "sourceLabel": "Der aktive Markenauftritt stammt aus:",
+    "updated": "Zuletzt gespeichert {{when}} von {{who}}, Revision {{revision}}",
+    "saveFailed": "Der Markenauftritt wurde nicht gespeichert: {{reason}}",
+    "warningsTitle": "Gespeichert, mit einer Warnung des Servers:",
+    "toast": {
+      "applyFailed": "Gespeichert, aber dieser Tab konnte den neuen Markenauftritt nicht laden. Laden Sie die Seite neu, um ihn zu sehen.",
+      "saved": "Markenauftritt gespeichert",
+      "reset": "Markenauftritt auf Standard zurückgesetzt"
+    },
+    "validation": {
+      "blank": "Darf nicht nur aus Leerzeichen bestehen. Für den Standard leer lassen.",
+      "tooLong": "Höchstens {{max}} Zeichen.",
+      "angleBrackets": "Darf weder < noch > enthalten.",
+      "control": "Darf keine Steuerzeichen enthalten.",
+      "color": "Verwenden Sie eine Farbe wie #0f766e, #fff, rgb(15 118 110), hsl(…) oder oklch(…), nur mit einfachen Zahlen."
+    },
+    "source": {
+      "database": "Auf dieser Seite gespeichert",
+      "properties": "Konfigurationseigenschaften",
+      "default": "Eingebaute Standardwerte"
+    },
+    "locked": {
+      "title": "Der Markenauftritt ist gesperrt",
+      "body": "Diese Installation setzt eddi.branding.locked=true. Der Markenauftritt kommt daher aus den Eigenschaften eddi.branding.* ({{source}}) und kann hier nicht geändert werden. Ändern Sie diese Eigenschaften und starten Sie neu."
+    },
+    "conflict": {
+      "body": "Jemand anderes hat den Markenauftritt inzwischen gespeichert (Revision {{revision}}). Ihre Änderungen wurden nicht gespeichert. Laden Sie die neueste Version und wenden Sie sie erneut an.",
+      "reload": "Neueste Version laden"
+    },
+    "names": {
+      "title": "Name",
+      "description": "Leere Felder fallen auf die Konfigurationseigenschaften zurück, danach auf die Standardwerte.",
+      "productName": "Produktname",
+      "productNameHint": "Ersetzt den Produktnamen in jeder Ansicht und jedem Titel.",
+      "shortName": "Kurzname",
+      "shortNameHint": "Für knappen Platz. Ist er leer, wird der Produktname verwendet.",
+      "shortNamePlaceholder": "Wie der Produktname",
+      "tagline": "Slogan",
+      "taglineHint": "Erscheint unter „Über“ und in Seitenbeschreibungen."
+    },
+    "colors": {
+      "title": "Farben",
+      "description": "Die Primärfarbe bestimmt Schaltflächen, Akzente und die ganze Markenskala. Warnungen behalten ihre eigene Farbe.",
+      "primary": "Primärfarbe",
+      "defaultPlaceholder": "Standard",
+      "primaryForeground": "Text auf Primärfarbe",
+      "darkPrimary": "Primärfarbe im Dunkelmodus",
+      "followsLight": "Wie im hellen Modus",
+      "darkPrimaryForeground": "Text auf Primärfarbe im Dunkelmodus",
+      "chatAccent": "Akzent des Chat-Widgets",
+      "followsPrimary": "Wie die Primärfarbe",
+      "picker": "{{name}} wählen"
+    },
+    "contrast": {
+      "light": "Kontrast im hellen Modus",
+      "dark": "Kontrast im Dunkelmodus",
+      "unknown": "Kontrast nicht geprüft",
+      "pass": "{{ratio}}:1 — erfüllt WCAG AA",
+      "fail": "{{ratio}}:1 — unter WCAG AA (4,5:1)"
+    },
+    "options": {
+      "title": "Optionen",
+      "poweredBy": "Hinweis „Powered by“ anzeigen",
+      "poweredByHint": "Der Dialog „Über“ nennt die Open-Source-Engine und ihre Lizenz.",
+      "updateCheck": "Update-Prüfung anzeigen",
+      "updateCheckHint": "Die Seite „Updates“ und das Banner verlinken auf das Upstream-Projekt. Bei eigenem Markenauftritt ausgeblendet, solange dies aus ist."
+    },
+    "preview": {
+      "title": "Vorschau",
+      "unsaved": "Ungespeicherte Änderungen — speichern, um sie überall anzuwenden.",
+      "saved": "Was jetzt alle Nutzer sehen.",
+      "light": "Hell",
+      "dark": "Dunkel",
+      "button": "Hauptaktion",
+      "badge": "Hervorhebung",
+      "agentMessage": "Hallo! Wie kann ich Ihnen heute helfen?",
+      "userMessage": "Zeig mir meine Agenten."
+    },
+    "assets": {
+      "title": "Bilder",
+      "description": "PNG, WebP oder SVG, bis 512 KB; ICO nur für das Favicon. Ein Bild gilt, sobald es hochgeladen ist.",
+      "uploaded": "Hochgeladen",
+      "default": "Standard",
+      "dropLabel": "{{slot}} hochladen",
+      "replace": "Ablegen oder klicken zum Ersetzen",
+      "upload": "Ablegen oder klicken zum Hochladen",
+      "remove": "Entfernen",
+      "logo": "Logo",
+      "logoHint": "Die Wortmarke der Seitenleiste im hellen Modus. Sollte auf hellem Grund lesbar sein.",
+      "logoDark": "Logo für den Dunkelmodus",
+      "logoDarkHint": "Optional. Für den Dunkelmodus; ist es leer, wird das Logo verwendet.",
+      "icon": "Symbol",
+      "iconHint": "Quadratisch. Eingeklappte Seitenleiste, Startseite und „Über“.",
+      "favicon": "Favicon",
+      "faviconHint": "Das Symbol im Browser-Tab. Ist es leer, wird das Symbol verwendet.",
+      "ogImage": "Bild für Linkvorschau",
+      "ogImageHint": "Erscheint, wenn ein Chat-Link geteilt wird. Ist es leer, wird das Logo verwendet.",
+      "noLogoNote": "Kein Logo hochgeladen: Die Seitenleiste zeigt „{{name}}“ als Text. Die Seiten vor der Anmeldung zeigen weiterhin das Standardlogo.",
+      "noIconNote": "Kein Symbol hochgeladen: Die App zeigt den ersten Buchstaben des Kurznamens, der Browser-Tab behält das Standardsymbol.",
+      "errorInvalid": "Das Bild wurde abgelehnt: {{reason}}",
+      "errorTooLarge": "Das Bild ist größer als 512 KB.",
+      "errorType": "Dieser Dateityp wird hier nicht angenommen. Verwenden Sie PNG, WebP oder SVG (ICO nur für das Favicon).",
+      "errorLocked": "Der Markenauftritt ist gesperrt, Bilder können hier nicht geändert werden."
+    },
+    "resetDialog": {
+      "title": "Markenauftritt zurücksetzen?",
+      "description": "Dies löscht alle gespeicherten Namen, Farben, Optionen und Bilder. Für alle Nutzer gelten wieder die Konfigurationseigenschaften oder die Standardwerte."
+    }
   }
 }

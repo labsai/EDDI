@@ -2,11 +2,11 @@
 
 EDDI can run under your product name, logo, icon and colours. One image serves every brand, and a rebrand needs neither a rebuild nor a restart.
 
-> **Status.** This page describes what is built so far: the brand store, its admin API and its delivery to the browser. The shells (page titles, descriptions, favicons, link previews and the loading spinner) are branded, and so is the Manager: its colours, its strings, logos, page titles, update UI and About dialog. The Chat UI's own screens, the Platform Operator, Swagger UI and the Keycloak login theme are not branded yet; the [white-labeling plan](../planning/white-label-ui-plan.md) lists what follows. With no brand set, EDDI looks exactly as it always has.
+> **Status.** This page describes what is built so far: the brand store, its admin API and its delivery to the browser, and the Manager's **Branding** page for editing it. The shells (page titles, descriptions, favicons, link previews and the loading spinner) are branded, and so is the Manager: its colours, its strings, logos, page titles, update UI and About dialog. The Chat UI's own screens, the Platform Operator, Swagger UI and the Keycloak login theme are not branded yet; the [white-labeling plan](../planning/white-label-ui-plan.md) lists what follows. With no brand set, EDDI looks exactly as it always has.
 
 ## Where the brand comes from
 
-The brand is one document per deployment, stored in the database (MongoDB or PostgreSQL), and edited by an admin through the REST API below. A Manager settings page for it comes later.
+The brand is one document per deployment, stored in the database (MongoDB or PostgreSQL), and edited by an admin on the Manager's [Branding page](#the-branding-page) or through the [REST API](#rest-api) below.
 
 Each field is resolved on its own, in this order:
 
@@ -48,7 +48,23 @@ The images in `assets-dir` use fixed names: `logo.svg` (or `.png`, `.webp`), `lo
 
 ### Locking the brand
 
-`eddi.branding.locked=true` is for installs that keep their brand in Git, such as a Helm values file. The properties are then the whole brand, and every write to `/administration/branding` answers `409` with a message naming the property. `GET` still answers and shows the brand in effect, with `"locked": true`.
+`eddi.branding.locked=true` is for installs that keep their brand in Git, such as a Helm values file. The properties are then the whole brand, and every write to `/administration/branding` answers `409` with a message naming the property. `GET` still answers and shows the brand in effect, with `"locked": true`, and the Branding page shows it read-only.
+
+## The Branding page
+
+**Admin → Branding** (`/manage/branding`) in the Manager edits the brand. It is listed only for `eddi-admin`, like the API it calls, and the command palette follows the same rule.
+
+- **Name**: product name, short name and tagline. An empty field is unset, so the property seed or the EDDI default applies; the placeholder shows what that is.
+- **Colours**: the primary colour and the text on it, the same pair for dark mode (empty follows light), and the chat widget's accent (empty follows the primary). Each has a colour picker and a text field that takes any colour the [validator](#what-is-validated) accepts. A badge shows the WCAG contrast of each primary pair as you type.
+- **Options**: the "Powered by" notice and the update check.
+- **Preview**: a small sidebar, a primary button, a highlight, the whole `brand-50…950` scale and a chat bubble, in light and dark side by side. It uses the same colour formulas as `brand.css`, so it shows what a save will look like, whatever brand is in effect around it.
+- **Images**: a drop zone per slot, with the image it shows now, Replace and Remove. An image applies as soon as it is uploaded. The page checks the 512 KB cap before sending, and explains each refusal: an SVG that could run script, a wrong type, too large, or locked. With a name set but no logo, it says that the sidebar shows the name as text; with no icon, that the browser tab keeps the default icon.
+
+**Saving** sends the whole form with the revision it was loaded at. Every value is first checked in the browser with the server's rules, and whatever the server still refuses is shown on the field it names. If someone else saved in the meantime, the page does not overwrite their change: it says so and offers **Reload latest**, which loads their version so you can apply your edit again. An image upload does not conflict with your own unsaved text edits. Contrast warnings from the server are shown after a save. **Reset to defaults** asks for confirmation, then clears every stored value and image.
+
+**Locked** (`eddi.branding.locked=true`): the page shows the brand from the properties, read-only, with a notice naming the property and the source.
+
+**Live update.** After a save, an upload or a reset, the page applies the new brand to its own tab without a reload. It swaps `brand.css` and the favicon for `?r=<revision>` URLs, loads `__brand__.js` again through a new script element (never `eval`, so the Content-Security-Policy is unchanged), and hands the result to the Manager's brand store. The name in every string, the logos, the colours and the page title change at once. Other open tabs pick the brand up when they next load, and other cluster nodes within 30 seconds.
 
 ## What is validated
 
@@ -153,7 +169,7 @@ Everything is served from EDDI's own origin, so the Content-Security-Policy does
 | Path | What it is |
 |---|---|
 | `/branding/logo`, `/branding/logo-dark`, `/branding/icon`, `/branding/favicon.ico`, `/branding/og-image` | The current image, or the bundled EDDI one. Served with `Cache-Control: public, max-age=300`, an `ETag` equal to the content hash, and `X-Content-Type-Options: nosniff` |
-| `/branding/__brand__.js` | Sets `window.__EDDI_BRAND__` = `{branded, revision, productName, shortName, tagline, poweredBy, showUpdateCheck, chat: {accent}}`. Uncached |
+| `/branding/__brand__.js` | Sets `window.__EDDI_BRAND__` = `{branded, revision, productName, shortName, tagline, poweredBy, showUpdateCheck, chat: {accent}, assets: {logo, logoDark, icon, favicon, ogImage}}`. `assets` says, per slot, whether the brand has an image of its own (uploaded or from `assets-dir`), as booleans; the hashes stay on the admin API. Uncached |
 | `/branding/brand.css` | The brand's colour tokens, empty when no colour is set. Uncached |
 
 These paths are public, like the pages that load them: a browser needs them before it has a token, and they show only what those pages already show.
@@ -189,7 +205,7 @@ The HTML pages are rendered with the brand before they are sent: `/manage`, `/we
 Besides its colours (above), the Manager takes the brand from `window.__EDDI_BRAND__`, read once by `src/lib/brand.ts` with the EDDI defaults as a fallback for every field:
 
 - **Strings.** Every mention of the product in the 11 locales is `{{productName}}`, an i18next default variable set from the brand before the first render, so "Welcome to EDDI" reads "Welcome to Acme Assist". Engine-version notes say "server version 6.6" rather than naming EDDI. Technical names stay as they are: `EDDI_*` variables, `X-EDDI-*` headers, `eddi.*` properties, the `eddi-v1` webhook signature and the "EDDI Cluster" Grafana dashboard. A test (`no-eddi-brand-literal.test.ts`) fails on a literal "EDDI" in a locale value, a `t()` fallback, JSX text or an `alt`/`aria-label`/`title`/`placeholder`.
-- **Logos.** The sidebars show `/branding/logo` in light mode and `/branding/logo-dark` in dark mode. Unbranded, both are the white EDDI wordmark, which the light sidebar inverts to near-black as before; a branded logo is shown as uploaded and never inverted. **So upload a logo that reads on a light background, plus a dark-mode logo if it does not read on a dark one.** A brand that sets only its name keeps the white EDDI wordmark, which is then hard to see on the light sidebar. The collapsed sidebar shows `/branding/icon` when branded (EDDI's "E." monogram otherwise), and the landing and Workforce pages use the icon too. Alt texts and labels are the product name.
+- **Logos.** The sidebars show `/branding/logo` in light mode and `/branding/logo-dark` in dark mode. Unbranded, both are the white EDDI wordmark, which the light sidebar inverts to near-black as before; a branded logo is shown as uploaded and never inverted. **So upload a logo that reads on a light background, plus a dark-mode logo if it does not read on a dark one.** A brand without a logo of its own shows its product name as a text wordmark instead of the EDDI one. The collapsed sidebar, the landing page, About and the Workforce pages show `/branding/icon`; a brand without an icon of its own gets the first letter of its short name on the primary colour instead (unbranded, the collapsed sidebar keeps EDDI's "E." monogram). Image URLs carry `?r=<revision>`, so a replaced image shows at once despite the five-minute cache. Alt texts and labels are the product name. The HTML shells' loader and the favicon still show the bundled EDDI image while nothing is uploaded.
 - **Page titles** read `<page> — <product> Manager`.
 - **The update UI is hidden when branded**: the Updates page and its menu entry, the update banner, and the automatic check, which then never contacts GitHub even if an admin had ticked it before. `showUpdateCheck: true` brings it back.
 - **About.** The Help menu in the sidebar footer, and the version under it when the update UI is hidden, open an About dialog with the product name, tagline and version. While `poweredBy` is on (the default) it adds "Powered by EDDI" and the Apache 2.0 notice.
@@ -207,4 +223,6 @@ The [plan](../planning/white-label-ui-plan.md) schedules each of them. Technical
 
 ## Development
 
-Under `npm run dev` (and MSW mock mode), a small Vite plugin in each UI (`scripts/vite-plugin-brand.mjs`) fills in the EDDI defaults and serves `/branding/*`. The dev server therefore always shows the EDDI brand, even when the backend it proxies has a brand set. `vite build` leaves the `%BRAND_*%` placeholders in the shells for EDDI to fill in, and a test in each UI checks that. The Manager's dev-only entry `index.html`, which serves deep links such as `/manage/agents` under `npm run dev`, loads the brand script and stylesheet like the built shells.
+Under `npm run dev` (and MSW mock mode), a small Vite plugin in each UI (`scripts/vite-plugin-brand.mjs`) fills in the EDDI defaults and serves `/branding/*`. The dev server therefore always loads with the EDDI brand, even when the backend it proxies has a brand set.
+
+In MSW mock mode the Branding page works end to end without a backend. The mock (`src/test/mocks/branding-handlers.ts`) keeps a brand in memory and, after a save or an upload, answers `__brand__.js`, `brand.css` and uploaded images from it, so the live update can be seen; a reload starts from the EDDI defaults again. Two variants: `sessionStorage["eddi-mock-branding-locked"] = "true"` shows a locked brand, and saving with the tagline `trigger a conflict` answers as if another admin had saved first. `vite build` leaves the `%BRAND_*%` placeholders in the shells for EDDI to fill in, and a test in each UI checks that. The Manager's dev-only entry `index.html`, which serves deep links such as `/manage/agents` under `npm run dev`, loads the brand script and stylesheet like the built shells.

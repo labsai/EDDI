@@ -32,7 +32,11 @@ const ZEBRA = {
   poweredBy: false,
   showUpdateCheck: false,
   chat: { accent: null },
+  assets: { logo: true, logoDark: true, icon: true, favicon: false, ogImage: false },
 };
+
+/** A brand that set a name and nothing else. */
+const NAME_ONLY = { ...ZEBRA, assets: { logo: false, logoDark: false, icon: false, favicon: false, ogImage: false } };
 
 const LATEST_URL = "https://api.github.com/repos/labsai/EDDI/releases/latest";
 
@@ -62,8 +66,9 @@ describe("sidebar logo", () => {
     renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
     const light = screen.getByTestId("sidebar-logo");
     const dark = screen.getByTestId("sidebar-logo-dark");
-    expect(light).toHaveAttribute("src", "/branding/logo");
-    expect(dark).toHaveAttribute("src", "/branding/logo-dark");
+    // The revision busts the browser's five-minute image cache after a change.
+    expect(light).toHaveAttribute("src", "/branding/logo?r=3");
+    expect(dark).toHaveAttribute("src", "/branding/logo-dark?r=3");
     for (const img of [light, dark]) {
       expect(img).toHaveAttribute("alt", "Zebra Labs");
       expect(img.className).not.toMatch(/\binvert\b/);
@@ -80,8 +85,35 @@ describe("sidebar logo", () => {
     renderWithProviders(<Sidebar collapsed onToggle={() => {}} />);
     expect(screen.queryByTestId("sidebar-monogram")).not.toBeInTheDocument();
     const icon = screen.getByTestId("sidebar-brand-icon");
-    expect(icon).toHaveAttribute("src", "/branding/icon");
+    expect(icon).toHaveAttribute("src", "/branding/icon?r=3");
     expect(icon).toHaveAttribute("alt", "Zebra Labs");
+  });
+
+  it("branded without a logo: the product name as text, never the EDDI wordmark", () => {
+    setBrand(NAME_ONLY);
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+    const wordmark = screen.getByTestId("sidebar-logo");
+    expect(wordmark.tagName).toBe("SPAN");
+    expect(wordmark).toHaveTextContent("Zebra Labs");
+    expect(wordmark).toHaveAttribute("role", "img");
+    expect(screen.queryByRole("img", { name: "EDDI" })).not.toBeInTheDocument();
+    expect(document.querySelector('img[src^="/branding/logo"]')).toBeNull();
+  });
+
+  it("branded with only a dark logo: text in light mode, the logo in dark mode", () => {
+    setBrand({ ...NAME_ONLY, assets: { ...NAME_ONLY.assets, logoDark: true } });
+    renderWithProviders(<Sidebar collapsed={false} onToggle={() => {}} />);
+    expect(screen.getByTestId("sidebar-logo").tagName).toBe("SPAN");
+    expect(screen.getByTestId("sidebar-logo-dark")).toHaveAttribute("src", "/branding/logo-dark?r=3");
+  });
+
+  it("collapsed, branded without an icon: the short name's initial, not the EDDI icon", () => {
+    setBrand(NAME_ONLY);
+    renderWithProviders(<Sidebar collapsed onToggle={() => {}} />);
+    const icon = screen.getByTestId("sidebar-brand-icon");
+    expect(icon.tagName).toBe("SPAN");
+    expect(icon).toHaveTextContent("Z");
+    expect(icon).toHaveAttribute("aria-label", "Zebra Labs");
   });
 
   it("follows a brand applied after the first render", () => {
@@ -100,14 +132,14 @@ describe("workforce sidebar and landing page", () => {
 
     renderWithProviders(<WorkforceSidebar collapsed onToggle={() => {}} />);
     expect(screen.getByRole("link", { name: "Zebra Labs" })).toBeInTheDocument();
-    expect(screen.getByTestId("workforce-sidebar-icon")).toHaveAttribute("src", "/branding/icon");
+    expect(screen.getByTestId("workforce-sidebar-icon")).toHaveAttribute("src", "/branding/icon?r=3");
   });
 
   it("landing page", () => {
     setBrand(ZEBRA);
     renderWithProviders(<LandingPage />, { initialRoute: "/welcome" });
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Welcome to Zebra Labs");
-    expect(screen.getByTestId("landing-brand-icon")).toHaveAttribute("src", "/branding/icon");
+    expect(screen.getByTestId("landing-brand-icon")).toHaveAttribute("src", "/branding/icon?r=3");
   });
 });
 

@@ -9,7 +9,7 @@ import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { LandingPage } from "@/pages/landing-page";
 import { NotFoundPage } from "@/pages/not-found";
 import { lazyPage } from "@/lib/lazy-page";
-import { isUpdateUiVisible, UPDATES_PATH } from "@/lib/brand";
+import { isUpdateUiVisible } from "@/lib/brand";
 import { useBrand } from "@/hooks/use-brand";
 
 /**
@@ -62,6 +62,7 @@ const AuditPage = lazyPage(() => import("@/pages/audit"), "AuditPage");
 const QuotasPage = lazyPage(() => import("@/pages/quotas"), "QuotasPage");
 const WorkspacesPage = lazyPage(() => import("@/pages/workspaces"), "WorkspacesPage");
 const GdprPage = lazyPage(() => import("@/pages/gdpr"), "GdprPage");
+const BrandingPage = lazyPage(() => import("@/pages/branding"), "BrandingPage");
 const UserDataPage = lazyPage(() => import("@/pages/user-data"), "UserDataPage");
 const TriggersPage = lazyPage(() => import("@/pages/triggers"), "TriggersPage");
 const CapabilitiesPage = lazyPage(() => import("@/pages/capabilities"), "CapabilitiesPage");
@@ -183,6 +184,7 @@ export function App() {
             <Route path="/manage/quotas" element={<QuotasPage />} />
             <Route path="/manage/workspaces" element={<WorkspacesPage />} />
             <Route path="/manage/gdpr" element={<GdprPage />} />
+            <Route path="/manage/branding" element={<BrandingPage />} />
             <Route path="/manage/groups" element={<GroupsPage />} />
             <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
             <Route path="/manage/groups/templates" element={<GroupTemplatesPage />} />
@@ -201,9 +203,11 @@ export function App() {
                 suggest otherwise to anyone reading the route table. */}
             <Route path="/manage/linked-accounts" element={<LinkedAccountsPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
-            {/* Hidden under a brand unless it opts in (white-label plan, R5). */}
+            {/* Hidden under a brand unless it opts in (white-label plan, R5).
+                A literal path, not UPDATES_PATH: route-integrity.test.ts reads
+                the route table as text. brand.test.ts pins the two equal. */}
             <Route
-              path={UPDATES_PATH}
+              path="/manage/updates"
               element={isUpdateUiVisible(brand) ? <UpdatesPage /> : <Navigate to="/manage" replace />}
             />
             {/* Redirects from old standalone user-data pages */}

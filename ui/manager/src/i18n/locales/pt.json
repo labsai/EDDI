@@ -94,7 +94,8 @@
     "breadcrumb": "Trilha de navegação",
     "checkingVersion": "Verificando a versão...",
     "expandSidebar": "Expandir a barra lateral",
-    "collapseSidebar": "Recolher a barra lateral"
+    "collapseSidebar": "Recolher a barra lateral",
+    "branding": "Marca"
   },
   "theme": {
     "light": "Claro",
@@ -6731,5 +6732,119 @@
     "noCases": "Ainda não há conversas. Uma suíte precisa de pelo menos um caso para ser executada.",
     "addCase": "Adicionar conversa",
     "turnCount": "Turnos: {{n}}"
+  },
+  "branding": {
+    "title": "Marca",
+    "subtitle": "Execute o {{productName}} com o seu próprio nome, logótipo e cores.",
+    "reset": "Repor predefinições",
+    "forbidden": "Apenas um administrador (eddi-admin) pode alterar a marca.",
+    "sourceLabel": "A marca em vigor vem de:",
+    "updated": "Guardado pela última vez {{when}} por {{who}}, revisão {{revision}}",
+    "saveFailed": "A marca não foi guardada: {{reason}}",
+    "warningsTitle": "Guardado, com um aviso do servidor:",
+    "toast": {
+      "applyFailed": "Guardado, mas este separador não conseguiu carregar a nova marca. Recarregue a página para a ver.",
+      "saved": "Marca guardada",
+      "reset": "Marca reposta nas predefinições"
+    },
+    "validation": {
+      "blank": "Não pode conter apenas espaços. Deixe vazio para usar a predefinição.",
+      "tooLong": "No máximo {{max}} caracteres.",
+      "angleBrackets": "Não pode conter < nem >.",
+      "control": "Não pode conter caracteres de controlo.",
+      "color": "Use uma cor como #0f766e, #fff, rgb(15 118 110), hsl(…) ou oklch(…), apenas com números simples."
+    },
+    "source": {
+      "database": "Guardada nesta página",
+      "properties": "Propriedades de configuração",
+      "default": "Predefinições incorporadas"
+    },
+    "locked": {
+      "title": "A marca está bloqueada",
+      "body": "Esta instalação define eddi.branding.locked=true, por isso a marca vem das propriedades eddi.branding.* ({{source}}) e não pode ser alterada aqui. Altere essas propriedades e reinicie."
+    },
+    "conflict": {
+      "body": "Outra pessoa guardou a marca entretanto (revisão {{revision}}). As suas alterações não foram guardadas. Carregue a versão mais recente e aplique-as de novo.",
+      "reload": "Carregar a mais recente"
+    },
+    "names": {
+      "title": "Nome",
+      "description": "Os campos vazios recorrem às propriedades de configuração e depois às predefinições.",
+      "productName": "Nome do produto",
+      "productNameHint": "Substitui o nome do produto em cada ecrã e título.",
+      "shortName": "Nome curto",
+      "shortNameHint": "Para espaços apertados. Se estiver vazio, usa-se o nome do produto.",
+      "shortNamePlaceholder": "Igual ao nome do produto",
+      "tagline": "Slogan",
+      "taglineHint": "Mostrado em «Acerca de» e nas descrições de página."
+    },
+    "colors": {
+      "title": "Cores",
+      "description": "A cor principal define botões, destaques e toda a escala da marca. Os avisos mantêm a sua própria cor.",
+      "primary": "Principal",
+      "defaultPlaceholder": "Predefinição",
+      "primaryForeground": "Texto sobre a principal",
+      "darkPrimary": "Principal no modo escuro",
+      "followsLight": "Igual ao modo claro",
+      "darkPrimaryForeground": "Texto sobre a principal no modo escuro",
+      "chatAccent": "Destaque do widget de chat",
+      "followsPrimary": "Igual à principal",
+      "picker": "Escolher {{name}}"
+    },
+    "contrast": {
+      "light": "Contraste no modo claro",
+      "dark": "Contraste no modo escuro",
+      "unknown": "Contraste não verificado",
+      "pass": "{{ratio}}:1 — cumpre WCAG AA",
+      "fail": "{{ratio}}:1 — abaixo de WCAG AA (4,5:1)"
+    },
+    "options": {
+      "title": "Opções",
+      "poweredBy": "Mostrar o aviso «Powered by»",
+      "poweredByHint": "A caixa «Acerca de» indica o motor de código aberto e a sua licença.",
+      "updateCheck": "Mostrar a verificação de atualizações",
+      "updateCheckHint": "A página de Atualizações e o aviso apontam para o projeto original. Ficam ocultos numa instalação com marca própria, a menos que isto esteja ativo."
+    },
+    "preview": {
+      "title": "Pré-visualização",
+      "unsaved": "Alterações por guardar — guarde para as aplicar em todo o lado.",
+      "saved": "O que todos os utilizadores veem agora.",
+      "light": "Claro",
+      "dark": "Escuro",
+      "button": "Ação principal",
+      "badge": "Destaque",
+      "agentMessage": "Olá! Como posso ajudar hoje?",
+      "userMessage": "Mostra-me os meus agentes."
+    },
+    "assets": {
+      "title": "Imagens",
+      "description": "PNG, WebP ou SVG, até 512 KB; ICO apenas para o favicon. Uma imagem aplica-se assim que é carregada.",
+      "uploaded": "Carregada",
+      "default": "Predefinida",
+      "dropLabel": "Carregar {{slot}}",
+      "replace": "Largue ou clique para substituir",
+      "upload": "Largue ou clique para carregar",
+      "remove": "Remover",
+      "logo": "Logótipo",
+      "logoHint": "O logótipo da barra lateral no modo claro. Deve ler-se sobre fundo claro.",
+      "logoDark": "Logótipo para o modo escuro",
+      "logoDarkHint": "Opcional. Usado no modo escuro; se estiver vazio, usa-se o logótipo.",
+      "icon": "Ícone",
+      "iconHint": "Quadrado. Barra lateral recolhida, página inicial e «Acerca de».",
+      "favicon": "Favicon",
+      "faviconHint": "O ícone do separador do navegador. Se estiver vazio, usa-se o ícone.",
+      "ogImage": "Imagem de pré-visualização de ligação",
+      "ogImageHint": "Mostrada quando se partilha uma ligação de chat. Se estiver vazia, usa-se o logótipo.",
+      "noLogoNote": "Nenhum logótipo carregado: a barra lateral mostra «{{name}}» como texto. As páginas apresentadas antes do início de sessão continuam a mostrar o logótipo predefinido.",
+      "noIconNote": "Nenhum ícone carregado: a aplicação mostra a primeira letra do nome curto e o separador do navegador mantém o ícone predefinido.",
+      "errorInvalid": "A imagem foi recusada: {{reason}}",
+      "errorTooLarge": "A imagem tem mais de 512 KB.",
+      "errorType": "Este tipo de ficheiro não é aceite aqui. Use PNG, WebP ou SVG (ICO apenas para o favicon).",
+      "errorLocked": "A marca está bloqueada, por isso as imagens não podem ser alteradas aqui."
+    },
+    "resetDialog": {
+      "title": "Repor a marca?",
+      "description": "Isto apaga todos os nomes, cores, opções e imagens guardados. As propriedades de configuração, ou as predefinições, voltam a aplicar-se a todos os utilizadores."
+    }
   }
 }

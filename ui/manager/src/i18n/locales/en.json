@@ -94,7 +94,8 @@
     "breadcrumb": "Breadcrumb",
     "checkingVersion": "Checking version...",
     "expandSidebar": "Expand sidebar",
-    "collapseSidebar": "Collapse sidebar"
+    "collapseSidebar": "Collapse sidebar",
+    "branding": "Branding"
   },
   "theme": {
     "light": "Light",
@@ -6660,5 +6661,119 @@
     "noCases": "No conversations yet. A suite needs at least one case to run.",
     "addCase": "Add conversation",
     "turnCount": "Turns: {{n}}"
+  },
+  "branding": {
+    "title": "Branding",
+    "subtitle": "Run {{productName}} under your own name, logo and colours.",
+    "reset": "Reset to defaults",
+    "forbidden": "Only an administrator (eddi-admin) can change the brand.",
+    "sourceLabel": "Brand in effect comes from:",
+    "updated": "Last saved {{when}} by {{who}}, revision {{revision}}",
+    "saveFailed": "The brand was not saved: {{reason}}",
+    "warningsTitle": "Saved, with a warning from the server:",
+    "toast": {
+      "applyFailed": "Saved, but this tab could not load the new brand. Reload the page to see it.",
+      "saved": "Brand saved",
+      "reset": "Brand reset to the defaults"
+    },
+    "validation": {
+      "blank": "Must not be only spaces. Leave it empty for the default.",
+      "tooLong": "At most {{max}} characters.",
+      "angleBrackets": "Must not contain < or >.",
+      "control": "Must not contain control characters.",
+      "color": "Use a colour like #0f766e, #fff, rgb(15 118 110), hsl(…) or oklch(…), with plain numbers only."
+    },
+    "source": {
+      "database": "Saved on this page",
+      "properties": "Configuration properties",
+      "default": "Built-in defaults"
+    },
+    "locked": {
+      "title": "The brand is locked",
+      "body": "This deployment sets eddi.branding.locked=true, so the brand comes from the eddi.branding.* properties ({{source}}) and cannot be changed here. Change those properties and restart to rebrand."
+    },
+    "conflict": {
+      "body": "Someone else saved the brand in the meantime (revision {{revision}}). Your changes were not saved. Reload the latest version and apply them again.",
+      "reload": "Reload latest"
+    },
+    "names": {
+      "title": "Name",
+      "description": "Empty fields fall back to the configuration properties, then to the defaults.",
+      "productName": "Product name",
+      "productNameHint": "Replaces the product name in every screen and title.",
+      "shortName": "Short name",
+      "shortNameHint": "For tight spaces. The product name is used when empty.",
+      "shortNamePlaceholder": "Same as the product name",
+      "tagline": "Tagline",
+      "taglineHint": "Shown in About and in page descriptions."
+    },
+    "colors": {
+      "title": "Colours",
+      "description": "The primary colour drives buttons, accents and the whole brand scale. Warnings keep their own colour.",
+      "primary": "Primary",
+      "defaultPlaceholder": "Default",
+      "primaryForeground": "Text on primary",
+      "darkPrimary": "Primary in dark mode",
+      "followsLight": "Same as light",
+      "darkPrimaryForeground": "Text on primary in dark mode",
+      "chatAccent": "Chat widget accent",
+      "followsPrimary": "Same as primary",
+      "picker": "Pick {{name}}"
+    },
+    "contrast": {
+      "light": "Light mode contrast",
+      "dark": "Dark mode contrast",
+      "unknown": "Contrast not checked",
+      "pass": "{{ratio}}:1 — passes WCAG AA",
+      "fail": "{{ratio}}:1 — below WCAG AA (4.5:1)"
+    },
+    "options": {
+      "title": "Options",
+      "poweredBy": "Show the “Powered by” notice",
+      "poweredByHint": "The About dialog names the open-source engine and its licence.",
+      "updateCheck": "Show the update check",
+      "updateCheckHint": "The Updates page and banner link to the upstream project. Hidden for a branded deployment unless this is on."
+    },
+    "preview": {
+      "title": "Preview",
+      "unsaved": "Unsaved changes — Save to apply them everywhere.",
+      "saved": "What every user sees now.",
+      "light": "Light",
+      "dark": "Dark",
+      "button": "Primary action",
+      "badge": "Highlight",
+      "agentMessage": "Hi! How can I help you today?",
+      "userMessage": "Show me my agents."
+    },
+    "assets": {
+      "title": "Images",
+      "description": "PNG, WebP or SVG, up to 512 KB; ICO for the favicon only. An image applies as soon as it is uploaded.",
+      "uploaded": "Uploaded",
+      "default": "Default",
+      "dropLabel": "Upload {{slot}}",
+      "replace": "Drop or click to replace",
+      "upload": "Drop or click to upload",
+      "remove": "Remove",
+      "logo": "Logo",
+      "logoHint": "The sidebar wordmark in light mode. Should read on a light background.",
+      "logoDark": "Dark-mode logo",
+      "logoDarkHint": "Optional. Used in dark mode; the logo is used when empty.",
+      "icon": "Icon",
+      "iconHint": "Square. The collapsed sidebar, the landing page and About.",
+      "favicon": "Favicon",
+      "faviconHint": "The browser tab icon. The icon is used when empty.",
+      "ogImage": "Link preview image",
+      "ogImageHint": "Shown when a chat link is shared. The logo is used when empty.",
+      "noLogoNote": "No logo uploaded: the sidebar shows “{{name}}” as text. The pages shown before sign-in still show the default logo.",
+      "noIconNote": "No icon uploaded: the app shows the first letter of the short name, and the browser tab keeps the default icon.",
+      "errorInvalid": "The image was refused: {{reason}}",
+      "errorTooLarge": "The image is larger than 512 KB.",
+      "errorType": "This file type is not accepted here. Use PNG, WebP or SVG (ICO for the favicon only).",
+      "errorLocked": "The brand is locked, so images cannot be changed here."
+    },
+    "resetDialog": {
+      "title": "Reset the brand?",
+      "description": "This clears every saved name, colour, option and image. The configuration properties, or the defaults, apply again for every user."
+    }
   }
 }

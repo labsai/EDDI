@@ -94,7 +94,8 @@
     "breadcrumb": "Ruta de navegación",
     "checkingVersion": "Comprobando la versión...",
     "expandSidebar": "Expandir la barra lateral",
-    "collapseSidebar": "Contraer la barra lateral"
+    "collapseSidebar": "Contraer la barra lateral",
+    "branding": "Marca"
   },
   "theme": {
     "light": "Claro",
@@ -6731,5 +6732,119 @@
     "noCases": "Aún no hay conversaciones. Una suite necesita al menos un caso para ejecutarse.",
     "addCase": "Añadir conversación",
     "turnCount": "Turnos: {{n}}"
+  },
+  "branding": {
+    "title": "Marca",
+    "subtitle": "Ejecute {{productName}} con su propio nombre, logotipo y colores.",
+    "reset": "Restablecer valores predeterminados",
+    "forbidden": "Solo un administrador (eddi-admin) puede cambiar la marca.",
+    "sourceLabel": "La marca activa procede de:",
+    "updated": "Guardado por última vez {{when}} por {{who}}, revisión {{revision}}",
+    "saveFailed": "La marca no se guardó: {{reason}}",
+    "warningsTitle": "Guardado, con una advertencia del servidor:",
+    "toast": {
+      "applyFailed": "Guardado, pero esta pestaña no pudo cargar la nueva marca. Recargue la página para verla.",
+      "saved": "Marca guardada",
+      "reset": "Marca restablecida a los valores predeterminados"
+    },
+    "validation": {
+      "blank": "No debe contener solo espacios. Déjelo vacío para usar el valor predeterminado.",
+      "tooLong": "Como máximo {{max}} caracteres.",
+      "angleBrackets": "No debe contener < ni >.",
+      "control": "No debe contener caracteres de control.",
+      "color": "Use un color como #0f766e, #fff, rgb(15 118 110), hsl(…) u oklch(…), solo con números simples."
+    },
+    "source": {
+      "database": "Guardada en esta página",
+      "properties": "Propiedades de configuración",
+      "default": "Valores predeterminados integrados"
+    },
+    "locked": {
+      "title": "La marca está bloqueada",
+      "body": "Esta instalación define eddi.branding.locked=true, así que la marca procede de las propiedades eddi.branding.* ({{source}}) y no se puede cambiar aquí. Cambie esas propiedades y reinicie."
+    },
+    "conflict": {
+      "body": "Otra persona guardó la marca mientras tanto (revisión {{revision}}). Sus cambios no se guardaron. Cargue la versión más reciente y vuelva a aplicarlos.",
+      "reload": "Cargar la más reciente"
+    },
+    "names": {
+      "title": "Nombre",
+      "description": "Los campos vacíos usan las propiedades de configuración y, después, los valores predeterminados.",
+      "productName": "Nombre del producto",
+      "productNameHint": "Sustituye el nombre del producto en cada pantalla y título.",
+      "shortName": "Nombre corto",
+      "shortNameHint": "Para espacios reducidos. Si está vacío, se usa el nombre del producto.",
+      "shortNamePlaceholder": "Igual que el nombre del producto",
+      "tagline": "Eslogan",
+      "taglineHint": "Se muestra en «Acerca de» y en las descripciones de página."
+    },
+    "colors": {
+      "title": "Colores",
+      "description": "El color principal define botones, acentos y toda la escala de la marca. Las advertencias conservan su propio color.",
+      "primary": "Principal",
+      "defaultPlaceholder": "Predeterminado",
+      "primaryForeground": "Texto sobre el principal",
+      "darkPrimary": "Principal en modo oscuro",
+      "followsLight": "Igual que en modo claro",
+      "darkPrimaryForeground": "Texto sobre el principal en modo oscuro",
+      "chatAccent": "Acento del widget de chat",
+      "followsPrimary": "Igual que el principal",
+      "picker": "Elegir {{name}}"
+    },
+    "contrast": {
+      "light": "Contraste en modo claro",
+      "dark": "Contraste en modo oscuro",
+      "unknown": "Contraste sin comprobar",
+      "pass": "{{ratio}}:1 — cumple WCAG AA",
+      "fail": "{{ratio}}:1 — por debajo de WCAG AA (4,5:1)"
+    },
+    "options": {
+      "title": "Opciones",
+      "poweredBy": "Mostrar el aviso «Powered by»",
+      "poweredByHint": "El diálogo «Acerca de» nombra el motor de código abierto y su licencia.",
+      "updateCheck": "Mostrar la comprobación de actualizaciones",
+      "updateCheckHint": "La página de Actualizaciones y el aviso enlazan al proyecto original. Se ocultan en una instalación con marca propia salvo que esto esté activado."
+    },
+    "preview": {
+      "title": "Vista previa",
+      "unsaved": "Cambios sin guardar — guarde para aplicarlos en todas partes.",
+      "saved": "Lo que ven ahora todos los usuarios.",
+      "light": "Claro",
+      "dark": "Oscuro",
+      "button": "Acción principal",
+      "badge": "Destacado",
+      "agentMessage": "¡Hola! ¿En qué puedo ayudarle hoy?",
+      "userMessage": "Muéstrame mis agentes."
+    },
+    "assets": {
+      "title": "Imágenes",
+      "description": "PNG, WebP o SVG, hasta 512 KB; ICO solo para el favicon. Una imagen se aplica en cuanto se sube.",
+      "uploaded": "Subida",
+      "default": "Predeterminada",
+      "dropLabel": "Subir {{slot}}",
+      "replace": "Suelte o haga clic para sustituir",
+      "upload": "Suelte o haga clic para subir",
+      "remove": "Quitar",
+      "logo": "Logotipo",
+      "logoHint": "El logotipo de la barra lateral en modo claro. Debe leerse sobre fondo claro.",
+      "logoDark": "Logotipo para modo oscuro",
+      "logoDarkHint": "Opcional. Se usa en modo oscuro; si está vacío se usa el logotipo.",
+      "icon": "Icono",
+      "iconHint": "Cuadrado. Barra lateral contraída, página de inicio y «Acerca de».",
+      "favicon": "Favicon",
+      "faviconHint": "El icono de la pestaña del navegador. Si está vacío se usa el icono.",
+      "ogImage": "Imagen de vista previa de enlace",
+      "ogImageHint": "Se muestra al compartir un enlace de chat. Si está vacía se usa el logotipo.",
+      "noLogoNote": "No se ha subido ningún logotipo: la barra lateral muestra «{{name}}» como texto. Las páginas previas al inicio de sesión siguen mostrando el logotipo predeterminado.",
+      "noIconNote": "No se ha subido ningún icono: la aplicación muestra la primera letra del nombre corto y la pestaña del navegador conserva el icono predeterminado.",
+      "errorInvalid": "La imagen fue rechazada: {{reason}}",
+      "errorTooLarge": "La imagen supera los 512 KB.",
+      "errorType": "Este tipo de archivo no se acepta aquí. Use PNG, WebP o SVG (ICO solo para el favicon).",
+      "errorLocked": "La marca está bloqueada, así que las imágenes no se pueden cambiar aquí."
+    },
+    "resetDialog": {
+      "title": "¿Restablecer la marca?",
+      "description": "Esto borra todos los nombres, colores, opciones e imágenes guardados. Las propiedades de configuración, o los valores predeterminados, vuelven a aplicarse para todos los usuarios."
+    }
   }
 }

@@ -94,7 +94,8 @@
     "breadcrumb": "パンくずリスト",
     "checkingVersion": "バージョンを確認中...",
     "expandSidebar": "サイドバーを展開",
-    "collapseSidebar": "サイドバーを折りたたむ"
+    "collapseSidebar": "サイドバーを折りたたむ",
+    "branding": "ブランディング"
   },
   "theme": {
     "light": "ライト",
@@ -6660,5 +6661,119 @@
     "noCases": "会話はまだありません。スイートを実行するには少なくとも1つのケースが必要です。",
     "addCase": "会話を追加",
     "turnCount": "ターン数：{{n}}"
+  },
+  "branding": {
+    "title": "ブランディング",
+    "subtitle": "{{productName}} を独自の名前、ロゴ、色で運用します。",
+    "reset": "既定に戻す",
+    "forbidden": "ブランドを変更できるのは管理者（eddi-admin）だけです。",
+    "sourceLabel": "現在のブランドの出所：",
+    "updated": "{{when}} に {{who}} が最終保存（リビジョン {{revision}}）",
+    "saveFailed": "ブランドは保存されませんでした：{{reason}}",
+    "warningsTitle": "保存しました（サーバーからの警告あり）：",
+    "toast": {
+      "applyFailed": "保存しましたが、このタブで新しいブランドを読み込めませんでした。ページを再読み込みしてください。",
+      "saved": "ブランドを保存しました",
+      "reset": "ブランドを既定に戻しました"
+    },
+    "validation": {
+      "blank": "空白だけにはできません。既定値を使うには空欄にしてください。",
+      "tooLong": "{{max}} 文字以内にしてください。",
+      "angleBrackets": "< や > は使用できません。",
+      "control": "制御文字は使用できません。",
+      "color": "#0f766e、#fff、rgb(15 118 110)、hsl(…)、oklch(…) のような色を、数値だけで指定してください。"
+    },
+    "source": {
+      "database": "このページで保存",
+      "properties": "設定プロパティ",
+      "default": "組み込みの既定値"
+    },
+    "locked": {
+      "title": "ブランドはロックされています",
+      "body": "このデプロイは eddi.branding.locked=true を設定しているため、ブランドは eddi.branding.* プロパティ（{{source}}）から読み込まれ、ここでは変更できません。プロパティを変更して再起動してください。"
+    },
+    "conflict": {
+      "body": "その間に別の人がブランドを保存しました（リビジョン {{revision}}）。変更は保存されていません。最新版を読み込んで、もう一度適用してください。",
+      "reload": "最新版を読み込む"
+    },
+    "names": {
+      "title": "名前",
+      "description": "空欄の項目は設定プロパティ、次に既定値が使われます。",
+      "productName": "製品名",
+      "productNameHint": "すべての画面とタイトルの製品名を置き換えます。",
+      "shortName": "略称",
+      "shortNameHint": "狭い場所用。空欄なら製品名を使います。",
+      "shortNamePlaceholder": "製品名と同じ",
+      "tagline": "キャッチフレーズ",
+      "taglineHint": "「バージョン情報」とページ説明に表示されます。"
+    },
+    "colors": {
+      "title": "色",
+      "description": "プライマリ色はボタン、アクセント、ブランドの色階すべてを決めます。警告は独自の色のままです。",
+      "primary": "プライマリ",
+      "defaultPlaceholder": "既定",
+      "primaryForeground": "プライマリ上の文字",
+      "darkPrimary": "ダークモードのプライマリ",
+      "followsLight": "ライトと同じ",
+      "darkPrimaryForeground": "ダークモードのプライマリ上の文字",
+      "chatAccent": "チャットウィジェットのアクセント",
+      "followsPrimary": "プライマリと同じ",
+      "picker": "{{name}}を選択"
+    },
+    "contrast": {
+      "light": "ライトモードのコントラスト",
+      "dark": "ダークモードのコントラスト",
+      "unknown": "コントラスト未確認",
+      "pass": "{{ratio}}:1 — WCAG AA に適合",
+      "fail": "{{ratio}}:1 — WCAG AA（4.5:1）未満"
+    },
+    "options": {
+      "title": "オプション",
+      "poweredBy": "「Powered by」表記を表示",
+      "poweredByHint": "「バージョン情報」にオープンソースのエンジンとそのライセンスを表示します。",
+      "updateCheck": "更新チェックを表示",
+      "updateCheckHint": "「更新」ページとバナーは上流プロジェクトにリンクします。ブランド設定済みのデプロイでは、これをオンにしない限り非表示です。"
+    },
+    "preview": {
+      "title": "プレビュー",
+      "unsaved": "未保存の変更があります — 保存するとすべてに反映されます。",
+      "saved": "現在すべてのユーザーに見えている状態です。",
+      "light": "ライト",
+      "dark": "ダーク",
+      "button": "主要な操作",
+      "badge": "強調",
+      "agentMessage": "こんにちは！今日はどのようなご用件ですか？",
+      "userMessage": "エージェントを見せて。"
+    },
+    "assets": {
+      "title": "画像",
+      "description": "PNG、WebP、SVG（512 KB まで）。ICO はファビコンのみ。画像はアップロードするとすぐに反映されます。",
+      "uploaded": "アップロード済み",
+      "default": "既定",
+      "dropLabel": "{{slot}}をアップロード",
+      "replace": "ドロップまたはクリックで置き換え",
+      "upload": "ドロップまたはクリックでアップロード",
+      "remove": "削除",
+      "logo": "ロゴ",
+      "logoHint": "ライトモードのサイドバーのロゴ。明るい背景で読めるものにしてください。",
+      "logoDark": "ダークモード用ロゴ",
+      "logoDarkHint": "任意。ダークモードで使用し、空欄ならロゴを使います。",
+      "icon": "アイコン",
+      "iconHint": "正方形。折りたたんだサイドバー、トップページ、「バージョン情報」で使用します。",
+      "favicon": "ファビコン",
+      "faviconHint": "ブラウザーのタブのアイコン。空欄ならアイコンを使います。",
+      "ogImage": "リンクプレビュー画像",
+      "ogImageHint": "チャットのリンクを共有したときに表示されます。空欄ならロゴを使います。",
+      "noLogoNote": "ロゴがありません：サイドバーには「{{name}}」が文字で表示されます。サインイン前のページには既定のロゴが表示されたままです。",
+      "noIconNote": "アイコンがありません：アプリには略称の頭文字が表示され、ブラウザーのタブは既定のアイコンのままです。",
+      "errorInvalid": "画像は拒否されました：{{reason}}",
+      "errorTooLarge": "画像が 512 KB を超えています。",
+      "errorType": "このファイル形式はここでは使えません。PNG、WebP、SVG を使ってください（ICO はファビコンのみ）。",
+      "errorLocked": "ブランドがロックされているため、ここでは画像を変更できません。"
+    },
+    "resetDialog": {
+      "title": "ブランドをリセットしますか？",
+      "description": "保存された名前、色、オプション、画像をすべて消去します。すべてのユーザーに再び設定プロパティまたは既定値が適用されます。"
+    }
   }
 }

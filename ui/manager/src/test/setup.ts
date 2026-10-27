@@ -3,7 +3,7 @@ import { cleanup } from "@testing-library/react";
 import { configure } from "@testing-library/react";
 import { afterEach, beforeAll, afterAll, vi } from "vitest";
 import { server } from "./mocks/server";
-import { resetSecretsMockState } from "./mocks/handlers";
+import { resetBrandingMockState, resetSecretsMockState } from "./mocks/handlers";
 import { drainToasts } from "./drain-toasts";
 
 // Increase default waitFor timeout to handle parallel test load. The suite is
@@ -86,6 +86,7 @@ afterEach(async () => {
   server.resetHandlers();
   // Handlers that hold module state are not reset by resetHandlers().
   resetSecretsMockState();
+  resetBrandingMockState();
 });
 
 // Clean up after all tests

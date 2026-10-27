@@ -412,6 +412,74 @@
   }
 }
 
+/* ── Settings → Branding preview ───────────────────────────────
+   Each preview panel (components/branding/brand-preview.tsx) restates one
+   mode's surfaces and the EDDI brand defaults, so the light panel shows light
+   mode while the page is dark (and the other way round), and a colour the admin
+   cleared previews as the default rather than as the brand still in effect. The
+   brand's own colours go on top as inline custom properties (brandPreviewStyle,
+   the same formulas as /branding/brand.css). Inside a panel only token
+   utilities are used, never `dark:` variants, which follow the page's mode. */
+.brand-preview-light {
+  --color-background: #fafaf9;
+  --color-foreground: #1c1917;
+  --color-card: #ffffff;
+  --color-muted: #f5f5f4;
+  --color-muted-foreground: #78716c;
+  --color-border: #e7e5e4;
+  --color-sidebar: #ffffff;
+  --color-sidebar-foreground: #44403c;
+  --color-sidebar-border: #e7e5e4;
+  --color-sidebar-accent: #b45309;
+  --color-sidebar-accent-foreground: #ffffff;
+  --color-primary: #f59e0b;
+  --color-primary-foreground: #0c0a09;
+  --color-ring: #f59e0b;
+  --color-brand-50: var(--color-amber-50);
+  --color-brand-100: var(--color-amber-100);
+  --color-brand-200: var(--color-amber-200);
+  --color-brand-300: var(--color-amber-300);
+  --color-brand-400: var(--color-amber-400);
+  --color-brand-500: var(--color-amber-500);
+  --color-brand-600: var(--color-amber-600);
+  --color-brand-700: var(--color-amber-700);
+  --color-brand-800: var(--color-amber-800);
+  --color-brand-900: var(--color-amber-900);
+  --color-brand-950: var(--color-amber-950);
+  color: var(--color-foreground);
+  background-color: var(--color-background);
+}
+
+.brand-preview-dark {
+  --color-background: #09090b;
+  --color-foreground: #fafaf9;
+  --color-card: #18181b;
+  --color-muted: #27272a;
+  --color-muted-foreground: #a1a1aa;
+  --color-border: #27272a;
+  --color-sidebar: #09090b;
+  --color-sidebar-foreground: #d4d4d8;
+  --color-sidebar-border: #18181b;
+  --color-sidebar-accent: #f59e0b;
+  --color-sidebar-accent-foreground: #0c0a09;
+  --color-primary: #f59e0b;
+  --color-primary-foreground: #0c0a09;
+  --color-ring: #f59e0b;
+  --color-brand-50: var(--color-amber-50);
+  --color-brand-100: var(--color-amber-100);
+  --color-brand-200: var(--color-amber-200);
+  --color-brand-300: var(--color-amber-300);
+  --color-brand-400: var(--color-amber-400);
+  --color-brand-500: var(--color-amber-500);
+  --color-brand-600: var(--color-amber-600);
+  --color-brand-700: var(--color-amber-700);
+  --color-brand-800: var(--color-amber-800);
+  --color-brand-900: var(--color-amber-900);
+  --color-brand-950: var(--color-amber-950);
+  color: var(--color-foreground);
+  background-color: var(--color-background);
+}
+
 /* ── Chat-scale markdown headings ──────────────────────────────
    DELIBERATELY UNLAYERED. The typography plugin sizes headings for a DOCUMENT
    (h1 ≈ 2.14em even at prose-sm), which inside a chat bubble reads as a
