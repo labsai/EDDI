@@ -40,6 +40,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ScheduledExecutorService;
@@ -155,13 +159,43 @@ class AgentDeploymentManagementTest {
 
             when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of(info));
             when(agentStore.read("deletedLater", 1)).thenReturn(new AgentConfiguration());
-            // First sweep deploys it, so this node tracks the row.
+            Instant[] now = {Instant.parse("2026-01-01T00:00:00Z")};
+            management.clock = new Clock() {
+                @Override
+                public ZoneOffset getZone() {
+                    return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return this;
+                }
+
+                @Override
+                public Instant instant() {
+                    return now[0];
+                }
+            };
+            // First sweep deploys it, so this node tracks the row (one config read).
             management.checkDeployments();
             verify(agentFactory).deployAgent(Environment.production, "deletedLater", 1, null);
+            // (the missing-config check, plus the deploy-time HITL lint's own read)
+            verify(agentStore, times(2)).read("deletedLater", 1);
+
+            // First sweep as a tracked row checks the config once...
+            management.checkDeployments();
+            verify(agentStore, times(3)).read("deletedLater", 1);
+            // ...and further sweeps inside the interval do not read the store again.
+            now[0] = now[0].plus(AgentDeploymentManagement.TRACKED_CONFIG_CHECK_INTERVAL).minusSeconds(1);
+            management.checkDeployments();
+            verify(agentStore, times(3)).read("deletedLater", 1);
 
             // The Agent is then deleted but the shared row survives (cascade delete
             // failed).
             when(agentStore.read("deletedLater", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+            management.checkDeployments();
+            verify(deploymentStore, never()).deleteDeploymentInfo(any(), any(), any());
+            now[0] = now[0].plusSeconds(2);
             management.checkDeployments();
 
             verify(deploymentStore).deleteDeploymentInfo("production", "deletedLater", 1);

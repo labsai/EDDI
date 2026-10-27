@@ -152,6 +152,13 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
     static final Duration MAX_RETRY_DELAY = Duration.ofMinutes(5);
 
     /**
+     * How often the missing-config check runs for a row this node already tracks.
+     * The agent store has no read cache, so checking every tracked row on every
+     * sweep would cost one database read per deployed agent every few seconds.
+     */
+    static final Duration TRACKED_CONFIG_CHECK_INTERVAL = Duration.ofMinutes(5);
+
+    /**
      * Deployments that failed, and when each may be tried again.
      *
      * <p>
@@ -168,6 +175,12 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
      * </p>
      */
     private final Map<DeploymentInfo, RetryState> failingDeployments = new ConcurrentHashMap<>();
+
+    /**
+     * When the config of a locally tracked row was last checked; see
+     * {@link #TRACKED_CONFIG_CHECK_INTERVAL}.
+     */
+    private final Map<DeploymentInfo, Instant> trackedConfigChecks = new ConcurrentHashMap<>();
 
     /** What is known about one failing deployment. */
     record RetryState(int failures, Instant nextAttempt) {
@@ -695,6 +708,7 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                     .filter(deploymentInfo -> deploymentInfo.getAgentId() != null && deploymentInfo.getAgentVersion() != null).toList();
             // A deployment that is no longer meant to be deployed is no longer failing.
             failingDeployments.keySet().retainAll(meantToBeDeployed);
+            trackedConfigChecks.keySet().retainAll(meantToBeDeployed);
             if (clustered()) {
                 reconcileUndeployed(meantToBeDeployed);
             }
@@ -704,6 +718,15 @@ public class AgentDeploymentManagement implements IAgentDeploymentManagement {
                         boolean trackedLocally;
                         synchronized (sweepLock) {
                             trackedLocally = this.deploymentInfos.contains(deploymentInfo);
+                        }
+                        if (trackedLocally) {
+                            Instant lastChecked = trackedConfigChecks.get(deploymentInfo);
+                            if (lastChecked != null && now.isBefore(lastChecked.plus(TRACKED_CONFIG_CHECK_INTERVAL))) {
+                                return;
+                            }
+                            trackedConfigChecks.put(deploymentInfo, now);
+                        } else {
+                            trackedConfigChecks.remove(deploymentInfo);
                         }
                         try {
                             // A deployment record can outlive its Agent. deployAgent reports that by
