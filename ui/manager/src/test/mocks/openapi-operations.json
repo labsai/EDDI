@@ -297,6 +297,7 @@
     "POST /agentstore/agents/{id}/cascade",
     "POST /agentstore/agents/{id}/currentversion",
     "POST /agenttests/runs",
+    "POST /agenttests/runs/{runId}/cancel",
     "POST /apicallstore/apicalls",
     "POST /apicallstore/apicalls/discover-endpoints",
     "POST /apicallstore/apicalls/{id}",

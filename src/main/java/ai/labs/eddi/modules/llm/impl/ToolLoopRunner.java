@@ -1143,12 +1143,23 @@ class ToolLoopRunner {
         trace.add(callStep);
 
         // Agent test harness: a test conversation's tool call is answered by its
-        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
-        // for
-        // every other conversation. Self-contained early return — keep it that way.
-        String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
-                toolSources == null ? null : toolSources.get(toolRequest.name()));
-        if (mockedResult != null) {
+        // suite's mock (or refused) and never reaches the outside world. A no-op
+        // prefix check for every other conversation. The call is decided here and
+        // recorded once. A refusal, and a mock for any tool whose executor has no use
+        // for it, are recorded and return early; a mock for a MockAwareToolExecutor
+        // (an httpcall tool), and a call the suite runs live, go through the executor
+        // below instead — so the response handling a live call gets, saveResponse and
+        // postResponse property instructions, runs on the mock — and are recorded only
+        // once the budget, quota and deadline gates have let them through.
+        String mockSource = toolSources == null ? null : toolSources.get(toolRequest.name());
+        ToolMockRegistry.Decision testDecision = ToolMockRegistry.previewToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+                mockSource);
+        ToolMockRegistry.MockResult mockDecision = testDecision != null ? testDecision.result() : null;
+        MockAwareToolExecutor mockingExecutor = mockDecision != null && mockDecision.outcome() == ToolMockRegistry.Outcome.MOCKED
+                && toolExecutors.get(toolRequest.name()) instanceof MockAwareToolExecutor aware ? aware : null;
+        if (mockDecision != null && mockingExecutor == null) {
+            ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+            String mockedResult = ToolMockRegistry.toolResultOf(mockDecision, mockSource);
             Map<String, Object> mockedStep = new HashMap<>();
             mockedStep.put("type", "tool_result");
             mockedStep.put("tool", toolRequest.name());
@@ -1260,7 +1271,9 @@ class ToolLoopRunner {
             // A tool object built for this conversation (attachments, artifacts, memory,
             // dynamic agents) is never cached — derived from the executor's class, see
             // ToolCacheService#isConversationBound.
-            boolean cacheThisCall = enableCaching
+            // A mocked call is never cached (a mock must not answer a later live call)
+            // and costs nothing.
+            boolean cacheThisCall = enableCaching && mockingExecutor == null
                     && !ToolCacheService.isConversationBound(executor)
                     && ToolCacheService.mayCache(toolSource, toolRequest.name(), canonicalName, task.getToolCacheScopes());
             String cacheScopeTag = cacheThisCall
@@ -1281,9 +1294,14 @@ class ToolLoopRunner {
             // service opens; they ride in the OTel context because nothing but the
             // trace depends on them (see ToolCallTrace).
             try (Scope ignored = new ToolCallTrace(toolSource, toolRequest.id()).makeCurrent()) {
+                final ToolMockRegistry.MockResult mock = mockingExecutor != null ? mockDecision : null;
+                // Every gate passed: the call is made now, so it counts now.
+                if (testDecision != null) {
+                    ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+                }
                 toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                        () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
-                        toolTimeoutMs);
+                        mock != null ? () -> mockingExecutor.executeMocked(toolRequest, mock) : () -> executor.execute(toolRequest, null),
+                        enableRateLimiting, cacheThisCall, enableCostTracking && mock == null, rateLimit, toolTimeoutMs);
             }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
@@ -1326,6 +1344,9 @@ class ToolLoopRunner {
         // toolResult was redacted above; it is scanned again because truncation
         // (summarize strategy) can produce new text.
         resultStep.put("result", SecretRedactionFilter.redact(toolResult));
+        if (mockingExecutor != null) {
+            resultStep.put("mocked", true);
+        }
         trace.add(resultStep);
 
         // LAZY mode: after discover_tools returns, activate the matching built-in
