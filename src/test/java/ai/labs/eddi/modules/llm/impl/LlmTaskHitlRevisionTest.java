@@ -22,6 +22,8 @@ import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.JsonObjectGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -53,12 +55,14 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -330,6 +334,28 @@ class LlmTaskHitlRevisionTest {
 
             assertFalse(llmTask.reviseAnswer(memory, config(false), new HitlRevisionRequest(candidate("the draft", false, 0), NOTE, 1)));
             verifyNoInteractions(chatModel);
+        }
+
+        @Test
+        @DisplayName("a revision's guardrail reprompt is admitted like any paid call: refused, it is not asked and the revision is not produced")
+        void revisionRepromptIsSpendGated() throws Exception {
+            var gate = mock(LlmSpendGate.class);
+            when(gate.check(any())).thenReturn(null);
+            when(gate.admit(any(), anyDouble(), anyDouble()))
+                    .thenReturn(LlmSpendGate.Admission.refused(new LlmSpendGate.Refusal("conversation_ceiling", "reached")));
+            llmTask.spendGate = gate;
+            llmTask.guardrailService = new GuardrailService(List.of(new JsonObjectGuardrail()), new SimpleMeterRegistry());
+            var config = config(false);
+            var guardrail = new LlmConfiguration.GuardrailConfig();
+            guardrail.setType("json-object");
+            guardrail.setAction("reprompt");
+            config.tasks().get(0).setOutputGuardrails(List.of(guardrail));
+            modelAnswers("prose, not json");
+
+            assertFalse(llmTask.reviseAnswer(memory, config, new HitlRevisionRequest(candidate("the draft", false, 0), NOTE, 1)));
+
+            verify(chatModel, times(1)).chat(anyList());
+            verify(gate, times(1)).admit(any(), anyDouble(), anyDouble());
         }
 
         @Test

@@ -2220,8 +2220,8 @@ tool cost. It is checked
   once.
 - **before every further paid call of the task** — a same-model re-ask (`responseValidation`
   `retry`), a cascade's escalation to its next step and that step's re-asks, an output guardrail's
-  `reprompt`, and a [`classifier`](#the-classifier-type-a-safety-classifier-model) guardrail's own
-  call (input and output). A task writes its cost into `audit:cost` only once it has finished, so
+  `reprompt`, and a [`classifier`](#the-classifier-type-a-safety-classifier-model) or
+  `judge` guardrail's own call (input and output). A task writes its cost into `audit:cost` only once it has finished, so
   each of these checks adds what the task has already spent in this turn: the earlier attempts at
   their prices, the primary answer before a reprompt, the earlier cascade steps before an
   escalation. A refused call is not made:
@@ -2231,7 +2231,7 @@ tool cost. It is checked
   | Re-ask | Skipped, counted as `eddi_llm_recovery_total{action="retry",outcome="skipped_spend"}`; the reply stays unresolved and `fallbackAction` applies, as when `maxRetries` is spent |
   | Cascade escalation | Not started; the cascade returns its best answer so far (`eddi_llm_cascade_ceiling_exceeded_total{kind="spend"}`), as at its own `maxCostPerRun` |
   | Guardrail reprompt | Not sent; the answer is blocked with the guardrail's `blockMessage`, as when the turn is out of time |
-  | `classifier` call | Not made; the guardrail could not decide, with the audit reason `spend_refused`, and its `failMode` applies |
+  | `classifier` or `judge` call | Not made; the guardrail could not decide, with the audit reason `spend_refused`, and its `failMode` applies |
 
   Each refusal is also counted by `eddi_llm_spend_refused_total{reason}` with the same reasons as the
   primary call (`conversation_ceiling`, `tenant_budget`, `tenant_accounting_unavailable`): the

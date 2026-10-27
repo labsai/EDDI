@@ -2445,7 +2445,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         content = validated.content();
         if (guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails()) && content != null) {
             Reprompter reprompter = reprompter(request, asker, memory, task, RepromptCircuit.NONE);
-            var screened = guardrailService.runOutput(task.getOutputGuardrails(), content, reprompter, guardrailContext(memory, task, request),
+            // The revision attempt just made is spend this phase has not recorded yet; the
+            // guardrails' paid calls (a reprompt, a classifier or judge) are admitted
+            // against it, as on the live path.
+            TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+            outputSpend.add(pricedCost(metadata, task));
+            var screened = guardrailService.runOutput(task.getOutputGuardrails(), content, reprompter,
+                    guardrailContext(memory, task, request).withSpend(outputSpend),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
             metadata = foldRepromptUsage(metadata, screened.reprompts());
             accumulateCost(currentStep, screened.costUsd());
@@ -3148,13 +3154,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             if (!repromptMayStart(memory, task)) {
                 return null;
             }
-            // A reprompt is another priced model call: the spend gate is asked again, so
-            // a turn that reached its tenant budget or conversation ceiling stops
-            // re-asking (and the guardrail blocks).
-            if (spendGate != null && spendGate.check(memory) != null) {
-                LOGGER.infof("Guardrail reprompt for task '%s' skipped: a spend limit is reached", task.getId());
-                return null;
-            }
+            // The spend gate is NOT asked here: every caller runs this reprompter inside
+            // GuardrailService.runOutput, which admits each reprompt through the
+            // context's spend gate (a TaskSpend) before calling it. A second
+            // LlmSpendGate.check here would count the reservation that admission just
+            // took, and could refuse a reprompt it had admitted.
             var ticket = circuit.acquire().get();
             if (!ticket.allowed()) {
                 recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", ticket.denial().failure().label(), 0L);
