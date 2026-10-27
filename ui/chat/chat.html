@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#1a1a1a" />
-  <link rel="icon" href="/img/favicon.ico" />
-  <title>EDDI Chat</title>
-  <meta name="description" content="EDDI — Open Source Conversational AI" />
-  <meta property="og:title" content="EDDI Chat" />
-  <meta property="og:description" content="Open Source Conversational AI" />
-  <meta property="og:image" content="/img/logo_eddi.png" />
+  <meta name="theme-color" content="%BRAND_THEME_COLOR%" />
+  <link rel="icon" href="/branding/favicon.ico" />
+  <title>%BRAND_PRODUCT_NAME% Chat</title>
+  <meta name="description" content="%BRAND_PRODUCT_NAME% — %BRAND_TAGLINE%" />
+  <meta property="og:title" content="%BRAND_PRODUCT_NAME% Chat" />
+  <meta property="og:description" content="%BRAND_TAGLINE%" />
+  <meta property="og:image" content="/branding/og-image" />
   <style>
     @font-face {
       font-display: swap;
@@ -38,10 +38,15 @@
   </style>
 </head>
 <body>
+  <!-- First in <body>, so it comes after the stylesheet Vite injects at the end of
+       <head> and the brand's colour tokens win (BrandDelivery). -->
+  <link rel="stylesheet" href="/branding/brand.css" />
   <div id="root"></div>
   <!-- Operator settings the widget needs before its first request
        (window.__EDDI_CHAT__), served by the EDDI backend; see src/api/chat-config.ts. -->
   <script src="/chat/__config__.js"></script>
+  <!-- The brand (window.__EDDI_BRAND__), served by the EDDI backend. -->
+  <script src="/branding/__brand__.js"></script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

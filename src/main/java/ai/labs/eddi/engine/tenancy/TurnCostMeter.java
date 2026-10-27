@@ -127,8 +127,10 @@ public class TurnCostMeter {
     /**
      * The charge still owed from an earlier settle: this step's own
      * {@code audit:pending_cost} when it has one (a pause that settled during an
-     * outage), otherwise the newest earlier step's. {@code 0.0} is how a recovered
-     * charge is recorded, so the newest value is always the current one.
+     * outage, or the value an undo or redo copied from the step it moved aside —
+     * see {@code ConversationMemory.carryPendingCost}), otherwise the newest
+     * earlier step's. {@code 0.0} is how a recovered charge is recorded, so the
+     * newest value is always the current one.
      */
     private static double outstanding(IConversationMemory memory, IWritableConversationStep step) {
         IData<?> own = step.getData(MemoryKeys.AUDIT_PENDING_COST);

@@ -39,7 +39,7 @@ New: `output-match-builder.test.tsx` (5), `lib/api/__tests__/alerts.test.ts` (3)
 - **Editor** ([`alert-rule-editor.tsx`](../../ui/manager/src/components/alerts/alert-rule-editor.tsx)): targets are edited, removed and — new — moved up or down as whole objects, so each keeps its own `targetId`; rows are keyed by it. A new target has none. Save and Send test send the ids as loaded. Two new strings (`alerts.moveTargetUp`, `alerts.moveTargetDown`) in all 11 locales.
 - **Validation:** `ruleProblems` accepts a masked URL only together with a `targetId`, so a masked URL is never sent without one.
 - **MSW** ([`alert-handlers.ts`](../../ui/manager/src/test/mocks/alert-handlers.ts)) now mirrors the server: it stores full URLs and answers reads masked, assigns ids on create (replacing client ones), restores a masked or empty URL on update and test send only from the stored target with the same `targetId`, and refuses one without a known id with 400 `INVALID_RULE`.
-- **Platform Operator:** the masked-URL paragraph explains `targetId` and the `INVALID_RULE` refusal. Revision 41 → 42.
+- **Platform Operator:** the masked-URL paragraph explains `targetId` and the `INVALID_RULE` refusal. Revision 41 → 42; it ships as **43**, because merging main (where the ratings work had moved the operator to 39) needed a revision above both.
 
 ### Tests
 

@@ -134,6 +134,8 @@ jobs:
               - 'licenses/**'
               # The UI markdown DocumentationLinksTest and DocumentationAccuracyTest walk.
               - 'ui/**/*.md'
+              # And the docs site's (docs-site/README.md); its generated .generated/ is never committed.
+              - 'docs-site/**/*.md'
               # Graded by unit tests, so they are test inputs rather than prose:
               # ComposeStackTest parses README.md's compose commands, and
               # BuildQualityGatesTest reads AGENTS.md 4.7 to check it still describes
@@ -1429,10 +1431,12 @@ jobs:
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
       # one Auth E2E run). It normally takes 20 s to 5 min, so ten minutes fails
-      # a stall fast enough to re-run.
+      # a stall fast enough to re-run. The script skips `--with-deps` — apt fonts
+      # from a mirror that crawled for 10+ minutes on 2026-10-26 — when the
+      # runner's own libraries already launch Chromium; the two steps below share it.
       - name: Install Playwright browsers
         timeout-minutes: 10
-        run: npx playwright install --with-deps chromium
+        run: node scripts/install-playwright-chromium.mjs
 
       # Two workers: the config's `workers: 1` on CI exists for the backend tiers,
       # whose specs share state in serial groups. Every MSW test gets its own mocked
@@ -2151,7 +2155,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: npx playwright install --with-deps chromium
+        run: node scripts/install-playwright-chromium.mjs
 
       # Against the app EDDI serves on :7070 — the bundle in this image — not a Vite
       # dev server (see E2E_AGAINST_BACKEND in playwright.config.ts).
@@ -2299,7 +2303,7 @@ jobs:
       - name: Install Playwright browsers
         timeout-minutes: 10
         working-directory: ui/manager
-        run: npx playwright install --with-deps chromium
+        run: node scripts/install-playwright-chromium.mjs
 
       - name: Run auth tests
         working-directory: ui/manager
@@ -2628,6 +2632,7 @@ jobs:
     permissions:
       contents: write  # Required for creating GitHub Releases
       id-token: write  # Sigstore cosign keyless signing of SHA256SUMS (OIDC → Fulcio)
+      attestations: write  # SLSA provenance attestation of SHA256SUMS
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -2665,6 +2670,17 @@ jobs:
             SHA256SUMS
           echo "### 🔏 SHA256SUMS signed (Sigstore cosign, keyless)" >> "$GITHUB_STEP_SUMMARY"
           echo "Verify: \`cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity ${SIGNER_IDENTITY} --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # Signing proves who signed SHA256SUMS; provenance records how it was built
+      # (this workflow, this commit, this runner). Scorecard's Signed-Releases check
+      # warns on a release that has the signature but no provenance, so attest the
+      # same file the release publishes. Like the image attestation above, the
+      # statement is stored in GitHub's attestation store and verifiable with
+      # `gh attestation verify SHA256SUMS --repo labsai/EDDI`.
+      - name: Generate SLSA provenance attestation (SHA256SUMS)
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: SHA256SUMS
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
