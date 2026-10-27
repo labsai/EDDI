@@ -41,6 +41,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 
 /**
  * Runs the debate-style phase turn orders (sequential, parallel, and
@@ -205,8 +206,11 @@ public class PhaseExecutionEngine {
         }
         // repeat is 0-based: with the default minRepeats=2 the first check happens
         // after the SECOND repeat (repeat index 1), which is the first one that has
-        // a predecessor to differ from.
-        if (repeat + 1 < convergence.minRepeats() || previousRepeatEntries == null || previousRepeatEntries.isEmpty()) {
+        // a predecessor to differ from. VERDICT compares nothing, so it needs no
+        // predecessor and its minRepeats may be 1.
+        boolean verdictMode = convergence.isVerdictMode();
+        if (repeat + 1 < convergence.minRepeats()
+                || (!verdictMode && (previousRepeatEntries == null || previousRepeatEntries.isEmpty()))) {
             return PhaseOutcome.cont();
         }
         // An empty current round means the repeat produced nothing — the turn budget
@@ -231,7 +235,12 @@ public class PhaseExecutionEngine {
             turnCounter.incrementAndGet();
         }
 
-        var verdict = runJudge(gc, config, phase, protocol, phaseIdx, convergence, repeatEntries, previousRepeatEntries, listener);
+        var verdict = verdictMode
+                ? runJudge(gc, config, phase, protocol, phaseIdx, convergence,
+                        ConvergenceDetector.buildVerdictInput(currentQuestion(gc), repeatEntries), ConvergenceDetector::parseVerdict, listener)
+                : runJudge(gc, config, phase, protocol, phaseIdx, convergence,
+                        ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries),
+                        output -> ConvergenceDetector.parseJudgeVerdict(output, convergence.threshold()), listener);
         recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
         return verdict.converged() ? PhaseOutcome.endRepeats(verdict.summary()) : PhaseOutcome.cont();
     }
@@ -642,9 +651,17 @@ public class PhaseExecutionEngine {
                 List.copyOf(merged), existing.method(), existing.decidedAtPhase(), existing.raw()));
     }
 
+    /**
+     * The question the current run's phases answer: a continuation's, else the
+     * original.
+     */
+    private static String currentQuestion(GroupConversation gc) {
+        return gc.getResumeQuestion() != null ? gc.getResumeQuestion() : gc.getOriginalQuestion();
+    }
+
     private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
-                                                            ProtocolConfig protocol, int phaseIdx, ConvergenceConfig convergence,
-                                                            List<TranscriptEntry> repeatEntries, List<TranscriptEntry> previousRepeatEntries,
+                                                            ProtocolConfig protocol, int phaseIdx, ConvergenceConfig convergence, String input,
+                                                            Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
                                                             GroupDiscussionEventListener listener) {
         String moderatorAgentId = config.getModeratorAgentId();
         if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
@@ -659,7 +676,6 @@ public class PhaseExecutionEngine {
         }
 
         var judge = new GroupMember(moderatorAgentId, "Convergence Judge", 0, "MODERATOR");
-        String input = ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries);
         try {
             // JUDGE_CONVERSATION_KEY, not the moderator's agent id: the judge runs the
             // moderator AGENT but must not share the moderator's CONVERSATION, or its
@@ -667,7 +683,7 @@ public class PhaseExecutionEngine {
             // SYNTHESIS turn (same agent) reads — and the synthesis comes back as JSON.
             TranscriptEntry judgeEntry = memberTurnExecutor.executeAgentTurn(judge, gc, input, protocol, phaseIdx, phase, null, listener,
                     null, JUDGE_CONVERSATION_KEY);
-            return ConvergenceDetector.parseJudgeVerdict(judgeEntry != null ? judgeEntry.content() : null, convergence.threshold());
+            return parser.apply(judgeEntry != null ? judgeEntry.content() : null);
         } catch (Exception e) {
             LOGGER.warnf("Convergence judge failed for phase '%s' — continuing without an early exit: %s", phase.name(), e.getMessage());
             return ConvergenceDetector.ConvergenceVerdict.notConverged("Convergence judge failed: " + e.getMessage());

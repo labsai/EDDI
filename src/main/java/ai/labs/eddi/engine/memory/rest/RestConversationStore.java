@@ -682,11 +682,12 @@ public class RestConversationStore implements IRestConversationStore {
         conversationAccessGuard.requireConversationOwner(conversationId);
 
         try {
-            // Project the pending tool-call batch down to names-only before returning:
-            // this generic raw-read surface is reachable by any authenticated caller
-            // and must NOT leak the unredacted tool arguments or the frozen LLM
-            // transcript of a paused conversation — those stay behind the approver-only
-            // detail=full gate. Mirrors fix #4's confinement on the Simple surface.
+            // Redact the pause machinery before returning: the pending tool-call batch
+            // goes down to names-only, and a revision candidate (onRejection: REVISE)
+            // loses its frozen request. This raw-read surface must NOT leak the
+            // unredacted tool arguments, the frozen LLM transcript of a paused
+            // conversation or the compiled system prompt — see
+            // redactRawPendingToolCallsForRead, its single redaction point.
             // requireSnapshot, not the raw load: a missing conversation returned null
             // here, which JAX-RS renders as 204 No Content — indistinguishable from a
             // conversation that exists and happens to be empty.

@@ -56,6 +56,7 @@ User sends message
 
 Human reviews → POST /agents/{conversationId}/resume with a decision
   └→ REJECTED → remaining pipeline tasks are skipped, state = READY
+       (onRejection: REVISE and a note → the model revises its answer instead, see below)
   └→ APPROVED → pipeline resumes from the bookmarked task + 1
        └→ Remaining tasks (output, templating, …) execute normally
 ```
@@ -81,6 +82,8 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
 | `approvalTimeout` | ISO-8601 duration (`"PT30S"`, `"PT15M"`) | `null` | Time before the timeout policy fires. Required for finite policies. |
 | `timeoutPolicy` | `AUTO_APPROVE` \| `AUTO_REJECT` \| `ABORT` \| `WAIT_INDEFINITELY` | `WAIT_INDEFINITELY` | What happens when the timeout expires. |
 | `pauseReason` | string, ≤ 500 chars | `null` | Approver-facing text shown in pending-approval listings and approval-status — answers "what am I approving?". Falls back to a generic reason when absent. |
+| `onRejection` | `SKIP` \| `REVISE` (case-insensitive) | `SKIP` | What a `REJECTED` decision on a rule pause does. `SKIP` skips the remaining tasks and shows the note. `REVISE` has the model revise the answer it gave before the pause, with the note as feedback. See [Revise with the reviewer's note](#revise-with-the-reviewers-note). |
+| `maxRevisionsPerTurn` | integer, `1`..`10` | `3` | Under `REVISE`, how many revisions one turn may take. A rejection after that skips. |
 
 Validation happens at **save time** (and on ZIP import): a finite policy without a valid positive `approvalTimeout` (or a malformed duration like `"30m"`, or an overlong `pauseReason`) is rejected with an actionable 400 — it never degrades silently to wait-forever at runtime.
 
@@ -144,7 +147,45 @@ The listing has no offset parameter, so a caller sees at most `limit` entries. T
 | Properties (this + later turns) | `{properties.hitlVerdict}` | Conversation-scoped property — next-turn behavior rules can react via a property matcher |
 | Raw step data (pipeline tasks) | `hitl:decision_verdict`, `hitl:decision_note`, `hitl:decision_by` | Not template-accessible (colon keys) |
 
-On **REJECTED**, the remaining pipeline tasks are skipped (the actions that would have triggered API calls are still in the step — they must not run) and a public output message with the reviewer's note is emitted so UIs render feedback.
+On **REJECTED**, the remaining pipeline tasks are skipped (the actions that would have triggered API calls are still in the step — they must not run) and a public output message with the reviewer's note is emitted so UIs render feedback. Under `onRejection: REVISE` a rejection with a note revises the answer instead; see below.
+
+### Revise with the reviewer's note
+
+`hitlConfig.onRejection: "REVISE"` turns a rejection into a request for a better answer. It suits a workflow in which a rule pauses **after** the model answered so that a person reviews the draft:
+
+```json
+{
+  "hitlConfig": {
+    "onRejection": "REVISE",
+    "maxRevisionsPerTurn": 2,
+    "pauseReason": "Review the draft reply before it is sent"
+  }
+}
+```
+
+The approval API is unchanged: the reviewer rejects with a note, over REST `POST /agents/{conversationId}/resume` (`{"verdict": "REJECTED", "note": "Too formal; mention the refund date"}`), the MCP `resume_conversation` tool or the Manager's Approvals page.
+
+**What happens.** The same model is asked once more, over the exact request that produced the draft (system prompt, history, retrieved context and any tool results, kept with the pause), with the draft as the assistant's turn and the note as the user's next message. The revision replaces the draft, and the pipeline continues from the task after the model's. A rule that paused on the draft therefore pauses again on the revision, and the reviewer sees it before it goes out. Approve it, or reject it again with another note.
+
+- **The note is data.** It is human-written, so it may go in the user role, but it is never template source: it is put into the message by concatenation, not run through the template engine.
+- **No tool runs again.** The revision is one model call with no tools. A draft that came from a tool loop is re-asked over its tool results, the way an output guardrail re-asks a final answer.
+- **The same checks apply.** The revision passes `responseValidation` and the task's output guardrails, and the spend gate is asked first (`maxCostPerConversationUsd`, the tenant budget). The revision's tokens and cost are recorded on the step like any answer's.
+- **Tasks after the model's run again**, from the one after the model's task up to and past the pause. Output that the draft and those tasks wrote is cut back first, so nothing appears twice. Keep side effects (an `httpcall` that sends something) **after** the pause, which is the usual design anyway.
+- **Templates can tell.** `{memory.current.hitlRevision}` holds the revision's number. `{memory.current.hitlDecision}` reads `REJECTED` (the decision on the draft) while the revision runs and awaits review, and is overwritten by the next decision on the same turn: once the revision is approved, the step reads `APPROVED`.
+
+**When a rejection still skips.** In all of these cases the rejection behaves exactly as under `SKIP`:
+
+| Case | `hitl:revision:outcome` |
+|------|------|
+| The decision has no note (blank counts as none). A Slack Reject button counts as none too: the note it records is its own attribution, not a request | `no_note` |
+| The decision is automated: a timeout's `AUTO_REJECT`, a group's `system:group` | `automated` |
+| There is no answer to revise: the pause came before the model ran in this turn, the answer came from a later task or workflow, or its request was over `eddi.hitl.revision.transcript-max-bytes` (default 256 KB) | `no_answer` |
+| The turn has had `maxRevisionsPerTurn` revisions already | `exhausted` |
+| The revision could not be produced: the LLM configuration changed since the pause, a spend limit is reached, the model failed or returned nothing, or the revision failed `responseValidation` or was blocked by a guardrail | `failed` |
+
+**Which pauses.** Only behavior-rule (`RULE`) pauses. A rejected **tool call** (`TOOL_CALL` pause) is not a rejected answer: the model already receives the rejection, with the note, as that call's tool result and answers from there, under either policy. Group discussions are not affected either (a member's own pause is cancelled inside a group, see [Group members](#group-members)).
+
+**Records.** The step keeps `hitl:revision:outcome` (`{outcome, round}`) as part of the turn's HITL record, the `hitl.approval` audit entry carries `onRejection: REVISE` for a rejection under the policy, and the revision itself is an ordinary LLM task entry in the audit ledger (model, response, tokens, cost). The counter `eddi_hitl_revision_total{outcome}` counts the outcomes. The request kept with the pause (`hitl:revision:candidate`) is internal: it is withheld from `returnDetailed` and from an approver's `approval-status?detail=full`, the raw read `GET /conversationstore/conversations/{conversationId}` serves only its draft and bookkeeping (never `transcriptJson`, the frozen request with the compiled system prompt), it is scrubbed of secret input and secret context like the rest of the step, and it is removed from the step when the pause is decided.
 
 ### Secret context on resume
 
@@ -406,7 +447,7 @@ Validation (all `400`, applied **before** any state changes, so a bad body never
 - Top-level `REJECTED` combined with any per-call `APPROVED` is contradictory — set the top-level verdict to `APPROVED` to mix outcomes.
 - `amendedArguments` is only valid on an `APPROVED` call, must be a **JSON object**, is size-capped, and cannot amend a call whose arguments were truncated at pause time (approve/reject it as-is).
 
-A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (`status: REJECTED_BY_REVIEWER`, the tool name and the reviewer's note) — rejection feeds *back into* the model rather than aborting the turn. What the result tells the model to do depends on who decided and whether a note came with it:
+A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (`status: REJECTED_BY_REVIEWER`, the tool name and the reviewer's note) — rejection feeds *back into* the model rather than aborting the turn. What the result tells the model to do depends on who decided and whether a note came with it (`hitlConfig.onRejection` does not change this: it applies to rule pauses only):
 
 - **A person left a note.** The result says the user did not approve the call and left a note: if the note asks for changes, call the tool again with exactly those changes and nothing else changed; if it declines or asks for something else, do not call it again and reply briefly. A note is therefore a way to ask for a revision. The re-proposed call is a new call: it is gated like any other, pauses again (a new `pauseId` and its own timeout) and needs its own approval. Nothing a note says changes a call that was approved.
 - **No note, or an automated decision.** The result keeps the plain "declined" text: do not retry this exact call, explain the situation and offer alternatives. An automated decision is one whose `decidedBy` starts with `system:` — the timeout auto-reject (`system:timeout`) and the group-conversation auto-reject (`system:group`, note "tool approval is not available during group discussions in this version"). The note on those is an explanation, not a request, and asking the model to revise would only make it retry a call that can never be approved.
@@ -509,7 +550,7 @@ The gate is guarded by a feature flag: `eddi.hitl.tool.enabled` (default `true`;
 |--------|-----------|------------------|
 | `WAIT_INDEFINITELY` | Nothing is scheduled; waits forever | Critical decisions (compliance, safety) |
 | `AUTO_APPROVE` | APPROVED decision (`decidedBy: system:timeout`), resumes | Progress monitoring, non-critical gates |
-| `AUTO_REJECT` | REJECTED decision → regular: turn skipped; group: `FAILED` | Strict SLA gates |
+| `AUTO_REJECT` | REJECTED decision → regular: turn skipped (never revised, even under `onRejection: REVISE`); group: `FAILED` | Strict SLA gates |
 | `ABORT` | Cancels the conversation/discussion | Safety-critical pipelines |
 
 Timeouts are one-shot schedules on EDDI's cluster-aware `ScheduleFireExecutor` — exactly one pod owns each claim, and they route through the **same** resume/cancel machinery as human decisions. Delivery is at-least-once (a lease-expired claim can be re-stolen after a pod crash), so a timeout must be safe to fire twice — and against the wrong pause:
@@ -531,7 +572,7 @@ Approve/reject/cancel/status require, in order: the **conversation owner**, the 
 
 ## Auditing
 
-Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note), and the resumed pipeline leg records its task entries like any other turn. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED`, the cancel mode, and the **cancelling actor** (`decidedBy`: the authenticated principal, or a `system:*` identifier such as `system:timeout` for ABORT policies and `system:group` for auto-cancelled member pauses). This is the EU AI Act human-oversight trail.
+Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note, and `onRejection: REVISE` for a rule-pause rejection under that policy), and the resumed pipeline leg records its task entries like any other turn — a revision included. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED`, the cancel mode, and the **cancelling actor** (`decidedBy`: the authenticated principal, or a `system:*` identifier such as `system:timeout` for ABORT policies and `system:group` for auto-cancelled member pauses). This is the EU AI Act human-oversight trail.
 
 ## Crash Recovery
 
@@ -545,7 +586,7 @@ Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-re
 
 ## Operations
 
-- **Metrics** (`/q/metrics`): `eddi_hitl_pause_count`, `eddi_hitl_resume_count`, `eddi_hitl_timeout_count`, each tagged `surface=regular|group`; `eddi_group_member_pause_skipped_count` for auto-cancelled member pauses inside groups; `eddi.operator.write.approval{decision=approved|rejected|timeout}`, one per gated call the instant its verdict is resolved (`timeout` is a distinct bucket from `approved`/`rejected` — see [Request pinning](#request-pinning--approval-binds-to-a-request-not-a-tool-name) above; not operator-specific despite the name, it fires for any gated call regardless of which agent).
+- **Metrics** (`/q/metrics`): `eddi_hitl_pause_count`, `eddi_hitl_resume_count`, `eddi_hitl_timeout_count`, each tagged `surface=regular|group`; `eddi_hitl_revision_total{outcome}` for rejections under `onRejection: REVISE`; `eddi_group_member_pause_skipped_count` for auto-cancelled member pauses inside groups; `eddi.operator.write.approval{decision=approved|rejected|timeout}`, one per gated call the instant its verdict is resolved (`timeout` is a distinct bucket from `approved`/`rejected` — see [Request pinning](#request-pinning--approval-binds-to-a-request-not-a-tool-name) above; not operator-specific despite the name, it fires for any gated call regardless of which agent).
 - **Operator canary/gate metrics** (client-reported): the write canary and gate-installed check both run entirely client-side (there is no server-side notion of "the operator", just an agent with a particular `hitlConfig`), so the Manager reports outcomes via `POST /administration/operator/{canary-result,gate-status}` (`eddi-admin` only) purely so they show up on `/q/metrics` without a Manager tab open. This is a relay, not a verification — a report is trusted at face value. Produces `eddi.operator.canary{outcome=pass|fail|unknown}`, `eddi.operator.canary.duration`, and the gauge `eddi.operator.gate.verified` (1 only while every provisioned version last read back with a sound gate; defaults to 0, including on a deployment that has never activated an operator — that ambiguity is real and unresolved by this signal alone).
 - **Operator self-URL** (`GET /administration/operator/self-url`, `eddi-admin`): answers the address this deployment can reach *itself* at, which is what the operator's generated tools must target. `eddi.self.base-url` when set, otherwise `http://${quarkus.http.host}:${quarkus.http.port}` when the listener binds one specific address (loopback ones such as `127.0.0.5` or `::1` included; an IPv6 literal is bracketed, e.g. `http://[::1]:7070`), and `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty or `localhost` bind; the response is `{baseUrl, source}` with `source` one of `configured`, `loopback` or `unresolved`. `unresolved` (with `baseUrl: null`) means a random HTTP port (`quarkus.http.port=0`) and no override — the Manager then refuses to guess and asks for the base URL explicitly. It exists because the only other candidate a provisioning client has is its own browser origin, and the two coincide only when nothing sits between the browser and EDDI — a tunnelled staging instance was provisioned with `localhost:7080` in front of a container on `:7070`, and the operator reported itself deployed and gate-verified while all 22 of its tools failed on connect. Deliberately a GET with no arguments: the answer must not depend on a `Host` header or an `X-Forwarded-*` chain a proxy can rewrite. Note that pointing the tools at that address makes them cross-origin to `${caller:token}`'s same-origin rule, which is why `CallerIdentityResolver` also releases the token when the target is this very process — the same argument `LoopbackCallerAuthFilter` makes for the internal hop; the value comes from deployment configuration alone. It is not narrower than same-origin: the self address bypasses whatever sits in front of EDDI, so what the token reaches is what EDDI's own authorization allows. A deployment that also relies on its proxy's rules sets `eddi.caller-identity.self-release.enabled=false`; a caller whose origin could not be captured never gets the self release.
 - **Undeploy**: paused conversations do **not** count as active — an agent version with pending approvals can be undeployed. Resuming afterwards returns `409 agent not deployed` and the pause is restored (redeploy, then retry). Its approval timeouts stay armed through the undeploy (they are not among the schedules an undeploy disables) and fire at their due time; if the decision cannot be applied then, it is retried every `eddi.schedule.hitl-timeout-retry-interval` as described under timeouts. The idle-conversation cleanup sweep likewise **spares** `AWAITING_HUMAN` conversations — a pending approval is never silently force-ended by maintenance.

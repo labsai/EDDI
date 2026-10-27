@@ -296,6 +296,8 @@ eddi_group_member_pause_skipped_count_total # Member turns skipped instead of pa
 eddi_group_continue_count_total             # Continuation rounds
 eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
+eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
+eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 ```
 
 ### Standing Team (Cadence) Metrics
@@ -653,6 +655,7 @@ eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
 eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
 eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
+eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
@@ -718,7 +721,7 @@ eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
 eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
 eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout|spend_refused)
-eddi_guardrail_judge_duration_seconds       # Timer: one `judge` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (pass|fail|unparseable|unavailable|timeout|spend_refused)
+eddi_guardrail_judge_duration_seconds       # Timer: one `judge` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (pass|fail|unparseable|unavailable|timeout|spend_refused)
 ```
 
 `eddi_guardrail_triggered_total` counts findings, not evaluations: a guardrail that

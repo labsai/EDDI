@@ -25,7 +25,16 @@ import {
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
-import { MAX_NOTIFY_RECIPIENTS, MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import {
+  DEFAULT_MAX_REVISIONS_PER_TURN,
+  MAX_NOTIFY_RECIPIENTS,
+  MAX_PAUSE_REASON_LENGTH,
+  MAX_REVISIONS_PER_TURN,
+  MIN_REVISIONS_PER_TURN,
+  type AgentHitlConfig,
+  type HitlRejectionAction,
+  type ToolApprovalsConfig,
+} from "@/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
@@ -1288,6 +1297,67 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                     ? t("agentDetail.hitlTimeoutInvalid", "A finite policy needs a positive ISO-8601 duration, e.g. PT15M.")
                     : t("agentDetail.hitlTimeoutHint", "e.g. PT30S, PT15M, PT2H.")}
                 </p>
+              </div>
+            )}
+
+            {/* onRejection (E2) — what a rejection with a note does on a rule pause. */}
+            <div>
+              <label htmlFor="hitl-on-rejection" className="mb-1 block text-[10px] text-muted-foreground">
+                {t("agentDetail.hitlOnRejection", "When a reviewer rejects")}
+              </label>
+              <select
+                id="hitl-on-rejection"
+                value={hitl.onRejection ?? "SKIP"}
+                onChange={(e) => {
+                  const onRejection = e.target.value as HitlRejectionAction;
+                  // SKIP is the default: store nothing rather than the default, and
+                  // drop the bound that only REVISE reads.
+                  patchHitl(
+                    onRejection === "REVISE"
+                      ? { onRejection, maxRevisionsPerTurn: hitl.maxRevisionsPerTurn ?? DEFAULT_MAX_REVISIONS_PER_TURN }
+                      : { onRejection: null, maxRevisionsPerTurn: null },
+                  );
+                }}
+                disabled={disabled}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="hitl-on-rejection"
+              >
+                <option value="SKIP">{t("agentDetail.hitlOnRejectionSkip", "Skip the rest of the turn and show the note")}</option>
+                <option value="REVISE">{t("agentDetail.hitlOnRejectionRevise", "Have the model revise its answer with the note")}</option>
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {t(
+                  "agentDetail.hitlOnRejectionHint",
+                  "Revise applies to a rule pause after the model answered, and only to a rejection with a note. Rejected tool calls already go back to the model with the note.",
+                )}
+              </p>
+            </div>
+
+            {hitl.onRejection === "REVISE" && (
+              <div>
+                <label htmlFor="hitl-max-revisions" className="mb-1 block text-[10px] text-muted-foreground">
+                  {t("agentDetail.hitlMaxRevisions", "Revisions per turn")}
+                </label>
+                <input
+                  id="hitl-max-revisions"
+                  type="number"
+                  min={MIN_REVISIONS_PER_TURN}
+                  max={MAX_REVISIONS_PER_TURN}
+                  step={1}
+                  value={hitl.maxRevisionsPerTurn ?? DEFAULT_MAX_REVISIONS_PER_TURN}
+                  onChange={(e) => {
+                    // min/max bound the spinner, not a pasted value: clamp to what
+                    // the backend accepts so the save cannot be refused.
+                    const v = e.currentTarget.valueAsNumber;
+                    if (!Number.isFinite(v)) return;
+                    patchHitl({
+                      maxRevisionsPerTurn: Math.min(MAX_REVISIONS_PER_TURN, Math.max(MIN_REVISIONS_PER_TURN, Math.trunc(v))),
+                    });
+                  }}
+                  disabled={disabled}
+                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  data-testid="hitl-max-revisions"
+                />
               </div>
             )}
 

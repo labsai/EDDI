@@ -321,6 +321,12 @@ A turn that paused for a human tool approval continues on the same recovery poli
 | Cascade | Not applied: the resume continues on the cascade step that paused (the escalation decision was made before the pause) |
 | Turn deadline | None: a resume starts a turn without one |
 
+A rule pause that a reviewer **rejects with a note** under `hitlConfig.onRejection: REVISE` is not a resume of a
+tool loop: the model is asked once more over the request that produced the rejected answer, with the note as
+the corrective message, and no tool runs. That revision passes `responseValidation` and the output guardrails,
+and the spend gate is asked before it. A failure of any kind (`onError` included) does not serve a fallback: the
+rejection then applies as under `SKIP`. See [Revise with the reviewer's note](hitl.md#revise-with-the-reviewers-note).
+
 ## Known limits
 
 - Streaming (SSE) calls keep their own timeout and are not bounded by the turn deadline, and their retry loop

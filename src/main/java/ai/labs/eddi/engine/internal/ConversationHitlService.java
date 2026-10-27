@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -761,7 +762,7 @@ class ConversationHitlService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision,
-                    prePauseWasToolCall, prePauseBatch);
+                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy());
             // Task 10 — tool-resume metric, tagged by aggregate verdict.
             if (prePauseWasToolCall) {
                 recordToolResumeMetric(decision, prePauseBatch);
@@ -1239,6 +1240,21 @@ class ConversationHitlService {
                            String userId, Environment environment,
                            HitlDecision decision,
                            boolean toolCallPause, PendingToolCallBatch pendingBatch) {
+        auditHitlDecision(conversationId, agentId, agentVersion, userId, environment, decision, toolCallPause, pendingBatch, null);
+    }
+
+    /**
+     * As above; {@code revisionPolicy} is the agent's {@code onRejection} policy. A
+     * rejected RULE pause under {@code REVISE} records it as
+     * {@code onRejection: REVISE}, so the ledger shows the note was a revision
+     * request — what the revision then did is the {@code hitl:revision:outcome} of
+     * the step and the LLM task's own entry.
+     */
+    void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
+                           String userId, Environment environment,
+                           HitlDecision decision,
+                           boolean toolCallPause, PendingToolCallBatch pendingBatch,
+                           HitlRevisionPolicy revisionPolicy) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
@@ -1258,6 +1274,8 @@ class ConversationHitlService {
             if (toolCallPause) {
                 detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
                 detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
+            } else if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null && revisionPolicy.revise()) {
+                detail.put("onRejection", revisionPolicy.onRejection().name());
             }
             auditLedgerService.submit(new AuditEntry(
                     UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
@@ -1654,9 +1672,13 @@ class ConversationHitlService {
             AgentConfiguration agentConfig = lookup.config();
             if (agentConfig == null || agentConfig.getHitlConfig() == null) {
                 memory.setAgentToolApprovalsConfig(null);
+                memory.setHitlRevisionPolicy(null);
                 return;
             }
             memory.setAgentToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
+            // onRejection rides on the same pinned read; null (the default SKIP)
+            // captures nothing, so an agent that did not opt in is unchanged.
+            memory.setHitlRevisionPolicy(HitlRevisionPolicy.of(agentConfig.getHitlConfig()));
         } catch (Exception e) {
             // Same reasoning: this catch used to leave the carrier untouched (null on
             // a fresh memory), which is the fail-open again by a different route.
