@@ -239,6 +239,11 @@ generator bug that turned an external `…/CONTRIBUTING.md` target into `…/CON
   plugins grouped (the plugins declare peer ranges on both). This matters beyond the site: CI's
   Trivy filesystem scan reads every lockfile in the repository, so an unpatched advisory in
   `docs-site/package-lock.json` would fail every backend PR. `npm audit` is clean today.
+- **No `sharp`** (found by Dependency Review on the PR): Astro's default image service needs it,
+  and its libvips binaries are LGPL-3.0, which `dependency-review.yml` denies. The site has no
+  raster images, so it uses the pass-through image service and `package.json` overrides `sharp`
+  with the stub in `docs-site/stubs/sharp`; `scripts/licenses.test.mjs` checks the lockfile
+  against the workflow's deny-list. A future raster image that needs resizing reopens this.
 - `ci.yml`'s `backend` filter gains `docs-site/**/*.md` (DocumentationLinksTest grades
   `docs-site/README.md`, the same reason `ui/**/*.md` is there), and `BuildQualityGatesTest`
   now also holds `docs-site/.nvmrc` to the pom's `node.version`.

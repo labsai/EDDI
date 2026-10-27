@@ -2109,12 +2109,22 @@
       "permanent": true
     },
     {
+      "source": "/agent-configuration/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
       "source": "/agent-configuration/:slug([^/.]+).md",
       "destination": "/:slug.md",
       "permanent": true
     },
     {
       "source": "/architecture-and-concepts/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/:slug([^/.]+)/",
       "destination": "/:slug/",
       "permanent": true
     },
@@ -2129,12 +2139,22 @@
       "permanent": true
     },
     {
+      "source": "/archive/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
       "source": "/archive/:slug([^/.]+).md",
       "destination": "/:slug.md",
       "permanent": true
     },
     {
       "source": "/conversations-and-orchestration/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/:slug([^/.]+)/",
       "destination": "/:slug/",
       "permanent": true
     },
@@ -2149,12 +2169,22 @@
       "permanent": true
     },
     {
+      "source": "/deployment-and-infrastructure/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
       "source": "/deployment-and-infrastructure/:slug([^/.]+).md",
       "destination": "/:slug.md",
       "permanent": true
     },
     {
       "source": "/protocols-and-integration/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/:slug([^/.]+)/",
       "destination": "/:slug/",
       "permanent": true
     },
@@ -2169,12 +2199,22 @@
       "permanent": true
     },
     {
+      "source": "/reference/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
       "source": "/reference/:slug([^/.]+).md",
       "destination": "/:slug.md",
       "permanent": true
     },
     {
       "source": "/security-and-compliance/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/:slug([^/.]+)/",
       "destination": "/:slug/",
       "permanent": true
     },

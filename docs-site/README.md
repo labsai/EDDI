@@ -40,6 +40,12 @@ npm run redirects   # after editing legacy-urls.txt: regenerate vercel.json's re
 npm run check-live -- https://<deployment>   # every page, .md copy and legacy URL, over HTTP
 ```
 
+**No `sharp`.** Astro's default image service needs it, and its libvips binaries are LGPL-3.0,
+which the repository's licence policy (`dependency-review.yml`) denies. The site has no raster
+images, so it uses the pass-through image service, and `package.json` overrides `sharp` with the
+stub in [`stubs/sharp`](stubs/sharp/package.json). Adding a raster image that needs resizing
+means revisiting that, not removing the override.
+
 Not part of the Maven build: `./mvnw package` neither builds nor ships this site. CI runs
 [`docs-site.yml`](../.github/workflows/docs-site.yml): the tests on every pull request, the build
 when `docs/` or this directory changed.

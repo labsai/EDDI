@@ -166,7 +166,9 @@ export function buildRedirects(resolved, index) {
     if (index.slugs.has(section)) continue;
     // Slugs without a dot only: '.md' is handled by the second rule, and the few slugs
     // with dots (upgrading-from-6.4, ...) are in legacy-urls.txt explicitly.
+    // The slash form too: with trailingSlash: true the request may arrive as /<section>/<slug>/.
     out.push({ source: `/${section}/:slug([^/.]+)`, destination: '/:slug/', permanent: true });
+    out.push({ source: `/${section}/:slug([^/.]+)/`, destination: '/:slug/', permanent: true });
     out.push({ source: `/${section}/:slug([^/.]+).md`, destination: '/:slug.md', permanent: true });
   }
   return out;
@@ -184,7 +186,10 @@ export function pathWorks(p, index, resolved) {
   if (resolved.some((r) => r.path.replace(/\/+$/, '') === key)) return true;
   const { segments } = splitPath(decoded);
   if (segments.length === 1 && index.sections.has(segments[0])) return true;
-  return segments.length === 2 && index.sections.has(segments[0]) && index.slugs.has(segments[1]);
+  // Exactly what the per-section fallback in buildRedirects matches: a section that is not
+  // itself a page, and a page slug without a dot ([^/.]+).
+  const [section, slug] = segments;
+  return segments.length === 2 && index.sections.has(section) && !index.slugs.has(section) && !slug.includes('.') && index.slugs.has(slug);
 }
 
 const DOCS_URL = /https?:\/\/docs\.(?:labs\.ai|eddi\.technology)(\/[^\s"'`)<>\]|,;]*)?/g;

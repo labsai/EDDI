@@ -118,6 +118,7 @@ describe('buildRedirects', () => {
     const fallback = all.findIndex((r) => r.source === '/security-and-compliance/:slug([^/.]+)');
     assert.ok(fallback > all.findIndex((r) => r.source === '/security-and-compliance/secrets-vault'));
     assert.equal(all[fallback].destination, '/:slug/');
+    assert.equal(find(all, '/security-and-compliance/:slug([^/.]+)/'), '/:slug/');
   });
 });
 
@@ -134,6 +135,12 @@ describe('pathWorks', () => {
     for (const p of ['/nope', '/security-and-compliance/nope', '/nope/secrets-vault/deeper']) {
       assert.ok(!pathWorks(p, index, resolved), p);
     }
+  });
+
+  // Only what the fallback rule can actually serve: no dotted slug, no section that is a page.
+  it('rejects deep links the per-section fallback does not redirect', () => {
+    assert.ok(!pathWorks('/agent-configuration/upgrading-from-6.4', index, resolved));
+    assert.ok(!pathWorks('/getting-started/secrets-vault', index, resolved));
   });
 });
 

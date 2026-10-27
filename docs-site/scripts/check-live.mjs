@@ -58,11 +58,17 @@ for (const { slug } of plan.pages.values()) {
 }
 for (const f of ['/llms.txt', '/llms-full.txt', '/llms-small.txt']) expect(base + f, f);
 
-// Every redirect source in vercel.json, generated from the same list.
+// Every redirect source in vercel.json, generated from the same list. Through the legacy host
+// the request must also END on the canonical host: without the host rule, the path redirects
+// alone would land on the right path on docs.labs.ai and look like a pass.
 for (const rule of buildRedirects(resolved, index)) {
   if (rule.has || rule.source.includes(':')) continue;
   expect(base + rule.source, rule.destination);
-  if (legacyBase) expect(legacyBase + rule.source, rule.destination);
+  if (legacyBase) expect(legacyBase + rule.source, rule.destination, { canonical: true });
+}
+// And paths no static redirect covers, which only the host rule can move.
+if (legacyBase) {
+  for (const p of ['/', '/secrets-vault/', '/secrets-vault.md', '/llms.txt']) expect(legacyBase + p, p, { canonical: true });
 }
 
 let failures = 0;
@@ -76,6 +82,9 @@ async function worker() {
       if (r.url !== c.target) problem = `left the site for ${r.url}, expected ${c.target}`;
     } else if (r.status !== 200) problem = `ended with HTTP ${r.status} at ${r.url}`;
     else if (c.markdown && !r.type.includes('markdown')) problem = `served as ${r.type}, not Markdown`;
+    else if (c.canonical && c.target?.startsWith('/') && new URL(r.url).origin !== new URL(base).origin) {
+      problem = `stayed on ${new URL(r.url).origin} instead of moving to ${base}`;
+    }
     else if (c.target && c.target.startsWith('/') && new URL(r.url).pathname !== c.target) {
       problem = `landed on ${new URL(r.url).pathname}, expected ${c.target}`;
     }

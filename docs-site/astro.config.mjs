@@ -1,7 +1,7 @@
 // @ts-check
 import { readFileSync } from 'node:fs';
 import starlight from '@astrojs/starlight';
-import { defineConfig } from 'astro/config';
+import { defineConfig, passthroughImageService } from 'astro/config';
 import mermaid from 'astro-mermaid';
 import starlightLinksValidator from 'starlight-links-validator';
 import starlightLlmsTxt from 'starlight-llms-txt';
@@ -40,6 +40,11 @@ export default defineConfig({
 	site,
 	publicDir: './.generated/public',
 	outDir: './.generated/dist',
+	// No image processing: the docs have no raster images (the logos are SVG, badges are remote).
+	// Astro's default service needs sharp, whose libvips binaries are LGPL-3.0, which the
+	// repository's dependency licence policy (dependency-review.yml) denies — so package.json
+	// overrides sharp with the stub in stubs/sharp and nothing here ever loads it.
+	image: { service: passthroughImageService() },
 	// The backend and the Manager link to /secrets-vault, /clustering, ... without a slash.
 	trailingSlash: 'ignore',
 	integrations: [

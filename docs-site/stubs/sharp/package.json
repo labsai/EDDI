@@ -1,0 +1,8 @@
+{
+  "name": "sharp",
+  "version": "0.0.0-not-installed",
+  "private": true,
+  "description": "Stand-in for sharp, which astro lists as an optional dependency. The docs site uses the pass-through image service and never loads it; the real package would pull in libvips (LGPL-3.0), which the repository's dependency licence policy denies. See ../../README.md.",
+  "license": "Apache-2.0",
+  "main": "index.js"
+}
