@@ -662,6 +662,7 @@ public class ScheduleFireExecutor {
         boolean interrupted = false;
 
         try {
+            requireUnreservedUserId(schedule);
             // userId is passed through unchanged — DreamService rejects a missing or
             // placeholder identity loudly; defaulting it here would silently
             // consolidate an empty memory set.
@@ -796,17 +797,27 @@ public class ScheduleFireExecutor {
 
     /** The user a conversation this schedule starts belongs to. */
     static String scheduleUserId(ScheduleConfiguration schedule) {
-        // A run's tool mocks and call record are keyed on its conversations' user
-        // ids; a fire acting as one would join a live run's session. Refused here,
-        // where every fire passes, whatever path stored the schedule.
+        requireUnreservedUserId(schedule);
+        return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
+    }
+
+    /**
+     * A run's tool mocks and call record are keyed on its conversations' user ids;
+     * a fire acting as one would join a live run's session. Refused on every fire
+     * path — new, reused and rolled-over conversations, Dream — whatever path
+     * stored the schedule (a legacy row may predate the save-time check).
+     */
+    static void requireUnreservedUserId(ScheduleConfiguration schedule) {
         if (AgentTestConversations.isReservedUserId(schedule.getUserId())) {
             throw new IllegalStateException("Schedule " + schedule.getId() + " runs as a user id in the reserved '"
                     + AgentTestConversations.USER_ID_PREFIX + "' namespace; it is not fired. Change its userId.");
         }
-        return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
     }
 
     private String resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+        // Before the reuse path below, which returns an existing conversation without
+        // ever starting one.
+        requireUnreservedUserId(schedule);
         String conversationId = schedule.getPersistentConversationId();
         Map<String, Property> carriedProperties = Map.of();
 

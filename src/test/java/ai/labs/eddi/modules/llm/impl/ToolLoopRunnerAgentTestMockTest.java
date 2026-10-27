@@ -76,6 +76,22 @@ class ToolLoopRunnerAgentTestMockTest {
         ToolMockRegistry.unregister(TEST_USER);
     }
 
+    /**
+     * As {@link #call}, but with caching and cost tracking switched ON for the call
+     * and the tool opted in to caching — so that any {@code false} reaching the
+     * service can only come from the mock path turning them off.
+     */
+    private String callWithAccounting(String user, String tool, String args, List<Map<String, Object>> trace) {
+        IConversationMemory memory = mock(IConversationMemory.class);
+        when(memory.getUserId()).thenReturn(user);
+        var request = ToolExecutionRequest.builder().id("c1").name(tool).arguments(args).build();
+        var task = new LlmConfiguration.Task();
+        task.setId("t");
+        task.setToolCacheScopes(Map.of(tool, "conversation"));
+        return runner.executeSingleToolCallResult(request, memory, trace, executors, Map.of(), Map.of(), Map.of(tool, "http"), 100, null,
+                "conv-1", false, true, true, task, false, List.of(), new ArrayList<>());
+    }
+
     private String call(String user, String tool, String args, List<Map<String, Object>> trace) {
         IConversationMemory memory = mock(IConversationMemory.class);
         when(memory.getUserId()).thenReturn(user);
@@ -131,7 +147,7 @@ class ToolLoopRunnerAgentTestMockTest {
                 anyInt())).thenAnswer(i -> i.<Supplier<String>>getArgument(4).get());
         var trace = new ArrayList<Map<String, Object>>();
 
-        String result = call(TEST_USER, "getAvailability", "{}", trace);
+        String result = callWithAccounting(TEST_USER, "getAvailability", "{}", trace);
 
         assertTrue(result.contains("postResponseRan"), result);
         assertEquals(1, handed.size());
@@ -139,6 +155,11 @@ class ToolLoopRunnerAgentTestMockTest {
         assertEquals(0, executed.get(), "the live path never ran");
         assertEquals(1, session.calls().size());
         verify(service).executeToolWrapped(any(ToolInvocation.class), any(), any(), any(), any(), anyBoolean(), eq(false), eq(false), anyInt(),
+                anyInt());
+        // Control: the same call outside a test conversation is cached and priced, so
+        // the two false flags above come from the mock, not from this setup.
+        callWithAccounting("alice", "getAvailability", "{}", new ArrayList<>());
+        verify(service).executeToolWrapped(any(ToolInvocation.class), any(), any(), any(), any(), anyBoolean(), eq(true), eq(true), anyInt(),
                 anyInt());
         assertEquals(Boolean.TRUE, trace.get(trace.size() - 1).get("mocked"));
     }

@@ -87,8 +87,9 @@ Review follow-ups to the agent regression harness (PR #1065).
   live call) refused by the tool budget, tenant quota or turn deadline no longer
   counts as a call (`ToolMockRegistry.previewToolCall` / `recordToolCall`).
 - **Reserved `agent-test:` ids** are also refused at REST schedule save and at
-  every schedule fire, and `OwnershipValidator` checks the resolved id as well as
-  the requested one.
+  every schedule fire — including a persistent schedule that reuses its stored
+  conversation and a Dream consolidation fire, which never start one — and
+  `OwnershipValidator` checks the resolved id as well as the requested one.
 - **A non-`MockResult` under the tool-path mock key never mocks**: the call is
   treated as undecided — refused in a test conversation, sent in any other.
 - **Permanent delete removes HITL tool-journal entries** too, as GDPR erasure does.

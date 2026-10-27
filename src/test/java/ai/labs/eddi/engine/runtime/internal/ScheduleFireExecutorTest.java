@@ -237,6 +237,40 @@ class ScheduleFireExecutorTest {
      * exact regression SKIPPED exists to prevent, and the opposite of what
      * {@code docs/scheduling.md} promises operators.
      */
+    /**
+     * The reuse path returns the stored conversation without starting one, so it
+     * never reached the guard in scheduleUserId: a legacy row with a reserved id
+     * would have fired into a test conversation and joined its mock session.
+     */
+    @Test
+    void fire_persistentReuseWithAReservedAgentTestUserId_isRefusedAndSaysNothing() throws Exception {
+        var schedule = makeCronSchedule("sched-reserved-reuse", "persistent");
+        schedule.setUserId("agent-test:0123456789abcdef01234567:0:1");
+        schedule.setPersistentConversationId("conv-test");
+        storedConversation("conv-test", ConversationState.READY, 1);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("reserved"), result.errorMessage());
+        verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void fire_dreamWithAReservedAgentTestUserId_isRefusedBeforeDreamRuns() throws Exception {
+        var schedule = makeCronSchedule("sched-reserved-dream", "new");
+        schedule.setUserId("agent-test:0123456789abcdef01234567:0:1");
+        schedule.setMetadata(Map.of(DreamService.METADATA_TYPE_KEY, DreamService.METADATA_TYPE_CONSOLIDATION));
+        assertTrue(DreamService.isDreamSchedule(schedule.getMetadata()), "fixture must take the Dream path");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("reserved"), result.errorMessage());
+        verifyNoInteractions(dreamService);
+    }
+
     @Test
     void fire_sayRejectsThePausedConversation_isRecordedSkippedNotFailed() throws Exception {
         var schedule = makeCronSchedule("sched-paused-throw", "persistent");
