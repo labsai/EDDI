@@ -286,6 +286,12 @@ Rules for clients:
   (`eddi.streaming.cancel-on-client-disconnect=true`). Set it to `false` to let
   the turn finish and persist when the client goes away; the reply is then there
   when the conversation is read again.
+- **Silent stretches carry a keep-alive.** A model can work for a minute before
+  its first token or tool call. When a stream has carried nothing for
+  `eddi.streaming.keepalive-interval-seconds` (default `15`, `0` = off), EDDI
+  writes an SSE comment line, `: keep-alive`, so a load balancer or proxy idle
+  timeout (60 s on an AWS ALB) does not close the connection. SSE clients ignore
+  comment lines; a hand-written parser must skip lines that start with `:`.
 
 The Chat UI (`ui/chat`) and the Manager are reference consumers of this
 contract.

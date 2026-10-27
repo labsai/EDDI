@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -41,7 +42,12 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -83,6 +89,16 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      */
     static final String DEFAULT_CANCEL_ON_CLIENT_DISCONNECT = "true";
 
+    /**
+     * Default for {@code eddi.streaming.keepalive-interval-seconds}.
+     *
+     * @see #keepAliveIntervalSeconds
+     */
+    static final String DEFAULT_KEEPALIVE_INTERVAL_SECONDS = "15";
+
+    /** The SSE comment text of a keep-alive frame ({@code : keep-alive}). */
+    static final String KEEPALIVE_COMMENT = "keep-alive";
+
     private final IConversationService conversationService;
     private final ConversationAccessGuard conversationAccessGuard;
 
@@ -115,6 +131,42 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private final boolean cancelOnClientDisconnect;
 
     /**
+     * How long a turn's stream may stay silent before EDDI writes an SSE comment
+     * line ({@code : keep-alive}) on it
+     * ({@code eddi.streaming.keepalive-interval-seconds}, default 15; {@code 0}
+     * turns it off).
+     *
+     * <p>
+     * A turn can go a minute without a single event: a model working out a tool
+     * call or a structured reply emits no tokens until it is done. Load balancers
+     * and proxies close a connection that carries no bytes for their idle timeout
+     * (60 s on an AWS ALB by default), and with {@code cancel-on-client-disconnect}
+     * on, that close also discards the turn. The comment line keeps bytes moving;
+     * SSE clients ignore comments by definition, so no consumer has to know about
+     * it. It is only written when nothing else was sent for the whole interval, so
+     * a stream of tokens carries no extra frames. A failed write on a closed sink
+     * is treated like any other send to a vanished client, so a dropped connection
+     * is now noticed during the silent stretch too, not only at the next real
+     * event.
+     * </p>
+     */
+    private final int keepAliveIntervalSeconds;
+
+    /**
+     * One daemon thread ticks every open turn stream. A tick only checks a clock
+     * and, rarely, writes a comment line, so one thread serves any number of
+     * streams. Replaceable in unit tests, which run the tick by hand.
+     */
+    ScheduledExecutorService keepAliveScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "eddi-sse-keepalive");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** Monotonic clock in milliseconds; replaceable in unit tests. */
+    LongSupplier clockMillis = () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+
+    /**
      * Removes the engine-reserved keys from client-supplied context. Field-injected
      * with the strict default so directly constructed unit tests keep it non-null
      * (CDI overwrites it with the configured bean in production).
@@ -137,19 +189,37 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     public RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard,
             @ConfigProperty(name = "eddi.streaming.cancel-on-client-disconnect",
-                            defaultValue = DEFAULT_CANCEL_ON_CLIENT_DISCONNECT) boolean cancelOnClientDisconnect) {
+                            defaultValue = DEFAULT_CANCEL_ON_CLIENT_DISCONNECT) boolean cancelOnClientDisconnect,
+            @ConfigProperty(name = "eddi.streaming.keepalive-interval-seconds",
+                            defaultValue = DEFAULT_KEEPALIVE_INTERVAL_SECONDS) int keepAliveIntervalSeconds) {
         this.conversationService = conversationService;
         this.conversationAccessGuard = conversationAccessGuard;
         this.cancelOnClientDisconnect = cancelOnClientDisconnect;
+        this.keepAliveIntervalSeconds = Math.max(0, keepAliveIntervalSeconds);
     }
 
     /**
      * Convenience constructor for the direct-construction unit tests — applies the
-     * shipped default for {@code eddi.streaming.cancel-on-client-disconnect}.
+     * shipped default for {@code eddi.streaming.keepalive-interval-seconds}.
+     */
+    RestAgentEngineStreaming(IConversationService conversationService,
+            ConversationAccessGuard conversationAccessGuard, boolean cancelOnClientDisconnect) {
+        this(conversationService, conversationAccessGuard, cancelOnClientDisconnect,
+                Integer.parseInt(DEFAULT_KEEPALIVE_INTERVAL_SECONDS));
+    }
+
+    /**
+     * Convenience constructor for the direct-construction unit tests — applies the
+     * shipped defaults for both streaming settings.
      */
     RestAgentEngineStreaming(IConversationService conversationService,
             ConversationAccessGuard conversationAccessGuard) {
         this(conversationService, conversationAccessGuard, Boolean.parseBoolean(DEFAULT_CANCEL_ON_CLIENT_DISCONNECT));
+    }
+
+    @PreDestroy
+    void shutdownKeepAlive() {
+        keepAliveScheduler.shutdownNow();
     }
 
     @Override
@@ -197,6 +267,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.
         final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse);
+        stream.startKeepAlive();
 
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
@@ -486,12 +557,76 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         private final AtomicBoolean terminal = new AtomicBoolean();
         /** Guarantees the disconnect cancel is signalled at most once per stream. */
         private final AtomicBoolean cancelSignalled = new AtomicBoolean();
+        /**
+         * Serialises writes to the sink: the turn's events and the keep-alive tick come
+         * from different threads, and a comment line must never land between two lines
+         * of an event.
+         */
+        private final Object writeLock = new Object();
+        /** When the last frame was written; guarded by {@link #writeLock}. */
+        private long lastWriteMillis;
+        private volatile ScheduledFuture<?> keepAlive;
 
         private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse) {
             this.conversationId = conversationId;
             this.safeConversationId = safeConversationId;
             this.eventSink = eventSink;
             this.sse = sse;
+            this.lastWriteMillis = clockMillis.getAsLong();
+        }
+
+        /**
+         * Starts the keep-alive tick for this stream, unless it is turned off. The tick
+         * runs at the interval and writes a comment only when the stream has been
+         * silent for at least one whole interval.
+         */
+        void startKeepAlive() {
+            if (keepAliveIntervalSeconds <= 0) {
+                return;
+            }
+            try {
+                keepAlive = keepAliveScheduler.scheduleAtFixedRate(this::keepAliveTick, keepAliveIntervalSeconds,
+                        keepAliveIntervalSeconds, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                // A rejected schedule (shutting down) must not fail the turn.
+                LOGGER.debugf("SSE keep-alive not scheduled for conversation %s: %s", safeConversationId, e.getMessage());
+            }
+        }
+
+        void keepAliveTick() {
+            if (terminal.get()) {
+                stopKeepAlive();
+                return;
+            }
+            boolean gone = false;
+            synchronized (writeLock) {
+                if (clockMillis.getAsLong() - lastWriteMillis < TimeUnit.SECONDS.toMillis(keepAliveIntervalSeconds)) {
+                    return;
+                }
+                if (eventSink.isClosed()) {
+                    gone = true;
+                } else {
+                    try {
+                        eventSink.send(sse.newEventBuilder().comment(KEEPALIVE_COMMENT).build());
+                        lastWriteMillis = clockMillis.getAsLong();
+                    } catch (Exception e) {
+                        LOGGER.debugf("Failed to send SSE keep-alive for conversation %s: %s", safeConversationId,
+                                e.getMessage());
+                        gone = eventSink.isClosed();
+                    }
+                }
+            }
+            if (gone) {
+                stopKeepAlive();
+                onClientGone();
+            }
+        }
+
+        private void stopKeepAlive() {
+            ScheduledFuture<?> future = keepAlive;
+            if (future != null) {
+                future.cancel(false);
+            }
         }
 
         /**
@@ -503,23 +638,30 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
 
         void send(String eventName, String data) {
-            if (eventSink.isClosed()) {
-                LOGGER.debugf("SSE sink closed, dropping event: %s", eventName);
-                onClientGone();
-                return;
-            }
-            try {
-                eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, padDataLines(data)).build());
-            } catch (Exception e) {
-                LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
-                // RESTEasy Reactive throws IllegalStateException synchronously when the
-                // sink closed between the check above and the write. Re-checking the
-                // sink (rather than treating every send failure as a disconnect) keeps
-                // an unrelated failure — a broken event payload, say — from cancelling
-                // a turn whose client is still connected and waiting.
+            boolean gone = false;
+            synchronized (writeLock) {
                 if (eventSink.isClosed()) {
-                    onClientGone();
+                    LOGGER.debugf("SSE sink closed, dropping event: %s", eventName);
+                    gone = true;
+                } else {
+                    try {
+                        eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, padDataLines(data)).build());
+                        lastWriteMillis = clockMillis.getAsLong();
+                    } catch (Exception e) {
+                        LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
+                        // RESTEasy Reactive throws IllegalStateException synchronously when the
+                        // sink closed between the check above and the write. Re-checking the
+                        // sink (rather than treating every send failure as a disconnect) keeps
+                        // an unrelated failure — a broken event payload, say — from cancelling
+                        // a turn whose client is still connected and waiting.
+                        gone = eventSink.isClosed();
+                    }
                 }
+            }
+            // Outside the lock: the cancel can call back into this stream from
+            // another thread.
+            if (gone) {
+                onClientGone();
             }
         }
 
@@ -541,6 +683,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
 
         void close() {
+            stopKeepAlive();
             try {
                 if (!eventSink.isClosed()) {
                     eventSink.close();
@@ -560,6 +703,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
          * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the trade-off.
          */
         private void onClientGone() {
+            stopKeepAlive();
             if (terminal.get() || !cancelSignalled.compareAndSet(false, true)) {
                 return;
             }
