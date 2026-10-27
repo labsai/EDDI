@@ -696,6 +696,32 @@ class TenantQuotaServiceTest {
     }
 
     /**
+     * The quota row is cached, so on a cache hit the pre-call cost gate's only
+     * store call is the monthly-cost read. That read failing used to fail OPEN on
+     * PostgreSQL (it returned $0 spent) and escape as a raw driver exception on
+     * MongoDB, failing the turn instead of serving the fallback answer.
+     */
+    @Test
+    @DisplayName("a monthly-cost read that fails refuses the pre-call gate as an accounting outage — not $0 spent, not a throw")
+    void unreadableMonthlyCostRefusesAsAccountingUnavailable() {
+        var store = new InMemoryTenantQuotaStore(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true)) {
+            @Override
+            public double getMonthlyCost(String tenantId) {
+                throw new QuotaAccountingUnavailableException(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE);
+            }
+        };
+        var service = new TenantQuotaService(store, meterRegistry, TENANT_ID);
+
+        QuotaCheckResult result = assertDoesNotThrow(() -> service.checkCostBudget(TENANT_ID));
+
+        assertFalse(result.allowed(), "fail closed");
+        assertTrue(result.accountingUnavailable());
+        assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
+        assertNull(meterRegistry.find("eddi.tenant.quota.denied").counter());
+        assertEquals(1.0, meterRegistry.counter("eddi.tenant.quota.unavailable", "tenant", TENANT_ID, "type", "cost").count());
+    }
+
+    /**
      * A refusal is not cached, so the next turn asks the store again instead of
      * being pinned to the outage for {@code QUOTA_CACHE_TTL}.
      */

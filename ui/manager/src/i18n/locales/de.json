@@ -4427,6 +4427,7 @@
     "budgetTitle": "Monatliches Kostenbudget",
     "budgetUnlimited": "Es ist kein monatliches Kostenbudget gesetzt – die Ausgaben werden erfasst, aber nie begrenzt.",
     "budgetNotEnforced": "Ein Budget von {{limit}} ist gesetzt, die Durchsetzung ist aber aus – es wird nicht angewendet.",
+    "budgetDisabled": "Die Durchsetzung ist aus – die Ausgaben werden weder erfasst noch begrenzt.",
     "budgetReached": "Budget erreicht ({{spent}} von {{limit}}). LLM-Tasks liefern ihre Ersatzantwort, statt das Modell aufzurufen, und Tool-Aufrufe werden abgelehnt – bis der Monat wechselt oder das Limit erhöht wird.",
     "budgetRemaining": "{{spent}} von {{limit}} in diesem Monat verbraucht. Noch {{remaining}}, bevor Modelle nicht mehr aufgerufen werden.",
     "budgetNote": "Zählt berechnete Modellaufrufe und erfasste Tool-Kosten pro UTC-Kalendermonat. Modelle ohne Preis, Unterhaltungszusammenfassungen und Embeddings werden nicht erfasst. Ein Turn, der das Limit überschreitet, läuft noch zu Ende – die Summe kann also leicht darüber liegen. Abgelehnte Aufrufe zählt die Metrik eddi.llm.spend.refused.",

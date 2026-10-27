@@ -4427,6 +4427,7 @@
     "budgetTitle": "每月费用预算",
     "budgetUnlimited": "未设置每月费用预算，因此只计量花费，不做限制。",
     "budgetNotEnforced": "已设置 {{limit}} 的预算，但强制执行已关闭，因此不会生效。",
+    "budgetDisabled": "强制执行已关闭，因此既不计量也不限制花费。",
     "budgetReached": "已达预算（{{spent}} / {{limit}}）。LLM 任务将返回备用回答而不调用模型，工具调用将被拒绝，直到下个月开始或上限被调高。",
     "budgetRemaining": "本月已使用 {{spent}} / {{limit}}。还剩 {{remaining}}，之后将不再调用模型。",
     "budgetNote": "按 UTC 日历月统计已定价的模型调用和已跟踪的工具费用。未定价的模型、对话摘要和嵌入不计量。越过上限的那一轮仍会完成，因此总额可能略高于上限。被拒绝的调用计入 eddi.llm.spend.refused 指标。",
