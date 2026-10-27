@@ -4497,6 +4497,7 @@
     "budgetTitle": "Presupuesto de coste mensual",
     "budgetUnlimited": "No hay presupuesto de coste mensual: el gasto se mide pero nunca se limita.",
     "budgetNotEnforced": "Hay un presupuesto de {{limit}}, pero la aplicación está desactivada, así que no se aplica.",
+    "budgetDisabled": "La aplicación está desactivada: el gasto no se mide ni se limita.",
     "budgetReached": "Presupuesto alcanzado ({{spent}} de {{limit}}). Las tareas LLM responden con su respuesta de reserva en lugar de llamar al modelo y se rechazan las llamadas a herramientas, hasta que cambie el mes o se suba el límite.",
     "budgetRemaining": "{{spent}} de {{limit}} usados este mes. Quedan {{remaining}} antes de que se dejen de llamar los modelos.",
     "budgetNote": "Cuenta las llamadas a modelos con precio y el coste de herramientas registrado, por mes natural UTC. No se miden los modelos sin precio, los resúmenes de conversación ni los embeddings. Un turno que cruza el límite termina igualmente, por lo que el total puede quedar algo por encima. Las llamadas rechazadas se cuentan en la métrica eddi.llm.spend.refused.",

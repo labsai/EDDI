@@ -12191,12 +12191,12 @@
         {
           "id": 262,
           "type": "timeseries",
-          "title": "LLM spend gate refusals",
+          "title": "Spend gate refusals (model calls; tool calls for tenant_check_error)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_spend_refused_total`: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached.",
+          "description": "`eddi_llm_spend_refused_total`, by reason: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached (`tenant_budget`, `conversation_ceiling`) or the quota store could not answer (`tenant_accounting_unavailable`). `tenant_check_error` means the budget check itself threw — a defect that should never be non-zero — and counts refused model calls and refused tool calls alike.",
           "gridPos": {
             "h": 7,
             "w": 12,

@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [October 2026](changelog/2026-10.md) | 151 | 708 KB |
+| [October 2026](changelog/2026-10.md) | 152 | 713 KB |
 | [September 2026](changelog/2026-09.md) | 223 | 1216 KB |
 | [August 2026](changelog/2026-08.md) | 213 | 845 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
@@ -66,6 +66,127 @@ which neither a reader nor an agent's context window could usefully hold.
 
 The two running registers — **Decision Log** and **Regression Notes** — live at the
 bottom of this file and are never archived.
+
+---
+
+## feat(hitl): a person's note on a rejected tool call asks the model to revise (2026-10-26)
+
+**Repo:** EDDI (`feat/hitl-note-asks-for-changes`)
+
+### What changed and why
+
+An approval card lets a person send a note instead of approving ("use a shorter title"). Until now a rejected call always told the model "the reviewer declined this action, do not retry, offer alternatives", so a note that asked for a change produced an explanation instead of a corrected proposal. Two small changes in [`ToolLoopResumer`](../src/main/java/ai/labs/eddi/modules/llm/impl/ToolLoopResumer.java):
+
+- **The instruction depends on who decided.** When the note is non-blank and `decidedBy` does not start with `system:`, the rejection tool-result says the user did not approve the call and left a note: if the note asks for changes, call the tool again with exactly those changes and nothing else changed (the user will be asked to approve the new call); if it declines or asks for something else, do not call it again and reply briefly. With no note, or for an automated decision (`system:timeout`, `system:group`), the text is exactly what it was. Detection is the existing `system:` convention on `decidedBy`, never the note text, so the group-conversation auto-reject cannot make the model retry a call that can never be approved.
+- **A per-call rejection falls back to the top-level note.** A call listed in `toolDecisions` with `REJECTED` and no note of its own (absent or blank) now uses `decision.note`, as an unlisted call already did. A call's own note still wins; approved calls are unaffected.
+
+The re-proposed call is an ordinary new call: it is gated, pauses again with a new `pauseId` and needs its own approval, so an approved call is never silently changed. Each re-proposal counts toward `hitlConfig.toolApprovals.maxPausesPerTurn` (default 3, maximum 10); [`docs/hitl.md`](hitl.md) says to raise it where notes are expected to come back as revisions.
+
+No REST shape, verdict type or default changes.
+
+### Tests
+
+`ToolLoopResumerNoteTest`: the envelope for a person's note, for no or blank note, and for `system:timeout` / `system:group` with a note; the per-call fallback through the real resume loop (own note kept, absent and blank fall back, unlisted unchanged); and one test that stores a paused conversation as a snapshot document, loads it back, resumes it `REJECTED` with a note and asserts the model's next request carries the new instruction and the note.
+
+---
+
+## 🐛 fix(llm): a `\'` inside a JSON reply no longer turns a complete answer into the fallback (2026-10-26)
+
+**Repo:** EDDI (`fix/llm-json-repair-backslash-quote`)
+
+### What changed and why
+
+Gemini sometimes escapes an apostrophe inside a JSON string the way JavaScript and Python allow: `"Japan\'s ruling class"`. JSON has no `\'` escape, so `ModelOutputParser` reported `invalid JSON syntax` for the whole reply, and a `convertToObject` task served its fallback answer ("Sorry, I could not answer that just now"). In the case that showed it, the reply was complete and correct, about 1,300 characters long, and one apostrophe was the only defect.
+
+[`ModelOutputParser`](../src/main/java/ai/labs/eddi/modules/llm/impl/ModelOutputParser.java) now drops the backslash of `\'` inside JSON strings, after the fence strip and before parsing. This is the one exception to its "invalid JSON is never fixed" rule, and the class Javadoc says so. It is safe because `\'` is never valid JSON and can only mean `'`.
+
+- The pass is string-aware and linear. It copies every other escape as the pair it is, so `\\'` (an escaped backslash, then a quote) stays valid JSON and `\"` does not end the string. Outside strings nothing changes.
+- The whole reply is repaired once; when the object has to be extracted from prose, each candidate is repaired on its own, so an unmatched `"` in the text before the object cannot shift what counts as inside a string.
+- A reply without `\'` is not copied.
+- A repaired reply reports `repaired`, like a stripped fence.
+- A reply that is still invalid keeps its raw text, and a second, real syntax error is not hidden.
+
+### Tests
+
+`ModelOutputParserTest`:
+- accepted: the observed case, several `\'` in one object and inside an array, fenced, with prose around it, and with an unmatched quote in the prose before it;
+- left alone: `\\'` stays valid and unrepaired, and an escaped double quote does not end the string;
+- still rejected: prose containing `\'` is `not JSON` with the raw text kept, and `\'` plus a trailing comma is still `invalid JSON syntax`.
+
+Mutation checks:
+- With the repair switched off entirely, the acceptance cases that contain `\'` fail, and the `\\'` case passes either way, as it should.
+- With only the per-candidate repair removed, the two extraction cases fail: prose around the object, and the unmatched quote before it.
+
+---
+
+## 🐛 fix(ci): publish the `-b` image for a merge that does not touch `ui/` (2026-10-21)
+
+**Repo:** EDDI (`fix/ci-docker-push-backend-only`)
+
+### What changed and why
+
+Since the monorepo split of 2026-09-15 (`4f19e4767`, "run each half only when it changed"), no merge to `main` that changed only backend code published a `-b` image. Build & Test, the integration tests and the E2E runs on the built image all passed, and **Docker Build & Push** was skipped.
+
+The cause is GitHub's implicit `success()`. A job condition without a status function gets one added, and for a job with `needs` it grades every job upstream, not only the listed ones. Docker waits on `ui-gate`, which is written to pass when the UI did not change (`always()`, skipped ui-* jobs accepted). On a backend-only push those ui-* jobs are skipped, so the implicit `success()` of docker was false and it was skipped — and with it Smoke Test and Preflight Verify (Pushed Image), which depend on it. Of the last 25 merges, every backend-only one was affected; tag builds were not, because detect-changes forces `ui=true` for a tag.
+
+[`ci.yml`](../.github/workflows/ci.yml):
+- `docker` starts its condition with `!cancelled()` and grades its own `needs` explicitly: no `failure`, `cancelled` or `skipped` result. That keeps the gate the job's NOTE insists on — every listed job must have succeeded, so a failed or skipped test job still blocks the push, and no `always()` is used.
+- `smoke-test` gets `!cancelled() && needs.docker.result == 'success'`, and `preflight-push` gains `!cancelled()` in front of its existing condition, for the same reason.
+
+The tag-only jobs (release, Red Hat publish, post-release) are unchanged: on a tag the ui-* jobs always run.
+
+### Verification
+
+- The history check behind the diagnosis — Docker push outcome against the ui-* jobs for the last 25 `main` pushes — lines up one to one.
+- `BuildQualityGatesTest#jobsBehindUiGateGradeTheirNeedsExplicitly` fails on any job behind `ui-gate` that runs on a non-tag push without a status function, and on a docker condition that loses its explicit `needs` checks or gains `always()`. Against the old `ci.yml` it fails, naming docker, smoke-test and preflight-push.
+- The merge of this branch does **not** prove the fix: it changes `ci.yml`, which the `ui` path filter counts as a UI change, so its ui-* jobs run and it would publish anyway. The proof is the next backend-only push to `main` — it must publish a `-b` image and run Smoke Test.
+
+---
+
+## 🐛 fix(hitl): a resume could not re-supply secret context, because loading a conversation dropped `secret` (2026-10-20)
+
+**Repo:** EDDI (`fix/secret-context-survives-store-load`)
+
+### What changed and why
+
+Secret context on resume (#1114) refused every resume that re-supplied a secret with 400 — `context['userToken'] was not a secret context value in the paused turn` — although the paused step was stored with `"secret": true` and the placeholder. Both conversation stores rebuild a stored `context:*` entry as `new Context(type, value)` when they load a conversation, which dropped the flag, and `ConversationHitlService.validateResumeContext` and `Conversation.injectResumeSecretContext` both read it from that loaded memory. A resume always loads from the store, so the feature could not work in a deployment; the tests of #1114 and #1116 build the memory in process and never went through a load.
+
+Both stores now keep the flag when they rebuild the entry. Nothing else changes: the stored value is still the placeholder, the re-supplied value lives for the resumed turn only, and that turn stores the placeholder again.
+
+Files: [`ConversationMemoryStore.java`](../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java) (`loadConversationMemorySnapshot`), [`PostgresConversationMemoryStore.java`](../src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java) (`fixContextTypes`).
+
+### Tests
+
+- `MongoConversationMemoryStoreTest`, `PostgresConversationMemoryStoreTest`: a secret entry keeps `secret: true` and the placeholder through a real store round trip; an ordinary entry stays unmarked.
+- `ConversationMemoryStoreResilienceTest`: the same on the MongoDB load path with a mocked collection, so it also runs without Docker.
+- Without the fix all three new tests fail (`expected: <true> but was: <null>`).
+- End to end against an image built from this branch (MongoDB, an agent whose gated `POST` tool sends `Bearer {context.userToken}`): the resume that re-supplies the token now runs the approved call with it, where 6.6.0 answered 400; re-supplying a key that was not secret in the paused turn is still a 400 and leaves the pause; a resume without the token is still refused; neither token is stored in the conversation afterwards.
+
+---
+
+## 🔖 chore(release): after 6.6.0 (2026-10-20)
+
+**Repo:** EDDI (`chore/post-release-6.6.0`, opened by `post-release.yml` after the release pipeline published the image)
+
+### What
+
+- Release pointers: 6.5.0 → 6.6.0 (Helm chart 2.10.0 → 2.11.0)
+- Build version (pom.xml): 6.6.0 → 6.7.0
+
+Generated by `python scripts/bump-version.py post-release 6.6.0`. Files:
+
+- `pom.xml`
+- `docs/build-reproducibility.md`
+- `docs/developer-quickstart.md`
+- `docs/getting-started.md`
+- `docs/kubernetes.md`
+- `docs/redhat-openshift.md`
+- `docs/release-signing.md`
+- `docs/setup-eddi-on-aws-with-mongodb-atlas.md`
+- `k8s/base/kustomization.yaml`
+- `k8s/quickstart.yaml`
+- `helm/eddi/Chart.yaml`
+- `src/test/java/ai/labs/eddi/deploy/DeploymentManifestsTest.java`
 
 ---
 
@@ -1245,81 +1366,13 @@ The 2026-10-17 throughput work made `eddi.conversation.max-in-flight-turns` (hea
 
 ---
 
-## perf(runtime): overload hardening — capacity check before any read, per-conversation queue cap, bounded MongoDB pool wait (2026-10-17)
-
-**Repo:** EDDI · **Branch:** `feat/turn-admission-hardening`
-
-### What changed and why
-
-A load test and JProfiler session on 2026-10-17 (1,000 to 5,000 concurrent conversations, 3 s mock
-LLM) found that once turns run on virtual threads (#1045), the MongoDB connection pool is where a turn
-spends its time under load. Indexed single-document reads averaged 2.2–3.3 s inside the driver, while
-mongod's own profiler logged them at 15–20 ms.
-
-- **Capacity check before any read.** `IConversationService.refuseIfAtCapacity` (a no-op default;
-  `ConversationService` implements it against `eddi.conversation.max-in-flight-turns`). `RestAgentEngine`
-  (`say`, `rerun`) and `RestAgentEngineStreaming` call it before the ownership check. Until now, a turn
-  refused at the limit first read its descriptor and loaded its conversation. Admission in `admitTurn`
-  stays the authoritative, atomic check.
-- **`eddi.conversation.max-queued-turns-per-conversation` (default 20).** Turns of one conversation run
-  one at a time, so a client that keeps sending without waiting for answers (a retry storm, a bot loop)
-  only built a queue of turns, each holding a permit and a loaded conversation. One more than 20 waiting
-  is now refused in `AbstractQueuedConversationCoordinator` with the existing 503 `capacity_exceeded`,
-  counted as `eddi_turn_rejected_total{reason="conversation_queue"}`. The cap applies in both
-  coordinators.
-- **`eddi.mongodb.max-wait-time-ms` (default 10000).** The driver waited up to 120 s for a pooled
-  connection, twice the turn timeout, so a saturated pool held turns long after their callers had given
-  up. A `waitQueueTimeoutMS` in the connection string still wins.
-- **`eddi.datastore.pool.wait` timer and `eddi.datastore.pool.wait.timeouts` counter** (MongoDB,
-  `PoolWaitListener`). Micrometer's pool listener showed how many operations were waiting, never for how
-  long. Both are on the Full Metrics dashboard's connection-pool panel. PostgreSQL already exports
-  `agroal_blocking_time_*`.
-
-### Measured
-
-`scripts/loadtest`, 3 s mock LLM, 6 GB heap, everything on one Windows laptop (Docker Desktop), with
-its own compose project and ports. "Legacy" is this build with `eddi.mongodb.max-wait-time-ms=0`, i.e.
-the driver's 120 s.
-
-| Scenario | Legacy (120 s pool wait) | This change (10 s) |
-|---|---|---|
-| 2,500 conversations × 10 turns | 69 turns/s · p50 26.9 s · p95 65.7 s · 668 × 408 | **191 turns/s · p50 7.5 s · p95 21.9 s** · 73 × 408, 7 × 5xx, 1 × 503 |
-| Burst: ramp to 5,000 users in 30 s, hold 60 s | 75 turns/s · p50 48.2 s · p95 73.7 s | **240 turns/s · p50 13.3 s · p95 20.1 s** · 727 × 503 at the in-flight limit |
-
-The bounded wait accounts for this difference: it is the only setting that differs between the two
-columns, and each run started on a fresh database. With the driver's 120 s, the p95 (66 s) ran past
-the 60 s turn timeout. Turns whose callers had already given up kept queueing for connections, and that
-abandoned work crowded out live turns. Each figure comes from a single run on a laptop, so read the
-ratio, not the absolute numbers. Details are in
-[`scripts/loadtest/results/admission-2026-10-17.md`](../scripts/loadtest/results/admission-2026-10-17.md).
-
-### Design decisions
-
-- **No adaptive limit, yet.** A limiter that lowered the in-flight limit while the mean pool wait
-  exceeded a target was built, tested and measured, then left out of this change. Under the harness,
-  which drives clients that ignore `Retry-After`, it cut goodput (2,500 conversations: 191 → 27 turns/s;
-  5,000-user burst: 240 → 20 turns/s). In the burst, the pool-wait signal stayed around 470 ms while
-  MongoDB served only about 500 operations/s. It is parked on a local branch, `wip/adaptive-turn-limit`.
-  Judging it needs load-test clients that honour `Retry-After`; the benchmark-suite work adds them.
-- **Queue cap default 20, not 5** (the throughput plan's WS4b proposal). Coordinator tests that queue
-  20 turns on one conversation are legitimate FIFO tests, and a chat channel can deliver several messages
-  from a fast typist. 20 is beyond any human pace and still stops a loop.
-
-### What's next
-
-- The Platform Operator's prompt does not explain `capacity_exceeded`, nor any of the turn limits. A
-  follow-up should add it, together with an operator revision bump.
-- WS4a deadline gaps (skipping turns whose deadline expired while queued) touch `ConversationStepRunner`,
-  which the per-turn round-trip follow-up to #1055 is changing; take them after that lands.
-
----
-
 ## Decision Log
 
 _For recording decisions that come up during implementation that aren't in the plan._
 
 | Date       | Decision                                                              | Context                               | Alternative Considered                                      |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| 2026-10-26 | A rejection note from a person asks the model to revise; automated `system:` decisions keep the "declined" text | The note is the user's way to say "not like this"; the model should come back with a new proposal to approve. Automated notes are explanations, and the group auto-reject would otherwise be retried in a loop. | Matching on the note text; a new verdict type that means "revise" |
 | 2026-10-19 | The REST turn timeout counts from the request's arrival (first route of the router), and a turn still queued when its caller gave up is dropped unrun | Under a burst the worker-pool wait before the timeout was armed reached 79 s, and turns nobody waited for spent the model and the database | A default `turnDeadlineMs` for every agent; arming the timeout on a Vert.x timer at arrival, which races the resource method's own response |
 | 2026-10-19 | `say`/`rerun` run on virtual threads, conversation starts stay on the worker pool | Starts on virtual threads collapsed a 2-CPU node (event loops starved); the pool is their only concurrency bound | All agent endpoints on virtual threads; a new start-concurrency limit (follow-up) |
 | 2026-10-19 | `/q/metrics` is served by an EDDI route on two dedicated threads, ahead of Quarkus' blocking handler | The blocking route shares the worker pool and went blind for two minutes in every overloaded run | The Quarkus management interface, whose blocking routes use the same pool |
@@ -1567,6 +1620,7 @@ _Track any regressions introduced during implementation for quick debugging._
 
 | Date | Regression | Cause | Fix | Commit |
 | ---- | ---------- | ----- | --- | ------ |
+| 2026-10-20 | Every HITL resume that re-supplied secret context answered 400, so an approved call acting as the user could never run | Both conversation stores rebuilt context entries without the `secret` flag when loading a conversation; the resume check and the injection read it from that memory | Both loaders keep the flag; store round-trip tests for MongoDB and PostgreSQL | (this branch) |
 | 2026-10-15 | An embedding that relied on `?token=` stops authenticating | The parameter is now ignored unless `eddi.chat.url-token.enabled=true` (M6); the widget says so in the browser console | Set the property, or move to the `postMessage` hand-off | a136e09 |
 | 2026-10-15 | A deployment behind a TLS-terminating proxy with neither `quarkus.http.proxy.proxy-address-forwarding` nor an absolute `quarkus.oidc.resource-metadata.resource` advertises an `http` MCP resource identifier | `force-https-scheme` now defaults to `false` (L3) | Set one of those two, or `force-https-scheme=true` | a136e09 |
 | 2026-10-15 | `ExpressionProvider` recursed without bound (StackOverflowError at depth 20,000, ~10 s CPU for 3 MB); the Error escaped task-failure accounting; `saveResponse` without `responseObjectName` failed every turn | No length/depth cap and per-level `substring`; `LifecycleManager` caught only `RuntimeException`; no save-time validation | `ExpressionLimits` + index-based parser, `StackOverflowError` handled as a task failure, `ApiCallsConfigurationValidator` | fix/parser-bounds |

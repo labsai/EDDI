@@ -606,7 +606,12 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 }
             }
         } catch (SQLException e) {
-            LOGGER.warnf("Failed to read monthly cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            // Returning 0.0 told the pre-call cost gate the tenant had spent nothing, so
+            // an outage let every model and tool call through (fail OPEN), while the
+            // MongoDB store failed the same read. Raise the outage the way getQuota does;
+            // TenantQuotaService refuses it as accounting-unavailable.
+            LOGGER.errorf("Failed to read monthly cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
         }
         return 0.0;
     }
