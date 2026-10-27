@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Expectation;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.PropertyExpectation;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.TestCase;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Turn;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.ScriptedEngine.Step;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun;
 import ai.labs.eddi.engine.agenttests.model.AgentTestRun.AttemptResult;
@@ -28,11 +29,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -78,7 +84,12 @@ class AgentTestRunnerTest {
 
     private static AgentTestRun started(boolean keep) {
         return new AgentTestRun(RUN_ID, "bbbbbbbbbbbbbbbbbbbbbbbb", 3, "wizard", AGENT_ID, 7, AgentTestRun.Status.RUNNING, "alice", 1L, null, null,
-                null, null, null, null, null, null, null, null, keep, null);
+                null, null, null, null, null, null, null, null, keep, null, null, null);
+    }
+
+    private static AgentTestRun startedWithHeartbeat(long heartbeatAt) {
+        return new AgentTestRun(RUN_ID, "bbbbbbbbbbbbbbbbbbbbbbbb", 3, "wizard", AGENT_ID, 7, AgentTestRun.Status.RUNNING, "alice", 1L, null, null,
+                null, null, null, null, null, null, null, null, false, null, "node-a/boot0001", heartbeatAt);
     }
 
     private static Expectation actions(String... contain) {
@@ -297,6 +308,119 @@ class AgentTestRunnerTest {
         AgentTestRun run = runner(engine, 4).run(started(false), suite);
 
         assertEquals(AgentTestRun.Status.PASSED, run.status(), () -> String.valueOf(run.cases()));
+    }
+
+    /**
+     * A run holds one of a node's few run slots for as long as it runs — up to
+     * 2,000 turns of up to 900 s each. Cancel must free it without waiting for the
+     * turn in flight, and still end and delete the conversation.
+     */
+    @Test
+    @DisplayName("cancel stops a run mid-turn: CANCELLED, the conversation ended and deleted, the run no longer active")
+    void cancelStopsARunMidTurn() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        var runner = runner(engine, 4);
+        var result = CompletableFuture.supplyAsync(() -> runner.run(started(false), suite(null, null, happyPath())));
+        verify(engine.service, timeout(5_000)).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+
+        assertTrue(runner.cancel(RUN_ID, "bob"));
+        AgentTestRun run = result.get(10, TimeUnit.SECONDS);
+
+        assertEquals(AgentTestRun.Status.CANCELLED, run.status());
+        assertTrue(run.error().contains("bob"), run.error());
+        AttemptResult attempt = run.cases().getFirst().attempts().getFirst();
+        assertFalse(attempt.passed());
+        assertTrue(attempt.error().contains("cancelled"), attempt.error());
+        String conversationId = engine.conversations.keySet().iterator().next();
+        verify(engine.service).endConversation(conversationId, AgentTestConversations.SYSTEM_ACTOR);
+        verify(conversationStore).purgeAgentTestConversation(conversationId, RUN_ID);
+        assertFalse(runner.isActive(RUN_ID));
+        assertFalse(runner.cancel(RUN_ID, "bob"), "a finished run is not cancellable");
+        verify(runStore).update(run);
+    }
+
+    @Test
+    @DisplayName("a run not executing on this node cannot be cancelled here")
+    void unknownRunIsNotCancelled() throws Exception {
+        assertFalse(runner(engine(), 4).cancel(RUN_ID, "bob"));
+    }
+
+    /**
+     * Other replicas tell a live run from an orphan by its heartbeat. The final
+     * write must be the last one: a heartbeat after it would put RUNNING back.
+     */
+    @Test
+    @DisplayName("a running run's heartbeat is refreshed by compare-and-swap, and nothing is written after the final record")
+    void heartbeatRunsUntilTheFinalWrite() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        var runner = new AgentTestRunner(engine.service, runStore, conversationStore, auditLedger, new SimpleMeterRegistry(), 4, 50, 20);
+        var result = CompletableFuture.supplyAsync(() -> runner.run(startedWithHeartbeat(5L), suite(null, null, happyPath())));
+        verify(runStore, timeout(5_000).atLeast(2)).updateIfHeartbeat(argThat(r -> r.status() == AgentTestRun.Status.RUNNING), anyLong());
+
+        runner.cancel(RUN_ID, "bob");
+        AgentTestRun finished = result.get(10, TimeUnit.SECONDS);
+        Thread.sleep(100);
+
+        var records = ArgumentCaptor.forClass(AgentTestRun.class);
+        var expected = ArgumentCaptor.forClass(Long.class);
+        verify(runStore, atLeast(3)).updateIfHeartbeat(records.capture(), expected.capture());
+        assertEquals(finished, records.getAllValues().getLast(), "the final record is the last write");
+        // Each write expects the heartbeat the one before stored: a chain no other
+        // writer can join.
+        assertEquals(5L, expected.getAllValues().getFirst());
+        for (int i = 1; i < expected.getAllValues().size(); i++) {
+            assertEquals(records.getAllValues().get(i - 1).heartbeatAt(), expected.getAllValues().get(i));
+        }
+        verify(runStore, never()).update(any());
+    }
+
+    /**
+     * Another node saw the heartbeat stop and closed the run as ABORTED. The
+     * owner's next beat fails its compare-and-swap: it must stop the run, not write
+     * RUNNING (or its own verdict) back over what pollers already saw.
+     */
+    @Test
+    @DisplayName("a run closed by another node stops at its next heartbeat and writes nothing back")
+    void lostOwnershipStopsTheRun() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        doThrow(new IResourceStore.ResourceModifiedException("heartbeat changed")).when(runStore).updateIfHeartbeat(any(), anyLong());
+        var runner = new AgentTestRunner(engine.service, runStore, conversationStore, auditLedger, new SimpleMeterRegistry(), 4, 50, 20);
+
+        AgentTestRun run = CompletableFuture.supplyAsync(() -> runner.run(startedWithHeartbeat(5L), suite(null, null, happyPath())))
+                .get(10, TimeUnit.SECONDS);
+
+        assertNotNull(run);
+        verify(runStore, never()).update(any());
+        verify(auditLedger, never()).submit(any());
+        assertFalse(runner.isActive(RUN_ID));
+    }
+
+    /**
+     * A turn given up on can finish in the engine after its conversation was ended
+     * and deleted, and write it back: once it completes, the conversation is
+     * deleted again.
+     */
+    @Test
+    @DisplayName("a conversation whose abandoned turn finishes late is deleted again")
+    void abandonedTurnIsPurgedAgainWhenItFinishes() throws Exception {
+        var engine = engine();
+        engine.neverAnswer = true;
+        var runner = runner(engine, 4);
+        var result = CompletableFuture.supplyAsync(() -> runner.run(started(false), suite(null, null, happyPath())));
+        verify(engine.service, timeout(5_000)).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(),
+                any());
+        runner.cancel(RUN_ID, "bob");
+        result.get(10, TimeUnit.SECONDS);
+        String conversationId = engine.conversations.keySet().iterator().next();
+        verify(conversationStore, times(1)).purgeAgentTestConversation(conversationId, RUN_ID);
+
+        engine.unanswered.getFirst().onComplete(null);
+
+        verify(conversationStore, timeout(15_000).times(2)).purgeAgentTestConversation(conversationId, RUN_ID);
     }
 
     @Test

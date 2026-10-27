@@ -216,11 +216,18 @@ class ToolLoopResumer {
             // call, and "not REJECTED" is a dangerous way to spell "approved".
             HitlDecision.HitlVerdict verdict = resolvedVerdict != null ? resolvedVerdict : HitlDecision.HitlVerdict.REJECTED;
             String note = cd != null ? cd.getNote() : decision.getNote();
+            // A listed call that carries no note of its own and is rejected falls back to
+            // the top-level note. Approved calls are unaffected: their note is never shown
+            // to the model.
+            if (cd != null && verdict == HitlDecision.HitlVerdict.REJECTED && (note == null || note.isBlank())) {
+                note = decision.getNote();
+            }
             String amended = cd != null ? cd.getAmendedArguments() : null;
             gateSupport.recordWriteApprovalDecision(verdict, decision.getDecidedBy());
 
             if (verdict == HitlDecision.HitlVerdict.REJECTED) {
-                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note)));
+                currentMessages
+                        .add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note, decision.getDecidedBy())));
                 trace.add(Map.of("type", "hitl_rejected", "tool", c.getToolName(), "callId", c.getCallId()));
                 continue;
             }
@@ -355,6 +362,7 @@ class ToolLoopResumer {
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
+                toolCostBefore,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCalls, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
                 jsonPolicy, finalTranscript, null);
@@ -542,13 +550,33 @@ class ToolLoopResumer {
      * Builds the reviewer-rejection envelope with the tool name and free-text note
      * JSON-escaped via Jackson — NEVER string-concatenated with raw reviewer text.
      */
-    String rejectionEnvelope(String toolName, String note) {
+    /**
+     * Deciders that are not a person ({@code system:timeout},
+     * {@code system:group}).
+     */
+    private static final String AUTOMATED_DECIDER_PREFIX = "system:";
+
+    /** Instruction when a person rejected the call and left a note. */
+    static final String NOTE_INSTRUCTION = "The user did not approve this call and left a note. "
+            + "If the note asks for changes, call the tool again with exactly those changes applied "
+            + "and nothing else changed; the user will be asked to approve the new call. "
+            + "If the note declines or asks for something else, do not call it again; reply briefly.";
+
+    /** Instruction without a note, or for an automated decision. */
+    static final String DECLINED_INSTRUCTION = "The reviewer declined this action. Do not retry this exact call; "
+            + "explain the situation to the user and offer alternatives.";
+
+    String rejectionEnvelope(String toolName, String note, String decidedBy) {
         Map<String, Object> envelope = new LinkedHashMap<>();
         envelope.put("status", "REJECTED_BY_REVIEWER");
         envelope.put("tool", toolName);
         envelope.put("note", note != null ? note : "");
-        envelope.put("instruction", "The reviewer declined this action. Do not retry this exact call; "
-                + "explain the situation to the user and offer alternatives.");
+        boolean automated = decidedBy != null && decidedBy.startsWith(AUTOMATED_DECIDER_PREFIX);
+        if (note != null && !note.isBlank() && !automated) {
+            envelope.put("instruction", NOTE_INSTRUCTION);
+        } else {
+            envelope.put("instruction", DECLINED_INSTRUCTION);
+        }
         return toJson(envelope);
     }
 

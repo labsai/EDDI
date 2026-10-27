@@ -2681,6 +2681,23 @@ case "${1:-help}" in
       fi
     done
 
+    # An install from before docker-compose.postgres-only.yml required
+    # POSTGRES_PASSWORD has none in .env, and its data volume was initialised with
+    # the old hardcoded `eddi`. Without a value the refreshed file cannot be
+    # interpolated, so carry the legacy password forward instead of failing.
+    # Postgres reads the variable only at initdb: a fresh random value here would
+    # lock EDDI out of the existing volume.
+    if ! grep -q '^POSTGRES_PASSWORD=' "$ENV_FILE" 2>/dev/null; then
+      for f in "${COMPOSE_FILE_LIST[@]}"; do
+        if grep -q 'POSTGRES_PASSWORD' "$f" 2>/dev/null; then
+          _set_kv POSTGRES_PASSWORD "'eddi'" "$ENV_FILE"
+          echo "Note: no POSTGRES_PASSWORD in ${ENV_FILE}; kept the legacy value 'eddi' so the" >&2
+          echo "      existing database volume still accepts it. Rotate it when convenient." >&2
+          break
+        fi
+      done
+    fi
+
     # Refreshing the compose files above can introduce new file-type bind
     # mounts. When a bind-mount source is missing Docker creates a *directory*
     # at that path, which either silently drops the dashboard or fails the mount

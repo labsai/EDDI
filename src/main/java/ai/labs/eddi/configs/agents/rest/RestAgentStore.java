@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.ratings.RatingConfigValidator;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -164,6 +165,7 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response updateAgent(String id, Integer version, AgentConfiguration agentConfiguration, Boolean compatible) {
         validateSecurityFlags(agentConfiguration);
+        RatingConfigValidator.validate(agentConfiguration);
         // The agent's own EDIT check first: the workflow lookup below answers "exists
         // / does not exist", which a caller with no rights to this agent must not be
         // able to use as an oracle for arbitrary workflow ids.
@@ -304,6 +306,7 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public Response createAgent(AgentConfiguration agentConfiguration) {
         validateSecurityFlags(agentConfiguration);
+        RatingConfigValidator.validate(agentConfiguration);
         requireWorkflowsExist(agentConfiguration);
 
         // createDocument() because the id and version are what this method needs.
@@ -333,6 +336,7 @@ public class RestAgentStore implements IRestAgentStore {
         try {
             AgentConfiguration agentConfig = agentStore.read(id, version);
             validateSecurityFlags(agentConfig);
+            RatingConfigValidator.validate(agentConfig);
             // The copy is an agent a person made, not one create_sub_agent
             // provisioned: it must not inherit the original's provenance.
             agentConfig.setDynamicOrigin(null);
@@ -820,6 +824,11 @@ public class RestAgentStore implements IRestAgentStore {
     @Override
     public String getResourceURI() {
         return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
     }
 
     @Override

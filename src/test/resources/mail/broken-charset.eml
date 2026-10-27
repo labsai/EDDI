@@ -1,0 +1,19 @@
+From: Ivan Example <ivan@example.com>
+To: support@example.org
+Subject: Charset trouble
+Date: Sat, 24 Oct 2026 17:00:00 +0000
+Message-ID: <charset-1@mail.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="cs"
+
+--cs
+Content-Type: text/plain; charset="x-unknown-klingon"
+Content-Transfer-Encoding: 8bit
+
+GrÃ¼ÃŸe aus KÃ¶ln â€” cafÃ©
+--cs
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 8bit
+
+Naïve résumé
+--cs--

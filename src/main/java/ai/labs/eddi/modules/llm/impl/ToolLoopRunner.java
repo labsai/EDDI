@@ -23,6 +23,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -201,7 +202,7 @@ class ToolLoopRunner {
         double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
-        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
+        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0, toolCostBefore,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, ClearedToolCalls.none(), transcriptMaxBytes, tokenHolder,
                 jsonPolicy,
                 finalTranscript, exchangeRecorder);
@@ -314,6 +315,10 @@ class ToolLoopRunner {
      *            verdict-applied tool results
      * @param startIteration
      *            first loop index — carries budget continuity across a pause
+     * @param toolCostBefore
+     *            the conversation's tracked tool cost before this run's first tool
+     *            ran — for a resume, before the approved calls, so the cost ceiling
+     *            counts what they charged
      * @param clearedCalls
      *            calls a human already approved this pause, bound to id, tool and
      *            arguments and consumed on first match
@@ -332,7 +337,8 @@ class ToolLoopRunner {
      *            survives a pause, a failure or a cancellation of this run
      */
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
-                           List<Map<String, Object>> trace, int startIteration, AgentOrchestrator.ToolSetup setup, boolean isLazy,
+                           List<Map<String, Object>> trace, int startIteration, double toolCostBefore, AgentOrchestrator.ToolSetup setup,
+                           boolean isLazy,
                            LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
                            int llmTaskIndex, ClearedToolCalls clearedCalls, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                            JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut, ToolExchangeRecorder exchangeRecorder)
@@ -401,17 +407,23 @@ class ToolLoopRunner {
             // spent so far — its tokens at the task's prices and its tool cost. Without
             // it one tool-heavy turn could run far past the ceiling, since the task-level
             // gate only sees a loop's cost once the whole loop has finished.
-            OptionalDouble costCeiling = memory.getConversationCostCeilingUsd();
+            // A scheduled fire's maxCostPerFire tightens it
+            // (LlmSpendGate.effectiveCeiling).
+            OptionalDouble costCeiling = LlmSpendGate.effectiveCeiling(memory);
             boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
             double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
-            double toolCostAtLoopStart = ceilingApplies ? conversationToolCost(conversationId) : 0.0;
+            // The live path's first request was gated by the task-level preflight, so
+            // the check starts once the model has answered. A resume (startIteration
+            // > 0) has already run the approved calls, whose cost no preflight saw:
+            // its first request is checked too.
+            boolean resumed = startIteration > 0;
 
             for (int i = startIteration; i < maxIterations; i++) {
-                if (ceilingApplies && modelAnswered) {
+                if (ceilingApplies && (modelAnswered || resumed)) {
                     double spent = costBeforeLoop
                             + TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
                                     tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
-                            + toolCostDelta(conversationId, toolCostAtLoopStart);
+                            + toolCostDelta(conversationId, toolCostBefore);
                     if (spent >= costCeiling.getAsDouble()) {
                         String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
                                 spent);
@@ -620,8 +632,17 @@ class ToolLoopRunner {
                                     pinResolvers);
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
-                            throw new ToolApprovalRequiredException(
+                            var pause = new ToolApprovalRequiredException(
                                     ToolApprovalGateSupport.buildPauseReason(effectiveToolApprovals, gateResult, governingRule), batch);
+                            // What this run spent up to the pause — its model rounds at the
+                            // task's prices and its tool calls (for a resume, from before the
+                            // approved calls). LlmTask records it on the step as the pause
+                            // passes, so the resume's spend checks count it.
+                            Map<String, Object> usageSoFar = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
+                            pause.addSpend(usageSoFar,
+                                    TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), usageSoFar)
+                                            + toolCostDelta(conversationId, toolCostBefore));
+                            throw pause;
                         }
                     }
 
@@ -1142,12 +1163,23 @@ class ToolLoopRunner {
         trace.add(callStep);
 
         // Agent test harness: a test conversation's tool call is answered by its
-        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
-        // for
-        // every other conversation. Self-contained early return — keep it that way.
-        String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
-                toolSources == null ? null : toolSources.get(toolRequest.name()));
-        if (mockedResult != null) {
+        // suite's mock (or refused) and never reaches the outside world. A no-op
+        // prefix check for every other conversation. The call is decided here and
+        // recorded once. A refusal, and a mock for any tool whose executor has no use
+        // for it, are recorded and return early; a mock for a MockAwareToolExecutor
+        // (an httpcall tool), and a call the suite runs live, go through the executor
+        // below instead — so the response handling a live call gets, saveResponse and
+        // postResponse property instructions, runs on the mock — and are recorded only
+        // once the budget, quota and deadline gates have let them through.
+        String mockSource = toolSources == null ? null : toolSources.get(toolRequest.name());
+        ToolMockRegistry.Decision testDecision = ToolMockRegistry.previewToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+                mockSource);
+        ToolMockRegistry.MockResult mockDecision = testDecision != null ? testDecision.result() : null;
+        MockAwareToolExecutor mockingExecutor = mockDecision != null && mockDecision.outcome() == ToolMockRegistry.Outcome.MOCKED
+                && toolExecutors.get(toolRequest.name()) instanceof MockAwareToolExecutor aware ? aware : null;
+        if (mockDecision != null && mockingExecutor == null) {
+            ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+            String mockedResult = ToolMockRegistry.toolResultOf(mockDecision, mockSource);
             Map<String, Object> mockedStep = new HashMap<>();
             mockedStep.put("type", "tool_result");
             mockedStep.put("tool", toolRequest.name());
@@ -1183,7 +1215,23 @@ class ToolLoopRunner {
 
         // Check tenant-level monthly cost budget (MCP governance)
         if (tenantQuotaService != null) {
-            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            QuotaCheckResult costCheck;
+            try {
+                costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            } catch (RuntimeException e) {
+                // Same guard as LlmSpendGate: a check that throws is a defect, not an
+                // outage (the service answers those) — refuse the tool call (fail
+                // closed) under the tenant_check_error reason instead of failing the turn.
+                String checkError = LlmSpendGate.tenantCheckFailed(null, conversationId, "tool call", e);
+                Map<String, Object> errorStep = new HashMap<>();
+                errorStep.put("type", "tool_error");
+                errorStep.put("tool", toolRequest.name());
+                errorStep.put("error", checkError);
+                trace.add(errorStep);
+                // The exception class stays in the trace and the log; the model gets
+                // generic wording.
+                return new ToolCallResult("Error: " + LlmSpendGate.TENANT_CHECK_ERROR_MESSAGE);
+            }
             if (!costCheck.allowed()) {
                 // The reason string already distinguishes the two, but the log line
                 // in front of it did not: an operator grepping for "cost budget
@@ -1243,7 +1291,9 @@ class ToolLoopRunner {
             // A tool object built for this conversation (attachments, artifacts, memory,
             // dynamic agents) is never cached — derived from the executor's class, see
             // ToolCacheService#isConversationBound.
-            boolean cacheThisCall = enableCaching
+            // A mocked call is never cached (a mock must not answer a later live call)
+            // and costs nothing.
+            boolean cacheThisCall = enableCaching && mockingExecutor == null
                     && !ToolCacheService.isConversationBound(executor)
                     && ToolCacheService.mayCache(toolSource, toolRequest.name(), canonicalName, task.getToolCacheScopes());
             String cacheScopeTag = cacheThisCall
@@ -1264,9 +1314,14 @@ class ToolLoopRunner {
             // service opens; they ride in the OTel context because nothing but the
             // trace depends on them (see ToolCallTrace).
             try (Scope ignored = new ToolCallTrace(toolSource, toolRequest.id()).makeCurrent()) {
+                final ToolMockRegistry.MockResult mock = mockingExecutor != null ? mockDecision : null;
+                // Every gate passed: the call is made now, so it counts now.
+                if (testDecision != null) {
+                    ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+                }
                 toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                        () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
-                        toolTimeoutMs);
+                        mock != null ? () -> mockingExecutor.executeMocked(toolRequest, mock) : () -> executor.execute(toolRequest, null),
+                        enableRateLimiting, cacheThisCall, enableCostTracking && mock == null, rateLimit, toolTimeoutMs);
             }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
@@ -1277,6 +1332,19 @@ class ToolLoopRunner {
         // mid-array whenever a response limit was configured, so the parse failed and
         // NO discovered tool was ever activated.
         String untruncatedResult = toolResult;
+
+        // Credentials out BEFORE anything leaves for a model. The result below is
+        // sent to the task's (possibly hosted) model, and the summarize truncation
+        // strategy sends it to a second one first. An administrator's tool reads
+        // configuration documents unredacted — that is their right — but the
+        // plaintext key in one is not the model provider's: until this line only
+        // the display trace was filtered, so the operator showed `<REDACTED>` while
+        // the provider received the key. Same scan as the trace, so the model never
+        // sees more than the person watching it does. Before truncation, because a
+        // cut can leave a key too short for the shape rules to recognise. The raw
+        // result stays internal: LAZY activation parses it and the repeat guard
+        // classifies it, and neither sends it anywhere.
+        toolResult = SecretRedactionFilter.redact(toolResult);
 
         // Apply response truncation (MCP governance).
         //
@@ -1293,9 +1361,12 @@ class ToolLoopRunner {
         resultStep.put("tool", toolRequest.name());
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
-        // The MODEL still receives the raw result — the return value below is
-        // untouched; only the display record is filtered.
+        // toolResult was redacted above; it is scanned again because truncation
+        // (summarize strategy) can produce new text.
         resultStep.put("result", SecretRedactionFilter.redact(toolResult));
+        if (mockingExecutor != null) {
+            resultStep.put("mocked", true);
+        }
         trace.add(resultStep);
 
         // LAZY mode: after discover_tools returns, activate the matching built-in

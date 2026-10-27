@@ -271,7 +271,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Set<String> substitutedSecrets = new HashSet<>();
         // A call reached through the LLM tool path was already intercepted (and
         // recorded) by ToolLoopRunner; only a rule-triggered call is intercepted here.
-        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER);
+        //
+        // The mock the LLM tool path already chose travels as a MockResult. Anything
+        // else under that key is not a decision of ToolLoopRunner's, so the call is
+        // treated as undecided and intercepted here: mocked or refused in a test
+        // conversation, sent as usual in any other.
+        Object chosenMock = templateDataObjects.get(ToolMockRegistry.TOOL_PATH_MOCK);
+        final boolean forgedMock = chosenMock != null && !(chosenMock instanceof ToolMockRegistry.MockResult);
+        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER) || forgedMock;
+        final ToolMockRegistry.MockResult toolPathMock = !ruleTriggered && chosenMock instanceof ToolMockRegistry.MockResult chosen ? chosen : null;
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
 
@@ -279,13 +287,20 @@ public class ApiCallExecutor implements IApiCallExecutor {
             templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
             if (call.getForEach() != null) {
-                return executeForEach(call, memory, templateDataObjects, targetServerUrl, ruleTriggered, substitutedSecrets);
+                return executeForEach(call, memory, templateDataObjects, targetServerUrl, ruleTriggered, toolPathMock, substitutedSecrets);
             }
 
+            // Agent test harness: a test conversation gets its suite's mock (or a 501
+            // NOT_EXECUTED) instead of a request — decided, and recorded, once per call,
+            // not once per retry: a live call that is retried is one tool call too.
+            final ToolMockRegistry.MockResult mocked = ruleTriggered
+                    ? ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall")
+                    : toolPathMock;
+
             if (Boolean.TRUE.equals(call.getFireAndForget())) {
-                // Agent test harness: a test conversation's fire-and-forget call is never
-                // sent unless its suite runs calls live.
-                if (ruleTriggered && ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") != null) {
+                // A test conversation's fire-and-forget call is never sent unless its
+                // suite runs calls live.
+                if (mocked != null) {
                     return Collections.emptyMap();
                 }
                 executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
@@ -313,13 +328,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
-                    // Agent test harness: a test conversation gets its suite's mock (or a 501
-                    // NOT_EXECUTED) instead of a request, and everything below — saveResponse,
-                    // postResponse property instructions, retries — runs on it unchanged. It is
-                    // selected BEFORE the request is built: building resolves ${vault:},
+                    // Agent test harness: with a mock (chosen above, BEFORE the request is
+                    // built) everything below — saveResponse, postResponse property
+                    // instructions, retries — runs on it unchanged. Building resolves ${vault:},
                     // ${connection:} and ${caller:} references, and a mocked call must neither
                     // fetch a live credential nor fail for want of one.
-                    var mocked = ruleTriggered ? ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") : null;
                     Set<String> resolvedSecrets;
                     if (mocked != null) {
                         resolvedSecrets = Set.of();
@@ -588,7 +601,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * finished: the items themselves share nothing.
      */
     private Map<String, Object> executeForEach(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects,
-                                               String targetServerUrl, boolean ruleTriggered, Set<String> substitutedSecrets)
+                                               String targetServerUrl, boolean ruleTriggered, ToolMockRegistry.MockResult toolPathMock,
+                                               Set<String> substitutedSecrets)
             throws LifecycleException, ITemplatingEngine.TemplateEngineException, IOException {
         ForEachInstruction forEach = call.getForEach();
         String callName = call.getName();
@@ -629,7 +643,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         for (ForEachItems.Element element : elements) {
             Map<String, Object> itemData = new LinkedHashMap<>(templateDataObjects);
             itemData.put(iterationName, element.value());
-            var mocked = ruleTriggered ? ToolMockRegistry.interceptRuleCall(memory, callName, null, "httpcall") : null;
+            var mocked = ruleTriggered ? ToolMockRegistry.interceptRuleCall(memory, callName, null, "httpcall") : toolPathMock;
             if (mocked != null) {
                 work.add(() -> forEachItemFromResponse(call, element.index(), new MockedResponse(mocked), Set.of(), 1, saveResponse));
                 continue;

@@ -26,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
@@ -89,6 +90,8 @@ final class ScriptedEngine {
     /** Tools the "agent" calls on a given input, through the real mock registry. */
     final Map<String, List<String>> toolCallsByInput = new ConcurrentHashMap<>();
     volatile boolean neverAnswer;
+    /** The handlers of turns that were never answered, to answer them late. */
+    final List<ConversationResponseHandler> unanswered = new CopyOnWriteArrayList<>();
     volatile long startDelayMs;
 
     ScriptedEngine(Step onStart, Function<String, Step> script) throws Exception {
@@ -122,6 +125,7 @@ final class ScriptedEngine {
             InputData input = inv.getArgument(6);
             ConversationResponseHandler handler = inv.getArgument(8);
             if (neverAnswer) {
+                unanswered.add(handler);
                 return null;
             }
             var snapshot = conversations.get(conversationId);
