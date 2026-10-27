@@ -1205,12 +1205,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      * <p>
      * {@code type} names a guardrail implementation ({@code prompt-injection},
      * {@code pii-redaction}, {@code regex-filter}, {@code max-length},
-     * {@code json-object}, {@code classifier}); an unknown type is skipped with a
-     * WARN at run time, never rejected, so a config written for a newer EDDI still
-     * loads on an older one. {@code action} decides what a finding does:
-     * {@code block} (the default), {@code redact}, {@code reprompt} (output only —
-     * the same model is asked again, at most {@code maxRetries} times, then the
-     * answer is blocked) or {@code warn}. An unknown action is treated as
+     * {@code json-object}, {@code classifier}, {@code judge}); an unknown type is
+     * skipped with a WARN at run time, never rejected, so a config written for a
+     * newer EDDI still loads on an older one. {@code action} decides what a finding
+     * does: {@code block} (the default), {@code redact}, {@code reprompt} (output
+     * only — the same model is asked again, at most {@code maxRetries} times, then
+     * the answer is blocked, or with {@code onExhausted: deliver-best} the best
+     * attempt is delivered) or {@code warn}. An unknown action is treated as
      * {@code block}. {@code parameters} reach the guardrail as plain strings and
      * are never run through the template engine.
      *
@@ -1224,10 +1225,15 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public static final int MAX_RETRIES_CEILING = 5;
         /** Default of {@link #getMaxRetries()}. */
         public static final int DEFAULT_MAX_RETRIES = 2;
+        /** {@link #getOnExhausted()}: block the answer (the default). */
+        public static final String ON_EXHAUSTED_BLOCK = "block";
+        /** {@link #getOnExhausted()}: deliver the attempt this guardrail rated best. */
+        public static final String ON_EXHAUSTED_DELIVER_BEST = "deliver-best";
 
         private String type;
         private String action = "block";
         private Integer maxRetries;
+        private String onExhausted;
         private String blockMessage;
         private Map<String, String> parameters;
 
@@ -1266,6 +1272,33 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public int effectiveMaxRetries() {
             int value = maxRetries != null ? maxRetries : DEFAULT_MAX_RETRIES;
             return Math.max(0, Math.min(MAX_RETRIES_CEILING, value));
+        }
+
+        /**
+         * What a {@code reprompt} guardrail does once its retries are spent:
+         * {@code block} (the default, also when unset) or {@code deliver-best} —
+         * deliver the attempt it rated best, recorded as a {@code warn} and still
+         * screened by the guardrails after it. Null when unset; meaningless for any
+         * other action (refused at deploy time). See {@link #deliversBest()}.
+         *
+         * @since 6.7.0
+         */
+        public String getOnExhausted() {
+            return onExhausted;
+        }
+
+        public void setOnExhausted(String onExhausted) {
+            this.onExhausted = onExhausted;
+        }
+
+        /**
+         * True for a {@code reprompt} guardrail whose {@code onExhausted} is
+         * {@code deliver-best}. Any other value, or another action, blocks — an unknown
+         * value fails safe.
+         */
+        public boolean deliversBest() {
+            return onExhausted != null && ON_EXHAUSTED_DELIVER_BEST.equalsIgnoreCase(onExhausted.trim())
+                    && "reprompt".equalsIgnoreCase(action != null ? action.trim() : "");
         }
 
         public String getBlockMessage() {
