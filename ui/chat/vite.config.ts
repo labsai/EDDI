@@ -1,9 +1,24 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve } from "path";
+import { brandDefaults } from "./scripts/vite-plugin-brand.mjs";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    // The EDDI brand for `npm run dev`: fills chat.html's %BRAND_*% placeholders
+    // and serves /branding/*. Dev server only — EDDI renders both itself in
+    // production (scripts/vite-plugin-brand.mjs).
+    brandDefaults({
+      assets: {
+        logo: resolve(import.meta.dirname, "public/img/logo_eddi.png"),
+        "logo-dark": resolve(import.meta.dirname, "public/img/logo_eddi.png"),
+        "og-image": resolve(import.meta.dirname, "public/img/logo_eddi.png"),
+        icon: resolve(import.meta.dirname, "public/img/favicon.ico"),
+        "favicon.ico": resolve(import.meta.dirname, "public/img/favicon.ico"),
+      },
+    }),
+  ],
   base: "/",
   resolve: {
     alias: {
