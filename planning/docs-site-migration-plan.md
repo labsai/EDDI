@@ -205,13 +205,19 @@ chatbot-era names → their agent-era pages, the Agent/Bot Father pages → `/ag
 [`scripts/redirects.mjs`](../docs-site/scripts/redirects.mjs) generates the `redirects` of
 `docs-site/vercel.json` (`npm run redirects`), in this order:
 
-1. host `docs.labs.ai`, any path → the same path on `docs.eddi.technology` (one rule — the old
-   domain stays attached to the project for good, because released images print its links);
+1. host `docs.labs.ai`, any path → the same path on `docs.eddi.technology`, **301** (one rule — the
+   old domain stays attached to the project for good, because released images print its links);
 2. each legacy path in its plain, trailing-slash and `.md` forms → its page or `.md` copy;
 3. page slugs containing a dot, without the slash → with it (phase 3 finding: `trailingSlash`
    treats `/upgrading-from-6.4` as a file with extension `.4` and adds no slash, so it 404s);
 4. a fallback per SUMMARY section, `/<section>/<slug>` → `/<slug>/`, for GitBook deep links
    nobody recorded. Explicit rules come first, so it cannot shadow them.
+
+Every generated rule is an explicit `statusCode: 301` (decided 2026-10-27: docs.labs.ai → 301,
+kept forever). Vercel's `permanent: true` would send 308, which is just as permanent, but 301 is
+the code every crawler and client has always read as a move. Vercel's own `trailingSlash`
+redirect (`/x` → `/x/`) is a 308 and cannot be configured; `check-live` requires the 301 on the
+hop that leaves docs.labs.ai, whichever order the two run in.
 
 The tests fail when a legacy line resolves to nothing, when `vercel.json` is stale, and when
 any docs link written in the backend, the UIs, README, CONTRIBUTING, AGENTS, the plugin or
@@ -285,6 +291,7 @@ phone width, the 404 page.
    and `docs.labs.ai` to the project. Lower the TTL of the docs.labs.ai record a day ahead, then
    point it from `hosting.gitbook.io` to Vercel.
 4. **Verify live:** `npm run check-live -- https://docs.eddi.technology --legacy-base https://docs.labs.ai`.
+   It also requires the hop that leaves docs.labs.ai to be a **301**.
 5. **GitBook:** disconnect Git Sync (that removes the `GitBook (docs)` PR check); unpublish the
    space but keep it for 30 days. **Rollback** within that window: point the docs.labs.ai
    record back at `hosting.gitbook.io`.

@@ -94,6 +94,16 @@ describe('buildRedirects', () => {
     assert.equal(first.destination, 'https://docs.eddi.technology/:path*');
   });
 
+  // The decision: docs.labs.ai -> 301, kept forever. Vercel's `permanent: true` would be a 308.
+  it('makes every rule an explicit 301, never `permanent`', () => {
+    const all = rules('/security-and-compliance/secrets-vault\n/old https://github.com/x');
+    assert.ok(all.length > 5);
+    for (const rule of all) {
+      assert.equal(rule.statusCode, 301, rule.source);
+      assert.equal('permanent' in rule, false, rule.source);
+    }
+  });
+
   it('redirects the plain, trailing-slash and .md forms of a legacy path', () => {
     const all = rules('/security-and-compliance/secrets-vault');
     assert.equal(find(all, '/security-and-compliance/secrets-vault'), '/secrets-vault/');
