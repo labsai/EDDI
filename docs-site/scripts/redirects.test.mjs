@@ -176,8 +176,17 @@ describe('the real site', () => {
     assert.equal(config.installCommand, 'cd docs-site && npm ci');
     assert.equal(config.buildCommand, 'cd docs-site && npm run build');
     assert.equal(config.outputDirectory, 'docs-site/.generated/dist');
-    assert.match(config.ignoreCommand, /^test "\$VERCEL_ENV" != production \|\| test ! -d docs-site \|\| git diff --quiet HEAD\^ HEAD -- /);
-    for (const p of ['docs-site', 'docs', 'PRIVACY.md', 'vercel.json']) assert.ok(config.ignoreCommand.split(' ').includes(p), p);
+    assert.match(config.ignoreCommand, /^\[ "\$VERCEL_ENV" != production \] \|\| \[ ! -d docs-site \] \|\| /);
+    // Against the last successful deployment, not HEAD^: a cancelled docs build followed by a
+    // non-docs commit must still publish. No previous SHA, or one not in the clone, builds.
+    assert.match(config.ignoreCommand, /P=\$VERCEL_GIT_PREVIOUS_SHA; \[ -n "\$P" \] && git cat-file -e .*git diff --quiet "\$P" HEAD -- /);
+    assert.doesNotMatch(config.ignoreCommand, /HEAD\^/);
+    // Vercel refuses a longer one in the project settings, which carry the same command.
+    assert.ok(config.ignoreCommand.length <= 256, `ignoreCommand is ${config.ignoreCommand.length} characters`);
+    for (const p of ['docs-site', 'docs', 'PRIVACY.md', 'vercel.json']) {
+      // Whole word: followed by a space or the closing `;`.
+      assert.match(config.ignoreCommand, new RegExp(`HEAD --.*\\s${p.replace('.', '\\.')}[\\s;]`), p);
+    }
     assert.equal(fs.existsSync(path.join(siteDir, 'vercel.json')), false, 'docs-site/vercel.json would be ignored by Vercel');
   });
 
