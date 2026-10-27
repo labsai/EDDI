@@ -25,3 +25,23 @@ Phase 2 of the plan: a page-by-page comparison against GitBook. Then phase 3, th
 ```decision-log
 | 2026-10-26 | Docs move off GitBook to an Astro + Starlight build of `docs/` on Vercel at docs.eddi.technology; docs.labs.ai redirects permanently; flat URLs from file names | GitBook URLs carry the SUMMARY section and break when a page moves; the backend's flat docs links 404 there; the marketing site already moved to eddi.technology on Vercel | Keeping docs.labs.ai canonical (docs stay on the old brand domain); folding the docs into the website repo (plain Astro with 11 locales, and docs PRs could not be validated before merge); GitHub Pages (no real redirects) |
 ```
+
+## 📚 feat(docs-site): redirects for every URL GitBook ever served, CI, and the cutover kit (2026-10-27)
+
+**Repo:** EDDI (`feat/docs-site-astro`)
+
+### What changed and why
+
+Phases 2–4 of [`planning/docs-site-migration-plan.md`](../../planning/docs-site-migration-plan.md). After this, moving docs.labs.ai off GitBook is a Vercel project and a DNS record — the checklist is phase 5 of the plan.
+
+- **Fidelity (phase 2), by script over all 94 pages.** Source against build: the same number of tables and code blocks, and no Markdown leaking into rendered text. GitBook against build: 98.4% mean word coverage, every gap GitBook's page chrome or text that changed on `main` after the branch was cut.
+- **Every old URL keeps working (phase 3).** [`docs-site/legacy-urls.txt`](../../docs-site/legacy-urls.txt) lists every URL docs.labs.ai has served — today's sitemap, the Wayback Machine's older flat and chatbot-era URLs, the links in this repo and the website. [`scripts/redirects.mjs`](../../docs-site/scripts/redirects.mjs) generates `vercel.json`'s redirects from it: docs.labs.ai → the same path on docs.eddi.technology, then each legacy path in its plain, trailing-slash and `.md` forms, then a per-section fallback. Pages whose slug contains a dot (`upgrading-from-6.4`) get an explicit slash redirect, because `trailingSlash` takes `.4` for a file extension and would 404 them — found by the new checker.
+- **A guard over docs links in the repository.** Every docs URL written in the backend, the UIs, README, CONTRIBUTING, AGENTS, the plugin and `.github/` must land on a page, anchor included. Released images print those links forever; three of them 404 on GitBook today.
+- **[`scripts/check-live.mjs`](../../docs-site/scripts/check-live.mjs)** checks a deployment over HTTP — 693 URLs followed hop by hop. Run locally against a stand-in for Vercel's serving of `vercel.json`, it found the dotted-slug 404s and a generator bug that rewrote an external `…/CONTRIBUTING.md` target to `…/CONTRIBUTING/`; both are fixed and covered by tests.
+- **Headers:** the website's security headers, with a CSP written for this site (`'wasm-unsafe-eval'` for the search index, shields.io and quay.io images). Search, Mermaid and badges were checked in a browser under it with no violations.
+- **CI (phase 4):** [`docs-site.yml`](../../.github/workflows/docs-site.yml) — check *Docs Site* — runs the tests on every PR (they hold the repo-wide link guard) and the site build when docs changed. Dependabot watches `/docs-site`, because CI's Trivy scan reads its lockfile and an advisory there would fail every backend PR. `ci.yml`'s `backend` filter gains `docs-site/**/*.md`, and `BuildQualityGatesTest` holds `docs-site/.nvmrc` to the pom's Node.
+- AGENTS.md (ecosystem row: the website is Astro + Tailwind on Vercel at eddi.technology), CONTRIBUTING (how to add a page), the ship-pr skill (the new check) and the monorepo plan now describe the docs as they are built.
+
+### Verification
+
+`npm test` in `docs-site/`: 52 tests; the new guards were mutation-checked. `npm run build` clean; `check-live` 693/693 against the local stand-in. The Java guards touched here (`BuildQualityGatesTest`, `DocumentationLinksTest`, `DocumentationAccuracyTest`, `DocumentedRestPathsTest`, the changelog tests) pass.

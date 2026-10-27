@@ -1,6 +1,6 @@
 # EDDI documentation — from GitBook to an Astro + Starlight site on Vercel
 
-Status: **revision 2, phase 1 done** (2026-10-26). Roadmap §3 item 14 ("Website — Astro
+Status: **revision 2, phases 1–4 done; 5 and 6 need the Vercel project and DNS** (2026-10-27). Roadmap §3 item 14 ("Website — Astro
 + Starlight documentation site"). Decided: domain option A (`docs.eddi.technology`, docs.labs.ai
 redirects permanently).
 
@@ -71,7 +71,7 @@ compatible with each other and with the website's Astro 7.
 
 ## 3. Decisions
 
-### 3.1 Domain — **open, needs coordination**
+### 3.1 Domain — decided: A
 
 docs.labs.ai's DNS has to move off GitBook in either case, so the choice costs the same:
 
@@ -193,84 +193,115 @@ keeps the CSP minimal and the docs cookie-free.
 
 ## 5. Redirects
 
-`legacy-urls.txt` is the union of today's sitemap, the Wayback list (112 URLs), the `.md`
-variants of every sitemap URL, and the URLs this repo and the website link to. Each line maps
-to a target page; the map is mostly mechanical:
+[`docs-site/legacy-urls.txt`](../docs-site/legacy-urls.txt) lists every URL docs.labs.ai has
+served: today's sitemap (96), the Wayback Machine's record (older flat and chatbot-era URLs) and
+the links in this repo and the website. A line is a path, or a path and a target where the
+default rule cannot work. The default: a section root goes to its section's first page, anything
+else to the longest trailing part that is a page slug
+(`/agent-configuration/langchain/llm-parameters` → `/llm-parameters/`). Hand-written targets:
+chatbot-era names → their agent-era pages, the Agent/Bot Father pages → `/agent-manager-gui/`
+(the Platform Operator replaced it in 6.3.0), pages with no successor → the closest page or `/`.
 
-- `/<section>/<slug>`, `/<section>/<parent>/<slug>` and their `.md` forms → `/<slug>/`
-  (`.md` → `/<slug>.md`).
-- Flat old URLs (`/docker`, `/metrics`, …) already *are* pages under §3.2.
-- Bot-era and removed pages get a hand-written target: `/creating-your-first-chatbot*` and
-  `/your-first-bot*` → `/creating-your-first-agent/`, `/bot-manager-gui` →
-  `/agent-manager-gui/`, `/import-export-a-chatbot` → `/import-export-an-agent/`,
-  `/deployement-management-of-chatbots` → `/deployment-management-of-agents/`,
-  `/advanced-concepts/*-father-*` → `/getting-started/`; pages with no successor
-  (`/facebook-channel-setup`, `/http2-and-ssl`, `/git-support`, `/deployment-and-infrastructure/tasks`,
-  `/deployment-and-infrastructure/git-commit-guide`) → the closest section's page or `/`.
-- Section roots (`/getting-started`, `/deployment-and-infrastructure`, …) → that section's first page.
+[`scripts/redirects.mjs`](../docs-site/scripts/redirects.mjs) generates the `redirects` of
+`docs-site/vercel.json` (`npm run redirects`), in this order:
 
-Redirects are generated into `vercel.json` as explicit 301s (a regex catch-all like
-`/:section/:slug` would capture `/changelog/2026-10`). With domain option A, the docs.labs.ai
-host is attached to the same Vercel project with one host-scoped rule
-`https://docs.labs.ai/(.*)` → `https://docs.eddi.technology/$1`, so the legacy map applies
-after it.
+1. host `docs.labs.ai`, any path → the same path on `docs.eddi.technology` (one rule — the old
+   domain stays attached to the project for good, because released images print its links);
+2. each legacy path in its plain, trailing-slash and `.md` forms → its page or `.md` copy;
+3. page slugs containing a dot, without the slash → with it (phase 3 finding: `trailingSlash`
+   treats `/upgrading-from-6.4` as a file with extension `.4` and adds no slash, so it 404s);
+4. a fallback per SUMMARY section, `/<section>/<slug>` → `/<slug>/`, for GitBook deep links
+   nobody recorded. Explicit rules come first, so it cannot shadow them.
 
-`sync-docs.test.mjs` asserts every line of `legacy-urls.txt` resolves to a page or a redirect,
-so the map cannot rot. The cutover script (phase 5) checks the same list against the live host.
+The tests fail when a legacy line resolves to nothing, when `vercel.json` is stale, and when
+any docs link written in the backend, the UIs, README, CONTRIBUTING, AGENTS, the plugin or
+`.github/` does not land on a page — `#anchor` included. That last guard is the check that would
+have caught the three 404s in §2. It lives in the docs-site tests rather than in Java, because
+it needs the same slug rules and anchors the sync computes; the workflow runs those tests on
+every pull request for that reason.
+
+[`scripts/check-live.mjs`](../docs-site/scripts/check-live.mjs) checks a deployment over HTTP:
+every page, its no-slash form and `.md` copy, the llms files and every redirect source, each
+followed hop by hop to where it must land (693 URLs). Verified locally against a stand-in for
+Vercel's static serving that applies `vercel.json` (redirects in order, host rules,
+`trailingSlash`, headers): 0 failures — after it found the dotted-slug 404s above and a
+generator bug that turned an external `…/CONTRIBUTING.md` target into `…/CONTRIBUTING/`.
 
 ## 6. CI and repo guards
 
-- New workflow `.github/workflows/docs-site.yml`, path-filtered to `docs/**`, `docs-site/**`,
-  `PRIVACY.md`: `npm ci && npm test && npm run build`. No secrets, so it runs for fork PRs too.
-  Replaces the `GitBook (docs)` check. Actions pinned by SHA, minimal `permissions:` (Scorecard).
-- `.github/dependabot.yml`: an `npm` entry for `/docs-site`, grouped like the UI entries.
-- Java guard in `DocumentationLinksTest` (or a sibling): every `docs.labs.ai/<path>` (and
-  `docs.eddi.technology/<path>`) literal in `src/main/java`, `ui/`, `README.md`,
-  `CONTRIBUTING.md`, `integrations/`, `.github/` must name a page in SUMMARY or a line of
-  `legacy-urls.txt`. That is the check that would have caught the three 404s in §2.
-- Not deployed by Actions — Vercel's Git integration deploys, as for the website. Actions only
-  validates.
+- [`.github/workflows/docs-site.yml`](../.github/workflows/docs-site.yml), check **Docs Site**:
+  `npm ci && npm test` on every pull request and push to `main` (the repo-wide docs-link guard
+  is in those tests), and `npm run build` when `docs/**`, `PRIVACY.md`, `docs-site/**` or the
+  workflow changed. No secrets, so fork PRs get it too. Actions pinned by SHA, `contents: read`,
+  `NODE_VERSION` declared at the pom's value as `BuildQualityGatesTest` requires of every
+  workflow.
+- `.github/dependabot.yml`: an `npm` entry for `/docs-site`, with Astro, Starlight and the
+  plugins grouped (the plugins declare peer ranges on both). This matters beyond the site: CI's
+  Trivy filesystem scan reads every lockfile in the repository, so an unpatched advisory in
+  `docs-site/package-lock.json` would fail every backend PR. `npm audit` is clean today.
+- `ci.yml`'s `backend` filter gains `docs-site/**/*.md` (DocumentationLinksTest grades
+  `docs-site/README.md`, the same reason `ui/**/*.md` is there), and `BuildQualityGatesTest`
+  now also holds `docs-site/.nvmrc` to the pom's `node.version`.
+- Not deployed by Actions — Vercel's Git integration deploys, as for the website.
 
 ## 7. Phases
 
-| # | Work | Done when |
+| # | Work | State |
 | --- | --- | --- |
-| 0 | Decide domain (§3.1); confirm the Vercel plan (§3.4) | Answered |
-| 1 ✅ | Scaffold `docs-site/`, theme from the website, `sync-docs.mjs` + tests, sidebar from SUMMARY, `.md` endpoints, llms.txt | `npm run build` renders every SUMMARY page locally, validator clean — done 2026-10-26 (94 pages) |
-| 2 | Fidelity pass: every page next to its GitBook version — tables, mermaid, long code blocks, the changelog archives | Every page checked |
-| 3 | `legacy-urls.txt` + redirect generation + test; Java URL guard; CSP | Tests green |
-| 4 | `docs-site.yml`, dependabot entry; Vercel project; preview deployment on a PR | Preview reachable; search works under the CSP |
-| 5 | Cutover: add the domain(s) in Vercel; switch DNS for docs.labs.ai (and add docs.eddi.technology) at the registrar; run the legacy-URL script against the live host; disconnect GitBook Git Sync | All `legacy-urls.txt` lines 200/301 live |
-| 6 | Cleanup (§8), changelog fragment; GitBook space kept intact but unpublished for 30 days, then cancelled | — |
+| 0 | Decide domain (§3.1) | ✅ option A |
+| 1 | Scaffold `docs-site/`, theme, `sync-docs.mjs` + tests, sidebar from SUMMARY, `.md` copies, llms.txt | ✅ 2026-10-26 — 94 pages, validator clean |
+| 2 | Fidelity against GitBook | ✅ 2026-10-27 — see below |
+| 3 | `legacy-urls.txt`, redirect generation, tests; repo docs-link guard; headers and CSP | ✅ 2026-10-27 |
+| 4 | `docs-site.yml`, Dependabot, CI filter | ✅ 2026-10-27 — the Vercel project itself is phase 5, step 1 |
+| 5 | Cutover — **needs Vercel and DNS access**, checklist below | open |
+| 6 | After cutover — below | open |
 
-Phases 1–4 are one PR here, perhaps two (scaffold; then CI + redirects). Nothing reader-visible
-changes until the DNS switch in phase 5. **Rollback:** point the docs.labs.ai CNAME back at
-GitBook — which is why the space stays intact for 30 days. Lower the record's TTL a day ahead.
+**Phase 2, how it was checked.** By script, not by eye, over all 94 pages: (a) source against
+build — every page renders as many tables and code blocks as its Markdown has, and no Markdown
+syntax leaks into the rendered text (unrendered links, bold, table rows, GitBook tags, escaped
+HTML); the only two count differences were single-column tables and an indented code block
+that the checker had missed and the renderer had not. (b) GitBook against build — the words of
+each GitBook page's `<main>` against ours: mean coverage 98.4%, and every gap is GitBook's page
+chrome ("For the complete documentation index, see llms.txt…", breadcrumbs) or text that changed
+on `main` after the branch was cut. Then by eye in a browser: search, Mermaid, both themes,
+phone width, the 404 page.
 
-Rough size: 3–5 days, most of it phases 2 and 3.
+### Phase 5 — cutover checklist
+
+1. **Vercel project** (team of the website project): import `labsai/EDDI`, Root Directory
+   `docs-site`, enable "Include source files outside of the Root Directory". Everything else is
+   in `vercel.json`. Check the plan tier: Hobby is non-commercial.
+2. **Preview:** open the project's latest deployment and run
+   `npm run check-live -- https://<deployment-url>` in `docs-site/` — it must report 0 failures.
+   Open a page with a Mermaid diagram and use search, with the console open: the CSP must not
+   block anything (verified locally, not yet on Vercel).
+3. **Domains:** add `docs.eddi.technology` (DNS at easyname — a CNAME to the target Vercel shows)
+   and `docs.labs.ai` to the project. Lower the TTL of the docs.labs.ai record a day ahead, then
+   point it from `hosting.gitbook.io` to Vercel.
+4. **Verify live:** `npm run check-live -- https://docs.eddi.technology --legacy-base https://docs.labs.ai`.
+5. **GitBook:** disconnect Git Sync (that removes the `GitBook (docs)` PR check); unpublish the
+   space but keep it for 30 days. **Rollback** within that window: point the docs.labs.ai
+   record back at `hosting.gitbook.io`.
+
+### Phase 6 — after cutover
+
+- Nothing in this repo *has* to change: docs.labs.ai redirects permanently, and the flat links
+  the backend and the Manager print work there for the first time. Moving the literals to
+  `docs.eddi.technology` (`VaultStartupBanner`, `ComplianceStartupChecks`, `RestSecretStore`,
+  Manager `sidebar.tsx` and `coordinator.tsx`, `README.md`, `CONTRIBUTING.md`, `plugin.json`,
+  `.github/ISSUE_TEMPLATE/config.yml`) saves a hop and can wait for a quiet moment; the
+  docs-link guard covers both domains.
+- `.claude/skills/ship-pr/SKILL.md`: drop `GitBook (docs)` from the checks list.
+- The website repo: point its `docsLinks` at the new URLs (the redirects cover the gap) and fix
+  its AGENTS.md "Docs: published separately at docs.labs.ai".
+- After 30 days, cancel the GitBook space.
+- Already done in the phase-1–4 PR: AGENTS.md (ecosystem row, roadmap, key files),
+  CONTRIBUTING (adding a page), the ship-pr skill (`Docs Site` check), the monorepo plan pointer.
+  The Platform Operator's prompt and allow-list mention no docs URL, so it needs no change.
 
 ## 8. Cleanup after cutover
 
-In this repo:
-
-- URL literals (only if domain option A): `VaultStartupBanner`, `ComplianceStartupChecks`,
-  `ui/manager` `sidebar.tsx` and `coordinator.tsx`, `README.md`, `CONTRIBUTING.md`,
-  `plugin.json`, `.github/ISSUE_TEMPLATE/config.yml`. (With option B they already work under the
-  flat scheme — nothing to change.)
-- `AGENTS.md`: ecosystem row (the website is Astro + Tailwind on Vercel at `eddi.technology`;
-  the docs are built by `docs-site/`), the "Build & Test" section gains `docs-site`, roadmap
-  item 14 done.
-- `.claude/skills/ship-pr/SKILL.md`: `GitBook (docs)` → the new check.
-- `planning/monorepo-migration-plan.md` §9.4: the GitBook paragraph becomes a pointer here.
-- `CONTRIBUTING.md`: "adding a doc page = file + SUMMARY entry; preview with
-  `npm run dev` in `docs-site/`".
-- The Platform Operator (AGENTS.md §4.6 item 6): check its system prompt for docs URLs; bump
-  `operator-revision.json` only if it changes.
-- Historical mentions of GitBook stay (changelog archives, `DocumentationLinksTest` javadoc,
-  the two "GitBook-hosted Postman collections" notes).
-
-In the website repo (separate PR there): rewrite the `docsLinks` to the new URLs (the 301s
-cover the gap), and fix its AGENTS.md "Docs: published separately at docs.labs.ai".
+Folded into phase 6 above.
 
 ## 9. Open questions worth a decision, not blocking
 

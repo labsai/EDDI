@@ -13,6 +13,8 @@
     "prebuild": "npm run sync",
     "build": "astro build",
     "preview": "astro preview",
+    "redirects": "node scripts/redirects.mjs",
+    "check-live": "node scripts/check-live.mjs",
     "test": "node --test \"scripts/**/*.test.mjs\""
   },
   "dependencies": {
