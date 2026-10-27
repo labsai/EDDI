@@ -1278,6 +1278,19 @@ class ToolLoopRunner {
         // NO discovered tool was ever activated.
         String untruncatedResult = toolResult;
 
+        // Credentials out BEFORE anything leaves for a model. The result below is
+        // sent to the task's (possibly hosted) model, and the summarize truncation
+        // strategy sends it to a second one first. An administrator's tool reads
+        // configuration documents unredacted — that is their right — but the
+        // plaintext key in one is not the model provider's: until this line only
+        // the display trace was filtered, so the operator showed `<REDACTED>` while
+        // the provider received the key. Same scan as the trace, so the model never
+        // sees more than the person watching it does. Before truncation, because a
+        // cut can leave a key too short for the shape rules to recognise. The raw
+        // result stays internal: LAZY activation parses it and the repeat guard
+        // classifies it, and neither sends it anywhere.
+        toolResult = SecretRedactionFilter.redact(toolResult);
+
         // Apply response truncation (MCP governance).
         //
         // The provenance envelope is added AFTER this, so the budget handed to the
@@ -1293,8 +1306,8 @@ class ToolLoopRunner {
         resultStep.put("tool", toolRequest.name());
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
-        // The MODEL still receives the raw result — the return value below is
-        // untouched; only the display record is filtered.
+        // toolResult was redacted above; it is scanned again because truncation
+        // (summarize strategy) can produce new text.
         resultStep.put("result", SecretRedactionFilter.redact(toolResult));
         trace.add(resultStep);
 
