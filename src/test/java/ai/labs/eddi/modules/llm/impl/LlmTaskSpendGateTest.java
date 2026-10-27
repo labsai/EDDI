@@ -9,6 +9,8 @@ import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
@@ -16,6 +18,7 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
+import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
@@ -45,10 +48,14 @@ import java.util.OptionalDouble;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LLM_SPEND_REFUSED_PREFIX;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.doubleThat;
@@ -56,6 +63,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.MockitoAnnotations.openMocks;
@@ -274,5 +282,45 @@ class LlmTaskSpendGateTest {
 
         assertEquals(1, model.calls);
         verify(steps, never()).getExactDataPerStep(AUDIT_COST);
+    }
+
+    /** A pause whose run spent 1000 input tokens and $0.025 before it. */
+    private static ToolApprovalRequiredException pauseWithSpend(PendingToolCallBatch batch) {
+        var pause = new ToolApprovalRequiredException("approve", batch);
+        pause.addSpend(Map.of("inputTokens", 1000), 0.025);
+        return pause;
+    }
+
+    @Test
+    @DisplayName("a tool loop that pauses: what it spent so far goes on the step's audit:cost and audit:token_usage")
+    void pauseRecordsTheSpendSoFar() throws Exception {
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenThrow(pauseWithSpend(new PendingToolCallBatch()));
+
+        assertThrows(ToolApprovalRequiredException.class, () -> run(task()));
+
+        // The pause snapshot persists the step, so the resume's preflight, loop
+        // ceiling and total all read this.
+        verify(dataFactory).createData(eq(AUDIT_COST), doubleThat(d -> Math.abs(d - 0.025) < 1e-12));
+        verify(dataFactory).createData(eq(AUDIT_TOKEN_USAGE),
+                argThat(u -> u instanceof Map<?, ?> m && Long.valueOf(1000).equals(m.get("inputTokens"))));
+    }
+
+    @Test
+    @DisplayName("a resume that pauses again records its own segment once, not twice")
+    void rePauseRecordsItsSegmentOnce() throws Exception {
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        var batch = new PendingToolCallBatch();
+        batch.setLlmTaskId("taskA");
+        batch.setLlmTaskIndex(0);
+        when(memory.getHitlPendingToolCalls()).thenReturn(batch);
+        when(memory.getHitlResumeDecision()).thenReturn(mock(HitlDecision.class));
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
+                .thenThrow(pauseWithSpend(new PendingToolCallBatch()));
+
+        assertThrows(ToolApprovalRequiredException.class, () -> run(task()));
+
+        verify(dataFactory, times(1)).createData(eq(AUDIT_COST), any());
     }
 }
