@@ -28,6 +28,7 @@ import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
 import java.nio.charset.Charset;
@@ -35,6 +36,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.security.Security;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -58,7 +60,10 @@ import java.util.function.UnaryOperator;
  * sends single hops and nothing else:
  * <ul>
  * <li><b>SSRF</b> — the initial URL and every redirect hop are checked as the
- * request's {@link SsrfPolicy} says.</li>
+ * request's {@link SsrfPolicy} says — before the hop is sent, and again once
+ * its response headers are in, so a name that rebinds to a refused address
+ * between the check and the connection gets no response back
+ * ({@link #recheckAfterExchange}).</li>
  * <li><b>Redirects</b> — never followed by the engine. Followed here hop by
  * hop, up to the policy's limit, with the method rewritten as its
  * {@link MethodRule} says.</li>
@@ -129,6 +134,12 @@ public class OutboundHttp {
     private final boolean ssrfProtectionEnabled;
     private final MeterRegistry meterRegistry;
 
+    /** The full SSRF check ({@link SsrfPolicy#STRICT}). */
+    private final TargetValidator strictCheck;
+
+    /** The cloud-metadata check ({@link SsrfPolicy#METADATA_ONLY}). */
+    private final TargetValidator metadataCheck;
+
     /**
      * Closes a body whose read has stalled past its budget — a server that sent its
      * headers and then nothing never returns from a read on its own.
@@ -158,13 +169,56 @@ public class OutboundHttp {
             Instance<SecretResolver> secretResolver, boolean ssrfProtectionEnabled, MeterRegistry meterRegistry) {
         this(settings, new JdkOutboundEngine(settings, tlsContexts(tlsRegistry), secrets(secretResolver)),
                 ssrfProtectionEnabled, meterRegistry);
+        if (positiveDnsCacheDisabled(Security.getProperty(DNS_CACHE_TTL_PROPERTY), System.getProperty(LEGACY_DNS_CACHE_TTL_PROPERTY))) {
+            LOGGER.warnf("The JVM's positive DNS cache is disabled (%s=0). The SSRF checks of outbound requests resolve a host "
+                    + "and the HTTP client resolves it again to connect; without the cache the two lookups can return different "
+                    + "answers, which is what a DNS-rebinding attack relies on. Leave %s unset (30s) or set it above 0.",
+                    DNS_CACHE_TTL_PROPERTY, DNS_CACHE_TTL_PROPERTY);
+        }
     }
 
     OutboundHttp(OutboundSettings settings, OutboundEngine engine, boolean ssrfProtectionEnabled, MeterRegistry meterRegistry) {
+        this(settings, engine, ssrfProtectionEnabled, meterRegistry, InetAddress::getAllByName);
+    }
+
+    /**
+     * With an injectable resolver for the SSRF checks, so a test can play a name
+     * whose answer changes between the check and the connection.
+     */
+    OutboundHttp(OutboundSettings settings, OutboundEngine engine, boolean ssrfProtectionEnabled, MeterRegistry meterRegistry,
+            UrlValidationUtils.HostResolver hostResolver) {
         this.settings = Objects.requireNonNull(settings);
         this.engine = Objects.requireNonNull(engine);
         this.ssrfProtectionEnabled = ssrfProtectionEnabled;
         this.meterRegistry = Objects.requireNonNull(meterRegistry);
+        Objects.requireNonNull(hostResolver);
+        this.strictCheck = url -> UrlValidationUtils.validateUrl(url, hostResolver);
+        this.metadataCheck = url -> UrlValidationUtils.rejectCloudMetadataTarget(url, hostResolver);
+    }
+
+    /** The security property that sets the JVM's positive DNS cache lifetime. */
+    static final String DNS_CACHE_TTL_PROPERTY = "networkaddress.cache.ttl";
+
+    /**
+     * Its system-property fallback, read only when the security property is unset.
+     */
+    static final String LEGACY_DNS_CACHE_TTL_PROPERTY = "sun.net.inetaddr.ttl";
+
+    /**
+     * Whether the JVM caches no successful DNS lookup at all — the security
+     * property, else the system property, set to {@code 0}. Unset means the JDK
+     * default of 30 seconds; a negative value means forever.
+     */
+    static boolean positiveDnsCacheDisabled(String securityValue, String systemValue) {
+        String value = securityValue != null && !securityValue.isBlank() ? securityValue : systemValue;
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        try {
+            return Integer.parseInt(value.trim()) == 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     /**
@@ -279,7 +333,8 @@ public class OutboundHttp {
                 ? request.redirectOverride()
                 : request.profile().defaultRedirects(ssrf);
 
-        checkInitial(ssrf, request.uri());
+        TargetValidator check = initialCheck(ssrf);
+        validate(check, request.uri());
 
         String method = request.method();
         URI uri = request.uri();
@@ -291,6 +346,7 @@ public class OutboundHttp {
 
         while (true) {
             Received received = engine.send(new Hop(request.profile(), method, uri, headers, body, hopTimeout, deadlineNanos));
+            recheckAfterExchange(check, uri, received);
             int status = received.status();
             if (!(redirects instanceof RedirectPolicy.Follow follow) || !REDIRECT_CODES.contains(status)) {
                 return read(request.profile(), received, mode, uri, chain, hopTimeout);
@@ -321,7 +377,8 @@ public class OutboundHttp {
                 throw new IOException("Redirect " + status + " with an unparsable Location header from: " + withoutQuery(uri));
             }
             // Prevents SSRF via 302 → internal.
-            checkHop(ssrf, request.hopValidator(), target);
+            check = hopCheck(ssrf, request.hopValidator());
+            validate(check, target);
             // Both URIs come from the server (Location): sanitized so a crafted header
             // cannot forge log lines.
             LOGGER.debugf("Following redirect %d/%d: %s → %s", hops, follow.maxHops(), LogSanitizer.sanitize(withoutQuery(uri)),
@@ -338,32 +395,63 @@ public class OutboundHttp {
         }
     }
 
-    private static void checkInitial(SsrfPolicy policy, URI uri) {
-        switch (policy) {
-            case STRICT -> validate(UrlValidationUtils::validateUrl, uri);
-            case METADATA_ONLY -> validate(UrlValidationUtils::rejectCloudMetadataTarget, uri);
-            case HOPS_ONLY, NONE, FOLLOW_GLOBAL_FLAG -> {
-                // HOPS_ONLY trusts the initial URL; FOLLOW_GLOBAL_FLAG never reaches here
-                // unresolved.
-            }
-        }
+    /**
+     * The check the initial URL gets, or {@code null} for none: HOPS_ONLY trusts
+     * the initial URL, and FOLLOW_GLOBAL_FLAG never reaches here unresolved.
+     */
+    private TargetValidator initialCheck(SsrfPolicy policy) {
+        return switch (policy) {
+            case STRICT -> strictCheck;
+            case METADATA_ONLY -> metadataCheck;
+            case HOPS_ONLY, NONE, FOLLOW_GLOBAL_FLAG -> null;
+        };
     }
 
-    private static void checkHop(SsrfPolicy policy, TargetValidator override, URI target) {
+    /** The check a redirect hop gets, or {@code null} for none. */
+    private TargetValidator hopCheck(SsrfPolicy policy, TargetValidator override) {
         if (override != null) {
-            validate(override, target);
+            return override;
+        }
+        return switch (policy) {
+            case STRICT, HOPS_ONLY -> strictCheck;
+            case METADATA_ONLY -> metadataCheck;
+            case NONE, FOLLOW_GLOBAL_FLAG -> null;
+        };
+    }
+
+    /**
+     * Runs the hop's check a second time, once its response headers are in, and
+     * discards the response when the target no longer passes (DNS rebinding).
+     * <p>
+     * The check resolves the host through {@link InetAddress}; the JDK client
+     * resolves it again to connect, and neither can be handed the other's answer.
+     * Both normally read the JVM's positive DNS cache
+     * ({@value #DNS_CACHE_TTL_PROPERTY}, 30 seconds by default), so they agree —
+     * unless the cache entry expired in the instant between them, which is the
+     * window a rebinding name aims for. The lookup the connection made in that case
+     * is the one now cached, so asking again after the exchange sees the address
+     * that was actually used, for as long as the exchange took less than the cache
+     * lifetime. A target that has turned private (or into the metadata service) is
+     * refused here: the request went out, but its response — the instance's
+     * credentials, an internal page — never reaches the caller or a redirect.
+     */
+    private static void recheckAfterExchange(TargetValidator check, URI uri, Received received) {
+        if (check == null) {
             return;
         }
-        switch (policy) {
-            case STRICT, HOPS_ONLY -> validate(UrlValidationUtils::validateUrl, target);
-            case METADATA_ONLY -> validate(UrlValidationUtils::rejectCloudMetadataTarget, target);
-            case NONE, FOLLOW_GLOBAL_FLAG -> {
-                // Nothing to check.
-            }
+        try {
+            validate(check, uri);
+        } catch (OutboundBlockedException e) {
+            closeQuietly(received.body());
+            throw new OutboundBlockedException("Response discarded: the target no longer passes the SSRF check after "
+                    + "connecting (its address changed while the request was in flight): " + e.getMessage(), e);
         }
     }
 
     private static void validate(TargetValidator validator, URI target) {
+        if (validator == null) {
+            return;
+        }
         try {
             validator.validate(target.toString());
         } catch (OutboundBlockedException e) {

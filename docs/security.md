@@ -647,6 +647,18 @@ Hostnames that indicate internal services are rejected:
 - Any hostname ending in `.local`
 - Any hostname ending in `.internal`
 
+### DNS rebinding
+
+The checks above resolve the host; the HTTP client then resolves it **again** to connect, and none of the clients EDDI uses can be handed the validated addresses (the JDK `HttpClient` has no resolver hook, and an IP-literal URL would break TLS SNI and certificate checks). Both lookups normally read the JVM's positive DNS cache — 30 seconds by default, and Vert.x resolves through the JDK because `quarkus.vertx.use-async-dns` is off — so they agree. A rebinding name aims for the instant that cache entry expires between the two, answering with a public address for the check and a private one for the connection. What each path does about it:
+
+| Path | Guard | What is left |
+| --- | --- | --- |
+| httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. | Nothing for the address check. With protection off, the per-hop "no step into a more private class" rule still compares by name |
+| `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
+| MCP servers (langchain4j transport, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again inside the transport's per-request header hook, before each request — handshake, `tools/list`, every tool call — is sent. | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
+
+Keep `networkaddress.cache.ttl` at its default or above 0: with the positive cache off every lookup is fresh and the two answers can differ at will.
+
 ### Usage
 
 ```java
