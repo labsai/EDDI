@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.DisplayName;
@@ -146,6 +147,30 @@ class OwnershipValidatorTest {
     @Nested
     @DisplayName("validateAndResolveUserId()")
     class ValidateAndResolveUserId {
+
+        /**
+         * A live run's mocks and call record are keyed on its conversations' user ids;
+         * a start from outside naming one would join that run's session. Refused for
+         * everyone — an admin may otherwise name any user, and with authorization off
+         * anyone may.
+         */
+        @Test
+        @DisplayName("refuses a user id in the agent-test namespace — with auth off, and for an admin")
+        void refusesAgentTestUserIds() {
+            String testUserId = AgentTestConversations.userIdFor("0123456789abcdef01234567", 0, 1);
+            assertThrows(ForbiddenException.class, () -> new OwnershipValidator(false).validateAndResolveUserId(null, testUserId));
+            assertThrows(ForbiddenException.class,
+                    () -> new OwnershipValidator(true).validateAndResolveUserId(authenticatedIdentity(CALLER_ID, true), testUserId));
+            assertThrows(ForbiddenException.class, () -> new OwnershipValidator(false).validateAndResolveUserId(null, " Agent-Test:x"));
+            assertEquals("agent-tester", new OwnershipValidator(false).validateAndResolveUserId(null, "agent-tester"));
+        }
+
+        @Test
+        @DisplayName("refuses a caller whose own identity resolves into the agent-test namespace")
+        void refusesAReservedResolvedIdentity() {
+            var identity = authenticatedIdentity("agent-test:0123456789abcdef01234567:0:1", false);
+            assertThrows(ForbiddenException.class, () -> new OwnershipValidator(true).validateAndResolveUserId(identity, null));
+        }
 
         @Test
         @DisplayName("returns requestedUserId as-is when auth is disabled")

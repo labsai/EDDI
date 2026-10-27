@@ -292,7 +292,8 @@ class McpRoleTierParityTest {
         mirrors.put(IRestGroupTemplates.class, McpRoles.AUTHOR); // list_group_templates, create_group_from_template
         mirrors.put(IRestGroupWorkspace.class, McpRoles.AUTHOR); // add_team_task, list_team_backlog
         mirrors.put(IRestDocs.class, McpRoles.DOCS); // list_docs, read_docs
-        mirrors.put(IRestAgentTestRuns.class, McpRoles.AUTHOR); // run_agent_tests, get_agent_test_run, list_agent_test_runs
+        mirrors.put(IRestAgentTestRuns.class, McpRoles.AUTHOR); // run_agent_tests, get_agent_test_run, list_agent_test_runs,
+                                                                // cancel_agent_test_run
         mirrors.put(IRestConversationRatingAdmin.class, McpRoles.AUTHOR); // *_conversation_ratings, review_conversation_rating
         mirrors.put(IRestAlertEvents.class, McpRoles.AUTHOR); // list_alert_events, acknowledge_alert_event
 

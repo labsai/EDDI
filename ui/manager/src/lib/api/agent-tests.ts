@@ -87,7 +87,7 @@ export interface AgentTestSuite {
 
 // ── Run ───────────────────────────────────────────────────────────
 
-export type RunStatus = "RUNNING" | "PASSED" | "FAILED" | "ERROR" | "ABORTED";
+export type RunStatus = "RUNNING" | "PASSED" | "FAILED" | "ERROR" | "ABORTED" | "CANCELLED";
 
 /** One expectation that did not hold. `expectation` is the field name, or
  *  `unmockedTool` for a tool call that had no mock in fail-closed mode. */
@@ -153,8 +153,12 @@ export interface AgentTestRun {
   casesFailed?: number;
   cases?: CaseResult[];
   keepConversations?: boolean;
-  /** Set for ERROR and ABORTED: the reason the run did not finish. */
+  /** Set for ERROR, ABORTED and CANCELLED: the reason the run did not finish. */
   error?: string;
+  /** The node executing the run, `<nodeId>/<bootId>`. */
+  ownerNode?: string;
+  /** The owner's last sign of life while RUNNING (epoch ms). */
+  heartbeatAt?: number;
 }
 
 export interface StartRunRequest {
@@ -172,6 +176,15 @@ export function isRunFinished(status: RunStatus | undefined): boolean {
 /** POST /agenttests/runs — 202 with the RUNNING record. */
 export function startAgentTestRun(request: StartRunRequest): Promise<AgentTestRun> {
   return api.post<AgentTestRun>("/agenttests/runs", request);
+}
+
+/**
+ * POST /agenttests/runs/{runId}/cancel — 202 with the record as it is now (still
+ * RUNNING); it reads CANCELLED moments later. 409 when it has already finished or
+ * runs on another node.
+ */
+export function cancelAgentTestRun(runId: string): Promise<AgentTestRun> {
+  return api.post<AgentTestRun>(`/agenttests/runs/${encodeURIComponent(runId)}/cancel`);
 }
 
 export function getAgentTestRun(runId: string): Promise<AgentTestRun> {
