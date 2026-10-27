@@ -366,6 +366,17 @@ class ConversationContinuationsTest {
             assertEquals(0, continuations.disarm(CONVERSATION_ID));
             verify(scheduleStore).deleteSchedulesByName(name);
         }
+
+        @Test
+        @DisplayName("disarm still deletes when the pending count fails, and reports nothing withdrawn")
+        void disarmDeletesWhenTheCountFails() throws Exception {
+            String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
+            doThrow(new IResourceStore.ResourceStoreException("count down")).when(scheduleStore).countPendingSchedulesByName(name);
+            doReturn(2).when(scheduleStore).deleteSchedulesByName(name);
+
+            assertEquals(0, continuations.disarm(CONVERSATION_ID));
+            verify(scheduleStore).deleteSchedulesByName(name);
+        }
     }
 
     @Nested

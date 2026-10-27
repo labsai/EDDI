@@ -433,9 +433,17 @@ public class ConversationContinuations {
         if (conversationId == null || scheduleStore == null) {
             return 0;
         }
+        String name = scheduleName(conversationId);
+        // The count is only for the report; if it fails the delete must still run, or a
+        // cancelled job stays armed. An unknown count reports 0 withdrawn, never the
+        // deleted-row count, which includes spent one-shots.
+        int pending = 0;
         try {
-            String name = scheduleName(conversationId);
-            int pending = scheduleStore.countPendingSchedulesByName(name);
+            pending = scheduleStore.countPendingSchedulesByName(name);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not count the pending continuation of conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+        try {
             int deleted = scheduleStore.deleteSchedulesByName(name);
             int withdrawn = Math.min(pending, deleted);
             if (withdrawn > 0) {
