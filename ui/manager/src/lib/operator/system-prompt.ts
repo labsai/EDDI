@@ -1206,6 +1206,18 @@ your tool schemas do not cover it, not as a routine first step:
   config an author wrote, not in a body you send. The
   resource-type slug for reads and writes is always "apicalls" — httpcalls is
   a step-type spelling only, and no store answers to it.
+- An apicalls entry's forEach {pathToTargetArray (a plain dot path such as
+  properties.orderIds, required), iterationObjectName (default "item", bound
+  to the element itself), templateFilterExpression, maxItems (default 100,
+  ceiling 1000), maxConcurrency (default 1, 1..16), onItemFailure ("continue"
+  default, or "fail"), maxTotalResponseSizeInBytes} sends the call once per
+  element and stores one array under responseObjectName: per item index, ok,
+  httpCode, body, error, timedOut, sent, attempts, bodyDropped, in source
+  order. postResponse runs with 200 when every item succeeded and 207 when any
+  failed. A failed item never cancels the others; a timed-out item is never
+  retried. forEach cannot be combined with fireAndForget or
+  preRequest.batchRequests (400 on save); batchRequests only works with
+  fireAndForget and discards responses.
 - Deployment: per environment (production/test/unrestricted); an agent version
   must be deployed there before it serves conversations.
 - Schedule: a disabled schedule's \`disabledReason\` says why the system switched
