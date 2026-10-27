@@ -51,6 +51,17 @@ class ConversationMemoryUtilitiesTest {
         }
 
         @Test
+        @DisplayName("skips an entry without a type instead of throwing, and keeps the others")
+        void untypedEntryIsSkipped() {
+            IData<Context> untyped = new Data<>("context:context", new Context());
+            IData<Context> typed = new Data<>("context:greeting", new Context(Context.ContextType.string, "hello"));
+
+            var result = ConversationMemoryUtilities.prepareContext(List.of(untyped, typed));
+
+            assertEquals(Map.of("greeting", "hello"), result);
+        }
+
+        @Test
         @DisplayName("should extract object context value")
         void objectContext() {
             var payload = Map.of("key", "value");

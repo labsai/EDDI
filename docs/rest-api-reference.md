@@ -96,6 +96,11 @@ conversation when you first read it. A context value is visible to templates
 only during the turn it was sent with, so a value needed later must be sent
 again or copied into a property — see [Passing context](passing-context-information.md).
 
+Every context entry needs a `type` (`string`, `object`, `array` or `expressions`). An entry
+without one is refused with `400` and `{"error": {"code": "INVALID_CONTEXT", …}}` naming the
+key, on this call and on every `say`. The usual cause is wrapping the map in
+`{"context": {…}}` here, where the body is the map itself.
+
 `404 Agent is not deployed or not ready` means no version of the agent is
 deployed and `READY` in that environment.
 
