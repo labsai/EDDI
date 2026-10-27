@@ -14,6 +14,7 @@ import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -437,7 +438,7 @@ class ConversationHitlService {
             // operations are recorded in the audit ledger.
             if (auditLedgerService.isEnabled()) {
                 String envName = environment.toString();
-                memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
             }
 
             // Carry the agent-level tool-approval config onto memory BEFORE the resumed

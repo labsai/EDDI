@@ -84,6 +84,63 @@ class TurnAuditBufferTest {
     }
 
     @Test
+    @DisplayName("flush reports whether every entry was accepted, and an acknowledging collector can refuse")
+    void flushReportsAcceptance() {
+        List<AuditEntry> accepted = new ArrayList<>();
+        memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> {
+            boolean take = !"refused".equals(entry.taskId());
+            if (take) {
+                accepted.add(entry);
+            }
+            return take;
+        });
+        TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        assertTrue(buffer.flush(memory));
+
+        buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        memory.getAuditCollector().collect(entry("refused", "hello", null));
+        assertFalse(buffer.flush(memory), "one refused entry means the evidence is not safely in the ledger");
+        assertEquals(2, accepted.size(), "the rest of the turn is still submitted");
+    }
+
+    @Test
+    @DisplayName("flush reports failure when a submit throws; a plain collector counts as accepting")
+    void flushReportsFailure() {
+        memory.setAuditCollector(entry -> {
+            throw new IllegalStateException("boom");
+        });
+        TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        assertFalse(buffer.flush(memory));
+
+        memory.setAuditCollector(ledger::add);
+        buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        assertTrue(buffer.flush(memory));
+    }
+
+    @Test
+    @DisplayName("releaseLedgerOwnedEvidence drops the prompt and the response and nothing else")
+    void releaseDropsOnlyPromptAndResponse() {
+        var step = memory.getCurrentStep();
+        step.storeData(new Data<>(MemoryKeys.AUDIT_COMPILED_PROMPT, "p"));
+        step.storeData(new Data<>(MemoryKeys.AUDIT_MODEL_RESPONSE, "r"));
+        step.storeData(new Data<>(MemoryKeys.AUDIT_MODEL_NAME, "m"));
+        step.storeData(new Data<>(MemoryKeys.AUDIT_TOOL_CALLS, Map.of("calls", List.of())));
+        step.storeData(new Data<>("input", "hello"));
+
+        TurnAuditBuffer.releaseLedgerOwnedEvidence(memory);
+
+        assertNull(step.getLatestData(MemoryKeys.AUDIT_COMPILED_PROMPT));
+        assertNull(step.getLatestData(MemoryKeys.AUDIT_MODEL_RESPONSE));
+        assertNotNull(step.getLatestData(MemoryKeys.AUDIT_MODEL_NAME));
+        assertNotNull(step.getLatestData(MemoryKeys.AUDIT_TOOL_CALLS));
+        assertNotNull(step.getLatestData("input"));
+    }
+
+    @Test
     @DisplayName("an ordinary turn is submitted unchanged")
     void ordinaryInputIsNotRedacted() {
         TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
