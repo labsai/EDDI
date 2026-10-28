@@ -45,6 +45,7 @@
 - [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
+- [Long Jobs — the Conversation as the Job Log](long-jobs.md)
 - [Conversation Ratings](conversation-ratings.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)

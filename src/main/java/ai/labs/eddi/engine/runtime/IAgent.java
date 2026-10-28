@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.IConversation.IConversationOutputRenderer;
@@ -79,6 +80,16 @@ public interface IAgent {
      */
     default Double getMaxCostPerConversationUsd() {
         return null;
+    }
+
+    /**
+     * The agent's self-continuation settings ({@code maxContinuations},
+     * {@code continuationInput}); {@link ContinuationPolicy#OFF} when unset.
+     *
+     * @since 6.6.0
+     */
+    default ContinuationPolicy getContinuationPolicy() {
+        return ContinuationPolicy.OFF;
     }
 
     /**

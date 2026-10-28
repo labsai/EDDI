@@ -338,6 +338,31 @@ fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
 
+### Self-continuation Metrics
+
+Turns an agent starts itself with the reserved `CONTINUE_CONVERSATION` action
+(see [Long jobs](long-jobs.md)). Charted in the **Scheduling** row of the Full
+Metrics Reference, since every continuation is delivered as a one-shot schedule.
+
+```text
+eddi_continuation_scheduled_total           # Continuations armed after a committed turn
+eddi_continuation_run_total                 # Continuation turns that ran
+eddi_continuation_refused_total             # Continuations ignored or stopped; tag: reason
+```
+
+`reason` is one of `disabled` (the agent sets no `maxContinuations`), `limit`,
+`cost_ceiling`, `not_settled` (the asking turn failed, ended or paused),
+`group_member`, `schedule_failed`, and — decided when the schedule fires —
+`ended`, `awaiting_human`, `gone` (deleted or erased), `restricted` (GDPR Art.
+18), `undeployed`, `interrupted`, `duplicate` and `owner_mismatch` (the schedule's
+user does not own the conversation — a schedule the engine did not mint; alert on
+any). Every reason except
+`undeployed` ends the chain; an `undeployed` fire is retried with the schedule
+backoff and dead-lettered like any failed fire. A steady `disabled` rate means a
+rule emits the action on an agent that never opted in. `duplicate` counts
+re-delivered fires that found their turn already ran — the at-least-once
+delivery working as designed, not an error.
+
 ### Agent Test Metrics
 
 ```text

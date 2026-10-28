@@ -74,6 +74,21 @@ class AgentStoreClientLibraryMemoryToolsTest {
     }
 
     @Test
+    @DisplayName("the deployed agent carries its self-continuation settings; a version without them has continuation off")
+    void carriesTheContinuationPolicy() throws Exception {
+        var config = configuration(false, null);
+        config.setMaxContinuations(12);
+        config.setContinuationInput("next");
+        when(agentStoreService.getAgentConfiguration("agent-1", 7)).thenReturn(config);
+        when(agentStoreService.getAgentConfiguration("agent-1", 8)).thenReturn(configuration(false, null));
+
+        var policy = library.getAgent("agent-1", 7).getContinuationPolicy();
+        assertEquals(12, policy.maxContinuations());
+        assertEquals("next", policy.input());
+        assertFalse(library.getAgent("agent-1", 8).getContinuationPolicy().enabled());
+    }
+
+    @Test
     @DisplayName("a version without a generation deploys without one")
     void legacyVersionHasNoGeneration() throws Exception {
         when(agentStoreService.getAgentConfiguration("agent-1", 1)).thenReturn(configuration(false, null));

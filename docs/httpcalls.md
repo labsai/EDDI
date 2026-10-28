@@ -408,6 +408,12 @@ Fire-and-forget calls are not bounded by it: they are built on the turn's thread
 
 A `forEach` call is bounded per item: each item's timeout is clamped as above when it starts, and an item whose turn comes after the deadline is not sent and is recorded as such. The deploy-time worst-case warning counts a `forEach` call once per round — `maxItems` divided by `maxConcurrency`, rounded up.
 
+> **Waiting for a long external operation?** A `retryApiCallInstruction` sleeps on the conversation's
+> thread between attempts, and each backoff is capped at 30 seconds — it is meant for transient errors,
+> not for polling a render or export that takes minutes. Poll from
+> [continuation turns](long-jobs.md#waiting-for-an-external-operation) instead: one short turn per check,
+> each traced and bounded by `maxContinuations`.
+
 ### forEach — one call per element
 
 `forEach` runs the call once for every element of an array and stores what each element produced as one array, under the call's `responseObjectName`, like any other response. `postResponse` property instructions, output templates and later calls read it as usual — `{properties.x}` once copied, or `{memory.current.httpCalls.<responseObjectName>}`.

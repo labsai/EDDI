@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -148,6 +149,22 @@ public interface IConversationMemory extends Serializable {
      */
     default SpendReservations getSpendReservations() {
         return null;
+    }
+
+    /**
+     * The agent's self-continuation settings ({@code maxContinuations},
+     * {@code continuationInput}); {@link ContinuationPolicy#OFF} when the agent
+     * sets none. Transient like the cost ceiling: carried from the agent onto
+     * memory for every turn, never persisted.
+     */
+    default ContinuationPolicy getContinuationPolicy() {
+        return ContinuationPolicy.OFF;
+    }
+
+    /** Set (or clear, with {@code null}) the self-continuation settings. */
+    default void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
+        // no-op by default
+
     }
 
     /**

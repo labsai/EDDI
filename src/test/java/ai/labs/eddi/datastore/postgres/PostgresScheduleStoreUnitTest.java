@@ -553,6 +553,32 @@ class PostgresScheduleStoreUnitTest {
                 "7 fire logs and 3 schedules were removed; the erasure count is 3");
     }
 
+    /**
+     * A fired one-shot stays behind disabled under its name; only enabled rows and
+     * rows switched off by an undeploy are still pending.
+     */
+    @Test
+    void countPendingSchedulesByName_countsEnabledAndUndeployDisabledRowsOnly() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getInt(1)).thenReturn(1);
+
+        assertEquals(1, sut.countPendingSchedulesByName("continuation-conv-1"));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("COUNT(*) FROM eddi_schedules WHERE name = ?")
+                && s.contains("enabled = true OR disabled_reason = ?")), sql.getAllValues().toString());
+        verify(preparedStatement).setString(1, "continuation-conv-1");
+        verify(preparedStatement).setString(2, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+    }
+
+    @Test
+    void countPendingSchedulesByName_wrapsADatabaseFailure() throws Exception {
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> sut.countPendingSchedulesByName("continuation-conv-1"));
+    }
+
     @Test
     void deleteSchedulesByName_returnsTheScheduleRowCount() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(4, 2);
