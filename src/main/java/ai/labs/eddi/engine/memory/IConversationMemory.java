@@ -141,6 +141,17 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The paid calls of this conversation that are in flight, held against
+     * {@link #getConversationCostCeilingUsd()} so concurrent calls cannot all pass
+     * the same check. Transient and per loaded memory; {@code null} (the default)
+     * when this memory keeps none, in which case the ceiling is checked without
+     * reservations.
+     */
+    default SpendReservations getSpendReservations() {
+        return null;
+    }
+
+    /**
      * The agent's self-continuation settings ({@code maxContinuations},
      * {@code continuationInput}); {@link ContinuationPolicy#OFF} when the agent
      * sets none. Transient like the cost ceiling: carried from the agent onto
@@ -153,6 +164,7 @@ public interface IConversationMemory extends Serializable {
     /** Set (or clear, with {@code null}) the self-continuation settings. */
     default void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
         // no-op by default
+
     }
 
     /**

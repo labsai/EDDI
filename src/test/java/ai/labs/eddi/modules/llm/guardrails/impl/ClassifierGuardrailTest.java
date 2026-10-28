@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
@@ -573,6 +574,114 @@ class ClassifierGuardrailTest {
             var result = svc.screenInput(List.of(cfg), "hello", input(Map.of()), outcomes::add);
             assertTrue(result.isBlocked());
             assertEquals(GuardrailService.REASON_ERROR, outcomes.get(0).reason());
+        }
+    }
+
+    // === spend checks (E4) ===
+
+    @Nested
+    @DisplayName("spend checks: the classifier's call is admitted before it starts")
+    class Spend {
+
+        private final List<Double> expected = new ArrayList<>();
+        private final List<Double> spent = new ArrayList<>();
+        private int open;
+
+        private PaidCallGate gate(boolean admit) {
+            return expectedUsd -> {
+                expected.add(expectedUsd);
+                open++;
+                return new PaidCallGate.PaidCall() {
+                    @Override
+                    public String refusalReason() {
+                        return admit ? null : "conversation_ceiling";
+                    }
+
+                    @Override
+                    public void spent(double actualUsd) {
+                        spent.add(actualUsd);
+                    }
+
+                    @Override
+                    public void close() {
+                        open--;
+                    }
+                };
+            };
+        }
+
+        @Test
+        @DisplayName("refused: the model is never called, and the guardrail could not decide with reason spend_refused")
+        void refusedIsUndecided() throws Exception {
+            var model = install(StubModel.answering("no"));
+
+            var undecided = assertThrows(GuardrailUndecidedException.class,
+                    () -> classifier.evaluate("hello", input(params()).withSpend(gate(false))));
+
+            assertEquals(PaidCallGate.REASON_SPEND_REFUSED, undecided.reason());
+            assertEquals(0.0, undecided.costUsd());
+            assertTrue(model.requests.isEmpty());
+            assertEquals(0, open);
+        }
+
+        @Test
+        @DisplayName("refused through the service: failMode closed blocks with spend_refused, open lets the text pass with a warning")
+        void failModeApplies() throws Exception {
+            install(StubModel.answering("no"));
+            var service = new GuardrailService(List.of(classifier), meterRegistry);
+            List<GuardrailOutcome> outcomes = new ArrayList<>();
+            var closed = new GuardrailConfig();
+            closed.setType(ClassifierGuardrail.TYPE);
+            closed.setAction("block");
+            closed.setParameters(params());
+            var open = new GuardrailConfig();
+            open.setType(ClassifierGuardrail.TYPE);
+            open.setAction("block");
+            open.setParameters(params("failMode", "open"));
+
+            var blocked = service.screenInput(List.of(closed), "hello", input(Map.of()).withSpend(gate(false)), outcomes::add);
+            var passed = service.screenInput(List.of(open), "hello", input(Map.of()).withSpend(gate(false)), outcomes::add);
+
+            assertTrue(blocked.isBlocked());
+            assertFalse(passed.isBlocked());
+            assertEquals(PaidCallGate.REASON_SPEND_REFUSED, outcomes.get(0).reason());
+            assertEquals(GuardrailAction.WARN, outcomes.get(1).action());
+            assertEquals(PaidCallGate.REASON_SPEND_REFUSED, outcomes.get(1).reason());
+        }
+
+        @Test
+        @DisplayName("admitted: the call runs, its cost is reported, the expected cost comes from the prompt and the input price")
+        void admittedReportsCost() throws Exception {
+            install(StubModel.answering("no", new TokenUsage(1_000_000, 0)));
+
+            var verdict = classifier.evaluate("x".repeat(400), input(params("inputPricePer1M", "2")).withSpend(gate(true)));
+
+            assertFalse(verdict.triggered());
+            assertEquals(List.of(2.0), spent);
+            // 400 characters ~ 100 tokens at $2 per 1M
+            assertEquals(100 * 2.0 / 1_000_000, expected.get(0), 1e-12);
+            assertEquals(0, open);
+        }
+
+        @Test
+        @DisplayName("an unparseable answer still reports its cost; a failed call releases its admission")
+        void unparseableAndFailure() throws Exception {
+            install(StubModel.answering("hmm", new TokenUsage(1_000_000, 0)));
+            assertThrows(GuardrailUndecidedException.class,
+                    () -> classifier.evaluate("hello", input(params("inputPricePer1M", "3")).withSpend(gate(true))));
+            assertEquals(List.of(3.0), spent);
+
+            install(new StubModel(r -> {
+                throw new RuntimeException("connection refused");
+            }));
+            assertThrows(GuardrailUndecidedException.class, () -> classifier.evaluate("hello", input(params()).withSpend(gate(true))));
+            assertEquals(0, open);
+        }
+
+        @Test
+        @DisplayName("an unpriced classifier expects nothing")
+        void unpricedExpectsNothing() {
+            assertEquals(0.0, GuardrailModelClient.expectedCost(List.of(UserMessage.from("hello")), input(params())));
         }
     }
 }
