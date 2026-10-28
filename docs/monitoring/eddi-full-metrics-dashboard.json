@@ -10803,7 +10803,7 @@
           "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: TXT lookups are failing temporarily; an unreachable resolver (eddi.email.dns.servers) is one possible cause. budget_exhausted is a local limit, not a DNS failure: a message needed more DKIM key and DMARC record lookups than eddi.email.dns.max-lookups-per-message allows, and the lookups past it were not sent."
         },
         {
-          "id": 268,
+          "id": 280,
           "type": "timeseries",
           "title": "Inbound email by outcome",
           "datasource": {
@@ -10851,7 +10851,7 @@
           "description": "Trigger-mode mail by outcome: processed (a turn was submitted), duplicate (seen before), unauthenticated, blocked (lists, own address), loop (auto-replies, bounces, EDDI mail), throttled (maxTurnsPerSenderPerDay), budget (dailyCostBudgetUsd or a tenant quota), too_large, parse_error, deferred (waits for a later poll: temporary authentication result, agent not deployed, conversation busy), unroutable, failed. Filter by integration with the integration label."
         },
         {
-          "id": 269,
+          "id": 281,
           "type": "timeseries",
           "title": "Mailbox poll duration",
           "datasource": {
@@ -10899,7 +10899,7 @@
           "description": "Average time of one mailbox poll per integration. Polls that fail (connection, login, folder) are tagged outcome=error on the same meter; they back off on their own, up to an hour."
         },
         {
-          "id": 270,
+          "id": 282,
           "type": "timeseries",
           "title": "Mailbox cursor resets",
           "datasource": {
@@ -10947,7 +10947,7 @@
           "description": "UIDVALIDITY changes per hour by integration: the folder was rebuilt, and EDDI rescanned it, deduplicated by the message ledger. Failed polls show on the poll duration meter as outcome=error."
         },
         {
-          "id": 271,
+          "id": 283,
           "type": "timeseries",
           "title": "Stranded email turns resolved",
           "datasource": {
@@ -10995,7 +10995,7 @@
           "description": "Claims given back and submitted email turns resolved after a crash: requeued (a stale claim that had done nothing outside EDDI; the mail is processed again), done, failed, awaiting_human (resolved from the conversation) or lost (the node stopped while starting the conversation and none was recorded; the mail was not run again)."
         },
         {
-          "id": 272,
+          "id": 284,
           "type": "timeseries",
           "title": "Processed mail marking",
           "datasource": {
