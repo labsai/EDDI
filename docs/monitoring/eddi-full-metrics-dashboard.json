@@ -8790,6 +8790,104 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 273,
+          "type": "timeseries",
+          "title": "Self-continuation",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_continuation_*` — turns an agent started itself with the reserved `CONTINUE_CONVERSATION` action. `scheduled` counts continuations armed after a committed turn, `run` the continuation turns that ran, `refused` the ones ignored or stopped, by reason: `disabled` (the agent sets no maxContinuations — usually a rule emitting the action on an agent that never opted in), `limit`, `cost_ceiling`, `not_settled`, `group_member`, `schedule_failed`, and at fire time `ended`, `awaiting_human`, `gone`, `restricted`, `undeployed` (retried), `interrupted`, `duplicate` (a re-delivered fire that found its turn already ran).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_continuation_scheduled_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "scheduled"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_continuation_run_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "run"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (reason) (rate(eddi_continuation_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "refused — {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
@@ -10609,7 +10707,7 @@
           }
         },
         {
-          "id": 273,
+          "id": 274,
           "type": "timeseries",
           "title": "Mail sender authentication",
           "datasource": {
@@ -10657,7 +10755,7 @@
           "description": "Verdicts of EDDI's own DKIM verification and DMARC alignment on inbound mail: aligned_pass (the only authenticated one), pass_unaligned (a valid signature for another domain, e.g. a mailing list), fail (signatures that do not verify, a lookup failure, or an ambiguous From), none (unsigned). Mostly none means the correspondents do not sign with DKIM."
         },
         {
-          "id": 274,
+          "id": 275,
           "type": "timeseries",
           "title": "Mail DNS lookups (DKIM keys, DMARC records)",
           "datasource": {

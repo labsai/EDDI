@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -39,6 +40,7 @@ public class Agent implements IAgent {
     private Long turnDeadlineMs;
     private Long turnDeadlineReserveMs;
     private Double maxCostPerConversationUsd;
+    private ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
     private boolean memoryToolsEnabled;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
@@ -73,6 +75,8 @@ public class Agent implements IAgent {
         // Transient carrier, like the tool-approval config below: the LLM task reads
         // the ceiling from memory, also on the CONVERSATION_START turn.
         conversationMemory.setConversationCostCeilingUsd(maxCostPerConversationUsd);
+        // Same carrier: a CONVERSATION_START turn may ask to continue itself.
+        conversationMemory.setContinuationPolicy(continuationPolicy);
         // Which versions the conversation may follow. Null on a version stored before
         // generations existed: the conversation then stays on this version.
         conversationMemory.setCompatibilityGeneration(compatibilityGeneration);
@@ -104,6 +108,7 @@ public class Agent implements IAgent {
         // always reflects the version that runs the turn (null clears a ceiling the
         // memory may carry from a version that had one).
         conversationMemory.setConversationCostCeilingUsd(maxCostPerConversationUsd);
+        conversationMemory.setContinuationPolicy(continuationPolicy);
         return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
 
@@ -161,6 +166,15 @@ public class Agent implements IAgent {
 
     public void setMaxCostPerConversationUsd(Double maxCostPerConversationUsd) {
         this.maxCostPerConversationUsd = maxCostPerConversationUsd;
+    }
+
+    @Override
+    public ContinuationPolicy getContinuationPolicy() {
+        return continuationPolicy;
+    }
+
+    public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
+        this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
     }
 
     public void setTurnDeadline(Long turnDeadlineMs, Long turnDeadlineReserveMs) {

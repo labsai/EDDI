@@ -12,6 +12,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -34,6 +36,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -1371,6 +1374,65 @@ class ScheduleFireExecutorTest {
                 "surface", "regular",
                 "conversationId", conversationId));
         return s;
+    }
+
+    // ==================== Self-continuation fires ====================
+
+    @Test
+    void fire_continuation_routesToTheHandlerWithTheDesignerInputAndLogsTheFire() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-1");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 4, 10));
+        when(handler.fire(any(), any(), eq("next phase"), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
+
+        var log = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals(FireStatus.FAILED.name(), log.status(), "a failed continuation is retried by the poller like any fire");
+        assertEquals("conv-9", log.conversationId());
+        assertEquals("busy", log.errorMessage());
+        verify(scheduleStore).logFire(log);
+        // Never the strategy path: no say() from the executor itself.
+        verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fire_continuation_parksAnInterruptAcrossTheFireLogWriteAndRestoresIt() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-2");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 1, 10));
+        // The handler caught an InterruptedException and re-asserted the flag.
+        when(handler.fire(any(), any(), any(), any())).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "interrupted");
+        });
+        var flagDuringLog = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            flagDuringLog.set(Thread.currentThread().isInterrupted());
+            return null;
+        }).when(scheduleStore).logFire(any());
+
+        try {
+            executor.fire(schedule, "instance-1", 1);
+
+            assertFalse(flagDuringLog.get(), "the fire log is written with the interrupt parked");
+            assertTrue(Thread.currentThread().isInterrupted(), "and the interrupt is restored afterwards");
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     // ==================== RAG ingestion fires ====================
