@@ -241,7 +241,9 @@ The check answers "is this provably ungranted?", and anything short of proof is 
 - contains the `*` wildcard, or
 - is `null` or empty — an unset list means unrestricted, not "deny all"
 
-Uncertainty likewise never becomes a violation: unreadable metadata, a disabled vault, or a secret that does not exist all resolve to *allowed*. A check that cannot run must not be able to take agents down.
+Uncertainty likewise never becomes a violation: unreadable metadata or a disabled vault resolve to *allowed*. A check that cannot run must not be able to take agents down.
+
+A secret that **does not exist yet** is allowed at deployment too: it has no grant to check, and deploying first is a supported flow — [agent sync](agent-sync-guide.md) promotes a workflow to an instance that does not hold the source's secrets, then deploys it. Its grant is checked when the secret is **created** instead, because the resolver does not check grants: a secret created later and restricted to another agent would otherwise resolve for every agent already deployed with a reference to it. Under `enforce`, `PUT /secretstore/secrets/{tenantId}/{keyName}` and the space-secret endpoint answer **409** to a create whose `allowedAgents` leaves out a deployed agent that already references the secret, and name the agents: add them to the list, or undeploy them first. `warn` logs the same message and creates the secret; `off` does not look. The scan covers every deployment recorded in the shared database — so, on a cluster, the agents deployed on the other nodes too — plus the runtime registry of the node handling the request, which alone knows a deployment still coming up or one made with `autoDeploy=false`. Under `enforce` a scan that could not look everywhere refuses as well, with its own **409**: an agent whose configuration could not be read (it is named), or a listing that failed. That is the opposite of the deploy gate, which lets an unreadable configuration through, because the costs are reversed — a refused deployment is an outage, a refused creation is a retry. Naming the agent in `allowedAgents`, or granting the wildcard, needs no scan. What no scan can see is a deployment racing the creation, recorded on another node a moment after the records were read. Updating a secret that already exists is not checked this way — narrowing an existing grant is covered by the grant endpoint's `agentsLosingAccess` warning.
 
 ### What is scanned
 
@@ -367,7 +369,7 @@ Three properties are worth knowing:
   "grantsAllAgents": false,
   "description": "LLM provider key",
   "createdAt": "2026-03-15T10:30:00Z",
-  "agentsLosingAccessScope": "this-node",
+  "agentsLosingAccessScope": "cluster",
   "agentsLosingAccess": [
     { "agentId": "89abcdef0123456789abcdef", "agentVersion": 3, "environment": "production" }
   ],
@@ -375,7 +377,7 @@ Three properties are worth knowing:
 }
 ```
 
-  Those agents are **not** broken now: the check is a deploy-time gate, so they keep resolving the secret until they are redeployed. What breaks is their *next* deployment, possibly weeks later on a restart nobody connects to the grant edit — which is exactly why it is reported at the moment of the change. Add `?dryRun=true` to get this answer **without writing anything**; that is how the Manager shows the warning before you commit rather than after. Every deployed *version* is considered, not only the latest, since an older version can be the one serving. The list covers the agents deployed on the node you are talking to — the response says so in `agentsLosingAccessScope: "this-node"` — so on a cluster it is indicative rather than exhaustive.
+  Those agents are **not** broken now: the check is a deploy-time gate, so they keep resolving the secret until they are redeployed. What breaks is their *next* deployment, possibly weeks later on a restart nobody connects to the grant edit — which is exactly why it is reported at the moment of the change. Add `?dryRun=true` to get this answer **without writing anything**; that is how the Manager shows the warning before you commit rather than after. Every deployed *version* is considered, not only the latest, since an older version can be the one serving. The list covers every deployment recorded in the shared database plus the runtime registry of the node you are talking to — `agentsLosingAccessScope: "cluster"` says so. A deployment made with `autoDeploy=false` on another node is not recorded, and appears once that node's announcement has deployed it on this one too.
 
 **In the Manager UI:** *Secrets* → the **Allowed Agents** column, or the **Access** action on a row. Agents are picked from a searchable list of the ones that exist (a raw ID can still be typed, for an agent not created yet), and a change that would strip access from a deployed agent shows the warning above and has to be acknowledged before it can be saved.
 
@@ -797,7 +799,7 @@ It returns the vault reference:
 ]
 ```
 
-> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response.
+> The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response. A row written before the keyed form still carries a bare SHA-256; the next `POST /{tenantId}/rotate-dek` replaces it with the keyed form as it re-seals the row.
 
 **`GET /health`** — returns vault provider status:
 

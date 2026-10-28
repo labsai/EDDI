@@ -1060,7 +1060,8 @@ your tool schemas do not cover it, not as a routine first step:
   user's message before the model runs, outputGuardrails the answer before it
   is delivered. Each entry is {type, action, maxRetries, onExhausted,
   blockMessage, parameters}; type is prompt-injection (input), pii-redaction,
-  regex-filter, max-length, classifier (both), judge or json-object (output);
+  regex-filter, max-length, classifier (both), judge, json-object or
+  expression (output);
   action is block (default), redact, reprompt (output: re-ask the same model,
   maxRetries default 2, max 5, then block) or warn. onExhausted (output
   reprompt only, EDDI 6.7+) is block (default) or deliver-best: once the
@@ -1120,6 +1121,27 @@ your tool schemas do not cover it, not as a routine first step:
   classifier then blocks every guarded turn; open lets the text through with a
   warning. It does not re-screen earlier history messages (cost). Point the
   admin at docs/langchain.md for worked examples.
+- The expression guardrail (output only, EDDI 6.7+) checks a JSON answer with
+  a deterministic expression — arithmetic and cross-field rules, no model
+  call. Parameters, all required and checked at deploy: expr (at most 2000
+  characters, e.g. "sum(lines[*].amount) == total"), issue (an issue code of
+  upper-case letters, digits and underscores, e.g. LINE_SUM) and fix (at most
+  1000 characters: the only sentence a reprompt tells the model). The
+  language: paths (total, invoice.total, lines[0].amount, the wildcard
+  lines[*].amount, $ for the whole answer), decimal arithmetic (0.1 + 0.2 ==
+  0.3 is true), == != < <= > >= (not chainable), && || ! (short-circuit), and
+  the functions sum, count, min, max, len, abs, round(x, n), exists(path),
+  approx(a, b, tolerance) — nothing else. A missing path is null: x == null
+  tests it, any other comparison with null is false, and arithmetic or a
+  function on null cannot decide. False is reason
+  "expression_failed:<issue>"; a reprompt sends EDDI's fixed frame around the
+  fix text only, never values from the answer. An answer that is not JSON is
+  expression_unparseable, an evaluation error (null or type mismatch, division
+  by zero) or a non-boolean result expression_undecided:<cause>; failMode
+  decides (closed by default for block and reprompt: the answer is withheld
+  without a re-ask). A deploy refusal names the position of a syntax error —
+  read it to the admin. Typical setup: action reprompt, maxRetries 1, after a
+  responseSchema for the shape.
 - The judge guardrail (output only, EDDI 6.7+) asks a model whether the answer
   is right by the admin's own criteria — e.g. grounded in the retrieved
   sources. Same model parameters as the classifier (provider plus the
@@ -1153,6 +1175,22 @@ your tool schemas do not cover it, not as a routine first step:
   maxResponseSizeInBytes (characters, default 2,000,000).
 - Groups seat each agent once: a member repeated by agentId, whatever its member
   type, is refused on save with 400 — a second seat needs a second agent.
+- Rejected rule pauses: an agent's hitlConfig.onRejection is "SKIP" (default:
+  the rest of the turn is skipped and the note shown) or "REVISE": a rejection
+  WITH a note has the same model revise the answer it gave before the pause (one
+  tool-less re-ask, the note as feedback, the same output guardrails), then the
+  tasks after the model's run again, so the rule pauses again on the revision.
+  maxRevisionsPerTurn (1-10, default 3) bounds it. A rejection without a note, a
+  timeout, a Slack button, a pause before any answer, a spend limit or a failed
+  revision still skips; the step's hitl:revision:outcome says which. Rejected
+  tool calls are unaffected (they reach the model as a tool result anyway).
+- TASK_FORCE groups: maxReworks (0-5, default 0) sends a task that fails VERIFY
+  back to its member with the verifier's feedback, up to that many times per
+  task, within protocol.maxTurns and the cost ceiling; it is not applied when the
+  EXECUTE phase gates tasks for approval. An unparseable verdict still
+  auto-verifies, counted as eddi_group_verify_unparseable_total. A repeating
+  phase's convergence.mode "VERDICT" ends it once the moderator's review of the
+  latest repeat passes (default "SIMILARITY", the agreement score).
 - Behavior rules: conditions evaluated per turn that emit ACTIONS; output
   configs and api calls key off those action names.
 - Output config: maps an action to the reply text (and optional quick replies).
@@ -1161,6 +1199,18 @@ your tool schemas do not cover it, not as a routine first step:
   config an author wrote, not in a body you send. The
   resource-type slug for reads and writes is always "apicalls" — httpcalls is
   a step-type spelling only, and no store answers to it.
+- An apicalls entry's forEach {pathToTargetArray (a plain dot path such as
+  properties.orderIds, required), iterationObjectName (default "item", bound
+  to the element itself), templateFilterExpression, maxItems (default 100,
+  ceiling 1000), maxConcurrency (default 1, 1..16), onItemFailure ("continue"
+  default, or "fail"), maxTotalResponseSizeInBytes} sends the call once per
+  element and stores one array under responseObjectName: per item index, ok,
+  httpCode, body, error, timedOut, sent, attempts, bodyDropped, in source
+  order. postResponse runs with 200 when every item succeeded and 207 when any
+  failed. A failed item never cancels the others; a timed-out item is never
+  retried. forEach cannot be combined with fireAndForget or
+  preRequest.batchRequests (400 on save); batchRequests only works with
+  fireAndForget and discards responses.
 - Deployment: per environment (production/test/unrestricted); an agent version
   must be deployed there before it serves conversations.
 - Schedule: a disabled schedule's \`disabledReason\` says why the system switched

@@ -1085,7 +1085,7 @@ Three limits. **The current turn** is not withheld by its own flag: a second LLM
 | `closed` | Treated as a finding that blocks: the turn is answered with the guardrail's `blockMessage` (an earlier history message is withheld). | `block`, `reprompt` — a guardrail that exists to keep something out must not let it through because it could not look (a `reprompt` cannot verify any answer either, so it blocks without re-asking) |
 | `open` | Recorded as a `warn`; the text passes. | `redact`, `warn` |
 
-Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) or [`judge`](#the-judge-type-grading-the-answer-with-issue-codes) that could not decide, `classifier_unavailable` / `classifier_unparseable` or `judge_unavailable` / `judge_unparseable`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
+Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) or [`judge`](#the-judge-type-grading-the-answer-with-issue-codes) that could not decide, `classifier_unavailable` / `classifier_unparseable` or `judge_unavailable` / `judge_unparseable`, and for an [`expression`](#the-expression-type-a-deterministic-check-over-a-json-answer), `expression_unparseable` / `expression_undecided:<cause>`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
 
 A `block` is a returned value, never an exception, so a block message can never be mistaken for a transient provider error and retried.
 
@@ -1099,6 +1099,7 @@ A `block` is a returned value, never an exception, so a block message can never 
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
 | `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
 | `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
+| `expression` | output | A JSON answer for which your boolean expression is false — arithmetic and cross-field rules such as `sum(lines[*].amount) == total`. See [below](#the-expression-type-a-deterministic-check-over-a-json-answer). | `expr`, `issue`, `fix` (all required) |
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
 
@@ -1269,6 +1270,70 @@ A `reprompt` guardrail whose `maxRetries` are spent — or that cannot re-ask at
 **A quality check giving up does not override the guardrails around it, except itself.** The guardrails *before* the exhausted one already screened the delivered attempt in the pass that rated it (their redactions are in it, their findings recorded, and a blocking finding would have ended that pass). The guardrails *after* it had not, so they screen it once more, with no further reprompts: a `redact` (PII) still rewrites it, a `warn` is still recorded, and a `block` — or a `reprompt` finding, which may not re-ask now — blocks it. Each other guardrail therefore sees the delivered attempt exactly once, and a model-backed one is called once for it. A guardrail that *could not decide* is not "exhausted": its `failMode` applies as always.
 
 `onExhausted: "deliver-best"` is refused at deploy time on any action but `reprompt`, and on input guardrails (an input `reprompt` blocks). On a `classifier` it is allowed but logged as a warning — a safety check that delivers what it flagged defeats its purpose.
+
+### The `expression` type: a deterministic check over a JSON answer
+
+`expression` (output only) parses the answer as JSON and evaluates a boolean expression you write over it. It catches answers that are well-formed but wrong — a total that is not the sum of its lines, an end date before the start date — without calling another model, and reprompts with a fix you wrote.
+
+```json
+"outputGuardrails": [ {
+  "type": "expression",
+  "action": "reprompt",
+  "maxRetries": 1,
+  "blockMessage": "I could not produce a consistent invoice.",
+  "parameters": {
+    "expr": "sum(lines[*].amount) == total",
+    "issue": "LINE_SUM",
+    "fix": "Make total equal the sum of the line amounts, to the cent."
+  }
+} ]
+```
+
+Given the answer `{"total": 31.00, "lines": [{"amount": 10.10}, {"amount": 20.20}]}`, the expression is false: the model is asked again with exactly
+
+```
+Your previous reply needs these corrections:
+- Make total equal the sum of the line amounts, to the cent.
+Write a new reply that applies them. Reply with the answer only.
+```
+
+and a corrected answer (`"total": 30.30`) is delivered. With `action: "block"` a wrong total is never delivered. Pair it with a task's [`responseSchema`](#shape-validation-responseschema-and-nonblankfields) for the shape; `expression` checks the content.
+
+| Parameter | Meaning |
+|---|---|
+| `expr` | The expression (grammar below), at most 2000 characters. Required. |
+| `issue` | The issue code reported when the expression is false: upper-case letters, digits and underscores, starting with a letter, at most 40 characters. The audit reason is `expression_failed:<issue>`. Required. |
+| `fix` | The sentence a reprompt tells the model, at most 1000 characters. Required. |
+
+All three are checked at deploy time: a missing parameter, a bad issue code or an expression that does not parse is refused with a message naming the problem and its position (`parameter 'expr' is not valid at position 21: '=' is not an operator; compare with '=='`).
+
+**Grammar.** Literals: numbers (`12`, `12.50`), strings in single or double quotes (a backslash escapes only a backslash or a quote), `true`, `false`, `null`. Paths into the answer: `total`, `invoice.total`, `lines[0].amount`, `invoice['due-date']`, and the wildcard `lines[*].amount`, which yields the list of every line's amount (`orders[*].lines[*].amount` flattens). `$` is the answer itself — for an answer that is a JSON array, `count($) > 0` or `sum($[*].amount)`. Operators, from tightest to loosest: `!` and unary `-`; `*` `/` `%`; `+` `-`; `<` `<=` `>` `>=`; `==` `!=`; `&&`; `||`, with parentheses for grouping. Comparisons do not chain (`a < b < c` is refused; write `a < b && b < c`). Functions — no others exist:
+
+| Function | Result |
+|---|---|
+| `sum(list)`, `count(list)` | The sum of a list of numbers (0 for an empty list); the number of elements |
+| `min(list)`, `max(list)`, `min(a, b, …)`, `max(a, b, …)` | The smallest / largest number |
+| `len(x)` | Characters of a string, elements of a list, keys of an object |
+| `abs(x)`, `round(x, n)` | Absolute value; `x` rounded half-up to `n` decimals (0–20; default 0) |
+| `exists(path)` | Whether every step of the path is present — a key holding `null` is present. A path without `[*]` |
+| `approx(a, b, tolerance)` | `abs(a - b) <= tolerance` |
+
+**Numbers are decimal, not floating point.** `0.1 + 0.2 == 0.3` is true and money sums are exact; `1.0 == 1.00` is true. Arithmetic keeps 34 significant digits (division rounds half-even there). The answer's numbers are read exactly as written.
+
+**Null and missing values.** A path that does not exist is `null`, as is a JSON `null`; so is a wildcard over something that is not an array, and after a wildcard an element without the rest of the path contributes `null` to the list.
+
+- `x == null` and `x != null` test for it; any other comparison with `null` (`discount > 0` when there is no discount) is **false**.
+- Arithmetic, `&&`/`||`/`!`, or a function given `null` cannot decide — `sum(lines[*].amount)` over a line without an amount is not quietly skipped.
+- `&&` and `||` short-circuit, so `!exists(discount) || discount <= total` never looks at a missing discount.
+
+**Could not decide.** Safe is a positive finding: only an expression that evaluates to `true` passes. These are *could not decide*, and `failMode` applies (closed — the answer is withheld without a reprompt — by default for `block` and `reprompt`):
+
+- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals);
+- `expression_undecided:<cause>` — evaluation failed: `null_operand`, `type_mismatch` (a number compared with a string, `sum` over text), `division_by_zero`, `empty_aggregate` (`min`/`max` of nothing), `bad_argument`, `number_out_of_range` (more than 1000 digits or a scale beyond ±1000), `fan_out`, `step_budget`, or `not_boolean` (the expression produced a number, a string or a list).
+
+**Bounds.** An expression has at most 2000 characters, 32 levels of nesting, 500 parts and 32 segments per path. Evaluating it reads at most 10,000 values per path and takes at most 200,000 steps; past either, it cannot decide. Each distinct expression is compiled once and kept in a bounded cache (512 entries).
+
+**Feedback without injection.** The corrective message is EDDI's fixed frame around your `fix` text, and nothing else: no value from the answer, no computed sum, nothing the user wrote. A model cannot use the check to put words into its own next prompt. `repromptMessage` still overrides the whole message, as for every type.
 
 ### Where guardrails run
 
