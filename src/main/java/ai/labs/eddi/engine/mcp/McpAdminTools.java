@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.schedule.rest.RestScheduleStore;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -1196,6 +1197,11 @@ public class McpAdminTools {
         if (scheduleId == null || scheduleId.isBlank())
             return errorJson("scheduleId is required");
         try {
+            // The alerts-maintenance schedule is the server's own; REST refuses this too.
+            if (RestScheduleStore.isSystemSchedule(scheduleStore.readSchedule(scheduleId))) {
+                return errorJson("This schedule is managed by the server (alert retries, digests and retention) and cannot be deleted.",
+                        RestScheduleStore.SYSTEM_SCHEDULE, null);
+            }
             scheduleStore.deleteSchedule(scheduleId);
             return resultJson("schedule_deleted", Map.of("scheduleId", scheduleId));
         } catch (Exception e) {

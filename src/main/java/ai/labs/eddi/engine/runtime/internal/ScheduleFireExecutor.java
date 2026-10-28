@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
+import ai.labs.eddi.engine.alerts.AlertSchedules;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -58,6 +60,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * ({@code HitlTimeoutHandler})</li>
  * <li>{@code dreamType=dream_consolidation} — background user-memory
  * maintenance ({@link DreamService})</li>
+ * <li>{@code alertType=alert_maintenance} — alert delivery retries, digests and
+ * retention ({@link AlertMaintenanceService})</li>
  * <li>{@code continuationType=conversation_continuation} — the next turn of a
  * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
  * one whose input, identity and once-only check are the engine's, not a
@@ -97,6 +101,9 @@ public class ScheduleFireExecutor {
 
     @Inject
     TeamCadenceService teamCadenceService;
+
+    @Inject
+    AlertMaintenanceService alertMaintenanceService;
 
     @Inject
     ContinuationFireHandler continuationFireHandler;
@@ -215,6 +222,13 @@ public class ScheduleFireExecutor {
             return hitlFireLog;
         }
 
+        if (AlertSchedules.isMaintenanceSchedule(md)) {
+            // Alert maintenance fast-path — a system job (delivery retries, digests,
+            // retention), not a conversation turn and not anybody's schedule, so it
+            // runs before the creator check. The poller's claim and lease make one
+            // node run it at a time.
+            return fireAlertMaintenance(schedule, instanceId, attemptNumber);
+        }
         if (ConversationContinuations.isContinuationSchedule(md)) {
             // Self-continuation fast-path: the next turn of one conversation, armed by
             // the engine after the previous turn committed. Before the creator check
@@ -746,6 +760,41 @@ public class ScheduleFireExecutor {
     private static boolean isBenignOutcome(IngestionReport report) {
         var outcome = report.outcome();
         return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED;
+    }
+
+    /**
+     * One pass of the alert maintenance job. A pass that did nothing writes no fire
+     * log: the job runs every minute, and a log row per idle minute would bury the
+     * schedule's history (and the fire-log collection) in noise.
+     */
+    private ScheduleFireLog fireAlertMaintenance(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        boolean worthLogging;
+        try {
+            AlertMaintenanceService.Result result = alertMaintenanceService.run();
+            worthLogging = !result.isEmpty();
+            if (worthLogging) {
+                LOGGER.debugf("[SCHEDULE] Alert maintenance: retried=%d, digests=%d, deleted=%d", result.retried(), result.digests(),
+                        result.deleted());
+            }
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            worthLogging = true;
+            LOGGER.warnf(e, "[SCHEDULE] Alert maintenance failed (schedule %s)", schedule.getId());
+        }
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
+                Instant.now(), status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        if (worthLogging) {
+            try {
+                scheduleStore.logFire(fireLog);
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[SCHEDULE] Failed to log alert maintenance fire for schedule %s", schedule.getId());
+            }
+        }
+        return fireLog;
     }
 
     private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {

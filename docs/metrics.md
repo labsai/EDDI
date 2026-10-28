@@ -768,6 +768,24 @@ The current state — one rating per conversation and per reply — is what
 two stars, thumbs down), `neutral` below 0.6 (three stars) and `high` otherwise.
 See [Conversation Ratings](conversation-ratings.md).
 
+### Alert Metrics
+
+```text
+eddi_alerts_fired_total             # Alerts recorded; tag: source (RATING|CONVERSATION_ERROR|OUTPUT_MATCH|digest)
+eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the same rule, agent and conversation in the same window
+eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
+eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)
+eddi_alerts_digests_total           # Digests created (see eddi_alerts_deliveries_total for send outcomes)
+eddi_alerts_dropped_total           # Alert work dropped because the alert queue was full; tag: reason (queue_full)
+eddi_alerts_queue_depth             # Gauge: work waiting for the alert worker
+```
+
+No tag carries an agent id (a rule over every agent would mint a series per agent).
+`eddi_alerts_dropped_total` should stay at zero; anything else means the alert
+worker cannot keep up — see [Alerts](alerts.md#operating-alerts). A Grafana alert
+rule on `outcome="gave_up"` is in the
+[Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).
+
 ### Agent Identity & Signing Metrics
 
 ```text

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.ratings;
 
+import ai.labs.eddi.engine.alerts.AlertErasureRedactor;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.ratings.model.ConversationRating;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -25,6 +26,10 @@ import java.util.List;
  * reviewer of ratings they triaged as a maintainer (the ratings themselves are
  * other people's data and stay). The export carries the user's ratings with the
  * reviewer's identity left out — that names somebody else.
+ * <p>
+ * An alert about a rating carries an excerpt of its comment. Alert events hold
+ * no user id, so they are found through the ratings: before the ratings are
+ * deleted, the excerpts of every alert about them are blanked.
  */
 @ApplicationScoped
 public class ConversationRatingGdprParticipant implements IGdprParticipant {
@@ -33,10 +38,12 @@ public class ConversationRatingGdprParticipant implements IGdprParticipant {
     static final int MAX_EXPORTED_RATINGS = 10_000;
 
     private final IConversationRatingStore ratingStore;
+    private final AlertErasureRedactor alertRedactor;
 
     @Inject
-    public ConversationRatingGdprParticipant(IConversationRatingStore ratingStore) {
+    public ConversationRatingGdprParticipant(IConversationRatingStore ratingStore, AlertErasureRedactor alertRedactor) {
         this.ratingStore = ratingStore;
+        this.alertRedactor = alertRedactor;
     }
 
     @Override
@@ -46,6 +53,10 @@ public class ConversationRatingGdprParticipant implements IGdprParticipant {
 
     @Override
     public long erase(String userId) {
+        // First, while the ratings still say whose they are.
+        List<String> ratingIds = ratingStore.readByUserId(userId, Integer.MAX_VALUE).stream().map(ConversationRating::id).toList();
+        // Waits for deliveries holding a send claim on one of these alerts.
+        alertRedactor.redactRatingComments(ratingIds);
         long deleted = ratingStore.deleteByUserId(userId);
         ratingStore.clearReviewer(userId);
         return deleted;

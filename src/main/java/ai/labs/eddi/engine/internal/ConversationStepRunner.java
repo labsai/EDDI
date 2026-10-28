@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.alerts.TurnOutcome;
+import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundException;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -14,6 +16,8 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
@@ -29,6 +33,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -1042,9 +1047,101 @@ class ConversationStepRunner {
      */
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future) {
+        TurnWait wait = awaitTurn(loggingContext, conversationId, memory, future);
+        reportTurnOutcome(memory, wait);
+        return wait == TurnWait.TIMED_OUT || wait == TurnWait.INTERRUPTED || wait == TurnWait.ABANDONED_WHILE_PAUSED;
+    }
+
+    /** How the wait for a turn ended. */
+    enum TurnWait {
+        /** The turn finished; its outcome is on the memory. */
+        COMPLETED,
+        /** The turn failed with an exception the runtime handed back. */
+        FAILED,
+        /** The agent timeout expired; the turn was abandoned. */
+        TIMED_OUT,
+        /** The waiting thread was interrupted; the turn was abandoned. */
+        INTERRUPTED,
+        /**
+         * The wait gave up, but a pause had already been committed and was left alone.
+         */
+        ABANDONED_WHILE_PAUSED
+    }
+
+    /**
+     * The single point where every turn's outcome is final — the say path and the
+     * HITL resume path both wait here, and the runtime runs the turn's completion
+     * callbacks before {@code Future.get} returns. Reports a bad outcome as a
+     * {@link TurnOutcome} event (the alert hook); a clean turn costs one state
+     * check. Reads in-memory data only, and never throws: alerting must not be able
+     * to fail or slow a turn.
+     */
+    void reportTurnOutcome(IConversationMemory memory, TurnWait wait) {
+        try {
+            ErrorKind kind = classifyTurnOutcome(memory, wait);
+            if (kind != null && memory != null) {
+                conversationService
+                        .reportTurnOutcome(new TurnOutcome(memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), kind));
+            } else if (wait == TurnWait.COMPLETED && memory != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {
+                // A clean turn: the OUTPUT_MATCH hook checks its cache and, for an agent
+                // without such rules, does nothing else.
+                conversationService.reportCleanTurn(memory);
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not report the outcome of a turn: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * The alert kind of a turn's outcome, or {@code null} for a clean one (or a
+     * pause, which is not a failure).
+     */
+    static ErrorKind classifyTurnOutcome(IConversationMemory memory, TurnWait wait) {
+        switch (wait) {
+            case TIMED_OUT :
+                return ErrorKind.TURN_DEADLINE;
+            case INTERRUPTED :
+                return ErrorKind.TURN_INTERRUPTED;
+            case ABANDONED_WHILE_PAUSED :
+                return null;
+            default :
+                break;
+        }
+        if (memory == null) {
+            return null;
+        }
+        if (memory.isCancelled()) {
+            return ErrorKind.TURN_INTERRUPTED;
+        }
+        ConversationState state = memory.getConversationState();
+        if (wait == TurnWait.FAILED || state == ConversationState.ERROR) {
+            return ErrorKind.TURN_ERROR;
+        }
+        if (state == ConversationState.EXECUTION_INTERRUPTED) {
+            return ErrorKind.TURN_INTERRUPTED;
+        }
+        IConversationMemory.IWritableConversationStep step = memory.getCurrentStep();
+        if (step == null) {
+            return null;
+        }
+        List<IData<Object>> refusals = step.getAllData(MemoryKeys.LLM_SPEND_REFUSED_PREFIX);
+        if (refusals == null || refusals.isEmpty()) {
+            return null;
+        }
+        boolean ceiling = false;
+        for (IData<Object> refusal : refusals) {
+            if (refusal != null && refusal.getResult() instanceof Map<?, ?> record
+                    && "conversation_ceiling".equals(String.valueOf(record.get("reason")))) {
+                ceiling = true;
+            }
+        }
+        return ceiling ? ErrorKind.COST_CEILING : ErrorKind.TENANT_BUDGET;
+    }
+
+    private TurnWait awaitTurn(Map<String, String> loggingContext, String conversationId, IConversationMemory memory, Future<Void> future) {
         try {
             future.get(agentTimeout, TimeUnit.SECONDS);
-            return false;
+            return TurnWait.COMPLETED;
         } catch (TimeoutException | InterruptedException e) {
             // C3: abandon the turn FIRST — before any further store round trip. The
             // cancel marks BaseRuntime's per-submission abandonment token, which is
@@ -1075,7 +1172,7 @@ class ConversationStepRunner {
                 future.cancel(true);
                 ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
                 if (currentState == ConversationState.AWAITING_HUMAN) {
-                    return true;
+                    return TurnWait.ABANDONED_WHILE_PAUSED;
                 }
                 setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
                 String errorMessage = "Execution of Workflows interrupted or timed out.";
@@ -1086,10 +1183,10 @@ class ConversationStepRunner {
                     Thread.currentThread().interrupt();
                 }
             }
-            return true;
+            return e instanceof TimeoutException ? TurnWait.TIMED_OUT : TurnWait.INTERRUPTED;
         } catch (ExecutionException e) {
             logConversationError(loggingContext, conversationId, e);
-            return false;
+            return TurnWait.FAILED;
         }
     }
 

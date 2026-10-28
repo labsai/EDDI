@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.api.IRestAgentSetup;
+import ai.labs.eddi.engine.api.IRestAlertEvents;
 import ai.labs.eddi.engine.api.IRestConversationRatingAdmin;
 import ai.labs.eddi.engine.api.IRestDocs;
 import ai.labs.eddi.engine.api.IRestGroupConversation;
@@ -57,7 +58,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
- * The MCP role matrix, measured rather than read: every one of the 92 tools is
+ * The MCP role matrix, measured rather than read: every one of the 94 tools is
  * invoked with authorization on, once per single-role identity, and the test
  * records whether the role gate let the call through. The result must equal the
  * documented tier of the tool, and each tier must equal the
@@ -76,7 +77,7 @@ class McpRoleTierParityTest {
 
     private static final Class<?>[] TOOL_CLASSES = {McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
-            McpAgentTestTools.class, McpRatingTools.class};
+            McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -207,7 +208,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(93, measured.size());
+        assertEquals(95, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -294,6 +295,7 @@ class McpRoleTierParityTest {
         mirrors.put(IRestAgentTestRuns.class, McpRoles.AUTHOR); // run_agent_tests, get_agent_test_run, list_agent_test_runs,
                                                                 // cancel_agent_test_run
         mirrors.put(IRestConversationRatingAdmin.class, McpRoles.AUTHOR); // *_conversation_ratings, review_conversation_rating
+        mirrors.put(IRestAlertEvents.class, McpRoles.AUTHOR); // list_alert_events, acknowledge_alert_event
 
         for (var entry : mirrors.entrySet()) {
             assertEquals(restRoles(entry.getKey()), new HashSet<>(entry.getValue()), entry.getKey().getSimpleName());

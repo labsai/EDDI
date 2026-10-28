@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.alerts.OutputMatchHook;
+import ai.labs.eddi.engine.alerts.TurnOutcome;
 import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
@@ -851,6 +853,22 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Inject
     Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /**
+     * The alert hook: a turn that ended badly (see
+     * {@code ConversationStepRunner#reportTurnOutcome}). Observed synchronously by
+     * {@code AlertDispatcher}, which only enqueues. {@code null} in unit tests that
+     * build the service by hand.
+     */
+    @Inject
+    Event<TurnOutcome> turnOutcomeEvent;
+
+    /**
+     * The OUTPUT_MATCH half of the alert hook, for turns that finished cleanly;
+     * {@code null} in unit tests that build the service by hand.
+     */
+    @Inject
+    OutputMatchHook outputMatchHook;
 
     /** How long a request waits for an agent another node has just deployed. */
     static final Duration CLUSTER_DEPLOY_WAIT = Duration.ofSeconds(15);
@@ -2889,6 +2907,25 @@ public class ConversationService implements IConversationService, UserErasurePar
     /** A turn's write was refused by the cluster fence (cluster mode only). */
     void counterFenceRejected() {
         meterRegistry.counter("eddi.cluster.fence.rejected").increment();
+    }
+
+    /**
+     * Hands a clean turn to the OUTPUT_MATCH alert hook (a cache check, usually
+     * nothing more).
+     */
+    void reportCleanTurn(IConversationMemory memory) {
+        OutputMatchHook hook = outputMatchHook;
+        if (hook != null) {
+            hook.onCleanTurn(memory);
+        }
+    }
+
+    /** Hands a bad turn outcome to the alert hook; never throws. */
+    void reportTurnOutcome(TurnOutcome outcome) {
+        Event<TurnOutcome> event = turnOutcomeEvent;
+        if (event != null) {
+            event.fire(outcome);
+        }
     }
 
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,

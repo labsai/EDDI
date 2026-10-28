@@ -47,6 +47,7 @@
 - [Human-in-the-Loop (HITL)](hitl.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
 - [Conversation Ratings](conversation-ratings.md)
+- [Alerts](alerts.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)
