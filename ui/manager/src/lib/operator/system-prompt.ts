@@ -1230,8 +1230,11 @@ your tool schemas do not cover it, not as a routine first step:
   and maxCostPerConversationUsd bounds all of them together. The turn's step
   records "continuation:next" (intent to schedule — the marker is written
   before the schedule is, so it is NOT proof the next turn exists: confirm the
-  "continuation-<conversationId>" schedule is there and check the
-  schedule_failed refusals before saying it is scheduled) or
+  "continuation-<conversationId>" schedule is there before saying it is
+  scheduled; a failed schedule write, "schedule_failed", happens after the
+  step is committed, so it is NOT in the step: it is only a warning in the
+  platform logs and the eddi_continuation_refused_total metric, which you
+  cannot read — check the logs, or ask an administrator to check the metric) or
   "continuation:refused" (why not: disabled, limit, cost_ceiling, not_settled,
   group_member, ...) — read the conversation with returnDetailed=true. It never runs for an ENDED or
   AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws
