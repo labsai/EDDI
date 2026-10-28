@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -123,6 +124,56 @@ class ConversationPurgeServiceTest {
 
         assertNull(failure.get(), () -> "purge failed off the request thread: " + failure.get());
         verify(conversationService).endConversation(CONVERSATION_ID, "system:admin-end");
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    /**
+     * The tool loop checkpoints memory before every tool call (mocked test calls
+     * included); a permanent delete that left those copies behind did not delete
+     * the conversation. Only GDPR erasure used to remove them.
+     */
+    @Test
+    @DisplayName("a permanent delete removes the conversation's memory checkpoints and HITL tool journal too")
+    @SuppressWarnings("unchecked")
+    void purgeDeletesCheckpoints() throws Exception {
+        IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
+        Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
+        when(checkpointInstance.isResolvable()).thenReturn(true);
+        when(checkpointInstance.get()).thenReturn(checkpoints);
+        Instance<AutoVaultedSecrets> vault = mock(Instance.class);
+        Instance<IAttachmentStore> attachments = mock(Instance.class);
+        IHitlToolJournalStore journal = mock(IHitlToolJournalStore.class);
+        Instance<IHitlToolJournalStore> journalInstance = mock(Instance.class);
+        when(journalInstance.isResolvable()).thenReturn(true);
+        when(journalInstance.get()).thenReturn(journal);
+        var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, attachments,
+                checkpointInstance, journalInstance);
+
+        withCheckpoints.purge(CONVERSATION_ID);
+
+        verify(checkpoints).deleteByConversationId(CONVERSATION_ID);
+        verify(journal).deleteByConversationId(CONVERSATION_ID);
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    @Test
+    @DisplayName("a failing checkpoint or tool-journal store does not stop the delete")
+    @SuppressWarnings("unchecked")
+    void checkpointFailureDoesNotStopThePurge() throws Exception {
+        IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
+        when(checkpoints.deleteByConversationId(CONVERSATION_ID)).thenThrow(new IllegalStateException("db down"));
+        Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
+        when(checkpointInstance.isResolvable()).thenReturn(true);
+        when(checkpointInstance.get()).thenReturn(checkpoints);
+        IHitlToolJournalStore journal = mock(IHitlToolJournalStore.class);
+        when(journal.deleteByConversationId(CONVERSATION_ID)).thenThrow(new IllegalStateException("db down"));
+        Instance<IHitlToolJournalStore> journalInstance = mock(Instance.class);
+        when(journalInstance.isResolvable()).thenReturn(true);
+        when(journalInstance.get()).thenReturn(journal);
+        var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
+                mock(Instance.class), checkpointInstance, journalInstance);
+
+        assertDoesNotThrow(() -> withCheckpoints.purge(CONVERSATION_ID));
         verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
     }
 

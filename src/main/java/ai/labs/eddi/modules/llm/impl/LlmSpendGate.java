@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -137,7 +139,7 @@ public class LlmSpendGate {
      */
     public Refusal check(IConversationMemory memory) {
         // The agent's own ceiling first: pure arithmetic over memory, no I/O.
-        OptionalDouble ceiling = memory != null ? memory.getConversationCostCeilingUsd() : OptionalDouble.empty();
+        OptionalDouble ceiling = memory != null ? effectiveCeiling(memory) : OptionalDouble.empty();
         if (ceilingApplies(ceiling)) {
             double spent = conversationCost(memory);
             if (spent >= ceiling.getAsDouble()) {
@@ -175,6 +177,59 @@ public class LlmSpendGate {
      */
     static boolean ceilingApplies(OptionalDouble ceiling) {
         return ceiling != null && ceiling.isPresent() && Double.isFinite(ceiling.getAsDouble()) && ceiling.getAsDouble() >= 0;
+    }
+
+    /**
+     * The conversation cost ceiling this turn is held to: the agent's
+     * {@code maxCostPerConversationUsd}, tightened by a scheduled fire's
+     * {@code maxCostPerFire} when the turn carries one (context
+     * {@value ScheduleConfiguration#CONTEXT_MAX_COST_PER_FIRE} on the current
+     * step). The fire's ceiling is what was spent before this step — the
+     * {@link #conversationCost} total, undone and discarded steps included, less
+     * the current step's own {@code audit:cost} — plus the allowance, so the
+     * allowance is per fire even on a persistent conversation; the tighter of the
+     * two wins. The tool loop asks the same question between rounds.
+     */
+    static OptionalDouble effectiveCeiling(IConversationMemory memory) {
+        OptionalDouble agentCeiling = memory.getConversationCostCeilingUsd();
+        double allowance = maxCostPerFire(memory);
+        if (!(allowance > 0)) {
+            return agentCeiling;
+        }
+        double fireCeiling = conversationCost(memory) - currentStepCost(memory) + allowance;
+        if (ceilingApplies(agentCeiling) && agentCeiling.getAsDouble() <= fireCeiling) {
+            return agentCeiling;
+        }
+        return OptionalDouble.of(fireCeiling);
+    }
+
+    /**
+     * The current step's {@code maxCostPerFire} allowance, or {@code 0} when the
+     * turn is not a capped scheduled fire (or the value is not a finite number).
+     * Exact-key read on the current step only: the allowance belongs to the fire
+     * that set it, not to later turns of the same conversation.
+     */
+    static double maxCostPerFire(IConversationMemory memory) {
+        try {
+            var step = memory.getCurrentStep();
+            IData<Object> data = step == null ? null : step.getData("context:" + ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+            if (data == null || !(data.getResult() instanceof Context context) || context.getValue() == null) {
+                return 0.0;
+            }
+            Object value = context.getValue();
+            double allowance = value instanceof Number n ? n.doubleValue() : Double.parseDouble(String.valueOf(value));
+            return Double.isFinite(allowance) ? allowance : 0.0;
+        } catch (RuntimeException e) {
+            LOGGER.debugf("maxCostPerFire context could not be read: %s", e.getMessage());
+            return 0.0;
+        }
+    }
+
+    /** What the current step has spent so far — its {@code audit:cost}. */
+    private static double currentStepCost(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        IData<Object> cost = step == null ? null : step.getData(MemoryKeys.AUDIT_COST);
+        return cost != null && cost.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) ? n.doubleValue() : 0.0;
     }
 
     /**

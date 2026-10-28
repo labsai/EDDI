@@ -18,6 +18,14 @@ export interface ChatMessage {
   kind?: "notice";
   /** `image` output items, rendered by the widget rather than as markdown. */
   images?: { uri: string; alt?: string }[];
+  /**
+   * The conversation step this message belongs to, when the source said so —
+   * set for transcripts rebuilt from a full snapshot. Messages of a live turn
+   * leave it unset and are counted from the nearest one that has it (see
+   * `stepIndexes` in rating-steps.ts). Rating a reply needs it: the server
+   * keys reply ratings by step.
+   */
+  stepIndex?: number;
 }
 
 /**

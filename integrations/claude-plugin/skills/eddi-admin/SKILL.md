@@ -80,10 +80,12 @@ id from the user, the Manager, or an earlier run in `list_agent_test_runs`.
 
 1. `run_agent_tests` with the suite and agent ids — it deploys the version to `test`
    (never production) and returns a run id at once.
-2. Poll `get_agent_test_run` until `PASSED`, `FAILED`, `ERROR` or `ABORTED`. It names each
-   failing expectation with the actual value, the tools called and any unmocked tool
-   call (which fails its case rather than executing).
+2. Poll `get_agent_test_run` until `PASSED`, `FAILED`, `ERROR`, `ABORTED` or `CANCELLED`. It
+   names each failing expectation with the actual value, the tools called and any unmocked
+   tool call (which fails its case rather than executing).
 3. `list_agent_test_runs` shows the history — compare against the last passing run.
+4. `cancel_agent_test_run` stops a run that is still `RUNNING` (for example one started
+   against the wrong version); it frees the run slot and deletes its test conversations.
 
 Run the suite before every promotion when the agent has one. `read_docs("agent-testing")`
 has the suite format.

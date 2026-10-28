@@ -346,6 +346,20 @@ class PostgresSecretPersistenceTest extends PostgresTestBase {
         void getNonExistent() {
             assertNull(persistence.getMetaValue("nonexistent.key"));
         }
+
+        @Test
+        @DisplayName("delete-if-equals — keeps a value that has changed, removes only the exact one")
+        void deleteIfEqualsKeepsADifferentValue() {
+            // The case the method exists for: a KEK rotation re-wrapped the value after
+            // this node wrote it, and the stale node's take-back must not delete it.
+            persistence.setMetaValue("vault.checksum-key", "rewrapped");
+
+            assertFalse(persistence.deleteMetaValueIfEquals("vault.checksum-key", "written-by-stale-node"));
+            assertEquals("rewrapped", persistence.getMetaValue("vault.checksum-key"));
+
+            assertTrue(persistence.deleteMetaValueIfEquals("vault.checksum-key", "rewrapped"));
+            assertNull(persistence.getMetaValue("vault.checksum-key"));
+        }
     }
 
     // ─── Schema ─────────────────────────────────────────────────

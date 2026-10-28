@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -1434,6 +1435,10 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (schedule.getAgentId() == null || schedule.getAgentId().isBlank()) {
             throw new IllegalArgumentException("agentId is required");
+        }
+        if (AgentTestConversations.isReservedUserId(schedule.getUserId())) {
+            throw new IllegalArgumentException("userId may not start with '" + AgentTestConversations.USER_ID_PREFIX
+                    + "': that namespace is reserved for agent test runs");
         }
 
         // Validate time zone early — before cron parsing which also uses ZoneId.of()

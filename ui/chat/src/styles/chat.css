@@ -1633,3 +1633,295 @@ a:hover { opacity: 0.85; }
     font-size: 16px;
   }
 }
+
+/* ─── Ratings ─────────────────────────────────── */
+
+/* Thumbs under an agent reply. Hidden until the reply is hovered or focused
+   (opacity, not display, so the buttons stay reachable by keyboard and their
+   focus reveals them); always visible once rated and on touch screens. */
+.step-rating {
+  margin: 4px 0 -4px;
+}
+
+.step-rating__buttons {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.message:hover .step-rating__buttons,
+.step-rating:focus-within .step-rating__buttons,
+.step-rating--rated .step-rating__buttons {
+  opacity: 1;
+}
+
+.step-rating__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--chat-text-muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.step-rating__btn:hover,
+.step-rating__btn:focus-visible {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text);
+}
+
+.step-rating__btn[aria-pressed="true"] {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text-accent, var(--chat-accent));
+}
+
+.step-rating__details {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px solid var(--chat-border);
+  border-radius: var(--chat-radius-sm, 8px);
+  background: var(--chat-surface);
+}
+
+.step-rating__question {
+  margin: 0 0 6px;
+  font-size: 0.85rem;
+  color: var(--chat-text-muted);
+}
+
+.step-rating__actions,
+.rating-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Conversation rating card — a sibling of the paused card. */
+.rating-card {
+  position: relative;
+  margin: 8px 12px;
+  padding: 12px 40px 12px 14px;
+  border: 1px solid var(--chat-qr-border, var(--chat-border));
+  border-left: 3px solid var(--chat-accent);
+  border-radius: 10px;
+  background: var(--chat-agent-bg);
+  color: var(--chat-agent-text);
+}
+
+.rating-card__close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--chat-text-muted);
+  cursor: pointer;
+}
+
+.rating-card__close:hover,
+.rating-card__close:focus-visible {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text);
+}
+
+.rating-card__title {
+  margin: 0 0 8px;
+  font-weight: 600;
+  font-size: 0.92rem;
+}
+
+.rating-card__title:focus {
+  outline: none;
+}
+
+.rating-card__note {
+  margin: 8px 0 0;
+  color: var(--chat-text-muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.rating-card__details {
+  margin-top: 8px;
+}
+
+.rating-stars,
+.rating-thumbs {
+  display: flex;
+  gap: 4px;
+}
+
+.rating-stars__star,
+.rating-thumbs__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chat-text-muted);
+  font-size: 1.25rem;
+  cursor: pointer;
+}
+
+.rating-stars__star:hover:not(:disabled),
+.rating-stars__star:focus-visible,
+.rating-thumbs__btn:hover:not(:disabled),
+.rating-thumbs__btn:focus-visible {
+  border-color: var(--chat-border);
+  color: var(--chat-text);
+}
+
+.rating-stars__star--on {
+  color: var(--chat-warning, #f5b301);
+}
+
+.rating-stars__star--on svg {
+  fill: currentColor;
+}
+
+.rating-thumbs__btn[aria-pressed="true"] {
+  background: var(--chat-accent-soft);
+  color: var(--chat-text-accent, var(--chat-accent));
+}
+
+.rating-stars__star:disabled,
+.rating-thumbs__btn:disabled,
+.rating-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.rating-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.rating-tags__chip {
+  padding: 4px 10px;
+  border: 1px solid var(--chat-qr-border, var(--chat-border));
+  border-radius: 14px;
+  background: var(--chat-qr-bg, transparent);
+  color: var(--chat-qr-text, var(--chat-text));
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.rating-tags__chip[aria-pressed="true"] {
+  border-color: var(--chat-accent);
+  background: var(--chat-accent-soft);
+}
+
+.rating-comment {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--chat-input-border, var(--chat-border));
+  border-radius: 8px;
+  background: var(--chat-input-bg, var(--chat-surface));
+  color: var(--chat-input-text, var(--chat-text));
+  font: inherit;
+  font-size: 0.88rem;
+  resize: vertical;
+}
+
+.rating-comment:focus {
+  outline: none;
+  border-color: var(--chat-input-focus, var(--chat-accent));
+}
+
+.rating-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--chat-text);
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.rating-btn:hover:not(:disabled),
+.rating-btn:focus-visible {
+  border-color: var(--chat-accent);
+}
+
+.rating-btn--primary {
+  border-color: var(--chat-accent);
+  background: var(--chat-accent);
+  color: #fff;
+}
+
+.rating-btn--primary:hover:not(:disabled) {
+  background: var(--chat-accent-hover, var(--chat-accent));
+}
+
+.rating-btn--quiet {
+  border-color: transparent;
+  color: var(--chat-text-muted);
+}
+
+/* A refused rating's notice — above the composer, never over it. */
+.chat-toast-region {
+  display: flex;
+  justify-content: center;
+  padding: 0 12px;
+}
+
+.chat-toast {
+  margin: 4px 0;
+  padding: 6px 12px;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  background: var(--chat-surface-raised, var(--chat-surface));
+  color: var(--chat-text);
+  font-size: 0.82rem;
+  box-shadow: var(--chat-shadow, none);
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .step-rating__buttons {
+    opacity: 1;
+  }
+
+  .step-rating__btn,
+  .rating-card__close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .rating-stars__star,
+  .rating-thumbs__btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .rating-tags__chip,
+  .rating-btn {
+    min-height: 36px;
+  }
+}
+
+@media (max-width: 480px) {
+  .rating-card {
+    margin: 8px 6px;
+  }
+}

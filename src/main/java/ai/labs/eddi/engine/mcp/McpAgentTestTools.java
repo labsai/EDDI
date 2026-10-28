@@ -47,7 +47,7 @@ public class McpAgentTestTools {
 
     @Tool(name = "run_agent_tests", description = "Run an agent test suite (golden conversations) against an agent version. Deploys the "
             + "version to the 'test' environment if needed (never production) and runs in the background: returns the run id at once — "
-            + "poll get_agent_test_run until status is PASSED, FAILED, ERROR or ABORTED. Tool calls are mocked by the suite; an unmocked call is "
+            + "poll get_agent_test_run until status is PASSED, FAILED, ERROR, ABORTED or CANCELLED. Tool calls are mocked by the suite; an unmocked call is "
             + "not executed and fails its case.")
     public String runAgentTests(@ToolArg(description = "Test suite id (required)") String suiteId,
                                 @ToolArg(description = "Agent id (required)") String agentId,
@@ -72,6 +72,18 @@ public class McpAgentTestTools {
             return jsonSerialization.serialize(service.readRun(runId));
         } catch (Exception e) {
             return toolFailure(LOGGER, "get_agent_test_run", e);
+        }
+    }
+
+    @Tool(name = "cancel_agent_test_run", description = "Cancel a RUNNING agent test run: no further turn starts, a turn in progress is "
+            + "abandoned, and its test conversations are ended and deleted. Returns the record as it is now; poll get_agent_test_run "
+            + "until status is CANCELLED. Only works on the node executing the run.")
+    public String cancelAgentTestRun(@ToolArg(description = "Run id (required)") String runId) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        try {
+            return jsonSerialization.serialize(service.cancelRun(runId));
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "cancel_agent_test_run", e);
         }
     }
 

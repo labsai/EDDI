@@ -37,7 +37,8 @@ src/
 │   ├── attachments-api.ts  # Upload/delete + attachment_N context construction
 │   ├── sse-events.ts       # Pure interpretation of SSE payloads
 │   ├── snapshot.ts         # Snapshot steps → messages (masks secret input)
-│   └── demo-api.ts         # Mock API for demo mode
+│   ├── rating-api.ts       # Conversation/reply ratings, profile `rating` parsing, error-code copy
+│   └── demo-api.ts         # Mock API for demo mode (incl. an in-memory rating backend)
 ├── components/     # UI components
 │   ├── ChatWidget.tsx      # Main orchestrator (lifecycle, SSE, query params)
 │   ├── ChatHeader.tsx      # Logo/title, undo/redo, theme toggle, new conversation
@@ -46,12 +47,15 @@ src/
 │   ├── SecretInput.tsx     # The input field an agent requested (password masked, text/email plain)
 │   ├── ChatInput.tsx       # Auto-grow textarea, attachment chips, secret mode
 │   ├── PausedCard.tsx      # Awaiting-approval state (read-only, no approve/reject)
+│   ├── RatingCard.tsx      # "How did we do?" — stars/thumbs, tags, comment, thanks state
+│   ├── StepRating.tsx      # Thumbs under an agent reply, optional reason/comment form
 │   ├── QuickReplies.tsx    # Pill buttons for suggested replies
 │   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade), Using {tool}
 │   └── ScrollToBottom.tsx  # Floating scroll button
 ├── hooks/
 │   ├── useTheme.ts         # Dark/light/system theme with localStorage
-│   └── useHitlPolling.ts   # Polls approval-status while a turn is paused
+│   ├── useHitlPolling.ts   # Polls approval-status while a turn is paused
+│   └── useRatings.ts       # Restore, optimistic rate/withdraw, when the rating card offers itself
 ├── store/
 │   └── chat-store.tsx  # Context + useReducer state management
 ├── styles/
@@ -61,6 +65,7 @@ src/
 │   └── sse.ts          # SSE stream + status-aware fetch harnesses
 ├── i18n.ts             # String tables (en/de/fr/es), t(), initLocale() — ALL widget-owned text goes through t()
 ├── ime.ts              # isImeComposing(): Enter that confirms an IME candidate is not "send"
+├── rating-steps.ts     # Which conversation step a message belongs to (reply ratings are keyed by step)
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
 ```
@@ -134,6 +139,11 @@ src/
   raises `max-body-size` to 25M precisely so in-cap uploads do not hit it.
 - **A 409 means the input was never consumed** — restore it, do not leave it in
   the transcript as if sent.
+- **The rating endpoints answer `{error: "<CODE>", message}`** — the stable code is
+  in `error` (`RATING_WINDOW_CLOSED`, `RATING_DISABLED`, …), unlike the `{error,
+  code}` envelope above; `rating-api.ts` parses it. Reply ratings are keyed by
+  **step** (`/agents/{conversationId}/steps/{stepIndex}/rating`), step 0 being the
+  greeting — see `rating-steps.ts`.
 
 ---
 
