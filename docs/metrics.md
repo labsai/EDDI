@@ -296,6 +296,8 @@ eddi_group_member_pause_skipped_count_total # Member turns skipped instead of pa
 eddi_group_continue_count_total             # Continuation rounds
 eddi_group_followup_count_total             # Member follow-ups
 eddi_group_close_count_total                # Conversations closed to further rounds
+eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
+eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 ```
 
 ### Standing Team (Cadence) Metrics
@@ -336,6 +338,31 @@ fire-log table keeps growing means either retention is switched off
 (`eddi.schedule.fire-log-retention=0`) or the sweep is throwing — the poller
 logs that failure at ERROR.
 
+### Self-continuation Metrics
+
+Turns an agent starts itself with the reserved `CONTINUE_CONVERSATION` action
+(see [Long jobs](long-jobs.md)). Charted in the **Scheduling** row of the Full
+Metrics Reference, since every continuation is delivered as a one-shot schedule.
+
+```text
+eddi_continuation_scheduled_total           # Continuations armed after a committed turn
+eddi_continuation_run_total                 # Continuation turns that ran
+eddi_continuation_refused_total             # Continuations ignored or stopped; tag: reason
+```
+
+`reason` is one of `disabled` (the agent sets no `maxContinuations`), `limit`,
+`cost_ceiling`, `not_settled` (the asking turn failed, ended or paused),
+`group_member`, `schedule_failed`, and — decided when the schedule fires —
+`ended`, `awaiting_human`, `gone` (deleted or erased), `restricted` (GDPR Art.
+18), `undeployed`, `interrupted`, `duplicate` and `owner_mismatch` (the schedule's
+user does not own the conversation — a schedule the engine did not mint; alert on
+any). Every reason except
+`undeployed` ends the chain; an `undeployed` fire is retried with the schedule
+backoff and dead-lettered like any failed fire. A steady `disabled` rate means a
+rule emits the action on an agent that never opted in. `duplicate` counts
+re-delivered fires that found their turn already ran — the at-least-once
+delivery working as designed, not an error.
+
 ### Agent Test Metrics
 
 ```text
@@ -358,7 +385,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
-eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling)
+eddi_llm_spend_refused_total{reason}        # Paid LLM calls skipped by the spend checks — a task's model call, a re-ask, a cascade escalation, a guardrail reprompt, a `classifier` or `judge` guardrail call (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect). Tool calls are counted only when the tool loop stops on the conversation ceiling (conversation_ceiling) or the tenant budget check throws (tenant_check_error); a tool call refused because the tenant budget is spent or its accounting is unavailable returns an error to the model without incrementing it
 ```
 
 `eddi_tenant_usage_cost_total` moves whenever a settled turn (or a Dream run) with
@@ -569,7 +596,7 @@ eddi_llm_cascade_escalations_total          # Moves to a costlier step; tag: rea
 eddi_llm_cascade_accepted_step_total        # Which step answered; tag: step
 eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider, type
 eddi_llm_failure_total                      # Failed model calls by failure class: each failed cascade step, and each failed single-model task (a cascade's overall failure is not counted twice); tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model (the resolved name, not a ${vars:...} template)
-eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration)
+eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration|spend — the conversation ceiling or tenant budget refused the next step)
 eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|tool|httpcall|httpcall_retry)
 eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
@@ -602,7 +629,7 @@ eddi_llm_streaming_downgraded_total         # Fell back to a single chunk; tag: 
 eddi_llm_output_total                       # convertToObject reply parse outcome; tag: outcome (valid|repaired|invalid|empty|schema_mismatch)
 eddi_llm_recovery_total                     # Recovery actions of the LLM task; tags: action, outcome, trigger
                                             #   action=fallback, outcome=served,  trigger=onError|validation   (a turn answered with the configured fallback)
-                                            #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_breaker,
+                                            #   action=retry,    outcome=recovered|still_invalid|failed|skipped_budget|skipped_no_time|skipped_cost|skipped_spend|skipped_breaker,
                                             #                    trigger=empty|truncated|content_filter|invalid_json|context_too_long   (a same-model re-ask)
                                             #   action=escalate, outcome=invalid_output|timeout|error|retryable_error|low_confidence, trigger=<reply problem or failure class>   (a cascade step handed over)
                                             #   action=repair,   outcome=recovered, trigger=invalid_json       (a reply parsed only after fence stripping / extraction)
@@ -653,6 +680,7 @@ eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
 eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard
 eddi_hitl_rule_matched_total                # Approval rules that matched; tag: match
+eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict
 eddi_mcp_hitl_cancelled_total               # Cancellations via MCP; tag: surface
@@ -694,11 +722,12 @@ eddi_email_auth_total                       # Verdicts of DKIM + DMARC alignment
 eddi_email_dns_lookups_total                # TXT lookups for DKIM keys and DMARC records; tags: result (found|not_found|tempfail|budget_exhausted|oversize|invalid_name), cached (true|false)
 ```
 
-`eddi_email_auth_total` shows whether a mailbox's correspondents can be authenticated at all: a mailbox whose mail is
-mostly `none` comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
+`eddi_email_auth_total` counts the verdicts for all mail the selected instances processed, so it shows whether your
+correspondents can be authenticated at all: if most mail is `none`, it comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
 tampered, forwarded or list mail, or forged mail — **or a DNS problem**: a key lookup that fails temporarily or runs
-out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no other signature passes (if one
-does, the verdict is `pass_unaligned` instead). Such a verdict is marked temporary and the mail is retried, so a `fail`
+out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no signature passes. If a signature
+passes, DMARC alignment determines the verdict: an aligned signature yields `aligned_pass` (never temporary), and an
+unaligned signature yields `pass_unaligned`. A caller can retry a temporary verdict, so a `fail`
 rise that comes with a rise in `tempfail` points at DNS, and one that comes with `budget_exhausted` at the lookup
 limit, rather than at the senders. An unexpected error inside the verifier is counted as `fail` as well (the mail is
 treated as unauthenticated, not retried) and logs the WARN `Sender authentication failed internally`, so a `fail` rise
@@ -761,13 +790,46 @@ eddi_counterweight_strict_downgraded_total  # strict downgraded because the mode
 eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
 eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
-eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout)
+eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail evaluation (outcome=spend_refused makes no provider call); tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout|spend_refused)
+eddi_guardrail_judge_duration_seconds       # Timer: one `judge` guardrail evaluation (outcome=spend_refused makes no provider call); tags: provider (a registered provider type, or unknown|unsupported), outcome (pass|fail|unparseable|unavailable|timeout|spend_refused)
 ```
 
 `eddi_guardrail_triggered_total` counts findings, not evaluations: a guardrail that
 passes the text records nothing. Unknown guardrail types are skipped before they are
 counted, so `type` only ever carries a registered guardrail. See
 [Input and Output Guardrails](langchain.md#input-and-output-guardrails).
+
+### Conversation Rating Metrics
+
+```text
+eddi_conversation_ratings_total             # Ratings people gave; tags: kind (conversation|message), scale (THUMBS|FIVE_STAR), bucket (low|neutral|high), agentId
+eddi_conversation_ratings_normalized        # Distribution summary of the normalized score (0..1); tags: agentId, kind (_count, _sum, _max)
+eddi_conversation_ratings_withdrawn_total   # Ratings withdrawn by the person who gave them; tag: kind
+```
+
+The counter measures rating *events*: a person who changes a rating counts twice.
+The current state — one rating per conversation and per reply — is what
+`GET /ratings/summary` reports. `bucket` is `low` below a normalized 0.4 (one or
+two stars, thumbs down), `neutral` below 0.6 (three stars) and `high` otherwise.
+See [Conversation Ratings](conversation-ratings.md).
+
+### Alert Metrics
+
+```text
+eddi_alerts_fired_total             # Alerts recorded; tag: source (RATING|CONVERSATION_ERROR|OUTPUT_MATCH|digest)
+eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the same rule, agent and conversation in the same window
+eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
+eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)
+eddi_alerts_digests_total           # Digests created (see eddi_alerts_deliveries_total for send outcomes)
+eddi_alerts_dropped_total           # Alert work dropped because the alert queue was full; tag: reason (queue_full)
+eddi_alerts_queue_depth             # Gauge: work waiting for the alert worker
+```
+
+No tag carries an agent id (a rule over every agent would mint a series per agent).
+`eddi_alerts_dropped_total` should stay at zero; anything else means the alert
+worker cannot keep up — see [Alerts](alerts.md#operating-alerts). A Grafana alert
+rule on `outcome="gave_up"` is in the
+[Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).
 
 ### Agent Identity & Signing Metrics
 
@@ -839,7 +901,7 @@ eddi_a2a_tasks_total                        # A2A tasks by the state their turn 
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
-eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_<http status>)
+eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 
 `eddi_channel_observe_decisions_total` is one sample per message an observer

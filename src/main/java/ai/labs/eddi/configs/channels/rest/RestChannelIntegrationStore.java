@@ -19,6 +19,8 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -35,6 +37,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -80,18 +83,35 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
     private final Instance<EmailChannelSupport> emailSupport;
+    private final SecretResolver secretResolver;
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard) {
-        this(channelStore, documentDescriptorStore, resourceAccessGuard, null);
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, (Instance<EmailChannelSupport>) null, (SecretResolver) null);
+    }
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            Instance<EmailChannelSupport> emailSupport) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, emailSupport, null);
+    }
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            SecretResolver secretResolver) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, null, secretResolver);
     }
 
     @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard,
-            Instance<EmailChannelSupport> emailSupport) {
+            Instance<EmailChannelSupport> emailSupport,
+            SecretResolver secretResolver) {
+        this.secretResolver = secretResolver;
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -131,6 +151,42 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             return response;
         }
         return Response.fromResponse(response).header(WARNINGS_HEADER, String.join(",", warnings)).build();
+    }
+
+    /**
+     * Refuses a webhook whose vault secret already exists but is shorter than
+     * {@link WebhookChannelSettings#MIN_SECRET_LENGTH}: the endpoint would answer
+     * 401 to every request. A secret that is not in the vault yet (or cannot be
+     * read) cannot be judged here - the vault reference alone is checked by
+     * {@link WebhookChannelSettings#validate}, and the router re-checks the
+     * resolved value on every refresh.
+     */
+    private void requireUsableWebhookSecret(Map<String, String> platformConfig) {
+        String reference = platformConfig == null ? null : platformConfig.get(WebhookChannelSettings.KEY_SIGNING_SECRET);
+        if (secretResolver == null || reference == null) {
+            return;
+        }
+        try {
+            // Only the default tenant's vault is read at save time: resolving another
+            // tenant's reference for any editor would tell them whether that secret
+            // exists and whether it is short. Such references are left to the router's
+            // runtime check.
+            if (!SecretReference.DEFAULT_TENANT.equals(SecretReference.parse(reference.trim()).tenantId())) {
+                return;
+            }
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        String resolved;
+        try {
+            resolved = secretResolver.resolveValue(reference.trim());
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (resolved != null && !resolved.equals(reference.trim()) && resolved.length() < WebhookChannelSettings.MIN_SECRET_LENGTH) {
+            throw new BadRequestException("The vault secret behind platformConfig.signingSecret is shorter than "
+                    + WebhookChannelSettings.MIN_SECRET_LENGTH + " characters - use 32 random bytes.");
+        }
     }
 
     /**
@@ -277,6 +333,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id)
             throws IResourceStore.ResourceNotFoundException {
         return channelStore.getCurrentResourceId(id);
@@ -369,6 +430,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             if (!webhookErrors.isEmpty()) {
                 throw new BadRequestException(String.join(" ", webhookErrors));
             }
+            requireUsableWebhookSecret(config.getPlatformConfig());
         }
         boolean email = EmailChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(channelType);
         if (email) {

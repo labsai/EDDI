@@ -148,6 +148,12 @@ principal, not a user: erasing or exporting it is refused with 400.
     linked to an address. All of it is
     **permanently deleted**. Each reports under its own step name
     (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailIdentities`)
+16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
+    deleted** by the `conversationRatings` participant, which also forgets the user
+    as the *reviewer* of ratings they triaged as a maintainer (those ratings are
+    other people's data and stay). Ratings deliberately outlive retention purges
+    of transcripts, so no conversation sweep reaches them. See
+    [Conversation Ratings](conversation-ratings.md)
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -169,6 +175,16 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   download API
 - Linked OAuth accounts (`connectionGrants`: tenant, connection, status, scopes and
   dates) — never token material
+- Conversation ratings the user gave (`conversationRatings`: conversation and step,
+  agent and version, score, tags, comment, triage status and note — without the
+  reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)
+  blocks new ratings
+- Alerting (`alerts`): for a user who runs agents, the alert rules they created or last
+  edited — id, name, times and which role — and the alert events they acknowledged —
+  id, rule name, source, agent, fired and acknowledged times; for a user who chatted,
+  the `OUTPUT_MATCH` values alerts stored from their conversations (`outputMatchValues`:
+  value, conversation, time). No other person's identity; capped at 10,000 each.
+  Erasure blanks those values and forgets the user as acknowledger and rule author
 - A2A tasks the user, as a peer, created (`a2aTasks`: task and context ids, the
   message sent, the reply, state and timestamps)
 - Group discussions the user started (`groupConversations`: question, transcript,

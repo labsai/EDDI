@@ -17,6 +17,7 @@ import {
   grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
+  grantsRatingReads,
   grantedPatchEndpoints,
   grantsCredentialSafeEdits,
 } from "../tool-scopes";
@@ -205,6 +206,7 @@ describe("tool-scopes", () => {
         "POST /administration/{environment}/deploy/{agentId}",
         "POST /administration/{environment}/undeploy/{agentId}",
         "POST /agenttests/runs",
+        "POST /agenttests/runs/{runId}/cancel",
         "POST /schedulestore/schedules/{scheduleId}/disable",
         "POST /groupstore/groups",
         "POST /administration/agents/setup",
@@ -596,5 +598,31 @@ describe("tool-scopes", () => {
       expect(grantsAgentModification(endpointsForScope("read_write"))).toBe(true);
       expect(grantsAgentModification(endpointsForScope("read_only"))).toBe(false);
     });
+  });
+});
+
+describe("conversation ratings", () => {
+  it("grants the three rating reads in both scopes", () => {
+    for (const scope of ["read_only", "read_write"] as const) {
+      const endpoints = endpointsForScope(scope);
+      expect(endpoints).toEqual(
+        expect.arrayContaining(["GET /ratings", "GET /ratings/summary", "GET /ratings/attention-count"]),
+      );
+      expect(grantsRatingReads(endpoints)).toBe(true);
+    }
+  });
+
+  it("grants no rating triage and no export — reviewing stays a human action", () => {
+    const all = endpointsForScope("read_write");
+    expect(all).not.toContain("PATCH /ratings/{ratingId}");
+    expect(all).not.toContain("POST /ratings/review");
+    expect(all).not.toContain("GET /ratings/export");
+    expect(all.filter((e) => e.includes("/ratings") && !e.startsWith("GET "))).toEqual([]);
+  });
+
+  it("needs all three reads before the prompt may describe them", () => {
+    expect(grantsRatingReads(["GET /ratings", "GET /ratings/summary"])).toBe(false);
+    expect(grantsRatingReads(["GET /ratings/summary", "GET /ratings/attention-count"])).toBe(false);
+    expect(grantsRatingReads(["GET /ratings", "GET /ratings/attention-count"])).toBe(false);
   });
 });

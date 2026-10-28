@@ -222,7 +222,7 @@ class PostgresSecretPersistenceUnitTest {
 
         assertTrue(persistence.updateSecretSealing(createTestSecret(), "dek-0"));
 
-        verify(preparedStatement).setString(7, "dek-0");
+        verify(preparedStatement).setString(8, "dek-0");
     }
 
     @Test

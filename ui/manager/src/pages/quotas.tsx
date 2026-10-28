@@ -325,7 +325,7 @@ export function QuotasPage() {
                     label={t("quotas.monthlyCost", "Monthly Cost")}
                     value={usage.monthlyCostUsd}
                     limit={form?.maxMonthlyCostUsd ?? -1}
-                    prefix="$"
+                    format={formatUsd}
                     testId="usage-cost"
                   />
                   <div className="flex flex-col justify-center rounded-lg border border-border/50 bg-muted/30 p-3">
@@ -482,24 +482,49 @@ function QuotaField({
 }
 
 /**
+ * Dollars for the budget status. Two decimals hide sub-cent spend — a $0.006
+ * spend against a $0.01 cap read "$0.01 of $0.01 … $0.00 left" — so amounts
+ * under a dollar keep up to four decimals, trailing zeros trimmed back to two.
+ * Smaller amounts get as many decimals as their first two significant digits
+ * need: a positive limit must never read as $0.00, because a zero limit blocks
+ * every call and a tiny one does not. Amounts of a dollar or more keep up to
+ * six decimals, so a $1.003 spend against a $1.004 cap does not read as
+ * "$1.00 of $1.00" while $0.001 remains; $12.50 stays "$12.50".
+ */
+function formatUsd(n: number): string {
+  const abs = Math.abs(n);
+  if (n === 0 || !Number.isFinite(n)) {
+    return `$${n.toFixed(2)}`;
+  }
+  const decimals = abs >= 1 ? 6 : Math.min(20, Math.max(4, 1 - Math.floor(Math.log10(abs))));
+  return `$${n.toFixed(decimals).replace(/0+$/, "").replace(/\.(\d)$/, (_, d: string) => `.${d}0`).replace(/\.$/, ".00")}`;
+}
+
+/**
  * What the monthly cost budget is doing right now. The limit is enforced by the
  * backend (priced spend is metered after each turn; once the month's total
  * reaches the limit, LLM tasks serve their fallback answer instead of calling
- * the model), so this says which of four states the tenant is in rather than
- * leaving the operator to infer it from a progress bar.
+ * the model), so this says which of five states the tenant is in rather than
+ * leaving the operator to infer it from a progress bar: enforcement off with no
+ * budget (nothing metered), enforcement off with a budget, no budget, budget
+ * reached, or spend versus remaining.
  */
 function CostBudgetStatus({ spent, limit, enforced }: { spent: number; limit: number; enforced: boolean }) {
   const { t } = useTranslation();
   const unlimited = limit < 0;
   const reached = !unlimited && spent >= limit;
-  const money = (n: number) => `$${n.toFixed(2)}`;
+  const money = formatUsd;
 
   let tone = "border-border/50 bg-muted/30 text-muted-foreground";
   let state: string;
-  if (unlimited) {
-    state = t("quotas.budgetUnlimited", "No monthly cost budget is set, so spend is metered but never limited.");
+  // Enforcement first: with it off the backend records no spend at all, so
+  // "metered but never limited" would be untrue for a disabled tenant.
+  if (!enforced && unlimited) {
+    state = t("quotas.budgetDisabled", "Enforcement is off, so spend is neither metered nor limited.");
   } else if (!enforced) {
     state = t("quotas.budgetNotEnforced", "A budget of {{limit}} is set, but enforcement is off, so it is not applied.", { limit: money(limit) });
+  } else if (unlimited) {
+    state = t("quotas.budgetUnlimited", "No monthly cost budget is set, so spend is metered but never limited.");
   } else if (reached) {
     tone = "border-destructive/40 bg-destructive/5 text-destructive";
     state = t(
@@ -534,12 +559,15 @@ function UsageCard({
   value,
   limit,
   prefix = "",
+  format,
   testId,
 }: {
   label: string;
   value: number;
   limit: number;
   prefix?: string;
+  /** Renders value and limit; replaces `prefix` and the two-decimal rounding. */
+  format?: (n: number) => string;
   testId: string;
 }) {
   const isUnlimited = limit < 0;
@@ -552,10 +580,10 @@ function UsageCard({
       <span className="text-xs text-muted-foreground">{label}</span>
       <div className="mt-1 flex items-baseline gap-1">
         <span className="text-xl font-bold text-foreground">
-          {prefix}{typeof value === "number" && value % 1 !== 0 ? value.toFixed(2) : value}
+          {format ? format(value) : <>{prefix}{typeof value === "number" && value % 1 !== 0 ? value.toFixed(2) : value}</>}
         </span>
         <span className="text-xs text-muted-foreground">
-          / {isUnlimited ? "∞" : `${prefix}${limit}`}
+          / {isUnlimited ? "∞" : format ? format(limit) : `${prefix}${limit}`}
         </span>
       </div>
       {!isUnlimited && (

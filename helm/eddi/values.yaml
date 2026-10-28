@@ -472,6 +472,17 @@ keycloak:
   # you understand), or point eddi.oidc.authServerUrl at a Keycloak you run
   # with `start` and leave keycloak.enabled=false.
   devModeAcknowledged: false
+
+  # Which forwarded headers Keycloak trusts (KC_PROXY_HEADERS): xforwarded,
+  # forwarded, or none. Empty means automatic — `xforwarded` when
+  # eddi.oidc.publicUrl is https, since the pod itself serves plain http and an
+  # https public URL means something in front terminates TLS. Without it the
+  # token, jwks and userinfo endpoints in Keycloak's discovery document come out
+  # as http:// (KC_HOSTNAME_BACKCHANNEL_DYNAMIC derives them from the request),
+  # and MCP clients such as Claude Code refuse to send credentials to them. Set
+  # `none` if Keycloak is reachable directly, without a proxy that overwrites
+  # those headers — trusting them then lets a client pick the scheme and host.
+  proxyHeaders: ""
   storage:
     size: 1Gi
     # storageClassName: standard

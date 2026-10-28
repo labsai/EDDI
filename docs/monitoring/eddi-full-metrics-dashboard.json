@@ -6983,7 +6983,83 @@
           "description": "How long the oldest pending approval has waited. Alert EddiApprovalWaitingLong fires past 24 h."
         },
         {
-          "id": 264,
+          "id": 272,
+          "type": "timeseries",
+          "title": "Rejections under onRejection: REVISE",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_hitl_revision_total{outcome}` — what a rejected rule pause did under `hitlConfig.onRejection: REVISE`: `revised`, or why it skipped (`no_note`, `automated`, `no_answer`, `exhausted`, `failed`). A rising `failed` share means revisions are refused by the spend gate, the model or a guardrail.",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 47
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_hitl_revision_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 269,
           "type": "timeseries",
           "title": "HITL email notifications",
           "datasource": {
@@ -7031,7 +7107,7 @@
           "description": "Approval notification mails by outcome: sent, retry (deferred, will be retried), failed (gave up), suppressed (the pause was decided before it went out). A rising failed or retry rate means the system mailer's relay is refusing or unreachable."
         },
         {
-          "id": 265,
+          "id": 268,
           "type": "stat",
           "title": "Email ledger pending",
           "datasource": {
@@ -7995,6 +8071,156 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 270,
+          "type": "timeseries",
+          "title": "Tasks returned for rework",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_group_task_reworks_total` — tasks VERIFY sent back to their member with the verifier's feedback (`maxReworks`).",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 50
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_group_task_reworks_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "hidden",
+              "placement": "bottom",
+              "showLegend": false,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 271,
+          "type": "timeseries",
+          "title": "Unparseable VERIFY verdicts",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_group_verify_unparseable_total` — verifier replies that could not be parsed; every task of that pass was auto-verified (fail-open). Should stay near zero: a steady rate means the moderator's model ignores the verdict format.",
+          "gridPos": {
+            "h": 7,
+            "w": 8,
+            "x": 0,
+            "y": 57
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_group_verify_unparseable_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "hidden",
+              "placement": "bottom",
+              "showLegend": false,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
@@ -8561,6 +8787,104 @@
             },
             "tooltip": {
               "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 273,
+          "type": "timeseries",
+          "title": "Self-continuation",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_continuation_*` — turns an agent started itself with the reserved `CONTINUE_CONVERSATION` action. `scheduled` counts continuations armed after a committed turn, `run` the continuation turns that ran, `refused` the ones ignored or stopped, by reason: `disabled` (the agent sets no maxContinuations — usually a rule emitting the action on an agent that never opted in), `limit`, `cost_ceiling`, `not_settled`, `group_member`, `schedule_failed`, and at fire time `ended`, `awaiting_human`, `gone`, `restricted`, `undeployed` (retried), `interrupted`, `duplicate` (a re-delivered fire that found its turn already ran).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_continuation_scheduled_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "scheduled"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_continuation_run_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "run"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (reason) (rate(eddi_continuation_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "refused — {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
               "sort": "desc"
             }
           }
@@ -10383,7 +10707,7 @@
           }
         },
         {
-          "id": 266,
+          "id": 278,
           "type": "timeseries",
           "title": "Mail sender authentication",
           "datasource": {
@@ -10402,7 +10726,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (result) (rate(eddi_email_auth_total{job=~\"$job\"}[5m]))",
+              "expr": "sum by (result) (rate(eddi_email_auth_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "{{result}}",
               "refId": "A"
             }
@@ -10428,10 +10752,10 @@
               "sort": "desc"
             }
           },
-          "description": "Verdicts of EDDI's own DKIM verification and DMARC alignment on inbound mail: aligned_pass (the only authenticated one), pass_unaligned (a valid signature for another domain, e.g. a mailing list), fail (signatures that do not verify, a lookup failure, or an ambiguous From), none (unsigned). Mostly none means the correspondents do not sign with DKIM."
+          "description": "Verdicts of EDDI's own DKIM verification and DMARC alignment on inbound mail: aligned_pass (the only authenticated one), pass_unaligned (a valid signature for another domain, e.g. a mailing list), fail (signatures that do not verify, a lookup failure, or an ambiguous From), none (unsigned). Counts all mail the selected instances processed; mostly none means the senders do not sign with DKIM."
         },
         {
-          "id": 267,
+          "id": 279,
           "type": "timeseries",
           "title": "Mail DNS lookups (DKIM keys, DMARC records)",
           "datasource": {
@@ -10450,7 +10774,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (result, cached) (rate(eddi_email_dns_lookups_total{job=~\"$job\"}[5m]))",
+              "expr": "sum by (result, cached) (rate(eddi_email_dns_lookups_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "{{result}} (cached={{cached}})",
               "refId": "A"
             }
@@ -10476,7 +10800,7 @@
               "sort": "desc"
             }
           },
-          "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: the resolver (eddi.email.dns.servers) is unreachable. budget_exhausted: messages carry more signatures than eddi.email.dns.max-lookups-per-message allows."
+          "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: TXT lookups are failing temporarily; an unreachable resolver (eddi.email.dns.servers) is one possible cause. budget_exhausted is a local limit, not a DNS failure: a message needed more DKIM key and DMARC record lookups than eddi.email.dns.max-lookups-per-message allows, and the lookups past it were not sent."
         },
         {
           "id": 268,
@@ -12638,12 +12962,12 @@
         {
           "id": 262,
           "type": "timeseries",
-          "title": "LLM spend gate refusals",
+          "title": "Spend gate refusals (model calls; tool calls for tenant_check_error)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_spend_refused_total`: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached.",
+          "description": "`eddi_llm_spend_refused_total`, by reason: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached (`tenant_budget`, `conversation_ceiling`) or the quota store could not answer (`tenant_accounting_unavailable`). `tenant_check_error` means the budget check itself threw — a defect that should never be non-zero — and counts refused model calls and refused tool calls alike.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -13490,12 +13814,12 @@
         {
           "id": 189,
           "type": "stat",
-          "title": "Gate last verified (this process)",
+          "title": "Gate last verified (latest report, any replica)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "How long ago this EDDI process last received a verified gate report (eddi_operator_gate_last_verified_timestamp_seconds). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
+          "description": "How long ago the most recent verified gate report arrived from any replica (maximum of eddi_operator_gate_last_verified_timestamp_seconds across instances; one replica's recent report hides an older or missing one on another). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -15702,7 +16026,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Rate of `eddi_webhook_events_total` by outcome: `accepted` (a turn was started), `duplicate` (200, already accepted), `in_progress` (409, first delivery still running) or `refused_<status>` (HTTP status returned: 400, 401 bad signature, 403, 404 unknown integration, 409 awaiting approval, 413, 415, 422, 429, 500, 503). A rising 401 rate is a misconfigured sender or a probe.",
+      "description": "Rate of `eddi_webhook_events_total` by outcome: `accepted` (a turn was started), `duplicate` (200, already accepted), `in_progress` (409, first delivery still running), `refused_capacity` (503, the integration is over its `maxDeliveriesPerWindow` budget or the shared replay-protection cache is past its backstop) or `refused_<status>` (HTTP status returned: 400, 401 bad signature, unknown integration id or unusable secret, 403, 409 awaiting approval, 413, 415, 422, 429, 500, 503 agent not deployed or shutting down). A rising 401 rate is a misconfigured sender or a probe; a rising `refused_capacity` is one integration sending faster than its budget.",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -15919,6 +16243,546 @@
                 ]
               },
               "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 267,
+          "type": "timeseries",
+          "title": "Judge guardrail latency and outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean `eddi_guardrail_judge_duration_seconds` by `provider` and `outcome` (pass, fail, unparseable, unavailable, timeout). A judge grades an LLM task's answer against the issue codes its author declared, after the model answered; only turns whose agent configures a judge guardrail record samples. Watch `unparseable` and `unavailable`: under failMode open they switch the check off without blocking anything. Empty (\"no samples yet\") when there is no judge traffic, because a mean latency has no honest value without calls.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 33
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, outcome) (rate(eddi_guardrail_judge_duration_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum by (provider, outcome) (rate(eddi_guardrail_judge_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 264,
+      "type": "row",
+      "title": "Conversation Ratings",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "panels": [
+        {
+          "id": 265,
+          "type": "timeseries",
+          "title": "Ratings by kind and bucket",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_conversation_ratings_total` — ratings people gave, per `kind` (conversation/message) and `bucket` (low/neutral/high on the normalized score). A re-rating counts again; withdrawals (`eddi_conversation_ratings_withdrawn_total`) are query B. Flat is normal when no agent has `ratingConfig` enabled.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind, bucket) (rate(eddi_conversation_ratings_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}} / {{bucket}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (kind) (rate(eddi_conversation_ratings_withdrawn_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "withdrawn {{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 266,
+          "type": "timeseries",
+          "title": "Average normalized rating by agent",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean of `eddi_conversation_ratings_normalized` (0..1) per `agentId` over the window, from its `_sum` and `_count`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (agentId) (rate(eddi_conversation_ratings_normalized_sum{job=~\"$job\"}[$__rate_interval])) / sum by (agentId) (rate(eddi_conversation_ratings_normalized_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{agentId}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 274,
+      "type": "row",
+      "title": "Alerts",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "panels": [
+        {
+          "id": 275,
+          "type": "timeseries",
+          "title": "Alerts fired, folded and held back",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_alerts_fired_total` by `source`; `eddi_alerts_deduplicated_total` (folded into an earlier alert of the same rule, agent and conversation in the window), `eddi_alerts_throttled_total` (past the rule cap, held for the digest or the inbox) and `eddi_alerts_digests_total`. Flat is normal without alert rules.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (source) (rate(eddi_alerts_fired_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "fired {{source}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum (rate(eddi_alerts_deduplicated_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "deduplicated"
+            },
+            {
+              "refId": "C",
+              "expr": "sum (rate(eddi_alerts_throttled_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "throttled"
+            },
+            {
+              "refId": "D",
+              "expr": "sum (rate(eddi_alerts_digests_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "digests"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 276,
+          "type": "timeseries",
+          "title": "Alert deliveries and dropped work",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_alerts_deliveries_total` by `type` (slack/webhook) and `outcome` — `gave_up` is a target that failed its last retry (see the Alerts inbox for the error). `eddi_alerts_dropped_total` is alert work dropped because the alert queue was full: it should stay at zero; turns and ratings are never slowed by it.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type, outcome) (rate(eddi_alerts_deliveries_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{type}} {{outcome}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_alerts_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 277,
+          "type": "timeseries",
+          "title": "Alert queue depth",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_alerts_queue_depth` — work waiting for the single alert worker. It drains within seconds normally; a plateau near `eddi.alerts.queue-capacity` means the worker is stuck on a slow webhook or database and new alerts are being dropped.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 44
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(eddi_alerts_queue_depth{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "queued"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
             },
             "overrides": []
           },

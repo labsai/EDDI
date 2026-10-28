@@ -1280,6 +1280,8 @@ Own commit; independently revertible.
   under `docs/` needs a `SUMMARY.md` entry or it is written but never published. (Files not
   listed there — `changelog.md` among them — are deliberately unpublished, and `planning/`
   lies outside the GitBook space entirely, which is why plan documents belong there.)
+  *(2026-10-27: GitBook is being replaced by `docs-site/`, which builds the same SUMMARY-listed
+  pages — see `planning/docs-site-migration-plan.md`.)*
 
 ### 9.5 Archive the old repos — sequencing
 

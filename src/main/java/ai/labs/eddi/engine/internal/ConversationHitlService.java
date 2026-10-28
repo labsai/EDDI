@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -203,6 +204,9 @@ class ConversationHitlService {
             // finished pause is harmless: its fire finds nothing awaiting a decision
             // and completes.
             deleteHitlTimeoutSchedule(conversationId);
+            if (!pausedOnly) {
+                conversationService.disarmContinuations(conversationId);
+            }
             conversationService.cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
                 // A pending human approval was terminally resolved outside resume:
@@ -226,6 +230,17 @@ class ConversationHitlService {
         if (inFlightMemory != null || remoteSignalled) {
             // Nothing persisted to flip, but a running pipeline was signalled —
             // it will stop at the next task boundary and persist its own state.
+            // A cancelled job must not start its next turn either.
+            if (!pausedOnly) {
+                conversationService.disarmContinuations(conversationId);
+            }
+            return IConversationService.CancelOutcome.CANCELLED;
+        }
+        // Between two turns of a self-continuing job nothing runs and nothing is
+        // paused, but the job is still live: its next turn is queued. Withdrawing it
+        // is what cancelling that job means. Never on the approver's paused-only
+        // cancel, which may stop a pending approval and nothing else.
+        if (!pausedOnly && conversationService.disarmContinuations(conversationId) > 0) {
             return IConversationService.CancelOutcome.CANCELLED;
         }
         // READY / ENDED / ERROR / EXECUTION_INTERRUPTED: nothing paused, nothing
@@ -602,6 +617,11 @@ class ConversationHitlService {
                         // atomic
                         // compare-and-store lets the terminal writer win; when it does,
                         // discard the resumed outcome (no persist, no schedule/notify).
+                        // A resumed turn that settled may ask to continue, like any turn:
+                        // decided before the store, armed below once it is committed.
+                        if (!rePaused) {
+                            conversationService.decideContinuation(memory);
+                        }
                         boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
                         if (!persisted) {
                             LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
@@ -634,6 +654,7 @@ class ConversationHitlService {
                             // best-effort: a failing observer must never affect the
                             // persisted resume above.
                             fireHitlResumeCompleted(conversationId, environment, memory, decision);
+                            conversationService.armContinuation(conversationId, memory, environment);
                         }
                     } catch (ResourceStoreException e) {
                         conversationService.logConversationError(loggingContext, conversationId, e);
@@ -761,7 +782,7 @@ class ConversationHitlService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision,
-                    prePauseWasToolCall, prePauseBatch);
+                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy());
             // Task 10 — tool-resume metric, tagged by aggregate verdict.
             if (prePauseWasToolCall) {
                 recordToolResumeMetric(decision, prePauseBatch);
@@ -1239,6 +1260,21 @@ class ConversationHitlService {
                            String userId, Environment environment,
                            HitlDecision decision,
                            boolean toolCallPause, PendingToolCallBatch pendingBatch) {
+        auditHitlDecision(conversationId, agentId, agentVersion, userId, environment, decision, toolCallPause, pendingBatch, null);
+    }
+
+    /**
+     * As above; {@code revisionPolicy} is the agent's {@code onRejection} policy. A
+     * rejected RULE pause under {@code REVISE} records it as
+     * {@code onRejection: REVISE}, so the ledger shows the note was a revision
+     * request — what the revision then did is the {@code hitl:revision:outcome} of
+     * the step and the LLM task's own entry.
+     */
+    void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
+                           String userId, Environment environment,
+                           HitlDecision decision,
+                           boolean toolCallPause, PendingToolCallBatch pendingBatch,
+                           HitlRevisionPolicy revisionPolicy) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
@@ -1258,6 +1294,8 @@ class ConversationHitlService {
             if (toolCallPause) {
                 detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
                 detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
+            } else if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null && revisionPolicy.revise()) {
+                detail.put("onRejection", revisionPolicy.onRejection().name());
             }
             auditLedgerService.submit(new AuditEntry(
                     UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
@@ -1654,9 +1692,13 @@ class ConversationHitlService {
             AgentConfiguration agentConfig = lookup.config();
             if (agentConfig == null || agentConfig.getHitlConfig() == null) {
                 memory.setAgentToolApprovalsConfig(null);
+                memory.setHitlRevisionPolicy(null);
                 return;
             }
             memory.setAgentToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
+            // onRejection rides on the same pinned read; null (the default SKIP)
+            // captures nothing, so an agent that did not opt in is unchanged.
+            memory.setHitlRevisionPolicy(HitlRevisionPolicy.of(agentConfig.getHitlConfig()));
         } catch (Exception e) {
             // Same reasoning: this catch used to leave the carrier untouched (null on
             // a fresh memory), which is the fail-open again by a different route.

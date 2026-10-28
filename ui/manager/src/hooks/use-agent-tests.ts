@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  cancelAgentTestRun,
   getAgentTestRun,
   isRunFinished,
   listAgentTestRuns,
@@ -39,6 +40,18 @@ export function useAgentTestRun(runId: string | null) {
     enabled: !!runId,
     refetchInterval: (query) =>
       query.state.data && !isRunFinished(query.state.data.status) ? RUN_POLL_MS : false,
+  });
+}
+
+/** Asks a RUNNING run to stop; the run and its agent's history are re-read. */
+export function useCancelAgentTestRun() {
+  const queryClient = useQueryClient();
+  return useMutation<AgentTestRun, Error, string>({
+    mutationFn: cancelAgentTestRun,
+    onSuccess: (run, runId) => {
+      void queryClient.invalidateQueries({ queryKey: agentTestKeys.run(runId) });
+      if (run.agentId) void queryClient.invalidateQueries({ queryKey: agentTestKeys.runs(run.agentId) });
+    },
   });
 }
 

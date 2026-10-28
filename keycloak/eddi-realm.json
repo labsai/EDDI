@@ -56,7 +56,8 @@
     "composite": true,
     "composites": {
       "realm": [
-        "eddi-user"
+        "eddi-user",
+        "offline_access"
       ]
     },
     "clientRole": false
@@ -85,7 +86,8 @@
         "composite": true,
         "composites": {
           "realm": [
-            "eddi-user"
+            "eddi-user",
+            "offline_access"
           ]
         },
         "clientRole": false
@@ -93,6 +95,12 @@
       {
         "name": "eddi-approver",
         "description": "May decide pending human-in-the-loop approvals they do not own"
+      },
+      {
+        "name": "offline_access",
+        "description": "${role_offline-access}",
+        "composite": false,
+        "clientRole": false
       }
     ]
   },
@@ -445,6 +453,15 @@
           }
         }
       ]
+    },
+    {
+      "name": "offline_access",
+      "description": "OpenID Connect built-in scope: offline_access",
+      "protocol": "openid-connect",
+      "attributes": {
+        "consent.screen.text": "${offlineAccessScopeConsentText}",
+        "display.on.consent.screen": "true"
+      }
     }
   ],
   "defaultDefaultClientScopes": [
@@ -582,7 +599,8 @@
         "profile",
         "email",
         "web-origins",
-        "acr"
+        "acr",
+        "offline_access"
       ],
       "protocolMappers": [
         {
@@ -631,7 +649,14 @@
         "eddi-editor",
         "eddi-user",
         "eddi-viewer",
-        "eddi-approver"
+        "eddi-approver",
+        "offline_access"
+      ]
+    },
+    {
+      "clientScope": "offline_access",
+      "roles": [
+        "offline_access"
       ]
     }
   ],
@@ -646,7 +671,8 @@
       "realmRoles": [
         "eddi-admin",
         "eddi-editor",
-        "eddi-viewer"
+        "eddi-viewer",
+        "offline_access"
       ],
       "groups": [
         "/engineering"
@@ -660,7 +686,8 @@
       "enabled": true,
       "emailVerified": false,
       "realmRoles": [
-        "eddi-viewer"
+        "eddi-viewer",
+        "offline_access"
       ]
     },
     {
@@ -671,7 +698,8 @@
       "enabled": true,
       "emailVerified": false,
       "realmRoles": [
-        "eddi-user"
+        "eddi-user",
+        "offline_access"
       ]
     }
   ],

@@ -183,10 +183,20 @@ public interface ITenantQuotaStore {
      * <p>
      * <strong>Side effect:</strong> resets expired windows (including the monthly
      * cost if a month boundary has passed).
+     * <p>
+     * Like {@link #getQuota}, this cannot report an outage in its return value —
+     * {@code 0.0} reads as "nothing spent" and lets every call through — so a store
+     * that could not be reached throws {@link QuotaAccountingUnavailableException},
+     * which {@link TenantQuotaService#checkCostBudget} turns into a refusal flagged
+     * {@code accountingUnavailable} (fail closed). Every backend must do this the
+     * same way: the stores once disagreed, PostgreSQL returning {@code 0.0} (fail
+     * open) and MongoDB letting the driver exception fail the turn.
      *
      * @param tenantId
      *            tenant identifier
      * @return accumulated monthly cost in USD (0.0 for unknown tenants)
+     * @throws QuotaAccountingUnavailableException
+     *             if the store could not be reached
      */
     double getMonthlyCost(String tenantId);
 

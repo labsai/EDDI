@@ -2,11 +2,12 @@
 <html lang="en" dir="ltr">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/eddi-icon.svg" />
+    <link rel="icon" href="/branding/icon" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="EDDI Workforce — AI teams that solve complex challenges together" />
-    <title>EDDI Workforce</title>
+    <meta name="description" content="%BRAND_PRODUCT_NAME% Workforce — AI teams that solve complex challenges together" />
+    <title>%BRAND_PRODUCT_NAME% Workforce</title>
     <script src="/manage/__auth_config__.js"></script>
+    <script src="/branding/__brand__.js"></script>
     <script type="module" src="/src/main.tsx"></script>
     <style>
       /* Inline loading indicator — visible until React mounts and replaces #root content */
@@ -43,11 +44,14 @@
     </style>
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
+    <!-- First in <body>, so it comes after the stylesheet Vite injects at the end of
+         <head> and the brand's colour tokens win (BrandDelivery). -->
+    <link rel="stylesheet" href="/branding/brand.css" />
     <div id="root">
       <div class="app-loader">
-        <img src="/img/logo_eddi.png" alt="EDDI" />
+        <img src="/branding/logo" alt="%BRAND_PRODUCT_NAME%" />
         <div class="app-loader-spinner"></div>
-        <div class="app-loader-text">Loading EDDI Workforce…</div>
+        <div class="app-loader-text">Loading %BRAND_PRODUCT_NAME% Workforce…</div>
       </div>
     </div>
   </body>

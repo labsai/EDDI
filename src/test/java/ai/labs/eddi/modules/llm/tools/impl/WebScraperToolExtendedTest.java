@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
+import org.jsoup.Jsoup;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +36,14 @@ class WebScraperToolExtendedTest {
     void setUp() {
         mockHttpClient = mock(OutboundHttp.class);
         webScraperTool = new WebScraperTool(mockHttpClient, new HtmlToMarkdownConverter());
+    }
+
+    private static int countOccurrences(String text, String part) {
+        int count = 0;
+        for (int at = text.indexOf(part); at >= 0; at = text.indexOf(part, at + part.length())) {
+            count++;
+        }
+        return count;
     }
 
     private void mockResponse(int statusCode, String body) throws IOException, InterruptedException {
@@ -342,6 +351,46 @@ class WebScraperToolExtendedTest {
             String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "span.item"));
 
             assertTrue(result.contains("[Additional elements truncated]"));
+        }
+
+        @Test
+        @DisplayName("nested matches are listed once, not once per matching ancestor")
+        void nestedMatchesDoNotRepeatDescendantText() throws Exception {
+            // Every matching ancestor copied its whole subtree, so
+            // twenty nested divs returned the innermost text twenty times.
+            String payload = "Z".repeat(1_000);
+            mockResponse(200, "<html><body>" + "<div>".repeat(20) + payload + "</div>".repeat(20) + "</body></html>");
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "div"));
+
+            assertEquals(1, countOccurrences(result, payload), "the nested text must appear once");
+            assertTrue(result.contains("1. " + payload), result.substring(0, Math.min(200, result.length())));
+            assertFalse(result.contains("\n2. "), "an element inside a listed one is part of it, not a second entry");
+        }
+
+        @Test
+        @DisplayName("the listed text is held to one output budget across all elements")
+        void totalOutputIsCapped() throws Exception {
+            StringBuilder html = new StringBuilder("<html><body>");
+            for (int i = 0; i < 20; i++) {
+                html.append("<p>").append("y".repeat(4_000)).append("</p>");
+            }
+            mockResponse(200, html.append("</body></html>").toString());
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "p"));
+
+            long listed = result.chars().filter(c -> c == 'y').count();
+            assertTrue(listed <= WebScraperTool.MAX_SELECTOR_OUTPUT_CHARACTERS, "listed " + listed + " characters");
+            assertTrue(result.contains("[Additional elements truncated]"), "a cut must be said, not silent");
+        }
+
+        @Test
+        @DisplayName("bounded text reads like Element.text() and stops at its cap")
+        void boundedTextMatchesJsoupText() {
+            var element = Jsoup.parse("<div>  Hello <b>big</b>\n world<p>next</p>tail<br>end </div>").selectFirst("div");
+
+            assertEquals(element.text(), WebScraperTool.boundedText(element, 1_000));
+            assertEquals("Hello", WebScraperTool.boundedText(element, 5));
         }
 
         @Test

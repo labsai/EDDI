@@ -256,29 +256,15 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     resolvers.put(apiCall.getName(),
                             toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(memory, toolRequest), targetServerUrl));
 
-                    executors.put(apiCall.getName(), (toolRequest, memoryId) -> {
-                        try {
-                            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
-                            // ToolLoopRunner already ran the agent-test interception for this call;
-                            // tell the executor not to intercept (and count) it again as a rule call.
-                            templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+                    executors.put(apiCall.getName(), new MockAwareToolExecutor() {
+                        @Override
+                        public String execute(ToolExecutionRequest toolRequest, Object memoryId) {
+                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, null);
+                        }
 
-                            // Checked before the wire, not after. A body the model wrote as
-                            // broken JSON cannot bind at any API, so sending it spends a round
-                            // trip to be told something the string itself already says.
-                            String rejection = rejectUnparseableBody(apiCall, templateData);
-                            if (rejection != null) {
-                                return rejection;
-                            }
-
-                            Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
-
-                            String serialized = jsonSerialization.serialize(result);
-                            LOGGER.debugf("Httpcall tool '%s' result: keys=%s size=%d", apiCall.getName(), result.keySet(), serialized.length());
-                            return serialized;
-                        } catch (Exception e) {
-                            LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-                            return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
+                        @Override
+                        public String executeMocked(ToolExecutionRequest toolRequest, ToolMockRegistry.MockResult mock) {
+                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, mock);
                         }
                     });
                 }
@@ -290,6 +276,44 @@ class HttpCallToolsProvider implements ToolSourceProvider {
         }
 
         return new ToolContribution(toolSpecs, executors, Map.of(), endpoints, List.of(), Map.of(), resolvers);
+    }
+
+    /**
+     * One httpcall tool invocation.
+     *
+     * @param mock
+     *            the agent-test mock {@link ToolLoopRunner} chose for this call, or
+     *            null to send the request — the executor answers the call with it
+     *            and runs its response handling on it unchanged
+     */
+    private String executeHttpCallTool(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest, String targetServerUrl,
+                                       ToolMockRegistry.MockResult mock) {
+        try {
+            Map<String, Object> templateData = templateDataFor(memory, toolRequest);
+            // ToolLoopRunner already ran the agent-test interception for this call;
+            // tell the executor not to intercept (and count) it again as a rule call.
+            templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+            if (mock != null) {
+                templateData.put(ToolMockRegistry.TOOL_PATH_MOCK, mock);
+            }
+
+            // Checked before the wire, not after. A body the model wrote as
+            // broken JSON cannot bind at any API, so sending it spends a round
+            // trip to be told something the string itself already says.
+            String rejection = rejectUnparseableBody(apiCall, templateData);
+            if (rejection != null) {
+                return rejection;
+            }
+
+            Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
+
+            String serialized = jsonSerialization.serialize(result);
+            LOGGER.debugf("Httpcall tool '%s' result: keys=%s size=%d", apiCall.getName(), result.keySet(), serialized.length());
+            return serialized;
+        } catch (Exception e) {
+            LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
+            return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
+        }
     }
 
     /**

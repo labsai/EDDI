@@ -62,13 +62,16 @@ public final class UrlValidationUtils {
      * Validates URL safety using a custom host resolver. Returns the resolved
      * addresses for callers that wish to implement socket-level IP pinning.
      * <p>
-     * <b>Note:</b> The default {@code OutboundHttp} code path does NOT pin the
-     * resolved addresses — the JDK {@code HttpClient} re-resolves DNS
-     * independently. This means a short-TTL DNS rebinding attack is theoretically
-     * possible between validation and connect. The risk is accepted because
-     * exploitation requires a cooperating DNS server, a sub-second race window, AND
-     * bypassing per-hop redirect validation. See {@code docs/architecture.md} "DNS
-     * Rebinding" for details.
+     * <b>Note:</b> no HTTP client EDDI uses can be handed these addresses — the JDK
+     * {@code HttpClient} and the Vert.x client both resolve the host again to
+     * connect. The two lookups normally agree because both read the JVM's positive
+     * DNS cache; a rebinding name aims for the instant that cache entry expires
+     * between them. What closes the gap is per path: the Vert.x httpcalls client
+     * checks the address it actually connected to before sending
+     * ({@code HttpClientModule.refusingConnectedPeers}); {@code OutboundHttp}
+     * repeats the check once the response headers are in and discards the response
+     * of a target that has turned private; MCP transports check the URL again on
+     * every request. See {@code docs/security.md} "DNS rebinding".
      *
      * @param url
      *            the URL to validate

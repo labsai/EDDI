@@ -164,6 +164,23 @@ describe("WorkforceSettings — group collaboration parity", () => {
     });
   });
 
+  describe("maxReworks (E2)", () => {
+    it("persists the rework bound, clamped to the backend's 0..5", async () => {
+      const user = userEvent.setup();
+      const put = capturePut();
+      render();
+      await screen.findByDisplayValue("Product Review Panel");
+      await expandSection(user, /Protocol & Resilience/i);
+
+      expect(screen.getByTestId("settings-max-reworks")).toHaveValue(0);
+      fireEvent.change(screen.getByTestId("settings-max-reworks"), { target: { value: "9" } });
+      await user.click(screen.getByRole("button", { name: /Save Changes/i }));
+
+      await waitFor(() => expect(put.body).toBeDefined());
+      expect(put.body!.maxReworks).toBe(5);
+    });
+  });
+
   describe("dynamic agents (I7 / F18)", () => {
     /**
      * `LifecyclePolicy` is the one group enum with Jackson's @JsonValue, so the

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
 import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
@@ -21,6 +22,9 @@ import io.vertx.core.net.SocketAddress;
 import io.vertx.core.tracing.TracingPolicy;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
+import io.vertx.ext.web.client.impl.ClientPhase;
+import io.vertx.ext.web.client.impl.HttpContext;
+import io.vertx.ext.web.client.impl.WebClientInternal;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
@@ -76,10 +80,103 @@ public class HttpClientModule {
         // live jar that was the actual replay vector. If a future feature needs
         // cookies, scope a WebClientSession per conversation/principal rather than
         // sharing one here.
-        WebClient webClient = WebClient.wrap(
-                guardedHttpClient(vertx, options, OutboundTargetPolicy.parseAllowedHosts(allowedHosts.orElse(""))), options);
+        Set<String> allowList = OutboundTargetPolicy.parseAllowedHosts(allowedHosts.orElse(""));
+        WebClient webClient = WebClient.wrap(guardedHttpClient(vertx, options, allowList), options);
+        ((WebClientInternal) webClient).addInterceptor(refusingConnectedPeers(ssrfProtectionEnabled, allowList));
 
         return new VertxHttpClient(vertx, webClient, webClient);
+    }
+
+    /**
+     * Whether {@value OutboundTargetPolicy#CONFIG_KEY} is on. Field-injected so the
+     * tests that build this module by hand get the shipped default.
+     */
+    @ConfigProperty(name = OutboundTargetPolicy.CONFIG_KEY, defaultValue = "false")
+    boolean ssrfProtectionEnabled;
+
+    /**
+     * A web-client interceptor that checks the address each request is <em>actually
+     * connected to</em>, before a byte of the request is written (DNS rebinding).
+     * <p>
+     * {@code ApiCallExecutor} validates the target by resolving its host through
+     * {@link InetAddress}; the client then resolves the host again when it opens a
+     * connection. Both lookups normally hit the JVM's positive DNS cache
+     * ({@code quarkus.vertx.use-async-dns} is off, so Vert.x resolves through the
+     * JDK), but a cache entry expiring between the two lets a rebinding name pass
+     * the check as a public address and connect to a private one. In the
+     * {@code SEND_REQUEST} phase the connection exists — pooled or fresh, first
+     * request or redirect hop — and nothing has been sent yet, so its remote
+     * address is the one fact the check can no longer be raced on:
+     * <ul>
+     * <li>a cloud-metadata or link-local peer is refused always, allow-list or not,
+     * as {@link UrlValidationUtils#rejectCloudMetadataTarget} refuses it by
+     * name;</li>
+     * <li>with protection on, a loopback, private or otherwise internal peer is
+     * refused unless the request's host is on
+     * {@value OutboundTargetPolicy#ALLOWED_HOSTS_KEY} — the rule
+     * {@code ApiCallExecutor} applies to the URL.</li>
+     * </ul>
+     * A request whose peer cannot be read is refused with protection on (it cannot
+     * be vouched for) and let through with it off.
+     */
+    static Handler<HttpContext<?>> refusingConnectedPeers(boolean ssrfProtectionEnabled, Set<String> allowedHosts) {
+        return context -> {
+            if (context.phase() == ClientPhase.SEND_REQUEST) {
+                HttpClientRequest request = context.clientRequest();
+                String refusal = connectedPeerRefusal(connectedAddress(request), request != null ? request.getHost() : null,
+                        request != null ? request.getPort() : -1, request != null && isHttps(request), ssrfProtectionEnabled,
+                        allowedHosts);
+                if (refusal != null) {
+                    context.fail(new IllegalArgumentException(refusal));
+                    return;
+                }
+            }
+            context.next();
+        };
+    }
+
+    private static boolean isHttps(HttpClientRequest request) {
+        String uri = request.absoluteURI();
+        return uri != null && uri.toLowerCase(Locale.ROOT).startsWith("https");
+    }
+
+    /**
+     * Why a request to {@code host} that connected to {@code peerAddress} must not
+     * be sent, or {@code null} when it may.
+     *
+     * @param peerAddress
+     *            the IP literal the connection's remote end has, or {@code null}
+     *            when unknown
+     */
+    static String connectedPeerRefusal(String peerAddress, String host, int port, boolean https, boolean ssrfProtectionEnabled,
+                                       Set<String> allowedHosts) {
+        if (peerAddress == null || peerAddress.isBlank()) {
+            return ssrfProtectionEnabled ? "Request refused: the address the connection reached cannot be read, so it cannot be checked" : null;
+        }
+        String bare = peerAddress.startsWith("[") && peerAddress.endsWith("]") ? peerAddress.substring(1, peerAddress.length() - 1) : peerAddress;
+        // An IPv6 link-local peer carries its zone ("fe80::1%eth0"); the zone says
+        // nothing about where the address sits, and would only stop the parse.
+        int zone = bare.indexOf('%');
+        if (zone > 0) {
+            bare = bare.substring(0, zone);
+        }
+        InetAddress peer;
+        try {
+            peer = InetAddress.ofLiteral(bare);
+        } catch (IllegalArgumentException e) {
+            return ssrfProtectionEnabled ? "Request refused: the connection's remote address is not an IP address: " + bare : null;
+        }
+        if (UrlValidationUtils.isMetadataAddress(peer)) {
+            return "Request refused: " + host + " connected to " + bare + ", a cloud instance-metadata or link-local address";
+        }
+        if (!ssrfProtectionEnabled || isAllowListed(host, port, https, allowedHosts)) {
+            return null;
+        }
+        if (UrlValidationUtils.isPrivateAddress(peer)) {
+            return "Request refused: " + host + " connected to " + bare + ", a private/internal address, which "
+                    + OutboundTargetPolicy.CONFIG_KEY + "=true refuses (the name resolved differently when it was validated)";
+        }
+        return null;
     }
 
     /**
@@ -256,14 +353,23 @@ public class HttpClientModule {
     }
 
     private static boolean isAllowListed(String bareHost, RequestOptions next, Set<String> allowedHosts) {
-        if (allowedHosts == null || allowedHosts.isEmpty()) {
+        Integer port = next.getPort();
+        return isAllowListed(bareHost, port != null ? port : -1, Boolean.TRUE.equals(next.isSsl()), allowedHosts);
+    }
+
+    /**
+     * Whether {@code host} — bare or in IPv6 brackets — or {@code host:port} (a
+     * missing port meaning the scheme's default) is on the allow-list.
+     */
+    static boolean isAllowListed(String host, int port, boolean https, Set<String> allowedHosts) {
+        if (host == null || allowedHosts == null || allowedHosts.isEmpty()) {
             return false;
         }
-        String host = bareHost.toLowerCase(Locale.ROOT);
-        Integer port = next.getPort();
-        int effective = port != null && port > 0 ? port : Boolean.TRUE.equals(next.isSsl()) ? 443 : 80;
-        return allowedHosts.contains(host) || allowedHosts.contains(host + ":" + effective)
-                || allowedHosts.contains("[" + host + "]:" + effective);
+        String lower = host.toLowerCase(Locale.ROOT);
+        String bare = lower.startsWith("[") && lower.endsWith("]") ? lower.substring(1, lower.length() - 1) : lower;
+        int effective = port > 0 ? port : https ? 443 : 80;
+        return allowedHosts.contains(bare) || allowedHosts.contains(bare + ":" + effective)
+                || allowedHosts.contains("[" + bare + "]:" + effective);
     }
 
     /**

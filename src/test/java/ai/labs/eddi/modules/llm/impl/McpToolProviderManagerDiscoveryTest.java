@@ -120,6 +120,25 @@ class McpToolProviderManagerDiscoveryTest {
         }
 
         @Test
+        @DisplayName("a cache hit is validated again: a URL that now resolves privately gets none of its cached tools")
+        void cacheHitIsRevalidated() {
+            var manager = spyManager(McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS);
+            doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
+                    .when(manager).fetchToolsFromServer(any());
+
+            assertEquals(1, manager.discoverTools(List.of(config("a", URL_A))).toolSpecs().size());
+            // The name rebinds: the same URL now fails the SSRF check.
+            doThrow(new IllegalArgumentException("URL resolves to a private/internal address which is not allowed: server-a.example.com"))
+                    .when(manager).validateServerUrl(URL_A);
+            var second = manager.discoverTools(List.of(config("a", URL_A)));
+
+            assertTrue(second.toolSpecs().isEmpty(), "cached executors must not outlive the URL check");
+            assertTrue(second.executors().isEmpty());
+            assertEquals(List.of(McpFailureKind.INVALID_CONFIGURATION), second.failures().stream().map(McpServerFailure::kind).toList());
+            verify(manager, times(1)).fetchToolsFromServer(any());
+        }
+
+        @Test
         @DisplayName("an expired cache entry is re-discovered (TTL is honoured, not 'cache forever')")
         void expiredEntryIsRediscovered() {
             var manager = spyManager(0L); // every entry is stale immediately

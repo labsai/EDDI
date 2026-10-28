@@ -665,13 +665,23 @@ server {
     # year. No includeSubDomains: sslip.io names are not ours to bind.
     add_header Strict-Transport-Security "max-age=31536000" always;
 
+    # Keycloak trusts the X-Forwarded-* headers (KC_PROXY_HEADERS=xforwarded in
+    # the override below), so every one of them is SET here, never passed on:
+    # a client-supplied X-Forwarded-Host or -Port would otherwise choose the
+    # host and port of the URLs in Keycloak's discovery response, and an
+    # appended X-Forwarded-For would let the caller pick the address Keycloak
+    # records for it in login events.
     location / {
         proxy_pass         http://localhost:8180;
         proxy_http_version 1.1;
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
-        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-For \$remote_addr;
         proxy_set_header   X-Forwarded-Proto https;
+        proxy_set_header   X-Forwarded-Host \$host;
+        proxy_set_header   X-Forwarded-Port 443;
+        # No path prefix here; an empty value makes nginx drop the client's.
+        proxy_set_header   X-Forwarded-Prefix "";
         proxy_buffer_size  128k;
         proxy_buffers      4 256k;
     }
@@ -712,6 +722,13 @@ services:
   keycloak:
     environment:
       KC_HOSTNAME: "https://\${KC_DOMAIN}"
+      # docker-compose.auth.yml sets KC_HOSTNAME_BACKCHANNEL_DYNAMIC, which builds
+      # the token, jwks and userinfo URLs in Keycloak's discovery document from
+      # the request - plain http behind this nginx. Trusting the X-Forwarded-*
+      # headers nginx sets makes them https; without it MCP clients (Claude Code)
+      # refuse to send credentials to the http token endpoint. Keycloak listens
+      # on localhost only, so nothing can reach it without passing nginx.
+      KC_PROXY_HEADERS: "xforwarded"
 OVERRIDE_EOF
 
   # Register the override in the eddi CLI config so "eddi restart" uses it too

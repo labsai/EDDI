@@ -283,6 +283,26 @@ export const READ_ENDPOINTS: readonly string[] = [
   // nothing the agent read above does not. "Who changed this agent's prompt?" is
   // the question an admin asks first after a misbehaving deploy.
   "GET /auditstore/admin-actions",
+  // Conversation ratings (EDDI 6.6.0+): what the people chatting thought of an
+  // agent — the list, the aggregates and the triage-queue count. "How is agent X
+  // rated since version N?" is answered from the summary grouped by agentVersion.
+  // The backend scopes every one of them to the caller exactly as for the
+  // Manager's Feedback page (an administrator sees every agent; anyone else must
+  // name an agent they hold EDIT on), and the operator's tool calls run as the
+  // signed-in admin under caller-identity auth.
+  //
+  // Deliberately NOT granted:
+  // - `PATCH /ratings/{ratingId}` and `POST /ratings/review`: triage records the
+  //   CALLER as the reviewer. Under caller-identity auth that is the admin who
+  //   approved, but the judgement "I looked at this feedback" would be the
+  //   model's, and a bulk review clears the whole attention queue in one call.
+  //   Reviewing stays a human action on the Feedback page.
+  // - `GET /ratings/export`: a `text/csv` download of up to 100,000 rows,
+  //   userIds included for an admin — nothing a chat answer needs, and the
+  //   generated tool would hand the whole file to the model.
+  "GET /ratings",
+  "GET /ratings/summary",
+  "GET /ratings/attention-count",
 ] as const;
 
 /**
@@ -437,6 +457,10 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   // grants, then runs scripted conversations whose tool calls are mocked and fail
   // closed. A write, so it is gated like the deploy it performs.
   "POST /agenttests/runs",
+  // Cancelling one stops the run (and deletes its test conversations) — the
+  // counterpart of starting it, with the same rights and no request body. Gated:
+  // it ends conversations, and a run someone else is relying on is theirs to stop.
+  "POST /agenttests/runs/{runId}/cancel",
   "POST /schedulestore/schedules/{scheduleId}/disable",
   "POST /groupstore/groups",
   "POST /administration/agents/setup",
@@ -747,6 +771,17 @@ export function grantsKnowledgeBaseBinding(endpoints: readonly string[]): boolea
     set.has("PUT /workflowstore/workflows/{id}") &&
     set.has("PUT /llmstore/llms/{id}")
   );
+}
+
+/**
+ * Whether the conversation-rating reads are granted — the list, the summary and
+ * the attention count. One predicate for all three: the prompt's ratings section
+ * uses each of them, and a section describing a read the agent lacks would send
+ * the model calling a tool that does not exist.
+ */
+export function grantsRatingReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return set.has("GET /ratings") && set.has("GET /ratings/summary") && set.has("GET /ratings/attention-count");
 }
 
 /** Whether an upload source's stored files can be listed. */

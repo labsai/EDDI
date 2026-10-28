@@ -21,13 +21,24 @@ import {
   Hand,
   NotebookPen,
   Gauge,
+  Repeat,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
 import type { Agent, ChannelConnector } from "@/lib/api/agents";
-import { MAX_NOTIFY_RECIPIENTS, MAX_PAUSE_REASON_LENGTH, type AgentHitlConfig, type ToolApprovalsConfig } from "@/lib/api/hitl";
+import {
+  DEFAULT_MAX_REVISIONS_PER_TURN,
+  MAX_NOTIFY_RECIPIENTS,
+  MAX_PAUSE_REASON_LENGTH,
+  MAX_REVISIONS_PER_TURN,
+  MIN_REVISIONS_PER_TURN,
+  type AgentHitlConfig,
+  type HitlRejectionAction,
+  type ToolApprovalsConfig,
+} from "@/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
+import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { EditorSection } from "./editor-section";
@@ -1067,6 +1078,144 @@ export const LimitsSection = memo(function LimitsSection({
   );
 });
 
+// ─── Self-continuation ──────────────────────────────────────────────────────
+
+/**
+ * `maxContinuations` and `continuationInput`: how many turns one conversation
+ * may start itself with the reserved `CONTINUE_CONVERSATION` action, and the
+ * literal input those turns get. A section of its own beside Limits: it is a
+ * bound on the whole agent, and its count is validated apart from the cost box.
+ */
+export const ContinuationSection = memo(function ContinuationSection({
+  agent,
+  onChange,
+  disabled = false,
+  modified = false,
+  onValidityChange,
+}: AgentSectionProps & {
+  /** Told whether the count in the box is unusable; the page refuses to save while it is. */
+  onValidityChange?: (invalid: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const inputId = `${id}-input`;
+  const max = agent.maxContinuations;
+
+  const [text, setText] = useState(() => (max === undefined ? "" : String(max)));
+  // A number input reports half-typed text ("5e", "-") as "" — which would read as
+  // "off" and silently drop the field while the box still shows the text — so it
+  // is tracked apart, as in LimitsSection.
+  const [badInput, setBadInput] = useState(false);
+  const parsed = badInput ? { ok: false as const } : parseMaxContinuations(text);
+  const invalid = !parsed.ok;
+  useEffect(() => {
+    onValidityChange?.(invalid);
+    return () => onValidityChange?.(false);
+  }, [invalid, onValidityChange]);
+  useEffect(() => {
+    // Follow the draft when it changes underneath (Discard, a save, a version switch).
+    setText((prev) => {
+      const p = parseMaxContinuations(prev);
+      if (p.ok && p.value === max) return prev;
+      setBadInput(false);
+      return max === undefined ? "" : String(max);
+    });
+  }, [max]);
+
+  function commitMax(next: string, bad: boolean) {
+    setText(next);
+    setBadInput(bad);
+    const p = bad ? ({ ok: false } as const) : parseMaxContinuations(next);
+    if (!p.ok) return;
+    // Off is the field being absent, never a stored 0 the author did not type.
+    const { maxContinuations: _unset, ...rest } = agent;
+    void _unset;
+    onChange(p.value === undefined ? rest : { ...rest, maxContinuations: p.value });
+  }
+
+  function commitInput(next: string) {
+    const value = next.slice(0, MAX_CONTINUATION_INPUT_LENGTH);
+    const { continuationInput: _unset, ...rest } = agent;
+    void _unset;
+    onChange(value === "" ? rest : { ...rest, continuationInput: value });
+  }
+
+  return (
+    <EditorSection
+      label={t("agentDetail.continuation", "Self-continuation")}
+      icon={Repeat}
+      accent="text-sky-500"
+      variant="card"
+      modified={modified}
+      defaultOpen={max !== undefined}
+    >
+      <div className="space-y-3" data-testid="continuation-section">
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t(
+            "agentDetail.continuationDesc",
+            "Lets a behavior rule start the next turn of the same conversation with the reserved CONTINUE_CONVERSATION action, without user input — a long job runs as many ordinary turns. Each continuation runs under the turn deadline, and the cost cap above bounds all of them together.",
+          )}
+        </p>
+        <div>
+          <label htmlFor={id} className="mb-1 block text-xs font-medium text-foreground">
+            {t("agentDetail.maxContinuations", "Max continuations per conversation")}
+          </label>
+          <input
+            id={id}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={MAX_CONTINUATIONS}
+            step={1}
+            value={text}
+            placeholder={t("agentDetail.continuationOff", "Off")}
+            disabled={disabled}
+            onChange={(e) => commitMax(e.target.value, e.target.validity?.badInput === true)}
+            aria-invalid={invalid || undefined}
+            aria-describedby={hintId}
+            className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 aria-invalid:border-destructive"
+            data-testid="max-continuations"
+          />
+          {parsed.ok ? (
+            <p id={hintId} className="mt-1 text-[10px] text-muted-foreground">
+              {t("agentDetail.maxContinuationsHint", "Empty or 0 = off. Counted over the whole conversation.")}
+            </p>
+          ) : (
+            <p id={hintId} className="mt-1 text-[10px] text-destructive" data-testid="max-continuations-invalid">
+              {t("agentDetail.maxContinuationsInvalid", "Enter a whole number from 0 to {{max}}, or leave empty for off.", {
+                max: MAX_CONTINUATIONS,
+              })}
+            </p>
+          )}
+        </div>
+        <div>
+          <label htmlFor={inputId} className="mb-1 block text-xs font-medium text-foreground">
+            {t("agentDetail.continuationInput", "Continuation input")}
+          </label>
+          <input
+            id={inputId}
+            type="text"
+            value={agent.continuationInput ?? ""}
+            maxLength={MAX_CONTINUATION_INPUT_LENGTH}
+            placeholder={t("agentDetail.continuationInputPlaceholder", "Empty input")}
+            disabled={disabled}
+            onChange={(e) => commitInput(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            data-testid="continuation-input"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {t(
+              "agentDetail.continuationInputHint",
+              "The user input of every continuation turn, used as written — not a template. A continuation turn can read its number from {context.selfContinuation.number}.",
+            )}
+          </p>
+        </div>
+      </div>
+    </EditorSection>
+  );
+});
+
 // ─── Session Management ────────────────────────────────────────────────────
 
 const SNAPSHOT_TRIGGERS = ["before_tool", "before_action"] as const;
@@ -1174,7 +1323,9 @@ export const HitlConfigSection = memo(function HitlConfigSection({
         return null;
     }
   }
-  const recipientsError = notifyOn ? recipientsProblem() : null;
+  // Only a field the user can see can block the save: switching HITL off hides
+  // the recipients (and drops hitlConfig), whatever notifyOn last said.
+  const recipientsError = enabled && notifyOn ? recipientsProblem() : null;
   const recipientsInvalid = recipientsError !== null;
   useEffect(() => {
     onValidityChange?.(recipientsInvalid);
@@ -1286,6 +1437,67 @@ export const HitlConfigSection = memo(function HitlConfigSection({
                     ? t("agentDetail.hitlTimeoutInvalid", "A finite policy needs a positive ISO-8601 duration, e.g. PT15M.")
                     : t("agentDetail.hitlTimeoutHint", "e.g. PT30S, PT15M, PT2H.")}
                 </p>
+              </div>
+            )}
+
+            {/* onRejection (E2) — what a rejection with a note does on a rule pause. */}
+            <div>
+              <label htmlFor="hitl-on-rejection" className="mb-1 block text-[10px] text-muted-foreground">
+                {t("agentDetail.hitlOnRejection", "When a reviewer rejects")}
+              </label>
+              <select
+                id="hitl-on-rejection"
+                value={hitl.onRejection ?? "SKIP"}
+                onChange={(e) => {
+                  const onRejection = e.target.value as HitlRejectionAction;
+                  // SKIP is the default: store nothing rather than the default, and
+                  // drop the bound that only REVISE reads.
+                  patchHitl(
+                    onRejection === "REVISE"
+                      ? { onRejection, maxRevisionsPerTurn: hitl.maxRevisionsPerTurn ?? DEFAULT_MAX_REVISIONS_PER_TURN }
+                      : { onRejection: null, maxRevisionsPerTurn: null },
+                  );
+                }}
+                disabled={disabled}
+                className="w-full appearance-none rounded-lg border border-input bg-background px-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                data-testid="hitl-on-rejection"
+              >
+                <option value="SKIP">{t("agentDetail.hitlOnRejectionSkip", "Skip the rest of the turn and show the note")}</option>
+                <option value="REVISE">{t("agentDetail.hitlOnRejectionRevise", "Have the model revise its answer with the note")}</option>
+              </select>
+              <p className="mt-1 text-[10px] text-muted-foreground">
+                {t(
+                  "agentDetail.hitlOnRejectionHint",
+                  "Revise applies to a rule pause after the model answered, and only to a rejection with a note. Rejected tool calls already go back to the model with the note.",
+                )}
+              </p>
+            </div>
+
+            {hitl.onRejection === "REVISE" && (
+              <div>
+                <label htmlFor="hitl-max-revisions" className="mb-1 block text-[10px] text-muted-foreground">
+                  {t("agentDetail.hitlMaxRevisions", "Revisions per turn")}
+                </label>
+                <input
+                  id="hitl-max-revisions"
+                  type="number"
+                  min={MIN_REVISIONS_PER_TURN}
+                  max={MAX_REVISIONS_PER_TURN}
+                  step={1}
+                  value={hitl.maxRevisionsPerTurn ?? DEFAULT_MAX_REVISIONS_PER_TURN}
+                  onChange={(e) => {
+                    // min/max bound the spinner, not a pasted value: clamp to what
+                    // the backend accepts so the save cannot be refused.
+                    const v = e.currentTarget.valueAsNumber;
+                    if (!Number.isFinite(v)) return;
+                    patchHitl({
+                      maxRevisionsPerTurn: Math.min(MAX_REVISIONS_PER_TURN, Math.max(MIN_REVISIONS_PER_TURN, Math.trunc(v))),
+                    });
+                  }}
+                  disabled={disabled}
+                  className="h-8 w-24 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  data-testid="hitl-max-revisions"
+                />
               </div>
             )}
 

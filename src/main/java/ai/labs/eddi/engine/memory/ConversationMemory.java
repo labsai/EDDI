@@ -8,9 +8,12 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -97,6 +100,12 @@ public class ConversationMemory implements IConversationMemory {
     private transient TurnDeadline turnDeadline;
     /** The agent's per-conversation cost ceiling; NOT persisted. */
     private transient Double maxCostPerConversationUsd;
+    /**
+     * In-flight paid calls held against the ceiling; transient, never persisted.
+     */
+    private final transient SpendReservations spendReservations = new SpendReservations();
+    /** The agent's self-continuation settings; NOT persisted. */
+    private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -158,10 +167,70 @@ public class ConversationMemory implements IConversationMemory {
      * loaded ({@code ConversationMemoryUtilities.convertConversationMemorySnapshot}
      * restores the redo cache first), so clearing there wiped the redo history on
      * every load and every redo through the API was refused.
+     * <p>
+     * <b>Spend is not undone.</b> The steps dropped here carried money that was
+     * really spent, and the agent's {@code maxCostPerConversationUsd} reads it from
+     * the steps (every step's {@code audit:cost}). Dropping them silently made say
+     * → undo → say discard the spend — an unlimited conversation behind a public
+     * endpoint. So the new step inherits the abandoned timeline's total under
+     * {@link MemoryKeys#AUDIT_DISCARDED_COST}. (Their tenant charge still pending
+     * is not lost either: {@link #undoLastStep()} already moved it onto the step
+     * that became current, which is now this new step's predecessor.)
      */
     public IConversationStep startNextStep() {
+        double discardedSpend = 0.0;
+        for (IConversationStep abandoned : redoCache) {
+            discardedSpend += recordedSpend(abandoned);
+        }
         redoCache.clear();
-        return startNextStep(null);
+        IConversationStep step = startNextStep(null);
+        if (discardedSpend > 0.0) {
+            currentStep.storeData(new Data<>(MemoryKeys.AUDIT_DISCARDED_COST, discardedSpend));
+        }
+        return step;
+    }
+
+    /**
+     * Keep {@code TurnCostMeter}'s owed tenant charge on the current step when undo
+     * or redo changes which step that is.
+     * <p>
+     * {@code audit:pending_cost} is read from the newest step that has one: the
+     * step being settled, else the latest earlier step. Undo and redo reorder that
+     * history, so a value left behind on the step they move out of the way would be
+     * invisible (undo: it sits in the redo cache) or stale (redo: the restored
+     * step's own value predates whatever a rerun recorded on the step it replaces).
+     * Both are real money: a rerun after an undo charged an already-recovered
+     * amount a second time, and a rerun's own outage charge was lost to the older
+     * value of the step a redo brought back. The step moved aside always holds the
+     * newest value of the two, so it is copied onto the new current step — a
+     * {@code 0.0} included, which says an older charge was recovered. The undo and
+     * redo writes are full replaces, so the copy is persisted.
+     */
+    private void carryPendingCost(IConversationStep from) {
+        IData<Object> pending = from != null ? from.getData(MemoryKeys.AUDIT_PENDING_COST) : null;
+        if (pending != null && pending.getResult() instanceof Number owed) {
+            currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, owed.doubleValue()));
+        }
+    }
+
+    /**
+     * The priced spend a step records: its own {@link MemoryKeys#AUDIT_COST} plus
+     * the {@link MemoryKeys#AUDIT_DISCARDED_COST} it inherited from an abandoned
+     * timeline. Non-finite and negative values count as nothing — one NaN would
+     * otherwise disable every ceiling compared against the total.
+     */
+    public static double recordedSpend(IConversationStep step) {
+        if (step == null) {
+            return 0.0;
+        }
+        return nonNegative(step.getData(MemoryKeys.AUDIT_COST)) + nonNegative(step.getData(MemoryKeys.AUDIT_DISCARDED_COST));
+    }
+
+    private static double nonNegative(IData<Object> data) {
+        if (data != null && data.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) && n.doubleValue() > 0.0) {
+            return n.doubleValue();
+        }
+        return 0.0;
     }
 
     IConversationStep startNextStep(ConversationOutput conversationOutput) {
@@ -192,6 +261,7 @@ public class ConversationMemory implements IConversationMemory {
         conversationOutputs.pop();
         forgetPersistedStepCount();
         applyPropertyChanges(undone, true);
+        carryPendingCost(undone);
     }
 
     @Override
@@ -210,11 +280,13 @@ public class ConversationMemory implements IConversationMemory {
             throw new IllegalStateException();
         }
 
+        IConversationStep replaced = currentStep;
         previousSteps.push(currentStep);
         currentStep = (IWritableConversationStep) redoCache.pop();
         conversationOutputs.push(currentStep.getConversationOutput());
         applyPropertyChanges(currentStep, false);
         forgetPersistedStepCount();
+        carryPendingCost(replaced);
     }
 
     /**
@@ -512,6 +584,22 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public SpendReservations getSpendReservations() {
+        return spendReservations;
+    }
+
+    @Override
+    public ContinuationPolicy getContinuationPolicy() {
+        return continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+    }
+
+    @Override
+    public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
+        this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+
+    }
+
+    @Override
     public void setEventSink(ConversationEventSink eventSink) {
         this.eventSink = eventSink;
     }
@@ -711,6 +799,31 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlResumeDecision(HitlDecision decision) {
         this.hitlResumeDecision = decision;
+    }
+
+    // onRejection: REVISE — the turn's policy and its latest revisable answer.
+    // Neither is persisted from here (see HitlRevisionCandidate#STEP_KEY).
+    private transient HitlRevisionPolicy hitlRevisionPolicy;
+    private transient HitlRevisionCandidate hitlRevisionCandidate;
+
+    @Override
+    public HitlRevisionPolicy getHitlRevisionPolicy() {
+        return hitlRevisionPolicy;
+    }
+
+    @Override
+    public void setHitlRevisionPolicy(HitlRevisionPolicy policy) {
+        this.hitlRevisionPolicy = policy;
+    }
+
+    @Override
+    public HitlRevisionCandidate getHitlRevisionCandidate() {
+        return hitlRevisionCandidate;
+    }
+
+    @Override
+    public void setHitlRevisionCandidate(HitlRevisionCandidate candidate) {
+        this.hitlRevisionCandidate = candidate;
     }
 
     public static final class ConversationStepStack implements IConversationStepStack {

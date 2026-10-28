@@ -93,7 +93,7 @@ Within a group, rules are evaluated in order and — by default (`executionStrat
 
 ### Quick reply expressions must be unique identifiers
 
-Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, and `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)). Use dedicated identifiers:
+Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)), and `CONTINUE_CONVERSATION` (the agent starts its own next turn; off unless the agent sets `maxContinuations` — see [Long Jobs](long-jobs.md)). Use dedicated identifiers:
 
 ```
 ❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)
@@ -229,6 +229,44 @@ The output system supports an `inputField` output type that tells the UI to swit
 Supported `subType` values: `"password"`, `"text"`, `"email"`. When the UI receives an `inputField` in the output array, it replaces the standard text input with the appropriate specialized field for that turn. The field reverts to normal text input on the next response.
 
 > **Key pattern**: Add the `inputField` output item alongside regular `text` outputs in the same action's output set. The text explains what the user should enter, and the `inputField` controls how the input is rendered.
+
+## Conversation Ratings (`ratingConfig`)
+
+`ratingConfig` on the **agent** configuration (not a workflow extension) lets the
+people chatting rate the conversation and, optionally, single replies. Absent —
+the default — means off, and so does a `ratingConfig` without `"enabled": true`.
+See [Conversation Ratings](conversation-ratings.md) for the API and analytics.
+
+```json
+"ratingConfig": {
+  "enabled": true,
+  "scale": "FIVE_STAR",
+  "conversationRating": { "enabled": true, "promptText": "How did we do?", "askOnEnd": true, "askAfterTurns": 0 },
+  "messageRating": { "enabled": true },
+  "comment": { "enabled": true, "maxLength": 1000, "askBelowScore": 0.6 },
+  "reasonTags": ["Wrong answer", "Too slow", "Helpful"],
+  "ratingWindowHours": 168
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `enabled` | `false` | Ratings on for this version |
+| `scale` | `THUMBS` | `THUMBS` or `FIVE_STAR`, for the conversation rating. An unknown value fails the save |
+| `conversationRating.enabled` | `true` | The conversation as a whole may be rated |
+| `conversationRating.promptText` | client wording | The card's question, ≤ 500 characters |
+| `conversationRating.askOnEnd` | `true` | Chat client asks when the conversation ends |
+| `conversationRating.askAfterTurns` | `0` (never) | Also offer the card after N agent replies |
+| `messageRating.enabled` | `false` | Thumbs under each agent reply (always thumbs) |
+| `comment.enabled` | `false` | A free-text comment is accepted |
+| `comment.maxLength` | `1000` | 1–4000 characters |
+| `comment.askBelowScore` | `0` (always) | Open the comment box only below this normalized score (presentation only) |
+| `reasonTags` | `[]` | Closed list, ≤ 20 tags of ≤ 60 characters, no duplicates; any other tag is refused |
+| `ratingWindowHours` | `168` | Ratings accepted until N hours after the conversation's last activity; `0` = no limit |
+
+The checks are applied against the agent **version the conversation runs on**:
+enabling ratings in v3 does not let people rate conversations that ran on v2. A
+save with out-of-range values answers 400 naming the field.
 
 ## ZIP Structure for Agent Import
 

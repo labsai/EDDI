@@ -15,11 +15,13 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
+import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.IAnswerRevisingTask;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -35,12 +37,14 @@ import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailOutcome;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.JudgeGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.Reprompter;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -49,8 +53,12 @@ import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -87,7 +95,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * </ul>
  */
 @ApplicationScoped
-public class LlmTask implements ILifecycleTask {
+public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
     public static final String ID = "ai.labs.llm";
     public static final TaskId TASK_ID = new TaskId(ID);
 
@@ -219,6 +227,19 @@ public class LlmTask implements ILifecycleTask {
     @ConfigProperty(name = "eddi.llm.tool-loop.streaming.enabled", defaultValue = "true")
     boolean toolLoopStreamingEnabled;
 
+    /**
+     * Cap (bytes) of the frozen request an answer keeps for a human revision
+     * ({@code hitlConfig.onRejection: REVISE}). It is stored in the paused step, so
+     * it is far below the tool-pause cap; an answer over it has nothing to revise
+     * and a rejection skips as under SKIP. Initialized for the direct-construction
+     * unit tests.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.hitl.revision.transcript-max-bytes", defaultValue = "262144")
+    int revisionTranscriptMaxBytes = 262_144;
+
+    private final ChatTranscriptCodec revisionTranscriptCodec = new ChatTranscriptCodec();
+
     private static final Logger LOGGER = Logger.getLogger(LlmTask.class);
 
     @Inject
@@ -290,23 +311,7 @@ public class LlmTask implements ILifecycleTask {
                 return;
             }
 
-            var templateDataObjects = memoryItemConverter.convert(memory);
-
-            // Inject prompt snippets into template data — makes the snippets this
-            // agent may use available as {{snippets.<name>}} in system prompts. Scoped
-            // to the agent's workspace: getAll() would hand every workspace's snippets
-            // to every agent, and let a same-named snippet elsewhere replace this one's.
-            Map<String, Object> snippets = promptSnippetService.getForAgent(memory.getAgentId());
-            if (!snippets.isEmpty()) {
-                templateDataObjects.put("snippets", snippets);
-            }
-
-            // Inject global variables into template data — auto-available as
-            // {{vars.<key>}} in system prompts and parameters
-            Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
-            if (!globalVars.isEmpty()) {
-                templateDataObjects.put("vars", globalVars);
-            }
+            var templateDataObjects = templateData(memory);
 
             var actions = latestData.getResult();
             if (actions == null) {
@@ -350,9 +355,50 @@ public class LlmTask implements ILifecycleTask {
                 }
             }
 
+        } catch (ToolApprovalRequiredException pause) {
+            // A tool loop paused for approval. What it spent up to here really happened
+            // but no result will carry it, so record it on the step now: the pause
+            // snapshot persists the step, the pause's settle meters it, and the resume
+            // counts it once through audit:cost — in its spend preflight, its loop
+            // ceiling and its total. Recorded here and only here, for the live path and
+            // a resume that pauses again alike.
+            recordPrePauseSpend(memory.getCurrentStep(), pause);
+            throw pause;
         } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException | IOException | LifecycleException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * The template data every task renders against: the memory, plus the prompt
+     * snippets this agent may use ({@code {snippets.<name>}}, scoped to the agent's
+     * workspace: getAll() would hand every workspace's snippets to every agent, and
+     * let a same-named snippet elsewhere replace this one's) and the global
+     * variables ({@code {vars.<key>}}).
+     */
+    private Map<String, Object> templateData(IConversationMemory memory) {
+        var templateDataObjects = memoryItemConverter.convert(memory);
+        Map<String, Object> snippets = promptSnippetService.getForAgent(memory.getAgentId());
+        if (!snippets.isEmpty()) {
+            templateDataObjects.put("snippets", snippets);
+        }
+        Map<String, Object> globalVars = globalVariableResolver.getTemplateData();
+        if (!globalVars.isEmpty()) {
+            templateDataObjects.put("vars", globalVars);
+        }
+        return templateDataObjects;
+    }
+
+    /**
+     * Folds a pausing run's spend so far into the step's {@code audit:token_usage}
+     * and {@code audit:cost} (see {@link ToolApprovalRequiredException#addSpend}).
+     */
+    private void recordPrePauseSpend(IWritableConversationStep currentStep, ToolApprovalRequiredException pause) {
+        if (currentStep == null) {
+            return;
+        }
+        accumulateTokenUsage(currentStep, pause.getTokenUsageSoFar());
+        accumulateCost(currentStep, pause.getCostSoFarUsd());
     }
 
     /**
@@ -361,6 +407,11 @@ public class LlmTask implements ILifecycleTask {
     private void executeTask(IConversationMemory memory, Task task, IWritableConversationStep currentStep, Map<String, Object> templateDataObjects,
                              int llmTaskIndex)
             throws ITemplatingEngine.TemplateEngineException, ChatModelRegistry.UnsupportedLlmTaskException, IOException, LifecycleException {
+
+        // onRejection: REVISE — where this task's output begins, so a revision can
+        // cut back what the draft (and the tasks that run again after it) wrote.
+        final int revisionOutputMark = outputListSize(currentStep, MEMORY_OUTPUT_IDENTIFIER);
+        final int revisionQuickRepliesMark = outputListSize(currentStep, MemoryKeys.QUICK_REPLIES_PREFIX);
 
         // === Tool-approval (tool-level HITL) effective config resolution ===
         // How a task-level toolApprovals combines with the agent-level default is
@@ -393,15 +444,30 @@ public class LlmTask implements ILifecycleTask {
         String userInput = extractUserInput(memory);
         String taskId = task.getId() != null ? task.getId() : "default";
 
+        // Spend gate: asked once, before anything of this task that costs money (an
+        // input guardrail may call a classifier model, retrieval an embedding
+        // provider) and before any model request (plain, tool loop or cascade). A
+        // refusal skips all of it and serves the task's fallback answer — see the
+        // SpendRefusedException catch. The input is not screened then: nothing of it
+        // reaches a model or a retrieval query.
+        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+
         // === Input guardrails, first pass (WS4) ===
         // The user's raw message is screened BEFORE retrieval: a blocked message issues
         // no retrieval query and no httpCall, and a redacted one is what the RAG query
         // (possibly an external embedding provider) sees. The model-facing message is
         // assembled later; when it is still exactly this text the second pass below
         // reuses this result instead of evaluating again.
+        boolean screenInput = spendRefusal == null && guardrailService != null && !isNullOrEmpty(task.getInputGuardrails());
+        if (spendRefusal != null && guardrailService != null && guardrailService.anySkipsHistory(task.getInputGuardrails())) {
+            // Never screened, so a guardrail that does not re-screen history (the
+            // classifier) would never see this message: withhold it from later turns.
+            markInputWithheld(currentStep, task);
+        }
         GuardrailService.TextResult inputPrescreen = null;
-        if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails()) && userInput != null) {
-            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput, guardrailContext(memory, task, List.of()),
+        if (screenInput && userInput != null) {
+            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput,
+                    guardrailContext(memory, task, List.of()).withSpend(TaskSpend.of(spendGate, memory)),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
             accumulateCost(currentStep, inputPrescreen.costUsd());
             if (inputPrescreen.isBlocked()) {
@@ -421,7 +487,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Phase 8c-0: Zero-infrastructure RAG via named httpCall
         String httpCallRag = task.getHttpCallRag();
-        if (!isNullOrEmpty(httpCallRag) && userInput != null) {
+        if (spendRefusal == null && !isNullOrEmpty(httpCallRag) && userInput != null) {
             try {
                 String httpCallContext = capRagContext(executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects), maxRagContextChars,
                         "httpCall RAG '" + httpCallRag + "'");
@@ -439,7 +505,7 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // Vector store RAG: retrieve from knowledge bases in the workflow
-        if (userInput != null) {
+        if (spendRefusal == null && userInput != null) {
             try {
                 String ragContext = capRagContext(ragContextProvider.retrieveContext(memory, task, userInput), maxRagContextChars,
                         "vector RAG for task '" + taskId + "'");
@@ -529,6 +595,10 @@ public class LlmTask implements ILifecycleTask {
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
 
+        // Where the user's typed text sits in the current message, taken before the
+        // attachments append their own text parts behind it (input guardrails screen
+        // both, and must not mistake one for the other).
+        int typedTextIndex = GuardrailService.currentTextIndex(messages);
         // Forward the current step's attachments to the LLM as multimodal content,
         // gated on the resolved (provider, model) capabilities, honoring any
         // per-task multimodal overrides.
@@ -546,15 +616,22 @@ public class LlmTask implements ILifecycleTask {
         // messages of the window are screened again. Redaction rewrites what the model
         // sees; conversation memory keeps the message as the user sent it.
         GuardrailService.InputResult inputScreening = null;
-        if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails())) {
-            inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
-                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen);
+        if (screenInput) {
+            inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages,
+                    guardrailContext(memory, task, messages).withSpend(TaskSpend.of(spendGate, memory)),
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen, typedTextIndex);
             accumulateCost(currentStep, inputScreening.costUsd());
             if (inputScreening.isBlocked()) {
                 answerInputBlocked(memory, currentStep, task, processedParams, templateDataObjects, inputScreening.blockMessage());
                 return;
             }
             messages = inputScreening.messages();
+            if (inputScreening.withholdFromHistory()) {
+                // Redacted by a guardrail that later turns do not re-run over their
+                // history: withhold the message there instead. Only now — this turn's
+                // prompt is already built from memory.
+                markInputWithheld(currentStep, task);
+            }
         }
         final List<ChatMessage> requestMessages = messages;
         final GuardrailService.InputResult screenedInput = inputScreening;
@@ -572,10 +649,13 @@ public class LlmTask implements ILifecycleTask {
         FormatRetryRunner.ContextShrinker contextShrinker = () -> reapplyInputScreening(memory, task, screenedInput,
                 rebuildWithHalvedWindow(memory, task, shrinkSystemMessage, processedParams.get(KEY_PROMPT), shrinkLogSizeLimit, maxContextTokens,
                         anchorFirstSteps, includeFirstAgentMessage, resolvedType, processedParams, shrinkSummaryPrefix, shrinkSkipSteps));
-        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
+        // A re-ask is checked against the conversation's ceiling and the tenant budget
+        // before it starts, like the first call (reaskSpend).
+        final FormatRetryRunner.ReaskSpend reaskSpend = FormatRetryRunner.ReaskSpend.of(spendGate, memory);
+        FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
                 Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()), reaskSpend);
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -593,6 +673,11 @@ public class LlmTask implements ILifecycleTask {
         // that produced the answer, so the reprompt runs on the same model and never
         // re-runs a tool. Null leaves a reprompt nothing to do but block.
         Reprompter outputReprompter = null;
+        // The request that produced the answer, for a human revision after a later
+        // rule pause (onRejection: REVISE); set by the branch that produced it.
+        List<ChatMessage> revisionBase = null;
+        boolean revisionToolTranscript = false;
+        Integer revisionCascadeStep = null;
 
         // Determine whether the multi-model cascade will run. The base model is only
         // needed outside the active-cascade branch, so create it lazily to avoid an
@@ -651,10 +736,12 @@ public class LlmTask implements ILifecycleTask {
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-        // Spend gate: asked once, before any model request of this task (plain, tool
-        // loop or cascade). A refusal skips the whole model phase below and serves the
-        // task's fallback answer — see the SpendRefusedException catch.
-        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+        // Asked again once the input guardrails have run: a classifier call is priced,
+        // and the model call that follows must not overshoot a conversation ceiling
+        // that call reached.
+        if (spendRefusal == null && screenInput && spendGate != null) {
+            spendRefusal = spendGate.check(memory);
+        }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
         // the model will not be called: an unsettled half-open probe would block it.
@@ -693,7 +780,7 @@ public class LlmTask implements ILifecycleTask {
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()));
+                        turnBudget(memory.getTurnDeadline()), reaskSpend);
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -780,6 +867,12 @@ public class LlmTask implements ILifecycleTask {
                     outputReprompter = cascadeReprompter(cascadeConfig, cascadeResult, task, processedParams, templateDataObjects, memory,
                             jsonMode, agentSystemMessage, chatMessagesWithoutSystem, requestMessages);
                 }
+                revisionToolTranscript = cascadeResult.agentResult() != null;
+                revisionBase = revisionToolTranscript
+                        ? CascadingModelExecutor.toolTranscript(agentSystemMessage, chatMessagesWithoutSystem,
+                                cascadeResult.agentResult().toolExchange())
+                        : requestMessages;
+                revisionCascadeStep = cascadeResult.stepUsed() >= 0 ? cascadeResult.stepUsed() : null;
 
             } else if (skipCascade) {
                 // Agent mode with cascade disabled — use normal agent flow. The streaming
@@ -796,6 +889,9 @@ public class LlmTask implements ILifecycleTask {
                         outputReprompter = toolLoopReprompter(chatModel, agentSystemMessage, chatMessagesWithoutSystem, outcome.toolExchange(), task,
                                 memory, jsonPolicy, repromptCircuit);
                     }
+                    revisionBase = CascadingModelExecutor.toolTranscript(agentSystemMessage, chatMessagesWithoutSystem,
+                            outcome.toolExchange() != null ? outcome.toolExchange() : List.of());
+                    revisionToolTranscript = true;
                 } else {
                     var chatResult = executePlain(retryPolicy, chatModel, messages, task, jsonPolicy, contextShrinker, retryListener, currentStep,
                             circuitGate, memory.getTurnDeadline());
@@ -809,6 +905,7 @@ public class LlmTask implements ILifecycleTask {
                     if (outputGuarded) {
                         outputReprompter = plainReprompter(chatModel, requestMessages, task, memory, jsonPolicy, repromptCircuit);
                     }
+                    revisionBase = requestMessages;
                 }
 
             } else {
@@ -823,6 +920,11 @@ public class LlmTask implements ILifecycleTask {
                                     jsonPolicy, repromptCircuit)
                             : plainReprompter(chatModel, requestMessages, task, memory, jsonPolicy, repromptCircuit);
                 }
+                revisionToolTranscript = outcome != null;
+                revisionBase = outcome != null
+                        ? CascadingModelExecutor.toolTranscript(agentSystemMessage, chatMessagesWithoutSystem,
+                                outcome.toolExchange() != null ? outcome.toolExchange() : List.of())
+                        : requestMessages;
                 if (outcome != null) {
                     responseContent = outcome.response();
                     toolTrace = outcome.trace();
@@ -907,8 +1009,12 @@ public class LlmTask implements ILifecycleTask {
                 // === Output guardrails (WS4) === — on the validated answer, before it is
                 // stored, parsed or delivered. Not on a fallback: that is the author's text.
                 if (fallbackServed == null && outputGuarded && responseContent != null) {
+                    // The answer's own cost is not in audit:cost yet (it is recorded below), so
+                    // the phase's spend checks start from it.
+                    TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+                    outputSpend.add(pricedCost(responseMetadata, task));
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, outputReprompter,
-                            guardrailContext(memory, task, requestMessages, retrievedContextText),
+                            guardrailContext(memory, task, requestMessages, retrievedContextText).withSpend(outputSpend),
                             outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
@@ -1044,6 +1150,16 @@ public class LlmTask implements ILifecycleTask {
         }
 
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        // A fallback is the author's text, not an answer the model could revise.
+        // It is still the latest answer, so an earlier task's candidate must not
+        // stand in for it.
+        if (fallbackServed == null) {
+            recordRevisionCandidate(memory, task, llmTaskIndex, revisionBase, revisionToolTranscript, revisionCascadeStep, responseContent,
+                    shouldAddToOutput, revisionOutputMark, revisionQuickRepliesMark);
+        } else if (memory.getHitlRevisionPolicy() != null) {
+            memory.setHitlRevisionCandidate(null);
+        }
 
         // Strategy 2: Update rolling summary if configured.
         // IMPORTANT: Must run AFTER the current response is added to
@@ -1334,10 +1450,43 @@ public class LlmTask implements ILifecycleTask {
         if (tokenUsage != null) {
             accumulateTokenUsage(currentStep, tokenUsage);
         }
+        accumulateCost(currentStep, pricedCost(responseMetadata, task));
+    }
+
+    /**
+     * The priced cost of a model phase's metadata — its tokens at the task's prices
+     * (a cascade's own {@code cascadeCostUsd} instead) plus its tool cost. What
+     * {@link #accumulateUsageAndCost} records, and what the output phase's spend
+     * checks start from before it is recorded.
+     */
+    static double pricedCost(Map<String, Object> responseMetadata, Task task) {
+        if (responseMetadata == null) {
+            return 0.0;
+        }
+        Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
         double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
                 ? asDouble(responseMetadata.get("cascadeCostUsd"))
                 : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
-        accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
+        return llmCostUsd + asDouble(responseMetadata.get("toolCostUsd"));
+    }
+
+    /**
+     * Prices a cascade step's model phase at the step's own rates: sets
+     * {@code cascadeCostUsd} (which {@link #pricedCost} prefers) from the phase's
+     * token usage. Nothing changes without a step, without token usage, or when the
+     * metadata already carries a cascade cost.
+     */
+    static void priceAtCascadeStep(Map<String, Object> metadata, CascadeStep step, Task task) {
+        if (step != null && metadata != null && !metadata.containsKey("cascadeCostUsd") && metadata.get("tokenUsage") instanceof Map<?, ?> usage) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tokenUsage = (Map<String, Object>) usage;
+            metadata.put("cascadeCostUsd", CascadingModelExecutor.computeCost(step, task.getModelCascade(), tokenUsage));
+        }
+    }
+
+    /** {@code policy} with the spend check, or null when there is no policy. */
+    private static FormatRetryRunner.Policy withSpend(FormatRetryRunner.Policy policy, FormatRetryRunner.ReaskSpend spend) {
+        return policy != null ? policy.withSpend(spend) : null;
     }
 
     /**
@@ -1812,6 +1961,9 @@ public class LlmTask implements ILifecycleTask {
             return;
         }
 
+        final int revisionOutputMark = outputListSize(currentStep, MEMORY_OUTPUT_IDENTIFIER);
+        final int revisionQuickRepliesMark = outputListSize(currentStep, MemoryKeys.QUICK_REPLIES_PREFIX);
+
         // === Rebuild the chat model for THIS task only (normal-path parity) ===
         Map<String, String> processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
         var resolvedType = globalVariableResolver.resolveValue(task.getType());
@@ -1835,9 +1987,10 @@ public class LlmTask implements ILifecycleTask {
         // neither consults nor settles a circuit) and the cascade (the resume pins the
         // step whose tool loop paused). See docs/llm-resilience.md.
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
+        FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()),
+                FormatRetryRunner.ReaskSpend.of(spendGate, memory));
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -1870,11 +2023,25 @@ public class LlmTask implements ILifecycleTask {
                 : createToolLoopStreamingBridge(memory.getEventSink(),
                         "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
 
+        // Spend gate: the same preflight as the live path, asked before the approved
+        // tools run and before the first resumed model request. A conversation (or a
+        // scheduled fire's maxCostPerFire) that was spent while the turn waited for
+        // approval gets the fallback answer; the approved calls do not run.
+        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+
         AgentOrchestrator.ExecutionResult result = null;
         try {
+            if (spendRefusal != null) {
+                throw new LlmSpendGate.SpendRefusedException(spendRefusal);
+            }
             result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                     toolHitlEnabled, jsonPolicy);
             result = reaskResumedAnswer(result, retryPolicy, retryListener, chatModel, task, memory, jsonPolicy, currentStep);
+        } catch (LlmSpendGate.SpendRefusedException refused) {
+            // Not a failure of the model phase — it never started — so onError is not
+            // involved: the fallback answer is served unconditionally (live-path parity).
+            fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
+            result = null;
         } catch (ToolApprovalRequiredException rePause) {
             // The continuation hit another gated call and paused again. The loop
             // builds that batch from scratch, and it knows nothing about cascades, so
@@ -1904,6 +2071,11 @@ public class LlmTask implements ILifecycleTask {
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
                 ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
+        // A resumed cascade step ran on that step's model, so its tokens are priced at
+        // the step's rates (as the live cascade does), not the task's: set
+        // cascadeCostUsd — which pricedCost prefers — from the resumed token usage,
+        // for the output guardrails' spend checks and the audit cost alike.
+        priceAtCascadeStep(responseMetadata, cascadeStep, task);
 
         // responseValidation's actions (R6) apply to the resumed answer as to a live
         // one; the engine's own fallback text is not validated.
@@ -1920,8 +2092,10 @@ public class LlmTask implements ILifecycleTask {
                     Reprompter reprompter = result != null && !result.resumeTranscript().isEmpty()
                             ? transcriptReprompter(chatModel, result.resumeTranscript(), task, memory, jsonPolicy, RepromptCircuit.NONE)
                             : null;
+                    TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+                    outputSpend.add(pricedCost(responseMetadata, task));
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, reprompter,
-                            guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()),
+                            guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()).withSpend(outputSpend),
                             outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
@@ -1951,11 +2125,10 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // === Store the result EXACTLY like the normal path (executeTask) ===
-        // Surface metadata the same way executeTask does. Note the continuation's
-        // tokenUsage covers only the post-resume model calls: the usage accumulated
-        // before the pause dies with ToolApprovalRequiredException and resumeToolLoop
-        // starts a fresh accumulator, so a paused turn under-reports by its pre-pause
-        // segment.
+        // Surface metadata the same way executeTask does. The continuation's
+        // tokenUsage covers only the post-resume model calls; the pre-pause segment
+        // was recorded on this step's audit totals when the pause passed through
+        // execute (recordPrePauseSpend), so it is not added again here.
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
         if (!isNullOrEmpty(responseMetadataObjectName)) {
             templateDataObjects.put(responseMetadataObjectName, responseMetadata);
@@ -2000,9 +2173,8 @@ public class LlmTask implements ILifecycleTask {
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
-            // Known gap: the continuation's tokenUsage covers only the post-resume model
-            // calls (see the comment above) — the pre-pause segment is not recoverable
-            // here, so a paused turn's ledger entry under-reports by that segment.
+            // Adds the post-resume spend to the step totals, which already hold the
+            // pre-pause segment (see the comment above).
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
         } else {
             // The turn's token counts are also the caller's: the OpenAI-compatible /v1
@@ -2037,6 +2209,14 @@ public class LlmTask implements ILifecycleTask {
         // postResponse DOES run on resume — it reacts to the final response, which
         // only exists now that the tool loop completed.
         prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        // A rule pause later in this turn may have a human revise this answer too.
+        if (fallbackServed == null && result != null) {
+            recordRevisionCandidate(memory, task, index, result.resumeTranscript(), true, batch.getCascadeStepIndex(), responseContent,
+                    !addToOutputExplicitlyFalse, revisionOutputMark, revisionQuickRepliesMark);
+        } else if (memory.getHitlRevisionPolicy() != null) {
+            memory.setHitlRevisionCandidate(null);
+        }
 
         // Batch consumed — clear the transient tool-pause state so the next turn does
         // not re-detect resume mode.
@@ -2078,6 +2258,308 @@ public class LlmTask implements ILifecycleTask {
         }
         return new AgentOrchestrator.ExecutionResult(recovered.attempt().text(), result.trace(), metadata, result.toolExchange(),
                 result.resumeTranscript());
+    }
+
+    // === onRejection: REVISE — a human's note revises the answer (E2) ===
+
+    /** Length of a list-valued conversation-output entry of the step, 0 if none. */
+    private static int outputListSize(IWritableConversationStep step, String key) {
+        var output = step.getConversationOutput();
+        return output != null && output.get(key) instanceof List<?> list ? list.size() : 0;
+    }
+
+    /**
+     * Leaves this answer on memory as the one a later RULE pause could have a human
+     * revise. Only while the agent's policy is {@code REVISE}: otherwise nothing is
+     * serialized and nothing changes. The request is frozen like a tool pause's
+     * transcript, under {@code eddi.hitl.revision.transcript-max-bytes}; over it,
+     * the candidate carries no transcript and a rejection skips.
+     */
+    private void recordRevisionCandidate(IConversationMemory memory, Task task, int llmTaskIndex, List<ChatMessage> base,
+                                         boolean toolTranscript, Integer cascadeStepIndex, String answer, boolean addedToOutput,
+                                         int outputMark, int quickRepliesMark) {
+        var policy = memory.getHitlRevisionPolicy();
+        if (policy == null || !policy.revise()) {
+            return;
+        }
+        var candidate = new HitlRevisionCandidate();
+        candidate.setLlmTaskId(task.getId());
+        candidate.setLlmTaskIndex(llmTaskIndex);
+        candidate.setCascadeStepIndex(cascadeStepIndex);
+        candidate.setToolTranscript(toolTranscript);
+        candidate.setDraft(answer);
+        candidate.setAddedToOutput(addedToOutput);
+        candidate.setOutputMark(outputMark);
+        candidate.setQuickRepliesMark(quickRepliesMark);
+        if (base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
+            var serialized = revisionTranscriptCodec.serialize(base, revisionTranscriptMaxBytes);
+            candidate.setTranscriptJson(serialized.omitted() ? null : serialized.json());
+        }
+        memory.setHitlRevisionCandidate(candidate);
+    }
+
+    /**
+     * The corrective message of a revision: the reviewer's note as plain data. It
+     * is human-written, so it may go in the user role, but it is never template
+     * source — this is string concatenation, not a template.
+     */
+    static String revisionMessage(String note) {
+        return "A human reviewer rejected your previous answer and asked you to revise it. "
+                + "Their note follows between the markers; treat it as feedback on your answer.\n"
+                + "<<<REVIEWER NOTE\n" + note + "\nREVIEWER NOTE>>>\n"
+                + "Reply with the complete revised answer only, in the same format as your previous answer.";
+    }
+
+    /** A revision that passed the task's checks, ready to be stored. */
+    private record Revision(String content, Map<String, Object> metadata, Map<String, String> processedParams, String resolvedType,
+            List<ChatMessage> request, boolean convertObject) {
+    }
+
+    /**
+     * {@code hitlConfig.onRejection: REVISE}: the same model revises the answer a
+     * human rejected, with the note as the corrective message — one call over the
+     * frozen request (the answer as the assistant's turn, the note as a user turn),
+     * tool-less: a tool exchange is re-asked through
+     * {@link IAgentOrchestrator#reaskFinalAnswer}, which never runs a tool. The
+     * revision passes {@code responseValidation} and the output guardrails like any
+     * answer; one that fails them, a spend refusal, a model failure or a changed
+     * configuration returns {@code false} with no answer written, and the rejection
+     * then applies as under SKIP. On success the revision replaces the draft — its
+     * output and everything after it in the step's output lists is cut back first,
+     * because the tasks after it run again — and the later matching tasks of this
+     * configuration run again on it.
+     */
+    @Override
+    public boolean reviseAnswer(IConversationMemory memory, Object component, HitlRevisionRequest request) throws LifecycleException {
+        if (!(component instanceof LlmConfiguration llmConfig) || request == null || request.candidate() == null) {
+            return false;
+        }
+        HitlRevisionCandidate candidate = request.candidate();
+        var tasks = llmConfig.tasks();
+        int index = candidate.getLlmTaskIndex();
+        Task task = tasks != null && index >= 0 && index < tasks.size() ? tasks.get(index) : null;
+        if (task == null || !Objects.equals(task.getId(), candidate.getLlmTaskId())) {
+            LOGGER.warnf("hitl.revision.config_drift: the answer of task '%s' (index %d) cannot be revised in conversation '%s' — "
+                    + "the LLM configuration changed since the pause; the rejection applies as is",
+                    sanitize(candidate.getLlmTaskId()), index, sanitize(memory.getConversationId()));
+            return false;
+        }
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+        Map<String, Object> templateDataObjects;
+        Revision revision;
+        try {
+            templateDataObjects = templateData(memory);
+            revision = produceRevision(memory, task, candidate, request.note(), templateDataObjects, currentStep);
+        } catch (LifecycleException | RuntimeException | ChatModelRegistry.UnsupportedLlmTaskException e) {
+            LOGGER.warnf("hitl.revision.failed: revising the answer of task '%s' in conversation '%s' failed (%s) — the rejection applies as is",
+                    sanitize(task.getId()), sanitize(memory.getConversationId()), sanitize(e.getClass().getSimpleName()));
+            return false;
+        }
+        if (revision == null) {
+            return false;
+        }
+        try {
+            storeRevision(memory, task, index, candidate, revision, templateDataObjects, currentStep);
+        } catch (IOException | ITemplatingEngine.TemplateEngineException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
+
+        // The later tasks of this configuration ran on the draft before the pause;
+        // their output was cut back with it, so they run again on the revision.
+        IData<List<String>> latestActions = currentStep.getLatestData(ACTIONS);
+        List<String> actions = latestActions != null && latestActions.getResult() != null ? latestActions.getResult() : List.of();
+        try {
+            for (int taskIndex = index + 1; taskIndex < tasks.size(); taskIndex++) {
+                var later = tasks.get(taskIndex);
+                if (later.getActions().contains(MATCH_ALL_OPERATOR) || later.getActions().stream().anyMatch(actions::contains)) {
+                    executeTask(memory, later, currentStep, templateDataObjects, taskIndex);
+                }
+            }
+        } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException | IOException e) {
+            throw new LifecycleException(e.getLocalizedMessage(), e);
+        }
+        return true;
+    }
+
+    /** The revised answer, or null when it cannot be produced or fails a check. */
+    private Revision produceRevision(IConversationMemory memory, Task task, HitlRevisionCandidate candidate, String note,
+                                     Map<String, Object> templateDataObjects, IWritableConversationStep currentStep)
+            throws LifecycleException, ChatModelRegistry.UnsupportedLlmTaskException {
+        if (candidate.getTranscriptJson() == null || isNullOrEmpty(candidate.getDraft()) || isNullOrEmpty(note)) {
+            return null;
+        }
+        List<ChatMessage> base;
+        try {
+            base = revisionTranscriptCodec.deserialize(candidate.getTranscriptJson());
+        } catch (ChatTranscriptCodec.TranscriptCodecException e) {
+            LOGGER.warnf("hitl.revision.failed: the kept request of task '%s' cannot be read back — the rejection applies as is",
+                    sanitize(task.getId()));
+            return null;
+        }
+        // No unmetered attempt: the revision is a model call like any other.
+        if (spendGate != null && spendGate.check(memory) != null) {
+            LOGGER.infof("hitl.revision: not revising task '%s' in conversation '%s' — a spend limit is reached",
+                    sanitize(task.getId()), sanitize(memory.getConversationId()));
+            return null;
+        }
+        Map<String, String> processedParams = runTemplateEngineOnParams(task.getParameters(), templateDataObjects, memory);
+        String resolvedType = globalVariableResolver.resolveValue(task.getType());
+        // The answer came from a cascade step: the revision goes to that step's model.
+        Integer stepIndex = candidate.getCascadeStepIndex();
+        var cascade = task.getModelCascade();
+        CascadeStep revisionStep = null;
+        if (stepIndex != null && cascade != null && cascade.isEnabled() && cascade.getSteps() != null && stepIndex >= 0
+                && stepIndex < cascade.getSteps().size()) {
+            revisionStep = cascade.getSteps().get(stepIndex);
+            var stepModel = cascadingModelExecutor.resolveStepModel(revisionStep, task, processedParams, templateDataObjects,
+                    memory, "Cascade step");
+            resolvedType = stepModel.modelType();
+            processedParams = stepModel.params();
+        }
+        final var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams);
+        boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
+        var jsonPolicy = JsonResponseFormatPolicy.of(convertObject, resolvedType, task.getJsonResponseFormat(),
+                processedParams.get(KEY_RESPONSE_SCHEMA), capabilityParams(resolvedType, processedParams));
+
+        List<ChatMessage> request = new ArrayList<>(base);
+        request.add(AiMessage.from(candidate.getDraft()));
+        request.add(UserMessage.from(revisionMessage(note)));
+
+        FormatRetryRunner.Asker asker = candidate.isToolTranscript()
+                ? (msgs, maxTokens) -> {
+                    var reply = agentOrchestrator.reaskFinalAnswer(chatModel, msgs, maxTokens, task, memory, jsonPolicy);
+                    if (reply == null) {
+                        throw new LifecycleException("The tool loop cannot re-ask its final answer");
+                    }
+                    return new FormatRetryRunner.Attempt(reply.response() != null ? reply.response() : "", reply.responseMetadata());
+                }
+                : (msgs, maxTokens) -> {
+                    var reply = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, memory.getTurnDeadline());
+                    return new FormatRetryRunner.Attempt(reply.response(), reply.responseMetadata());
+                };
+        // The revision, and any guardrail reprompt of it, ran on the cascade step the
+        // answer came from: priced at that step's rates, not the task's.
+        final CascadeStep pricedStep = revisionStep;
+        FormatRetryRunner.Asker stepPricedAsker = pricedStep == null ? asker : (msgs, maxTokens) -> {
+            var reply = asker.ask(msgs, maxTokens);
+            Map<String, Object> priced = reply.metadata() != null ? new HashMap<>(reply.metadata()) : new HashMap<>();
+            Map<String, Object> usage = new HashMap<>(priced);
+            priceAtCascadeStep(usage, pricedStep, task);
+            priced.put(KEY_REPROMPT_COST, usage.get("cascadeCostUsd"));
+            return new FormatRetryRunner.Attempt(reply.text(), priced);
+        };
+        var attempt = asker.ask(request, null);
+        Map<String, Object> metadata = attempt.metadata() != null ? new HashMap<>(attempt.metadata()) : new HashMap<>();
+        priceAtCascadeStep(metadata, revisionStep, task);
+        String content = attempt.text();
+        if (content == null || content.isBlank()) {
+            LOGGER.warnf("hitl.revision.failed: the model returned no revision for task '%s' — the rejection applies as is", sanitize(task.getId()));
+            accumulateRevisionSpend(currentStep, metadata, task);
+            return null;
+        }
+
+        // The revision passes the same checks as any answer: a human's note must not
+        // steer the model around a validation or a guardrail.
+        var validated = applyResponseValidation(content, metadata, task, currentStep, templateDataObjects, memory, convertObject,
+                processedParams.get(KEY_RESPONSE_SCHEMA));
+        if (validated.fallback() != null) {
+            accumulateRevisionSpend(currentStep, metadata, task);
+            return null;
+        }
+        content = validated.content();
+        if (guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails()) && content != null) {
+            Reprompter reprompter = reprompter(request, stepPricedAsker, memory, task, RepromptCircuit.NONE);
+            // The revision attempt just made is spend this phase has not recorded yet; the
+            // guardrails' paid calls (a reprompt, a classifier or judge) are admitted
+            // against it, as on the live path.
+            TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+            outputSpend.add(pricedCost(metadata, task));
+            var screened = guardrailService.runOutput(task.getOutputGuardrails(), content, reprompter,
+                    guardrailContext(memory, task, request).withSpend(outputSpend),
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
+            metadata = foldRepromptUsage(metadata, screened.reprompts());
+            accumulateCost(currentStep, screened.costUsd());
+            if (screened.isBlocked()) {
+                accumulateRevisionSpend(currentStep, metadata, task);
+                return null;
+            }
+            content = screened.text();
+        }
+        return new Revision(content, metadata, processedParams, resolvedType, request, convertObject);
+    }
+
+    /**
+     * A revision that is not stored was still a model call: its tokens and cost
+     * belong to the step like any other.
+     */
+    private void accumulateRevisionSpend(IWritableConversationStep currentStep, Map<String, Object> metadata, Task task) {
+        accumulateUsageAndCost(currentStep, metadata, task);
+    }
+
+    /**
+     * Stores the revision where the draft was, as the live path stores an answer,
+     * and leaves it on memory as the next candidate — so a rule that pauses again
+     * on it can have it revised again, against the whole exchange so far.
+     */
+    private void storeRevision(IConversationMemory memory, Task task, int llmTaskIndex, HitlRevisionCandidate candidate, Revision revision,
+                               Map<String, Object> templateDataObjects, IWritableConversationStep currentStep)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
+        truncateOutputList(currentStep, MEMORY_OUTPUT_IDENTIFIER, candidate.getOutputMark());
+        truncateOutputList(currentStep, MemoryKeys.QUICK_REPLIES_PREFIX, candidate.getQuickRepliesMark());
+
+        String content = revision.content();
+        Map<String, Object> metadata = revision.metadata();
+        var responseMetadataObjectName = task.getResponseMetadataObjectName();
+        if (!isNullOrEmpty(responseMetadataObjectName)) {
+            templateDataObjects.put(responseMetadataObjectName, metadata);
+            prePostUtils.createMemoryEntry(currentStep, metadata, responseMetadataObjectName, KEY_LANGCHAIN);
+        }
+        var responseObjectName = isNullOrEmpty(task.getResponseObjectName()) ? task.getId() : task.getResponseObjectName();
+        currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), content));
+        if (revision.convertObject()) {
+            templateDataObjects.put(responseObjectName, convertResponseToObject(content, task.getId(), currentStep,
+                    revision.processedParams().get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+        } else {
+            templateDataObjects.put(responseObjectName, content);
+        }
+
+        if (memory.getAuditCollector() != null) {
+            var processedParams = revision.processedParams();
+            currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_COMPILED_PROMPT,
+                    processedParams.getOrDefault(KEY_SYSTEM_MESSAGE, "") + "\n---\n" + processedParams.getOrDefault(KEY_PROMPT, "")));
+            currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_MODEL_RESPONSE, content));
+            String modelName = resolveModelNameOf(processedParams, revision.resolvedType());
+            currentStep.storeData(dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName != null ? modelName : task.getType()));
+            accumulateAuditEvidence(currentStep, metadata, List.of(), task);
+        } else {
+            accumulateUsageAndCost(currentStep, metadata, task);
+        }
+
+        if (candidate.isAddedToOutput() && producesRenderableOutput(content)) {
+            currentStep.storeData(dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), content));
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(new TextOutputItem(content, 0)));
+            if (memory.getEventSink() != null) {
+                memory.getEventSink().onToken(content);
+            }
+        }
+
+        prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+
+        recordRevisionCandidate(memory, task, llmTaskIndex, revision.request(), candidate.isToolTranscript(), candidate.getCascadeStepIndex(),
+                content, candidate.isAddedToOutput(), candidate.getOutputMark(), candidate.getQuickRepliesMark());
+    }
+
+    /**
+     * Cuts a list-valued conversation-output entry back to {@code mark} entries:
+     * what the draft and the tasks after it wrote, which run again for the
+     * revision. A mark of -1 (unknown) or past the end leaves the list as is.
+     */
+    private static void truncateOutputList(IWritableConversationStep step, String key, int mark) {
+        var output = step.getConversationOutput();
+        if (mark < 0 || output == null || !(output.get(key) instanceof List<?> list) || list.size() <= mark) {
+            return;
+        }
+        list.subList(mark, list.size()).clear();
     }
 
     /**
@@ -2462,7 +2944,9 @@ public class LlmTask implements ILifecycleTask {
         if (retryPolicy != null) {
             // Only the final model call is re-asked, over a transcript that already holds
             // the tool results; the loop and its tools are never re-run.
-            var recovered = formatRetryRunner.resolve(retryPolicy,
+            // The loop's tool cost is spent as well; the runner prices only tokens.
+            var loopPolicy = retryPolicy.withSpend(retryPolicy.spend().plus(asDouble(agentResult.responseMetadata().get("toolCostUsd"))));
+            var recovered = formatRetryRunner.resolve(loopPolicy,
                     new FormatRetryRunner.Attempt(agentResult.response(), agentResult.responseMetadata()),
                     CascadingModelExecutor.toolTranscript(systemMessage, chatMessagesWithoutSystem, agentResult.toolExchange()),
                     (msgs, maxTokens) -> {
@@ -2549,29 +3033,46 @@ public class LlmTask implements ILifecycleTask {
      * Answers a turn whose input a guardrail blocked: the block message becomes the
      * task's response — stored, visible to output templates under the response
      * object name, shown and streamed unless {@code addToOutput} is explicitly
-     * false. The model is not called; neither {@code preRequest} nor
-     * {@code postResponse} runs. It is served as a fallback: the step's
-     * {@code llm:fallback:<taskId>} flag keeps it out of later turns' history, and
-     * a {@code convertToObject} task gets it wrapped under {@code fallbackField}.
+     * false. The model is not called and {@code preRequest} does not run;
+     * {@code postResponse} does, exactly as after any other fallback (an output
+     * block, a spend refusal, {@code onError}) — for a {@code convertToObject} task
+     * with {@code addToOutput: false} it is what turns the
+     * {@code fallbackField}-wrapped block message into the user's answer. It is
+     * served as a fallback: the step's {@code llm:fallback:<taskId>} flag keeps the
+     * block message out of later turns' history, and its
+     * {@code llm:input_withheld:<taskId>} flag keeps the refused message out of
+     * every later model-facing history.
      */
     private void answerInputBlocked(IConversationMemory memory, IWritableConversationStep currentStep, Task task, Map<String, String> processedParams,
-                                    Map<String, Object> templateDataObjects, String blockMessage) {
+                                    Map<String, Object> templateDataObjects, String blockMessage)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
         var served = guardrailBlock(task, currentStep, blockMessage, Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)));
+        markInputWithheld(currentStep, task);
         currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), served.content()));
         String responseObjectName = isNullOrEmpty(task.getResponseObjectName()) ? task.getId() : task.getResponseObjectName();
         if (responseObjectName != null) {
             templateDataObjects.put(responseObjectName, served.object());
         }
-        if ("false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT))) {
-            return;
+        if (!"false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT))) {
+            currentStep.storeData(dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), blockMessage));
+            var outputItem = new TextOutputItem(blockMessage, 0);
+            outputItem.setFallback(true);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+            if (memory.getEventSink() != null) {
+                memory.getEventSink().onToken(blockMessage);
+            }
         }
-        currentStep.storeData(dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), blockMessage));
-        var outputItem = new TextOutputItem(blockMessage, 0);
-        outputItem.setFallback(true);
-        currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
-        if (memory.getEventSink() != null) {
-            memory.getEventSink().onToken(blockMessage);
-        }
+        prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+    }
+
+    /**
+     * Flags the step {@code llm:input_withheld:<taskId>}: no later model-facing
+     * history (message window, rolling summary, recall tool) carries this turn's
+     * user message — see {@code ConversationLogGenerator.isInputWithheldStep}.
+     */
+    private void markInputWithheld(IWritableConversationStep currentStep, Task task) {
+        String id = task.getId() != null ? task.getId() : "default";
+        currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX + id, Boolean.TRUE));
     }
 
     /**
@@ -2677,6 +3178,11 @@ public class LlmTask implements ILifecycleTask {
             if (!repromptMayStart(memory, task)) {
                 return null;
             }
+            // The spend gate is NOT asked here: every caller runs this reprompter inside
+            // GuardrailService.runOutput, which admits each reprompt through the
+            // context's spend gate (a TaskSpend) before calling it. A second
+            // LlmSpendGate.check here would count the reservation that admission just
+            // took, and could refuse a reprompt it had admitted.
             var ticket = circuit.acquire().get();
             if (!ticket.allowed()) {
                 recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", ticket.denial().failure().label(), 0L);
@@ -2692,8 +3198,23 @@ public class LlmTask implements ILifecycleTask {
                 throw e;
             }
             settleCircuit(ticket, attempt.text(), circuit.convertObject(), circuit.params(), task);
-            return new Reprompter.Attempt(attempt.text(), attempt.metadata());
+            return new Reprompter.Attempt(attempt.text(), attempt.metadata(), repromptCost(attempt.metadata(), task));
         };
+    }
+
+    /**
+     * What one reprompt cost: a cascade step's own price
+     * ({@code KEY_REPROMPT_COST}) or the reply's tokens at the task's prices.
+     */
+    private static double repromptCost(Map<String, Object> metadata, Task task) {
+        if (metadata == null) {
+            return 0.0;
+        }
+        if (metadata.containsKey(KEY_REPROMPT_COST)) {
+            return asDouble(metadata.get(KEY_REPROMPT_COST));
+        }
+        return TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                metadata.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null);
     }
 
     /** Plain chat: the same model over the same request. */
@@ -2979,9 +3500,42 @@ public class LlmTask implements ILifecycleTask {
             for (String problem : guardrailService.validate("outputGuardrails", task.getOutputGuardrails())) {
                 problems.add("task '" + taskId + "' " + problem);
             }
+            for (String warning : guardrailService.warnings("inputGuardrails", task.getInputGuardrails())) {
+                LOGGER.warnf("LLM task '%s' %s", taskId, warning);
+            }
+            for (String warning : guardrailService.warnings("outputGuardrails", task.getOutputGuardrails())) {
+                LOGGER.warnf("LLM task '%s' %s", taskId, warning);
+            }
+            warnSelfJudging(task, taskId);
         }
         if (!problems.isEmpty()) {
             throw new WorkflowConfigurationException("Invalid guardrail configuration: " + String.join("; ", problems));
+        }
+    }
+
+    /**
+     * A {@code judge} grading the task's own model is biased toward its own
+     * answers: worth a note at deploy time, not a refusal (a different prompt still
+     * catches a lot). Compared on the configured provider and model name.
+     */
+    private static void warnSelfJudging(Task task, String taskId) {
+        if (task.getOutputGuardrails() == null || task.getParameters() == null) {
+            return;
+        }
+        String taskModel = resolveModelName(task.getParameters());
+        if (task.getType() == null || taskModel == null) {
+            return;
+        }
+        for (GuardrailConfig guardrail : task.getOutputGuardrails()) {
+            if (guardrail == null || !JudgeGuardrail.TYPE.equals(guardrail.getType()) || guardrail.getParameters() == null) {
+                continue;
+            }
+            Map<String, String> p = guardrail.getParameters();
+            if (task.getType().trim().equalsIgnoreCase(String.valueOf(p.get("provider")).trim())
+                    && taskModel.trim().equals(String.valueOf(resolveModelName(p)).trim())) {
+                LOGGER.warnf("LLM task '%s' has a judge guardrail on its own model '%s' — a model grading its own answers is biased; "
+                        + "consider a different judge model", taskId, taskModel);
+            }
         }
     }
 

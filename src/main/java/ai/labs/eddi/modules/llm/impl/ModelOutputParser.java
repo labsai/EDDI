@@ -22,6 +22,11 @@ import java.util.Map;
  * <li>trim;</li>
  * <li>strip <em>one</em> surrounding markdown fence ({@code ```} or
  * {@code ```json}, tag case-insensitive);</li>
+ * <li>inside JSON strings, drop the backslash of {@code \'}. JSON has no such
+ * escape, and models trained on JavaScript and Python emit it
+ * ({@code Japan\'s}), so one apostrophe failed an otherwise complete reply. It
+ * can only mean {@code '}. The pass is string-aware: {@code \\'} (an escaped
+ * backslash, then a quote) and anything outside a string are left alone;</li>
  * <li>if that still does not parse, take the outermost balanced {@code {...}}
  * or {@code [...]} out of the text (string- and escape-aware scan) and parse
  * that — this handles a prose prefix and/or suffix. An extracted fragment is
@@ -29,8 +34,8 @@ import java.util.Map;
  * is accepted only as the whole (unfenced) reply, so prose like
  * {@code Pick option [1] or [2].} is never turned into a List.</li>
  * </ol>
- * Invalid JSON itself is never "fixed" (no trailing-comma repair, no quote
- * swapping): it either parses or it is {@link Kind#INVALID}.
+ * Apart from that one escape, invalid JSON is never "fixed" (no trailing-comma
+ * repair, no quote swapping): it either parses or it is {@link Kind#INVALID}.
  *
  * <h2>Reasons</h2> {@link JsonOutcome#reason()} is always one of this class'
  * own constants. It never contains model output, because it is meant to be fed
@@ -152,11 +157,13 @@ public final class ModelOutputParser {
         }
 
         String unfenced = stripFence(trimmed);
-        boolean fenceStripped = !unfenced.equals(trimmed);
+        String whole = dropApostropheEscapes(unfenced);
+        // A stripped fence or a dropped \' escape: either way the reply was repaired.
+        boolean normalised = !whole.equals(trimmed);
 
-        Object parsed = tryParseWhole(unfenced);
+        Object parsed = tryParseWhole(whole);
         if (parsed != null) {
-            return new JsonOutcome(Kind.VALID, parsed, fenceStripped, null, raw);
+            return new JsonOutcome(Kind.VALID, parsed, normalised, null, raw);
         }
 
         // Extraction: successive top-level balanced candidates, first one that parses.
@@ -173,8 +180,10 @@ public final class ModelOutputParser {
                 break;
             }
             String candidate = unfenced.substring(open, scan.end() + 1);
-            // The whole text was already tried above; do not parse it a second time.
-            Object value = candidate.equals(unfenced) ? null : tryParse(candidate);
+            // The whole text was already tried above; do not parse it a second time. A
+            // candidate is repaired on its own: a stray quote in the prose before it must
+            // not decide what counts as "inside a string" within the object.
+            Object value = candidate.equals(unfenced) ? null : tryParse(dropApostropheEscapes(candidate));
             // An extracted fragment (there was text around it) is only trusted when it is
             // a non-empty object: prose such as "Pick option [1] or [2]." or "The empty
             // set {} is..." must stay the user's answer, not become a List or empty Map.
@@ -212,6 +221,40 @@ public final class ModelOutputParser {
             start += JSON_TAG.length();
         }
         return trimmed.substring(start, length - FENCE.length()).trim();
+    }
+
+    /**
+     * {@code text} with the backslash of every {@code \'} inside a JSON string
+     * removed; {@code text} itself when it holds no {@code \'}.
+     * <p>
+     * One linear pass that tracks whether it is inside a string. Every other escape
+     * is copied as the pair it is, so {@code \\'} stays an escaped backslash
+     * followed by a quote and {@code \"} does not end the string. Outside strings
+     * nothing changes: valid JSON cannot hold {@code \'} there, and prose around
+     * the object is the extraction step's business.
+     */
+    static String dropApostropheEscapes(String text) {
+        if (text.indexOf("\\'") < 0) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        boolean inString = false;
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (inString && c == '\\' && i + 1 < text.length()) {
+                char next = text.charAt(++i);
+                if (next != '\'') {
+                    out.append(c);
+                }
+                out.append(next);
+                continue;
+            }
+            if (c == '"') {
+                inString = !inString;
+            }
+            out.append(c);
+        }
+        return out.toString();
     }
 
     /**

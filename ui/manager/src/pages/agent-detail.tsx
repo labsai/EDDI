@@ -1,4 +1,6 @@
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
+import { RatingConfigSection } from "@/components/editors/rating-config-section";
+import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
 import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
@@ -69,6 +71,7 @@ import {
 } from "@/lib/agent-draft";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import { agentKeys } from "@/lib/query-keys";
+import { MAX_CONTINUATIONS } from "@/lib/continuation";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
@@ -89,6 +92,7 @@ import {
   MemoryPolicySection,
   SessionManagementSection,
   LimitsSection,
+  ContinuationSection,
   HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -269,8 +273,12 @@ export function AgentDetailPage() {
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
   const [ceilingInvalid, setCeilingInvalid] = useState(false);
+  /** Whether the max-continuations box holds a count that cannot be saved (see `ContinuationSection`). */
+  const [continuationInvalid, setContinuationInvalid] = useState(false);
   /** Whether the approval-email recipients box holds a list that cannot be saved (see `HitlConfigSection`). */
   const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
+  /** Whether the Ratings section holds a value the backend would refuse (see `RatingConfigSection`). */
+  const [ratingInvalid, setRatingInvalid] = useState(false);
 
   /** Writes the draft as one new version. Resolves whether it landed. */
   const saveDraft = useCallback(async (): Promise<boolean> => {
@@ -281,6 +289,14 @@ export function AgentDetailPage() {
       toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
       return false;
     }
+    if (continuationInvalid) {
+      toast.error(
+        t("agentDetail.maxContinuationsInvalid", "Enter a whole number from 0 to {{max}}, or leave empty for off.", {
+          max: MAX_CONTINUATIONS,
+        }),
+      );
+      return false;
+    }
     if (hitlNotifyInvalid) {
       toast.error(
         t(
@@ -288,6 +304,10 @@ export function AgentDetailPage() {
           "Fix the approval email recipients, or switch email notifications off, before saving.",
         ),
       );
+      return false;
+    }
+    if (ratingInvalid) {
+      toast.error(t("agentDetail.rating.invalid", "Fix the highlighted fields in Ratings before saving."));
       return false;
     }
     const sent = draft;
@@ -322,7 +342,20 @@ export function AgentDetailPage() {
       }
       return false;
     }
-  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t, ceilingInvalid, hitlNotifyInvalid]);
+  }, [
+    draft,
+    isDirty,
+    agent,
+    updateAgentMutation,
+    id,
+    resolvedVersion,
+    queryClient,
+    t,
+    ceilingInvalid,
+    continuationInvalid,
+    hitlNotifyInvalid,
+    ratingInvalid,
+  ]);
 
   useEffect(() => {
     if (!rebaseFrom || !agent || agent === rebaseFrom) return;
@@ -518,7 +551,9 @@ export function AgentDetailPage() {
     touched("memoryPolicy"),
     touched("sessionManagement"),
     touched("maxCostPerConversationUsd"),
+    touched("maxContinuations", "continuationInput"),
     touched("conversationReview"),
+    touched("ratingConfig"),
     touched("hitlConfig"),
     touched("channels"),
   ].filter(Boolean).length;
@@ -842,6 +877,9 @@ export function AgentDetailPage() {
         </div>
       )}
 
+      {/* Feedback over the last 30 days, when the agent asks for ratings or has some */}
+      <AgentFeedbackStrip agentId={id!} ratingsEnabled={agent.ratingConfig?.enabled === true} />
+
       {/* Environment Status Badges */}
       {envStatuses && envStatuses.length > 0 && (
         <EnvironmentBadges
@@ -1020,11 +1058,31 @@ export function AgentDetailPage() {
         modified={touched("conversationReview")}
       />
 
+      {/* Conversation ratings */}
+      <RatingConfigSection
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("ratingConfig")}
+        onValidityChange={setRatingInvalid}
+      />
+
       {/* Spend limits */}
       <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
 
+      {/* Self-continuation */}
+      <ContinuationSection
+        key={`continuation-${id}-${resolvedVersion}`}
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("maxContinuations", "continuationInput")}
+        onValidityChange={setContinuationInvalid}
+      />
+
       {/* Human-in-the-Loop */}
       <HitlConfigSection
+        key={`${id}-${resolvedVersion}`}
         agent={doc}
         onChange={editAgent}
         disabled={isSaving}

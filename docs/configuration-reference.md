@@ -187,7 +187,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.expressions.max-depth` | `32` | Deepest parenthesis nesting the expression parser accepts, counted the same way and refused the same way as `eddi.expressions.max-length`. Each level is one recursion; the shipped agent configs use three |
 | `eddi.turns.idempotency.ttl-seconds` | `600` | How long a completed turn stays recognisable by its `Idempotency-Key` / `X-EDDI-Request-Id`, so a retried `say` returns the stored answer instead of running again. `0` disables idempotent turns. See [Conversations](conversations.md#idempotent-turns) |
 | `eddi.usermemories.deleteOlderThanDays` | `-1` | Persistent user memories older than this are deleted. **`-1` disables the sweep** — memories are kept forever until you set a positive number. Relevant to [GDPR](gdpr-compliance.md) and [HIPAA](hipaa-compliance.md) |
-| `eddi.conversation.client-context.permitted-reserved-keys` | *(empty)* | Comma-separated engine-reserved context keys that clients are allowed to set. Empty (the default) drops all of them from client-supplied context. Only `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript`, `dynamicAgentConfig`, `dynamicCreatedAgentIds` and `delegationDepth` are recognized; anything else is ignored. Set this only where every caller is trusted — see [Passing Context Information](passing-context-information.md#reserved-context-keys) |
+| `eddi.conversation.client-context.permitted-reserved-keys` | *(empty)* | Comma-separated engine-reserved context keys that clients are allowed to set. Empty (the default) drops all of them from client-supplied context. Only `groupId`, `groupConversationId`, `groupDepth`, `groupTranscript`, `dynamicAgentConfig`, `dynamicCreatedAgentIds`, `delegationDepth` and `selfContinuation` are recognized; anything else is ignored. Set this only where every caller is trusted — see [Passing Context Information](passing-context-information.md#reserved-context-keys) |
 | `eddi.coordinator.max-active-conversations` | `10000` | Ceiling on concurrently tracked conversations: how many conversations may hold a turn queue at once. Only a turn for a conversation that has none is refused; follow-up turns are always queued |
 | `eddi.conversation.max-in-flight-turns` | `auto` | Turns this node runs at once, queued or executing. One more is refused with **503** `capacity_exceeded` and `Retry-After`, and counted as `eddi_turn_rejected_total{reason="in_flight_limit"}`. Turns run on virtual threads, so this limit, not the worker pool, is the node's turn ceiling, and heap is what bounds it. **`auto`** derives it from the maximum heap: (max heap − 256 MB) ÷ `eddi.conversation.in-flight-turn-memory-mb`, e.g. 128 at a 512 MB heap, ~1400 at 3 GB, ~2900 at 6 GB. The node logs the value it resolved at startup and exports it as `eddi_conversation_max_in_flight_turns`. A number sets it; `0` or negative disables it. **Leave headroom above the number of conversations you expect to be active at once (roughly 10–20 %).** A turn holds its place until it has been persisted, and that happens after its caller already has the answer, so a client that sends its next turn straight away can arrive before the previous turn released its place. In a load test with exactly as many clients as the limit (1000 against 1000), 5–12 % of turns were refused this way. Keep the database pool in step (MongoDB driver default 100 connections, `maxPoolSize` in the connection string; PostgreSQL `quarkus.datasource.jdbc.max-size`, Quarkus default 50) |
 | `eddi.conversation.skip-turns-of-timed-out-callers` | `true` | A REST turn is answered `408` once `systemRuntime.agentTimeoutInSeconds` has passed since its request **arrived**, time spent waiting for a thread included. A turn still queued at that moment is dropped instead of run: its caller already has the `408`, and running it would spend a model call and database writes on an answer nobody reads. Under overload that is every queued turn, which is how goodput can fall to zero. The input is not consumed, so a retry runs normally. Counted as `eddi_turn_skipped_total{reason="caller_timed_out"}`. `false` runs such turns as before. Streams, schedules and group members carry no caller deadline and are unaffected |
@@ -240,6 +240,24 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The `DELETE` is by timestamp and therefore idempotent, so it needs no cluster claim |
 | `eddi.rag.ingestion.schedule-repair.enabled` | `true` | At startup, gives a next fire time to any RAG ingestion schedule stored without one. Such a row reads back enabled and can never be selected by the poller, so it looks scheduled and never runs. The sweep only touches rows that have no fire time at all, so an already armed row is skipped and a boot with nothing left to repair does no writes. It is not guaranteed to finish in one pass: it stops at its own 20,000-row bound, and at a store failure, logging a warning that says which — a later boot picks up the rows it never examined — see [rag.md](rag.md#ingestion-sources) |
+
+---
+
+## Alerts
+
+Full narrative: [alerts.md](alerts.md#operating-alerts).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.alerts.enabled` | `true` | Off: no alert work is queued and the `alerts-maintenance` schedule is not created |
+| `eddi.alerts.queue-capacity` | `1000` | Work the alert worker may have waiting; past it work is dropped (`eddi_alerts_dropped_total`), never waited for |
+| `eddi.alerts.maintenance-interval` | `60s` | Heartbeat of the `alerts-maintenance` system schedule (retries, digests, retention); at least 15 s. Read when the schedule is created |
+| `eddi.alerts.max-attempts` | `5` | Delivery attempts per target before it is marked `FAILED` |
+| `eddi.alerts.retry-base` | `30s` | Retry backoff: `base × 4^(attempt-1)`, at most six hours |
+| `eddi.alerts.claim-lease` | `2m` | How long a node owns a delivery in progress before the maintenance job may retry it |
+| `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
+| `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery |
+| `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
 
 ---
 
@@ -385,6 +403,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
 | `eddi.hitl.tool.journal-retention` | `30d` | How long tool-approval journal entries are kept |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
+| `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
@@ -635,6 +654,27 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.tenant.quota.max-monthly-cost-usd` | `-1` | `-1` = unlimited. Priced LLM and tool spend per UTC month; once reached, LLM tasks serve their fallback answer and tool calls are refused. Unpriced models meter $0 — see [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget) |
 | `eddi.variables.cache-ttl-minutes` | `2` | [Global variable](global-variables.md) cache lifetime |
 | `eddi.deployment.env` | `development` *(when unset)* | Value matched by the `deploymentContext` behavior-rule condition, letting one agent behave differently per environment |
+
+---
+
+## White-labeling
+
+The brand is normally edited at runtime (`/administration/branding`, `eddi-admin`) and stored in the database. These properties **seed** every field the stored brand leaves unset; with `eddi.branding.locked=true` they are the whole brand and nothing can be edited at runtime. Every value passes the same validation as a REST write, and an invalid one fails startup naming the property. See [White-Labeling](white-labeling.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.branding.locked` | `false` | Properties are authoritative: the stored brand is ignored and every branding write answers 409. For installs that keep their brand in Git |
+| `eddi.branding.product-name` | *(unset: `EDDI`)* | The product name the UIs show. At most 40 characters; no `<`, `>` or control characters |
+| `eddi.branding.short-name` | *(unset: the product name)* | For tight spaces. At most 12 characters |
+| `eddi.branding.tagline` | *(unset)* | One line for link previews and the welcome page. At most 120 characters |
+| `eddi.branding.color.primary` | *(unset: EDDI amber)* | Primary colour: `#rgb`, `#rrggbb`, or `rgb()`/`hsl()`/`oklch()` with plain numbers |
+| `eddi.branding.color.primary-foreground` | *(unset)* | Text on the primary colour. Below 4.5:1 contrast logs a WARN |
+| `eddi.branding.color.dark-primary` | *(unset: the primary)* | Primary colour in dark mode |
+| `eddi.branding.color.dark-primary-foreground` | *(unset: the foreground)* | Text on it in dark mode |
+| `eddi.branding.color.chat-accent` | *(unset: the primary)* | The Chat UI's accent |
+| `eddi.branding.powered-by` | *(unset: `true`)* | Show "Powered by EDDI" |
+| `eddi.branding.show-update-check` | *(unset: `false`)* | Keep the Manager's update check UI while branded |
+| `eddi.branding.assets-dir` | *(unset)* | Directory of brand images under fixed names (`logo.svg\|png\|webp`, `logo-dark.*`, `icon.*`, `favicon.ico\|png\|svg`, `og-image.*`), each checked like an upload. A missing directory or a refused file fails startup |
 
 ---
 

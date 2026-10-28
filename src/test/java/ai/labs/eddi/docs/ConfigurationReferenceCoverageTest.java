@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -85,6 +86,15 @@ class ConfigurationReferenceCoverageTest {
      * counts when the same file also uses that constant where a property name goes,
      * which {@link #CONFIG_USE} checks.
      */
+    /** {@code @ConfigMapping(prefix = "eddi.…")}. */
+    private static final Pattern CONFIG_MAPPING = Pattern.compile("@ConfigMapping\\(\\s*prefix\\s*=\\s*\"(eddi\\.[\\w.\\-]+)\"");
+
+    /** A group interface nested in a mapping, at one indentation level. */
+    private static final Pattern NESTED_INTERFACE = Pattern.compile("(?m)^    interface (\\w+)\\s*\\{");
+
+    /** An accessor of a mapping: indentation, return type and name. */
+    private static final Pattern ACCESSOR = Pattern.compile("(?m)^( +)(?:[\\w.]+<)?(\\w+)>?\\s+(\\w+)\\(\\);");
+
     private static final Pattern CONSTANT = Pattern.compile("static final String (\\w+)\\s*=\\s*\"(eddi\\.[\\w.\\-]+)\"");
 
     /**
@@ -314,6 +324,7 @@ class ConfigurationReferenceCoverageTest {
             record(INJECTED.matcher(entry.getValue()), found, entry.getKey());
             record(LOOKED_UP.matcher(entry.getValue()), found, entry.getKey());
             record(EXPRESSION.matcher(entry.getValue()), found, entry.getKey());
+            recordConfigMapping(entry.getValue(), found, entry.getKey());
         }
         // Constants last, and against every source: a constant is only evidence
         // once something hands it to the config API, and that may be another file.
@@ -356,6 +367,61 @@ class ConfigurationReferenceCoverageTest {
                 into.putIfAbsent(property, source);
             }
         }
+    }
+
+    /**
+     * Properties of a {@code @ConfigMapping(prefix = "eddi.…")} interface: one per
+     * accessor, kebab-cased under the prefix, and a nested interface returned by an
+     * accessor is a group one level down ({@code Color color()} with
+     * {@code primaryForeground()} inside is
+     * {@code <prefix>.color.primary-foreground}).
+     * <p>
+     * Without this, a mapped property was invisible to both directions of the
+     * check: never required in the reference, and refused there as invented.
+     * <p>
+     * The parse goes by indentation — accessors of the mapping at one level, those
+     * of a nested group one level deeper — which is how the formatter lays these
+     * interfaces out; a mapping it cannot read finds nothing, and then
+     * {@link #referenceIsExhaustive()} fails on the documented names rather than
+     * passing silently.
+     */
+    private static void recordConfigMapping(String body, TreeMap<String, String> into, String source) {
+        Matcher mapping = CONFIG_MAPPING.matcher(body);
+        if (!mapping.find()) {
+            return;
+        }
+        String prefix = mapping.group(1);
+        Map<String, String> groupOf = new LinkedHashMap<>();
+        Matcher nested = NESTED_INTERFACE.matcher(body);
+        while (nested.find()) {
+            groupOf.put(nested.group(1), null);
+        }
+        Matcher accessor = ACCESSOR.matcher(body);
+        String currentGroup = null;
+        int lastNestedAt = -1;
+        Matcher nestedStart = NESTED_INTERFACE.matcher(body);
+        while (accessor.find()) {
+            while (nestedStart.find(lastNestedAt + 1) && nestedStart.start() < accessor.start()) {
+                currentGroup = nestedStart.group(1);
+                lastNestedAt = nestedStart.start();
+            }
+            String indent = accessor.group(1);
+            String type = accessor.group(2);
+            String name = kebab(accessor.group(3));
+            if (indent.length() == 4) {
+                if (groupOf.containsKey(type)) {
+                    groupOf.put(type, prefix + "." + name);
+                } else {
+                    into.putIfAbsent(prefix + "." + name, source);
+                }
+            } else if (indent.length() == 8 && currentGroup != null && groupOf.get(currentGroup) != null) {
+                into.putIfAbsent(groupOf.get(currentGroup) + "." + name, source);
+            }
+        }
+    }
+
+    private static String kebab(String camel) {
+        return camel.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase(Locale.ROOT);
     }
 
     /**

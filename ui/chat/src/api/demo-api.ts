@@ -6,6 +6,13 @@
    ────────────────────────────────────────────── */
 
 import type { ChatMessage, QuickReply, SSEEvent } from "@/types";
+import {
+  CONVERSATION_STEP,
+  type RatingClient,
+  type RatingInput,
+  type RatingProfile,
+  type StoredRating,
+} from "./rating-api";
 
 /** Simulated delay */
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -213,3 +220,71 @@ export function demoGetQuickReplies(message: string): QuickReply[] {
   const response = getResponse(message);
   return response.quickReplies ?? [];
 }
+
+/* ─── Demo ratings ────────────────────────────── */
+
+/** What the showcase agent asks for: every rating control, so all of them can be tried. */
+export const DEMO_RATING_PROFILE: RatingProfile = {
+  scale: "FIVE_STAR",
+  conversationRating: true,
+  promptText: null,
+  askOnEnd: true,
+  askAfterTurns: 3,
+  messageRating: true,
+  comment: true,
+  commentMaxLength: 1000,
+  commentAskBelowScore: 0,
+  reasonTags: ["Helpful", "Wrong answer", "Didn't understand me", "Too slow"],
+  ratingWindowHours: 168,
+};
+
+const demoRatings = new Map<string, Map<number, StoredRating>>();
+
+function demoStore(conversationId: string): Map<number, StoredRating> {
+  let ratings = demoRatings.get(conversationId);
+  if (!ratings) {
+    ratings = new Map();
+    demoRatings.set(conversationId, ratings);
+  }
+  return ratings;
+}
+
+function demoRate(conversationId: string, stepIndex: number, input: RatingInput): StoredRating {
+  const rating: StoredRating = {
+    conversationId,
+    stepIndex,
+    score: input.score,
+    tags: input.tags ?? [],
+    comment: input.comment?.trim() || null,
+  };
+  demoStore(conversationId).set(stepIndex, rating);
+  return rating;
+}
+
+/** An in-memory rating backend, so demo mode works offline. */
+export const demoRatingClient: RatingClient = {
+  async read(conversationId) {
+    await delay(50);
+    const ratings = [...demoStore(conversationId).values()];
+    return {
+      conversation: ratings.find((r) => r.stepIndex === CONVERSATION_STEP) ?? null,
+      steps: ratings.filter((r) => r.stepIndex !== CONVERSATION_STEP),
+    };
+  },
+  async rateConversation(conversationId, input) {
+    await delay(150);
+    return demoRate(conversationId, CONVERSATION_STEP, input);
+  },
+  async rateStep(conversationId, stepIndex, input) {
+    await delay(150);
+    return demoRate(conversationId, stepIndex, input);
+  },
+  async withdrawConversation(conversationId) {
+    await delay(100);
+    demoStore(conversationId).delete(CONVERSATION_STEP);
+  },
+  async withdrawStep(conversationId, stepIndex) {
+    await delay(100);
+    demoStore(conversationId).delete(stepIndex);
+  },
+};
