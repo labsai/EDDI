@@ -704,7 +704,7 @@ reset with every restart and never saw pauses taken before it; alert on
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
 ```text
-eddi_email_outbound_total                   # Notification mails by outcome; tags: kind (notify), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited)
+eddi_email_outbound_total                   # System mails by outcome; tags: kind (notify|notice), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited)
 eddi_email_ledger_pending                   # Email ledger rows not yet sent, failed or suppressed (gauge)
 ```
 
@@ -737,6 +737,28 @@ address. For
 `tempfail` means TXT lookups are failing temporarily, of which an unreachable resolver (`eddi.email.dns.servers`) is
 one possible cause; `budget_exhausted` is a local limit, not a DNS failure: a message needed more DKIM key and DMARC
 record lookups than `eddi.email.dns.max-lookups-per-message` allows, and the lookups past it were not sent.
+
+**Email channel, trigger mode** ([email-integration.md](email-integration.md#metrics)):
+
+```text
+eddi_email_inbound_total                    # Inbound mail by outcome; tags: integration, transport (imap), mode (trigger), outcome (processed|duplicate|unauthenticated|blocked|loop|throttled|budget|too_large|parse_error|deferred|unroutable|failed)
+eddi_email_poll_duration_seconds            # One mailbox poll (timer); tags: integration, transport, mode, outcome (ok|error)
+eddi_email_poll_cursor_resets_total         # UIDVALIDITY changes that restarted a folder scan; tags: integration, transport, mode
+eddi_email_poll_marked_total                # Processed mail marked in the mailbox; tags: integration, transport, mode, result (flagged|moved|flagged_not_moved|nothing)
+eddi_email_ledger_stranded_recovered_total  # Claims given back and submitted turns resolved after a crash; tag: outcome (requeued|done|failed|awaiting_human|lost)
+```
+
+`integration` is the channel integration's resource id, never an address. `processed` means a turn was submitted;
+`deferred` mail stays in the mailbox and is retried by a later poll (a temporary authentication result, an agent that
+is not deployed, a busy conversation); `throttled` and `budget` mail waits for the next UTC day or the next poll, and
+the integration's owners hear about it once a day (`eddi_email_outbound_total{kind="notice"}` when a system mailer is
+configured). Every refusal (`unauthenticated`, `blocked`, `loop`, `too_large`, `parse_error`, `unroutable`) is recorded
+in the email ledger and never answered. A `poll_duration` with `outcome=error` is a failed poll (connection, login,
+folder); the integration backs off on its own. `poll_marked{result="nothing"}` means the server takes no custom
+keywords (Exchange Online, some hosters) and no move is configured: polling continues on the cursor and the ledger, and
+`processedAction: move:<folder>` is the fix. `stranded_recovered{outcome="requeued"}` is a claim whose node died before
+anything left EDDI — the mail was processed again; `outcome="lost"` is mail whose node stopped while starting its
+conversation: it is not run again, and the integration's owners get the `lost` notice.
 
 ### Platform Operator Metrics
 

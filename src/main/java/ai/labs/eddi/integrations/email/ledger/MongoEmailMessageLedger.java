@@ -79,6 +79,9 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.ascending(F_RECIPIENT), new IndexOptions().name("idx_email_ledger_recipient"));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_RECIPIENT), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
                 new IndexOptions().name("idx_email_ledger_rate"));
+        rows.createIndex(Indexes.ascending(F_MESSAGE_ID), new IndexOptions().name("idx_email_ledger_message_id"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_RECIPIENT), Indexes.ascending(F_KIND),
+                Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_inbound_sender"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
@@ -160,6 +163,53 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public long deleteExpired(Instant now) {
         return rows.deleteMany(Filters.lte(F_EXPIRES, Date.from(now))).getDeletedCount();
+    }
+
+    @Override
+    public Optional<LedgerEntry> findByMessage(String integrationId, Direction direction, String messageId) {
+        return Optional.ofNullable(rows.find(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_DIRECTION, direction.name()),
+                Filters.eq(F_MESSAGE_ID, messageId))).first()).map(MongoEmailMessageLedger::toEntry);
+    }
+
+    @Override
+    public Optional<LedgerEntry> findOutboundByMessageId(String messageId) {
+        return Optional.ofNullable(rows.find(Filters.and(Filters.eq(F_MESSAGE_ID, messageId), Filters.eq(F_DIRECTION, Direction.OUT.name()))).first())
+                .map(MongoEmailMessageLedger::toEntry);
+    }
+
+    @Override
+    public boolean transition(String id, State from, State to, String conversationId, Instant nextAttemptAt, String lastError, boolean countAttempt,
+                              Instant now) {
+        List<Bson> updates = new ArrayList<>();
+        updates.add(Updates.set(F_STATE, to.name()));
+        updates.add(Updates.set(F_NEXT, date(nextAttemptAt)));
+        updates.add(Updates.set(F_ERROR, lastError));
+        updates.add(Updates.set(F_UPDATED, Date.from(now)));
+        if (conversationId != null) {
+            updates.add(Updates.set(F_CONVERSATION, conversationId));
+        }
+        if (countAttempt) {
+            updates.add(Updates.inc(F_ATTEMPTS, 1));
+        }
+        return rows.updateOne(Filters.and(Filters.eq(F_ID, id), Filters.eq(F_STATE, from.name())), Updates.combine(updates))
+                .getModifiedCount() == 1;
+    }
+
+    @Override
+    public List<LedgerEntry> findDue(Kind kind, State state, Instant now, int limit) {
+        List<LedgerEntry> result = new ArrayList<>();
+        for (Document document : rows.find(Filters.and(Filters.eq(F_STATE, state.name()), Filters.eq(F_KIND, kind.name()),
+                Filters.lte(F_NEXT, Date.from(now)))).sort(Sorts.ascending(F_NEXT)).limit(limit)) {
+            result.add(toEntry(document));
+        }
+        return result;
+    }
+
+    @Override
+    public long countInboundTurns(String integrationId, String sender, Instant since) {
+        return rows.countDocuments(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_RECIPIENT, sender),
+                Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.gte(F_CREATED, Date.from(since)),
+                Filters.in(F_STATE, State.TURN_SUBMITTED.name(), State.DONE.name())));
     }
 
     @Override

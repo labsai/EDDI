@@ -63,6 +63,7 @@
 - [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [Webhook Triggers (CloudEvents)](webhook-triggers.md)
+- [Email Integration (Trigger Mode)](email-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
 

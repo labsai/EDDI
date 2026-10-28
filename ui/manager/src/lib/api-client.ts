@@ -210,15 +210,16 @@ function truncateMessage(message: string): string {
  * 2xx, so `response.ok` cannot tell them apart and the Manager reported every
  * one of them as a clean success.
  *
- * Deliberately just the status. A header accessor would round the shape out,
- * and nothing needs one: the only header-carried signal in this family,
- * `X-Schedules-Skipped`, is read by `backup.ts`, which bypasses `ApiClient`
- * entirely because it posts zip bodies. Adding an accessor with no caller is
- * the same defect as an endpoint wrapper nobody renders.
+ * The response headers ride along because a save can now carry advice that is
+ * not an error: a channel-integration create or update answers 201 / 200 with
+ * `X-Eddi-Warnings` (stable codes such as `email.open-trigger`), and the save
+ * itself succeeded. (`X-Schedules-Skipped` is read by `backup.ts`, which
+ * bypasses `ApiClient` entirely because it posts zip bodies.)
  */
 export interface ApiResponse<T> {
   data: T;
   status: number;
+  headers: Headers;
 }
 
 /** Extract a human-readable message from any caught error */
@@ -421,6 +422,7 @@ class ApiClient {
     const envelope = (data: T): ApiResponse<T> => ({
       data,
       status: response.status,
+      headers: response.headers,
     });
 
     // 204 No Content has no body. 202 Accepted usually has none either, but
@@ -494,11 +496,18 @@ class ApiClient {
   /**
    * The `*WithResponse` family, for the endpoints where a 2xx is not yet an
    * answer — see {@link ApiResponse}. Prefer the plain verb everywhere else:
-   * an envelope at a call site that ignores it only adds a `.data`. There is no
-   * `postWithResponse` because nothing posts to such an endpoint yet.
+   * an envelope at a call site that ignores it only adds a `.data`.
    */
   getWithResponse<T>(path: string): Promise<ApiResponse<T>> {
     return this.requestWithResponse<T>("GET", path);
+  }
+
+  postWithResponse<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<ApiResponse<T>> {
+    return this.requestWithResponse<T>("POST", path, body, headers);
+  }
+
+  putWithResponse<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<ApiResponse<T>> {
+    return this.requestWithResponse<T>("PUT", path, body, headers);
   }
 
   deleteWithResponse<T>(path: string): Promise<ApiResponse<T>> {

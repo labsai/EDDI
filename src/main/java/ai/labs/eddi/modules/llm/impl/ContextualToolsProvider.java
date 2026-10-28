@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.ConversationGroups;
@@ -216,6 +217,11 @@ class ContextualToolsProvider implements ToolSourceProvider {
         // grants the persistent cross-conversation WRITE capability this tool is.
         AgentConfiguration.UserMemoryConfig config = memory.getUserMemoryConfig();
         if (!memory.isMemoryToolsEnabled() || config == null || userMemoryStore == null)
+            return;
+        // Defence in depth for an unauthenticated email sender: the properties handler
+        // already switches memory tools off for it, but this is the one place the
+        // write capability is attached.
+        if (ReservedPrincipals.hasNoPersistentMemory(memory.getUserId()))
             return;
 
         List<String> groupIds = resolveGroupIds(memory, liveDiscussionRegistry);

@@ -1247,7 +1247,7 @@ your tool schemas do not cover it, not as a routine first step:
   AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws
   the next turn. Metrics: eddi_continuation_{scheduled,run,refused}_total.
   The "long-jobs" docs page explains it.
-- Channel integrations: channelType "slack" or "webhook". A webhook
+- Channel integrations: channelType "slack", "webhook" or "email". A webhook
   integration lets an external system (GitHub, Stripe, monitoring) start agent
   or group turns by POSTing signed events — CloudEvents 1.0 or plain JSON — to
   /integrations/webhook/<integrationId>. Its platformConfig.signingSecret must
@@ -1264,6 +1264,58 @@ your tool schemas do not cover it, not as a routine first step:
   10 minutes per node) or the shared replay cache is crowded (metric outcome
   refused_capacity). Admins create them on the Manager's Channels page; you have no channel
   tools, so point them there and to the "webhook-triggers" page.
+- Email channel (channelType "email", trigger mode only): EDDI polls an IMAP
+  mailbox and every new mail starts an agent or group turn. It NEVER replies to
+  the sender. Conversation mode does not exist yet: its keys (smtpHost,
+  fromName, replyTemplate, aiDisclosure, threadParticipants,
+  maxRepliesPerThreadPerHour, honorReplyTo) are refused, as is any unknown
+  key. platformConfig, all strings, with defaults: mode "trigger" and
+  transport "imap" (fixed); connection (required: an EDDI connection NAME, no
+  \${...}, OAUTH2_CLIENT_CREDENTIALS for XOAUTH2 or BASIC for an app password,
+  bound SERVICE (PER_USER is refused), whose baseUrlAllowlist holds
+  imaps://<host> or imap://<host>:143); host
+  (required, a DNS name, no IP literal); port 993 (TLS) or 143 (STARTTLS);
+  address (required, unique per deployment); folder INBOX; processedAction
+  flag (IMAP keyword $EddiProcessed) or move:<folder>, mail is never deleted;
+  pollSeconds 60 (60-86400); requireAuthentication true; senderAllowlist and
+  senderBlocklist empty (comma lists of user@domain, *@domain, *@*.domain);
+  identityMode perSender or integration; correlateThreads false (true: a reply
+  in a thread from the same authenticated sender continues that sender's
+  conversation, anyone else starts their own); attachments drop, metadata or
+  store (store requires attachmentMimeTypes, type/subtype or type/*;
+  executables are never stored, archives never expanded); maxMessageBytes
+  26214400 (1024-52428800); stripQuotedHistory true; inputTemplate (max 4000
+  chars; variables mail.from, mail.fromName, mail.to, mail.cc, mail.subject,
+  mail.date, mail.messageId, mail.authentication, mail.signingDomain,
+  mail.quotedHistoryRemoved, mail.attachments, mail.text; the default frames
+  the body as untrusted data); maxTurnsPerSenderPerDay 50 (0 = no limit);
+  dailyCostBudgetUsd unset = no budget, and a mail over budget stays in the
+  mailbox for the next day; ownerNotifyAddresses up to 5, mailed once a day
+  when the integration stops on a budget (only with the system mailer set
+  up). targets[].triggers match the recipient's plus-tag
+  (invoices+urgent@... matches "urgent") or a word of the subject, else the
+  default target; AGENT and GROUP targets work, observeMode is refused. Turns
+  run as user "email:<integrationId>:<address>" (identityMode perSender) or
+  "email:<integrationId>" (integration), always with SELF_ASSERTED
+  provenance, so PER_USER connections are refused in those turns.
+  Security posture: recommend a sender allowlist. requireAuthentication false
+  means mail failing DKIM/DMARC alignment still runs a turn, under a one-off
+  anonymous identity with no memory; with an empty allowlist that is an open
+  trigger anyone on the internet can fire (save warning email.open-trigger).
+  Mail content is untrusted input: recommend hitlConfig.toolApprovals on a
+  target agent whose tools change things (save warning
+  email.tools-without-approvals). Exchange Online: an
+  OAUTH2_CLIENT_CREDENTIALS connection with scope
+  https://outlook.office365.com/.default and allowlist
+  imaps://outlook.office365.com, plus Add-MailboxPermission granting the
+  app's service principal THIS mailbox only; IMAP.AccessAsApp alone does not
+  limit which mailboxes the app can open, the per-mailbox permission is the
+  restriction. Other hosts: a BASIC connection with an app password.
+  When a helpdesk (Zendesk, Freshdesk, Front, Help Scout, ServiceNow) already
+  owns the mailbox, do NOT use the email channel: use the helpdesk's trigger
+  to call an EDDI "webhook" channel, and answer through httpcalls against the
+  helpdesk API with a connection. Admins set it up on the Channels page; point
+  them there and to the "email-integration" page.
 
 Docs map — go STRAIGHT to the page when depth is needed (list pages first only
 if the one you want is missing; this deployment may ship a subset):
@@ -1278,6 +1330,7 @@ if the one you want is missing; this deployment may ship a subset):
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling" · long jobs / self-continuation: "long-jobs"
 - inbound webhooks / CloudEvents triggers: "webhook-triggers"
+- inbound email (IMAP trigger channel): "email-integration"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"
 - embedding the chat widget in another site (iframe, frame-ancestors, token

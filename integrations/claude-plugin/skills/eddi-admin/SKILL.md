@@ -138,7 +138,11 @@ audit trail → server log → the configuration that produced it. Follow
 - **Channels** connect agents to Slack and similar: `list_channel_integrations`,
   `read_channel_integration`, `create_channel_integration`, `update_channel_integration`,
   `delete_channel_integration`. Platform tokens are vault references.
-  `read_docs("slack-integration")`.
+  `read_docs("slack-integration")`. An `email` channel (trigger mode) polls an IMAP mailbox and
+  starts a turn per mail, never replying; its credential is a connection name, and the result's
+  `warnings` (`email.open-trigger`, `email.tools-without-approvals`) are worth relaying.
+  Where a helpdesk already owns the mailbox, use a `webhook` channel instead.
+  `read_docs("email-integration")`.
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
   `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`; requests from a

@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { parseChannelResourceUri, createDefaultTarget, DEFAULT_OBSERVE_CONFIG } from "@/lib/api/channels";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
+import {
+  parseChannelResourceUri,
+  createDefaultTarget,
+  DEFAULT_OBSERVE_CONFIG,
+  parseChannelWarnings,
+  createChannel,
+  updateChannel,
+  type ChannelIntegrationConfiguration,
+} from "@/lib/api/channels";
 
 describe("parseChannelResourceUri", () => {
   it("parses eddi:// resource URIs", () => {
@@ -73,5 +83,62 @@ describe("DEFAULT_OBSERVE_CONFIG", () => {
     expect(DEFAULT_OBSERVE_CONFIG.maxCostPerDay).toBe(5.0);
     expect(DEFAULT_OBSERVE_CONFIG.triggerKeywords).toEqual([]);
     expect(DEFAULT_OBSERVE_CONFIG.triggerMimeTypes).toEqual([]);
+  });
+});
+
+describe("channel save warnings (X-Eddi-Warnings)", () => {
+  const config: ChannelIntegrationConfiguration = {
+    name: "Invoices",
+    channelType: "email",
+    platformConfig: { mode: "trigger", transport: "imap" },
+    targets: [createDefaultTarget("agent1")],
+    defaultTargetName: "default",
+  };
+
+  it("splits the header into codes, dropping blanks and repeats", () => {
+    expect(parseChannelWarnings(null)).toEqual([]);
+    expect(parseChannelWarnings("")).toEqual([]);
+    expect(parseChannelWarnings(" email.open-trigger , ,email.tools-without-approvals,email.open-trigger")).toEqual([
+      "email.open-trigger",
+      "email.tools-without-approvals",
+    ]);
+  });
+
+  it("returns the warnings of a create next to its location", async () => {
+    server.use(
+      http.post("*/channelstore/channels", () =>
+        new HttpResponse(null, {
+          status: 201,
+          headers: {
+            Location: "/channelstore/channels/abc?version=1",
+            "X-Eddi-Warnings": "email.open-trigger,email.tools-without-approvals",
+          },
+        }),
+      ),
+    );
+    await expect(createChannel(config)).resolves.toEqual({
+      location: "/channelstore/channels/abc?version=1",
+      warnings: ["email.open-trigger", "email.tools-without-approvals"],
+    });
+  });
+
+  it("returns no warnings when the header is absent, and survives an update without a Location", async () => {
+    server.use(http.put("*/channelstore/channels/:id", () => new HttpResponse(null, { status: 200 })));
+    await expect(updateChannel("abc", 1, config)).resolves.toEqual({ location: "", warnings: [] });
+  });
+
+  it("returns the warnings of an update", async () => {
+    server.use(
+      http.put("*/channelstore/channels/:id", () =>
+        new HttpResponse(null, {
+          status: 200,
+          headers: { Location: "/channelstore/channels/abc?version=2", "X-Eddi-Warnings": "email.open-trigger" },
+        }),
+      ),
+    );
+    await expect(updateChannel("abc", 1, config)).resolves.toEqual({
+      location: "/channelstore/channels/abc?version=2",
+      warnings: ["email.open-trigger"],
+    });
   });
 });

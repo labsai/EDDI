@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -545,6 +546,24 @@ class ConversationServiceDeepBranchTest {
         void nullUserMemoryConfig() {
             var handler = conversationService.createPropertiesHandler(USER_ID, null);
             assertNull(handler.getUserMemoryConfig());
+        }
+
+        @Test
+        @DisplayName("an unauthenticated email sender (email-anon:) gets no memory store and no memory tools")
+        void anonymousEmailSenderHasNoMemory() {
+            var handler = conversationService.createPropertiesHandler("email-anon:0123abcd",
+                    new AgentConfiguration.UserMemoryConfig(), true);
+            assertNull(handler.getUserMemoryStore(), "no long-term memory read or written");
+            assertFalse(handler.isMemoryToolsEnabled(), "no UserMemoryTool");
+        }
+
+        @Test
+        @DisplayName("an authenticated email sender (email:<id>:<address>) keeps its memory")
+        void authenticatedEmailSenderHasMemory() {
+            var handler = conversationService.createPropertiesHandler("email:int1:alice@example.com",
+                    new AgentConfiguration.UserMemoryConfig(), true);
+            assertSame(userMemoryStore, handler.getUserMemoryStore());
+            assertTrue(handler.isMemoryToolsEnabled());
         }
     }
 

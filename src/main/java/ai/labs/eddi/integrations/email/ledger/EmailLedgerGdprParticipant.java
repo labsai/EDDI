@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
+import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -25,13 +26,15 @@ import java.util.Set;
 /**
  * Erases and exports the email ledger rows addressed to a person.
  * <p>
- * A ledger row names its recipient by address, and an erasure request names a
- * user id. The addresses taken to be the person's are the user id itself when
- * it is an address, and the email the user directory recorded for that
- * principal — which is why the directory participant runs after this one
- * ({@link IGdprParticipant#LAST}). A row whose recipient is an address that
- * belongs to nobody in the directory (a shared mailbox an agent designer typed)
- * is not personal data of this user and is left to retention
+ * A ledger row names its counterpart by address — the recipient of an outbound
+ * row, the sender of an inbound one — and an erasure request names a user id.
+ * The addresses taken to be the person's are the user id itself when it is an
+ * address, the address of an email channel identity
+ * ({@code email:<integrationId>:<address>}), and the email the user directory
+ * recorded for that principal — which is why the directory participant runs
+ * after this one ({@link IGdprParticipant#LAST}). A row whose recipient is an
+ * address that belongs to nobody in the directory (a shared mailbox an agent
+ * designer typed) is not personal data of this user and is left to retention
  * ({@code eddi.email.ledger-retention}).
  * <p>
  * The export lists what a row says about the person — when, which message, its
@@ -97,6 +100,9 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
             return addresses;
         }
         AddressNormalizer.tryNormalize(userId).ifPresent(addresses::add);
+        // An email channel identity (email:<integrationId>:<address>) names its
+        // address.
+        EmailUserIdentity.addressOf(userId).flatMap(AddressNormalizer::tryNormalize).ifPresent(addresses::add);
         if (directory != null && directory.isResolvable()) {
             Optional<DirectoryUser> entry = directory.get().find(userId);
             entry.map(DirectoryUser::email).flatMap(AddressNormalizer::tryNormalize).ifPresent(addresses::add);

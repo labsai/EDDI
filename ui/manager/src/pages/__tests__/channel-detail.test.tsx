@@ -378,3 +378,97 @@ describe("ChannelDetailPage", () => {
     });
   });
 });
+
+describe("ChannelDetailPage — email integration", () => {
+  const emailChannel = {
+    name: "Invoices Mailbox",
+    channelType: "email",
+    platformConfig: {
+      connection: "exchange-mailbox",
+      host: "outlook.office365.com",
+      address: "invoices@example.com",
+    },
+    targets: [
+      { name: "default", type: "AGENT", targetId: "agent1", triggers: [], observeMode: false, observeConfig: null },
+      { name: "urgent", type: "AGENT", targetId: "agent2", triggers: ["urgent"], observeMode: false, observeConfig: null },
+    ],
+    defaultTargetName: "default",
+  };
+
+  function useEmailChannel() {
+    server.use(http.get("*/channelstore/channels/:id", () => HttpResponse.json(emailChannel)));
+  }
+
+  it("shows the email form and setup notes instead of a webhook URL", async () => {
+    useEmailChannel();
+    renderChannelDetail("mail1", 1);
+    await waitFor(() => expect(screen.getByTestId("email-platform-fields")).toBeInTheDocument());
+    expect(screen.getByTestId("email-host")).toHaveValue("outlook.office365.com");
+    expect(screen.getByTestId("email-setup-section")).toBeInTheDocument();
+    expect(screen.queryByText("Webhook URL")).toBeNull();
+    expect(screen.getByTestId("target-trigger-hint-1").textContent).toContain("invoices+urgent@");
+  });
+
+  it("saves the fixed mode and transport keys and toasts the save-time warning", async () => {
+    let saved: { platformConfig?: Record<string, string> } | undefined;
+    useEmailChannel();
+    server.use(
+      http.put("*/channelstore/channels/:id", async ({ request }) => {
+        saved = (await request.json()) as typeof saved;
+        return new HttpResponse(null, {
+          status: 200,
+          headers: {
+            Location: "/channelstore/channels/mail1?version=2",
+            "X-Eddi-Warnings": "email.tools-without-approvals",
+          },
+        });
+      }),
+    );
+    renderChannelDetail("mail1", 1, true);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("save-channel-btn"));
+
+    await waitFor(() => expect(saved?.platformConfig?.mode).toBe("trigger"));
+    expect(saved?.platformConfig).toEqual({ ...emailChannel.platformConfig, mode: "trigger", transport: "imap" });
+    await waitFor(() => expect(screen.getByText(/has tools and no tool approvals/)).toBeInTheDocument());
+  });
+
+  it("refuses to save an email integration the backend would reject, without a request", async () => {
+    let requests = 0;
+    useEmailChannel();
+    server.use(
+      http.put("*/channelstore/channels/:id", () => {
+        requests += 1;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderChannelDetail("mail1", 1, true);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-host")).toBeInTheDocument());
+    await user.clear(screen.getByTestId("email-host"));
+    await user.type(screen.getByTestId("email-host"), "10.0.0.5");
+    await user.click(screen.getByTestId("save-channel-btn"));
+
+    await waitFor(() => expect(screen.getAllByText(/Use a DNS name, not an IP address/).length).toBeGreaterThan(1));
+    expect(requests).toBe(0);
+  });
+});
+
+describe("ChannelDetailPage — switching the channel type", () => {
+  it("drops the webhook keys when a webhook channel becomes an email one, and none come back", async () => {
+    const user = userEvent.setup();
+    renderChannelDetail("ch4", 1);
+    await waitFor(() => expect(screen.getByTestId("webhook-platform-fields")).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByTestId("channel-type-select"), "email");
+    expect(screen.getByTestId("email-platform-fields")).toBeInTheDocument();
+    await user.click(screen.getByText("Raw Configuration"));
+    const raw = () => JSON.parse(screen.getByText(/"channelType"/).textContent ?? "{}") as { platformConfig: Record<string, string> };
+    expect(raw().platformConfig).toEqual({ mode: "trigger", transport: "imap" });
+
+    await user.selectOptions(screen.getByTestId("channel-type-select"), "webhook");
+    expect(raw().platformConfig).toEqual({});
+    expect(screen.getByTestId("webhook-signing-secret")).toBeInTheDocument();
+  });
+});

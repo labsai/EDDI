@@ -17,6 +17,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.integrations.email.EmailMailboxPoller;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -26,6 +28,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
@@ -1547,6 +1550,57 @@ class ScheduleFireExecutorTest {
         assertEquals(FireStatus.FAILED.name(), log.status());
         assertNotNull(log.errorMessage());
         verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any(), any());
+    }
+
+    @Nested
+    class EmailPoll {
+
+        private EmailMailboxPoller poller;
+
+        @BeforeEach
+        void wirePoller() {
+            poller = mock(EmailMailboxPoller.class);
+            setField(executor, "emailMailboxPoller", poller);
+        }
+
+        private ScheduleConfiguration pollSchedule(String name, String integrationId) {
+            var schedule = new ScheduleConfiguration();
+            schedule.setId("poll-1");
+            schedule.setName(name);
+            schedule.setTriggerType(TriggerType.HEARTBEAT);
+            schedule.setHeartbeatIntervalSeconds(60L);
+            schedule.setMetadata(EmailPollSchedules.metadata(integrationId));
+            return schedule;
+        }
+
+        @Test
+        void pollsTheMailboxAndNeverRunsAConversation() throws Exception {
+            when(poller.poll("int-1")).thenReturn(new EmailMailboxPoller.PollReport(false, "1 processed"));
+
+            var log = executor.fire(pollSchedule("email-poll:int-1", "int-1"), "node-1", 1);
+
+            assertEquals(ScheduleConfiguration.FireStatus.COMPLETED.name(), log.status());
+            verify(poller).poll("int-1");
+            verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        }
+
+        @Test
+        void aMailServerOutageIsRecordedButNotAFailedFire() {
+            when(poller.poll("int-1")).thenReturn(new EmailMailboxPoller.PollReport(true, "CONNECTION: refused"));
+
+            var log = executor.fire(pollSchedule("email-poll:int-1", "int-1"), "node-1", 1);
+
+            assertEquals(ScheduleConfiguration.FireStatus.COMPLETED.name(), log.status(), "the poller backs off itself; no dead-lettering");
+            assertEquals("CONNECTION: refused", log.errorMessage());
+        }
+
+        @Test
+        void aRowWhoseNameDoesNotMatchItsIntegrationIsRefused() {
+            var log = executor.fire(pollSchedule("email-poll:my-integration", "victim-integration"), "node-1", 1);
+
+            assertEquals(ScheduleConfiguration.FireStatus.FAILED.name(), log.status());
+            verify(poller, never()).poll(anyString());
+        }
     }
 
     private static ScheduleConfiguration makeIngestionSchedule(String id, String ragConfigId, int version,

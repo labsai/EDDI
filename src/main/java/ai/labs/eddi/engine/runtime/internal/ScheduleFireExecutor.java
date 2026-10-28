@@ -18,6 +18,8 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.integrations.email.EmailMailboxPoller;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
@@ -113,6 +115,13 @@ public class ScheduleFireExecutor {
 
     @Inject
     ToolCostTracker toolCostTracker;
+
+    /**
+     * Polls an email integration's mailbox; null only in unit tests that never fire
+     * one.
+     */
+    @Inject
+    EmailMailboxPoller emailMailboxPoller;
 
     /**
      * Re-checks, on every agent fire, that the schedule's creator may still use the
@@ -222,6 +231,12 @@ public class ScheduleFireExecutor {
             return hitlFireLog;
         }
 
+        if (EmailPollSchedules.isEmailPollSchedule(md)) {
+            // Mailbox poll fast-path — governed by its channel integration, not by an
+            // agent's USE grant, so it runs before the creator check. Same machinery
+            // (claim, lease, fire log) as the ingestion fast-path.
+            return fireEmailPoll(schedule, instanceId, attemptNumber);
+        }
         if (AlertSchedules.isMaintenanceSchedule(md)) {
             // Alert maintenance fast-path — a system job (delivery retries, digests,
             // retention), not a conversation turn and not anybody's schedule, so it
@@ -719,6 +734,43 @@ public class ScheduleFireExecutor {
 
         return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status, errorMessage, cost,
                 interrupted);
+    }
+
+    /**
+     * Polls one mailbox. A mail server outage is recorded in the fire log's error
+     * text but the fire counts as COMPLETED: the poller backs off on its own (see
+     * {@code EmailMailboxPoller}), and the retry ladder here would dead-letter a
+     * mailbox after a few minutes of outage.
+     */
+    private ScheduleFireLog fireEmailPoll(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        Map<String, Object> md = schedule.getMetadata();
+        String integrationId = EmailPollSchedules.integrationId(md);
+        if (integrationId == null || schedule.getName() == null || !schedule.getName().equals(EmailPollSchedules.scheduleName(integrationId))) {
+            // Minted only by EmailPollScheduler; a row whose name does not match its
+            // metadata was not, and must not make this node read someone's mailbox.
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = "This email poll schedule's name does not match the integration in its metadata";
+        } else if (emailMailboxPoller == null) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = "Email polling is not available on this node";
+        } else {
+            var report = emailMailboxPoller.poll(integrationId);
+            if (report.failed()) {
+                errorMessage = report.message();
+            }
+            LOGGER.debugf("[SCHEDULE] Email poll for schedule '%s': %s", schedule.getName(), report.message());
+        }
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
+                Instant.now(), status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log email poll fire for schedule %s", schedule.getId());
+        }
+        return fireLog;
     }
 
     /**

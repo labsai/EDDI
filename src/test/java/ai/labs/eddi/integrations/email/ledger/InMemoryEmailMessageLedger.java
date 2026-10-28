@@ -104,6 +104,52 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public synchronized Optional<LedgerEntry> findByMessage(String integrationId, Direction direction, String messageId) {
+        return rows.values().stream()
+                .filter(r -> r.integrationId().equals(integrationId) && r.direction() == direction && r.messageId().equals(messageId)).findFirst();
+    }
+
+    @Override
+    public synchronized Optional<LedgerEntry> findOutboundByMessageId(String messageId) {
+        return rows.values().stream().filter(r -> r.direction() == Direction.OUT && r.messageId().equals(messageId)).findFirst();
+    }
+
+    @Override
+    public synchronized boolean transition(String id, State from, State to, String conversationId, Instant nextAttemptAt, String lastError,
+                                           boolean countAttempt, Instant now) {
+        LedgerEntry r = rows.get(id);
+        if (r == null || r.state() != from) {
+            return false;
+        }
+        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(),
+                conversationId != null ? conversationId : r.conversationId(), r.sourceRef(), r.idempotencyKey(), r.recipient(), to,
+                r.attempts() + (countAttempt ? 1 : 0), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now, r.expiresAt()));
+        return true;
+    }
+
+    @Override
+    public synchronized List<LedgerEntry> findDue(Kind kind, State state, Instant now, int limit) {
+        return rows.values().stream()
+                .filter(r -> r.state() == state && r.kind() == kind && r.nextAttemptAt() != null && !r.nextAttemptAt().isAfter(now))
+                .sorted(Comparator.comparing(LedgerEntry::nextAttemptAt)).limit(limit).toList();
+    }
+
+    @Override
+    public synchronized long countInboundTurns(String integrationId, String sender, Instant since) {
+        return rows.values().stream()
+                .filter(r -> r.integrationId().equals(integrationId) && sender.equals(r.recipient()) && r.kind() == Kind.TRIGGER
+                        && !r.createdAt().isBefore(since) && (r.state() == State.TURN_SUBMITTED || r.state() == State.DONE))
+                .count();
+    }
+
+    /**
+     * Test hook: replaces a row as it is (to simulate an earlier state or a crash).
+     */
+    public synchronized void put(LedgerEntry entry) {
+        rows.put(entry.id(), entry);
+    }
+
+    @Override
     public synchronized List<LedgerEntry> findByRecipient(String recipient) {
         return rows.values().stream().filter(r -> recipient.equals(r.recipient())).toList();
     }

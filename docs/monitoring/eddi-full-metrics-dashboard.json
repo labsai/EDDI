@@ -10801,6 +10801,246 @@
             }
           },
           "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: TXT lookups are failing temporarily; an unreachable resolver (eddi.email.dns.servers) is one possible cause. budget_exhausted is a local limit, not a DNS failure: a message needed more DKIM key and DMARC record lookups than eddi.email.dns.max-lookups-per-message allows, and the lookups past it were not sent."
+        },
+        {
+          "id": 280,
+          "type": "timeseries",
+          "title": "Inbound email by outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 60
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (outcome) (rate(eddi_email_inbound_total{job=~\"$job\"}[5m]))",
+              "legendFormat": "{{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Trigger-mode mail by outcome: processed (a turn was submitted), duplicate (seen before), unauthenticated, blocked (lists, own address), loop (auto-replies, bounces, EDDI mail), throttled (maxTurnsPerSenderPerDay), budget (dailyCostBudgetUsd or a tenant quota), too_large, parse_error, deferred (waits for a later poll: temporary authentication result, agent not deployed, conversation busy), unroutable, failed. Filter by integration with the integration label."
+        },
+        {
+          "id": 281,
+          "type": "timeseries",
+          "title": "Mailbox poll duration",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 60
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (integration) (rate(eddi_email_poll_duration_seconds_sum{job=~\"$job\"}[5m])) / sum by (integration) (rate(eddi_email_poll_duration_seconds_count{job=~\"$job\"}[5m]))",
+              "legendFormat": "{{integration}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Average time of one mailbox poll per integration. Polls that fail (connection, login, folder) are tagged outcome=error on the same meter; they back off on their own, up to an hour."
+        },
+        {
+          "id": 282,
+          "type": "timeseries",
+          "title": "Mailbox cursor resets",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 67
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (integration) (increase(eddi_email_poll_cursor_resets_total{job=~\"$job\"}[1h]))",
+              "legendFormat": "{{integration}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "UIDVALIDITY changes per hour by integration: the folder was rebuilt, and EDDI rescanned it, deduplicated by the message ledger. Failed polls show on the poll duration meter as outcome=error."
+        },
+        {
+          "id": 283,
+          "type": "timeseries",
+          "title": "Stranded email turns resolved",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 67
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (outcome) (increase(eddi_email_ledger_stranded_recovered_total{job=~\"$job\"}[1h]))",
+              "legendFormat": "{{outcome}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "Claims given back and submitted email turns resolved after a crash: requeued (a stale claim that had done nothing outside EDDI; the mail is processed again), done, failed, awaiting_human (resolved from the conversation) or lost (the node stopped while starting the conversation and none was recorded; the mail was not run again)."
+        },
+        {
+          "id": 284,
+          "type": "timeseries",
+          "title": "Processed mail marking",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 74
+          },
+          "targets": [
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "sum by (result) (rate(eddi_email_poll_marked_total{job=~\"$job\"}[5m]))",
+              "legendFormat": "{{result}}",
+              "refId": "A"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "How processed mail was marked in the mailbox: flagged ($EddiProcessed keyword), moved, flagged_not_moved (the server lacks MOVE) or nothing (the server takes no custom keywords and no move was configured, e.g. Exchange Online with processedAction flag; the cursor and the ledger still keep mail from running twice). Sustained nothing: use processedAction move:<folder>."
         }
       ]
     },
