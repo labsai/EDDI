@@ -26,6 +26,7 @@ import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
@@ -750,6 +751,51 @@ class RestImportServiceArchiveContractTest {
             // The export side already refuses to archive these; the import must refuse
             // to match them.
             verify(restScheduleStore, never()).updateSchedule(eq("liveHitlTimer"), any());
+            verify(restScheduleStore).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a merge never matches the target's continuation schedule by name")
+        void continuationScheduleIsNotOverwrittenByMerge() throws Exception {
+            String timerName = ConversationContinuations.scheduleName("conv-1");
+            stubUnzip(dir -> {
+                Files.writeString(new File(dir, AGENT_ORIGIN_ID + ".agent.json").toPath(), "{\"workflows\":[]}");
+                File schedules = new File(dir, "schedules");
+                assertTrue(schedules.mkdirs());
+                // A crafted archive: the continuation name, but no continuation marker, so the
+                // REST
+                // bean's body guard does not recognise it.
+                Files.writeString(new File(schedules, "sched1.schedule.json").toPath(),
+                        "{\"id\":\"sched1\",\"name\":\"" + timerName + "\",\"agentId\":\"someOtherAgent\","
+                                + "\"cronExpression\":\"0 4 * * *\"}");
+            });
+
+            var existingDescriptor = new DocumentDescriptor();
+            existingDescriptor.setResource(URI.create(
+                    "eddi://ai.labs.agent/agentstore/agents/" + NEW_AGENT_ID + "?version=4"));
+            when(documentDescriptorStore.findByOriginId(AGENT_ORIGIN_ID)).thenReturn(List.of(existingDescriptor));
+
+            var liveContinuationRow = new ScheduleConfiguration();
+            liveContinuationRow.setId("liveContinuation");
+            liveContinuationRow.setName(timerName);
+            liveContinuationRow.setMetadata(ConversationContinuations.metadata("conv-1", 1, 5));
+            when(scheduleStore.readSchedulesByAgentId(NEW_AGENT_ID)).thenReturn(List.of(liveContinuationRow));
+            when(scheduleStore.readSchedule("liveContinuation")).thenReturn(liveContinuationRow);
+
+            var agentStore = stubAgentCreation();
+            var restAgentStore = mock(IRestAgentStore.class);
+            when(restAgentStore.updateAgent(anyString(), anyInt(), any(), any())).thenReturn(Response.ok().build());
+            try (var cdi = stubCdi(IAgentStore.class, agentStore,
+                    IRestScheduleStore.class, restScheduleStore,
+                    IRestAgentStore.class, restAgentStore)) {
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "merge", null, null, null);
+            }
+
+            // The update guard refuses a stored continuation schedule; matching it by name
+            // would turn an ordinary archived schedule into a failed (or worse) overwrite
+            // of
+            // the engine's next turn. It must fall through to the create path.
+            verify(restScheduleStore, never()).updateSchedule(eq("liveContinuation"), any());
             verify(restScheduleStore).createSchedule(any());
         }
 

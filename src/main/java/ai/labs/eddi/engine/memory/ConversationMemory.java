@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -99,6 +100,12 @@ public class ConversationMemory implements IConversationMemory {
     private transient TurnDeadline turnDeadline;
     /** The agent's per-conversation cost ceiling; NOT persisted. */
     private transient Double maxCostPerConversationUsd;
+    /**
+     * In-flight paid calls held against the ceiling; transient, never persisted.
+     */
+    private final transient SpendReservations spendReservations = new SpendReservations();
+    /** The agent's self-continuation settings; NOT persisted. */
+    private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -574,6 +581,22 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setConversationCostCeilingUsd(Double maxCostPerConversationUsd) {
         this.maxCostPerConversationUsd = maxCostPerConversationUsd;
+    }
+
+    @Override
+    public SpendReservations getSpendReservations() {
+        return spendReservations;
+    }
+
+    @Override
+    public ContinuationPolicy getContinuationPolicy() {
+        return continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+    }
+
+    @Override
+    public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
+        this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+
     }
 
     @Override

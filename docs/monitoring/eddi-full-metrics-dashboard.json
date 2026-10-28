@@ -8790,6 +8790,104 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 273,
+          "type": "timeseries",
+          "title": "Self-continuation",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_continuation_*` — turns an agent started itself with the reserved `CONTINUE_CONVERSATION` action. `scheduled` counts continuations armed after a committed turn, `run` the continuation turns that ran, `refused` the ones ignored or stopped, by reason: `disabled` (the agent sets no maxContinuations — usually a rule emitting the action on an agent that never opted in), `limit`, `cost_ceiling`, `not_settled`, `group_member`, `schedule_failed`, and at fire time `ended`, `awaiting_human`, `gone`, `restricted`, `undeployed` (retried), `interrupted`, `duplicate` (a re-delivered fire that found its turn already ran).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_continuation_scheduled_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "scheduled"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_continuation_run_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "run"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (reason) (rate(eddi_continuation_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "refused — {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },
@@ -13380,12 +13478,12 @@
         {
           "id": 189,
           "type": "stat",
-          "title": "Gate last verified (this process)",
+          "title": "Gate last verified (latest report, any replica)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "How long ago this EDDI process last received a verified gate report (eddi_operator_gate_last_verified_timestamp_seconds). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
+          "description": "How long ago the most recent verified gate report arrived from any replica (maximum of eddi_operator_gate_last_verified_timestamp_seconds across instances; one replica's recent report hides an older or missing one on another). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
           "gridPos": {
             "h": 5,
             "w": 6,
@@ -16034,6 +16132,292 @@
           "fieldConfig": {
             "defaults": {
               "unit": "percentunit",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 274,
+      "type": "row",
+      "title": "Alerts",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 36
+      },
+      "panels": [
+        {
+          "id": 275,
+          "type": "timeseries",
+          "title": "Alerts fired, folded and held back",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_alerts_fired_total` by `source`; `eddi_alerts_deduplicated_total` (folded into an earlier alert of the same rule, agent and conversation in the window), `eddi_alerts_throttled_total` (past the rule cap, held for the digest or the inbox) and `eddi_alerts_digests_total`. Flat is normal without alert rules.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (source) (rate(eddi_alerts_fired_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "fired {{source}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum (rate(eddi_alerts_deduplicated_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "deduplicated"
+            },
+            {
+              "refId": "C",
+              "expr": "sum (rate(eddi_alerts_throttled_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "throttled"
+            },
+            {
+              "refId": "D",
+              "expr": "sum (rate(eddi_alerts_digests_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "digests"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 276,
+          "type": "timeseries",
+          "title": "Alert deliveries and dropped work",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_alerts_deliveries_total` by `type` (slack/webhook) and `outcome` — `gave_up` is a target that failed its last retry (see the Alerts inbox for the error). `eddi_alerts_dropped_total` is alert work dropped because the alert queue was full: it should stay at zero; turns and ratings are never slowed by it.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 37
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (type, outcome) (rate(eddi_alerts_deliveries_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{type}} {{outcome}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_alerts_dropped_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "dropped {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 277,
+          "type": "timeseries",
+          "title": "Alert queue depth",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_alerts_queue_depth` — work waiting for the single alert worker. It drains within seconds normally; a plateau near `eddi.alerts.queue-capacity` means the worker is stuck on a slow webhook or database and new alerts are being dropped.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 44
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "max(eddi_alerts_queue_depth{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "queued"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
               "color": {
                 "mode": "palette-classic"
               },

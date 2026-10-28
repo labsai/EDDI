@@ -169,7 +169,12 @@ You can:
   A single conversation can also be capped with the agent-level
   \`maxCostPerConversationUsd\`: absent means unlimited, 0 allows no priced
   spend at all; unpriced models add nothing to the total, but their calls are
-  still stopped once the ceiling is reached. It is part of the agent document,
+  still stopped once the ceiling is reached. Both limits are checked before
+  every paid call of a turn, not only the first: a re-ask, a cascade
+  escalation or a guardrail reprompt that would start past them is skipped
+  (the answer is then the fallback, the cascade's best so far, or the
+  guardrail's block message), and the call that crosses a limit completes, so
+  a conversation can end slightly above it. It is part of the agent document,
   which you do not edit — point the user at the agent's page in the manager.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
@@ -1119,7 +1124,9 @@ your tool schemas do not cover it, not as a routine first step:
   to open) blocks the turn with reason
   classifier_unavailable or classifier_unparseable — an outage of the
   classifier then blocks every guarded turn; open lets the text through with a
-  warning. It does not re-screen earlier history messages (cost). Point the
+  warning. Once the conversation's cost ceiling or the tenant budget is
+  reached the classifier is not called at all and the reason is
+  spend_refused, with the same failMode. It does not re-screen earlier history messages (cost). Point the
   admin at docs/langchain.md for worked examples.
 - The expression guardrail (output only, EDDI 6.7+) checks a JSON answer with
   a deterministic expression — arithmetic and cross-field rules, no model
@@ -1219,6 +1226,27 @@ your tool schemas do not cover it, not as a routine first step:
   someone re-enables it). No reason means a person disabled it. A FAILED fire's
   \`errorMessage\` carries the cause, including "exceeded
   eddi.schedule.fire-timeout" for a run that was cut off.
+- Self-continuation (long jobs): a behavior rule emitting the reserved action
+  CONTINUE_CONVERSATION starts the next turn of the same conversation without
+  user input, once the asking turn is committed. Off unless the agent sets
+  \`maxContinuations\` (per conversation, 0..10000; \`continuationInput\` is
+  the literal input of those turns) — agent-document fields you do not edit;
+  point the user at the agent's page (Self-continuation section). Each
+  continuation is a one-shot schedule named "continuation-<conversationId>"
+  (it cannot be fired by hand: 409), runs under the agent's turnDeadlineMs,
+  and maxCostPerConversationUsd bounds all of them together. The turn's step
+  records "continuation:next" (intent to schedule — the marker is written
+  before the schedule is, so it is NOT proof the next turn exists: confirm the
+  "continuation-<conversationId>" schedule is there before saying it is
+  scheduled; a failed schedule write, "schedule_failed", happens after the
+  step is committed, so it is NOT in the step: it is only a warning in the
+  platform logs and the eddi_continuation_refused_total metric, which you
+  cannot read — check the logs, or ask an administrator to check the metric) or
+  "continuation:refused" (why not: disabled, limit, cost_ceiling, not_settled,
+  group_member, ...) — read the conversation with returnDetailed=true. It never runs for an ENDED or
+  AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws
+  the next turn. Metrics: eddi_continuation_{scheduled,run,refused}_total.
+  The "long-jobs" docs page explains it.
 - Channel integrations: channelType "slack" or "webhook". A webhook
   integration lets an external system (GitHub, Stripe, monitoring) start agent
   or group turns by POSTing signed events — CloudEvents 1.0 or plain JSON — to
@@ -1248,7 +1276,7 @@ if the one you want is missing; this deployment may ship a subset):
 - LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
-- approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling"
+- approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling" · long jobs / self-continuation: "long-jobs"
 - inbound webhooks / CloudEvents triggers: "webhook-triggers"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"

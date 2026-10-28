@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -19,6 +21,7 @@ import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -196,9 +199,19 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            Response continuationGuard = rejectContinuationBody(schedule, "create");
+            if (continuationGuard != null) {
+                return continuationGuard;
+            }
+
             Response ingestionGuard = rejectIngestionBody(schedule, "create");
             if (ingestionGuard != null) {
                 return ingestionGuard;
+            }
+
+            Response alertGuard = rejectAlertBody(schedule, "create");
+            if (alertGuard != null) {
+                return alertGuard;
             }
 
             Response cadenceGuard = rejectTeamCadenceBody(schedule, null, "create");
@@ -281,9 +294,19 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            Response continuationGuard = rejectContinuationBody(schedule, "update");
+            if (continuationGuard != null) {
+                return continuationGuard;
+            }
+
             Response ingestionGuard = rejectIngestionBody(schedule, "update");
             if (ingestionGuard != null) {
                 return ingestionGuard;
+            }
+
+            Response alertGuard = rejectAlertBody(schedule, "update");
+            if (alertGuard != null) {
+                return alertGuard;
             }
 
             // ONE read of the stored row, shared by every guard below and by the
@@ -312,6 +335,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             // be able to mutate it (e.g. push its nextFire far out to defeat an
             // ABORT/AUTO_REJECT deadline). Detect via the STORED schedule so a
             // request body that omits the metadata cannot bypass the check.
+            Response systemGuard = rejectSystemSchedule(stored, "update");
+            if (systemGuard != null) {
+                return systemGuard;
+            }
+
             Response guard = requireAdminForHitl(stored, "update");
             if (guard != null) {
                 return guard;
@@ -492,6 +520,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                         .entity("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
                                 + "Approve or reject via POST /agents/{conversationId}/resume, "
                                 + "or terminate via POST /agents/{conversationId}/cancel.")
+                        .build();
+            }
+            if (ConversationContinuations.isContinuationSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // The next turn of a self-continuing conversation: the engine armed it
+                // after a committed turn and runs it once, with its own input and
+                // once-only check. Firing it by hand would run another user's job early,
+                // on the request's identity rather than none.
+                LOGGER.warnf("Refused manual fire of continuation schedule %s (name=%s)", sanitize(scheduleId),
+                        sanitize(schedule.getName()));
+                return Response.status(Response.Status.CONFLICT)
+                        .entity("This schedule is the next turn of a self-continuing conversation and cannot be fired manually. "
+                                + "It runs on its own; end or cancel the conversation to stop it.")
                         .build();
             }
             // Checked on the STORED schedule: firing one that acts as another user is
@@ -869,6 +909,18 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private Response guardManagedSchedule(ScheduleConfiguration stored) {
         Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        // A continuation schedule is the engine's own next turn of a conversation:
+        // changing its input or timing, or clearing its marker with an empty metadata
+        // object, would let an editor steer or orphan another user's job. Judged on the
+        // STORED row, since the request body can omit or blank the marker.
+        if (ConversationContinuations.isContinuationSchedule(md)) {
+            LOGGER.warnf("Refused update of continuation schedule %s — it is managed by the conversation engine",
+                    sanitize(stored.getId()));
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is the next turn of a self-continuing conversation and cannot be updated. "
+                            + "End or cancel the conversation to stop it.")
+                    .build();
+        }
         if (RagIngestionSchedules.isIngestionSchedule(md)) {
             LOGGER.warnf("Refused update of ingestion schedule %s — it is managed by knowledge base %s",
                     sanitize(stored.getId()), sanitize(RagIngestionSchedules.ragConfigId(md)));
@@ -947,6 +999,79 @@ public class RestScheduleStore implements IRestScheduleStore {
                     .build();
         }
         return null;
+    }
+
+    /**
+     * Refuses a schedule body that claims an alert role ({@code alertType}) or the
+     * reserved name {@code alerts-maintenance}. That schedule is created by the
+     * server itself: a second one made by hand would only run the same job twice,
+     * and a same-named row without the marker would pass for the real one by name.
+     */
+    private Response rejectAlertBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata()) || AlertSchedules.isReservedName(schedule.getName()))) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — alert schedules are minted internally only", operation,
+                    AlertSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules named " + AlertSchedules.SCHEDULE_NAME + " or marked as alert maintenance (metadata "
+                            + AlertSchedules.METADATA_TYPE_KEY + ") cannot be created or updated via this API. The server manages the "
+                            + AlertSchedules.SCHEDULE_NAME + " schedule itself.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * Continuation schedules are minted only by {@code ConversationContinuations}
+     * after a committed turn, carrying that conversation and its owner. A fire of
+     * one runs a turn in the named conversation, so accepting the marker from a
+     * client would let anyone who may create a schedule inject a turn into another
+     * user's conversation. Refused for everyone, as the HITL timeout and ingestion
+     * markers are; ZIP import goes through this same method.
+     */
+    private Response rejectContinuationBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — continuation schedules are minted "
+                    + "internally only", operation, ConversationContinuations.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as conversation continuations (metadata "
+                            + ConversationContinuations.METADATA_TYPE_KEY + "=" + ConversationContinuations.METADATA_TYPE_VALUE
+                            + ") cannot be created or updated via this API. The engine arms them after a turn that "
+                            + "emits CONTINUE_CONVERSATION.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * Refuses changing a system schedule — the {@code alerts-maintenance} schedule,
+     * or any schedule carrying the {@code alertType} metadata — for everyone,
+     * administrators included: 409 {@code SYSTEM_SCHEDULE}. Judged on the STORED
+     * row. The server recreates the schedule on startup and on every alert-rule
+     * save as a backstop, but deleting or disabling it would silently stop alert
+     * retries and digests until then. Firing it manually stays allowed (it only
+     * runs the maintenance pass), and so does recovery — retry, enable and dismiss
+     * (see {@code requireMutableSchedule}) — so an exhausted schedule can be
+     * re-armed over REST.
+     */
+    private static Response rejectSystemSchedule(ScheduleConfiguration stored, String operation) {
+        if (stored == null || !isSystemSchedule(stored)) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of the system schedule %s", operation, sanitize(stored.getName()));
+        return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(ErrorResponses.body(SYSTEM_SCHEDULE,
+                        "The " + stored.getName() + " schedule is managed by the server and cannot be changed or deleted (" + operation
+                                + "). It runs alert retries, digests and retention."))
+                .build();
+    }
+
+    /** Error code of a refused change to a system-managed schedule. */
+    public static final String SYSTEM_SCHEDULE = "SYSTEM_SCHEDULE";
+
+    /** Whether the schedule is managed by the server itself. */
+    public static boolean isSystemSchedule(ScheduleConfiguration schedule) {
+        return schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata())
+                || AlertSchedules.SCHEDULE_NAME.equals(schedule.getName()) && schedule.getAgentId() == null);
     }
 
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
@@ -1202,6 +1327,15 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (stored == null) {
             return null; // absent — let the downstream operation surface its own 404/no-op
+        }
+        // Recovery (retry, enable, dismiss) stays open for the system schedule: after
+        // its retries are exhausted nothing else re-arms it. Only removing or stopping
+        // it is refused.
+        if ("delete".equals(operation) || "disable".equals(operation)) {
+            Response systemGuard = rejectSystemSchedule(stored, operation);
+            if (systemGuard != null) {
+                return systemGuard;
+            }
         }
         Response hitlGuard = requireAdminForHitl(stored, operation);
         if (hitlGuard != null) {

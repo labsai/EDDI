@@ -1144,9 +1144,9 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
 
 **Template data, never template source.** `promptTemplate` is your configuration. The text being screened reaches it only as data — `{input}` (the user's message; in the output phase, the user message the model answered), `{output}` (the answer, output phase), `{context}` and `{risk}` — so a user who types `{risk}` or `{#for …}` sends exactly those characters to the classifier; they are never evaluated.
 
-**Could not decide.** Safe is a positive finding, never a default (Pillar 4). A classifier that names an unsupported provider, cannot be reached, times out, has a `promptTemplate` that does not render, or answers something that is not a label has not checked the text. Its `failMode` decides, exactly as for a failing built-in guardrail — but the audit reason says why: `classifier_unavailable` (no answer) or `classifier_unparseable` (an answer that is neither label). A flagged text carries reason `classifier_flagged` (or `classifier_flagged:<risk>`).
+**Could not decide.** Safe is a positive finding, never a default (Pillar 4). A classifier that names an unsupported provider, cannot be reached, times out, has a `promptTemplate` that does not render, or answers something that is not a label has not checked the text. Its `failMode` decides, exactly as for a failing built-in guardrail — but the audit reason says why: `classifier_unavailable` (no answer) or `classifier_unparseable` (an answer that is neither label). A flagged text carries reason `classifier_flagged` (or `classifier_flagged:<risk>`). A call the spend checks refuse — the conversation reached its [`maxCostPerConversationUsd`](#per-conversation-llm-cost-ceiling), or the tenant its monthly budget — is not made and could not decide either, with reason `spend_refused`: `closed` withholds the text, `open` lets it through with a warning.
 
-**Cost and latency.** Each screened text is one classifier call — on the input side the typed text plus one call per attachment text part of the turn (an extract, or the note naming files shared earlier), all before the main model, so it adds its latency to every turn; keep `timeoutMs` short and the classifier close. The call's price is added to the turn's cost (`audit:cost`), so it is metered and counted against cost ceilings like any other model call — including the call whose answer could not be parsed. The task's [spend gate](#per-conversation-llm-cost-ceiling) is asked **before** the input classifier — a turn refused for the tenant budget or the conversation ceiling pays no classifier call (nor a retrieval query) and is answered with the fallback — and again after the input guardrails, so the classifier's own price cannot carry the main model call past a ceiling it reached. The classifier does **not** screen the earlier user messages of the history window (each was classified on its own turn): one model call per history message on every turn would multiply its cost by the window size. A message it blocked or redacted is withheld from later history instead (above). It is timed by `eddi.guardrail.classifier.duration{provider, outcome}` (outcome `safe`, `unsafe`, `unparseable`, `unavailable` or `timeout`), and its provider calls appear in the LLM telemetry like a task's.
+**Cost and latency.** Each screened text is one classifier call — on the input side the typed text plus one call per attachment text part of the turn (an extract, or the note naming files shared earlier), all before the main model, so it adds its latency to every turn; keep `timeoutMs` short and the classifier close. The call's price is added to the turn's cost (`audit:cost`), so it is metered and counted against cost ceilings like any other model call — including the call whose answer could not be parsed. The task's [spend gate](#per-conversation-llm-cost-ceiling) is asked **before** the input classifier — a turn refused for the tenant budget or the conversation ceiling pays no classifier call (nor a retrieval query) and is answered with the fallback — and again after the input guardrails, so the classifier's own price cannot carry the main model call past a ceiling it reached. The classifier does **not** screen the earlier user messages of the history window (each was classified on its own turn): one model call per history message on every turn would multiply its cost by the window size. A message it blocked or redacted is withheld from later history instead (above). It is timed by `eddi.guardrail.classifier.duration{provider, outcome}` (outcome `safe`, `unsafe`, `unparseable`, `unavailable`, `timeout` or `spend_refused`), and its provider calls appear in the LLM telemetry like a task's.
 
 #### Example: Granite Guardian 3.3 on vLLM
 
@@ -1355,7 +1355,7 @@ Every guardrail that fires produces:
 - an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
-Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
+Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
 
 ### Compatibility
 
@@ -2220,8 +2220,51 @@ tool cost. It is checked
   earlier cascade steps at theirs) and its tool cost are added to the step's `audit:cost` and
   `audit:token_usage` right away, so the resume's checks and its final total include them exactly
   once.
+- **before every further paid call of the task** — a same-model re-ask (`responseValidation`
+  `retry`), a cascade's escalation to its next step and that step's re-asks, an output guardrail's
+  `reprompt`, and a [`classifier`](#the-classifier-type-a-safety-classifier-model) or
+  `judge` guardrail's own call (input and output). A task writes its cost into `audit:cost` only once it has finished, so
+  each of these checks adds what the task has already spent in this turn: the earlier attempts at
+  their prices, the primary answer before a reprompt, the earlier cascade steps before an
+  escalation. A refused call is not made:
 
-The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
+  | Call | What happens instead |
+  | --- | --- |
+  | Re-ask | Skipped, counted as `eddi_llm_recovery_total{action="retry",outcome="skipped_spend"}`; the reply stays unresolved and `fallbackAction` applies, as when `maxRetries` is spent |
+  | Cascade escalation | Not started; the cascade returns its best answer so far (`eddi_llm_cascade_ceiling_exceeded_total{kind="spend"}`), as at its own `maxCostPerRun` |
+  | Guardrail reprompt | Not sent; the answer is blocked with the guardrail's `blockMessage`, as when the turn is out of time |
+  | `classifier` or `judge` call | Not made; the guardrail could not decide, with the audit reason `spend_refused`, and its `failMode` applies |
+
+  Each refusal is also counted by `eddi_llm_spend_refused_total{reason}` with the same reasons as the
+  primary call (`conversation_ceiling`, `tenant_budget`, `tenant_accounting_unavailable`): the
+  tenant's monthly budget is checked before these calls too.
+
+  A refusal is a safety stop: a refused guardrail reprompt blocks the answer even when that
+  guardrail's `onExhausted` is `deliver-best`, because delivering a "best" attempt after the spend
+  checks said stop would defeat the ceiling. `deliver-best` applies only to a guardrail that ran out
+  of retries, or whose reprompt could not start for lack of time or a model.
+
+**The call that crosses the ceiling completes.** A call is admitted while the conversation's spend
+so far — recorded `audit:cost`, plus what the running task has spent and not yet recorded, plus the
+expected cost of paid calls of the same conversation still in flight — is *below* the ceiling. The
+call's own price is not part of the comparison (it is not known before the call), so the last
+admitted call runs to completion and a conversation can end above the ceiling by about that one
+call's cost; the next call is refused. A call in flight holds its expected cost until it is over —
+a re-ask the previous attempt's price, a reprompt the previous reprompt's (nothing for the first),
+a classifier or judge its prompt at its input price, nothing when unpriced — so calls that run at the same time
+see each other's expected cost when they are checked. That is an estimate-based limit, not an exact guarantee:
+an estimate can be zero (an unpriced call) or lower than the actual cost, and a check compares only the
+amounts already held, so concurrent calls admitted together can still end above the ceiling by more than one
+call. The reservation is per conversation and lives with the conversation on the node that runs its
+turn — a conversation's turns are serialized, by the coordinator and in a cluster by the
+conversation lease — so no other conversation or node competes for it. The tenant budget is shared by every
+conversation and node and is only read, never reserved. Its monthly counter is charged when a turn
+settles, so the check adds what the current turn has spent and the counter has not seen yet (the
+step's `audit:cost` not yet metered, plus the running task's unrecorded spend): later paid calls of
+the same turn see the turn's own spend. What it cannot see is another conversation's unsettled
+turn: while that turn is unsettled, a conversation can keep making calls after the combined tenant spend has
+crossed the budget, as long as its own visible spend stays below it, so concurrent conversations can overshoot
+the budget by more than one call each. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
 unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
 refuses every model call, priced or not, since the spend so far already equals it. This is
@@ -2674,7 +2717,7 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 | `maxRetries` | Same-model re-asks **per model** (per cascade step), shared by every `retry` policy. Clamped to `0..3`. `0` sends no re-ask (a cascade still escalates on invalid output). A cascade step overrides it with `steps[i].maxFormatRetries`, e.g. `0` for an expensive last-resort model | `1` |
 | `truncationRetryFactor` | The truncation re-ask runs **once** with the output-token cap multiplied by this (`maxTokens`, or `maxOutputTokens` for Gemini; Anthropic's built-in default counts). Clamped to `1..4` and never above 32768 tokens. If the cap is not configured (and the provider has no known default) there is nothing to raise and the re-ask is skipped | `2` |
 | `correctiveMessage` | The user message of an invalid-JSON re-ask. `{reason}` is replaced **literally** with EDDI's own reason (`not JSON`, `truncated JSON`, `no JSON object`, `unbalanced braces`, `invalid JSON syntax`). It is not a template and never receives model or user text | "Your previous reply could not be used: {reason}. Reply again with only the JSON object described in the instructions." (a neutral sentence for a task that does not return JSON) |
-| `maxRetryCostUsd` | Optional dollar cap on what the re-asks of one model may cost in total; a re-ask that would start at or above it is skipped. It is priced from the task's / step's `inputPricePer1M` / `outputPricePer1M`: **without prices it cannot fire**. Per-conversation cost ceilings (`ToolCostTracker`) are not consulted | (none) |
+| `maxRetryCostUsd` | Optional dollar cap on what the re-asks of one model may cost in total; a re-ask that would start at or above it is skipped. It is priced from the task's / step's `inputPricePer1M` / `outputPricePer1M`: **without prices it cannot fire**. Independently of it, every re-ask is also checked against the agent's [`maxCostPerConversationUsd`](#per-conversation-llm-cost-ceiling) and the tenant's monthly budget, counting the attempts already made (outcome `skipped_spend`) | (none) |
 | `minAttemptMs` | A re-ask only starts if the model's remaining time (the cascade step's `timeoutMs`; the turn deadline once there is one) is at least this. Otherwise the cascade escalates at once: serving the user in time beats insisting on the same model | `3000` |
 | `fallbackAction` | What happens when the re-asks (and every cascade step) did not help: `fallback` serves the [fallback](#fallback-answers-and-onerror), `error` fails the turn, `warn` keeps the reply | `fallback` |
 

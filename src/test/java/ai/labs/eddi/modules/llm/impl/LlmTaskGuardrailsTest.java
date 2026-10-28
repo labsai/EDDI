@@ -80,6 +80,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -1088,6 +1089,8 @@ class LlmTaskGuardrailsTest {
         useClassifier();
         var gate = mock(LlmSpendGate.class);
         when(gate.check(memory)).thenReturn(null, new LlmSpendGate.Refusal("conversation_ceiling", "reached"));
+        // paid guardrail/reprompt calls are admitted through admit(), not check()
+        when(gate.admit(any(), anyDouble(), anyDouble())).thenReturn(LlmSpendGate.Admission.ALLOWED);
         llmTask.spendGate = gate;
         var classifier = new ClassifierModel("No", null);
         when(chatModelRegistry.getOrCreate(eq("ollama"), any())).thenReturn(classifier);
@@ -1103,10 +1106,13 @@ class LlmTaskGuardrailsTest {
     }
 
     @Test
-    @DisplayName("a reprompt asks the spend gate again: once a limit is reached the model is not re-asked and the answer is blocked")
+    @DisplayName("a reprompt is admitted once, through admit(): refused, the model is not re-asked and the answer is blocked; check() is not asked again")
     void reprompt_isSpendGated() throws Exception {
         var gate = mock(LlmSpendGate.class);
-        when(gate.check(memory)).thenReturn(null, new LlmSpendGate.Refusal("conversation_ceiling", "reached"));
+        when(gate.check(memory)).thenReturn(null);
+        // paid guardrail/reprompt calls are admitted through admit(), not check()
+        when(gate.admit(any(), anyDouble(), anyDouble()))
+                .thenReturn(LlmSpendGate.Admission.refused(new LlmSpendGate.Refusal("conversation_ceiling", "reached")));
         llmTask.spendGate = gate;
         var model = FaultInjectingChatModel.script(Step.text("prose")).repeatLast();
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
@@ -1118,8 +1124,31 @@ class LlmTaskGuardrailsTest {
         run(task);
 
         assertEquals(1, model.callCount(), "the primary call only");
-        verify(gate, times(2)).check(memory);
+        // the preflight only: a second check() would count the reservation admit()
+        // holds
+        verify(gate, times(1)).check(memory);
+        verify(gate, times(1)).admit(any(), anyDouble(), anyDouble());
         assertEquals("Blocked.", outputItem().getText());
+    }
+
+    @Test
+    @DisplayName("an ADMITTED reprompt is not refused by a second check(): that would count the reservation admit() just took")
+    void reprompt_admittedIsNotCheckedAgain() throws Exception {
+        var gate = mock(LlmSpendGate.class);
+        when(gate.check(memory)).thenReturn(null, new LlmSpendGate.Refusal("conversation_ceiling", "reached"));
+        when(gate.admit(any(), anyDouble(), anyDouble())).thenReturn(LlmSpendGate.Admission.ALLOWED);
+        llmTask.spendGate = gate;
+        var model = FaultInjectingChatModel.script(Step.text("prose")).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task();
+        var cfg = guardrail("json-object", "reprompt");
+        cfg.setBlockMessage("Blocked.");
+        task.setOutputGuardrails(List.of(cfg));
+
+        run(task);
+
+        assertTrue(model.callCount() >= 2, "the admitted reprompt was asked: " + model.callCount());
+        verify(gate, times(1)).check(memory);
     }
 
     @Test

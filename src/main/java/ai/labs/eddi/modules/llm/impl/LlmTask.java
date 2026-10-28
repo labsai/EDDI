@@ -469,7 +469,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         }
         GuardrailService.TextResult inputPrescreen = null;
         if (screenInput && userInput != null) {
-            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput, guardrailContext(memory, task, List.of()),
+            inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput,
+                    guardrailContext(memory, task, List.of()).withSpend(TaskSpend.of(spendGate, memory)),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
             accumulateCost(currentStep, inputPrescreen.costUsd());
             if (inputPrescreen.isBlocked()) {
@@ -626,7 +627,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         final Map<String, String> stepTextVerdicts = new ConcurrentHashMap<>();
         GuardrailService.InputResult inputScreening = null;
         if (screenInput) {
-            inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
+            inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages,
+                    guardrailContext(memory, task, messages).withSpend(TaskSpend.of(spendGate, memory)),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen, typedTextIndex);
             accumulateCost(currentStep, inputScreening.costUsd());
             if (inputScreening.isBlocked()) {
@@ -657,10 +659,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         FormatRetryRunner.ContextShrinker contextShrinker = () -> reapplyInputScreening(memory, task, screenedInput,
                 rebuildWithHalvedWindow(memory, task, shrinkSystemMessage, processedParams.get(KEY_PROMPT), shrinkLogSizeLimit, maxContextTokens,
                         anchorFirstSteps, includeFirstAgentMessage, resolvedType, processedParams, shrinkSummaryPrefix, shrinkSkipSteps));
-        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
+        // A re-ask is checked against the conversation's ceiling and the tenant budget
+        // before it starts, like the first call (reaskSpend).
+        final FormatRetryRunner.ReaskSpend reaskSpend = FormatRetryRunner.ReaskSpend.of(spendGate, memory);
+        FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
                 Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()), reaskSpend);
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -785,7 +790,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()),
+                        turnBudget(memory.getTurnDeadline()), reaskSpend,
                         (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, promptBeforeScreening, memory, task, resolvedType,
                                 processedParams,
                                 stepType, stepParams, screenedInput, currentStep, stepTextVerdicts));
@@ -1017,8 +1022,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 // === Output guardrails (WS4) === — on the validated answer, before it is
                 // stored, parsed or delivered. Not on a fallback: that is the author's text.
                 if (fallbackServed == null && outputGuarded && responseContent != null) {
+                    // The answer's own cost is not in audit:cost yet (it is recorded below), so
+                    // the phase's spend checks start from it.
+                    TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+                    outputSpend.add(pricedCost(responseMetadata, task));
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, outputReprompter,
-                            guardrailContext(memory, task, requestMessages, retrievedContextText),
+                            guardrailContext(memory, task, requestMessages, retrievedContextText).withSpend(outputSpend),
                             outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
@@ -1437,7 +1446,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         }
         result.set(stepLast, stepUser.toBuilder().contents(contents).build());
         var unseen = guardrailService.screenUnseenText(task.getInputGuardrails(), result, stepLast, screenedTexts,
-                stepTextVerdicts, guardrailContext(memory, task, result));
+                stepTextVerdicts, guardrailContext(memory, task, result).withSpend(TaskSpend.of(spendGate, memory)));
         accumulateCost(currentStep, unseen.costUsd());
         return unseen.messages();
     }
@@ -1567,10 +1576,43 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (tokenUsage != null) {
             accumulateTokenUsage(currentStep, tokenUsage);
         }
+        accumulateCost(currentStep, pricedCost(responseMetadata, task));
+    }
+
+    /**
+     * The priced cost of a model phase's metadata — its tokens at the task's prices
+     * (a cascade's own {@code cascadeCostUsd} instead) plus its tool cost. What
+     * {@link #accumulateUsageAndCost} records, and what the output phase's spend
+     * checks start from before it is recorded.
+     */
+    static double pricedCost(Map<String, Object> responseMetadata, Task task) {
+        if (responseMetadata == null) {
+            return 0.0;
+        }
+        Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
         double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
                 ? asDouble(responseMetadata.get("cascadeCostUsd"))
                 : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
-        accumulateCost(currentStep, llmCostUsd + asDouble(responseMetadata.get("toolCostUsd")));
+        return llmCostUsd + asDouble(responseMetadata.get("toolCostUsd"));
+    }
+
+    /**
+     * Prices a cascade step's model phase at the step's own rates: sets
+     * {@code cascadeCostUsd} (which {@link #pricedCost} prefers) from the phase's
+     * token usage. Nothing changes without a step, without token usage, or when the
+     * metadata already carries a cascade cost.
+     */
+    static void priceAtCascadeStep(Map<String, Object> metadata, CascadeStep step, Task task) {
+        if (step != null && metadata != null && !metadata.containsKey("cascadeCostUsd") && metadata.get("tokenUsage") instanceof Map<?, ?> usage) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tokenUsage = (Map<String, Object>) usage;
+            metadata.put("cascadeCostUsd", CascadingModelExecutor.computeCost(step, task.getModelCascade(), tokenUsage));
+        }
+    }
+
+    /** {@code policy} with the spend check, or null when there is no policy. */
+    private static FormatRetryRunner.Policy withSpend(FormatRetryRunner.Policy policy, FormatRetryRunner.ReaskSpend spend) {
+        return policy != null ? policy.withSpend(spend) : null;
     }
 
     /**
@@ -2071,9 +2113,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // neither consults nor settles a circuit) and the cascade (the resume pins the
         // step whose tool loop paused). See docs/llm-resilience.md.
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-        FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
+        FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId());
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()),
+                FormatRetryRunner.ReaskSpend.of(spendGate, memory));
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -2154,6 +2197,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         Map<String, Object> responseMetadata = result != null && result.responseMetadata() != null
                 ? new HashMap<>(result.responseMetadata())
                 : new HashMap<>();
+        // A resumed cascade step ran on that step's model, so its tokens are priced at
+        // the step's rates (as the live cascade does), not the task's: set
+        // cascadeCostUsd — which pricedCost prefers — from the resumed token usage,
+        // for the output guardrails' spend checks and the audit cost alike.
+        priceAtCascadeStep(responseMetadata, cascadeStep, task);
 
         // responseValidation's actions (R6) apply to the resumed answer as to a live
         // one; the engine's own fallback text is not validated.
@@ -2170,8 +2218,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                     Reprompter reprompter = result != null && !result.resumeTranscript().isEmpty()
                             ? transcriptReprompter(chatModel, result.resumeTranscript(), task, memory, jsonPolicy, RepromptCircuit.NONE)
                             : null;
+                    TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+                    outputSpend.add(pricedCost(responseMetadata, task));
                     var screened = guardrailService.runOutput(task.getOutputGuardrails(), responseContent, reprompter,
-                            guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()),
+                            guardrailContext(memory, task, result != null ? result.resumeTranscript() : List.of()).withSpend(outputSpend),
                             outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
                     responseMetadata = foldRepromptUsage(responseMetadata, screened.reprompts());
                     accumulateCost(currentStep, screened.costUsd());
@@ -2483,9 +2533,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // The answer came from a cascade step: the revision goes to that step's model.
         Integer stepIndex = candidate.getCascadeStepIndex();
         var cascade = task.getModelCascade();
+        CascadeStep revisionStep = null;
         if (stepIndex != null && cascade != null && cascade.isEnabled() && cascade.getSteps() != null && stepIndex >= 0
                 && stepIndex < cascade.getSteps().size()) {
-            var stepModel = cascadingModelExecutor.resolveStepModel(cascade.getSteps().get(stepIndex), task, processedParams, templateDataObjects,
+            revisionStep = cascade.getSteps().get(stepIndex);
+            var stepModel = cascadingModelExecutor.resolveStepModel(revisionStep, task, processedParams, templateDataObjects,
                     memory, "Cascade step");
             resolvedType = stepModel.modelType();
             processedParams = stepModel.params();
@@ -2511,8 +2563,20 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                     var reply = legacyChatExecutor.execute(chatModel, msgs, task, jsonPolicy, maxTokens, memory.getTurnDeadline());
                     return new FormatRetryRunner.Attempt(reply.response(), reply.responseMetadata());
                 };
+        // The revision, and any guardrail reprompt of it, ran on the cascade step the
+        // answer came from: priced at that step's rates, not the task's.
+        final CascadeStep pricedStep = revisionStep;
+        FormatRetryRunner.Asker stepPricedAsker = pricedStep == null ? asker : (msgs, maxTokens) -> {
+            var reply = asker.ask(msgs, maxTokens);
+            Map<String, Object> priced = reply.metadata() != null ? new HashMap<>(reply.metadata()) : new HashMap<>();
+            Map<String, Object> usage = new HashMap<>(priced);
+            priceAtCascadeStep(usage, pricedStep, task);
+            priced.put(KEY_REPROMPT_COST, usage.get("cascadeCostUsd"));
+            return new FormatRetryRunner.Attempt(reply.text(), priced);
+        };
         var attempt = asker.ask(request, null);
         Map<String, Object> metadata = attempt.metadata() != null ? new HashMap<>(attempt.metadata()) : new HashMap<>();
+        priceAtCascadeStep(metadata, revisionStep, task);
         String content = attempt.text();
         if (content == null || content.isBlank()) {
             LOGGER.warnf("hitl.revision.failed: the model returned no revision for task '%s' — the rejection applies as is", sanitize(task.getId()));
@@ -2530,8 +2594,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         }
         content = validated.content();
         if (guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails()) && content != null) {
-            Reprompter reprompter = reprompter(request, asker, memory, task, RepromptCircuit.NONE);
-            var screened = guardrailService.runOutput(task.getOutputGuardrails(), content, reprompter, guardrailContext(memory, task, request),
+            Reprompter reprompter = reprompter(request, stepPricedAsker, memory, task, RepromptCircuit.NONE);
+            // The revision attempt just made is spend this phase has not recorded yet; the
+            // guardrails' paid calls (a reprompt, a classifier or judge) are admitted
+            // against it, as on the live path.
+            TaskSpend outputSpend = TaskSpend.of(spendGate, memory);
+            outputSpend.add(pricedCost(metadata, task));
+            var screened = guardrailService.runOutput(task.getOutputGuardrails(), content, reprompter,
+                    guardrailContext(memory, task, request).withSpend(outputSpend),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
             metadata = foldRepromptUsage(metadata, screened.reprompts());
             accumulateCost(currentStep, screened.costUsd());
@@ -3000,7 +3070,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (retryPolicy != null) {
             // Only the final model call is re-asked, over a transcript that already holds
             // the tool results; the loop and its tools are never re-run.
-            var recovered = formatRetryRunner.resolve(retryPolicy,
+            // The loop's tool cost is spent as well; the runner prices only tokens.
+            var loopPolicy = retryPolicy.withSpend(retryPolicy.spend().plus(asDouble(agentResult.responseMetadata().get("toolCostUsd"))));
+            var recovered = formatRetryRunner.resolve(loopPolicy,
                     new FormatRetryRunner.Attempt(agentResult.response(), agentResult.responseMetadata()),
                     CascadingModelExecutor.toolTranscript(systemMessage, chatMessagesWithoutSystem, agentResult.toolExchange()),
                     (msgs, maxTokens) -> {
@@ -3232,13 +3304,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             if (!repromptMayStart(memory, task)) {
                 return null;
             }
-            // A reprompt is another priced model call: the spend gate is asked again, so
-            // a turn that reached its tenant budget or conversation ceiling stops
-            // re-asking (and the guardrail blocks).
-            if (spendGate != null && spendGate.check(memory) != null) {
-                LOGGER.infof("Guardrail reprompt for task '%s' skipped: a spend limit is reached", task.getId());
-                return null;
-            }
+            // The spend gate is NOT asked here: every caller runs this reprompter inside
+            // GuardrailService.runOutput, which admits each reprompt through the
+            // context's spend gate (a TaskSpend) before calling it. A second
+            // LlmSpendGate.check here would count the reservation that admission just
+            // took, and could refuse a reprompt it had admitted.
             var ticket = circuit.acquire().get();
             if (!ticket.allowed()) {
                 recordRecovery(memory, LlmRecoveryLog.CIRCUIT_SKIP, "skipped", ticket.denial().failure().label(), 0L);
@@ -3254,8 +3324,23 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 throw e;
             }
             settleCircuit(ticket, attempt.text(), circuit.convertObject(), circuit.params(), task);
-            return new Reprompter.Attempt(attempt.text(), attempt.metadata());
+            return new Reprompter.Attempt(attempt.text(), attempt.metadata(), repromptCost(attempt.metadata(), task));
         };
+    }
+
+    /**
+     * What one reprompt cost: a cascade step's own price
+     * ({@code KEY_REPROMPT_COST}) or the reply's tokens at the task's prices.
+     */
+    private static double repromptCost(Map<String, Object> metadata, Task task) {
+        if (metadata == null) {
+            return 0.0;
+        }
+        if (metadata.containsKey(KEY_REPROMPT_COST)) {
+            return asDouble(metadata.get(KEY_REPROMPT_COST));
+        }
+        return TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
+                metadata.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null);
     }
 
     /** Plain chat: the same model over the same request. */
