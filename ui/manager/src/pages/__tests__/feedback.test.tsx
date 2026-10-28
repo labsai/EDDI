@@ -118,6 +118,25 @@ describe("FeedbackPage", () => {
     await waitFor(() => expect(reads).toBeGreaterThan(1));
   });
 
+  it("falls back to the last page that exists when triage empties the current one", async () => {
+    const rows = ratingFixtures().slice(0, 1);
+    let total = 30;
+    server.use(
+      http.get("*/ratings", ({ request }) => {
+        const index = Number(new URL(request.url).searchParams.get("index") ?? 0);
+        return HttpResponse.json({ total, index, limit: 25, ratings: index >= total ? [] : rows });
+      }),
+    );
+    renderFeedback();
+    await screen.findByTestId("feedback-next");
+    await screen.findByTestId("rating-row-r1");
+    total = 25; // the reviewer triaged the five rows of page 2 elsewhere
+    fireEvent.click(screen.getByTestId("feedback-next"));
+    // Page 2 is now empty; without the clamp the page stays empty and hides the 25 left.
+    expect(await screen.findByTestId("rating-row-r1")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId("feedback-prev")).toBeDisabled());
+  });
+
   it("saves an internal note", async () => {
     renderFeedback();
     fireEvent.click(await screen.findByTestId("rating-note-btn-r1"));

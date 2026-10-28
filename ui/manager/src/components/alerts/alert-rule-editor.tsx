@@ -375,8 +375,8 @@ export function AlertRuleEditor({ initial, isAdmin, onDone }: AlertRuleEditorPro
       {testResults && (
         <ul className="space-y-1 text-sm" data-testid="alert-rule-test-results">
           {testResults.length === 0 && <li className="text-muted-foreground">{t("alerts.testNoTargets", "No targets to test — add Slack or a webhook.")}</li>}
-          {testResults.map((r) => (
-            <li key={r.label} className={r.delivered ? "text-foreground" : "text-destructive"}>
+          {testResults.map((r, i) => (
+            <li key={`${i}-${r.label}`} className={r.delivered ? "text-foreground" : "text-destructive"}>
               {r.label}: {r.delivered ? t("alerts.testDelivered", "delivered") : (r.error ?? t("alerts.testFailed", "failed"))}
             </li>
           ))}

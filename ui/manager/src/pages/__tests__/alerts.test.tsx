@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
@@ -426,6 +426,22 @@ describe("AlertsPage — rules", () => {
     const results = await screen.findByTestId("alert-rule-test-results");
     expect(within(results).getByText(/Slack C0123ABC: delivered/)).toBeInTheDocument();
     expect(within(results).getByText(/Slack refused the message/)).toBeInTheDocument();
+  });
+
+  it("shows two targets with the same label as two rows, without a duplicate-key warning", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderAlerts("/manage/alerts?tab=rules");
+      fireEvent.click(await screen.findByTestId("alert-rule-edit-rule-ratings"));
+      fireEvent.click(screen.getByTestId("alert-rule-add-target"));
+      fireEvent.change(screen.getByTestId("alert-rule-target-channel-1"), { target: { value: "C0123ABC" } });
+      fireEvent.click(screen.getByTestId("alert-rule-test"));
+      const results = await screen.findByTestId("alert-rule-test-results");
+      await waitFor(() => expect(within(results).getAllByText(/Slack C0123ABC: delivered/)).toHaveLength(2));
+      expect(errors.mock.calls.some((call) => String(call[0]).includes("same key"))).toBe(false);
+    } finally {
+      errors.mockRestore();
+    }
   });
 
   it("deletes a rule after confirmation", async () => {

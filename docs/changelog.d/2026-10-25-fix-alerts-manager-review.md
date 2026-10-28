@@ -8,6 +8,11 @@
 - **MSW:** the bulk-acknowledge handler answers 400 `INVALID_PARAMETER` to an empty `ids` list or an empty entry, as the server does; the Manager sends `{}` when it acknowledges by filter and a non-empty list otherwise, so its calls are unchanged.
 - **Platform Operator:** the prompt says webhooks must be https and corrects "no conversation text" — a rating comment, or an `OUTPUT_MATCH` value with `includeValue` and conversation review on, can appear, each at most 280 characters. Revision 40 → 41.
 
+### Review follow-ups
+
+- `AlertDeliveryService` derives the send claim lease as the longer of 30 s and three times `eddi.alerts.webhook-timeout`, and `AlertSettings` keeps that timeout between 1 s and 60 s, so a long timeout can no longer make every send skip.
+- Manager: test-result rows in the rule editor have unique keys; removing a chat rating clears its reasons and comment; the chat hook reads a conversation's own rating controls even when the current profile is null; the feedback list steps back to the last existing page when triage empties the current one.
+
 ### Tests
 
 `npm run typecheck`, eslint on the changed files and `npm run i18n:check` pass; the alert and operator suites (19 files, 530 tests) pass.

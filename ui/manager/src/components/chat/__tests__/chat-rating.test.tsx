@@ -83,6 +83,17 @@ describe("ChatRatingCard", () => {
     fireEvent.click(screen.getByTestId("chat-rating-card-up"));
     expect(await screen.findByTestId("chat-rating-thanks")).toBeInTheDocument();
   });
+
+  it("removing a rating clears its reasons and comment, so the next rating does not bring them back", async () => {
+    const onRate = vi.fn().mockResolvedValue(true);
+    renderWithProviders(
+      <ChatRatingCard profile={profile()} current={{ stepIndex: -1, score: 2, tags: ["Wrong answer"], comment: "old words" }} onRate={onRate} onClose={() => {}} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove rating" }));
+    await waitFor(() => expect(onRate).toHaveBeenCalledWith(null));
+    fireEvent.click(await screen.findByTestId("chat-rating-star-4"));
+    expect(onRate).toHaveBeenLastCalledWith({ score: 4, tags: [], comment: "" });
+  });
 });
 
 describe("useChatRatings", () => {
@@ -187,6 +198,13 @@ describe("useChatRatings", () => {
     const { result } = renderHook(() => useChatRatings("conv-3", null, []));
     act(() => result.current.openCard());
     expect(result.current.cardOpen).toBe(false);
-    expect(read).toBe(false);
+    await waitFor(() => expect(read).toBe(true));
+    expect(result.current.profile).toBeNull();
+  });
+
+  it("reads the conversation's own controls when the current profile is null", async () => {
+    server.use(http.get("*/agents/:conversationId/rating", () => HttpResponse.json({ conversation: null, steps: [], controls: profile({ scale: "THUMBS" }) })));
+    const { result } = renderHook(() => useChatRatings("conv-old", null, [msg("agent", "Hi")]));
+    await waitFor(() => expect(result.current.profile?.scale).toBe("THUMBS"));
   });
 });
