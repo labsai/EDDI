@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.model.DeploymentFailure;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
@@ -1224,6 +1225,10 @@ public class McpAdminTools {
             if (HitlSchedules.isHitlTimeout(schedule.getMetadata())) {
                 return errorJson("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
                         + "Resolve the pending approval via the conversation's resume or cancel endpoint.");
+            }
+            if (ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
+                return errorJson("This schedule is the next turn of a self-continuing conversation and cannot be fired manually. "
+                        + "It runs on its own; end or cancel the conversation to stop it.");
             }
             // Claim it on the poller's own terms first, and release the claim in the
             // finally. Firing unclaimed raced the poller — with

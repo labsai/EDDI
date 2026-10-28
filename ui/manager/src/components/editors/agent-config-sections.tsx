@@ -21,6 +21,7 @@ import {
   Hand,
   NotebookPen,
   Gauge,
+  Repeat,
 } from "lucide-react";
 import type { AgentEdit } from "@/lib/agent-draft";
 import { useSkills } from "@/hooks/use-capabilities";
@@ -37,6 +38,7 @@ import {
 } from "@/lib/api/hitl";
 import { parseNotifyRecipients } from "@/lib/hitl-notify";
 import { parseCostCeiling } from "@/lib/cost-ceiling";
+import { MAX_CONTINUATIONS, MAX_CONTINUATION_INPUT_LENGTH, parseMaxContinuations } from "@/lib/continuation";
 import { isValidIsoDuration, requiresApprovalTimeout } from "@/lib/hitl-config";
 import { CONFIDENCE_COLORS } from "@/lib/constants";
 import { EditorSection } from "./editor-section";
@@ -1071,6 +1073,144 @@ export const LimitsSection = memo(function LimitsSection({
             "Only priced models count toward this cap. A model with no input/output price in its LLM configuration adds $0, but is still stopped once other spend has reached the cap.",
           )}
         </p>
+      </div>
+    </EditorSection>
+  );
+});
+
+// ─── Self-continuation ──────────────────────────────────────────────────────
+
+/**
+ * `maxContinuations` and `continuationInput`: how many turns one conversation
+ * may start itself with the reserved `CONTINUE_CONVERSATION` action, and the
+ * literal input those turns get. A section of its own beside Limits: it is a
+ * bound on the whole agent, and its count is validated apart from the cost box.
+ */
+export const ContinuationSection = memo(function ContinuationSection({
+  agent,
+  onChange,
+  disabled = false,
+  modified = false,
+  onValidityChange,
+}: AgentSectionProps & {
+  /** Told whether the count in the box is unusable; the page refuses to save while it is. */
+  onValidityChange?: (invalid: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const id = useId();
+  const hintId = `${id}-hint`;
+  const inputId = `${id}-input`;
+  const max = agent.maxContinuations;
+
+  const [text, setText] = useState(() => (max === undefined ? "" : String(max)));
+  // A number input reports half-typed text ("5e", "-") as "" — which would read as
+  // "off" and silently drop the field while the box still shows the text — so it
+  // is tracked apart, as in LimitsSection.
+  const [badInput, setBadInput] = useState(false);
+  const parsed = badInput ? { ok: false as const } : parseMaxContinuations(text);
+  const invalid = !parsed.ok;
+  useEffect(() => {
+    onValidityChange?.(invalid);
+    return () => onValidityChange?.(false);
+  }, [invalid, onValidityChange]);
+  useEffect(() => {
+    // Follow the draft when it changes underneath (Discard, a save, a version switch).
+    setText((prev) => {
+      const p = parseMaxContinuations(prev);
+      if (p.ok && p.value === max) return prev;
+      setBadInput(false);
+      return max === undefined ? "" : String(max);
+    });
+  }, [max]);
+
+  function commitMax(next: string, bad: boolean) {
+    setText(next);
+    setBadInput(bad);
+    const p = bad ? ({ ok: false } as const) : parseMaxContinuations(next);
+    if (!p.ok) return;
+    // Off is the field being absent, never a stored 0 the author did not type.
+    const { maxContinuations: _unset, ...rest } = agent;
+    void _unset;
+    onChange(p.value === undefined ? rest : { ...rest, maxContinuations: p.value });
+  }
+
+  function commitInput(next: string) {
+    const value = next.slice(0, MAX_CONTINUATION_INPUT_LENGTH);
+    const { continuationInput: _unset, ...rest } = agent;
+    void _unset;
+    onChange(value === "" ? rest : { ...rest, continuationInput: value });
+  }
+
+  return (
+    <EditorSection
+      label={t("agentDetail.continuation", "Self-continuation")}
+      icon={Repeat}
+      accent="text-sky-500"
+      variant="card"
+      modified={modified}
+      defaultOpen={max !== undefined}
+    >
+      <div className="space-y-3" data-testid="continuation-section">
+        <p className="text-[10px] leading-relaxed text-muted-foreground">
+          {t(
+            "agentDetail.continuationDesc",
+            "Lets a behavior rule start the next turn of the same conversation with the reserved CONTINUE_CONVERSATION action, without user input — a long job runs as many ordinary turns. Each continuation runs under the turn deadline, and the cost cap above bounds all of them together.",
+          )}
+        </p>
+        <div>
+          <label htmlFor={id} className="mb-1 block text-xs font-medium text-foreground">
+            {t("agentDetail.maxContinuations", "Max continuations per conversation")}
+          </label>
+          <input
+            id={id}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={MAX_CONTINUATIONS}
+            step={1}
+            value={text}
+            placeholder={t("agentDetail.continuationOff", "Off")}
+            disabled={disabled}
+            onChange={(e) => commitMax(e.target.value, e.target.validity?.badInput === true)}
+            aria-invalid={invalid || undefined}
+            aria-describedby={hintId}
+            className="h-8 w-32 rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 aria-invalid:border-destructive"
+            data-testid="max-continuations"
+          />
+          {parsed.ok ? (
+            <p id={hintId} className="mt-1 text-[10px] text-muted-foreground">
+              {t("agentDetail.maxContinuationsHint", "Empty or 0 = off. Counted over the whole conversation.")}
+            </p>
+          ) : (
+            <p id={hintId} className="mt-1 text-[10px] text-destructive" data-testid="max-continuations-invalid">
+              {t("agentDetail.maxContinuationsInvalid", "Enter a whole number from 0 to {{max}}, or leave empty for off.", {
+                max: MAX_CONTINUATIONS,
+              })}
+            </p>
+          )}
+        </div>
+        <div>
+          <label htmlFor={inputId} className="mb-1 block text-xs font-medium text-foreground">
+            {t("agentDetail.continuationInput", "Continuation input")}
+          </label>
+          <input
+            id={inputId}
+            type="text"
+            value={agent.continuationInput ?? ""}
+            maxLength={MAX_CONTINUATION_INPUT_LENGTH}
+            placeholder={t("agentDetail.continuationInputPlaceholder", "Empty input")}
+            disabled={disabled}
+            onChange={(e) => commitInput(e.target.value)}
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+            data-testid="continuation-input"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            {t(
+              "agentDetail.continuationInputHint",
+              "The user input of every continuation turn, used as written — not a template. A continuation turn can read its number from {context.selfContinuation.number}.",
+            )}
+          </p>
+        </div>
       </div>
     </EditorSection>
   );

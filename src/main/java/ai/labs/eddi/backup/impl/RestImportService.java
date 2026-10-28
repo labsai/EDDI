@@ -41,6 +41,7 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.agents.mongo.AgentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -48,6 +49,7 @@ import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
@@ -882,6 +884,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // creation, after all extensions already landed (partial
                 // import), and surfaced as a 500 instead of a 400.
                 HitlConfigValidation.validate(agentConfig.getHitlConfig());
+                AgentStore.validateContinuation(agentConfig);
 
                 agentConfig.getWorkflows()
                         .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
@@ -2537,14 +2540,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * schedule has across deployments. Its id belongs to the store that issued it,
      * so it cannot be matched on.
      * <p>
-     * HITL approval timeouts are left out, mirroring the export side: they are
-     * safety timers for one pending approval on this deployment, named after its
-     * conversation, and never part of an agent's configuration. Listed here, an
-     * archive carrying a plain schedule with that name would match one and — for an
-     * admin, whom {@code requireAdminForHitl} lets through — PUT over it, dropping
-     * the {@code hitlType} marker and the deadline and silently disarming the
-     * pending approval's ABORT/AUTO_REJECT policy. Excluded, such a name falls
-     * through to the create path instead, where nothing existing is touched.
+     * Conversation-continuation schedules are left out for the same reason (the
+     * exporter skips them, and the update guard refuses them). HITL approval
+     * timeouts are left out, mirroring the export side: they are safety timers for
+     * one pending approval on this deployment, named after its conversation, and
+     * never part of an agent's configuration. Listed here, an archive carrying a
+     * plain schedule with that name would match one and — for an admin, whom
+     * {@code requireAdminForHitl} lets through — PUT over it, dropping the
+     * {@code hitlType} marker and the deadline and silently disarming the pending
+     * approval's ABORT/AUTO_REJECT policy. Excluded, such a name falls through to
+     * the create path instead, where nothing existing is touched.
      * <p>
      * A name the agent uses twice is left out for the same reason: nothing makes a
      * schedule name unique — {@code RestScheduleStore.createSchedule} validates the
@@ -2558,7 +2563,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         try {
             for (ScheduleConfiguration existing : scheduleStore.readSchedulesByAgentId(agentId)) {
                 if (existing != null && existing.getName() != null && existing.getId() != null
-                        && !HitlSchedules.isHitlTimeout(existing.getMetadata())) {
+                        && !HitlSchedules.isHitlTimeout(existing.getMetadata())
+                        && !ConversationContinuations.isContinuationSchedule(existing.getMetadata())) {
                     if (byName.putIfAbsent(existing.getName(), existing.getId()) != null) {
                         ambiguousNames.add(existing.getName());
                     }

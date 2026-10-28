@@ -870,6 +870,43 @@ public class AgentConfiguration {
      */
     private Double maxCostPerConversationUsd;
 
+    // === Self-continuation ===
+
+    /**
+     * How many turns one conversation may run on its own, without user input, by
+     * emitting the reserved {@code CONTINUE_CONVERSATION} action — counted over the
+     * whole conversation. Unset or {@code 0} (the default) switches the action off:
+     * it is ignored with a warning and the step records why. Each continuation is
+     * an ordinary turn under the agent's {@link #turnDeadlineMs}, and
+     * {@link #maxCostPerConversationUsd} bounds all of them together. Accepted
+     * range {@code 0}..{@code 10000}.
+     */
+    private Integer maxContinuations;
+
+    /**
+     * The user input of every continuation turn: a literal string written by the
+     * agent designer, never a template (runtime data never becomes template
+     * source). Unset means an empty input. At most 4096 characters. A turn can tell
+     * it is a continuation from {@code {context.selfContinuation.number}}.
+     */
+    private String continuationInput;
+
+    public Integer getMaxContinuations() {
+        return maxContinuations;
+    }
+
+    public void setMaxContinuations(Integer maxContinuations) {
+        this.maxContinuations = maxContinuations;
+    }
+
+    public String getContinuationInput() {
+        return continuationInput;
+    }
+
+    public void setContinuationInput(String continuationInput) {
+        this.continuationInput = continuationInput;
+    }
+
     public Double getMaxCostPerConversationUsd() {
         return maxCostPerConversationUsd;
     }

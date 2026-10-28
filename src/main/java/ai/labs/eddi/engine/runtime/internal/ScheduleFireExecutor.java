@@ -19,6 +19,8 @@ import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
@@ -51,8 +53,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Executes a scheduled fire by resolving the conversation strategy and calling
  * {@link IConversationService#say}.
  * <p>
- * Two schedule kinds are recognised by their metadata and bypass the
- * conversation path entirely, because neither is a conversation turn:
+ * These schedule kinds are recognised by their metadata and bypass the
+ * strategy-based conversation path:
  * <ul>
  * <li>{@code hitlType=hitl_timeout} — HITL approval deadlines
  * ({@code HitlTimeoutHandler})</li>
@@ -60,9 +62,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * maintenance ({@link DreamService})</li>
  * <li>{@code alertType=alert_maintenance} — alert delivery retries, digests and
  * retention ({@link AlertMaintenanceService})</li>
+ * <li>{@code continuationType=conversation_continuation} — the next turn of a
+ * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
+ * one whose input, identity and once-only check are the engine's, not a
+ * schedule's</li>
  * </ul>
- * Both still run under the poller's cluster-wide claim, lease, retry/backoff
- * and fire-log machinery.
+ * All of them still run under the poller's cluster-wide claim, lease,
+ * retry/backoff and fire-log machinery.
  * <p>
  * All existing guards apply automatically:
  * <ul>
@@ -98,6 +104,9 @@ public class ScheduleFireExecutor {
 
     @Inject
     AlertMaintenanceService alertMaintenanceService;
+
+    @Inject
+    ContinuationFireHandler continuationFireHandler;
 
     @Inject
     RagSourceIngestionService ragSourceIngestionService;
@@ -219,6 +228,13 @@ public class ScheduleFireExecutor {
             // runs before the creator check. The poller's claim and lease make one
             // node run it at a time.
             return fireAlertMaintenance(schedule, instanceId, attemptNumber);
+        }
+        if (ConversationContinuations.isContinuationSchedule(md)) {
+            // Self-continuation fast-path: the next turn of one conversation, armed by
+            // the engine after the previous turn committed. Before the creator check
+            // for the same reason as the HITL timeout: the engine minted it, there is
+            // no creator, and the conversation's own owner and agent govern the turn.
+            return fireContinuation(schedule, instanceId, attemptNumber);
         }
 
         ResourceAccessGuard.UseCheck creatorAccess = creatorUseCheck(schedule);
@@ -405,6 +421,29 @@ public class ScheduleFireExecutor {
             restoreInterrupt(interrupted);
         }
 
+        return fireLog;
+    }
+
+    private ScheduleFireLog fireContinuation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        Map<String, Object> md = schedule.getMetadata();
+        String conversationId = (String) md.get(ConversationContinuations.METADATA_CONVERSATION_ID_KEY);
+        Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
+        ContinuationFireHandler.Result result = continuationFireHandler != null
+                ? continuationFireHandler.fire(md, schedule.getUserId(), schedule.getMessage(), timeout)
+                : new ContinuationFireHandler.Result(ScheduleConfiguration.FireStatus.FAILED.name(), "continuations are not available");
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(),
+                startedAt, Instant.now(), result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0);
+        // The handler re-asserts an interrupt it caught; park it across the fire-log
+        // write (a set flag can fail the store's connection checkout), as fire() does.
+        boolean interrupted = Thread.interrupted();
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log continuation fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
+        }
         return fireLog;
     }
 

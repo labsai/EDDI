@@ -835,7 +835,13 @@ class ConversationStepRunner {
                             } else {
                                 // Non-pause completion is unchanged: the normal say turn
                                 // settles to READY/ENDED/… and persists the full snapshot.
+                                // A CONTINUE_CONVERSATION is decided before the store (the
+                                // outcome is part of the committed step) and armed only once
+                                // the store succeeded: a turn that is not committed — fenced,
+                                // conflicted, failed to store — never queues its successor.
+                                conversationService.decideContinuation(conversationMemory);
                                 storeConversationMemory(conversationMemory, environment);
+                                conversationService.armContinuation(conversationId, conversationMemory, environment);
                             }
                         } catch (ConversationFencedException e) {
                             // Cluster mode: another node took the conversation over while this
