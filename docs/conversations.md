@@ -72,6 +72,15 @@ or a streaming `say`, and the retry is answered instead of refused:
   duplicate that lands on another node still meets `409` until the turn completes, after which the stored
   answer is served everywhere. `0` for the TTL switches the feature off.
 
+### Self-continuation
+
+A turn can start the next turn of its own conversation, without user input, by emitting the reserved
+action `CONTINUE_CONVERSATION` — the way a job longer than one turn runs as many ordinary turns. It is
+off unless the agent sets `maxContinuations` (per conversation); the next turn is armed only after the
+asking turn has been committed, runs under the agent's turn deadline and cost ceiling, carries
+`{context.selfContinuation.number}`, and runs once even when its delivery is repeated. Ending or
+cancelling the conversation withdraws it. See [Long Jobs](long-jobs.md).
+
 ### How Conversations Work in EDDI
 
 When you create a conversation:

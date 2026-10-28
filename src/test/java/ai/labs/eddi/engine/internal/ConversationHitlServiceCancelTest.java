@@ -103,6 +103,52 @@ class ConversationHitlServiceCancelTest {
     }
 
     @Test
+    @DisplayName("cancelling a self-continuing job between two turns withdraws its next turn and reports CANCELLED")
+    void cancelBetweenContinuationTurns() throws Exception {
+        when(store.getConversationState(ID)).thenReturn(ConversationState.READY);
+        when(store.compareAndSetState(eq(ID), any(), any())).thenReturn(false);
+        when(conversationService.disarmContinuations(ID)).thenReturn(1);
+
+        assertEquals(IConversationService.CancelOutcome.CANCELLED,
+                service.cancelConversation(ID, ControlSignal.CANCEL_GRACEFUL, "owner"));
+        verify(conversationService).disarmContinuations(ID);
+    }
+
+    @Test
+    @DisplayName("an idle conversation without a pending continuation still has nothing to cancel")
+    void idleWithoutContinuation() throws Exception {
+        when(store.getConversationState(ID)).thenReturn(ConversationState.READY);
+        when(store.compareAndSetState(eq(ID), any(), any())).thenReturn(false);
+        when(conversationService.disarmContinuations(ID)).thenReturn(0);
+
+        assertEquals(IConversationService.CancelOutcome.NOTHING_TO_CANCEL,
+                service.cancelConversation(ID, ControlSignal.CANCEL_GRACEFUL, "owner"));
+    }
+
+    @Test
+    @DisplayName("cancelling a running continuation turn also withdraws the next one")
+    void cancelRunningContinuationTurn() throws Exception {
+        when(store.getConversationState(ID)).thenReturn(ConversationState.IN_PROGRESS);
+        when(store.compareAndSetState(eq(ID), any(), any())).thenReturn(false);
+        inFlight.put(ID, mock(IConversationMemory.class));
+
+        service.cancelConversation(ID, ControlSignal.CANCEL_GRACEFUL, "owner");
+
+        verify(conversationService).disarmContinuations(ID);
+    }
+
+    @Test
+    @DisplayName("the approver's paused-only cancel never touches a pending continuation")
+    void approverNeverWithdrawsContinuations() throws Exception {
+        when(store.getConversationState(ID)).thenReturn(ConversationState.READY);
+        when(store.compareAndSetState(eq(ID), any(), any())).thenReturn(false);
+        when(conversationService.disarmContinuations(ID)).thenReturn(1);
+
+        assertEquals(IConversationService.CancelOutcome.NOTHING_TO_CANCEL, service.cancelPausedConversation(ID, "approver"));
+        verify(conversationService, never()).disarmContinuations(anyString());
+    }
+
+    @Test
     @DisplayName("an unknown conversation is NOT_FOUND")
     void unknownIsNotFound() throws Exception {
         when(store.getConversationState(ID)).thenReturn(null);
