@@ -715,6 +715,29 @@ recipient over `eddi.mail.notify.max-per-recipient-per-hour` (a sustained rise m
 30 s), so aggregate with `max`; it reads `NaN` until the first sweep and after a failed one. No tag carries an
 address, an agent or a conversation.
 
+**Mail sender authentication** ([security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc)):
+
+```text
+eddi_email_auth_total                       # Verdicts of DKIM + DMARC alignment; tag: result (aligned_pass|pass_unaligned|fail|none)
+eddi_email_dns_lookups_total                # TXT lookups for DKIM keys and DMARC records; tags: result (found|not_found|tempfail|budget_exhausted|oversize|invalid_name), cached (true|false)
+```
+
+`eddi_email_auth_total` counts the verdicts for all mail the selected instances processed, so it shows whether your
+correspondents can be authenticated at all: if most mail is `none`, it comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
+tampered, forwarded or list mail, or forged mail — **or a DNS problem**: a key lookup that fails temporarily or runs
+out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no signature passes. If a signature
+passes, DMARC alignment determines the verdict: an aligned signature yields `aligned_pass` (never temporary), and an
+unaligned signature yields `pass_unaligned`. A caller can retry a temporary verdict, so a `fail`
+rise that comes with a rise in `tempfail` points at DNS, and one that comes with `budget_exhausted` at the lookup
+limit, rather than at the senders. An unexpected error inside the verifier is counted as `fail` as well (the mail is
+treated as unauthenticated, not retried) and logs the WARN `Sender authentication failed internally`, so a `fail` rise
+with neither DNS signal is worth checking against that log before blaming the senders. No tag carries a domain or an
+address. For
+`eddi_email_dns_lookups_total`, `cached=true` is an answer served from the cache (no query sent); a sustained
+`tempfail` means TXT lookups are failing temporarily, of which an unreachable resolver (`eddi.email.dns.servers`) is
+one possible cause; `budget_exhausted` is a local limit, not a DNS failure: a message needed more DKIM key and DMARC
+record lookups than `eddi.email.dns.max-lookups-per-message` allows, and the lookups past it were not sent.
+
 ### Platform Operator Metrics
 
 ```text

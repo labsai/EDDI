@@ -1,0 +1,4 @@
+# RFC 8463 Appendix A.2: the public keys of the signed message in rfc8463.eml.
+# One record per line: name TXT "string" ...; the strings are joined as DNS joins them.
+brisbane._domainkey.football.example.com TXT "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+test._domainkey.football.example.com TXT "v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDkHlOQoBTzWR" "iGs5V6NpP3idY6Wk08a5qhdR6wy5bdOKb2jLQiY/J16JYi0Qvx/byYzCNb3W91y3FutAC" "DfzwQ/BC/e/8uBsCR+yz1Lxj+PL6lHvqMKrM3rG4hstT5QjvHO9PzoxZyVYLzBfO2EeC3" "Ip3G+2kryOTIKT+l/K4w3QIDAQAB"

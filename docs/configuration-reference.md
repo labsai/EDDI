@@ -556,9 +556,11 @@ Full guide: [slack-integration.md](slack-integration.md).
 ### Email
 
 There is no email channel yet. These settings govern the **system mailer** — the deployment's one SMTP sender, used
-today for [HITL email notifications](hitl.md#email-notifications) — its outbound message ledger, and the mail socket
-guard the coming IMAP/SMTP transports will connect through. Details:
-[security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector).
+today for [HITL email notifications](hitl.md#email-notifications) — its outbound message ledger, the mail socket
+guard the coming IMAP/SMTP transports will connect through, and the DNS lookups of sender authentication (DKIM and
+DMARC) that the email channel will use. Details:
+[security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector),
+[security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc).
 
 | Property | Default | Description |
 |---|---|---|
@@ -578,6 +580,12 @@ guard the coming IMAP/SMTP transports will connect through. Details:
 | `eddi.email.outbound.retry-backoff` | `1m` | Delay before the first retry; it doubles per attempt, capped at one hour |
 | `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so instances never send the same row twice |
 | `eddi.email.allowed-hosts` | *(empty — any public host)* | Comma-separated mail servers (IMAP/SMTP) that channel and knowledge-base authors may name: exact host names, or `*.domain` for its subdomains (not the domain itself). Applied on top of the always-on refusal of private, loopback, link-local and metadata addresses, which an entry here does not lift. An entry that is not a host name fails the first mail connection rather than being ignored |
+| `eddi.email.dns.servers` | *(unset — the system's resolvers)* | Comma-separated DNS servers for DKIM key and DMARC record lookups: `host`, `host:port` or `[v6]:port`. Point an air-gapped deployment at its own resolver. DNSSEC is not required; a validating resolver adds it. A value that cannot be used makes every lookup fail temporarily, with one ERROR — no mail is then authenticated |
+| `eddi.email.dns.timeout` | `5s` | Timeout of one DNS query (one retry). A timeout makes that signature or policy check temporary, never a pass |
+| `eddi.email.dns.cache-max-entries` | `10000` | Size of the TXT answer cache shared by all mailboxes |
+| `eddi.email.dns.cache-max-ttl` | `1h` | Longest time an answer is cached; shorter record TTLs (and, for a missing name, the zone's SOA minimum) are honoured. Temporary failures are never cached |
+| `eddi.email.dkim.max-delivery-age` | `7d` | When a transport passes the time the mailbox server accepted a message (IMAP `INTERNALDATE`), DKIM `x=` (expiry) and `t=` (not in the future) are judged at that instant, so a short-lived signature that was valid on delivery still verifies when the mail is processed later. The instant is never taken as later than now nor earlier than now minus this, so a broken or forged value cannot revive an old signature; without one, signatures are judged at the current time |
+| `eddi.email.dns.max-lookups-per-message` | `10` | Network lookups one message may cause (cache hits are free): one per DKIM signature, at most 5 of which are evaluated, plus up to two for DMARC. Past it, the remaining checks are temporary failures |
 
 ### OpenAI-compatible API
 

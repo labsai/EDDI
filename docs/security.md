@@ -734,6 +734,55 @@ the input — style blocks are read by a single forward scan, never by a backtra
 
 ---
 
+## Mail Sender Authentication — DKIM and DMARC
+
+A `From:` header is a string the sender types. Before the email channel (plan Phase 2) lets a mail reach an agent
+under its sender's identity, EDDI checks the DKIM signatures on the **raw bytes** itself and then DMARC alignment —
+provider verdicts are inconsistent, mostly unsigned, and absent for IMAP. One call, `SenderAuthenticator.authenticate`
+(`engine/mail`), returns `MailAuthentication`: `ALIGNED_PASS`, `PASS_UNALIGNED`, `FAIL` or `NONE`, the signing domain,
+a reason, a `temporary` flag and the outcome of every evaluated signature. **Only `ALIGNED_PASS` counts as
+authenticated.**
+
+| Rule | Detail |
+|---|---|
+| Algorithms | `rsa-sha256` (keys of 1024–8192 bits, public exponent at most 64 bits) and `ed25519-sha256` (RFC 8463, the JDK's EdDSA). `rsa-sha1` fails (RFC 8301), as does any other algorithm |
+| Canonicalisation | `simple` and `relaxed` for header and body, in every combination (RFC 6376 §3.4). Bare-LF input (a message stored on Unix) is converted to CRLF first |
+| `l=` refused | A body-length limit lets anyone append unsigned text to a signed mail and keep the signature valid; a signature carrying `l=` fails |
+| Header selection | Bottom-up per RFC 6376 §5.4.2; a name listed in `h=` more often than the header occurs binds its absence (over-signing), so a header added later breaks the signature. A signature must cover `From` |
+| One `From`, one mailbox | Exactly one `From` field with one mailbox, counted on the raw bytes as well as by the parser. A second `From` added above a once-signed one is not hashed — the signature still verifies — and many clients display it, so such a message is `FAIL` whatever its signatures say. The same holds for a duplicated `Subject`, `Date`, `Message-ID`, `In-Reply-To` or `References` |
+| Key record | `v=DKIM1` (first, if present), `k=` matching the algorithm, `h=` allowing sha256, `s=` allowing email, one record per selector. Empty `p=` = revoked = `FAIL`. `t=y` (testing) is not a pass: a message with only such signatures is `NONE`. `t=s` requires `i=` to equal `d=` |
+| Identity and time | `i=` must lie within `d=`. An expired `x=`, an `x=` before `t=`, or a `t=` more than 5 minutes in the future fails. Both are judged at the delivery instant when the transport passes the receiving server's own timestamp (IMAP `INTERNALDATE`, never a sender header), clamped to `[now − eddi.email.dkim.max-delivery-age, now]` (default 7 days); otherwise at the current time |
+| DMARC alignment | The `From` domain and a passing signature's `d=` must share an organisational domain (relaxed), or be equal when the `_dmarc` record says `adkim=s` (strict). The record is read from the `From` domain, else from its organisational domain (RFC 7489 §6.6.3); none = relaxed. A DMARC lookup that fails temporarily assumes strict and sets `temporary` |
+| Public Suffix List | Organisational domains come from the bundled Public Suffix List (ICANN and private sections, wildcard and exception rules), never fetched at runtime — see below |
+| DNS | TXT lookups through dnsjava (`MailDnsResolver`): `eddi.email.dns.servers` or the system's resolvers, a timeout, a cache that honours each record's TTL capped at `eddi.email.dns.cache-max-ttl` and bounded in size, at most `eddi.email.dns.max-lookups-per-message` network lookups per message, records over 4096 characters or answers of more than 10 records refused. DNSSEC is not required: run a validating resolver to add it |
+| Bounds | At most 5 signatures evaluated (the rest are counted), a 256 KB header block, 100 names per `h=`, one body hash per canonicalisation however many signatures there are, and the body is checked before the key is fetched so a tampered mail spends no lookup. Never throws: broken or hostile input is `FAIL` or `NONE` with a reason |
+| Provider fallback | `SignedProviderVerdict`, for a transport that receives a provider verdict under a signature it verified (Amazon SES over SNS). Used only when the local check could not run (no raw bytes, or every key lookup failed temporarily); never in place of a local `FAIL`, `NONE` or pass, and alignment is still EDDI's own. No provider implements it yet |
+
+**What an aligned pass proves, and what it does not.**
+
+- It authenticates the **domain**, not the person: anyone who can send through `example.com`'s signing servers can
+  write as `ceo@example.com`. Treat it as "this came from that organisation's mail system".
+- **SPF is not evaluated.** EDDI never sees the IP address that delivered the mail, so DMARC can only be satisfied by
+  aligned DKIM here. A domain that publishes SPF but does not sign with DKIM is never authenticated (most large
+  senders sign).
+- **Forwarded and mailing-list mail** usually breaks or replaces the original signature: a list that rewrites the
+  subject or adds a footer gives `FAIL`, one that re-signs as itself gives `PASS_UNALIGNED`. **ARC is not
+  evaluated**, so such mail is not authenticated.
+- `temporary=true` means a DNS failure or the lookup budget prevented a check; trying the same message again later
+  may authenticate it.
+
+**The Public Suffix List** is `src/main/resources/mail/public_suffix_list.dat`, the Public Suffix List project's file
+taken unmodified (MPL-2.0, `licenses/MPL-2.0.txt`). `public_suffix_list.properties` next to it records the upstream
+commit (currently `8437e526`, 2026-10-22) and the file's SHA-256; `PublicSuffixListTest` fails if the two disagree or
+the file is missing. Refresh both with `python scripts/update-public-suffix-list.py` (latest upstream commit, or one
+given as an argument) and review the diff: a newly listed suffix changes which domains align.
+
+**dnsjava and the JVM resolver.** The dnsjava jar registers a `java.net.spi.InetAddressResolverProvider`, which the
+JDK would use for *all* host-name resolution — including `SafeSocketConnector`'s and the SSRF checks'. Its provider
+returns the JDK's own resolver unless the system property `org.dnsjava.spi.enable=true` is set. Never set it.
+
+---
+
 ## Sandboxed Math Evaluation — `SafeMathParser`
 
 **Applies to:** Calculator tool.

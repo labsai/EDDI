@@ -14,7 +14,7 @@ The following license types are used by EDDI's dependencies:
 |------|-----------------|---------------------|
 | [MIT.txt](MIT.txt) | MIT | langchain4j, SLF4J, Mockito |
 | [BSD-2-Clause.txt](BSD-2-Clause.txt) | BSD-2-Clause | jzlib |
-| [BSD-3-Clause.txt](BSD-3-Clause.txt) | BSD-3-Clause | ASM, Protocol Buffers |
+| [BSD-3-Clause.txt](BSD-3-Clause.txt) | BSD-3-Clause | ASM, Protocol Buffers, dnsjava |
 | [EPL-1.0.txt](EPL-1.0.txt) | EPL-1.0 | JUnit 4 (legacy) |
 | [EPL-2.0.txt](EPL-2.0.txt) | EPL-2.0 | Jakarta EE, Eclipse Vert.x |
 | [LGPL-2.1.txt](LGPL-2.1.txt) | LGPL-2.1-only | Various (linked only) |
@@ -25,6 +25,7 @@ The following license types are used by EDDI's dependencies:
 | [UPL-1.0.txt](UPL-1.0.txt) | UPL-1.0 | Oracle OCI GenAI SDK |
 | [EDL-1.0.txt](EDL-1.0.txt) | BSD-3-Clause (EDL variant) | Eclipse Distribution |
 | [ISC.txt](ISC.txt) | ISC | jBCrypt |
+| [MPL-2.0.txt](MPL-2.0.txt) | MPL-2.0 | Public Suffix List data (`src/main/resources/mail/public_suffix_list.dat`, redistributed unmodified) |
 
 ## Generating a Full Dependency Report
 
