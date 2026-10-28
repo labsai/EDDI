@@ -2249,15 +2249,20 @@ call's own price is not part of the comparison (it is not known before the call)
 admitted call runs to completion and a conversation can end above the ceiling by about that one
 call's cost; the next call is refused. A call in flight holds its expected cost until it is over —
 a re-ask the previous attempt's price, a reprompt the previous reprompt's (nothing for the first),
-a classifier its prompt at its input price, nothing when unpriced — so calls that run at the same time cannot all pass the same check.
-That reservation is per conversation and lives with the conversation on the node that runs its
+a classifier or judge its prompt at its input price, nothing when unpriced — so calls that run at the same time
+see each other's expected cost when they are checked. That is an estimate-based limit, not an exact guarantee:
+an estimate can be zero (an unpriced call) or lower than the actual cost, and a check compares only the
+amounts already held, so concurrent calls admitted together can still end above the ceiling by more than one
+call. The reservation is per conversation and lives with the conversation on the node that runs its
 turn — a conversation's turns are serialized, by the coordinator and in a cluster by the
-conversation lease — so it is exact for the ceiling. The tenant budget is shared by every
+conversation lease — so no other conversation or node competes for it. The tenant budget is shared by every
 conversation and node and is only read, never reserved. Its monthly counter is charged when a turn
 settles, so the check adds what the current turn has spent and the counter has not seen yet (the
 step's `audit:cost` not yet metered, plus the running task's unrecorded spend): later paid calls of
 the same turn see the turn's own spend. What it cannot see is another conversation's unsettled
-turn, so concurrent conversations can each complete one call past the budget. Unset
+turn: while that turn is unsettled, a conversation can keep making calls after the combined tenant spend has
+crossed the budget, as long as its own visible spend stays below it, so concurrent conversations can overshoot
+the budget by more than one call each. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
 unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
 refuses every model call, priced or not, since the spend so far already equals it. This is

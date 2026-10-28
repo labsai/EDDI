@@ -35,6 +35,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -356,6 +357,44 @@ class LlmTaskHitlRevisionTest {
 
             verify(chatModel, times(1)).chat(anyList());
             verify(gate, times(1)).admit(any(), anyDouble(), anyDouble());
+        }
+
+        @Test
+        @DisplayName("a revision of a cascade step's answer is priced at that step's rates, for the guardrail admission and the recorded cost")
+        void revisionIsPricedAtTheCascadeStepsRates() throws Exception {
+            var gate = mock(LlmSpendGate.class);
+            when(gate.check(any())).thenReturn(null);
+            when(gate.admit(any(), anyDouble(), anyDouble()))
+                    .thenReturn(LlmSpendGate.Admission.refused(new LlmSpendGate.Refusal("conversation_ceiling", "reached")));
+            llmTask.spendGate = gate;
+            llmTask.guardrailService = new GuardrailService(List.of(new JsonObjectGuardrail()), new SimpleMeterRegistry());
+            var config = config(false);
+            var task = config.tasks().get(0);
+            task.setInputPricePer1M(100.0);
+            task.setOutputPricePer1M(100.0);
+            var guardrail = new LlmConfiguration.GuardrailConfig();
+            guardrail.setType("json-object");
+            guardrail.setAction("reprompt");
+            task.setOutputGuardrails(List.of(guardrail));
+            var step = new LlmConfiguration.CascadeStep();
+            step.setInputPricePer1M(1.0);
+            step.setOutputPricePer1M(1.0);
+            var cascade = new LlmConfiguration.ModelCascadeConfig();
+            cascade.setEnabled(true);
+            cascade.setSteps(List.of(step));
+            task.setModelCascade(cascade);
+            when(chatModel.chat(anyList())).thenReturn(
+                    ChatResponse.builder().aiMessage(AiMessage.from("prose, not json")).tokenUsage(new TokenUsage(1_000_000, 0)).build());
+            var candidate = candidate("the draft", false, 0);
+            candidate.setCascadeStepIndex(0);
+
+            assertFalse(llmTask.reviseAnswer(memory, config, new HitlRevisionRequest(candidate, NOTE, 1)));
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<Double> pending = ArgumentCaptor.forClass(Double.class);
+            verify(gate).admit(any(), pending.capture(), anyDouble());
+            assertEquals(1.0, pending.getValue(), 1e-9, "the step's rate, not the task's 100");
+            assertEquals(1.0, (Double) memory.getCurrentStep().getLatestData(MemoryKeys.AUDIT_COST).getResult(), 1e-9);
         }
 
         @Test
