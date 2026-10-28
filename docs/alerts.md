@@ -70,7 +70,8 @@ fast-paths. Alerts add one more: a single system schedule, `alerts-maintenance`
 cluster-wide CAS claim and lease make one node run it at a time; each run
 
 1. claims due deliveries (`nextAttemptAt ≤ now`, claimed per event by a conditional
-   update, so even two runners never deliver one event twice) and retries the
+   update, so two runners never send the same event at the same time; a node that
+   dies after sending but before recording it can cause a repeat on retry) and retries the
    failed targets — backoff 30 s × 4ⁿ⁻¹, at most `eddi.alerts.max-attempts` (5),
    then `FAILED`;
 2. assembles due digests;
@@ -91,7 +92,7 @@ user blanks the comment excerpt in every alert event about their ratings.
 
 ## Writing a rule
 
-`POST /alerts/rules` (or the **Rules** tab of the Manager's Alerts page):
+`POST /alerts/rules` (the Manager has no Alerts page yet, so rules are written over REST):
 
 ```json
 {
@@ -165,7 +166,7 @@ wildcards.
 | `gt`, `gte`, `lt`, `lte` | number | the value is a number and compares so |
 | `contains` | string | a string value contains it, or a list value has it as an element (`actions` takes `contains` and `exists` only) |
 
-A value of the wrong type never matches (`"5" gt 3` is false). The examples from the
+A value of the wrong type never matches an equality or ordered comparison (`"5" gt 3` is false, and so is `"5" eq 5`); `neq` is the exception and holds for it (`"5" neq 5` is true). The examples from the
 plan:
 
 ```json
@@ -364,6 +365,7 @@ little of its claim to finish inside it is put off. The erasure's redactions ski
 a claimed event and the erasure repeats them until no event of the user still holds
 the content, so it completes only after every send that had already read the
 content has finished — or its claim has expired, for a node that died mid-send.
+The wait is bounded (ten send leases): if an event still holds the content after that, the erasure step reports a failure for the next run to repeat, rather than claiming completion.
 The one limit: a send that started before the erasure completed cannot be recalled.
 
 **A GDPR export** (`alerts` in its `additionalData`) lists, for a person who runs

@@ -182,7 +182,7 @@ Read and triage what the people chatting thought of an agent — see [Conversati
 
 ### Alert Tools (2)
 
-The alert inbox — see [Alerts](alerts.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST `/alerts/events` resource, which the tools call in-process: an administrator sees every agent's events; anyone else passes `agentId` and holds `EDIT` on it (`AGENT_ID_REQUIRED` / `FORBIDDEN`). Events carry no user id; conversation content appears only as a rating comment or, when the rule sets `includeValue` and the agent version has conversation review on, an `OUTPUT_MATCH` value — each cut to 280 characters. Rules are written in the Manager or over REST.
+The alert inbox — see [Alerts](alerts.md). Tier `eddi-admin`, `eddi-editor`, equal to the REST `/alerts/events` resource, which the tools call in-process: an administrator sees every agent's events; anyone else passes `agentId` and holds `EDIT` on it (`AGENT_ID_REQUIRED` / `FORBIDDEN`). Events carry no conversation user id (an acknowledged one names the caller who acknowledged it); conversation content appears only as a rating comment or, when the rule sets `includeValue` and the agent version has conversation review on, an `OUTPUT_MATCH` value — each cut to 280 characters. Rules are written over REST (the Manager has no Alerts page yet).
 
 | Tool                      | Description                                                                                                    |
 | ------------------------- | -------------------------------------------------------------------------------------------------------------- |

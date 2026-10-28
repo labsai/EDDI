@@ -25,7 +25,7 @@ import java.util.concurrent.ThreadPoolExecutor;
  * its digest, or the inbox only);</li>
  * <li>{@code eddi.alerts.deliveries} — delivery attempts, tagged {@code type}
  * (slack|webhook) and {@code outcome} (success|failure|gave_up);</li>
- * <li>{@code eddi.alerts.digests} — digests sent;</li>
+ * <li>{@code eddi.alerts.digests} — digests created;</li>
  * <li>{@code eddi.alerts.dropped} — alert work dropped because the queue was
  * full, tagged {@code reason}; never expected in a healthy deployment;</li>
  * <li>{@code eddi.alerts.queue.depth} — work waiting for the alert worker (a
@@ -45,11 +45,29 @@ public class AlertMetrics {
     static final String DROPPED = "eddi.alerts.dropped";
     static final String QUEUE_DEPTH = "eddi.alerts.queue.depth";
 
+    /** The outcomes {@code delivery} is ever called with. */
+    private static final String[] DELIVERY_OUTCOMES = {"success", "failure", "gave_up"};
+
     private final MeterRegistry registry;
 
     @Inject
     public AlertMetrics(MeterRegistry registry) {
         this.registry = registry;
+        preRegister();
+    }
+
+    /**
+     * Registers the bounded delivery and dropped series at zero, so the first
+     * failure after a restart is a rise from 0 that {@code rate()} and
+     * {@code increase()} can see, and a dashboard panel shows 0 instead of no data.
+     */
+    private void preRegister() {
+        for (DeliveryType type : DeliveryType.values()) {
+            for (String outcome : DELIVERY_OUTCOMES) {
+                deliveryCounter(type, outcome);
+            }
+        }
+        dropped0(AlertDispatcher.REASON_QUEUE_FULL);
     }
 
     /** The queue-depth gauge of the alert worker. */
@@ -70,16 +88,24 @@ public class AlertMetrics {
     }
 
     public void delivery(DeliveryType type, String outcome) {
-        Counter.builder(DELIVERIES).description("Alert delivery attempts").tag("type", type.name().toLowerCase(Locale.ROOT))
-                .tag("outcome", outcome).register(registry).increment();
+        deliveryCounter(type, outcome).increment();
+    }
+
+    private Counter deliveryCounter(DeliveryType type, String outcome) {
+        return Counter.builder(DELIVERIES).description("Alert delivery attempts").tag("type", type.name().toLowerCase(Locale.ROOT))
+                .tag("outcome", outcome).register(registry);
     }
 
     public void digest() {
-        counter(DIGESTS, "Alert digests sent").increment();
+        counter(DIGESTS, "Alert digests created").increment();
     }
 
     public void dropped(String reason) {
-        counter(DROPPED, "Alert work dropped because the alert queue was full", "reason", reason).increment();
+        dropped0(reason).increment();
+    }
+
+    private Counter dropped0(String reason) {
+        return counter(DROPPED, "Alert work dropped because the alert queue was full", "reason", reason);
     }
 
     private Counter counter(String name, String description, String... tags) {

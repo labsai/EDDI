@@ -109,7 +109,7 @@ out, and only an admin sees who rated.
 
 `read_docs("conversation-ratings")` has the scales and filters.
 
-**Alerts.** Alert rules (written in the Manager or over REST) report low ratings,
+**Alerts.** Alert rules (written over REST; the Manager has no Alerts page yet) report low ratings,
 failed turns and turns whose result matched an `OUTPUT_MATCH` condition to an inbox,
 Slack or an https webhook. Events name no user; a rating comment, or an output-match
 value (only when the rule asks for it and the agent has conversation review on), appears cut to 280

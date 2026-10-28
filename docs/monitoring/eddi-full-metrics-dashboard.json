@@ -13380,12 +13380,12 @@
         {
           "id": 189,
           "type": "stat",
-          "title": "Gate last verified (this process)",
+          "title": "Gate last verified (latest report, any replica)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "How long ago this EDDI process last received a verified gate report (eddi_operator_gate_last_verified_timestamp_seconds). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
+          "description": "How long ago the most recent verified gate report arrived from any replica (maximum of eddi_operator_gate_last_verified_timestamp_seconds across instances; one replica's recent report hides an older or missing one on another). Empty until one arrives after boot; EddiOperatorGateRegressed needs one before it can fire.",
           "gridPos": {
             "h": 5,
             "w": 6,

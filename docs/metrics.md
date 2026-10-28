@@ -750,7 +750,7 @@ eddi_alerts_fired_total             # Alerts recorded; tag: source (RATING|CONVE
 eddi_alerts_deduplicated_total      # Alerts folded into an earlier one of the same rule, agent and conversation in the same window
 eddi_alerts_throttled_total         # Alerts held back past the rule's cap (for its digest, or the inbox only)
 eddi_alerts_deliveries_total        # Delivery attempts; tags: type (slack|webhook), outcome (success|failure|gave_up)
-eddi_alerts_digests_total           # Digests sent
+eddi_alerts_digests_total           # Digests created (see eddi_alerts_deliveries_total for send outcomes)
 eddi_alerts_dropped_total           # Alert work dropped because the alert queue was full; tag: reason (queue_full)
 eddi_alerts_queue_depth             # Gauge: work waiting for the alert worker
 ```

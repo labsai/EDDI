@@ -619,7 +619,7 @@ class RestScheduleStoreExpandedTest {
         }
 
         @Test
-        @DisplayName("the stored alerts-maintenance schedule cannot be updated, deleted, disabled, enabled or dismissed — 409 SYSTEM_SCHEDULE")
+        @DisplayName("the stored alerts-maintenance schedule cannot be updated, deleted or disabled — 409 SYSTEM_SCHEDULE")
         @SuppressWarnings("unchecked")
         void systemScheduleIsProtected() throws Exception {
             var stored = makeHeartbeatSchedule("sys");
@@ -629,13 +629,29 @@ class RestScheduleStoreExpandedTest {
             when(scheduleStore.readSchedule("sys")).thenReturn(stored);
             var body = makeHeartbeatSchedule("sys");
 
-            for (Response response : List.of(sut.updateSchedule("sys", body), sut.deleteSchedule("sys"), sut.disableSchedule("sys"),
-                    sut.enableSchedule("sys"), sut.dismissDeadLetter("sys"))) {
+            for (Response response : List.of(sut.updateSchedule("sys", body), sut.deleteSchedule("sys"), sut.disableSchedule("sys"))) {
                 assertEquals(409, response.getStatus());
                 assertEquals("SYSTEM_SCHEDULE", ((Map<String, String>) response.getEntity()).get("error"));
             }
             verify(scheduleStore, never()).deleteSchedule("sys");
             verify(scheduleStore, never()).updateSchedule(eq("sys"), any());
+        }
+
+        @Test
+        @DisplayName("the system schedule can still be recovered — retry, enable and dismiss are not refused as SYSTEM_SCHEDULE")
+        void systemScheduleRecoveryStaysOpen() throws Exception {
+            var stored = makeHeartbeatSchedule("sys");
+            stored.setName("alerts-maintenance");
+            stored.setAgentId(null);
+            stored.setMetadata(Map.of("alertType", "alert_maintenance"));
+            stored.setFireStatus(FireStatus.DEAD_LETTERED);
+            when(scheduleStore.readSchedule("sys")).thenReturn(stored);
+
+            assertEquals(200, sut.retryDeadLetter("sys").getStatus());
+            assertEquals(200, sut.dismissDeadLetter("sys").getStatus());
+            assertEquals(200, sut.enableSchedule("sys").getStatus());
+            verify(scheduleStore).requeueDeadLetter("sys");
+            verify(scheduleStore).dismissDeadLetter(eq("sys"), any());
         }
 
         @Test

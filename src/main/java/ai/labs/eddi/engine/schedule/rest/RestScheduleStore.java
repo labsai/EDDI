@@ -992,7 +992,9 @@ public class RestScheduleStore implements IRestScheduleStore {
      * row. The server recreates the schedule on startup and on every alert-rule
      * save as a backstop, but deleting or disabling it would silently stop alert
      * retries and digests until then. Firing it manually stays allowed (it only
-     * runs the maintenance pass).
+     * runs the maintenance pass), and so does recovery — retry, enable and dismiss
+     * (see {@code requireMutableSchedule}) — so an exhausted schedule can be
+     * re-armed over REST.
      */
     private static Response rejectSystemSchedule(ScheduleConfiguration stored, String operation) {
         if (stored == null || !isSystemSchedule(stored)) {
@@ -1269,9 +1271,14 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (stored == null) {
             return null; // absent — let the downstream operation surface its own 404/no-op
         }
-        Response systemGuard = rejectSystemSchedule(stored, operation);
-        if (systemGuard != null) {
-            return systemGuard;
+        // Recovery (retry, enable, dismiss) stays open for the system schedule: after
+        // its retries are exhausted nothing else re-arms it. Only removing or stopping
+        // it is refused.
+        if ("delete".equals(operation) || "disable".equals(operation)) {
+            Response systemGuard = rejectSystemSchedule(stored, operation);
+            if (systemGuard != null) {
+                return systemGuard;
+            }
         }
         Response hitlGuard = requireAdminForHitl(stored, operation);
         if (hitlGuard != null) {
