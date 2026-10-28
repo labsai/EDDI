@@ -59,6 +59,8 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.data.message.Content;
+import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -69,6 +71,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -602,7 +605,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // Forward the current step's attachments to the LLM as multimodal content,
         // gated on the resolved (provider, model) capabilities, honoring any
         // per-task multimodal overrides.
-        forwardAttachments(messages, memory, task, resolvedType, processedParams);
+        // The prompt as it was before the attachments joined it: a cascade step on a
+        // different endpoint gets its own attachment content from this.
+        final List<ChatMessage> promptWithoutAttachments = new ArrayList<>(messages);
+        forwardAttachments(messages, memory, task, resolvedType, processedParams, true);
 
         if (messages.isEmpty()) {
             return;
@@ -615,6 +621,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // current message reuses the first pass when unchanged; the earlier user
         // messages of the window are screened again. Redaction rewrites what the model
         // sees; conversation memory keeps the message as the user sent it.
+        final List<ChatMessage> promptBeforeScreening = messages;
+        // Step-only text screened this turn, by text: N cascade steps pay for one
+        // verdict.
+        final Map<String, String> stepTextVerdicts = new ConcurrentHashMap<>();
         GuardrailService.InputResult inputScreening = null;
         if (screenInput) {
             inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages,
@@ -780,7 +790,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()), reaskSpend);
+                        turnBudget(memory.getTurnDeadline()), reaskSpend,
+                        (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, promptBeforeScreening, memory, task, resolvedType,
+                                processedParams,
+                                stepType, stepParams, screenedInput, currentStep, stepTextVerdicts));
 
                 responseContent = cascadeResult.response();
                 cascadeAuditModel = cascadeResult.modelType() + "/" + cascadeResult.modelName();
@@ -1350,7 +1363,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             smaller = conversationHistoryBuilder.buildMessages(memory, systemMessage, prompt, half, includeFirstAgentMessage, summaryPrefix,
                     skipSteps);
         }
-        forwardAttachments(smaller, memory, task, resolvedType, processedParams);
+        forwardAttachments(smaller, memory, task, resolvedType, processedParams, true);
         return smaller;
     }
 
@@ -1360,17 +1373,130 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * multimodal overrides.
      */
     private void forwardAttachments(List<ChatMessage> messages, IConversationMemory memory, Task task, String resolvedType,
-                                    Map<String, String> processedParams) {
+                                    Map<String, String> processedParams, boolean record) {
         if (attachmentForwarder == null) {
             return;
         }
         var mm = task.getMultimodal();
-        var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
-        // Per-task override first, then what an openai-compatible endpoint declares.
-        var vision = ModelCapabilityService.visionOverride(taskVision, resolvedType, capabilityParams(resolvedType, processedParams));
+        var vision = effectiveVision(task, resolvedType, processedParams);
         var documents = mm != null ? ModelCapabilityService.Support.parse(mm.getDocuments()) : ModelCapabilityService.Support.AUTO;
         var audio = mm != null ? ModelCapabilityService.Support.parse(mm.getAudio()) : ModelCapabilityService.Support.AUTO;
-        attachmentForwarder.forward(messages, memory, resolvedType, resolveModelNameOf(processedParams, resolvedType), vision, documents, audio);
+        String model = resolveModelNameOf(processedParams, resolvedType);
+        attachmentForwarder.forward(messages, memory, resolvedType, model, vision, documents, audio, record);
+    }
+
+    /**
+     * The input guardrails applied to a cascade step's own prompt: the task-level
+     * rewrites carried over, and everything only the step's prompt carries screened
+     * afresh.
+     * <p>
+     * Not {@code GuardrailService#reapply}: that swaps the whole last user message
+     * for the task-level screened one, which carries the TASK's attachments and so
+     * would undo the step's. Instead each text part the screening changed in the
+     * task's prompt is rewritten, by its text, in the step's message, and the
+     * step's image and document parts are kept. Text the task's prompt did not have
+     * (an extract the task's model did not get, a skip note naming a file) was
+     * never seen by a guardrail, so it is screened here, quietly (the turn's
+     * findings were recorded once), by the history rule: redacted, or withheld when
+     * blocked or when a guardrail cannot check it. Fails closed: a prompt whose
+     * shape cannot be matched to the task's falls back to the task's screened
+     * prompt.
+     */
+    List<ChatMessage> screenedStepPrompt(List<ChatMessage> forStep, List<ChatMessage> beforeScreening, GuardrailService.InputResult screened,
+                                         IConversationMemory memory, Task task, IWritableConversationStep currentStep,
+                                         Map<String, String> stepTextVerdicts) {
+        if (guardrailService == null || isNullOrEmpty(task.getInputGuardrails()) || screened == null || screened.messages() == null) {
+            return forStep;
+        }
+        List<ChatMessage> after = screened.messages();
+        int stepLast = lastUserMessageIndex(forStep);
+        int taskLast = lastUserMessageIndex(beforeScreening);
+        if (stepLast < 0 || taskLast < 0 || taskLast >= after.size() || !(after.get(taskLast) instanceof UserMessage screenedUser)
+                || !(beforeScreening.get(taskLast) instanceof UserMessage rawUser)
+                || rawUser.contents().size() != screenedUser.contents().size()) {
+            LOGGER.debugf("Cascade step prompt does not match the task's screened prompt; using the task's (task '%s')", task.getId());
+            return after;
+        }
+        List<ChatMessage> result = new ArrayList<>(forStep);
+        for (int i = 0; i < Math.min(Math.min(beforeScreening.size(), after.size()), forStep.size()); i++) {
+            if (i != stepLast && after.get(i) != beforeScreening.get(i)) {
+                result.set(i, after.get(i));
+            }
+        }
+        // The task's own text parts, before and after screening: already checked.
+        Set<String> screenedTexts = new HashSet<>();
+        Map<String, String> rewritten = new HashMap<>();
+        for (int c = 0; c < rawUser.contents().size(); c++) {
+            if (rawUser.contents().get(c) instanceof TextContent raw && screenedUser.contents().get(c) instanceof TextContent done) {
+                screenedTexts.add(raw.text());
+                screenedTexts.add(done.text());
+                if (!raw.text().equals(done.text())) {
+                    rewritten.put(raw.text(), done.text());
+                }
+            }
+        }
+        UserMessage stepUser = (UserMessage) forStep.get(stepLast);
+        List<Content> contents = new ArrayList<>();
+        for (Content content : stepUser.contents()) {
+            if (content instanceof TextContent text && rewritten.containsKey(text.text())) {
+                contents.add(TextContent.from(rewritten.get(text.text())));
+            } else {
+                contents.add(content);
+            }
+        }
+        result.set(stepLast, stepUser.toBuilder().contents(contents).build());
+        var unseen = guardrailService.screenUnseenText(task.getInputGuardrails(), result, stepLast, screenedTexts,
+                stepTextVerdicts, guardrailContext(memory, task, result).withSpend(TaskSpend.of(spendGate, memory)));
+        accumulateCost(currentStep, unseen.costUsd());
+        return unseen.messages();
+    }
+
+    private static int lastUserMessageIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (messages.get(i) instanceof UserMessage) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The vision decision for the endpoint a request goes to: the per-task override
+     * first, then what an openai-compatible endpoint declares.
+     */
+    private ModelCapabilityService.Support effectiveVision(Task task, String type, Map<String, String> params) {
+        var mm = task.getMultimodal();
+        var taskVision = mm != null ? ModelCapabilityService.Support.parse(mm.getVision()) : ModelCapabilityService.Support.AUTO;
+        return ModelCapabilityService.visionOverride(taskVision, type, capabilityParams(type, params));
+    }
+
+    /**
+     * The prompt for a cascade step, or null when the task's own prompt is right
+     * for it. Attachments are gated on the endpoint that receives them, and an
+     * {@code openai-compatible} endpoint declares vision itself, so a step on
+     * another endpoint than the task's re-forwards the attachments with its own
+     * decision. Anything else — every non-cascade task, a step on the same
+     * endpoint, and any step when neither side is openai-compatible — keeps the
+     * task's prompt.
+     */
+    private List<ChatMessage> promptForCascadeStep(List<ChatMessage> promptWithoutAttachments, List<ChatMessage> promptBeforeScreening,
+                                                   IConversationMemory memory, Task task,
+                                                   String taskType, Map<String, String> taskParams, String stepType,
+                                                   Map<String, String> stepParams, GuardrailService.InputResult screenedInput,
+                                                   IWritableConversationStep currentStep, Map<String, String> stepTextVerdicts) {
+        if (attachmentForwarder == null || !(OpenAiCompatibleEndpoint.isType(taskType) || OpenAiCompatibleEndpoint.isType(stepType))) {
+            return null;
+        }
+        boolean sameEndpoint = Objects.equals(stepType, taskType)
+                && Objects.equals(resolveModelNameOf(stepParams, stepType), resolveModelNameOf(taskParams, taskType))
+                && effectiveVision(task, stepType, stepParams) == effectiveVision(task, taskType, taskParams);
+        if (sameEndpoint) {
+            return null;
+        }
+        List<ChatMessage> forStep = new ArrayList<>(promptWithoutAttachments);
+        // The turn's errors and counts were recorded by the task-level pass.
+        forwardAttachments(forStep, memory, task, stepType, stepParams, false);
+        return screenedStepPrompt(forStep, promptBeforeScreening, screenedInput, memory, task, currentStep, stepTextVerdicts);
     }
 
     /**

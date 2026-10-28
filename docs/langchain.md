@@ -868,7 +868,9 @@ still not a boolean counts as `false` with one WARN per distinct value. It never
 still win over the endpoint's flags; then the flags; then, for vision only, the deployment
 override `eddi.multimodal.openai-compatible.vision`; then the default, which is off. In a
 [model cascade](model-cascade.md) each `openai-compatible` step is judged by its **own**
-parameters (merged over the task's, as every step's are), not by the task's type.
+parameters (merged over the task's, as every step's are), not by the task's type. That covers
+the JSON response format and the **image attachments**: a step whose own endpoint declares
+`vision=true` gets the images, and a step that does not is not handed the task's.
 
 **Not yet.** Native `json_schema` structured output stays off for this type: schemaless JSON is
 sent when `jsonMode` allows it, and the prompt block carries the schema. Model discovery through

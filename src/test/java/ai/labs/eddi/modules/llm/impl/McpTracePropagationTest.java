@@ -169,4 +169,22 @@ class McpTracePropagationTest {
 
         assertEquals(Map.of("TraceParent", "00-own-01"), headers);
     }
+
+    @Test
+    @DisplayName("an author's own traceparent suppresses tracestate too: presence is all-or-nothing, as on every other outbound path")
+    void authorTraceparentSuppressesTracestate() {
+        Map<String, String> headers = McpToolProviderManager.withTraceHeaders(Map.of("TraceParent", "00-own-01"),
+                toolCallWithMeta(Map.of("traceparent", TRACEPARENT, "tracestate", "vendor=v1")));
+
+        assertEquals(Map.of("TraceParent", "00-own-01"), headers);
+    }
+
+    @Test
+    @DisplayName("an author's own tracestate suppresses traceparent too")
+    void authorTracestateSuppressesTraceparent() {
+        Map<String, String> headers = McpToolProviderManager.withTraceHeaders(Map.of("tracestate", "own=1"),
+                toolCallWithMeta(Map.of("traceparent", TRACEPARENT, "tracestate", "vendor=v1")));
+
+        assertEquals(Map.of("tracestate", "own=1"), headers);
+    }
 }
