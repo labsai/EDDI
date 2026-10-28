@@ -363,7 +363,15 @@ public class TenantQuotaService {
             return QuotaCheckResult.OK;
         }
 
-        double currentCost = quotaStore.getMonthlyCost(tenantId);
+        double currentCost;
+        try {
+            currentCost = quotaStore.getMonthlyCost(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            // Fail closed, as a result rather than an exception: every caller turns a
+            // refusal into a deterministic answer (the LLM task's fallback, a tool error
+            // result, Dream stopping), and none of them is inside a guard for a throw.
+            return quotaUnreadable(tenantId, "cost");
+        }
         double limit = quota.maxMonthlyCostUsd();
         if (limit >= 0 && currentCost >= limit) {
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();

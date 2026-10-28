@@ -151,6 +151,7 @@ class RestWebhookChannelTest {
         assertEquals(202, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-30"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
         assertEquals(409, repeat[0].getStatus());
         assertEquals("5", repeat[0].getHeaderString("Retry-After"));
+        assertTrue(repeat[0].getEntity().toString().contains("\"reason\":\"in_progress\""));
         // Once the first is recorded, a further repeat is a plain duplicate.
         assertEquals(200, endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-30"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
     }
@@ -184,11 +185,35 @@ class RestWebhookChannelTest {
     }
 
     @Test
-    void unknownIntegrationIs404() {
-        assertEquals(404, endpoint.receive("ffffffffffffffffffffffff", githubHeaders(PUSH, "d-5"),
-                PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
-        assertEquals(404, endpoint.receive("../etc", githubHeaders(PUSH, "d-5"), PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+    void unknownIntegrationAnswersExactlyLikeABadSignature() {
+        // A probe must not be able to tell a real id from a made-up one.
+        Map<String, String> unsigned = githubHeaders(PUSH, "d-5");
+        unsigned.remove("x-hub-signature-256");
+        Response badSignature = endpoint.receive(INTEGRATION_ID, unsigned, PUSH.getBytes(StandardCharsets.UTF_8));
+        Response unknown = endpoint.receive("ffffffffffffffffffffffff", githubHeaders(PUSH, "d-5"),
+                PUSH.getBytes(StandardCharsets.UTF_8));
+        Response malformedId = endpoint.receive("../etc", githubHeaders(PUSH, "d-5"), PUSH.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(401, unknown.getStatus());
+        assertEquals(401, malformedId.getStatus());
+        assertEquals(badSignature.getEntity(), unknown.getEntity());
+        assertEquals(badSignature.getEntity(), malformedId.getEntity());
         verifyNoInteractions(conversationService);
+    }
+
+    @Test
+    void replayUnderADifferentRoutingHeaderIsStillADuplicate() throws Exception {
+        // The event-type header is outside the MAC (github signs the body only), so
+        // a captured body can be resent with another one. The replay key is derived
+        // from the MAC, so no header variation reaches a second turn.
+        Map<String, String> first = githubHeaders(PUSH, "unused");
+        first.remove("x-github-delivery");
+        Map<String, String> rerouted = new HashMap<>(first);
+        rerouted.put("x-github-event", "ping");
+
+        assertEquals(202, endpoint.receive(INTEGRATION_ID, first, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        assertEquals(200, endpoint.receive(INTEGRATION_ID, rerouted, PUSH.getBytes(StandardCharsets.UTF_8)).getStatus());
+        verify(conversationService, times(1)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
     }
 
     @Test
@@ -298,8 +323,7 @@ class RestWebhookChannelTest {
         endpoint.receive(INTEGRATION_ID, unsigned, PUSH.getBytes(StandardCharsets.UTF_8));
         endpoint.receive("ffffffffffffffffffffffff", githubHeaders(PUSH, "d-61"), PUSH.getBytes(StandardCharsets.UTF_8));
 
-        assertEquals(1.0, meters.counter("eddi.webhook.events", "outcome", "refused_401").count());
-        assertEquals(1.0, meters.counter("eddi.webhook.events", "outcome", "refused_404").count());
+        assertEquals(2.0, meters.counter("eddi.webhook.events", "outcome", "refused_401").count());
     }
 
     @Test
@@ -309,5 +333,16 @@ class RestWebhookChannelTest {
         Response response = endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-8"), PUSH.getBytes(StandardCharsets.UTF_8));
         assertEquals(429, response.getStatus());
         assertEquals("60", response.getHeaderString("Retry-After"));
+    }
+
+    @Test
+    void awaitingApprovalIs409WithReasonAndNoRetryAfter() throws Exception {
+        doThrow(new IConversationService.ConversationAwaitingApprovalException("waiting")).when(conversationService)
+                .say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        Response response = endpoint.receive(INTEGRATION_ID, githubHeaders(PUSH, "d-90"), PUSH.getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(409, response.getStatus());
+        assertTrue(response.getEntity().toString().contains("\"reason\":\"awaiting_approval\""));
+        assertNull(response.getHeaderString("Retry-After"), "a human decision does not clear by retrying");
     }
 }

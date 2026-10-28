@@ -921,6 +921,11 @@ public class RestConnectionStore implements IRestConnectionStore {
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return connectionStore.getCurrentResourceId(id);
     }

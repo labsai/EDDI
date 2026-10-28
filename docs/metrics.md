@@ -358,7 +358,7 @@ eddi_tenant_usage_conversations_total       # Conversation usage (per tenant)
 eddi_tenant_usage_api_calls_total           # API call usage (per tenant)
 eddi_tenant_usage_cost_total                # Metered USD charged to the monthly cost budget (per tenant)
 eddi_tenant_cost_metering_total{outcome}    # Settle-time cost charges: recorded / over_budget / unavailable / error
-eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling)
+eddi_llm_spend_refused_total{reason}        # LLM model calls skipped by the spend gate (tenant_budget / tenant_accounting_unavailable / conversation_ceiling / tenant_check_error — the budget check threw, a defect; also counts tool calls refused for it)
 ```
 
 `eddi_tenant_usage_cost_total` moves whenever a settled turn (or a Dream run) with
@@ -740,12 +740,27 @@ eddi_identity_masking_applied_total         # Identity-masking passes applied
 eddi_guardrail_toolresult_count_total       # Tool results inspected by the tool-result guardrail; tags: action, source (a null source reads as `unknown`)
 eddi_guardrail_triggered_total              # An LLM task's input/output guardrail fired; tags: phase (input|output), type, action (block|redact|reprompt|warn)
 eddi_guardrail_classifier_duration_seconds  # Timer: one `classifier` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (safe|unsafe|unparseable|unavailable|timeout)
+eddi_guardrail_judge_duration_seconds       # Timer: one `judge` guardrail call; tags: provider (a registered provider type, or unknown|unsupported), outcome (pass|fail|unparseable|unavailable|timeout)
 ```
 
 `eddi_guardrail_triggered_total` counts findings, not evaluations: a guardrail that
 passes the text records nothing. Unknown guardrail types are skipped before they are
 counted, so `type` only ever carries a registered guardrail. See
 [Input and Output Guardrails](langchain.md#input-and-output-guardrails).
+
+### Conversation Rating Metrics
+
+```text
+eddi_conversation_ratings_total             # Ratings people gave; tags: kind (conversation|message), scale (THUMBS|FIVE_STAR), bucket (low|neutral|high), agentId
+eddi_conversation_ratings_normalized        # Distribution summary of the normalized score (0..1); tags: agentId, kind (_count, _sum, _max)
+eddi_conversation_ratings_withdrawn_total   # Ratings withdrawn by the person who gave them; tag: kind
+```
+
+The counter measures rating *events*: a person who changes a rating counts twice.
+The current state — one rating per conversation and per reply — is what
+`GET /ratings/summary` reports. `bucket` is `low` below a normalized 0.4 (one or
+two stars, thumbs down), `neutral` below 0.6 (three stars) and `high` otherwise.
+See [Conversation Ratings](conversation-ratings.md).
 
 ### Agent Identity & Signing Metrics
 
@@ -817,7 +832,7 @@ eddi_a2a_tasks_total                        # A2A tasks by the state their turn 
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_channel_observe_decisions_total        # Observe-mode reply decisions; tags: reason, type
-eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_<http status>)
+eddi_webhook_events_total                   # Inbound signed-webhook events; tag: outcome (accepted|duplicate|in_progress|refused_capacity|refused_<http status>)
 ```
 
 `eddi_channel_observe_decisions_total` is one sample per message an observer

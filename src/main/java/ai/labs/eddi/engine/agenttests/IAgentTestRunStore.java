@@ -24,6 +24,19 @@ public interface IAgentTestRunStore {
     /** Replaces a stored run (the id must be set). */
     void update(AgentTestRun run) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Replaces the run only while its stored {@code heartbeatAt} still equals
+     * {@code expectedHeartbeatAt} — one atomic compare-and-swap, so a heartbeat and
+     * an abort by another node cannot both land.
+     *
+     * @throws IResourceStore.ResourceModifiedException
+     *             the stored heartbeat is another one (or none)
+     * @throws IResourceStore.ResourceNotFoundException
+     *             the run is gone
+     */
+    void updateIfHeartbeat(AgentTestRun run, long expectedHeartbeatAt)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+
     AgentTestRun read(String runId) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
 
     /** Runs of one agent, newest first. */

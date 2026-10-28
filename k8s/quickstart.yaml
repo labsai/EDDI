@@ -283,7 +283,7 @@ metadata:
   namespace: eddi
   labels:
     app.kubernetes.io/name: eddi
-    app.kubernetes.io/version: "6.5.0"
+    app.kubernetes.io/version: "6.6.0"
     app.kubernetes.io/component: server
     app.kubernetes.io/part-of: eddi
 spec:
@@ -304,7 +304,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: eddi
-        app.kubernetes.io/version: "6.5.0"
+        app.kubernetes.io/version: "6.6.0"
         app.kubernetes.io/component: server
         app.kubernetes.io/part-of: eddi
       annotations:
@@ -344,7 +344,7 @@ spec:
         - name: eddi
           # Immutable patch tag, not the mutable ":6". Append @sha256:<digest>
           # after `cosign verify`ing the release to pin exactly what CI signed.
-          image: labsai/eddi:6.5.0
+          image: labsai/eddi:6.6.0
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false

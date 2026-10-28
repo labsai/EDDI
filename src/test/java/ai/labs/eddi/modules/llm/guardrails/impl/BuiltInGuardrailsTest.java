@@ -5,21 +5,32 @@
 package ai.labs.eddi.modules.llm.guardrails.impl;
 
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailOutcome;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("Built-in guardrails")
@@ -32,6 +43,17 @@ class BuiltInGuardrailsTest {
     private static GuardrailContext input() {
         return context(GuardrailPhase.INPUT, Map.of());
     }
+
+    /**
+     * A pattern that backtracks exponentially in java.util.regex on
+     * {@link #EVIL_INPUT}: the backreference defeats the engine's loop memoisation,
+     * which makes {@code (a+)+$} harmless on a current JDK. Each extra {@code a}
+     * doubles the work — without a budget one evaluation runs for minutes. The
+     * tests' 60 s preemptive timeout is far above the 250 ms budget (a loaded build
+     * machine can stall a thread for seconds) and far below the unbounded run.
+     */
+    private static final String EVIL_PATTERN = "^(?:(a)|a)+\\1?b";
+    private static final String EVIL_INPUT = "a".repeat(30) + "!";
 
     @Nested
     @DisplayName("pii-redaction")
@@ -128,6 +150,24 @@ class BuiltInGuardrailsTest {
         }
 
         @Test
+        @DisplayName("validate: an invalid author pattern fails the deploy, naming its line; valid ones pass")
+        void validate_invalidPattern() {
+            String problem = guardrail.validate(Map.of("patterns", "\\bsudo\\b\n([unclosed"));
+            assertTrue(problem != null && problem.contains("line 2"), String.valueOf(problem));
+            assertNull(guardrail.validate(Map.of("patterns", "\\bsudo\\b")));
+            assertNull(guardrail.validate(Map.of()));
+        }
+
+        @Test
+        @DisplayName("a backtracking author pattern runs out of budget: undecided (pattern_timeout), never a pass")
+        void catastrophicPattern_isUndecided() {
+            var ctx = context(GuardrailPhase.INPUT, Map.of("patterns", EVIL_PATTERN, "mode", "replace"));
+            var e = assertTimeoutPreemptively(Duration.ofSeconds(60),
+                    () -> assertThrows(GuardrailUndecidedException.class, () -> guardrail.evaluate(EVIL_INPUT, ctx)));
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, e.reason());
+        }
+
+        @Test
         void inputOnly() {
             assertEquals(Set.of(GuardrailPhase.INPUT), guardrail.phases());
         }
@@ -154,6 +194,107 @@ class BuiltInGuardrailsTest {
         void replacementIsLiteral() {
             var v = guardrail.evaluate("abc", context(GuardrailPhase.INPUT, Map.of("patterns", "b", "replacement", "$1\\")));
             assertEquals("a$1\\c", v.text());
+        }
+
+        @Test
+        @DisplayName("validate: an invalid pattern fails the deploy instead of being dropped (a block-only filter would fail open)")
+        void validate_invalidPattern() {
+            String problem = guardrail.validate(Map.of("patterns", "([unclosed"));
+            assertTrue(problem != null && problem.startsWith("regex-filter guardrail:") && problem.contains("line 1"), String.valueOf(problem));
+            assertNull(guardrail.validate(Map.of("patterns", "falcon\n\\d{4}")));
+            assertNull(guardrail.validate(null));
+        }
+
+        @Test
+        @DisplayName("a backtracking pattern runs out of budget: undecided (pattern_timeout), not a pass")
+        void catastrophicPattern_isUndecided() {
+            var ctx = context(GuardrailPhase.INPUT, Map.of("patterns", EVIL_PATTERN));
+            var e = assertTimeoutPreemptively(Duration.ofSeconds(60),
+                    () -> assertThrows(GuardrailUndecidedException.class, () -> guardrail.evaluate(EVIL_INPUT, ctx)));
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, e.reason());
+        }
+
+        @Test
+        @DisplayName("through the service: a block filter whose pattern times out refuses the text (fail closed)")
+        void catastrophicPattern_blockFailsClosed() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+            var block = new GuardrailConfig();
+            block.setType(RegexFilterGuardrail.TYPE);
+            block.setAction("block");
+            block.setParameters(Map.of("patterns", EVIL_PATTERN));
+
+            var blocked = service.screenInput(List.of(block), EVIL_INPUT, input(), o -> {
+            });
+
+            assertTrue(blocked.isBlocked());
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, blocked.blocked().reason());
+        }
+
+        private GuardrailConfig filter(String action, String failMode) {
+            var config = new GuardrailConfig();
+            config.setType(RegexFilterGuardrail.TYPE);
+            config.setAction(action);
+            var parameters = new HashMap<String, String>();
+            // the first pattern matches and finishes, the second one times out
+            parameters.put("patterns", "falcon\n" + EVIL_PATTERN);
+            if (failMode != null) {
+                parameters.put("failMode", failMode);
+            }
+            config.setParameters(parameters);
+            return config;
+        }
+
+        private static final String PARTLY_MATCHED = EVIL_INPUT + " project falcon";
+
+        @Test
+        @DisplayName("redact, failing open: the rewrites made before the timeout are kept, recorded as a redact with pattern_timeout")
+        void timeout_redactOpen_keepsPartialRewrite() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+            var outcomes = new ArrayList<GuardrailOutcome>();
+
+            var result = service.screenInput(List.of(filter("redact", null)), PARTLY_MATCHED, input(), outcomes::add);
+
+            assertFalse(result.isBlocked());
+            assertFalse(result.text().contains("falcon"), result.text());
+            assertTrue(result.text().endsWith("project [REDACTED]"), result.text());
+            assertEquals(1, outcomes.size());
+            assertEquals("redact", outcomes.get(0).action().label());
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, outcomes.get(0).reason());
+        }
+
+        @Test
+        @DisplayName("redact, failMode closed: a timeout blocks the text")
+        void timeout_redactClosed_blocks() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+
+            var result = service.screenInput(List.of(filter("redact", "closed")), PARTLY_MATCHED, input(), o -> {
+            });
+
+            assertTrue(result.isBlocked());
+            assertEquals(RegexFilterGuardrail.REASON_TIMEOUT, result.blocked().reason());
+        }
+
+        @Test
+        @DisplayName("block, failMode open: a pattern that did match before the timeout still blocks — a match is a finding")
+        void timeout_blockOpen_withAMatch_blocks() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+
+            var result = service.screenInput(List.of(filter("block", "open")), PARTLY_MATCHED, input(), o -> {
+            });
+
+            assertTrue(result.isBlocked());
+        }
+
+        @Test
+        @DisplayName("block, failMode open, nothing matched before the timeout: a warning, the text passes")
+        void timeout_blockOpen_noMatch_warns() {
+            var service = new GuardrailService(List.of(guardrail), new SimpleMeterRegistry());
+            var outcomes = new ArrayList<GuardrailOutcome>();
+
+            var result = service.screenInput(List.of(filter("block", "open")), EVIL_INPUT, input(), outcomes::add);
+
+            assertFalse(result.isBlocked());
+            assertEquals("warn", outcomes.get(0).action().label());
         }
     }
 

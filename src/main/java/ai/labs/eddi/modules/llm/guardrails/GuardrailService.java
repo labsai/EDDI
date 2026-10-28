@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.guardrails;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.Content;
@@ -62,9 +63,11 @@ public class GuardrailService {
 
     /**
      * What replaces an earlier user message of the history window that a guardrail
-     * would block — the model sees that something was withheld, not what.
+     * would block — the model sees that something was withheld, not what. The same
+     * text the history builder puts in place of a turn whose input was refused
+     * ({@link ConversationLogGenerator#WITHHELD_INPUT}).
      */
-    static final String HISTORY_PLACEHOLDER = "[earlier message withheld by a guardrail]";
+    static final String HISTORY_PLACEHOLDER = ConversationLogGenerator.WITHHELD_INPUT;
 
     /** The audit reason of a guardrail that threw or returned no verdict. */
     public static final String REASON_ERROR = "guardrail_error";
@@ -74,6 +77,20 @@ public class GuardrailService {
      * {@code open}.
      */
     public static final String PARAM_FAIL_MODE = "failMode";
+
+    /**
+     * Suffix of the {@code warn} reason recorded when a {@code deliver-best}
+     * guardrail's retries are spent and its best attempt is delivered.
+     */
+    public static final String DELIVERED_BEST_SUFFIX = ":delivered_best";
+
+    /** The list name {@link #validate} is given for a task's input guardrails. */
+    public static final String LIST_INPUT = "inputGuardrails";
+
+    /**
+     * The safety classifier's type, for the {@code deliver-best} deploy warning.
+     */
+    private static final String TYPE_CLASSIFIER = "classifier";
 
     /**
      * Bound on the distinct unknown types warned about, so a typo cannot grow
@@ -127,6 +144,10 @@ public class GuardrailService {
         }
         for (int i = 0; i < configs.size(); i++) {
             GuardrailConfig config = configs.get(i);
+            String exhaustion = config != null ? onExhaustedProblem(listName, config) : null;
+            if (exhaustion != null) {
+                problems.add(listName + "[" + i + "]: " + exhaustion);
+            }
             ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
             if (guardrail == null) {
                 continue;
@@ -137,6 +158,79 @@ public class GuardrailService {
             }
         }
         return problems;
+    }
+
+    /**
+     * {@code onExhausted}: {@code block} (the default, harmless anywhere) or
+     * {@code deliver-best}, which only means something for an output
+     * {@code reprompt} guardrail — anywhere else it would silently do nothing, so
+     * it is refused rather than ignored.
+     */
+    private static String onExhaustedProblem(String listName, GuardrailConfig config) {
+        String value = config.getOnExhausted();
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (GuardrailConfig.ON_EXHAUSTED_BLOCK.equalsIgnoreCase(trimmed)) {
+            return null;
+        }
+        if (!GuardrailConfig.ON_EXHAUSTED_DELIVER_BEST.equalsIgnoreCase(trimmed)) {
+            return "onExhausted must be 'block' or 'deliver-best'";
+        }
+        if (GuardrailAction.parse(config.getAction()) != GuardrailAction.REPROMPT) {
+            return "onExhausted 'deliver-best' needs action 'reprompt' — there are no retries to exhaust otherwise";
+        }
+        if (LIST_INPUT.equals(listName)) {
+            return "onExhausted 'deliver-best' applies to output guardrails only — an input reprompt blocks";
+        }
+        return null;
+    }
+
+    /**
+     * Configurations that work but deserve a WARN at deploy time, prefixed like
+     * {@link #validate}: each type's {@link ContentGuardrail#warnings}, and a
+     * {@code classifier} set to {@code deliver-best} — a safety check that delivers
+     * what it flagged defeats its purpose.
+     */
+    public List<String> warnings(String listName, List<GuardrailConfig> configs) {
+        List<String> warnings = new ArrayList<>();
+        if (configs == null) {
+            return warnings;
+        }
+        for (int i = 0; i < configs.size(); i++) {
+            GuardrailConfig config = configs.get(i);
+            ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
+            if (guardrail == null) {
+                continue;
+            }
+            if (config.deliversBest() && TYPE_CLASSIFIER.equals(config.getType())) {
+                warnings.add(listName + "[" + i + "]: onExhausted 'deliver-best' on a classifier delivers an answer the safety classifier flagged");
+            }
+            for (String warning : guardrail.warnings(config.getParameters())) {
+                warnings.add(listName + "[" + i + "]: " + warning);
+            }
+        }
+        return warnings;
+    }
+
+    /**
+     * Whether any of these input guardrails is a known type that does not re-screen
+     * the history window ({@link ContentGuardrail#screensHistory()} false, e.g. the
+     * classifier): a message such a guardrail never saw on its own turn is never
+     * checked by it later.
+     */
+    public boolean anySkipsHistory(List<GuardrailConfig> configs) {
+        if (configs == null) {
+            return false;
+        }
+        for (GuardrailConfig config : configs) {
+            ContentGuardrail guardrail = config != null && config.getType() != null ? byType.get(config.getType()) : null;
+            if (guardrail != null && guardrail.phases().contains(GuardrailPhase.INPUT) && !guardrail.screensHistory()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -172,8 +266,18 @@ public class GuardrailService {
      *            the text to answer with when blocked, otherwise null
      * @param costUsd
      *            what evaluating the guardrails cost
+     * @param withholdFromHistory
+     *            whether a {@code redact} was applied by a guardrail that does not
+     *            re-screen history ({@link ContentGuardrail#screensHistory()}): the
+     *            turn's message must then be withheld from later turns' history,
+     *            where it would otherwise reappear as the user sent it
+     * @param currentTextIndex
+     *            the content index of the user's typed text in the last user
+     *            message; the parts before it are earlier turns, the text parts
+     *            after it this turn's attachment text. -1 when it has no text
      */
-    public record InputResult(List<ChatMessage> messages, GuardrailOutcome blocked, String blockMessage, double costUsd) {
+    public record InputResult(List<ChatMessage> messages, GuardrailOutcome blocked, String blockMessage, double costUsd,
+            boolean withholdFromHistory, int currentTextIndex) {
         public boolean isBlocked() {
             return blocked != null;
         }
@@ -190,45 +294,97 @@ public class GuardrailService {
     }
 
     /**
-     * As {@link #runInput(List, List, GuardrailContext, Consumer)}, reusing an
-     * earlier {@link #screenInput} of the user's raw message: when the last user
-     * message is still exactly that text, its screened form is applied without
-     * evaluating (or recording) the guardrails a second time. When the model-facing
-     * message differs (a {@code prompt} template, attachment extracts) it is
-     * screened as usual.
+     * As {@link #runInput(List, List, GuardrailContext, Consumer, TextResult, int)}
+     * with the typed text taken to be the last text part of the last user message.
      */
     public InputResult runInput(List<GuardrailConfig> configs, List<ChatMessage> messages, GuardrailContext context,
                                 Consumer<GuardrailOutcome> onOutcome, TextResult prescreened) {
+        return runInput(configs, messages, context, onOutcome, prescreened, -1);
+    }
+
+    /**
+     * As {@link #runInput(List, List, GuardrailContext, Consumer)}, reusing an
+     * earlier {@link #screenInput} of the user's raw message: when the typed text
+     * of the last user message is still exactly that text, its screened form is
+     * applied without evaluating (or recording) the guardrails a second time. When
+     * it differs (a {@code prompt} template) it is screened as usual.
+     * <p>
+     * The last user message has three kinds of text part. Those before
+     * {@code typedTextIndex} are earlier turns the history builder merged in (a
+     * turn answered by a fallback); they are history. The part at it is what the
+     * user typed this turn. The text parts after it were appended for this turn's
+     * attachments (extracts, notes); each is screened as this turn's input too —
+     * recorded, and able to block — so that neither of them is mistaken for the
+     * other and a redaction lands on the text the model sees.
+     *
+     * @param typedTextIndex
+     *            the content index of the typed text in the last user message, as
+     *            it was before attachments were forwarded; -1 (or an index that is
+     *            not a text part) means its last text part
+     */
+    public InputResult runInput(List<GuardrailConfig> configs, List<ChatMessage> messages, GuardrailContext context,
+                                Consumer<GuardrailOutcome> onOutcome, TextResult prescreened, int typedTextIndex) {
         int last = lastUserIndex(messages);
         if (configs == null || configs.isEmpty() || last < 0) {
-            return new InputResult(messages, null, null, 0.0);
+            return new InputResult(messages, null, null, 0.0, false, -1);
         }
         GuardrailContext inputContext = context.with(GuardrailPhase.INPUT, null, messages);
         UserMessage current = (UserMessage) messages.get(last);
-        String original = currentText(current);
+        List<Content> contents = new ArrayList<>(current.contents());
+        int typed = typedTextIndex >= 0 && typedTextIndex < contents.size() && contents.get(typedTextIndex) instanceof TextContent
+                ? typedTextIndex
+                : lastTextIndex(contents);
+        String original = typed >= 0 ? ((TextContent) contents.get(typed)).text() : "";
         String text;
         double cost = 0.0;
+        boolean withhold = false;
         if (prescreened != null && !prescreened.isBlocked() && original.equals(prescreened.original())) {
             text = prescreened.text();
+            withhold = prescreened.withholdFromHistory();
         } else {
             TextResult screenedCurrent = screenInput(configs, original, inputContext, onOutcome);
             cost += screenedCurrent.costUsd();
             if (screenedCurrent.isBlocked()) {
-                return new InputResult(messages, screenedCurrent.blocked(), screenedCurrent.blockMessage(), cost);
+                return new InputResult(messages, screenedCurrent.blocked(), screenedCurrent.blockMessage(), cost, true, typed);
             }
             text = screenedCurrent.text();
+            withhold = screenedCurrent.withholdFromHistory();
+        }
+        boolean changed = false;
+        if (!text.equals(original)) {
+            if (typed >= 0) {
+                contents.set(typed, TextContent.from(text));
+            } else {
+                contents.add(TextContent.from(text));
+                typed = contents.size() - 1;
+            }
+            changed = true;
+        }
+        // This turn's attachment text: screened like the typed text, never as history.
+        for (int c = typed + 1; c < contents.size(); c++) {
+            if (!(contents.get(c) instanceof TextContent part)) {
+                continue;
+            }
+            TextResult screenedPart = screenInput(configs, part.text(), inputContext, onOutcome);
+            cost += screenedPart.costUsd();
+            if (screenedPart.isBlocked()) {
+                return new InputResult(messages, screenedPart.blocked(), screenedPart.blockMessage(), cost, true, typed);
+            }
+            withhold |= screenedPart.withholdFromHistory();
+            if (!screenedPart.text().equals(part.text())) {
+                contents.set(c, TextContent.from(screenedPart.text()));
+                changed = true;
+            }
         }
 
         List<ChatMessage> screened = new ArrayList<>(messages);
-        boolean changed = false;
-        if (!text.equals(original)) {
-            screened.set(last, withCurrentText(current, text));
-            changed = true;
+        if (changed) {
+            screened.set(last, current.toBuilder().contents(contents).build());
         }
-        HistoryResult history = screenHistory(configs, screened, last, inputContext);
+        HistoryResult history = screenHistory(configs, screened, last, typed, inputContext);
         cost += history.costUsd();
         changed |= history.changed();
-        return new InputResult(changed ? screened : messages, null, null, cost);
+        return new InputResult(changed ? screened : messages, null, null, cost, withhold, typed);
     }
 
     /**
@@ -244,8 +400,12 @@ public class GuardrailService {
      *            the answer when blocked, otherwise null
      * @param costUsd
      *            what evaluating the guardrails cost
+     * @param withholdFromHistory
+     *            whether a {@code redact} was applied by a guardrail that does not
+     *            re-screen history (see {@link InputResult#withholdFromHistory()})
      */
-    public record TextResult(String original, String text, GuardrailOutcome blocked, String blockMessage, double costUsd) {
+    public record TextResult(String original, String text, GuardrailOutcome blocked, String blockMessage, double costUsd,
+            boolean withholdFromHistory) {
         public boolean isBlocked() {
             return blocked != null;
         }
@@ -259,8 +419,9 @@ public class GuardrailService {
     public TextResult screenInput(List<GuardrailConfig> configs, String original, GuardrailContext context, Consumer<GuardrailOutcome> onOutcome) {
         String text = original != null ? original : "";
         double cost = 0.0;
+        boolean withhold = false;
         if (configs == null) {
-            return new TextResult(original, text, null, null, cost);
+            return new TextResult(original, text, null, null, cost, false);
         }
         for (GuardrailConfig config : configs) {
             ContentGuardrail guardrail = resolve(config, GuardrailPhase.INPUT);
@@ -269,6 +430,7 @@ public class GuardrailService {
             }
             GuardrailAction action = GuardrailAction.parse(config.getAction());
             Evaluation evaluation = evaluate(guardrail, text, context.with(GuardrailPhase.INPUT, config.getParameters(), context.messages()));
+            GuardrailVerdict verdict;
             if (evaluation.failed()) {
                 cost += evaluation.failureCostUsd();
                 // A block guardrail that cannot check the message refuses it (fail closed,
@@ -276,12 +438,18 @@ public class GuardrailService {
                 if (failsClosed(config, action)) {
                     var outcome = new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.BLOCK, evaluation.failureReason(), 0);
                     emit(onOutcome, outcome);
-                    return new TextResult(original, text, outcome, blockMessage(config, GuardrailPhase.INPUT), cost);
+                    return new TextResult(original, text, outcome, blockMessage(config, GuardrailPhase.INPUT), cost, true);
                 }
-                emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, evaluation.failureReason(), 0));
-                continue;
+                if (evaluation.partial() == null) {
+                    emit(onOutcome,
+                            new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, evaluation.failureReason(), 0));
+                    continue;
+                }
+                // Failing open, but it did find something before giving up: act on that.
+                verdict = evaluation.partial();
+            } else {
+                verdict = evaluation.verdict();
             }
-            GuardrailVerdict verdict = evaluation.verdict();
             cost += verdict.costUsd();
             if (!verdict.triggered()) {
                 continue;
@@ -290,17 +458,20 @@ public class GuardrailService {
                 case WARN -> emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.WARN, verdict.reason(), 0));
                 case REDACT -> {
                     text = verdict.kind() == GuardrailVerdict.Kind.REWRITE ? verdict.text() : blockMessage(config, GuardrailPhase.INPUT);
+                    // Later turns re-screen their history with this guardrail only when it
+                    // screens history; otherwise the turn's message must be withheld there.
+                    withhold |= !guardrail.screensHistory();
                     emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.REDACT, verdict.reason(), 0));
                 }
                 default -> {
                     // BLOCK, and REPROMPT: there is nothing to re-ask on the input side.
                     var outcome = new GuardrailOutcome(config.getType(), GuardrailPhase.INPUT, GuardrailAction.BLOCK, verdict.reason(), 0);
                     emit(onOutcome, outcome);
-                    return new TextResult(original, text, outcome, blockMessage(config, GuardrailPhase.INPUT), cost);
+                    return new TextResult(original, text, outcome, blockMessage(config, GuardrailPhase.INPUT), cost, true);
                 }
             }
         }
-        return new TextResult(original, text, null, null, cost);
+        return new TextResult(original, text, null, null, cost, withhold);
     }
 
     /**
@@ -319,10 +490,12 @@ public class GuardrailService {
             return rebuilt;
         }
         List<ChatMessage> copy = new ArrayList<>(rebuilt);
+        int typed = -1;
         if (screenedLast >= 0) {
             copy.set(last, screened.messages().get(screenedLast));
+            typed = screened.currentTextIndex();
         }
-        screenHistory(configs, copy, last, context.with(GuardrailPhase.INPUT, null, copy));
+        screenHistory(configs, copy, last, typed, context.with(GuardrailPhase.INPUT, null, copy));
         return copy;
     }
 
@@ -332,12 +505,15 @@ public class GuardrailService {
     /**
      * Screens (and rewrites in place) every earlier text of the window: all text
      * parts of the user messages before {@code last}, and the text parts of the
-     * last user message before its final one. The history builder merges the
-     * question of a turn answered by a fallback (a guardrail block among them) into
-     * the next user message, so that message can carry an earlier turn's text ahead
-     * of the current one; it is history, not the current turn.
+     * last user message before {@code currentTextIndex} (the typed text; -1: its
+     * last text part). The history builder merges the question of a turn answered
+     * by a fallback into the next user message, so that message can carry an
+     * earlier turn's text ahead of the current one; it is history, not the current
+     * turn. (A turn whose input a guardrail refused never gets here: the history
+     * builder has already replaced it with {@link #HISTORY_PLACEHOLDER}.)
      */
-    private HistoryResult screenHistory(List<GuardrailConfig> configs, List<ChatMessage> messages, int last, GuardrailContext context) {
+    private HistoryResult screenHistory(List<GuardrailConfig> configs, List<ChatMessage> messages, int last, int currentTextIndex,
+                                        GuardrailContext context) {
         boolean changed = false;
         double cost = 0.0;
         for (int i = 0; i <= last; i++) {
@@ -345,10 +521,10 @@ public class GuardrailService {
                 continue;
             }
             List<Content> contents = new ArrayList<>(user.contents());
-            int lastText = lastTextIndex(contents);
+            int currentFrom = i == last ? (currentTextIndex >= 0 ? currentTextIndex : lastTextIndex(contents)) : Integer.MAX_VALUE;
             boolean messageChanged = false;
             for (int c = 0; c < contents.size(); c++) {
-                if (!(contents.get(c) instanceof TextContent part) || (i == last && c == lastText)) {
+                if (!(contents.get(c) instanceof TextContent part) || (currentFrom >= 0 && c >= currentFrom)) {
                     continue;
                 }
                 String screened = part.text();
@@ -370,12 +546,16 @@ public class GuardrailService {
                             screened = HISTORY_PLACEHOLDER;
                             break;
                         }
-                        continue;
+                        if (evaluation.partial() == null) {
+                            continue;
+                        }
+                        verdict = evaluation.partial();
                     }
+                    // Paid for whether or not it fires.
+                    cost += verdict.costUsd();
                     if (!verdict.triggered()) {
                         continue;
                     }
-                    cost += verdict.costUsd();
                     if (action == GuardrailAction.REDACT && verdict.kind() == GuardrailVerdict.Kind.REWRITE) {
                         screened = verdict.text();
                     } else {
@@ -426,7 +606,10 @@ public class GuardrailService {
      * A {@code reprompt} finding asks the model again (through {@code reprompter})
      * and restarts the screening of the new answer from the first guardrail; once
      * the triggering guardrail's {@code maxRetries} are spent — or when no
-     * reprompter is available, or the turn is out of time — the answer is blocked.
+     * reprompter is available, or the turn is out of time — the answer is blocked,
+     * unless that guardrail's {@code onExhausted} is {@code deliver-best}: then the
+     * attempt it rated best is delivered with a {@code warn}, after one more pass
+     * through the guardrails after it (see {@link #deliverBest}).
      *
      * @param reprompter
      *            the branch's way to ask the same model again, or null when this
@@ -444,9 +627,13 @@ public class GuardrailService {
         double cost = 0.0;
         int attempts = 0;
         boolean changed = false;
+        // deliver-best: per guardrail (by list index), the attempt it rated best so
+        // far.
+        Map<Integer, Rated> best = new LinkedHashMap<>();
 
         screening : while (true) {
-            for (GuardrailConfig config : configs) {
+            for (int index = 0; index < configs.size(); index++) {
+                GuardrailConfig config = configs.get(index);
                 ContentGuardrail guardrail = resolve(config, GuardrailPhase.OUTPUT);
                 if (guardrail == null) {
                     continue;
@@ -454,6 +641,7 @@ public class GuardrailService {
                 GuardrailAction action = GuardrailAction.parse(config.getAction());
                 Evaluation evaluation = evaluate(guardrail, text, outputContext.with(GuardrailPhase.OUTPUT, config.getParameters(),
                         context.messages()));
+                GuardrailVerdict verdict;
                 if (evaluation.failed()) {
                     cost += evaluation.failureCostUsd();
                     // A block or reprompt guardrail that cannot verify the answer withholds it
@@ -461,12 +649,22 @@ public class GuardrailService {
                     if (failsClosed(config, action)) {
                         return blocked(config, evaluation.failureReason(), attempts, reprompts, cost, onOutcome);
                     }
-                    emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
-                            attempts));
-                    continue;
+                    if (evaluation.partial() == null) {
+                        emit(onOutcome,
+                                new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
+                                        attempts));
+                        continue;
+                    }
+                    // Failing open, but it did find something before giving up: act on that.
+                    verdict = evaluation.partial();
+                } else {
+                    verdict = evaluation.verdict();
                 }
-                GuardrailVerdict verdict = evaluation.verdict();
                 cost += verdict.costUsd();
+                if (action == GuardrailAction.REPROMPT && config.deliversBest()) {
+                    // Ties go to the later attempt: it was written with more feedback.
+                    best.merge(index, new Rated(text, verdict), (previous, next) -> next.severity() <= previous.severity() ? next : previous);
+                }
                 if (!verdict.triggered()) {
                     continue;
                 }
@@ -485,15 +683,15 @@ public class GuardrailService {
                     case REPROMPT -> {
                         if (reprompter == null || attempts >= config.effectiveMaxRetries()
                                 || attempts >= GuardrailConfig.MAX_RETRIES_CEILING) {
-                            return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                            return exhausted(configs, index, verdict, best, attempts, reprompts, cost, outputContext, onOutcome);
                         }
                         String corrective = correctiveMessage(config, verdict);
                         Reprompter.Attempt next = reprompter.reprompt(text, corrective);
                         if (next == null) {
                             LOGGER.infof(
-                                    "Output guardrail '%s' wanted a reprompt for task '%s' but none could start (turn out of time or the model's circuit is open) — blocking",
+                                    "Output guardrail '%s' wanted a reprompt for task '%s' but none could start (turn out of time or the model's circuit is open)",
                                     config.getType(), context.taskId());
-                            return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+                            return exhausted(configs, index, verdict, best, attempts, reprompts, cost, outputContext, onOutcome);
                         }
                         attempts++;
                         reprompts.add(next.metadata() != null ? next.metadata() : Map.of());
@@ -511,10 +709,137 @@ public class GuardrailService {
         return new OutputResult(changed ? text : answer, null, reprompts, cost);
     }
 
+    /** One attempt as a {@code deliver-best} guardrail saw and rated it. */
+    private record Rated(String text, GuardrailVerdict verdict) {
+        int severity() {
+            return verdict.severity();
+        }
+    }
+
+    /**
+     * A {@code reprompt} guardrail that may not reprompt again: blocked, or — with
+     * {@code onExhausted: deliver-best} — its best attempt delivered.
+     */
+    private OutputResult exhausted(List<GuardrailConfig> configs, int index, GuardrailVerdict verdict, Map<Integer, Rated> best, int attempts,
+                                   List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext,
+                                   Consumer<GuardrailOutcome> onOutcome) {
+        GuardrailConfig config = configs.get(index);
+        Rated chosen = best.get(index);
+        if (!config.deliversBest() || chosen == null) {
+            return blocked(config, verdict.reason(), attempts, reprompts, cost, onOutcome);
+        }
+        return deliverBest(configs, index, chosen, attempts, reprompts, cost, outputContext, onOutcome);
+    }
+
+    /**
+     * Delivers the attempt the exhausted guardrail rated best (fewest issue codes;
+     * for a guardrail without codes, the last attempt), recorded as a {@code warn}
+     * with reason {@code <reason>:delivered_best} and the reprompts sent as its
+     * retry count. A quality check giving up must never let an answer past a PII
+     * redaction or a safety check, so the guardrails after the exhausted one — the
+     * ones that have not seen this attempt — screen it, with no further reprompts:
+     * a {@code redact} still rewrites it, a {@code warn} is still recorded, and a
+     * {@code block} — or a {@code reprompt}, which may not re-ask now — blocks it.
+     * <p>
+     * The re-screen's outcomes are held back until it ends, so the record matches
+     * what happened: a delivered attempt is recorded as the {@code :delivered_best}
+     * warn followed by the re-screen's findings; a blocked one as the re-screen's
+     * findings and the block — with no {@code :delivered_best} warn for an attempt
+     * that was never delivered.
+     */
+    private OutputResult deliverBest(List<GuardrailConfig> configs, int exhaustedIndex, Rated chosen, int attempts,
+                                     List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext,
+                                     Consumer<GuardrailOutcome> onOutcome) {
+        GuardrailConfig exhausted = configs.get(exhaustedIndex);
+        String reason = chosen.verdict().reason() != null && !chosen.verdict().reason().isBlank() ? chosen.verdict().reason() : exhausted.getType();
+        LOGGER.infof("Output guardrail '%s' spent its retries for task '%s' — re-screening its best attempt for delivery", exhausted.getType(),
+                outputContext.taskId());
+        List<GuardrailOutcome> pending = new ArrayList<>();
+        OutputResult result = rescreen(configs, exhaustedIndex, chosen.text(), attempts, reprompts, cost, outputContext, pending);
+        if (!result.isBlocked()) {
+            emit(onOutcome, new GuardrailOutcome(exhausted.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, reason + DELIVERED_BEST_SUFFIX,
+                    attempts));
+        }
+        pending.forEach(outcome -> emit(onOutcome, outcome));
+        return result;
+    }
+
+    /**
+     * The re-screen of {@link #deliverBest}: the guardrails <em>after</em> the
+     * exhausted one, no reprompts. Its outcomes are collected into {@code pending},
+     * not emitted — the block outcome included, as the last entry.
+     * <p>
+     * A {@code deliver-best} guardrail rates an attempt only once every guardrail
+     * before it has screened that same attempt in the same pass: their redactions
+     * are already in the chosen text and their findings already recorded, and an
+     * earlier {@code block} or {@code reprompt} finding would have ended the pass
+     * before the attempt was rated. Running them again would record each finding
+     * twice and call (and bill) a model-backed guardrail twice on the same text.
+     */
+    private OutputResult rescreen(List<GuardrailConfig> configs, int exhaustedIndex, String chosenText, int attempts,
+                                  List<Map<String, Object>> reprompts, double cost, GuardrailContext outputContext, List<GuardrailOutcome> pending) {
+        String text = chosenText;
+        for (int index = exhaustedIndex + 1; index < configs.size(); index++) {
+            GuardrailConfig config = configs.get(index);
+            ContentGuardrail guardrail = resolve(config, GuardrailPhase.OUTPUT);
+            if (guardrail == null) {
+                continue;
+            }
+            GuardrailAction action = GuardrailAction.parse(config.getAction());
+            Evaluation evaluation = evaluate(guardrail, text, outputContext.with(GuardrailPhase.OUTPUT, config.getParameters(),
+                    outputContext.messages()));
+            GuardrailVerdict verdict;
+            if (evaluation.failed()) {
+                cost += evaluation.failureCostUsd();
+                if (failsClosed(config, action)) {
+                    OutputResult refused = blockedResult(config, evaluation.failureReason(), attempts, reprompts, cost);
+                    pending.add(refused.blocked());
+                    return refused;
+                }
+                if (evaluation.partial() == null) {
+                    pending.add(new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, evaluation.failureReason(),
+                            attempts));
+                    continue;
+                }
+                // Failing open, but it did find something before giving up: act on that,
+                // as the main screening pass does — a partial redaction is still applied.
+                verdict = evaluation.partial();
+            } else {
+                verdict = evaluation.verdict();
+            }
+            cost += verdict.costUsd();
+            if (!verdict.triggered()) {
+                continue;
+            }
+            switch (action) {
+                case WARN ->
+                    pending.add(new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.WARN, verdict.reason(), attempts));
+                case REDACT -> {
+                    text = verdict.kind() == GuardrailVerdict.Kind.REWRITE ? verdict.text() : blockMessage(config, GuardrailPhase.OUTPUT);
+                    pending.add(new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.REDACT, verdict.reason(), attempts));
+                }
+                // BLOCK, and REPROMPT: no further reprompts once a best attempt is chosen.
+                default -> {
+                    OutputResult refused = blockedResult(config, verdict.reason(), attempts, reprompts, cost);
+                    pending.add(refused.blocked());
+                    return refused;
+                }
+            }
+        }
+        return new OutputResult(text, null, reprompts, cost);
+    }
+
     private OutputResult blocked(GuardrailConfig config, String reason, int attempts, List<Map<String, Object>> reprompts, double cost,
                                  Consumer<GuardrailOutcome> onOutcome) {
+        OutputResult result = blockedResult(config, reason, attempts, reprompts, cost);
+        emit(onOutcome, result.blocked());
+        return result;
+    }
+
+    /** A blocked output result, without emitting its outcome. */
+    private static OutputResult blockedResult(GuardrailConfig config, String reason, int attempts, List<Map<String, Object>> reprompts,
+                                              double cost) {
         var outcome = new GuardrailOutcome(config.getType(), GuardrailPhase.OUTPUT, GuardrailAction.BLOCK, reason, attempts);
-        emit(onOutcome, outcome);
         return new OutputResult(blockMessage(config, GuardrailPhase.OUTPUT), outcome, reprompts, cost);
     }
 
@@ -603,7 +928,7 @@ public class GuardrailService {
      * reported that it could not decide — the reason to record and what the failed
      * attempt cost.
      */
-    private record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd) {
+    private record Evaluation(GuardrailVerdict verdict, String failureReason, double failureCostUsd, GuardrailVerdict partial) {
         boolean failed() {
             return verdict == null;
         }
@@ -619,19 +944,19 @@ public class GuardrailService {
             if (verdict == null) {
                 LOGGER.warnf("Guardrail '%s' returned no verdict on %s for task '%s' — treated as a guardrail error", guardrail.type(),
                         context.phase().label(), context.taskId());
-                return new Evaluation(null, REASON_ERROR, 0.0);
+                return new Evaluation(null, REASON_ERROR, 0.0, null);
             }
-            return new Evaluation(verdict, null, 0.0);
+            return new Evaluation(verdict, null, 0.0, null);
         } catch (GuardrailUndecidedException e) {
             String reason = e.reason() != null && !e.reason().isBlank() ? e.reason() : REASON_ERROR;
             LOGGER.infof("Guardrail '%s' could not decide on %s for task '%s' (%s) — its failMode applies", guardrail.type(),
                     context.phase().label(), context.taskId(), reason);
             double cost = Double.isFinite(e.costUsd()) && e.costUsd() > 0.0 ? e.costUsd() : 0.0;
-            return new Evaluation(null, reason, cost);
+            return new Evaluation(null, reason, cost, e.partialFinding());
         } catch (RuntimeException e) {
             LOGGER.warnf("Guardrail '%s' failed on %s for task '%s' (%s) — its failMode applies", guardrail.type(),
                     context.phase().label(), context.taskId(), e.getClass().getSimpleName());
-            return new Evaluation(null, REASON_ERROR, 0.0);
+            return new Evaluation(null, REASON_ERROR, 0.0, null);
         }
     }
 
@@ -658,31 +983,16 @@ public class GuardrailService {
     }
 
     /**
-     * The current turn's text of a user message: its last text part. Earlier text
-     * parts are earlier turns merged in by the history builder (see
-     * {@link #screenHistory}); other parts are images and documents.
+     * The content index of the current turn's typed text in the last user message
+     * of a freshly built history: its last text part (earlier text parts are
+     * earlier turns merged in by the history builder, other parts images and
+     * documents); -1 when there is none. Taken before attachments are forwarded,
+     * which append their own text parts after it — the value to pass to
+     * {@link #runInput(List, List, GuardrailContext, Consumer, TextResult, int)}.
      */
-    static String currentText(UserMessage message) {
-        if (message.hasSingleText()) {
-            return message.singleText();
-        }
-        int index = lastTextIndex(message.contents());
-        return index >= 0 ? ((TextContent) message.contents().get(index)).text() : "";
-    }
-
-    /**
-     * The message with its current text ({@link #currentText}) replaced; every
-     * other part, the name and the attributes are kept.
-     */
-    static UserMessage withCurrentText(UserMessage message, String text) {
-        List<Content> contents = new ArrayList<>(message.contents());
-        int index = lastTextIndex(contents);
-        if (index >= 0) {
-            contents.set(index, TextContent.from(text));
-        } else {
-            contents.add(TextContent.from(text));
-        }
-        return message.toBuilder().contents(contents).build();
+    public static int currentTextIndex(List<ChatMessage> messages) {
+        int last = lastUserIndex(messages);
+        return last >= 0 ? lastTextIndex(((UserMessage) messages.get(last)).contents()) : -1;
     }
 
     private static int lastTextIndex(List<Content> contents) {

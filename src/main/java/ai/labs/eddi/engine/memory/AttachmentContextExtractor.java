@@ -11,9 +11,11 @@ import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Extracts {@link Attachment} objects from the conversation context map.
@@ -267,6 +269,11 @@ public final class AttachmentContextExtractor {
         // insertion-ordered so the most recent turn's attachments come first.
         Map<String, Attachment> unique = new LinkedHashMap<>();
         for (int i = 0; i < previousSteps.size(); i++) {
+            // A turn an input guardrail refused keeps its files out of every later
+            // prompt: no re-inlined image, no "shared earlier" note, no readAttachment.
+            if (ConversationLogGenerator.isInputWithheld(previousSteps.get(i))) {
+                continue;
+            }
             // Exact-match read: "attachments" is a prefix of the
             // attachments:extracts / attachments:errors keys the forwarder persists,
             // so a prefix scan would return the wrong entry.
@@ -283,6 +290,40 @@ public final class AttachmentContextExtractor {
             }
         }
         return List.copyOf(unique.values());
+    }
+
+    /**
+     * The storage references of the files of earlier turns an input guardrail
+     * refused ({@link ConversationLogGenerator#isInputWithheld}) — what the
+     * {@code readAttachment} tool must not serve, although the attachment store
+     * still holds them for the conversation. A file that was also attached on a
+     * turn that was not refused stays readable.
+     */
+    public static Set<String> withheldStorageRefs(IConversationMemory memory) {
+        if (memory == null) {
+            return Set.of();
+        }
+        IConversationMemory.IConversationStepStack previousSteps = memory.getPreviousSteps();
+        if (previousSteps == null || previousSteps.size() == 0) {
+            return Set.of();
+        }
+        Set<String> withheld = new HashSet<>();
+        Set<String> accepted = new HashSet<>();
+        for (int i = 0; i < previousSteps.size(); i++) {
+            IData<List<?>> data = previousSteps.get(i).getData(MemoryKeys.ATTACHMENTS);
+            if (data == null || data.getResult() == null) {
+                continue;
+            }
+            Set<String> target = ConversationLogGenerator.isInputWithheld(previousSteps.get(i)) ? withheld : accepted;
+            for (Object value : data.getResult()) {
+                Attachment attachment = asAttachment(value);
+                if (attachment != null && attachment.getStorageRef() != null) {
+                    target.add(attachment.getStorageRef());
+                }
+            }
+        }
+        withheld.removeAll(accepted);
+        return withheld;
     }
 
     /**

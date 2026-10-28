@@ -4,23 +4,17 @@
  */
 package ai.labs.eddi.modules.llm.guardrails.impl;
 
-import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.modules.llm.guardrails.ContentGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
-import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
-import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.RegexDeadline;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.data.message.TextContent;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -28,18 +22,11 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -129,7 +116,7 @@ public class ClassifierGuardrail implements ContentGuardrail {
     static final long LABEL_MATCH_BUDGET_MS = 250;
     static final int DEFAULT_TIMEOUT_MS = 3000;
     /** Ceiling on {@code timeoutMs}: a classifier sits on every turn's path. */
-    static final int MAX_TIMEOUT_MS = 60_000;
+    static final int MAX_TIMEOUT_MS = GuardrailModelClient.MAX_TIMEOUT_MS;
 
     /**
      * The guardrail's own keys (and the generic ones of every guardrail), which are
@@ -146,23 +133,13 @@ public class ClassifierGuardrail implements ContentGuardrail {
     private static final Pattern LABEL_EDGES = Pattern.compile("^[^\\p{L}\\p{N}]+|[^\\p{L}\\p{N}]+$");
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
-    /**
-     * Runs the call so the turn deadline can cut it short when it is tighter than
-     * the provider timeout. Virtual threads: an abandoned call holds heap, not a
-     * platform thread.
-     */
-    private static final ExecutorService EXECUTOR = Executors
-            .newThreadPerTaskExecutor(Thread.ofVirtual().name("eddi-guardrail-classifier-", 0).factory());
-
-    private final ChatModelRegistry chatModelRegistry;
-    private final ITemplatingEngine templatingEngine;
-    private final MeterRegistry meterRegistry;
+    private final GuardrailModelClient client;
 
     @Inject
     public ClassifierGuardrail(ChatModelRegistry chatModelRegistry, ITemplatingEngine templatingEngine, MeterRegistry meterRegistry) {
-        this.chatModelRegistry = chatModelRegistry;
-        this.templatingEngine = templatingEngine;
-        this.meterRegistry = meterRegistry;
+        this.client = new GuardrailModelClient("Classifier guardrail", "eddi-guardrail-classifier-", () -> Timer.builder(METRIC_DURATION),
+                REASON_UNAVAILABLE,
+                REASON_UNPARSEABLE, chatModelRegistry, templatingEngine, meterRegistry);
     }
 
     @Override
@@ -210,48 +187,17 @@ public class ClassifierGuardrail implements ContentGuardrail {
 
     @Override
     public GuardrailVerdict evaluate(String text, GuardrailContext context) {
-        String provider = context.parameter(PARAM_PROVIDER, null);
-        if (provider == null) {
-            LOGGER.warnf("Classifier guardrail of task '%s' has no 'provider' parameter", context.taskId());
-            throw new GuardrailUndecidedException(REASON_UNAVAILABLE, 0.0);
-        }
-        long started = System.nanoTime();
-        String outcome = "unavailable";
-        String providerTag = "unknown";
-        try {
-            List<ChatMessage> messages = buildMessages(text, context);
-            ChatModel model = chatModelRegistry.getOrCreate(provider.trim(), modelParameters(context));
-            providerTag = provider.trim();
-            ChatResponse response = call(model, ChatRequest.builder().messages(messages).build(), context);
-            double cost = cost(response, context);
-            String answer = response != null && response.aiMessage() != null ? response.aiMessage().text() : null;
-            Label label = classify(answer, context);
-            outcome = label.name().toLowerCase(Locale.ROOT);
-            return switch (label) {
-                case UNSAFE -> GuardrailVerdict.violation(flaggedReason(context)).withCost(cost);
-                case SAFE -> GuardrailVerdict.allow().withCost(cost);
-                case UNPARSEABLE -> throw new GuardrailUndecidedException(REASON_UNPARSEABLE, cost);
-            };
-        } catch (ChatModelRegistry.UnsupportedLlmTaskException e) {
-            providerTag = "unsupported";
-            LOGGER.warnf("Classifier guardrail of task '%s' names an unsupported provider", context.taskId());
-            throw new GuardrailUndecidedException(REASON_UNAVAILABLE, 0.0);
-        } catch (ClassifierTimeoutException e) {
-            outcome = "timeout";
-            throw new GuardrailUndecidedException(REASON_UNAVAILABLE, 0.0);
-        } catch (GuardrailUndecidedException e) {
-            throw e;
-        } catch (RuntimeException e) {
-            // Never the provider's message: it can echo the request, i.e. the screened
-            // text.
-            LOGGER.warnf("Classifier guardrail of task '%s' could not reach its model (%s)", context.taskId(), e.getClass().getSimpleName());
-            throw new GuardrailUndecidedException(REASON_UNAVAILABLE, 0.0);
-        } finally {
-            if (meterRegistry != null) {
-                Timer.builder(METRIC_DURATION).tag("provider", providerTag).tag("outcome", outcome).register(meterRegistry)
-                        .record(System.nanoTime() - started, TimeUnit.NANOSECONDS);
-            }
-        }
+        return client.evaluate(context, new GuardrailModelClient.Call(OWN_PARAMETERS, DEFAULT_TIMEOUT_MS, () -> buildMessages(text, context), null,
+                (answer, cost) -> {
+                    Label label = classify(answer, context);
+                    String outcome = label.name().toLowerCase(Locale.ROOT);
+                    return switch (label) {
+                        case UNSAFE ->
+                            new GuardrailModelClient.Interpretation(outcome, GuardrailVerdict.violation(flaggedReason(context)).withCost(cost));
+                        case SAFE -> new GuardrailModelClient.Interpretation(outcome, GuardrailVerdict.allow().withCost(cost));
+                        case UNPARSEABLE -> GuardrailModelClient.Interpretation.unparseable();
+                    };
+                }));
     }
 
     // === Request ===
@@ -277,45 +223,22 @@ public class ClassifierGuardrail implements ContentGuardrail {
             }
             return messages;
         }
-        Map<String, Object> data = new HashMap<>();
-        data.put("input", question);
-        data.put("output", output ? screened : "");
+        Map<String, Object> data = GuardrailModelClient.templateData(screened, context);
         data.put("risk", context.parameter(PARAM_RISK, ""));
-        data.put("context", output && includeContext(context) && context.retrievedContext() != null ? context.retrievedContext() : "");
-        try {
-            String prompt = templatingEngine.processTemplate(template, data);
-            if (prompt == null || prompt.isBlank()) {
-                throw new IllegalStateException("empty classifier prompt");
-            }
-            return List.of(UserMessage.from(prompt));
-        } catch (ITemplatingEngine.TemplateEngineException e) {
-            LOGGER.warnf("Classifier guardrail of task '%s': promptTemplate does not render", context.taskId());
-            throw new IllegalStateException("classifier promptTemplate does not render");
-        }
+        return List.of(UserMessage.from(client.render(template, data, context)));
     }
 
     /**
      * The provider parameters: every parameter that is not the guardrail's own,
-     * plus {@code timeout} from {@code timeoutMs} so the provider's HTTP client
-     * gives up as well. Stable per configuration, so the registry caches one model.
+     * plus {@code timeout} from {@code timeoutMs}; see
+     * {@link GuardrailModelClient#modelParameters}.
      */
     static Map<String, String> modelParameters(GuardrailContext context) {
-        Map<String, String> params = new HashMap<>();
-        context.parameters().forEach((key, value) -> {
-            if (!OWN_PARAMETERS.contains(key)) {
-                params.put(key, value);
-            }
-        });
-        params.put(PARAM_TIMEOUT, Long.toString(timeoutMs(context)));
-        return params;
+        return GuardrailModelClient.modelParameters(context, OWN_PARAMETERS, DEFAULT_TIMEOUT_MS);
     }
 
     static long timeoutMs(GuardrailContext context) {
-        int configured = context.intParameter(PARAM_TIMEOUT_MS, DEFAULT_TIMEOUT_MS);
-        if (configured <= 0) {
-            configured = DEFAULT_TIMEOUT_MS;
-        }
-        return Math.min(configured, MAX_TIMEOUT_MS);
+        return GuardrailModelClient.timeoutMs(context, DEFAULT_TIMEOUT_MS);
     }
 
     /**
@@ -323,38 +246,7 @@ public class ClassifierGuardrail implements ContentGuardrail {
      * deadline (after its reserve) is closer.
      */
     static long budgetMs(GuardrailContext context) {
-        long budget = timeoutMs(context);
-        TurnDeadline deadline = context.deadline();
-        if (deadline != null) {
-            budget = Math.min(budget, deadline.remainingAfterReserveMs());
-        }
-        return budget;
-    }
-
-    private ChatResponse call(ChatModel model, ChatRequest request, GuardrailContext context) {
-        long budget = budgetMs(context);
-        if (budget <= 0) {
-            LOGGER.infof("Classifier guardrail of task '%s' skipped: the turn is out of time", context.taskId());
-            throw new ClassifierTimeoutException();
-        }
-        Future<ChatResponse> future = EXECUTOR.submit(() -> model.chat(request));
-        try {
-            return future.get(budget, TimeUnit.MILLISECONDS);
-        } catch (TimeoutException e) {
-            future.cancel(true);
-            LOGGER.infof("Classifier guardrail of task '%s' timed out after %dms", context.taskId(), budget);
-            throw new ClassifierTimeoutException();
-        } catch (InterruptedException e) {
-            future.cancel(true);
-            Thread.currentThread().interrupt();
-            throw new ClassifierTimeoutException();
-        } catch (ExecutionException e) {
-            Throwable cause = e.getCause();
-            if (cause instanceof RuntimeException runtime) {
-                throw runtime;
-            }
-            throw new IllegalStateException("classifier call failed", cause);
-        }
+        return GuardrailModelClient.budgetMs(context, DEFAULT_TIMEOUT_MS);
     }
 
     // === Verdict ===
@@ -408,13 +300,13 @@ public class ClassifierGuardrail implements ContentGuardrail {
                 return null;
             }
             String tail = answer.length() > MAX_LABEL_SCAN_CHARS ? answer.substring(answer.length() - MAX_LABEL_SCAN_CHARS) : answer;
-            Matcher matcher = pattern.get().matcher(BudgetedCharSequence.withBudget(tail, TimeUnit.MILLISECONDS.toNanos(LABEL_MATCH_BUDGET_MS)));
+            Matcher matcher = RegexDeadline.matcher(pattern.get(), tail, RegexDeadline.deadlineIn(LABEL_MATCH_BUDGET_MS));
             String found = null;
             try {
                 while (matcher.find()) {
                     found = matcher.groupCount() >= 1 && matcher.group(1) != null ? matcher.group(1) : matcher.group();
                 }
-            } catch (MatchBudgetExceededException e) {
+            } catch (RegexDeadline.MatchDeadlineExceededException e) {
                 LOGGER.warnf("Classifier labelPattern exceeded its %d ms match budget — the answer is undecided", LABEL_MATCH_BUDGET_MS);
                 return null;
             }
@@ -433,118 +325,12 @@ public class ClassifierGuardrail implements ContentGuardrail {
     // === Cost ===
 
     static double cost(ChatResponse response, GuardrailContext context) {
-        Double inputPrice = price(context, PARAM_INPUT_PRICE);
-        Double outputPrice = price(context, PARAM_OUTPUT_PRICE);
-        TokenUsage usage = response != null ? response.tokenUsage() : null;
-        if (usage == null) {
-            return 0.0;
-        }
-        Map<String, Object> tokenUsage = new HashMap<>();
-        tokenUsage.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
-        tokenUsage.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
-        double cost = TokenPricing.cost(inputPrice, outputPrice, tokenUsage);
-        return Double.isFinite(cost) && cost > 0.0 ? cost : 0.0;
-    }
-
-    private static Double price(GuardrailContext context, String name) {
-        String raw = context.parameter(name, null);
-        if (raw == null) {
-            return null;
-        }
-        try {
-            double value = Double.parseDouble(raw.trim());
-            return Double.isFinite(value) && value >= 0.0 ? value : null;
-        } catch (NumberFormatException e) {
-            return null;
-        }
+        return GuardrailModelClient.cost(response, context);
     }
 
     // === Helpers ===
 
-    private static boolean includeContext(GuardrailContext context) {
-        return Boolean.parseBoolean(context.parameter(PARAM_INCLUDE_CONTEXT, "false").trim());
-    }
-
     private static String lastUserText(List<ChatMessage> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if (messages.get(i) instanceof UserMessage user) {
-                return userText(user);
-            }
-        }
-        return "";
-    }
-
-    private static String userText(UserMessage message) {
-        if (message.hasSingleText()) {
-            return message.singleText();
-        }
-        StringBuilder text = new StringBuilder();
-        message.contents().forEach(content -> {
-            if (content instanceof TextContent part) {
-                if (!text.isEmpty()) {
-                    text.append('\n');
-                }
-                text.append(part.text());
-            }
-        });
-        return text.toString();
-    }
-
-    /** The call ran out of time — its own or the turn's. */
-    private static final class ClassifierTimeoutException extends RuntimeException {
-        ClassifierTimeoutException() {
-            super("classifier timed out", null, false, false);
-        }
-    }
-
-    /** Thrown from {@link BudgetedCharSequence} to abort a runaway match. */
-    private static final class MatchBudgetExceededException extends RuntimeException {
-        MatchBudgetExceededException() {
-            super(null, null, false, false);
-        }
-    }
-
-    /**
-     * A view of the text that gives up after a time budget: the regex engine reads
-     * it character by character, so a catastrophically backtracking pattern hits
-     * the check instead of running for minutes. The clock is read every 256 reads.
-     */
-    private static final class BudgetedCharSequence implements CharSequence {
-        private final CharSequence text;
-        private final long deadlineNanos;
-        private int reads;
-
-        /** {@code deadlineNanos} is an absolute {@link System#nanoTime()} value. */
-        private BudgetedCharSequence(CharSequence text, long deadlineNanos) {
-            this.text = text;
-            this.deadlineNanos = deadlineNanos;
-        }
-
-        static BudgetedCharSequence withBudget(CharSequence text, long budgetNanos) {
-            return new BudgetedCharSequence(text, System.nanoTime() + budgetNanos);
-        }
-
-        @Override
-        public char charAt(int index) {
-            if ((++reads & 0xFF) == 0 && System.nanoTime() - deadlineNanos > 0) {
-                throw new MatchBudgetExceededException();
-            }
-            return text.charAt(index);
-        }
-
-        @Override
-        public int length() {
-            return text.length();
-        }
-
-        @Override
-        public CharSequence subSequence(int start, int end) {
-            return new BudgetedCharSequence(text.subSequence(start, end), deadlineNanos);
-        }
-
-        @Override
-        public String toString() {
-            return text.toString();
-        }
+        return GuardrailModelClient.lastUserText(messages);
     }
 }

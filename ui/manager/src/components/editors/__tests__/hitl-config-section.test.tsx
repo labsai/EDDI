@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
@@ -216,6 +217,22 @@ describe("HitlConfigSection", () => {
       expect(onValidityChange).toHaveBeenLastCalledWith(true);
 
       fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(onValidityChange).toHaveBeenLastCalledWith(false);
+    });
+
+    it("an empty list stops counting once HITL itself is switched off", () => {
+      const onValidityChange = vi.fn();
+      function Host() {
+        const [agent, setAgent] = useState<Agent>({
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+        });
+        return <HitlConfigSection agent={agent} onChange={setAgent} onValidityChange={onValidityChange} />;
+      }
+      renderWithProviders(<Host />);
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "" } });
+      expect(onValidityChange).toHaveBeenLastCalledWith(true);
+
+      fireEvent.click(screen.getByTestId("hitl-config-enabled"));
       expect(onValidityChange).toHaveBeenLastCalledWith(false);
     });
 

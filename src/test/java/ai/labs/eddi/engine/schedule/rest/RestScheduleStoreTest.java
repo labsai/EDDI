@@ -136,6 +136,25 @@ class RestScheduleStoreTest {
         assertNotNull(created.getNextFire());
     }
 
+    /**
+     * A fire would act as that user id and join a live agent-test run's session.
+     * Refused for an admin too, who may otherwise name any user.
+     */
+    @Test
+    void create_rejectsAReservedAgentTestUserId() {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCronExpression("0 9 * * *");
+        schedule.setMessage("Hello");
+        schedule.setUserId("agent-test:0123456789abcdef01234567:0:1");
+
+        Response response = rest.createSchedule(schedule);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains("reserved"), String.valueOf(response.getEntity()));
+    }
+
     @Test
     void create_rejectsMissingAgentId() {
         var schedule = new ScheduleConfiguration();

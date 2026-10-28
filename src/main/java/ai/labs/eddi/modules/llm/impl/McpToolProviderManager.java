@@ -407,22 +407,17 @@ public class McpToolProviderManager {
                 continue;
             }
 
-            // F12: serve the tool list from the TTL cache when it is still fresh —
-            // a live tools/list RPC per server per turn was pure overhead. Nothing
-            // reaches the cache without having passed validation first, so this is
-            // checked before the (potentially DNS-resolving) validation below.
-            CachedTools cached = toolCache.get(cacheKey(serverConfig));
-            if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
-                LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
-                count("cache_hit");
-                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
-                continue;
-            }
-
             // A10/I3: a rejected URL or an unimplemented transport is a static
             // CONFIGURATION error, not a connectivity blip — validate before contacting
             // the server so it is reported as such, logged at ERROR, and never counted
             // as a circuit-breaker failure (the breaker shields flaky servers, not typos).
+            //
+            // Before the cache, not after it: the URL check resolves the host, and a
+            // name that passed when its tools were cached may resolve to a private
+            // address now (DNS rebinding). Serving cached
+            // executors without asking again handed the model tools bound to a host
+            // nobody had vouched for since. The lookup is normally answered from the
+            // JVM's DNS cache, so the check costs little on a hit.
             try {
                 validateServerUrl(url);
                 validateTransport(serverConfig.getTransport());
@@ -441,6 +436,16 @@ public class McpToolProviderManager {
             // (e.g. "sse") that is actually served over StreamableHTTP — say so once
             // per server rather than stripping every tool from a stored config.
             warnOnceAboutDeprecatedTransport(url, serverConfig.getTransport(), serverName);
+
+            // F12: serve the tool list from the TTL cache when it is still fresh —
+            // a live tools/list RPC per server per turn was pure overhead.
+            CachedTools cached = toolCache.get(cacheKey(serverConfig));
+            if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
+                LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
+                count("cache_hit");
+                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
+                continue;
+            }
 
             try {
                 // Discover tools — McpToolProvider returns ToolProviderResult
@@ -1251,18 +1256,31 @@ public class McpToolProviderManager {
         // embedded redirecting server. The A2A client makes the same choice.
         var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout).followRedirects(false);
 
+        // The headers supplier is the transport's one per-request hook: langchain4j
+        // calls it while building every HTTP request it sends — the handshake, each
+        // tools/list and tool call, the optional GET stream — before anything is
+        // written. The URL is validated there again, because this transport is cached
+        // and resolves the host itself on every new connection: a name that passed
+        // the check above can rebind to a private address later (DNS
+        // rebinding). A refusal throws out of the request, unsent.
+        String serverUrl = config.getUrl();
         if (!isNullOrEmpty(apiKey)) {
             final String configuredKey = apiKey;
             // Per request, not per client. The Map overload would freeze this value
             // into the cached client, which is why a ${caller:...} reference has to be
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
-            transportBuilder.customHeaders(callContext -> withTraceHeaders(
-                    authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext), callContext));
+            transportBuilder.customHeaders(callContext -> {
+                validateServerUrl(serverUrl);
+                return withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext), callContext);
+            });
         } else {
             // No credential configured: the server decides whether it needs one.
             // The trace context still goes out, mirrored from params._meta.
-            transportBuilder.customHeaders(callContext -> withTraceHeaders(Map.of(), callContext));
+            transportBuilder.customHeaders(callContext -> {
+                validateServerUrl(serverUrl);
+                return withTraceHeaders(Map.of(), callContext);
+            });
         }
 
         return transportBuilder.build();

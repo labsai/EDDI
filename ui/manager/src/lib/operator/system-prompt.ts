@@ -13,6 +13,7 @@ import {
   grantsIngestionFileReads,
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
+  grantsRatingReads,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -183,9 +184,15 @@ You can:
   case and turn failed, which expectation, and the actual value. With write
   access you can also start a run; it deploys the agent version to the test
   environment (never production) and runs in the background, so read the run
-  again until its status is no longer RUNNING. An \`unmockedTool\` failure means
-  the suite has no mock for a tool the agent called, not that the agent is
-  broken. You cannot create or edit suites.
+  again until its status is no longer RUNNING — then it is PASSED, FAILED,
+  ERROR (the harness could not run it), ABORTED (the node running it stopped;
+  its results are incomplete) or CANCELLED (someone stopped it; the cases that
+  finished keep their results). With write access you can also cancel a RUNNING
+  run; that only works on the node executing it, and 409 says so otherwise. An
+  \`unmockedTool\` failure means the suite has no mock for a tool the agent
+  called, not that the agent is broken. ABORTED, ERROR and CANCELLED are not a
+  verdict on the agent: say so, and suggest starting the run again. You cannot
+  create or edit suites.
 - Look up which EDDI version and git commit this deployment is running. Always
   call the version tool rather than answering from memory: the deployment can be
   upgraded after you were set up, so anything you remember may be out of date.
@@ -576,6 +583,49 @@ const BODY_KNOWLEDGE_BASES_NO_READS = `Knowledge bases (RAG):
  * section restates the four-step landing procedure operationally; this is the
  * mental model behind it.
  */
+/**
+ * Conversation ratings — gated on {@link grantsRatingReads}: every line below
+ * names one of the three rating reads, so the section is absent rather than
+ * wrong when they are not granted.
+ */
+const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
+- An agent version can ask the people chatting to rate the conversation and,
+  optionally, single replies. It is set in the agent document's
+  \`ratingConfig\`, which you do not edit: absent or \`enabled: false\` means
+  off (the default). Defaults when on: \`scale\` THUMBS (or FIVE_STAR) for the
+  conversation rating; a reply rating is always thumbs and off unless
+  \`messageRating.enabled\`; comments off unless \`comment.enabled\` (at most
+  \`comment.maxLength\`, default 1000); \`reasonTags\` a closed list, empty by
+  default; \`ratingWindowHours\` 168 after the last activity (0 = no limit).
+  The setting of the version the conversation RAN ON decides, so turning
+  ratings on in a new version does not open old conversations to them. Point
+  the admin at the agent's Ratings section in the manager to change it.
+- Every rating stores its raw score and a normalized score (0..1: thumbs 0 or
+  1, stars (score-1)/4), the agent version, environment and channel, optional
+  reason tags and comment, and a triage status: NEW or REVIEWED, with who
+  reviewed it and an internal note. A re-rating puts it back to NEW.
+- "Needs attention" means NEW and either low (normalized 0.5 or less) or
+  carrying a comment. Count it with the attention-count read; list it with the
+  rating list and \`needsAttention=true\`.
+- Scoping: an administrator sees every agent's ratings. Anyone else must pass
+  \`agentId\` and hold EDIT on that agent; without it the answer is 400
+  \`AGENT_ID_REQUIRED\` — ask which agent, never retry without one. Only
+  administrators see the rater's \`userId\`; do not repeat user ids unless asked.
+- "How is agent X rated since version N?": read the summary for the agent with
+  \`groupBy=agentVersion\` and compare the buckets from version N on with the
+  earlier ones (\`count\`, \`avgNormalized\`, \`csat\` = share of five-star
+  ratings scored 4-5, \`thumbsUpRate\`, \`topTags\`). The \`agentVersion\`
+  filter matches ONE version exactly, so it cannot express "since". Say how many
+  ratings each bucket holds: a version with fewer than about 10 is too few to
+  judge. For a trend over time use \`groupBy=week\` (or \`day\`) with
+  \`from\`/\`to\` (UTC; an instant \`to\` is exclusive, a date-only \`to\` includes
+  that whole day).
+- To show what people complained about, list with \`sort=lowest\` or
+  \`hasComment=true\` and quote the comments briefly; a row's
+  \`canOpenTranscript\` says whether the conversation itself can be read.
+- You cannot mark ratings reviewed, write review notes or export them: triage
+  is the admin's call on the Feedback page in the manager (/manage/feedback).`;
+
 const BODY_ARCHITECTURE = `How this platform is structured:
 - An agent references a workflow by id and version; the workflow's steps
   reference config documents (LLM config, behavior rules, output sets,
@@ -1008,27 +1058,46 @@ your tool schemas do not cover it, not as a routine first step:
   maxRefusalsPerTurn (3), exemptTools (e.g. status-poll tools).
 - Guardrails on an LLM task (off unless configured): inputGuardrails screen the
   user's message before the model runs, outputGuardrails the answer before it
-  is delivered. Each entry is {type, action, maxRetries, blockMessage,
-  parameters}; type is prompt-injection (input), pii-redaction, regex-filter,
-  max-length, classifier (both) or json-object (output); action is block (default), redact,
-  reprompt (output: re-ask the same model, maxRetries default 2, max 5, then
-  block) or warn. block/redact/reprompt on the output side make the task buffer
+  is delivered. Each entry is {type, action, maxRetries, onExhausted,
+  blockMessage, parameters}; type is prompt-injection (input), pii-redaction,
+  regex-filter, max-length, classifier (both), judge or json-object (output);
+  action is block (default), redact, reprompt (output: re-ask the same model,
+  maxRetries default 2, max 5, then block) or warn. onExhausted (output
+  reprompt only, EDDI 6.7+) is block (default) or deliver-best: once the
+  retries are spent, deliver the attempt that guardrail rated best (fewest
+  issue codes for a judge, else the last attempt), recorded as a warn with
+  reason "<reason>:delivered_best" — and that attempt is still screened by
+  the output guardrails after it (the ones before it already screened it; a
+  redact rewrites it, a block or reprompt finding blocks it), so it cannot
+  bypass the PII redaction or classifiers after it. The exhausted guardrail
+  does not re-screen its own pick, so a classifier with deliver-best delivers
+  what it flagged; keep a safety classifier on onExhausted block. The
+  deploy refuses deliver-best on any other action or on input guardrails, and
+  logs a warning for deliver-best on a classifier (a safety check should not
+  deliver what it flagged). block/redact/reprompt on the output side make the task buffer
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
   strings, never templates: pii-redaction takes patterns
   ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
   patterns one regular expression per line, max-length takes maxChars. A
   guardrail that errors fails closed for block/reprompt (the turn is blocked,
   reason guardrail_error) and open for redact/warn; parameter failMode
-  ("closed"/"open") overrides. Input guardrails run before retrieval. An
+  ("closed"/"open") overrides. regex-filter and prompt-injection patterns get
+  250 ms per text together; past it the reason is pattern_timeout and failMode
+  applies (block refuses the text). A pattern that is not a valid regular
+  expression fails the deploy, naming its line. A message an input guardrail
+  blocked (or a classifier redacted) is shown to models on later turns as
+  "[earlier message withheld by a guardrail]", without its files; conversation
+  memory keeps the original. Input guardrails run before retrieval. An
   unknown type is skipped with a WARN, not rejected. Every firing is in the
   audit entry's output.guardrails and the eddi.guardrail.triggered metric. When
   you can edit LLM configs, add them with a PATCH "add" of
   /tasks/<n>/inputGuardrails or /tasks/<n>/outputGuardrails.
 - The classifier guardrail asks a safety-classifier model the admin runs
   (EDDI ships and recommends none; the admin checks the model's licence).
-  Parameters: provider (an EDDI provider type: openai for any OpenAI-compatible
-  server such as vLLM, ollama, ...) plus that provider's own parameters exactly
-  as on an LLM task (baseUrl, apiKey, modelName for openai / model for ollama,
+  Parameters: provider (an EDDI provider type: openai-compatible for a
+  self-hosted server such as vLLM or llama-server, ollama, openai, ...) plus that
+  provider's own parameters exactly as on an LLM task (baseUrl, apiKey,
+  modelName for openai-compatible and openai / model for ollama,
   customParameters, maxTokens) — the admin sets apiKey in the editor as a vault
   reference; you never write one; unsafeLabel
   (default "yes") and safeLabel (default "no" only when unsafeLabel is "yes";
@@ -1051,6 +1120,30 @@ your tool schemas do not cover it, not as a routine first step:
   classifier then blocks every guarded turn; open lets the text through with a
   warning. It does not re-screen earlier history messages (cost). Point the
   admin at docs/langchain.md for worked examples.
+- The judge guardrail (output only, EDDI 6.7+) asks a model whether the answer
+  is right by the admin's own criteria — e.g. grounded in the retrieved
+  sources. Same model parameters as the classifier (provider plus the
+  provider's own keys; apiKey is a vault reference the admin sets — you never
+  write one), and its own: promptTemplate (required; {input}, {output},
+  {context} with includeRetrievedContext "true"), issues (required: a JSON
+  object as a string mapping 1-20 issue codes, upper-case letters, digits and
+  underscores, to the fix text a reprompt sends — e.g.
+  {"UNSUPPORTED_CLAIM": "Remove every claim the sources do not state."}),
+  timeoutMs (default 5000), inputPricePer1M/outputPricePer1M (an unpriced
+  judge is logged at deploy: its calls are not counted against cost ceilings),
+  jsonResponseFormat (on/off/auto). EDDI appends the reply format itself; the
+  judge may only answer {"issues": [declared codes]}, an empty list passes,
+  and a finding has reason "judge_failed:<CODES>". A reprompt tells the model
+  only the admin's fix texts for those codes — never the judge's own words,
+  so a judge cannot be used to inject instructions. Any other reply or an
+  undeclared code is judge_unparseable, an unreachable or slow judge
+  judge_unavailable; failMode decides (closed by default for reprompt, so the
+  answer is withheld — open lets it through with a warning). Typical setup:
+  action reprompt, maxRetries 1, onExhausted deliver-best. Each answer costs
+  one judge call, each reprompt one model call plus one more judge call;
+  eddi.guardrail.judge.duration{provider,outcome} shows pass, fail,
+  unparseable, unavailable and timeout. A judge on the task's own model is
+  biased (the deploy logs a note).
 - Property instructions (property setter, and preRequest/postResponse of
   apicalls, mcpcalls and llm tasks) are typed by the field they set:
   valueString (a template), valueInt, valueLong (beyond the int range),
@@ -1083,8 +1176,15 @@ your tool schemas do not cover it, not as a routine first step:
   be a \${vault:...} reference; signatureScheme is eddi-v1 (default), github or
   generic-hmac; targets[].triggers match the event type (exact or "prefix*").
   Turns run as user "webhook:<integrationId>" with the event as the context
-  value "event" (context.event in templates). 401 = bad signature, 200 = duplicate event id, 429 = tenant
-  quota. Admins create them on the Manager's Channels page; you have no channel
+  value "event" (context.event in templates). Answers: 401 = bad signature, an
+  unknown integration id (deliberately indistinguishable), or an unusable
+  secret (plaintext or under 16 characters: the router strips it and logs one
+  WARN; rotate to a 32-byte vault secret); 200 = duplicate event;
+  409 carries reason "in_progress" (retry) or "awaiting_approval" (a human must
+  decide); 429 = tenant quota; 503 = agent not deployed, or capacity: the
+  integration exceeded platformConfig.maxDeliveriesPerWindow (default 3000 per
+  10 minutes per node) or the shared replay cache is crowded (metric outcome
+  refused_capacity). Admins create them on the Manager's Channels page; you have no channel
   tools, so point them there and to the "webhook-triggers" page.
 
 Docs map — go STRAIGHT to the page when depth is needed (list pages first only
@@ -1092,8 +1192,9 @@ if the one you want is missing; this deployment may ship a subset):
 - versioning & how the pieces fit: "putting-it-all-together", "architecture"
 - behavior rules: "behavior-rules" · output: "output-configuration"
 - LLM & model selection: "langchain", "model-cascade"; every model parameter per provider and which model rejects it: "llm-parameters"
-- input/output guardrails (prompt-injection, PII redaction, reprompt): "langchain"
-  (section "Input and Output Guardrails"), design and limits in "security"
+- input/output guardrails (prompt-injection, PII redaction, reprompt, classifier,
+  judge, onExhausted deliver-best): "langchain" (section "Input and Output
+  Guardrails"), design and limits in "security"
 - LLM turn failures, fallback answers ("Sorry, I could not answer..."), retries,
   skipped models, circuit breaker: "llm-resilience"
 - HTTP tools: "httpcalls" · MCP: "mcp-server"
@@ -1267,6 +1368,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // Unconditional, but its CONTENT is derived: the section states either what
     // can be read or that nothing can. See buildKnowledgeBaseSection.
     buildKnowledgeBaseSection(endpoints),
+    ...(grantsRatingReads(endpoints) ? [BODY_RATINGS] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

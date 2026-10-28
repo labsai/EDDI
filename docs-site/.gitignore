@@ -1,0 +1,5 @@
+node_modules/
+.astro/
+
+# Written by scripts/sync-docs.mjs and astro build — docs/ is the source.
+.generated/

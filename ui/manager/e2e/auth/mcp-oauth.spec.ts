@@ -75,8 +75,10 @@ async function acceptConsentIfAsked(request: APIRequestContext, location: string
   return accepted.headers()["location"] ?? "";
 }
 
-/** Runs authorization-code + PKCE end to end and returns the access token. */
-async function tokenViaAuthorizationCode(request: APIRequestContext): Promise<string> {
+/** Runs authorization-code + PKCE end to end and returns the token response. */
+async function tokenViaAuthorizationCode(
+  request: APIRequestContext,
+): Promise<{ access: string; refresh: string }> {
   const { verifier, challenge } = pkcePair();
   const authorize = new URL(`${KEYCLOAK_BASE}/realms/${REALM}/protocol/openid-connect/auth`);
   authorize.search = new URLSearchParams({
@@ -127,9 +129,10 @@ async function tokenViaAuthorizationCode(request: APIRequestContext): Promise<st
     `the token exchange failed: ${await exchanged.text()}`,
   ).toBe(200);
 
-  const token = ((await exchanged.json()) as { access_token?: string }).access_token;
-  expect(token, "the token response carried no access_token").toBeTruthy();
-  return token as string;
+  const body = (await exchanged.json()) as { access_token?: string; refresh_token?: string };
+  expect(body.access_token, "the token response carried no access_token").toBeTruthy();
+  expect(body.refresh_token, "the token response carried no refresh_token").toBeTruthy();
+  return { access: body.access_token as string, refresh: body.refresh_token as string };
 }
 
 /** Claims of a JWT, unverified — the backend is what verifies it. */
@@ -157,8 +160,19 @@ test.describe("MCP over OAuth — a client signs itself in and calls a tool", ()
   });
 
   test("authorization code + PKCE yields a token EDDI accepts on /mcp", async ({ request }) => {
-    const token = await tokenViaAuthorizationCode(request);
+    const { access: token, refresh } = await tokenViaAuthorizationCode(request);
     const payload = claims(token);
+
+    // An ordinary refresh token dies with the realm's SSO session (30 idle
+    // minutes), which sends the user back through this browser flow after every
+    // break. eddi-mcp carries offline_access as a DEFAULT scope — the client asks
+    // only for `openid`, as an MCP client copying scopes_supported would — so the
+    // refresh token must come back as an offline one.
+    expect(
+      claims(refresh).typ,
+      "eddi-mcp issued an ordinary refresh token: offline_access is missing as a default client scope,"
+        + " from the client's scope mapping, or from the user's roles",
+    ).toBe("Offline");
 
     // What #805 validates. Without the audience mapper on eddi-mcp this token
     // would authenticate everywhere else and be refused here.

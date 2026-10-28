@@ -1158,7 +1158,7 @@ summarizer's.
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
-| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up |
+| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up. Like a continuation it needs the transcript's owner (or an admin) **and** current USE on the group: owning the transcript does not keep a member runnable after the group was unshared (`403`; the MCP `followup_with_member` refuses the same way) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |

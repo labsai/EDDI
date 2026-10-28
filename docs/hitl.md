@@ -219,8 +219,8 @@ re-evaluated against a newer version's configuration.
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/groups/{groupId}/conversations/{gcId}/approve` | Approve/reject (optionally per-task) |
-| `POST` | `/groups/{groupId}/conversations/{gcId}/approve/stream` | Same, with SSE progress events |
-| `GET` | `/groups/{groupId}/conversations/{gcId}/approval-status` | Pause summary (state, pausedAt, pauseId, phase, pauseType, reason, timeoutPolicy, awaiting task ids); `?detail=full` returns the whole conversation incl. transcript — approver-only callers get `full` only while paused, `403` otherwise |
+| `POST` | `/groups/{groupId}/conversations/{gcId}/approve/stream` | Same, with SSE progress events. The owner and admins follow the resumed discussion to its end; an approver-only caller (`eddi-approver`, neither owner nor admin) gets the outcome of their decision — `hitl_resume` once the resumed run is enqueued (a resume that cannot be enqueued keeps the pause and sends `group_error` instead), or for a rejection `group_complete` without the synthesized answer — and the stream then closes, because the member turns that run after the resume are outside the approver's review window |
+| `GET` | `/groups/{groupId}/conversations/{gcId}/approval-status` | Pause summary (state, pausedAt, pauseId, phase, pauseType, reason, timeoutPolicy, awaiting task ids; for a HUMAN-member turn `pendingMemberId`, `pendingMemberDisplayName` and `pendingHumanPrompt`); `?detail=full` returns the whole conversation incl. transcript — approver-only callers get `full` only while paused, `403` otherwise. `pendingHumanPrompt` is built from the discussion, so it goes only to the pending member, the owner, admins, and an approver while the conversation awaits approval; other approvers see who is up but not the prompt. The MCP `get_group_approval_status` applies the same rule |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals?limit=100` | This group's paused conversations as summaries (bounded, max 1000) |
 | `GET` | `/groups/pending-approvals?limit=100` | **Global approval inbox** across all groups (bounded, max 1000): admins/approvers see everything, other callers their own conversations |
 | `POST` | `/groups/{groupId}/conversations/{gcId}/cancel` | Cancel the discussion — `409` if it is already in a terminal state |
@@ -242,7 +242,7 @@ The `{groupId}` path segment is validated: a conversation that does not belong t
 
 Unknown task IDs, tasks not awaiting approval, and unknown decision values (anything other than case-insensitive `APPROVED`/`REJECTED`) are rejected with `400` **before anything is applied** — the pause and its timeout schedule survive a bad request. An explicit empty `taskApprovals` map (`{}`) behaves like the approve-all shortcut. Resume-vs-resume and cancel-vs-approve races are arbitrated by a DB-level compare-and-set; the loser gets `409`.
 
-**SSE events:** `awaiting_approval` (stream closes; re-attach via `/approve/stream`), `hitl_resume` (emitted once the approve commits — the stream stays open for the resumed discussion's events), `cancelled` and `group_complete`/`group_error` (stream closes), plus the standard discussion events. Every terminal outcome — including REJECTED verdicts, config-drift aborts, and resume failures — emits a closing event, so `/approve/stream` clients never hang.
+**SSE events:** `awaiting_approval` (stream closes; re-attach via `/approve/stream`), `hitl_resume` (emitted once the approve commits — for the owner and admins the stream stays open for the resumed discussion's events; an approver-only caller's stream sends it once the resumed run is enqueued and then closes, see the `approve/stream` row above), `cancelled` and `group_complete`/`group_error` (stream closes), plus the standard discussion events. Every terminal outcome — including REJECTED verdicts, config-drift aborts, and resume failures — emits a closing event, so `/approve/stream` clients never hang.
 
 ### Config drift protection
 
@@ -402,10 +402,16 @@ Validation (all `400`, applied **before** any state changes, so a bad body never
 - `toolDecisions` is only valid for a `TOOL_CALL` pause.
 - An unknown `callId` (not in the pending batch) is rejected (the body names the valid ids).
 - Each listed call requires a `verdict`; per-call `note` ≤ **1024** chars (top-level `note` ≤ 4096).
+- A listed call that is `REJECTED` and has no note of its own (absent or blank) uses the top-level `note`, so a client can send one note for the whole decision and still list the calls it rejects. An `APPROVED` call's note is never shown to the model.
 - Top-level `REJECTED` combined with any per-call `APPROVED` is contradictory — set the top-level verdict to `APPROVED` to mix outcomes.
 - `amendedArguments` is only valid on an `APPROVED` call, must be a **JSON object**, is size-capped, and cannot amend a call whose arguments were truncated at pause time (approve/reject it as-is).
 
-A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (with the reviewer's note) so it can produce a coherent tool-less answer — rejection feeds *back into* the model rather than aborting the turn.
+A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (`status: REJECTED_BY_REVIEWER`, the tool name and the reviewer's note) — rejection feeds *back into* the model rather than aborting the turn. What the result tells the model to do depends on who decided and whether a note came with it:
+
+- **A person left a note.** The result says the user did not approve the call and left a note: if the note asks for changes, call the tool again with exactly those changes and nothing else changed; if it declines or asks for something else, do not call it again and reply briefly. A note is therefore a way to ask for a revision. The re-proposed call is a new call: it is gated like any other, pauses again (a new `pauseId` and its own timeout) and needs its own approval. Nothing a note says changes a call that was approved.
+- **No note, or an automated decision.** The result keeps the plain "declined" text: do not retry this exact call, explain the situation and offer alternatives. An automated decision is one whose `decidedBy` starts with `system:` — the timeout auto-reject (`system:timeout`) and the group-conversation auto-reject (`system:group`, note "tool approval is not available during group discussions in this version"). The note on those is an explanation, not a request, and asking the model to revise would only make it retry a call that can never be approved.
+
+Each re-proposal is another pause and counts toward `maxPausesPerTurn`. A deployment that expects notes to come back as revisions should raise it (the maximum is `10`); at the cap the remaining gated calls in the turn are refused.
 
 ### `pauseDetails` for a tool pause
 

@@ -632,6 +632,27 @@ below. See [Enabling connections](connections.md#enabling-connections).
 
 ---
 
+## White-labeling
+
+The brand is normally edited at runtime (`/administration/branding`, `eddi-admin`) and stored in the database. These properties **seed** every field the stored brand leaves unset; with `eddi.branding.locked=true` they are the whole brand and nothing can be edited at runtime. Every value passes the same validation as a REST write, and an invalid one fails startup naming the property. See [White-Labeling](white-labeling.md).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.branding.locked` | `false` | Properties are authoritative: the stored brand is ignored and every branding write answers 409. For installs that keep their brand in Git |
+| `eddi.branding.product-name` | *(unset: `EDDI`)* | The product name the UIs show. At most 40 characters; no `<`, `>` or control characters |
+| `eddi.branding.short-name` | *(unset: the product name)* | For tight spaces. At most 12 characters |
+| `eddi.branding.tagline` | *(unset)* | One line for link previews and the welcome page. At most 120 characters |
+| `eddi.branding.color.primary` | *(unset: EDDI amber)* | Primary colour: `#rgb`, `#rrggbb`, or `rgb()`/`hsl()`/`oklch()` with plain numbers |
+| `eddi.branding.color.primary-foreground` | *(unset)* | Text on the primary colour. Below 4.5:1 contrast logs a WARN |
+| `eddi.branding.color.dark-primary` | *(unset: the primary)* | Primary colour in dark mode |
+| `eddi.branding.color.dark-primary-foreground` | *(unset: the foreground)* | Text on it in dark mode |
+| `eddi.branding.color.chat-accent` | *(unset: the primary)* | The Chat UI's accent |
+| `eddi.branding.powered-by` | *(unset: `true`)* | Show "Powered by EDDI" |
+| `eddi.branding.show-update-check` | *(unset: `false`)* | Keep the Manager's update check UI while branded |
+| `eddi.branding.assets-dir` | *(unset)* | Directory of brand images under fixed names (`logo.svg\|png\|webp`, `logo-dark.*`, `icon.*`, `favicon.ico\|png\|svg`, `og-image.*`), each checked like an upload. A missing directory or a refused file fails startup |
+
+---
+
 ## Logging & documentation surfaces
 
 | Property | Default | Description |

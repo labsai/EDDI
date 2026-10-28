@@ -1888,6 +1888,20 @@ for %%F in (%COMPOSE_FILES%) do (
     )
 )
 
+rem An install from before docker-compose.postgres-only.yml required POSTGRES_PASSWORD
+rem has none in .env, and its data volume was initialised with the old hardcoded
+rem "eddi". Carry that value forward: Postgres reads the variable only at initdb, so
+rem a fresh random one would lock EDDI out of the existing volume.
+set "NEED_PG="
+for %%F in (%COMPOSE_FILES%) do findstr /c:"POSTGRES_PASSWORD" "%%F" >nul 2>nul && set "NEED_PG=1"
+if defined NEED_PG (
+    findstr /b /c:"POSTGRES_PASSWORD=" "%ENV_FILE%" >nul 2>nul || (
+        >> "%ENV_FILE%" echo POSTGRES_PASSWORD='eddi'
+        echo Note: no POSTGRES_PASSWORD in .env, kept the legacy value eddi so the existing
+        echo       database volume still accepts it. Rotate it when convenient.
+    )
+)
+
 rem Refreshing the compose files above can introduce new file-type bind mounts, so
 rem the monitoring assets have to be on disk BEFORE the containers are recreated.
 rem Refreshing compose on its own is what breaks a previously working Grafana:
@@ -1911,9 +1925,15 @@ if defined MISSING_ASSETS goto update_assets_missing
 echo.
 echo Pulling latest images...
 docker compose %FLAGS% pull
+if errorlevel 1 goto update_failed
 docker compose %FLAGS% up -d
+if errorlevel 1 goto update_failed
 echo EDDI updated.
 goto :eof
+
+:update_failed
+echo EDDI update failed: docker compose reported an error, see above. The compose files and .env may already be refreshed, so check the state with eddi status.
+exit /b 1
 
 :check_ref
 rem Same rules as install.ps1's Test-GitRef: the character class alone lets '..'

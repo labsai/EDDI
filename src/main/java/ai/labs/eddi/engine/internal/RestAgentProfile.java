@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.api.IRestAgentProfile;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.ratings.ConversationRatingPolicy;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.security.ConversationReviewPolicy;
@@ -30,14 +31,16 @@ public class RestAgentProfile implements IRestAgentProfile {
     private final IDocumentDescriptorStore descriptorStore;
     private final IAgentFactory agentFactory;
     private final ConversationReviewPolicy reviewPolicy;
+    private final ConversationRatingPolicy ratingPolicy;
 
     @Inject
     public RestAgentProfile(ResourceAccessGuard accessGuard, IDocumentDescriptorStore descriptorStore, IAgentFactory agentFactory,
-            ConversationReviewPolicy reviewPolicy) {
+            ConversationReviewPolicy reviewPolicy, ConversationRatingPolicy ratingPolicy) {
         this.accessGuard = accessGuard;
         this.descriptorStore = descriptorStore;
         this.agentFactory = agentFactory;
         this.reviewPolicy = reviewPolicy;
+        this.ratingPolicy = ratingPolicy;
     }
 
     @Override
@@ -58,16 +61,23 @@ public class RestAgentProfile implements IRestAgentProfile {
         }
 
         String notice = null;
+        RatingProfile rating = null;
         try {
             // The notice follows the version a new conversation would run on — the one
             // the review decision is later made against.
             IAgent agent = agentFactory.getLatestReadyAgent(environment == null ? Deployment.Environment.production : environment, agentId);
             if (agent != null) {
                 notice = reviewPolicy.noticeFor(agentId, agent.getAgentVersion()).orElse(null);
+                // Like the notice, the rating controls follow the version a new
+                // conversation would run on; ratings are later checked against the
+                // version the conversation actually ran on. A client resuming a
+                // conversation takes the controls of that version from
+                // GET /agents/{conversationId}/rating instead.
+                rating = ratingPolicy.ratingConfigOf(agentId, agent.getAgentVersion()).map(RatingProfile::of).orElse(null);
             }
         } catch (Exception e) {
             LOGGER.debugf("Could not resolve the deployed version of %s: %s", sanitize(agentId), e.getMessage());
         }
-        return new AgentProfile(agentId, name, description, notice);
+        return new AgentProfile(agentId, name, description, notice, rating);
     }
 }

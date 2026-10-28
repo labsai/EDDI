@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
+import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
@@ -164,10 +165,13 @@ public class ConversationSummarizer {
         int reserved = hasSummary ? composeContent(existingSummary, alreadySummarized, summarizeThroughStep, "").length() : 0;
         int turnBudget = maxChars - reserved;
 
-        String newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+        // A message an input guardrail refused is withheld from the summarizer too:
+        // the summary reaches the main model's prompt on every later turn.
+        List<ConversationOutput> outputs = ConversationLogGenerator.modelFacingOutputs(memory);
+        String newTurnsText = renderTurns(outputs, alreadySummarized, summarizeThroughStep);
         while (newTurnsText.length() > turnBudget && summarizeThroughStep > alreadySummarized + 1) {
             summarizeThroughStep--;
-            newTurnsText = renderTurns(memory.getConversationOutputs(), alreadySummarized, summarizeThroughStep);
+            newTurnsText = renderTurns(outputs, alreadySummarized, summarizeThroughStep);
         }
 
         // Guard: don't call the LLM for a window with no text (e.g. malformed

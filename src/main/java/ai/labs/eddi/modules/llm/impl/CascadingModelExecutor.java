@@ -776,6 +776,10 @@ class CascadingModelExecutor {
                 // confidence 0 or swallowed into "best so far").
                 if (e instanceof ToolApprovalRequiredException tare) {
                     ticket.release();
+                    // The steps that ran before this one were priced and their tools
+                    // charged, but this run returns no result to carry them: the pause
+                    // carries them (the paused step's own segment is already on it).
+                    tare.addSpend(totals.tokenUsage, totals.llmCostUsd + totals.toolCostUsd);
                     // Record WHICH step paused (M-L1): the batch is the object already
                     // set on memory, persisted at the end of this turn. Without it the
                     // resume rebuilt the task's base model and an escalated step's

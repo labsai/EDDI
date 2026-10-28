@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { fileURLToPath, URL } from "node:url";
 import { readFileSync } from "node:fs";
 import type { ServerResponse } from "node:http";
+import { brandDefaults } from "./scripts/vite-plugin-brand.mjs";
 
 /**
  * The EDDI version this Manager ships with, read from the repository's pom.xml —
@@ -85,7 +86,22 @@ function pSSE(target = BACKEND): ProxyOptions {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    // The EDDI brand for `npm run dev` and MSW mock mode: fills the shells'
+    // %BRAND_*% placeholders and serves /branding/*. Dev server only — EDDI
+    // renders both itself in production (scripts/vite-plugin-brand.mjs).
+    brandDefaults({
+      assets: {
+        logo: fileURLToPath(new URL("./src/assets/logo_eddi.png", import.meta.url)),
+        "logo-dark": fileURLToPath(new URL("./src/assets/logo_eddi.png", import.meta.url)),
+        "og-image": fileURLToPath(new URL("./src/assets/logo_eddi.png", import.meta.url)),
+        icon: fileURLToPath(new URL("./public/eddi-icon.svg", import.meta.url)),
+        "favicon.ico": fileURLToPath(new URL("./public/eddi-icon.ico", import.meta.url)),
+      },
+    }),
+  ],
   define: {
     // The sidebar shows the version of the jar it ships in — see readPomVersion.
     __APP_VERSION__: JSON.stringify(process.env.EDDI_VERSION || readPomVersion()),

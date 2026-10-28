@@ -6983,7 +6983,7 @@
           "description": "How long the oldest pending approval has waited. Alert EddiApprovalWaitingLong fires past 24 h."
         },
         {
-          "id": 264,
+          "id": 269,
           "type": "timeseries",
           "title": "HITL email notifications",
           "datasource": {
@@ -7031,7 +7031,7 @@
           "description": "Approval notification mails by outcome: sent, retry (deferred, will be retried), failed (gave up), suppressed (the pause was decided before it went out). A rising failed or retry rate means the system mailer's relay is refusing or unreachable."
         },
         {
-          "id": 265,
+          "id": 268,
           "type": "stat",
           "title": "Email ledger pending",
           "datasource": {
@@ -12398,12 +12398,12 @@
         {
           "id": 262,
           "type": "timeseries",
-          "title": "LLM spend gate refusals",
+          "title": "Spend gate refusals (model calls; tool calls for tenant_check_error)",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_spend_refused_total`: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached.",
+          "description": "`eddi_llm_spend_refused_total`, by reason: model calls refused before they were made because the tenant monthly budget or the agent `maxCostPerConversationUsd` ceiling was already reached (`tenant_budget`, `conversation_ceiling`) or the quota store could not answer (`tenant_accounting_unavailable`). `tenant_check_error` means the budget check itself threw — a defect that should never be non-zero — and counts refused model calls and refused tool calls alike.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -15462,7 +15462,7 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
-      "description": "Rate of `eddi_webhook_events_total` by outcome: `accepted` (a turn was started), `duplicate` (200, already accepted), `in_progress` (409, first delivery still running) or `refused_<status>` (HTTP status returned: 400, 401 bad signature, 403, 404 unknown integration, 409 awaiting approval, 413, 415, 422, 429, 500, 503). A rising 401 rate is a misconfigured sender or a probe.",
+      "description": "Rate of `eddi_webhook_events_total` by outcome: `accepted` (a turn was started), `duplicate` (200, already accepted), `in_progress` (409, first delivery still running), `refused_capacity` (503, the integration is over its `maxDeliveriesPerWindow` budget or the shared replay-protection cache is past its backstop) or `refused_<status>` (HTTP status returned: 400, 401 bad signature, unknown integration id or unusable secret, 403, 409 awaiting approval, 413, 415, 422, 429, 500, 503 agent not deployed or shutting down). A rising 401 rate is a misconfigured sender or a probe; a rising `refused_capacity` is one integration sending faster than its budget.",
       "gridPos": {
         "h": 7,
         "w": 12,
@@ -15679,6 +15679,260 @@
                 ]
               },
               "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 267,
+          "type": "timeseries",
+          "title": "Judge guardrail latency and outcome",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean `eddi_guardrail_judge_duration_seconds` by `provider` and `outcome` (pass, fail, unparseable, unavailable, timeout). A judge grades an LLM task's answer against the issue codes its author declared, after the model answered; only turns whose agent configures a judge guardrail record samples. Watch `unparseable` and `unavailable`: under failMode open they switch the check off without blocking anything. Empty (\"no samples yet\") when there is no judge traffic, because a mean latency has no honest value without calls.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 33
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (provider, outcome) (rate(eddi_guardrail_judge_duration_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum by (provider, outcome) (rate(eddi_guardrail_judge_duration_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{provider}} {{outcome}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              },
+              "noValue": "no samples yet"
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": 264,
+      "type": "row",
+      "title": "Conversation Ratings",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "panels": [
+        {
+          "id": 265,
+          "type": "timeseries",
+          "title": "Ratings by kind and bucket",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_conversation_ratings_total` — ratings people gave, per `kind` (conversation/message) and `bucket` (low/neutral/high on the normalized score). A re-rating counts again; withdrawals (`eddi_conversation_ratings_withdrawn_total`) are query B. Flat is normal when no agent has `ratingConfig` enabled.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind, bucket) (rate(eddi_conversation_ratings_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}} / {{bucket}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (kind) (rate(eddi_conversation_ratings_withdrawn_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "withdrawn {{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 266,
+          "type": "timeseries",
+          "title": "Average normalized rating by agent",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Mean of `eddi_conversation_ratings_normalized` (0..1) per `agentId` over the window, from its `_sum` and `_count`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 35
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (agentId) (rate(eddi_conversation_ratings_normalized_sum{job=~\"$job\"}[$__rate_interval])) / sum by (agentId) (rate(eddi_conversation_ratings_normalized_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{agentId}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
             },
             "overrides": []
           },

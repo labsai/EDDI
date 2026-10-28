@@ -150,6 +150,11 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return outputStore.getCurrentResourceId(id);
     }

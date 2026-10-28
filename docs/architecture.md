@@ -990,7 +990,7 @@ http.send(OutboundRequest.get(Profile.DEFAULT, uri).build(),
 http.send(OutboundRequest.get(Profile.DEFAULT, uri).ssrf(SsrfPolicy.HOPS_ONLY).build(), mode);
 ```
 
-**DNS Rebinding:** EDDI validates hostnames at request time. A TOCTOU (time-of-check-time-of-use) gap exists between DNS validation and TCP connect. This is an accepted risk — exploitation requires a cooperating DNS server AND a successful race condition AND bypassing Layer 2 redirect validation. Defense-in-depth makes this impractical in practice.
+**DNS Rebinding:** EDDI validates hostnames at request time, and the HTTP client resolves the host again to connect — a TOCTOU (time-of-check-time-of-use) gap that the JVM's positive DNS cache normally closes. Where the cache entry expires in between, the httpcalls client checks the address it actually connected to before sending, `OutboundHttp` re-checks after the response headers and discards the response of a target that turned private, and MCP transports re-validate on every request. What remains per path is listed in [security.md → DNS rebinding](security.md#dns-rebinding).
 
 ### Vault Encryption Model
 

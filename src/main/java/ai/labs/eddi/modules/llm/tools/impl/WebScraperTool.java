@@ -22,13 +22,20 @@ import org.jboss.logging.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
 import org.jsoup.select.Elements;
+import org.jsoup.select.NodeFilter;
+import org.jsoup.select.NodeTraversor;
 import org.jsoup.select.Selector;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -82,6 +89,15 @@ public class WebScraperTool {
 
     /** Cap on what a single extraction hands back to the model. */
     private static final int MAX_EXTRACTED_CHARACTERS = 5000;
+
+    /** Most elements a selector extraction lists. */
+    static final int MAX_SELECTOR_ELEMENTS = 20;
+
+    /**
+     * Cap on the text of all listed elements together. Each element is also held to
+     * {@link #MAX_EXTRACTED_CHARACTERS}, so one huge match cannot take it all.
+     */
+    static final int MAX_SELECTOR_OUTPUT_CHARACTERS = 20_000;
 
     /** Backstop response cap used when no configuration is supplied (5 MiB). */
     static final long DEFAULT_MAX_RESPONSE_BYTES = 5L * 1024 * 1024;
@@ -258,14 +274,27 @@ public class WebScraperTool {
             StringBuilder result = new StringBuilder();
             result.append("Found ").append(elements.size()).append(" element(s) matching '").append(cssSelector).append("':\n\n");
 
+            // Element.text() copies an element's WHOLE descendant text, so a selector
+            // matching nested ancestors (`div` on twenty nested divs) used to hand back
+            // the same page text twenty times over. An element inside one already
+            // listed is skipped — its text is part of that ancestor's — and every
+            // element's text is gathered against what is left of one output budget,
+            // so nothing past the budget is ever materialized.
+            Set<Element> listed = Collections.newSetFromMap(new IdentityHashMap<>());
+            int budget = MAX_SELECTOR_OUTPUT_CHARACTERS;
             int count = 0;
             for (Element element : elements) {
-                if (count >= 20) { // Limit to 20 elements
+                if (hasListedAncestor(element, listed)) {
+                    continue;
+                }
+                if (count >= MAX_SELECTOR_ELEMENTS || budget <= 0) {
                     result.append("\n[Additional elements truncated]");
                     break;
                 }
-
-                result.append(++count).append(". ").append(element.text()).append("\n");
+                listed.add(element);
+                String text = boundedText(element, Math.min(budget, MAX_EXTRACTED_CHARACTERS));
+                budget -= text.length();
+                result.append(++count).append(". ").append(text).append("\n");
             }
 
             LOGGER.debugf("Extracted %d elements from %s", count, sanitize(url));
@@ -280,6 +309,80 @@ public class WebScraperTool {
         } catch (Exception e) {
             LOGGER.warnf("Selector extraction failed for %s: %s", sanitize(url), sanitize(e.getMessage()));
             throw new ToolFailureException("Error: Could not extract with selector - " + e.getMessage());
+        }
+    }
+
+    /** Whether an ancestor of {@code element} is already in the result. */
+    private static boolean hasListedAncestor(Element element, Set<Element> listed) {
+        if (listed.isEmpty()) {
+            return false;
+        }
+        for (Element parent = element.parent(); parent != null; parent = parent.parent()) {
+            if (listed.contains(parent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The element's text like {@link Element#text()} — descendant text with
+     * whitespace collapsed and block boundaries read as a space — but gathered only
+     * up to {@code maxChars}: the walk stops there, so an element holding the whole
+     * page costs its budget, not its size. Package-private for tests.
+     */
+    static String boundedText(Element element, int maxChars) {
+        StringBuilder text = new StringBuilder(Math.min(maxChars, 1024));
+        NodeTraversor.filter(new NodeFilter() {
+            @Override
+            public FilterResult head(Node node, int depth) {
+                if (text.length() >= maxChars) {
+                    return FilterResult.STOP;
+                }
+                if (node instanceof TextNode textNode) {
+                    appendCollapsed(text, textNode.getWholeText(), maxChars);
+                } else if (node instanceof Element child && (child.isBlock() || child.nameIs("br"))) {
+                    appendCollapsed(text, " ", maxChars);
+                }
+                return FilterResult.CONTINUE;
+            }
+
+            @Override
+            public FilterResult tail(Node node, int depth) {
+                // A block also ends with a boundary: "<p>next</p>tail" reads "next tail".
+                if (node != element && node instanceof Element child && child.isBlock()) {
+                    appendCollapsed(text, " ", maxChars);
+                }
+                return text.length() >= maxChars ? FilterResult.STOP : FilterResult.CONTINUE;
+            }
+        }, element);
+        int end = text.length();
+        while (end > 0 && text.charAt(end - 1) == ' ') {
+            end--;
+        }
+        return text.substring(0, end);
+    }
+
+    /** Space, tab, line feed, form feed or carriage return: jsoup's whitespace. */
+    private static boolean isJsoupWhitespace(char c) {
+        return c == ' ' || c == 9 || c == 10 || c == 12 || c == 13;
+    }
+
+    /**
+     * Appends {@code raw} with each whitespace run as one space, up to the cap. The
+     * whitespace set is jsoup's own, so a no-break space survives as it does in
+     * {@link Element#text()}.
+     */
+    private static void appendCollapsed(StringBuilder text, String raw, int maxChars) {
+        for (int i = 0; i < raw.length() && text.length() < maxChars; i++) {
+            char c = raw.charAt(i);
+            if (isJsoupWhitespace(c)) {
+                if (text.length() > 0 && text.charAt(text.length() - 1) != ' ') {
+                    text.append(' ');
+                }
+            } else {
+                text.append(c);
+            }
         }
     }
 

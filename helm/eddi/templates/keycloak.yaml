@@ -210,6 +210,15 @@ spec:
             # the internal address while tokens carry the public issuer.
             - name: KC_HOSTNAME_BACKCHANNEL_DYNAMIC
               value: "true"
+            {{- $proxyHeaders := .Values.keycloak.proxyHeaders | default (ternary "xforwarded" "none" (hasPrefix "https://" .Values.eddi.oidc.publicUrl)) }}
+            {{- if ne $proxyHeaders "none" }}
+            # BACKCHANNEL_DYNAMIC builds the token/jwks/userinfo URLs from the
+            # request. Behind a TLS-terminating proxy that request is plain http,
+            # so without trusting X-Forwarded-Proto those URLs come out http://
+            # and OAuth clients refuse them (keycloak.proxyHeaders in values.yaml).
+            - name: KC_PROXY_HEADERS
+              value: {{ $proxyHeaders | quote }}
+            {{- end }}
             {{- end }}
           resources:
             {{- toYaml .Values.keycloak.resources | nindent 12 }}

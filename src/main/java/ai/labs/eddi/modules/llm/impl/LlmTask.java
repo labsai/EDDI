@@ -35,12 +35,14 @@ import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailOutcome;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.JudgeGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.Reprompter;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleEndpoint;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProvider;
 import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
@@ -350,9 +352,30 @@ public class LlmTask implements ILifecycleTask {
                 }
             }
 
+        } catch (ToolApprovalRequiredException pause) {
+            // A tool loop paused for approval. What it spent up to here really happened
+            // but no result will carry it, so record it on the step now: the pause
+            // snapshot persists the step, the pause's settle meters it, and the resume
+            // counts it once through audit:cost — in its spend preflight, its loop
+            // ceiling and its total. Recorded here and only here, for the live path and
+            // a resume that pauses again alike.
+            recordPrePauseSpend(memory.getCurrentStep(), pause);
+            throw pause;
         } catch (ITemplatingEngine.TemplateEngineException | ChatModelRegistry.UnsupportedLlmTaskException | IOException | LifecycleException e) {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Folds a pausing run's spend so far into the step's {@code audit:token_usage}
+     * and {@code audit:cost} (see {@link ToolApprovalRequiredException#addSpend}).
+     */
+    private void recordPrePauseSpend(IWritableConversationStep currentStep, ToolApprovalRequiredException pause) {
+        if (currentStep == null) {
+            return;
+        }
+        accumulateTokenUsage(currentStep, pause.getTokenUsageSoFar());
+        accumulateCost(currentStep, pause.getCostSoFarUsd());
     }
 
     /**
@@ -393,14 +416,28 @@ public class LlmTask implements ILifecycleTask {
         String userInput = extractUserInput(memory);
         String taskId = task.getId() != null ? task.getId() : "default";
 
+        // Spend gate: asked once, before anything of this task that costs money (an
+        // input guardrail may call a classifier model, retrieval an embedding
+        // provider) and before any model request (plain, tool loop or cascade). A
+        // refusal skips all of it and serves the task's fallback answer — see the
+        // SpendRefusedException catch. The input is not screened then: nothing of it
+        // reaches a model or a retrieval query.
+        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+
         // === Input guardrails, first pass (WS4) ===
         // The user's raw message is screened BEFORE retrieval: a blocked message issues
         // no retrieval query and no httpCall, and a redacted one is what the RAG query
         // (possibly an external embedding provider) sees. The model-facing message is
         // assembled later; when it is still exactly this text the second pass below
         // reuses this result instead of evaluating again.
+        boolean screenInput = spendRefusal == null && guardrailService != null && !isNullOrEmpty(task.getInputGuardrails());
+        if (spendRefusal != null && guardrailService != null && guardrailService.anySkipsHistory(task.getInputGuardrails())) {
+            // Never screened, so a guardrail that does not re-screen history (the
+            // classifier) would never see this message: withhold it from later turns.
+            markInputWithheld(currentStep, task);
+        }
         GuardrailService.TextResult inputPrescreen = null;
-        if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails()) && userInput != null) {
+        if (screenInput && userInput != null) {
             inputPrescreen = guardrailService.screenInput(task.getInputGuardrails(), userInput, guardrailContext(memory, task, List.of()),
                     outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
             accumulateCost(currentStep, inputPrescreen.costUsd());
@@ -421,7 +458,7 @@ public class LlmTask implements ILifecycleTask {
 
         // Phase 8c-0: Zero-infrastructure RAG via named httpCall
         String httpCallRag = task.getHttpCallRag();
-        if (!isNullOrEmpty(httpCallRag) && userInput != null) {
+        if (spendRefusal == null && !isNullOrEmpty(httpCallRag) && userInput != null) {
             try {
                 String httpCallContext = capRagContext(executeHttpCallRag(memory, httpCallRag, userInput, templateDataObjects), maxRagContextChars,
                         "httpCall RAG '" + httpCallRag + "'");
@@ -439,7 +476,7 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // Vector store RAG: retrieve from knowledge bases in the workflow
-        if (userInput != null) {
+        if (spendRefusal == null && userInput != null) {
             try {
                 String ragContext = capRagContext(ragContextProvider.retrieveContext(memory, task, userInput), maxRagContextChars,
                         "vector RAG for task '" + taskId + "'");
@@ -529,6 +566,10 @@ public class LlmTask implements ILifecycleTask {
                     includeFirstAgentMessage, summaryPrefix, skipSteps);
         }
 
+        // Where the user's typed text sits in the current message, taken before the
+        // attachments append their own text parts behind it (input guardrails screen
+        // both, and must not mistake one for the other).
+        int typedTextIndex = GuardrailService.currentTextIndex(messages);
         // Forward the current step's attachments to the LLM as multimodal content,
         // gated on the resolved (provider, model) capabilities, honoring any
         // per-task multimodal overrides.
@@ -546,15 +587,21 @@ public class LlmTask implements ILifecycleTask {
         // messages of the window are screened again. Redaction rewrites what the model
         // sees; conversation memory keeps the message as the user sent it.
         GuardrailService.InputResult inputScreening = null;
-        if (guardrailService != null && !isNullOrEmpty(task.getInputGuardrails())) {
+        if (screenInput) {
             inputScreening = guardrailService.runInput(task.getInputGuardrails(), messages, guardrailContext(memory, task, messages),
-                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen);
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome), inputPrescreen, typedTextIndex);
             accumulateCost(currentStep, inputScreening.costUsd());
             if (inputScreening.isBlocked()) {
                 answerInputBlocked(memory, currentStep, task, processedParams, templateDataObjects, inputScreening.blockMessage());
                 return;
             }
             messages = inputScreening.messages();
+            if (inputScreening.withholdFromHistory()) {
+                // Redacted by a guardrail that later turns do not re-run over their
+                // history: withhold the message there instead. Only now — this turn's
+                // prompt is already built from memory.
+                markInputWithheld(currentStep, task);
+            }
         }
         final List<ChatMessage> requestMessages = messages;
         final GuardrailService.InputResult screenedInput = inputScreening;
@@ -651,10 +698,12 @@ public class LlmTask implements ILifecycleTask {
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
-        // Spend gate: asked once, before any model request of this task (plain, tool
-        // loop or cascade). A refusal skips the whole model phase below and serves the
-        // task's fallback answer — see the SpendRefusedException catch.
-        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+        // Asked again once the input guardrails have run: a classifier call is priced,
+        // and the model call that follows must not overshoot a conversation ceiling
+        // that call reached.
+        if (spendRefusal == null && screenInput && spendGate != null) {
+            spendRefusal = spendGate.check(memory);
+        }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
         // the model will not be called: an unsettled half-open probe would block it.
@@ -1870,11 +1919,25 @@ public class LlmTask implements ILifecycleTask {
                 : createToolLoopStreamingBridge(memory.getEventSink(),
                         "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task);
 
+        // Spend gate: the same preflight as the live path, asked before the approved
+        // tools run and before the first resumed model request. A conversation (or a
+        // scheduled fire's maxCostPerFire) that was spent while the turn waited for
+        // approval gets the fallback answer; the approved calls do not run.
+        LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+
         AgentOrchestrator.ExecutionResult result = null;
         try {
+            if (spendRefusal != null) {
+                throw new LlmSpendGate.SpendRefusedException(spendRefusal);
+            }
             result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                     toolHitlEnabled, jsonPolicy);
             result = reaskResumedAnswer(result, retryPolicy, retryListener, chatModel, task, memory, jsonPolicy, currentStep);
+        } catch (LlmSpendGate.SpendRefusedException refused) {
+            // Not a failure of the model phase — it never started — so onError is not
+            // involved: the fallback answer is served unconditionally (live-path parity).
+            fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
+            result = null;
         } catch (ToolApprovalRequiredException rePause) {
             // The continuation hit another gated call and paused again. The loop
             // builds that batch from scratch, and it knows nothing about cascades, so
@@ -1951,11 +2014,10 @@ public class LlmTask implements ILifecycleTask {
         }
 
         // === Store the result EXACTLY like the normal path (executeTask) ===
-        // Surface metadata the same way executeTask does. Note the continuation's
-        // tokenUsage covers only the post-resume model calls: the usage accumulated
-        // before the pause dies with ToolApprovalRequiredException and resumeToolLoop
-        // starts a fresh accumulator, so a paused turn under-reports by its pre-pause
-        // segment.
+        // Surface metadata the same way executeTask does. The continuation's
+        // tokenUsage covers only the post-resume model calls; the pre-pause segment
+        // was recorded on this step's audit totals when the pause passed through
+        // execute (recordPrePauseSpend), so it is not added again here.
         var responseMetadataObjectName = task.getResponseMetadataObjectName();
         if (!isNullOrEmpty(responseMetadataObjectName)) {
             templateDataObjects.put(responseMetadataObjectName, responseMetadata);
@@ -2000,9 +2062,8 @@ public class LlmTask implements ILifecycleTask {
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
-            // Known gap: the continuation's tokenUsage covers only the post-resume model
-            // calls (see the comment above) — the pre-pause segment is not recoverable
-            // here, so a paused turn's ledger entry under-reports by that segment.
+            // Adds the post-resume spend to the step totals, which already hold the
+            // pre-pause segment (see the comment above).
             accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
         } else {
             // The turn's token counts are also the caller's: the OpenAI-compatible /v1
@@ -2549,29 +2610,46 @@ public class LlmTask implements ILifecycleTask {
      * Answers a turn whose input a guardrail blocked: the block message becomes the
      * task's response — stored, visible to output templates under the response
      * object name, shown and streamed unless {@code addToOutput} is explicitly
-     * false. The model is not called; neither {@code preRequest} nor
-     * {@code postResponse} runs. It is served as a fallback: the step's
-     * {@code llm:fallback:<taskId>} flag keeps it out of later turns' history, and
-     * a {@code convertToObject} task gets it wrapped under {@code fallbackField}.
+     * false. The model is not called and {@code preRequest} does not run;
+     * {@code postResponse} does, exactly as after any other fallback (an output
+     * block, a spend refusal, {@code onError}) — for a {@code convertToObject} task
+     * with {@code addToOutput: false} it is what turns the
+     * {@code fallbackField}-wrapped block message into the user's answer. It is
+     * served as a fallback: the step's {@code llm:fallback:<taskId>} flag keeps the
+     * block message out of later turns' history, and its
+     * {@code llm:input_withheld:<taskId>} flag keeps the refused message out of
+     * every later model-facing history.
      */
     private void answerInputBlocked(IConversationMemory memory, IWritableConversationStep currentStep, Task task, Map<String, String> processedParams,
-                                    Map<String, Object> templateDataObjects, String blockMessage) {
+                                    Map<String, Object> templateDataObjects, String blockMessage)
+            throws IOException, ITemplatingEngine.TemplateEngineException {
         var served = guardrailBlock(task, currentStep, blockMessage, Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)));
+        markInputWithheld(currentStep, task);
         currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), served.content()));
         String responseObjectName = isNullOrEmpty(task.getResponseObjectName()) ? task.getId() : task.getResponseObjectName();
         if (responseObjectName != null) {
             templateDataObjects.put(responseObjectName, served.object());
         }
-        if ("false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT))) {
-            return;
+        if (!"false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT))) {
+            currentStep.storeData(dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), blockMessage));
+            var outputItem = new TextOutputItem(blockMessage, 0);
+            outputItem.setFallback(true);
+            currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
+            if (memory.getEventSink() != null) {
+                memory.getEventSink().onToken(blockMessage);
+            }
         }
-        currentStep.storeData(dataFactory.createData(LANGCHAIN_OUTPUT_IDENTIFIER + ":" + task.getType(), blockMessage));
-        var outputItem = new TextOutputItem(blockMessage, 0);
-        outputItem.setFallback(true);
-        currentStep.addConversationOutputList(MEMORY_OUTPUT_IDENTIFIER, List.of(outputItem));
-        if (memory.getEventSink() != null) {
-            memory.getEventSink().onToken(blockMessage);
-        }
+        prePostUtils.runPostResponse(memory, task.getPostResponse(), templateDataObjects, 200, false);
+    }
+
+    /**
+     * Flags the step {@code llm:input_withheld:<taskId>}: no later model-facing
+     * history (message window, rolling summary, recall tool) carries this turn's
+     * user message — see {@code ConversationLogGenerator.isInputWithheldStep}.
+     */
+    private void markInputWithheld(IWritableConversationStep currentStep, Task task) {
+        String id = task.getId() != null ? task.getId() : "default";
+        currentStep.storeData(dataFactory.createData(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX + id, Boolean.TRUE));
     }
 
     /**
@@ -2675,6 +2753,13 @@ public class LlmTask implements ILifecycleTask {
                                   RepromptCircuit circuit) {
         return (rejectedReply, correctiveMessage) -> {
             if (!repromptMayStart(memory, task)) {
+                return null;
+            }
+            // A reprompt is another priced model call: the spend gate is asked again, so
+            // a turn that reached its tenant budget or conversation ceiling stops
+            // re-asking (and the guardrail blocks).
+            if (spendGate != null && spendGate.check(memory) != null) {
+                LOGGER.infof("Guardrail reprompt for task '%s' skipped: a spend limit is reached", task.getId());
                 return null;
             }
             var ticket = circuit.acquire().get();
@@ -2979,9 +3064,42 @@ public class LlmTask implements ILifecycleTask {
             for (String problem : guardrailService.validate("outputGuardrails", task.getOutputGuardrails())) {
                 problems.add("task '" + taskId + "' " + problem);
             }
+            for (String warning : guardrailService.warnings("inputGuardrails", task.getInputGuardrails())) {
+                LOGGER.warnf("LLM task '%s' %s", taskId, warning);
+            }
+            for (String warning : guardrailService.warnings("outputGuardrails", task.getOutputGuardrails())) {
+                LOGGER.warnf("LLM task '%s' %s", taskId, warning);
+            }
+            warnSelfJudging(task, taskId);
         }
         if (!problems.isEmpty()) {
             throw new WorkflowConfigurationException("Invalid guardrail configuration: " + String.join("; ", problems));
+        }
+    }
+
+    /**
+     * A {@code judge} grading the task's own model is biased toward its own
+     * answers: worth a note at deploy time, not a refusal (a different prompt still
+     * catches a lot). Compared on the configured provider and model name.
+     */
+    private static void warnSelfJudging(Task task, String taskId) {
+        if (task.getOutputGuardrails() == null || task.getParameters() == null) {
+            return;
+        }
+        String taskModel = resolveModelName(task.getParameters());
+        if (task.getType() == null || taskModel == null) {
+            return;
+        }
+        for (GuardrailConfig guardrail : task.getOutputGuardrails()) {
+            if (guardrail == null || !JudgeGuardrail.TYPE.equals(guardrail.getType()) || guardrail.getParameters() == null) {
+                continue;
+            }
+            Map<String, String> p = guardrail.getParameters();
+            if (task.getType().trim().equalsIgnoreCase(String.valueOf(p.get("provider")).trim())
+                    && taskModel.trim().equals(String.valueOf(resolveModelName(p)).trim())) {
+                LOGGER.warnf("LLM task '%s' has a judge guardrail on its own model '%s' — a model grading its own answers is biased; "
+                        + "consider a different judge model", taskId, taskModel);
+            }
         }
     }
 

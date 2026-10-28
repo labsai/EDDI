@@ -3,7 +3,7 @@
    ────────────────────────────────────────────── */
 
 import { describe, it, expect } from "vitest";
-import { stepsToMessages } from "./snapshot";
+import { outputsCarryStepIndexes, stepsToMessages } from "./snapshot";
 
 /**
  * Fixtures below use the shape the backend actually sends —
@@ -18,6 +18,20 @@ import { stepsToMessages } from "./snapshot";
 const step = (data: Array<{ key: string; value: unknown }>) => ({
   conversationStep: data,
   timestamp: "2026-07-21T10:00:00Z",
+});
+
+describe("outputsCarryStepIndexes", () => {
+  it("trusts output positions when the steps agree in length or are absent", () => {
+    expect(outputsCarryStepIndexes([{}, {}], [{}, {}])).toBe(true);
+    expect(outputsCarryStepIndexes([{}, {}], undefined)).toBe(true);
+    expect(outputsCarryStepIndexes([{}, {}], [])).toBe(true);
+  });
+
+  it("does not trust them when the lists disagree, or when there are no outputs", () => {
+    expect(outputsCarryStepIndexes([{}, {}], [{}, {}, {}])).toBe(false);
+    expect(outputsCarryStepIndexes([], [{}])).toBe(false);
+    expect(outputsCarryStepIndexes(null, null)).toBe(false);
+  });
 });
 
 describe("stepsToMessages", () => {

@@ -33,6 +33,7 @@ import java.util.*;
 import java.util.Collection;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -962,6 +963,13 @@ public class DreamService {
      * for billing: the tenant counter holds priced spend only, exactly as for
      * conversation turns, so an unpriced dream config meters $0 and writes nothing.
      * Never throws — the call already happened.
+     * <p>
+     * <b>A charge the store could not record is carried, not dropped.</b> A
+     * conversation turn keeps it on its step ({@code audit:pending_cost}); a dream
+     * run has no conversation, so it is kept in {@link #pendingTenantCost} and
+     * added to the next priced consolidation charge. That carry is node-local and
+     * in-process: a restart before the store recovers loses it, which
+     * {@code docs/tenant-quotas.md} says.
      */
     private void meterTenantCost(SummarizationService.SummarizationResult llmResult, int inputContentLength,
                                  AgentConfiguration.DreamConfig config) {
@@ -972,14 +980,34 @@ public class DreamService {
         if (!(cost > 0.0) || !Double.isFinite(cost)) {
             return;
         }
+        double charge = cost + pendingTenantCost.getAndSet(0.0);
         try {
-            QuotaCheckResult result = tenantQuotaService.recordCost(tenantQuotaService.getDefaultTenantId(), cost);
+            QuotaCheckResult result = tenantQuotaService.recordCost(tenantQuotaService.getDefaultTenantId(), charge);
+            if (result.accountingUnavailable()) {
+                pendingTenantCost.accumulateAndGet(charge, Double::sum);
+                LOGGER.warnf("[DREAM] Could not charge $%.6f of consolidation to the tenant cost budget — quota accounting unavailable; "
+                        + "carried to the next consolidation charge", charge);
+            }
             meterRegistry.counter("eddi.tenant.cost.metering", "outcome",
                     result.accountingUnavailable() ? "unavailable" : result.allowed() ? "recorded" : "over_budget").increment();
         } catch (RuntimeException e) {
+            pendingTenantCost.accumulateAndGet(charge, Double::sum);
             meterRegistry.counter("eddi.tenant.cost.metering", "outcome", "error").increment();
-            LOGGER.errorf(e, "[DREAM] Could not charge $%.6f of consolidation to the tenant cost budget", cost);
+            LOGGER.errorf(e, "[DREAM] Could not charge $%.6f of consolidation to the tenant cost budget — carried to the next charge", charge);
         }
+    }
+
+    /**
+     * Consolidation spend not yet recorded on the tenant's monthly counter because
+     * the quota store could not answer; see {@link #meterTenantCost}. Shared by
+     * every dream run on this node — the counter is one per tenant, and all of them
+     * charge the default tenant.
+     */
+    private final AtomicReference<Double> pendingTenantCost = new AtomicReference<>(0.0);
+
+    /** Test hook: the consolidation charge still waiting to be recorded. */
+    double pendingTenantCost() {
+        return pendingTenantCost.get();
     }
 
     /**
