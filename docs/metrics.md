@@ -722,12 +722,12 @@ eddi_email_auth_total                       # Verdicts of DKIM + DMARC alignment
 eddi_email_dns_lookups_total                # TXT lookups for DKIM keys and DMARC records; tags: result (found|not_found|tempfail|budget_exhausted|oversize|invalid_name), cached (true|false)
 ```
 
-`eddi_email_auth_total` shows whether a mailbox's correspondents can be authenticated at all: a mailbox whose mail is
-mostly `none` comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
+`eddi_email_auth_total` counts the verdicts for all mail the selected instances processed, so it shows whether your
+correspondents can be authenticated at all: if most mail is `none`, it comes from senders that do not sign (only an aligned pass is authenticated); a rise in `fail` is
 tampered, forwarded or list mail, or forged mail — **or a DNS problem**: a key lookup that fails temporarily or runs
 out of budget (`tempfail` / `budget_exhausted` below) is counted as `fail` too when no signature passes. If a signature
 passes, DMARC alignment determines the verdict: an aligned signature yields `aligned_pass` (never temporary), and an
-unaligned signature yields `pass_unaligned`. A temporary verdict is retried, so a `fail`
+unaligned signature yields `pass_unaligned`. A caller can retry a temporary verdict, so a `fail`
 rise that comes with a rise in `tempfail` points at DNS, and one that comes with `budget_exhausted` at the lookup
 limit, rather than at the senders. An unexpected error inside the verifier is counted as `fail` as well (the mail is
 treated as unauthenticated, not retried) and logs the WARN `Sender authentication failed internally`, so a `fail` rise

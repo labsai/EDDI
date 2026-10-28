@@ -10726,7 +10726,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (result) (rate(eddi_email_auth_total{job=~\"$job\"}[5m]))",
+              "expr": "sum by (result) (rate(eddi_email_auth_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "{{result}}",
               "refId": "A"
             }
@@ -10752,7 +10752,7 @@
               "sort": "desc"
             }
           },
-          "description": "Verdicts of EDDI's own DKIM verification and DMARC alignment on inbound mail: aligned_pass (the only authenticated one), pass_unaligned (a valid signature for another domain, e.g. a mailing list), fail (signatures that do not verify, a lookup failure, or an ambiguous From), none (unsigned). Mostly none means the correspondents do not sign with DKIM."
+          "description": "Verdicts of EDDI's own DKIM verification and DMARC alignment on inbound mail: aligned_pass (the only authenticated one), pass_unaligned (a valid signature for another domain, e.g. a mailing list), fail (signatures that do not verify, a lookup failure, or an ambiguous From), none (unsigned). Counts all mail the selected instances processed; mostly none means the senders do not sign with DKIM."
         },
         {
           "id": 275,
@@ -10774,7 +10774,7 @@
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum by (result, cached) (rate(eddi_email_dns_lookups_total{job=~\"$job\"}[5m]))",
+              "expr": "sum by (result, cached) (rate(eddi_email_dns_lookups_total{job=~\"$job\"}[$__rate_interval]))",
               "legendFormat": "{{result}} (cached={{cached}})",
               "refId": "A"
             }
