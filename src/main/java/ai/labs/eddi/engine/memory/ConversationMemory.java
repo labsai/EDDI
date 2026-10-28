@@ -100,6 +100,10 @@ public class ConversationMemory implements IConversationMemory {
     private transient TurnDeadline turnDeadline;
     /** The agent's per-conversation cost ceiling; NOT persisted. */
     private transient Double maxCostPerConversationUsd;
+    /**
+     * In-flight paid calls held against the ceiling; transient, never persisted.
+     */
+    private final transient SpendReservations spendReservations = new SpendReservations();
     /** The agent's self-continuation settings; NOT persisted. */
     private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
@@ -580,6 +584,11 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public SpendReservations getSpendReservations() {
+        return spendReservations;
+    }
+
+    @Override
     public ContinuationPolicy getContinuationPolicy() {
         return continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
     }
@@ -587,6 +596,7 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
         this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+
     }
 
     @Override

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -207,6 +209,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return ingestionGuard;
             }
 
+            Response alertGuard = rejectAlertBody(schedule, "create");
+            if (alertGuard != null) {
+                return alertGuard;
+            }
+
             Response cadenceGuard = rejectTeamCadenceBody(schedule, null, "create");
             if (cadenceGuard != null) {
                 return cadenceGuard;
@@ -297,6 +304,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return ingestionGuard;
             }
 
+            Response alertGuard = rejectAlertBody(schedule, "update");
+            if (alertGuard != null) {
+                return alertGuard;
+            }
+
             // ONE read of the stored row, shared by every guard below and by the
             // carry-over. It used to be read three times per PUT — once per guard and
             // once more for the carry-over — so the fields that were carried over were
@@ -323,6 +335,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             // be able to mutate it (e.g. push its nextFire far out to defeat an
             // ABORT/AUTO_REJECT deadline). Detect via the STORED schedule so a
             // request body that omits the metadata cannot bypass the check.
+            Response systemGuard = rejectSystemSchedule(stored, "update");
+            if (systemGuard != null) {
+                return systemGuard;
+            }
+
             Response guard = requireAdminForHitl(stored, "update");
             if (guard != null) {
                 return guard;
@@ -985,6 +1002,25 @@ public class RestScheduleStore implements IRestScheduleStore {
     }
 
     /**
+     * Refuses a schedule body that claims an alert role ({@code alertType}) or the
+     * reserved name {@code alerts-maintenance}. That schedule is created by the
+     * server itself: a second one made by hand would only run the same job twice,
+     * and a same-named row without the marker would pass for the real one by name.
+     */
+    private Response rejectAlertBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata()) || AlertSchedules.isReservedName(schedule.getName()))) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — alert schedules are minted internally only", operation,
+                    AlertSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules named " + AlertSchedules.SCHEDULE_NAME + " or marked as alert maintenance (metadata "
+                            + AlertSchedules.METADATA_TYPE_KEY + ") cannot be created or updated via this API. The server manages the "
+                            + AlertSchedules.SCHEDULE_NAME + " schedule itself.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
      * Continuation schedules are minted only by {@code ConversationContinuations}
      * after a committed turn, carrying that conversation and its owner. A fire of
      * one runs a turn in the named conversation, so accepting the marker from a
@@ -1004,6 +1040,38 @@ public class RestScheduleStore implements IRestScheduleStore {
                     .build();
         }
         return null;
+    }
+
+    /**
+     * Refuses changing a system schedule — the {@code alerts-maintenance} schedule,
+     * or any schedule carrying the {@code alertType} metadata — for everyone,
+     * administrators included: 409 {@code SYSTEM_SCHEDULE}. Judged on the STORED
+     * row. The server recreates the schedule on startup and on every alert-rule
+     * save as a backstop, but deleting or disabling it would silently stop alert
+     * retries and digests until then. Firing it manually stays allowed (it only
+     * runs the maintenance pass), and so does recovery — retry, enable and dismiss
+     * (see {@code requireMutableSchedule}) — so an exhausted schedule can be
+     * re-armed over REST.
+     */
+    private static Response rejectSystemSchedule(ScheduleConfiguration stored, String operation) {
+        if (stored == null || !isSystemSchedule(stored)) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of the system schedule %s", operation, sanitize(stored.getName()));
+        return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(ErrorResponses.body(SYSTEM_SCHEDULE,
+                        "The " + stored.getName() + " schedule is managed by the server and cannot be changed or deleted (" + operation
+                                + "). It runs alert retries, digests and retention."))
+                .build();
+    }
+
+    /** Error code of a refused change to a system-managed schedule. */
+    public static final String SYSTEM_SCHEDULE = "SYSTEM_SCHEDULE";
+
+    /** Whether the schedule is managed by the server itself. */
+    public static boolean isSystemSchedule(ScheduleConfiguration schedule) {
+        return schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata())
+                || AlertSchedules.SCHEDULE_NAME.equals(schedule.getName()) && schedule.getAgentId() == null);
     }
 
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
@@ -1259,6 +1327,15 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (stored == null) {
             return null; // absent — let the downstream operation surface its own 404/no-op
+        }
+        // Recovery (retry, enable, dismiss) stays open for the system schedule: after
+        // its retries are exhausted nothing else re-arms it. Only removing or stopping
+        // it is refused.
+        if ("delete".equals(operation) || "disable".equals(operation)) {
+            Response systemGuard = rejectSystemSchedule(stored, operation);
+            if (systemGuard != null) {
+                return systemGuard;
+            }
         }
         Response hitlGuard = requireAdminForHitl(stored, operation);
         if (hitlGuard != null) {

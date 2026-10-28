@@ -243,6 +243,24 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 
 ---
 
+## Alerts
+
+Full narrative: [alerts.md](alerts.md#operating-alerts).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.alerts.enabled` | `true` | Off: no alert work is queued and the `alerts-maintenance` schedule is not created |
+| `eddi.alerts.queue-capacity` | `1000` | Work the alert worker may have waiting; past it work is dropped (`eddi_alerts_dropped_total`), never waited for |
+| `eddi.alerts.maintenance-interval` | `60s` | Heartbeat of the `alerts-maintenance` system schedule (retries, digests, retention); at least 15 s. Read when the schedule is created |
+| `eddi.alerts.max-attempts` | `5` | Delivery attempts per target before it is marked `FAILED` |
+| `eddi.alerts.retry-base` | `30s` | Retry backoff: `base × 4^(attempt-1)`, at most six hours |
+| `eddi.alerts.claim-lease` | `2m` | How long a node owns a delivery in progress before the maintenance job may retry it |
+| `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
+| `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery |
+| `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
+
+---
+
 ## Knowledge bases (RAG)
 
 | Property | Default | Description |

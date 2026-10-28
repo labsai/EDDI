@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
+import ai.labs.eddi.engine.alerts.AlertSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -139,6 +141,29 @@ class ScheduleFireExecutorTest {
         assertTrue(e.getMessage().contains("reserved"), e.getMessage());
         schedule.setUserId("alice");
         assertEquals("alice", ScheduleFireExecutor.scheduleUserId(schedule));
+    }
+
+    @Test
+    void alertMaintenanceRunsAsASystemJobAndLogsOnlyWhenItDidSomething() throws Exception {
+        AlertMaintenanceService maintenance = mock(AlertMaintenanceService.class);
+        setField(executor, "alertMaintenanceService", maintenance);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("alerts");
+        schedule.setName(AlertSchedules.SCHEDULE_NAME);
+        schedule.setMetadata(AlertSchedules.maintenanceMetadata());
+
+        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(0, 0, 0));
+        ScheduleFireLog idle = executor.fire(schedule, "node-1", 1);
+        assertEquals(FireStatus.COMPLETED.name(), idle.status());
+        verify(scheduleStore, never()).logFire(any());
+
+        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(2, 1, 0));
+        executor.fire(schedule, "node-1", 1);
+        verify(scheduleStore).logFire(any());
+
+        when(maintenance.run()).thenThrow(new IllegalStateException("db down"));
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "node-1", 1).status());
+        verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
