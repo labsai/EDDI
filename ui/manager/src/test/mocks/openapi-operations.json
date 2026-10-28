@@ -303,6 +303,7 @@
     "POST /agentstore/agents/{id}/cascade",
     "POST /agentstore/agents/{id}/currentversion",
     "POST /agenttests/runs",
+    "POST /agenttests/runs/{runId}/cancel",
     "POST /alerts/events/acknowledge",
     "POST /alerts/events/{eventId}/acknowledge",
     "POST /alerts/events/{eventId}/retry",

@@ -239,9 +239,21 @@ export interface ConvergenceConfig {
    * accepted but currently falls back to MODERATOR with a backend warning.
    */
   judge: ConvergenceJudge;
+  /**
+   * What the judge decides (E2). `"SIMILARITY"` (default, absent on configs saved
+   * before 6.6) scores agreement with the previous repeat against `threshold`.
+   * `"VERDICT"` reviews the latest repeat against the question and ends the phase
+   * once it passes; `threshold` is unused and `minRepeats` may be 1.
+   */
+  mode?: ConvergenceMode;
 }
 
 export type ConvergenceJudge = "MODERATOR" | "SERVICE";
+
+export type ConvergenceMode = "SIMILARITY" | "VERDICT";
+
+/** Backend `AgentGroupConfiguration.MAX_REWORKS_LIMIT`: the save-time bound of `maxReworks`. */
+export const MAX_REWORKS = 5;
 
 /** `VoteConfig.method` (I14). No SUPERMAJORITY exists — only these two. */
 export type VoteMethod = "MAJORITY" | "APPROVAL";
@@ -542,6 +554,12 @@ export interface AgentGroupConfiguration {
    * summary, which is the failure mode a minority report exists to prevent.
    */
   recordDissents?: boolean;
+  /**
+   * Reworks per task within one run (E2): a task that fails VERIFY goes back to
+   * its member with the verifier's feedback, up to this many times, then stays
+   * FAILED. `0`/absent keeps a failed verification final. Backend bound 0..5.
+   */
+  maxReworks?: number;
   /** Whether members may file their own tasks mid-discussion (I5). Absent = tools not assembled. */
   taskListConfig?: GroupTaskConfig | null;
   /** Bounds for RETRO-phase lesson harvesting (I8). `null` runs RETRO with defaults (3 per run / 50 stored). */

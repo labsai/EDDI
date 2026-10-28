@@ -207,6 +207,7 @@ describe("tool-scopes", () => {
         "POST /administration/{environment}/deploy/{agentId}",
         "POST /administration/{environment}/undeploy/{agentId}",
         "POST /agenttests/runs",
+        "POST /agenttests/runs/{runId}/cancel",
         "POST /schedulestore/schedules/{scheduleId}/disable",
         "POST /groupstore/groups",
         "POST /administration/agents/setup",

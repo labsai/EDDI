@@ -831,10 +831,17 @@ class ConversationStepRunner {
                                 // M1: a durably-committed pause is counted and its timeout armed.
                                 conversationService.counterHitlPause.increment();
                                 conversationService.conversationHitlService.scheduleHitlTimeout(conversationId, conversationMemory);
+                                conversationService.firePauseCommitted(conversationId, conversationMemory);
                             } else {
                                 // Non-pause completion is unchanged: the normal say turn
                                 // settles to READY/ENDED/… and persists the full snapshot.
+                                // A CONTINUE_CONVERSATION is decided before the store (the
+                                // outcome is part of the committed step) and armed only once
+                                // the store succeeded: a turn that is not committed — fenced,
+                                // conflicted, failed to store — never queues its successor.
+                                conversationService.decideContinuation(conversationMemory);
                                 storeConversationMemory(conversationMemory, environment);
+                                conversationService.armContinuation(conversationId, conversationMemory, environment);
                             }
                         } catch (ConversationFencedException e) {
                             // Cluster mode: another node took the conversation over while this
@@ -1072,7 +1079,7 @@ class ConversationStepRunner {
     void reportTurnOutcome(IConversationMemory memory, TurnWait wait) {
         try {
             ErrorKind kind = classifyTurnOutcome(memory, wait);
-            if (kind != null) {
+            if (kind != null && memory != null) {
                 conversationService
                         .reportTurnOutcome(new TurnOutcome(memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), kind));
             } else if (wait == TurnWait.COMPLETED && memory != null && memory.getConversationState() != ConversationState.AWAITING_HUMAN) {

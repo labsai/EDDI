@@ -108,6 +108,47 @@ class ConnectionOriginAndPrincipalTest {
     }
 
     @Nested
+    @DisplayName("mail origins on a baseUrlAllowlist")
+    class MailOrigins {
+
+        private String mailEntry(String origin) {
+            return ConnectionConfiguration.requireCanonicalAllowlistOrigin(origin, "baseUrlAllowlist");
+        }
+
+        @Test
+        @DisplayName("smtp/smtps/imap/imaps are accepted and fold the port their TLS mode implies")
+        void accepted() {
+            assertEquals(mailEntry("smtps://SMTP.office365.com"), targetOrigin("smtps://smtp.office365.com:465"));
+            assertEquals(mailEntry("smtp://relay.example.com"), targetOrigin("smtp://relay.example.com:587"));
+            assertEquals(mailEntry("imaps://outlook.office365.com"), targetOrigin("imaps://outlook.office365.com:993"));
+            assertEquals(mailEntry("imap://mail.example.com"), targetOrigin("imap://mail.example.com:143"));
+        }
+
+        @Test
+        @DisplayName("the relay port 25 is a distinct origin, and smtp is not smtps")
+        void distinct() {
+            assertNotEquals(mailEntry("smtp://relay.example.com"), targetOrigin("smtp://relay.example.com:25"));
+            assertEquals(mailEntry("smtp://relay.example.com:25"), targetOrigin("smtp://relay.example.com:25"));
+            assertNotEquals(mailEntry("smtps://relay.example.com"), targetOrigin("smtp://relay.example.com:587"));
+        }
+
+        @Test
+        @DisplayName("a mail origin with a path or userinfo is refused like an http one")
+        void bare() {
+            assertThrows(IllegalArgumentException.class, () -> mailEntry("smtps://smtp.example.com/x"));
+            assertThrows(IllegalArgumentException.class, () -> mailEntry("smtps://u:p@smtp.example.com"));
+            assertThrows(IllegalArgumentException.class, () -> mailEntry("pop3s://mail.example.com"));
+        }
+
+        @Test
+        @DisplayName("the other allowlists stay http(s) only: no client secret goes to a mail server")
+        void credentialEndpointsStayWeb() {
+            assertThrows(IllegalArgumentException.class,
+                    () -> ConnectionConfiguration.requireCanonicalOrigin("smtps://smtp.example.com", "credentialEndpointAllowlist"));
+        }
+    }
+
+    @Nested
     @DisplayName("the unverified-principal opt-in")
     class UnverifiedPrincipal {
 

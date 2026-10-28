@@ -91,6 +91,34 @@ class RestSecretStoreGrantOnCreateTest {
         }
 
         @Test
+        @DisplayName("a create whose grant leaves out a deployed agent already referencing the secret is a 409, and writes nothing")
+        void createLeavingOutAReferencingAgentRefused() throws Exception {
+            noSuchSecret();
+            List<String> grant = List.of("agentOne");
+            when(grantImpactAnalyzer.refusalToCreate(new SecretReference("default", "k"), grant, VaultGrantGate.Mode.ENFORCE))
+                    .thenReturn("Deployed agent(s) agentTwo already reference ${eddivault:default/k}");
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
+                    new IRestSecretStore.SecretRequest("v", null, grant, List.of("api.example.com")));
+
+            assertEquals(409, resp.getStatus());
+            assertTrue(String.valueOf(entityOf(resp).get("error")).contains("agentTwo"));
+            verify(secretProvider, never()).store(any(), any(), any(), any(), any());
+        }
+
+        @Test
+        @DisplayName("an update of an existing secret is not checked against referencing agents — that is the grant endpoint's warning")
+        void updateIsNotCheckedAgainstReferencingAgents() throws Exception {
+            existing(null);
+
+            Response resp = rest(VaultGrantGate.Mode.ENFORCE).storeSecret("default", "k",
+                    new IRestSecretStore.SecretRequest("v", null, List.of("agentOne")));
+
+            assertEquals(200, resp.getStatus());
+            verify(grantImpactAnalyzer, never()).refusalToCreate(any(), any(), any());
+        }
+
+        @Test
         @DisplayName("an empty list is refused too — it means every agent everywhere else")
         void createWithEmptyGrantRefused() throws Exception {
             noSuchSecret();

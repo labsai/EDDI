@@ -134,8 +134,11 @@ principal, not a user: erasing or exporting it is refused with 400.
 15. Stores that registered as GDPR participants — the user directory, workspace
     notifications and the **A2A task store** (a peer's tasks and context bindings,
     each holding the message it sent and the reply it got, keyed by the peer's
-    principal) — **permanently deleted**. Each reports under its own step name
-    (`userDirectory`, `workspaceNotifications`, `a2aTasks`)
+    principal), and the **email ledger** (HITL notification rows addressed to the
+    person — matched through the user id when it is an address and the email the
+    user directory recorded; it runs before the directory is erased) —
+    **permanently deleted**. Each reports under its own step name
+    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`)
 16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
     deleted** by the `conversationRatings` participant, which also forgets the user
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are

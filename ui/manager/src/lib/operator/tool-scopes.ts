@@ -479,6 +479,10 @@ export const WRITE_ENDPOINTS: readonly string[] = [
   // grants, then runs scripted conversations whose tool calls are mocked and fail
   // closed. A write, so it is gated like the deploy it performs.
   "POST /agenttests/runs",
+  // Cancelling one stops the run (and deletes its test conversations) — the
+  // counterpart of starting it, with the same rights and no request body. Gated:
+  // it ends conversations, and a run someone else is relying on is theirs to stop.
+  "POST /agenttests/runs/{runId}/cancel",
   "POST /schedulestore/schedules/{scheduleId}/disable",
   "POST /groupstore/groups",
   "POST /administration/agents/setup",

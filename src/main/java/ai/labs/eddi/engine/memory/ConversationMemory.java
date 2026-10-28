@@ -8,9 +8,12 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
@@ -97,6 +100,8 @@ public class ConversationMemory implements IConversationMemory {
     private transient TurnDeadline turnDeadline;
     /** The agent's per-conversation cost ceiling; NOT persisted. */
     private transient Double maxCostPerConversationUsd;
+    /** The agent's self-continuation settings; NOT persisted. */
+    private transient ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
 
     /** Transient — never serialized to MongoDB. Set per-turn for audit capture. */
     private transient IAuditEntryCollector auditCollector;
@@ -575,6 +580,16 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public ContinuationPolicy getContinuationPolicy() {
+        return continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+    }
+
+    @Override
+    public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
+        this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+    }
+
+    @Override
     public void setEventSink(ConversationEventSink eventSink) {
         this.eventSink = eventSink;
     }
@@ -774,6 +789,31 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setHitlResumeDecision(HitlDecision decision) {
         this.hitlResumeDecision = decision;
+    }
+
+    // onRejection: REVISE — the turn's policy and its latest revisable answer.
+    // Neither is persisted from here (see HitlRevisionCandidate#STEP_KEY).
+    private transient HitlRevisionPolicy hitlRevisionPolicy;
+    private transient HitlRevisionCandidate hitlRevisionCandidate;
+
+    @Override
+    public HitlRevisionPolicy getHitlRevisionPolicy() {
+        return hitlRevisionPolicy;
+    }
+
+    @Override
+    public void setHitlRevisionPolicy(HitlRevisionPolicy policy) {
+        this.hitlRevisionPolicy = policy;
+    }
+
+    @Override
+    public HitlRevisionCandidate getHitlRevisionCandidate() {
+        return hitlRevisionCandidate;
+    }
+
+    @Override
+    public void setHitlRevisionCandidate(HitlRevisionCandidate candidate) {
+        this.hitlRevisionCandidate = candidate;
     }
 
     public static final class ConversationStepStack implements IConversationStepStack {

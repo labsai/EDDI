@@ -362,6 +362,7 @@ class ToolLoopResumer {
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
+                toolCostBefore,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCalls, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
                 jsonPolicy, finalTranscript, null);

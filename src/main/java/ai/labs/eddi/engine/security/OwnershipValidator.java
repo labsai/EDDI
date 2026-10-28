@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -161,9 +162,36 @@ public class OwnershipValidator {
      *            the userId requested by the caller (may be null)
      * @return the resolved userId to use
      * @throws ForbiddenException
-     *             if a non-admin caller tries to impersonate another user
+     *             if a non-admin caller tries to impersonate another user, or any
+     *             caller — an admin, or anyone while authorization is off — names a
+     *             user id in the agent-test namespace
+     *             ({@link AgentTestConversations#USER_ID_PREFIX})
      */
     public String validateAndResolveUserId(SecurityIdentity identity, String requestedUserId) {
+        // The test runner's conversations are marked by their user id, and a run's
+        // tool mocks and call record are keyed on it. A conversation started from
+        // outside with a live run's user id would join that run's mock session: its
+        // tool calls would be recorded into the run's results and answered by its
+        // mocks. The runner starts its conversations below this check, so nothing
+        // legitimate arrives here with such an id.
+        if (AgentTestConversations.isReservedUserId(requestedUserId)) {
+            LOGGER.warnf("Conversation start refused: the requested user id is in the reserved agent-test namespace");
+            throw new ForbiddenException("Access denied: user ids starting with '" + AgentTestConversations.USER_ID_PREFIX
+                    + "' are reserved for agent test runs");
+        }
+        String resolved = resolveUserId(identity, requestedUserId);
+        // And the resolved id: a caller's own principal is what an empty request
+        // resolves to. Such a principal is refused at authentication already
+        // (ReservedPrincipals); this keeps the guarantee local.
+        if (AgentTestConversations.isReservedUserId(resolved)) {
+            LOGGER.warnf("Conversation start refused: the caller's identity is in the reserved agent-test namespace");
+            throw new ForbiddenException("Access denied: user ids starting with '" + AgentTestConversations.USER_ID_PREFIX
+                    + "' are reserved for agent test runs");
+        }
+        return resolved;
+    }
+
+    private String resolveUserId(SecurityIdentity identity, String requestedUserId) {
         if (!authEnabled) {
             return requestedUserId;
         }

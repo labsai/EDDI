@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
+import ai.labs.eddi.engine.runtime.BoundedFanOut;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -270,17 +271,36 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Set<String> substitutedSecrets = new HashSet<>();
         // A call reached through the LLM tool path was already intercepted (and
         // recorded) by ToolLoopRunner; only a rule-triggered call is intercepted here.
-        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER);
+        //
+        // The mock the LLM tool path already chose travels as a MockResult. Anything
+        // else under that key is not a decision of ToolLoopRunner's, so the call is
+        // treated as undecided and intercepted here: mocked or refused in a test
+        // conversation, sent as usual in any other.
+        Object chosenMock = templateDataObjects.get(ToolMockRegistry.TOOL_PATH_MOCK);
+        final boolean forgedMock = chosenMock != null && !(chosenMock instanceof ToolMockRegistry.MockResult);
+        final boolean ruleTriggered = !templateDataObjects.containsKey(ToolMockRegistry.TOOL_PATH_MARKER) || forgedMock;
+        final ToolMockRegistry.MockResult toolPathMock = !ruleTriggered && chosenMock instanceof ToolMockRegistry.MockResult chosen ? chosen : null;
         try {
             IWritableConversationStep currentStep = memory.getCurrentStep();
 
             var preRequest = call.getPreRequest();
             templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
-            if (call.getFireAndForget()) {
-                // Agent test harness: a test conversation's fire-and-forget call is never
-                // sent unless its suite runs calls live.
-                if (ruleTriggered && ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") != null) {
+            if (call.getForEach() != null) {
+                return executeForEach(call, memory, templateDataObjects, targetServerUrl, ruleTriggered, toolPathMock, substitutedSecrets);
+            }
+
+            // Agent test harness: a test conversation gets its suite's mock (or a 501
+            // NOT_EXECUTED) instead of a request — decided, and recorded, once per call,
+            // not once per retry: a live call that is retried is one tool call too.
+            final ToolMockRegistry.MockResult mocked = ruleTriggered
+                    ? ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall")
+                    : toolPathMock;
+
+            if (Boolean.TRUE.equals(call.getFireAndForget())) {
+                // A test conversation's fire-and-forget call is never sent unless its
+                // suite runs calls live.
+                if (mocked != null) {
                     return Collections.emptyMap();
                 }
                 executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory));
@@ -299,11 +319,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // key, which the memory serializer refuses — so EVERY turn running the
                 // call failed. The store refuses that config at save time now; one stored
                 // before the check skips the save and says so, instead of failing the turn.
-                boolean saveResponse = Boolean.TRUE.equals(call.getSaveResponse());
-                if (saveResponse && (call.getResponseObjectName() == null || call.getResponseObjectName().isBlank())) {
-                    LOGGER.warnf("ApiCall (%s) has saveResponse=true but no responseObjectName; its response is not stored", call.getName());
-                    saveResponse = false;
-                }
+                boolean saveResponse = effectiveSaveResponse(call);
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -312,13 +328,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
-                    // Agent test harness: a test conversation gets its suite's mock (or a 501
-                    // NOT_EXECUTED) instead of a request, and everything below — saveResponse,
-                    // postResponse property instructions, retries — runs on it unchanged. It is
-                    // selected BEFORE the request is built: building resolves ${vault:},
+                    // Agent test harness: with a mock (chosen above, BEFORE the request is
+                    // built) everything below — saveResponse, postResponse property
+                    // instructions, retries — runs on it unchanged. Building resolves ${vault:},
                     // ${connection:} and ${caller:} references, and a mocked call must neither
                     // fetch a live credential nor fail for want of one.
-                    var mocked = ruleTriggered ? ToolMockRegistry.interceptRuleCall(memory, call.getName(), null, "httpcall") : null;
                     Set<String> resolvedSecrets;
                     if (mocked != null) {
                         resolvedSecrets = Set.of();
@@ -533,6 +547,308 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
+    /**
+     * Whether the response is stored. saveResponse without a responseObjectName
+     * stored the body under a null key, which the memory serializer refuses — so
+     * EVERY turn running the call failed. The store refuses that config at save
+     * time now; one stored before the check skips the save and says so, instead of
+     * failing the turn.
+     */
+    private static boolean effectiveSaveResponse(ApiCall call) {
+        boolean saveResponse = Boolean.TRUE.equals(call.getSaveResponse());
+        if (saveResponse && (call.getResponseObjectName() == null || call.getResponseObjectName().isBlank())) {
+            LOGGER.warnf("ApiCall (%s) has saveResponse=true but no responseObjectName; its response is not stored", call.getName());
+            return false;
+        }
+        return saveResponse;
+    }
+
+    // === forEach ===
+
+    /**
+     * How much longer than the turn's remaining time the step waits for its items.
+     * Every item's timeout is already clamped to the deadline, so this only covers
+     * the client's own slack; past it an item still running is recorded as
+     * unfinished rather than waited for.
+     */
+    static final long FOR_EACH_WAIT_GRACE_MS = 5_000L;
+
+    /** Most characters of an exception message an item's error keeps. */
+    private static final int MAX_ITEM_ERROR_CHARS = 500;
+
+    /** Most characters of an error body an item keeps, like the single call. */
+    private static final int MAX_ITEM_ERROR_BODY_CHARS = 2_000;
+
+    /**
+     * The step code postResponse runs with when at least one item failed — HTTP's
+     * own "Multi-Status". Instructions gated on the default codes (200, 201) do not
+     * run on a partial result unless the author adds it.
+     */
+    static final int FOR_EACH_PARTIAL_HTTP_CODE = 207;
+
+    /**
+     * One request per element of {@code forEach.pathToTargetArray}, collected into
+     * one array.
+     * <p>
+     * Every request is <b>built on the turn's own thread</b>, one after another, so
+     * template rendering, vault, connection and caller resolution, the SSRF check
+     * and the approval scope see exactly what a single call sees — and only the
+     * sending goes to the virtual threads. Each element is bound into its own copy
+     * of the template data as DATA under {@code iterationObjectName}; it is never
+     * part of a template's source.
+     * <p>
+     * Memory is written only here, on the turn's thread, after every item has
+     * finished: the items themselves share nothing.
+     */
+    private Map<String, Object> executeForEach(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects,
+                                               String targetServerUrl, boolean ruleTriggered, ToolMockRegistry.MockResult toolPathMock,
+                                               Set<String> substitutedSecrets)
+            throws LifecycleException, ITemplatingEngine.TemplateEngineException, IOException {
+        ForEachInstruction forEach = call.getForEach();
+        String callName = call.getName();
+        if (Boolean.TRUE.equals(call.getFireAndForget())) {
+            // Refused at save time; a config stored before the check fails loudly
+            // instead of silently picking one of the two meanings.
+            throw new IllegalArgumentException("http call '" + LogSanitizer.sanitize(callName) + "' sets both forEach and fireAndForget. "
+                    + "forEach collects every item's result; for fire-and-forget fan-out use preRequest.batchRequests instead.");
+        }
+        HttpPreRequest preRequest = call.getPreRequest();
+        if (preRequest != null && preRequest.getBatchRequests() != null) {
+            throw new IllegalArgumentException("http call '" + LogSanitizer.sanitize(callName) + "' sets both forEach and "
+                    + "preRequest.batchRequests. Remove batchRequests: forEach already sends one request per element.");
+        }
+        TurnDeadline deadline = memory.getTurnDeadline();
+        if (deadline != null && deadline.isExpired()) {
+            Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall").increment();
+            throw new LifecycleException("ApiCall (" + callName + ") not sent: the turn deadline has already passed");
+        }
+
+        List<ForEachItems.Element> elements = ForEachItems.select(forEach, templateDataObjects, prePostUtils);
+        int maxItems = resolveMaxBatchSize(forEach.getMaxItems(), defaultMaxBatchSize, maxBatchSizeCeiling);
+        if (elements.size() > maxItems) {
+            // Refused as a whole, before anything is built or sent: a truncated loop
+            // would report success while quietly dropping the tail.
+            throw new IllegalArgumentException("forEach of http call '" + LogSanitizer.sanitize(callName) + "' would send " + elements.size()
+                    + " requests, more than its limit of " + maxItems + ". Narrow 'forEach.pathToTargetArray' or "
+                    + "'forEach.templateFilterExpression', or raise 'forEach.maxItems' (at most " + maxBatchSizeCeiling + ", set by "
+                    + BATCH_MAX_SIZE_CEILING_PROPERTY + ").");
+        }
+
+        boolean saveResponse = effectiveSaveResponse(call);
+        Map<String, Property> conversationProperties = conversationPropertiesOf(memory);
+        String iterationName = ForEachItems.iterationName(forEach);
+
+        // Built here, in order, on the turn's thread — see the method comment.
+        List<Callable<ForEachItemResult>> work = new ArrayList<>(elements.size());
+        for (ForEachItems.Element element : elements) {
+            Map<String, Object> itemData = new LinkedHashMap<>(templateDataObjects);
+            itemData.put(iterationName, element.value());
+            var mocked = ruleTriggered ? ToolMockRegistry.interceptRuleCall(memory, callName, null, "httpcall") : toolPathMock;
+            if (mocked != null) {
+                work.add(() -> forEachItemFromResponse(call, element.index(), new MockedResponse(mocked), Set.of(), 1, saveResponse));
+                continue;
+            }
+            BuiltRequest built;
+            try {
+                built = buildRequest(targetServerUrl, call, itemData, conversationProperties);
+            } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
+                // This item's request cannot be built (a refused reference, a template
+                // that does not render): nothing of it is sent, and the others still are.
+                String reason = "request not built: " + ForEachItems.describe(e, Set.of(), MAX_ITEM_ERROR_CHARS);
+                LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(callName), element.index(), reason);
+                work.add(() -> ForEachItemResult.notSent(element.index(), reason));
+                continue;
+            }
+            substitutedSecrets.addAll(built.resolvedSecrets());
+            work.add(() -> sendForEachItem(call, element.index(), built, itemData, deadline, saveResponse));
+        }
+
+        // The turn deadline admits each item as its turn comes; an item that would
+        // start after it is recorded as not sent. This is also where a future cost
+        // reservation plugs in (BoundedFanOut.Admission).
+        BoundedFanOut.Admission admission = deadline == null ? BoundedFanOut.Admission.ALWAYS : index -> {
+            if (deadline.isExpired()) {
+                Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall_foreach").increment();
+                return "not sent: the turn deadline had passed before this item's turn came";
+            }
+            return null;
+        };
+        long waitBudget = deadline != null ? deadline.remainingMs() + FOR_EACH_WAIT_GRACE_MS : 0L;
+        List<ForEachItemResult> results = BoundedFanOut.run(work, forEach.effectiveMaxConcurrency(), admission,
+                new BoundedFanOut.Outcomes<>() {
+                    @Override
+                    public ForEachItemResult notStarted(int position, String reason) {
+                        return ForEachItemResult.notSent(elements.get(position).index(), reason);
+                    }
+
+                    @Override
+                    public ForEachItemResult failed(int position, Throwable failure) {
+                        return new ForEachItemResult(elements.get(position).index(), null, null, null,
+                                "item failed: " + ForEachItems.describe(failure, substitutedSecrets, MAX_ITEM_ERROR_CHARS), false, true, 1, false);
+                    }
+
+                    @Override
+                    public ForEachItemResult unfinished(int position, boolean started) {
+                        return started
+                                ? new ForEachItemResult(elements.get(position).index(), null, null, null,
+                                        "still running when the step stopped waiting; its result is unknown and it is not retried", true, true, 1,
+                                        false)
+                                : ForEachItemResult.notSent(elements.get(position).index(),
+                                        "not sent: the step stopped waiting before this item could start");
+                    }
+                }, callerIdentityContext::propagate, waitBudget, "eddi-httpcall-foreach");
+
+        results = ForEachItems.capTotalSize(results, resolveForEachTotalBudget(call), jsonSerialization, callName);
+        List<Map<String, Object>> stored = new ArrayList<>(results.size());
+        int failed = 0;
+        for (ForEachItemResult itemResult : results) {
+            stored.add(itemResult.toMap());
+            if (!itemResult.ok()) {
+                failed++;
+            }
+        }
+        int stepCode = failed == 0 ? 200 : FOR_EACH_PARTIAL_HTTP_CODE;
+        LOGGER.infof("forEach of http call '%s': %d items, %d failed", LogSanitizer.sanitize(callName), results.size(), failed);
+
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+        Map<String, Object> result = new LinkedHashMap<>();
+        String failureSummary = failed == 0 ? null : failed + " of " + results.size() + " forEach items failed";
+        if (saveResponse) {
+            String responseObjectName = call.getResponseObjectName();
+            templateDataObjects.put(responseObjectName, stored);
+            prePostUtils.createMemoryEntry(currentStep, stored, responseObjectName, KEY_HTTP_CALLS);
+            if (failureSummary != null) {
+                prePostUtils.createMemoryEntry(currentStep, failureSummary, responseObjectName + "Error", KEY_HTTP_CALLS);
+                templateDataObjects.put(responseObjectName + "Error", failureSummary);
+                prePostUtils.createMemoryEntry(currentStep, stepCode, responseObjectName + "HttpCode", KEY_HTTP_CALLS);
+                templateDataObjects.put(responseObjectName + "HttpCode", stepCode);
+            }
+            result.put("body", stored);
+        }
+        result.put("httpCode", stepCode);
+
+        if (failureSummary != null && forEach.failsStepOnItemFailure()) {
+            // After the results are stored: the work that succeeded (and was paid
+            // for) stays readable; only the step reports failure.
+            throw new LifecycleException("http call '" + LogSanitizer.sanitize(callName) + "': " + failureSummary
+                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'");
+        }
+
+        Set<String> vaulted = prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, stepCode, false);
+        if (vaulted != null && !vaulted.isEmpty()) {
+            result.replaceAll((key, value) -> {
+                Object cleaned = SecretValueScrubber.scrubDeep(value, vaulted, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+                return cleaned != null ? cleaned : value;
+            });
+        }
+        return result;
+    }
+
+    /** The budget for all items' bodies together. */
+    private int resolveForEachTotalBudget(ApiCall call) {
+        Integer configured = call.getForEach().getMaxTotalResponseSizeInBytes();
+        return configured != null && configured > 0 ? configured : resolveMaxResponseSize(call);
+    }
+
+    /**
+     * Sends one item's request, with the call's retry policy — on its own virtual
+     * thread. Touches nothing shared: no memory, no template data but its own copy.
+     * <p>
+     * <b>An exception is never retried</b>, a timeout above all: the request may
+     * have reached the API and been processed (and billed) even though no response
+     * came back. The retry policy applies to responses only, as it does to a single
+     * call.
+     */
+    private ForEachItemResult sendForEachItem(ApiCall call, int index, BuiltRequest built, Map<String, Object> itemData, TurnDeadline deadline,
+                                              boolean saveResponse)
+            throws InterruptedException {
+        IRequest request = built.request();
+        Set<String> secrets = built.resolvedSecrets();
+        int attempts = 0;
+        while (true) {
+            if (deadline != null) {
+                request.setTimeout(deadlineBoundedTimeout(resolveTimeout(call), deadline), TimeUnit.MILLISECONDS);
+            }
+            int delay = getDelayInMillis(call, attempts > 0, attempts);
+            if (delay > 0) {
+                Thread.sleep(delay);
+            }
+            LOGGER.info(call.getName() + " forEach item " + index + " Request: " + (attempts > 0 ? attempts + ". retry - " : "")
+                    + RequestRedactor.safeRequestLog(request, secrets));
+            attempts++;
+            IResponse response;
+            try {
+                response = request.send();
+            } catch (IRequest.HttpRequestException | RuntimeException e) {
+                boolean timedOut = ForEachItems.isTimeout(e);
+                String reason = timedOut
+                        ? "the request timed out; the API may still have processed it, so it is not retried"
+                        : "the request failed: " + ForEachItems.describe(e, secrets, MAX_ITEM_ERROR_CHARS);
+                LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(call.getName()), index, reason);
+                return new ForEachItemResult(index, null, null, null, reason, timedOut, true, attempts, false);
+            }
+            LOGGER.info(call.getName() + " forEach item " + index + " Response: " + RequestRedactor.safeResponseLog(response, secrets));
+            ForEachItemResult result = forEachItemFromResponse(call, index, response, secrets, attempts, saveResponse);
+            Map<String, Object> retryData = itemData;
+            if (call.getResponseObjectName() != null && result.body() != null) {
+                retryData = new LinkedHashMap<>(itemData);
+                retryData.put(call.getResponseObjectName(), result.body());
+            }
+            boolean retry = retryCall(call.getPostResponse(), retryData, attempts, response.getHttpCode(), response.getContentAsString());
+            if (retry && deadline != null && !retryFitsDeadline(call, attempts, deadline)) {
+                Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "httpcall_retry").increment();
+                retry = false;
+            }
+            if (!retry) {
+                return result;
+            }
+        }
+    }
+
+    /** One item's response, redacted and capped exactly as a single call's. */
+    private ForEachItemResult forEachItemFromResponse(ApiCall call, int index, IResponse response, Set<String> secrets, int attempts,
+                                                      boolean saveResponse) {
+        int code = response.getHttpCode();
+        boolean success = code >= 200 && code < 300;
+        Map<String, String> headers = null;
+        if (!isNullOrEmpty(call.getResponseHeaderObjectName())) {
+            headers = redactHeaderValues(withoutCredentialHeaders(response.getHttpHeader()), secrets);
+        }
+        Object body = null;
+        String error = null;
+        if (success) {
+            if (saveResponse) {
+                body = successBody(call, response, secrets);
+            }
+        } else {
+            error = "the call returned http " + code;
+            if (saveResponse) {
+                String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), secrets);
+                if (errorBody != null && !errorBody.isBlank()) {
+                    body = SecretRedactionFilter.redact(errorBody.length() > MAX_ITEM_ERROR_BODY_CHARS
+                            ? errorBody.substring(0, MAX_ITEM_ERROR_BODY_CHARS)
+                            : errorBody);
+                }
+            }
+        }
+        return new ForEachItemResult(index, code, body, headers, error, false, true, attempts, false);
+    }
+
+    /**
+     * A 2xx body as a single call stores it: parsed and scrubbed when it is JSON,
+     * redacted text otherwise, capped at {@code maxResponseSizeInBytes}.
+     */
+    private Object successBody(ApiCall call, IResponse response, Set<String> secrets) {
+        String rawBody = response.getContentAsString();
+        Map<String, String> responseHeaders = response.getHttpHeader();
+        String contentType = responseHeaders != null ? responseHeaders.get(CONTENT_TYPE) : null;
+        contentType = contentType != null ? contentType.split(";")[0] : "<not-present>";
+        if (CONTENT_TYPE_APPLICATION_JSON.equals(contentType)) {
+            return redactedJsonResponse(rawBody, secrets, resolveMaxResponseSize(call), call.getName());
+        }
+        return truncateResponseBody(redactSuccessText(rawBody, secrets), resolveMaxResponseSize(call), call.getName());
+    }
+
     @Override
     @SuppressWarnings("unchecked")
     public ResolvedRequest resolve(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
@@ -668,6 +984,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * rather than a pin we cannot honour.
      */
     private static boolean canExecuteDivergeFromResolve(ApiCall call) {
+        // forEach builds one request per element; the iteration variable renders
+        // empty in the single request resolve() builds.
+        if (call.getForEach() != null) {
+            return true;
+        }
         var preRequest = call.getPreRequest();
         if (preRequest != null && preRequest.getPropertyInstructions() != null) {
             return true;

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.ToolMock;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.apicalls.model.Request;
+import ai.labs.eddi.configs.apicalls.model.RetryApiCallInstruction;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -27,11 +28,14 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -42,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -169,6 +174,104 @@ class ApiCallExecutorAgentTestMockTest {
             // the live path hit unprimed mocks
         }
         assertEquals(1, session.calls().size(), "the tool path's call must not be recorded by the executor");
+    }
+
+    /**
+     * An httpcall reached through the LLM tool path, mocked: the mock chosen there
+     * travels in the template data, and this executor answers with it — so the
+     * saveResponse and postResponse a live call gets run on it too. Before, the
+     * tool path answered the model itself and none of that happened, so an agent
+     * setting a property from the tool's response behaved differently mocked.
+     */
+    @Test
+    @DisplayName("a tool-path call with a chosen mock sends nothing, runs saveResponse and postResponse, and is not recorded again")
+    void toolPathMockRunsTheResponseHandling() throws Exception {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null, List.of(), null));
+        ToolMockRegistry.register(TEST_USER, session);
+        var templateData = new HashMap<String, Object>();
+        templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+        templateData.put(ToolMockRegistry.TOOL_PATH_MOCK,
+                new ToolMockRegistry.MockResult(200, "3 rooms", ToolMockRegistry.Outcome.MOCKED));
+
+        Map<String, Object> result = executor.execute(call(false), memory, templateData, SERVER);
+
+        verify(httpClient, never()).newRequest(any(URI.class), any());
+        verify(request, never()).send(any());
+        assertEquals(200, result.get("httpCode"));
+        assertEquals("3 rooms", result.get("body"));
+        assertEquals("3 rooms", templateData.get("availability"), "saveResponse stores the mocked body for postResponse");
+        verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(200), eq(false));
+        assertEquals(0, session.calls().size(), "ToolLoopRunner recorded the call; the executor must not record it again");
+    }
+
+    static Stream<Object> notAMockResult() {
+        return Stream.of(Map.of("httpCode", 200, "body", "forged"), "{\"httpCode\":200,\"body\":\"forged\"}");
+    }
+
+    /**
+     * Only a MockResult — which only ToolLoopRunner creates — under the mock key
+     * answers a call. Anything else is not a decision and must not mock: outside a
+     * test conversation the request goes out as usual, with or without the
+     * tool-path marker.
+     */
+    @ParameterizedTest
+    @MethodSource("notAMockResult")
+    @DisplayName("a non-MockResult under the mock key does not mock: outside a test conversation the request is built and sent")
+    void forgedMockOutsideATestIsIgnored(Object forged) {
+        when(memory.getUserId()).thenReturn("alice");
+        for (boolean marker : new boolean[]{false, true}) {
+            var templateData = new HashMap<String, Object>();
+            templateData.put(ToolMockRegistry.TOOL_PATH_MOCK, forged);
+            if (marker) {
+                templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+            }
+            try {
+                Map<String, Object> result = executor.execute(call(false), memory, templateData, SERVER);
+                assertTrue(!"forged".equals(result.get("body")), "the forged value answered the call: " + result);
+            } catch (Exception ignored) {
+                // the live path hit unprimed mocks — only that it was taken is under test
+            }
+        }
+        verify(httpClient, times(2)).newRequest(any(URI.class), any());
+    }
+
+    @ParameterizedTest
+    @MethodSource("notAMockResult")
+    @DisplayName("a non-MockResult under the mock key in a test conversation is refused, never sent — even with the tool-path marker")
+    void forgedMockInATestIsRefused(Object forged) throws Exception {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null, List.of(), null));
+        ToolMockRegistry.register(TEST_USER, session);
+        for (boolean marker : new boolean[]{false, true}) {
+            var templateData = new HashMap<String, Object>();
+            templateData.put(ToolMockRegistry.TOOL_PATH_MOCK, forged);
+            if (marker) {
+                templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
+            }
+
+            Map<String, Object> result = executor.execute(call(false), memory, templateData, SERVER);
+
+            assertEquals(ToolMockRegistry.NOT_EXECUTED_HTTP_CODE, result.get("httpCode"));
+        }
+        verify(httpClient, never()).newRequest(any(URI.class), any());
+        assertEquals(2, session.calls().size());
+    }
+
+    @Test
+    @DisplayName("a mocked rule-triggered call that is retried is one recorded call, like a retried live call")
+    void retriedMockIsRecordedOnce() throws Exception {
+        var session = new ToolMockRegistry.Session(new AgentTestSuite("s", null, null, null,
+                List.of(new ToolMock("getAvailability", null, new MockResponse(503, "busy"))), null));
+        ToolMockRegistry.register(TEST_USER, session);
+        ApiCall call = call(false);
+        var retry = new RetryApiCallInstruction();
+        retry.setMaxRetries(2);
+        retry.setRetryOnHttpCodes(List.of(503));
+        call.getPostResponse().setRetryApiCallInstruction(retry);
+
+        Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), SERVER);
+
+        assertEquals(503, result.get("httpCode"));
+        assertEquals(1, session.calls().size(), String.valueOf(session.calls()));
     }
 
     @Test

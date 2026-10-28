@@ -904,7 +904,7 @@ public class RestConnectionStore implements IRestConnectionStore {
             return;
         }
         for (String origin : connectionConfiguration.getBaseUrlAllowlist()) {
-            String canonical = ConnectionConfiguration.requireCanonicalOrigin(origin, "baseUrlAllowlist");
+            String canonical = ConnectionConfiguration.requireCanonicalAllowlistOrigin(origin, "baseUrlAllowlist");
             if (ConnectionConfiguration.isPlaintextRemoteOrigin(canonical)) {
                 throw new BadRequestException("baseUrlAllowlist entry " + canonical + " would send this connection's credential over plaintext "
                         + "http to a remote host, and allowPlaintextRemoteOrigins is off — "
@@ -918,6 +918,11 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public String getResourceURI() {
         return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
     }
 
     @Override

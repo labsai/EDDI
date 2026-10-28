@@ -87,6 +87,17 @@ export interface Agent {
    */
   maxCostPerConversationUsd?: number;
   /**
+   * How many turns one conversation may start itself with the reserved
+   * `CONTINUE_CONVERSATION` action, counted over the whole conversation.
+   * Absent (or 0) = off. 0..10000. See docs/long-jobs.md.
+   */
+  maxContinuations?: number;
+  /**
+   * The literal user input of every continuation turn — never a template.
+   * Absent = empty input. At most 4096 characters.
+   */
+  continuationInput?: string;
+  /**
    * The version's compatibility generation — SERVER-OWNED. Two versions of an
    * agent with the same generation are compatible: a running conversation moves
    * between them on its next turn once the newer one is deployed. `null` or

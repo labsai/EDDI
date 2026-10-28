@@ -5,7 +5,9 @@
 package ai.labs.eddi.configs.agents.model;
 import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 
+import ai.labs.eddi.configs.hitl.HitlRejectionAction;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -868,6 +870,43 @@ public class AgentConfiguration {
      */
     private Double maxCostPerConversationUsd;
 
+    // === Self-continuation ===
+
+    /**
+     * How many turns one conversation may run on its own, without user input, by
+     * emitting the reserved {@code CONTINUE_CONVERSATION} action — counted over the
+     * whole conversation. Unset or {@code 0} (the default) switches the action off:
+     * it is ignored with a warning and the step records why. Each continuation is
+     * an ordinary turn under the agent's {@link #turnDeadlineMs}, and
+     * {@link #maxCostPerConversationUsd} bounds all of them together. Accepted
+     * range {@code 0}..{@code 10000}.
+     */
+    private Integer maxContinuations;
+
+    /**
+     * The user input of every continuation turn: a literal string written by the
+     * agent designer, never a template (runtime data never becomes template
+     * source). Unset means an empty input. At most 4096 characters. A turn can tell
+     * it is a continuation from {@code {context.selfContinuation.number}}.
+     */
+    private String continuationInput;
+
+    public Integer getMaxContinuations() {
+        return maxContinuations;
+    }
+
+    public void setMaxContinuations(Integer maxContinuations) {
+        this.maxContinuations = maxContinuations;
+    }
+
+    public String getContinuationInput() {
+        return continuationInput;
+    }
+
+    public void setContinuationInput(String continuationInput) {
+        this.continuationInput = continuationInput;
+    }
+
     public Double getMaxCostPerConversationUsd() {
         return maxCostPerConversationUsd;
     }
@@ -1683,6 +1722,71 @@ public class AgentConfiguration {
 
         public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
             this.toolApprovals = toolApprovals;
+        }
+
+        /** Default for {@link #maxRevisionsPerTurn} when the field is absent. */
+        public static final int DEFAULT_MAX_REVISIONS_PER_TURN = 3;
+
+        /**
+         * What a {@code REJECTED} decision on a behavior-rule pause does. {@code SKIP}
+         * (default) is the behaviour before 6.6: the remaining tasks are skipped and
+         * the note is shown. {@code REVISE}: a rejection carrying a note makes the
+         * model revise the answer it gave before the pause (see
+         * {@link HitlRejectionAction}). Tool-call pauses are unaffected.
+         *
+         * @since 6.6.0
+         */
+        private HitlRejectionAction onRejection = HitlRejectionAction.SKIP;
+
+        /**
+         * How many times one turn may be revised under {@code onRejection: REVISE}
+         * before a further rejection skips, {@code 1}..{@code 10}. Absent = 3.
+         *
+         * @since 6.6.0
+         */
+        private Integer maxRevisionsPerTurn;
+
+        public HitlRejectionAction getOnRejection() {
+            return onRejection;
+        }
+
+        public void setOnRejection(HitlRejectionAction onRejection) {
+            // "onRejection": null keeps the default, like timeoutPolicy
+            if (onRejection != null) {
+                this.onRejection = onRejection;
+            }
+        }
+
+        public Integer getMaxRevisionsPerTurn() {
+            return maxRevisionsPerTurn;
+        }
+
+        public void setMaxRevisionsPerTurn(Integer maxRevisionsPerTurn) {
+            this.maxRevisionsPerTurn = maxRevisionsPerTurn;
+        }
+
+        /** {@link #maxRevisionsPerTurn}, or its default when absent. */
+        @JsonIgnore
+        public int effectiveMaxRevisionsPerTurn() {
+            return maxRevisionsPerTurn != null ? maxRevisionsPerTurn : DEFAULT_MAX_REVISIONS_PER_TURN;
+        }
+
+        /**
+         * Who is told when this agent pauses a conversation for approval —
+         * {@code notify.email.recipients} today. Absent = nobody is notified. The
+         * notification links to the Manager's approvals page and carries no
+         * conversation content; it confers no right to decide.
+         *
+         * @since 6.6.0
+         */
+        private HitlNotifyConfig notify;
+
+        public HitlNotifyConfig getNotify() {
+            return notify;
+        }
+
+        public void setNotify(HitlNotifyConfig notify) {
+            this.notify = notify;
         }
     }
 }

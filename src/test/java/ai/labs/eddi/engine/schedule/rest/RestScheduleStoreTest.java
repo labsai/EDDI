@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.schedule.rest;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
@@ -35,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 import java.security.Principal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -134,6 +136,102 @@ class RestScheduleStoreTest {
         assertEquals("persistent", created.getConversationStrategy());
         assertEquals("heartbeat", created.getMessage());
         assertNotNull(created.getNextFire());
+    }
+
+    /**
+     * A body carrying the continuation marker: a forged one would make the fire
+     * handler run a turn in the conversation it names, which may be anyone's.
+     */
+    private static ScheduleConfiguration forgedContinuation() {
+        var s = new ScheduleConfiguration();
+        s.setAgentId("agent-1");
+        s.setName("continuation");
+        s.setMessage("go on");
+        s.setOneTimeAt(Instant.now().plusSeconds(60).toString());
+        s.setMetadata(ConversationContinuations.metadata("victims-conversation", 1, 5));
+        return s;
+    }
+
+    @Test
+    void create_rejectsTheContinuationMarker_evenForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+
+        Response response = rest.createSchedule(forgedContinuation());
+
+        assertEquals(400, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains(ConversationContinuations.METADATA_TYPE_KEY));
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void update_rejectsTheContinuationMarker() throws Exception {
+        Response response = rest.updateSchedule("s1", forgedContinuation());
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    private ScheduleConfiguration storedContinuation() throws Exception {
+        var stored = new ScheduleConfiguration();
+        stored.setId("cont1");
+        stored.setName(ConversationContinuations.scheduleName("conv-c1"));
+        stored.setAgentId("agent-1");
+        stored.setUserId("someone");
+        stored.setMetadata(ConversationContinuations.metadata("conv-c1", 2, 5));
+        when(scheduleStore.readSchedule("cont1")).thenReturn(stored);
+        return stored;
+    }
+
+    @Test
+    void update_ofAStoredContinuationSchedule_isRefused_evenForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        storedContinuation();
+        var body = new ScheduleConfiguration();
+        body.setAgentId("agent-1");
+        body.setName("renamed");
+        body.setMessage("different input");
+        body.setOneTimeAt(Instant.now().plusSeconds(60).toString());
+
+        Response response = rest.updateSchedule("cont1", body);
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    @Test
+    void update_withEmptyMetadata_cannotClearTheContinuationMarker() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        storedContinuation();
+        var body = new ScheduleConfiguration();
+        body.setAgentId("agent-1");
+        body.setName("plain");
+        body.setMessage("x");
+        body.setOneTimeAt(Instant.now().plusSeconds(60).toString());
+        body.setMetadata(new HashMap<>());
+
+        Response response = rest.updateSchedule("cont1", body);
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+    }
+
+    /**
+     * A fire would act as that user id and join a live agent-test run's session.
+     * Refused for an admin too, who may otherwise name any user.
+     */
+    @Test
+    void create_rejectsAReservedAgentTestUserId() {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCronExpression("0 9 * * *");
+        schedule.setMessage("Hello");
+        schedule.setUserId("agent-test:0123456789abcdef01234567:0:1");
+
+        Response response = rest.createSchedule(schedule);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains("reserved"), String.valueOf(response.getEntity()));
     }
 
     @Test
@@ -336,6 +434,25 @@ class RestScheduleStoreTest {
         when(scheduleStore.readSchedule("h1")).thenReturn(hitlSchedule("h1"));
 
         Response response = rest.fireNow("h1");
+
+        assertEquals(409, response.getStatus());
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_continuationSchedule_refusedWithConflict_evenForAdmin() throws Exception {
+        // The engine armed it after a committed turn; a manual fire would run another
+        // user's job early, on the request's identity.
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        var s = new ScheduleConfiguration();
+        s.setId("c1");
+        s.setName(ConversationContinuations.scheduleName("conv-c1"));
+        s.setAgentId("agent-1");
+        s.setUserId("someone");
+        s.setMetadata(ConversationContinuations.metadata("conv-c1", 2, 5));
+        when(scheduleStore.readSchedule("c1")).thenReturn(s);
+
+        Response response = rest.fireNow("c1");
 
         assertEquals(409, response.getStatus());
         verify(fireExecutor, never()).fire(any(), any(), anyInt());

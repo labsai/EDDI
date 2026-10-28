@@ -14,6 +14,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -36,6 +38,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -123,6 +126,23 @@ class ScheduleFireExecutorTest {
      * nothing was ever dead-lettered, and the deadlettered counter operators are
      * told to alert on stayed flat while a nightly agent errored for a month.
      */
+    /**
+     * The fire-time check covers every path that stores a schedule (REST, MCP,
+     * import): a fire never acts as a reserved agent-test user id.
+     */
+    @Test
+    void aScheduleRunningAsAReservedAgentTestUserIdIsNotFired() {
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("sched-1");
+        schedule.setUserId("Agent-Test:0123456789abcdef01234567:0:1");
+
+        var e = assertThrows(IllegalStateException.class, () -> ScheduleFireExecutor.scheduleUserId(schedule));
+
+        assertTrue(e.getMessage().contains("reserved"), e.getMessage());
+        schedule.setUserId("alice");
+        assertEquals("alice", ScheduleFireExecutor.scheduleUserId(schedule));
+    }
+
     @Test
     void alertMaintenanceRunsAsASystemJobAndLogsOnlyWhenItDidSomething() throws Exception {
         AlertMaintenanceService maintenance = mock(AlertMaintenanceService.class);
@@ -245,6 +265,40 @@ class ScheduleFireExecutorTest {
      * exact regression SKIPPED exists to prevent, and the opposite of what
      * {@code docs/scheduling.md} promises operators.
      */
+    /**
+     * The reuse path returns the stored conversation without starting one, so it
+     * never reached the guard in scheduleUserId: a legacy row with a reserved id
+     * would have fired into a test conversation and joined its mock session.
+     */
+    @Test
+    void fire_persistentReuseWithAReservedAgentTestUserId_isRefusedAndSaysNothing() throws Exception {
+        var schedule = makeCronSchedule("sched-reserved-reuse", "persistent");
+        schedule.setUserId("agent-test:0123456789abcdef01234567:0:1");
+        schedule.setPersistentConversationId("conv-test");
+        storedConversation("conv-test", ConversationState.READY, 1);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("reserved"), result.errorMessage());
+        verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+    }
+
+    @Test
+    void fire_dreamWithAReservedAgentTestUserId_isRefusedBeforeDreamRuns() throws Exception {
+        var schedule = makeCronSchedule("sched-reserved-dream", "new");
+        schedule.setUserId("agent-test:0123456789abcdef01234567:0:1");
+        schedule.setMetadata(Map.of(DreamService.METADATA_TYPE_KEY, DreamService.METADATA_TYPE_CONSOLIDATION));
+        assertTrue(DreamService.isDreamSchedule(schedule.getMetadata()), "fixture must take the Dream path");
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("reserved"), result.errorMessage());
+        verifyNoInteractions(dreamService);
+    }
+
     @Test
     void fire_sayRejectsThePausedConversation_isRecordedSkippedNotFailed() throws Exception {
         var schedule = makeCronSchedule("sched-paused-throw", "persistent");
@@ -1347,6 +1401,65 @@ class ScheduleFireExecutorTest {
         return s;
     }
 
+    // ==================== Self-continuation fires ====================
+
+    @Test
+    void fire_continuation_routesToTheHandlerWithTheDesignerInputAndLogsTheFire() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-1");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 4, 10));
+        when(handler.fire(any(), any(), eq("next phase"), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
+
+        var log = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals(FireStatus.FAILED.name(), log.status(), "a failed continuation is retried by the poller like any fire");
+        assertEquals("conv-9", log.conversationId());
+        assertEquals("busy", log.errorMessage());
+        verify(scheduleStore).logFire(log);
+        // Never the strategy path: no say() from the executor itself.
+        verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fire_continuation_parksAnInterruptAcrossTheFireLogWriteAndRestoresIt() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-2");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 1, 10));
+        // The handler caught an InterruptedException and re-asserted the flag.
+        when(handler.fire(any(), any(), any(), any())).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "interrupted");
+        });
+        var flagDuringLog = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            flagDuringLog.set(Thread.currentThread().isInterrupted());
+            return null;
+        }).when(scheduleStore).logFire(any());
+
+        try {
+            executor.fire(schedule, "instance-1", 1);
+
+            assertFalse(flagDuringLog.get(), "the fire log is written with the interrupt parked");
+            assertTrue(Thread.currentThread().isInterrupted(), "and the interrupt is restored afterwards");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     // ==================== RAG ingestion fires ====================
 
     @Test
@@ -1484,6 +1597,29 @@ class ScheduleFireExecutorTest {
         s.setFireStatus(FireStatus.CLAIMED);
         s.setNextFire(Instant.now().minusSeconds(60));
         return s;
+    }
+
+    /**
+     * maxCostPerFire was accepted, stored and shown, but never reached the turn, so
+     * it capped nothing. The fire now hands its turn the allowance, which the LLM
+     * spend gate and the tool loop enforce (see LlmSpendGateTest).
+     */
+    @Test
+    void fire_maxCostPerFire_reachesTheTurn() throws Exception {
+        var schedule = makeCronSchedule("sched-cap", "new");
+        schedule.setMaxCostPerFire(0.5);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-cap", null));
+        sayCompletes("conv-cap");
+
+        executor.fire(schedule, "instance-1", 1);
+
+        ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), any(), eq("conv-cap"), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(),
+                any());
+        var allowance = input.getValue().getContext().get(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE);
+        assertNotNull(allowance, "the per-fire ceiling must travel with the scheduled input");
+        assertEquals(0.5, ((Number) allowance.getValue()).doubleValue(), 1e-9);
     }
 
     private static void setField(Object target, String fieldName, Object value) {

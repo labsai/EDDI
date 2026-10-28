@@ -461,6 +461,13 @@ class RestAlertRulesTest {
         }
 
         @Test
+        @DisplayName("a test without a rule body is a 400, not a server error")
+        void nullBody() {
+            asAdmin();
+            assertError(400, AlertErrors.INVALID_RULE, () -> rest.testRule(null));
+        }
+
+        @Test
         @DisplayName("a vault reference is accepted as the URL itself and shown as it is")
         void vaultUrl() {
             asAdmin();

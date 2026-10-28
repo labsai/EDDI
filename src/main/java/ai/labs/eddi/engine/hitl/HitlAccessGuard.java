@@ -81,6 +81,17 @@ public class HitlAccessGuard {
         return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
     }
 
+    /**
+     * Whether the caller may follow a group discussion past the approval they just
+     * decided — the owner and admins may. An {@code eddi-approver} who is neither
+     * may decide the pause, and may read the conversation while it awaits approval,
+     * but the member turns that run after the resume are outside that window (the
+     * same boundary as the agent resume's "a reply is a read").
+     */
+    public boolean mayReadResumedDiscussion(String ownerId) {
+        return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
+    }
+
     public String requireConversationHitlAccess(String conversationId) {
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
@@ -204,6 +215,29 @@ public class HitlAccessGuard {
             return;
         }
         ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+    }
+
+    /**
+     * Whether the caller may see a pending HUMAN turn's rendered prompt in the
+     * approval-status summary. The read guard admits every {@code eddi-approver},
+     * but the prompt is built from the discussion (peer responses, the question) —
+     * transcript content that the full view withholds from an approver outside an
+     * APPROVAL pause. So the prompt goes only to the member it is addressed to, the
+     * owner and admins, plus an approver while the conversation is actually
+     * awaiting approval (the same window the full view grants). Everybody else
+     * still sees who is up and when — the pause metadata.
+     */
+    public boolean mayReadPendingHumanPrompt(GroupConversation gc) {
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, gc.getUserId())) {
+            return true;
+        }
+        String callerId = OwnershipValidator.principalName(identity);
+        if (gc.getPendingHumanInput() != null && callerId != null
+                && callerId.equals(gc.getPendingHumanInput().memberId())) {
+            return true;
+        }
+        return gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
+                && ownershipValidator.isApprover(identity);
     }
 
     /**

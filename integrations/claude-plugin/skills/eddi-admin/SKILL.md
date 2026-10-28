@@ -80,10 +80,12 @@ id from the user, the Manager, or an earlier run in `list_agent_test_runs`.
 
 1. `run_agent_tests` with the suite and agent ids — it deploys the version to `test`
    (never production) and returns a run id at once.
-2. Poll `get_agent_test_run` until `PASSED`, `FAILED`, `ERROR` or `ABORTED`. It names each
-   failing expectation with the actual value, the tools called and any unmocked tool
-   call (which fails its case rather than executing).
+2. Poll `get_agent_test_run` until `PASSED`, `FAILED`, `ERROR`, `ABORTED` or `CANCELLED`. It
+   names each failing expectation with the actual value, the tools called and any unmocked
+   tool call (which fails its case rather than executing).
 3. `list_agent_test_runs` shows the history — compare against the last passing run.
+4. `cancel_agent_test_run` stops a run that is still `RUNNING` (for example one started
+   against the wrong version); it frees the run slot and deletes its test conversations.
 
 Run the suite before every promotion when the agent has one. `read_docs("agent-testing")`
 has the suite format.
@@ -107,7 +109,7 @@ out, and only an admin sees who rated.
 
 `read_docs("conversation-ratings")` has the scales and filters.
 
-**Alerts.** Alert rules (written in the Manager or over REST) report low ratings,
+**Alerts.** Alert rules (written over REST; the Manager has no Alerts page yet) report low ratings,
 failed turns and turns whose result matched an `OUTPUT_MATCH` condition to an inbox,
 Slack or an https webhook. Events name no user; a rating comment, or an output-match
 value (only when the rule asks for it and the agent has conversation review on), appears cut to 280
