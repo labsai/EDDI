@@ -83,7 +83,6 @@ class ReservedPrincipalsTest {
             Map.entry("system-value:", "template value tag"),
             Map.entry("pii:", "guardrail audit reason code (PiiRedactionGuardrail: pii:<kinds>)"),
             Map.entry("unknown:", "in-memory dedupe key for the unknown-guardrail-type WARN (GuardrailService)"),
-            Map.entry("sha256:", "synthetic Message-ID / hash prefix (MimeMessageParser, email ledger)"),
             Map.entry("notify:", "email ledger idempotency key (HitlEmailNotifier)"),
             Map.entry("notice:", "email ledger idempotency key (EmailOwnerNotifier)"),
             Map.entry("in:", "email ledger idempotency key of an inbound mail"),
