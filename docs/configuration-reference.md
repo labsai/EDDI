@@ -256,7 +256,7 @@ Full narrative: [alerts.md](alerts.md#operating-alerts).
 | `eddi.alerts.retry-base` | `30s` | Retry backoff: `base × 4^(attempt-1)`, at most six hours |
 | `eddi.alerts.claim-lease` | `2m` | How long a node owns a delivery in progress before the maintenance job may retry it |
 | `eddi.alerts.event-retention` | `90d` | Alert events older than this are deleted |
-| `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery |
+| `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of one webhook delivery; kept between 1 s and 60 s. The send claim lease is the longer of 30 s and three times this |
 | `eddi.alerts.manager-url` | *(unset)* | The Manager's base URL; when set, delivered alerts link to the inbox and the conversation |
 
 ---

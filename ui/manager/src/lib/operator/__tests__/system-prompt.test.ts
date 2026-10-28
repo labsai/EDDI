@@ -1181,3 +1181,21 @@ describe("conversation ratings", () => {
     expect(buildOperatorPromptBody(READ_ENDPOINTS)).toContain("matches ONE version exactly");
   });
 });
+
+describe("alerts", () => {
+  it("is taught when the alert reads are granted, in both scopes", () => {
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain("Alerts (rules that tell people when something needs them):");
+      expect(body).toContain("TURN_DEADLINE");
+      expect(body).toContain("OUTPUT_MATCH");
+      expect(body).toContain("alerts-maintenance");
+      expect(body).toContain("never shows a webhook's URL");
+      expect(body).toContain("You cannot acknowledge alerts");
+    }
+  });
+
+  it("is absent without the reads", () => {
+    const endpoints = READ_ENDPOINTS.filter((e) => e !== "GET /alerts/rules");
+    expect(buildOperatorPromptBody(endpoints)).not.toContain("Alerts (rules that tell people");
+  });
+});

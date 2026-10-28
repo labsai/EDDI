@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -67,6 +67,13 @@ export function FeedbackPage() {
   const listQuery = filters.tab === "attention" ? attentionQuery(filters) : allRatingsQuery(filters, now);
   const list = useRatingList(listQuery, "newest", page * PAGE_SIZE, PAGE_SIZE, !needsAgent);
   const agentPrompt = needsAgent || isAgentRequired(list.error);
+
+  // Triage can empty the current page; fall back to the last page that still exists.
+  const listTotal = list.data?.total;
+  useEffect(() => {
+    if (listTotal === undefined || page === 0 || page * PAGE_SIZE < listTotal) return;
+    setPage(Math.max(0, Math.ceil(listTotal / PAGE_SIZE) - 1));
+  }, [listTotal, page]);
 
   const [exporting, setExporting] = useState(false);
   const exportCsv = async () => {

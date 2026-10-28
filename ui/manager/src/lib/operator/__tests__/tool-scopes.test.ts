@@ -18,6 +18,7 @@ import {
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
   grantsRatingReads,
+  grantsAlertReads,
   grantedPatchEndpoints,
   grantsCredentialSafeEdits,
 } from "../tool-scopes";
@@ -624,5 +625,28 @@ describe("conversation ratings", () => {
     expect(grantsRatingReads(["GET /ratings", "GET /ratings/summary"])).toBe(false);
     expect(grantsRatingReads(["GET /ratings/summary", "GET /ratings/attention-count"])).toBe(false);
     expect(grantsRatingReads(["GET /ratings", "GET /ratings/attention-count"])).toBe(false);
+  });
+});
+
+describe("alerts", () => {
+  const READS = ["GET /alerts/events", "GET /alerts/events/unacknowledged-count", "GET /alerts/rules", "GET /alerts/rules/{ruleId}"];
+
+  it("grants the alert reads in both scopes", () => {
+    for (const scope of ["read_only", "read_write"] as const) {
+      const endpoints = endpointsForScope(scope);
+      expect(endpoints).toEqual(expect.arrayContaining(READS));
+      expect(grantsAlertReads(endpoints)).toBe(true);
+    }
+  });
+
+  it("grants no acknowledgement, retry, test send or rule write — they act for a human or send real messages", () => {
+    const all = endpointsForScope("read_write");
+    expect(all.filter((e) => e.includes("/alerts") && !e.startsWith("GET "))).toEqual([]);
+  });
+
+  it("needs every read before the prompt may describe them", () => {
+    for (const missing of READS) {
+      expect(grantsAlertReads(READS.filter((e) => e !== missing))).toBe(false);
+    }
   });
 });

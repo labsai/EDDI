@@ -14,6 +14,7 @@ import {
   grantsKnowledgeBaseAuthoring,
   grantsKnowledgeBaseBinding,
   grantsRatingReads,
+  grantsAlertReads,
   type OperatorScope,
 } from "./tool-scopes";
 import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
@@ -630,6 +631,55 @@ const BODY_RATINGS = `Conversation ratings (feedback from the people chatting):
   \`canOpenTranscript\` says whether the conversation itself can be read.
 - You cannot mark ratings reviewed, write review notes or export them: triage
   is the admin's call on the Feedback page in the manager (/manage/feedback).`;
+
+/**
+ * Alerts — gated on {@link grantsAlertReads}: every line names one of the alert
+ * reads, so the section is absent rather than wrong when they are not granted.
+ */
+const BODY_ALERTS = `Alerts (rules that tell people when something needs them):
+- An alert rule watches agents (one, several, or every agent) for a source:
+  RATING (a rating given or changed: at or below a normalized score, any
+  comment, or one of some reason tags — the criteria are OR-ed) or
+  CONVERSATION_ERROR (a turn ended in one of the listed kinds: TURN_ERROR,
+  TURN_INTERRUPTED, TURN_DEADLINE, COST_CEILING, TENANT_BUDGET) or
+  OUTPUT_MATCH (a finished turn's value compared with the author's constant:
+  \`path\` is properties.<name>, output.json.<a.b.c> — only when the output is
+  JSON — or actions; \`op\` is exists, eq, neq, in, gt, gte, lt, lte or
+  contains; no expressions). An OUTPUT_MATCH alert names the path, op and
+  constant; it carries the runtime value only when the rule sets
+  \`includeValue\` AND the agent version has conversation review on. Every alert
+  lands in the Manager's Alerts inbox; a rule can also deliver to a Slack
+  channel (through a Slack channel integration) and to an HMAC-signed webhook,
+  which must be an https URL (a plain http URL is refused when the rule is
+  saved; a \`\${vault:…}\` URL that resolves to http is not delivered to).
+- Spam control per rule: one alert per rule, agent and conversation per
+  throttle window (\`throttle.windowMinutes\`, default 60), at most
+  \`throttle.maxPerWindow\` (default 10) delivered per window; the rest are
+  held for an HOURLY or DAILY digest (\`digest\`, default HOURLY), or kept in
+  the inbox only when the digest is NONE.
+- An event's \`state\`: PENDING (delivering or waiting for a retry), DELIVERED,
+  FAILED (a target gave up after its retries — each delivery shows its
+  \`lastError\`), INBOX_ONLY, DIGEST_PENDING, DIGESTED. Retries back off from
+  30 seconds and run on the \`alerts-maintenance\` system schedule, so they
+  stop when scheduling is disabled. A Slack failure that names no integration
+  means no Slack channel integration serves that channel id.
+- Scoping is the /ratings rule: an administrator sees everything; anyone else
+  names an agent (AGENT_ID_REQUIRED otherwise). Events carry no user id.
+  Conversation content appears only as a rating alert's quote of the rater's
+  comment, or an OUTPUT_MATCH alert's matched value (only with includeValue and
+  conversation review on) — each at most 280 characters; quote either only
+  when asked.
+- A rule read never shows a webhook's URL: it answers scheme and host plus
+  "/***" and \`urlConfigured: true\` (the URL is often a credential), or the
+  \`\${vault:…}\` reference the URL is stored as. Name the host; there is no
+  full URL to quote. Every delivery target carries a server-assigned
+  \`targetId\`: a save that sends a masked URL back keeps the stored URL of
+  the target with the same \`targetId\` only, and a masked URL without a
+  known \`targetId\` is refused with INVALID_RULE (re-open the rule in the
+  editor, or enter the URL again).
+- You cannot acknowledge alerts, retry a delivery, send a test alert or change
+  a rule: the admin does that on the Alerts page in the manager
+  (/manage/alerts).`;
 
 const BODY_ARCHITECTURE = `How this platform is structured:
 - An agent references a workflow by id and version; the workflow's steps
@@ -1447,6 +1497,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     // can be read or that nothing can. See buildKnowledgeBaseSection.
     buildKnowledgeBaseSection(endpoints),
     ...(grantsRatingReads(endpoints) ? [BODY_RATINGS] : []),
+    ...(grantsAlertReads(endpoints) ? [BODY_ALERTS] : []),
     BODY_APP_CONTEXT,
     buildModelCatalogueSection(),
     BODY_STYLE,

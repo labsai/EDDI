@@ -107,7 +107,7 @@ public class AlertDeliveryService {
         // that starts before the erasure finishes cannot be recalled.
         String token = UUID.randomUUID().toString();
         Instant claimedAt = clock.instant();
-        Instant until = claimedAt.plus(SEND_CLAIM_LEASE);
+        Instant until = claimedAt.plus(sendLease());
         if (!eventStore.claimSend(event.id(), token, claimedAt, until)) {
             // Another node is sending this event right now: leave it for the next pass.
             return skipped(delivery, now);
@@ -131,9 +131,19 @@ public class AlertDeliveryService {
     }
 
     /** The delivery left as it was, due again after one lease. */
-    private static Delivery skipped(Delivery delivery, Instant now) {
+    private Delivery skipped(Delivery delivery, Instant now) {
         return new Delivery(delivery.targetKey(), delivery.type(), delivery.label(), DeliveryStatus.PENDING, delivery.attempts(),
-                delivery.lastAttemptAt(), delivery.lastError(), now.plus(SEND_CLAIM_LEASE));
+                delivery.lastAttemptAt(), delivery.lastError(), now.plus(sendLease()));
+    }
+
+    /**
+     * The claim lease: {@link #SEND_CLAIM_LEASE}, or three times the webhook
+     * timeout when that is longer, so a configured timeout can never reach the
+     * lease (which would leave every send skipped for good).
+     */
+    Duration sendLease() {
+        Duration floor = settings.webhookTimeout().multipliedBy(3);
+        return floor.compareTo(SEND_CLAIM_LEASE) > 0 ? floor : SEND_CLAIM_LEASE;
     }
 
     private Delivery send(AlertEvent event, Delivery delivery, DeliveryTarget target, int attempts, Instant now) {

@@ -2,6 +2,7 @@ import { Link, NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { usePendingApprovals, useAllGroupPendingApprovals } from "@/hooks/use-hitl";
 import { useAttentionCount } from "@/hooks/use-ratings";
+import { useUnacknowledgedAlerts } from "@/hooks/use-alerts";
 import {
   PanelLeftClose,
   PanelLeft,
@@ -106,6 +107,12 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
   const mayCountAllRatings = useIsAdminOrUnknown() && mayOpen("/manage/feedback");
   const { data: feedbackAttention } = useAttentionCount(undefined, mayCountAllRatings);
   const feedbackAttentionCount = mayCountAllRatings ? (feedbackAttention ?? 0) : 0;
+
+  // Unacknowledged alerts — the same rule as the Feedback badge: the count over
+  // every agent is an administrator's question, so only they get the badge.
+  const mayCountAllAlerts = useIsAdminOrUnknown() && mayOpen("/manage/alerts");
+  const { data: unacknowledgedAlerts } = useUnacknowledgedAlerts(undefined, mayCountAllAlerts);
+  const unacknowledgedAlertCount = mayCountAllAlerts ? (unacknowledgedAlerts ?? 0) : 0;
 
   /** Avatar initials and label — both empty when the token carries no profile claims */
   const initials = showUser ? userInitials(user) : "";
@@ -288,6 +295,23 @@ export function Sidebar({ collapsed, onToggle, showLanguage = false }: SidebarPr
                         })}
                       >
                         {!collapsed && (feedbackAttentionCount > 99 ? "99+" : feedbackAttentionCount)}
+                      </span>
+                    )}
+                    {item.path === "/manage/alerts" && unacknowledgedAlertCount > 0 && (
+                      <span
+                        className={cn(
+                          "ms-auto inline-flex items-center justify-center rounded-full bg-destructive font-semibold text-destructive-foreground",
+                          collapsed
+                            ? "absolute top-1.5 end-1.5 h-2 w-2"
+                            : "h-5 min-w-5 px-1.5 text-[11px]",
+                        )}
+                        data-testid="nav-alerts-badge"
+                        aria-label={t("alerts.unacknowledgedCount", {
+                          n: unacknowledgedAlertCount,
+                          defaultValue: "Unacknowledged alerts: {{n}}",
+                        })}
+                      >
+                        {!collapsed && (unacknowledgedAlertCount > 99 ? "99+" : unacknowledgedAlertCount)}
                       </span>
                     )}
                   </NavLink>

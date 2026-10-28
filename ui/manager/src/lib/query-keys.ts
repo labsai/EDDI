@@ -144,3 +144,15 @@ export const ratingKeys = {
   conversation: (conversationId: string | undefined, agentId: string | undefined) =>
     [...ratingKeys.all, "conversation", conversationId, agentId ?? null] as const,
 } as const;
+
+/**
+ * Alerts. Everything sits under `alertKeys.all`, so an acknowledgement, a retry
+ * or a rule save refreshes the inbox, the rule list and the sidebar badge.
+ */
+export const alertKeys = {
+  all: ["alerts"] as const,
+  events: (query: object, index: number, limit: number) => [...alertKeys.all, "events", query, index, limit] as const,
+  /** The sidebar badge. */
+  unacknowledged: (agentId?: string) => [...alertKeys.all, "unacknowledged", agentId ?? null] as const,
+  rules: (agentId?: string) => [...alertKeys.all, "rules", agentId ?? null] as const,
+} as const;
