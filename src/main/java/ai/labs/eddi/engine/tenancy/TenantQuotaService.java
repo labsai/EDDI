@@ -353,6 +353,19 @@ public class TenantQuotaService {
      * metered, so a deployment whose models carry no prices never reaches it.
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
+        return checkCostBudget(tenantId, 0.0);
+    }
+
+    /**
+     * {@link #checkCostBudget(String)} with spend the caller has made but the
+     * monthly counter has not seen yet. The counter is charged when a turn settles
+     * ({@code TurnCostMeter}), so a paid call later in the same turn — a re-ask, a
+     * reprompt, a second LLM task — compared against the counter alone would pass
+     * however much the turn has already spent. {@code pendingUsd} is that unsettled
+     * amount; a non-finite or negative value counts as none.
+     */
+    public QuotaCheckResult checkCostBudget(String tenantId, double pendingUsd) {
+        double pending = Double.isFinite(pendingUsd) && pendingUsd > 0.0 ? pendingUsd : 0.0;
         TenantQuota quota;
         try {
             quota = quotaFor(tenantId);
@@ -365,7 +378,7 @@ public class TenantQuotaService {
 
         double currentCost;
         try {
-            currentCost = quotaStore.getMonthlyCost(tenantId);
+            currentCost = quotaStore.getMonthlyCost(tenantId) + pending;
         } catch (QuotaAccountingUnavailableException e) {
             // Fail closed, as a result rather than an exception: every caller turns a
             // refusal into a deterministic answer (the LLM task's fallback, a tool error

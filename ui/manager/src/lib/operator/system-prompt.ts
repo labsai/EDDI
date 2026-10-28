@@ -170,7 +170,12 @@ You can:
   A single conversation can also be capped with the agent-level
   \`maxCostPerConversationUsd\`: absent means unlimited, 0 allows no priced
   spend at all; unpriced models add nothing to the total, but their calls are
-  still stopped once the ceiling is reached. It is part of the agent document,
+  still stopped once the ceiling is reached. Both limits are checked before
+  every paid call of a turn, not only the first: a re-ask, a cascade
+  escalation or a guardrail reprompt that would start past them is skipped
+  (the answer is then the fallback, the cascade's best so far, or the
+  guardrail's block message), and the call that crosses a limit completes, so
+  a conversation can end slightly above it. It is part of the agent document,
   which you do not edit — point the user at the agent's page in the manager.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
@@ -1169,7 +1174,9 @@ your tool schemas do not cover it, not as a routine first step:
   to open) blocks the turn with reason
   classifier_unavailable or classifier_unparseable — an outage of the
   classifier then blocks every guarded turn; open lets the text through with a
-  warning. It does not re-screen earlier history messages (cost). Point the
+  warning. Once the conversation's cost ceiling or the tenant budget is
+  reached the classifier is not called at all and the reason is
+  spend_refused, with the same failMode. It does not re-screen earlier history messages (cost). Point the
   admin at docs/langchain.md for worked examples.
 - The expression guardrail (output only, EDDI 6.7+) checks a JSON answer with
   a deterministic expression — arithmetic and cross-field rules, no model
