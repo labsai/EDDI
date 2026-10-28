@@ -10702,7 +10702,7 @@
               "sort": "desc"
             }
           },
-          "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: the resolver (eddi.email.dns.servers) is unreachable. budget_exhausted: messages carry more signatures than eddi.email.dns.max-lookups-per-message allows."
+          "description": "TXT lookups of sender authentication by result; cached=true was answered from the cache. Sustained tempfail: TXT lookups are failing temporarily; an unreachable resolver (eddi.email.dns.servers) is one possible cause. budget_exhausted is a local limit, not a DNS failure: a message needed more DKIM key and DMARC record lookups than eddi.email.dns.max-lookups-per-message allows, and the lookups past it were not sent."
         }
       ]
     },
