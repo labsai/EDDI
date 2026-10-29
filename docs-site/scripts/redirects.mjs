@@ -1,11 +1,11 @@
 // Keeps every URL docs.labs.ai has ever served working on the new site.
 //
-// legacy-urls.txt lists them; this turns the list into the "redirects" block of
-// vercel.json (`npm run redirects`), and answers "does this path work on the new
+// legacy-urls.txt lists them; this turns the list into the "redirects" block of the
+// repository-root vercel.json (`npm run redirects`), and answers "does this path work on the new
 // site?" for the tests and for the guard over docs links in the repository.
 //
 // Vercel evaluates redirects in order, before the file system, so the order is:
-//   1. docs.labs.ai (any path)  -> the same path on docs.eddi.technology
+//   1. docs.labs.ai (any path)  -> the same path on docs.eddi.technology (301, kept forever)
 //   2. each legacy path, in its plain, trailing-slash and .md forms -> its page
 //   3. pages whose slug contains a dot, without their trailing slash (see below)
 //   4. a fallback per SUMMARY section, /<section>/<slug> -> /<slug>/, for any
@@ -18,6 +18,15 @@ import GithubSlugger from 'github-slugger';
 import { planSite, repoIo, routeOf, SITE } from './sync-docs.mjs';
 
 export const LEGACY_HOST = 'docs.labs.ai';
+
+/**
+ * 301 Moved Permanently, set explicitly. Vercel's `permanent: true` sends 308, which is
+ * just as permanent, but 301 is the decision for docs.labs.ai (kept forever) and the code
+ * every crawler and HTTP client has always treated as a move. Vercel's own trailingSlash
+ * redirect (/x -> /x/) is a 308 and not configurable; check-live.mjs verifies that the hop
+ * which leaves docs.labs.ai is the 301, whichever order Vercel applies the two in.
+ */
+export const REDIRECT_STATUS = 301;
 
 /** Parses legacy-urls.txt into [{ path, target }] (target null when the default rule applies). */
 export function parseLegacy(text) {
@@ -136,14 +145,14 @@ export function buildRedirects(resolved, index) {
       source: '/:path*',
       has: [{ type: 'host', value: LEGACY_HOST }],
       destination: `${SITE}/:path*`,
-      permanent: true,
+      statusCode: REDIRECT_STATUS,
     },
   ];
   const seen = new Set();
   const add = (source, destination) => {
     if (seen.has(source) || source === destination) return;
     seen.add(source);
-    out.push({ source, destination, permanent: true });
+    out.push({ source, destination, statusCode: REDIRECT_STATUS });
   };
   const sectionRoots = [...index.sections].filter(([s]) => !index.slugs.has(s)).map(([s, route]) => ({ path: `/${s}`, target: route }));
   for (const { path: p, target } of [...resolved.filter((r) => r.redirect), ...sectionRoots]) {
@@ -167,9 +176,9 @@ export function buildRedirects(resolved, index) {
     // Slugs without a dot only: '.md' is handled by the second rule, and the few slugs
     // with dots (upgrading-from-6.4, ...) are in legacy-urls.txt explicitly.
     // The slash form too: with trailingSlash: true the request may arrive as /<section>/<slug>/.
-    out.push({ source: `/${section}/:slug([^/.]+)`, destination: '/:slug/', permanent: true });
-    out.push({ source: `/${section}/:slug([^/.]+)/`, destination: '/:slug/', permanent: true });
-    out.push({ source: `/${section}/:slug([^/.]+).md`, destination: '/:slug.md', permanent: true });
+    out.push({ source: `/${section}/:slug([^/.]+)`, destination: '/:slug/', statusCode: REDIRECT_STATUS });
+    out.push({ source: `/${section}/:slug([^/.]+)/`, destination: '/:slug/', statusCode: REDIRECT_STATUS });
+    out.push({ source: `/${section}/:slug([^/.]+).md`, destination: '/:slug.md', statusCode: REDIRECT_STATUS });
   }
   return out;
 }
@@ -239,7 +248,9 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     for (const e of errors) console.error(`  - ${e}`);
     process.exit(1);
   }
-  const file = path.join(siteDir, 'vercel.json');
+  // At the repository root, not here: Vercel reads vercel.json from the project's Root
+  // Directory, which is the repository root (docs-site/README.md, Deployment, says why).
+  const file = path.join(siteDir, '..', 'vercel.json');
   const config = JSON.parse(fs.readFileSync(file, 'utf8'));
   config.redirects = buildRedirects(resolved, index);
   fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);

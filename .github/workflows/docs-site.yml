@@ -8,7 +8,7 @@ name: Docs Site
 # that every docs URL written in the backend, the UIs, README and the plugin lands on a
 # page (released images print those links forever), and a change anywhere can add one.
 # The full site build — the link validator over every rendered page — runs when docs/,
-# PRIVACY.md (published as /privacy/), the site or this workflow changed.
+# PRIVACY.md (published as /privacy/), the site, the root vercel.json or this workflow changed.
 
 on:
   push:
@@ -47,6 +47,7 @@ jobs:
               - 'docs/**'
               - 'PRIVACY.md'
               - 'docs-site/**'
+              - 'vercel.json'
               - '.github/workflows/docs-site.yml'
 
       - name: Set up Node

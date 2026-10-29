@@ -9,7 +9,7 @@
 // end on the same page of the first one. Run it against a preview deployment
 // before the DNS switch, and against both domains after it.
 
-import { buildRedirects, loadAll } from './redirects.mjs';
+import { buildRedirects, loadAll, REDIRECT_STATUS } from './redirects.mjs';
 import { routeOf } from './sync-docs.mjs';
 
 const args = process.argv.slice(2);
@@ -27,24 +27,30 @@ if (errors.length) {
   process.exit(1);
 }
 
-/** Follows redirects by hand, so each hop's status is visible. */
+/**
+ * Follows redirects by hand, so each hop's status is visible. leftLegacyWith is the status
+ * of the hop that took the request off the legacy host — the one that must be a 301.
+ */
 async function land(url) {
   const hops = [];
   let current = url;
+  let leftLegacyWith = null;
   for (let i = 0; i < 6; i++) {
     const res = await fetch(current, { redirect: 'manual' });
     hops.push(res.status);
     const location = res.headers.get('location');
     if (res.status >= 300 && res.status < 400 && location) {
-      current = new URL(location, current).href;
+      const next = new URL(location, current).href;
+      if (legacyBase && current.startsWith(legacyBase) && !next.startsWith(legacyBase)) leftLegacyWith = res.status;
+      current = next;
       if (!current.startsWith(base) && !(legacyBase && current.startsWith(legacyBase))) {
-        return { url: current, status: res.status, hops, external: true };
+        return { url: current, status: res.status, hops, leftLegacyWith, external: true };
       }
       continue;
     }
-    return { url: current, status: res.status, hops, type: res.headers.get('content-type') ?? '' };
+    return { url: current, status: res.status, hops, leftLegacyWith, type: res.headers.get('content-type') ?? '' };
   }
-  return { url: current, status: 0, hops, error: 'too many redirects' };
+  return { url: current, status: 0, hops, leftLegacyWith, error: 'too many redirects' };
 }
 
 const checks = [];
@@ -97,6 +103,8 @@ async function worker() {
     else if (c.markdown && !r.type.includes('markdown')) problem = `served as ${r.type}, not Markdown`;
     else if (c.canonical && c.target?.startsWith('/') && new URL(r.url).origin !== new URL(base).origin) {
       problem = `stayed on ${new URL(r.url).origin} instead of moving to ${base}`;
+    } else if (c.canonical && r.leftLegacyWith !== REDIRECT_STATUS) {
+      problem = `left ${legacyBase} with HTTP ${r.leftLegacyWith}, expected ${REDIRECT_STATUS}`;
     }
     else if (c.target && c.target.startsWith('/') && new URL(r.url).pathname !== c.target) {
       problem = `landed on ${new URL(r.url).pathname}, expected ${c.target}`;
