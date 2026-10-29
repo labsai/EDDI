@@ -25,6 +25,21 @@ Revision 2 came out of a review against the code, a real build, and eight perspe
 - One per-user event stream, because the browser allows only six connections per origin over HTTP/1.1.
 - EDDI's own end-user app leads on what an OpenAI-protocol client such as Open WebUI cannot show: approvals, teams, structured input and memory transparency.
 
+### Decisions
+
+All ten recommendations in §10 were accepted (revision 3):
+
+- Workforce is the role-aware end-user app, and `/chat` stays the embed surface.
+- The app paths stay as they are.
+- The widget moves to Tailwind and i18next, keeping its colour variables as aliases.
+- Catalog listing is opt-in, default off.
+- Workforce links to the Operator instead of mounting its drawer.
+- An `eddi-user` lands in Workforce.
+- LLM titles are a per-agent opt-in, charged through the cost tracker.
+- The "Workforce" name stays open until phase 4.
+- Raw HTML in replies is a per-agent opt-in, off by default. The widget keeps today's behaviour until agents can opt in.
+- The docs recommend Open WebUI for generic chat.
+
 ### What's next
 
-Answers to the ten questions in §10 of the plan, then Phase 0.
+Phase 0 (bundle budgets, fonts per locale, the widget's router and HTML parser, the feature matrix), and Phase 2 (the catalog and a role-aware Workforce) in parallel.

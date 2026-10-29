@@ -1,6 +1,6 @@
 # Frontend Unification and End-User UX
 
-**Status:** Plan, revision 2 (2026-10-29). Nothing implemented.
+**Status:** Plan, revision 3 (2026-10-29): the questions of revision 2 are decided (§10). Nothing implemented.
 **Scope:** `ui/manager`, `ui/chat`, a new `ui/workforce`, shared packages under `ui/packages/`, and the backend endpoints an end-user app needs. Coordinates with [`white-label-ui-plan.md`](white-label-ui-plan.md) (branding) and [`monorepo-migration-plan.md`](monorepo-migration-plan.md) (the build wiring this extends).
 
 **Goals, as asked:**
@@ -22,7 +22,7 @@ Revision 1 was reviewed against the code and a real build, and then from eight p
 | R3 | **The "which agents may I use" logic already exists**: `AgentModelResolver.listModels()` filters deployed agents through `ResourceAccessGuard.requireAgentUseAccess` for `GET /v1/models` | The catalog endpoint (B1) is a thin, OIDC-authenticated wrapper over existing code, not new access control, so it moves to the front of the schedule |
 | R4 | **Self-service memory is already safe**: every `RestUserMemoryStore` method calls `ownershipValidator.validateUserAccess(identity, userId)` | B5 shrinks from a security item to a test that pins it |
 | R5 | **Workforce does not degrade for `eddi-user`, it fails**: its dashboard, board and settings read `/groupstore/...` (admin/editor only), and nothing in it checks roles | The role-aware Workforce is a prerequisite of the end-user story, not a later refinement |
-| R6 | **The catalog could list the Platform Operator, and every internal agent, to every `eddi-user`** when workspaces are off | Listing becomes an explicit, config-driven decision per agent (B1, Q4) |
+| R6 | **The catalog could list the Platform Operator, and every internal agent, to every `eddi-user`** when workspaces are off | Listing becomes an explicit, config-driven opt-in per agent, default off (B1, D4) |
 | R7 | **Sequencing**: revision 1 put four large refactor phases before any user-visible change | Re-sequenced into vertical slices that each ship something (§7). Packages are extracted when a second consumer needs them, not ahead of time |
 | R8 | **Six packages is too many** for three apps and one team | Three packages: `@eddi/core`, `@eddi/ui`, `@eddi/conversation` (§3.1) |
 | R9 | **Strategy**: EDDI already ships an OpenAI-compatible `/v1` API so that Open WebUI can be its front end (`docs/open-webui-integration.md`). Competing feature for feature on generic chat throws that away | EDDI's own end-user app matches the basics and leads where an OpenAI-protocol client cannot follow: approvals, teams, structured input, memory transparency, branding (§5) |
@@ -119,7 +119,7 @@ Multi-agent teams (7 discussion styles, votes, a facilitator, humans as members,
 ### 2.1 The end user
 
 - They do not care that there are three apps. They care that sign-in carries over, the sidebar remembers them, and nothing loads for three seconds. 714 KB before the first paint on a phone is the most visible problem today, and the fonts are more than half of the CSS.
-- "Workforce" is a builder's name for a team-of-agents product. An end user opening it to *ask a question* needs a home with a box to type in, not a dashboard of boards. **Naming is a decision** (Q8), and white-labelling (`productName`) already lets a customer rename it.
+- "Workforce" is a builder's name for a team-of-agents product. An end user opening it to *ask a question* needs a home with a box to type in, not a dashboard of boards. The name stays open until phase 4 (D8); white-labelling (`productName`) already lets a customer rename it.
 - Undo looks like it reverses everything. When a turn has called tools, the UI must say what undo cannot take back (§5, T1.6).
 - An approval wait is a dead end today: the user sees "paused" and nothing tells them when it continues. This is EDDI's most distinctive flow, and it needs the most care (T2.3).
 
@@ -303,9 +303,9 @@ A raw model picker in the end-user app. EDDI's unit is the agent, whose model it
 | # | Item | Shape | Notes |
 |---|---|---|---|
 | **B1** | **Catalog** | `GET /catalog/agents` and `GET /catalog/groups` at `eddi-user`: deployed and usable (reuse `AgentModelResolver` / `ResourceAccessGuard`), **and listed** (a per-agent and per-group `listed` flag, default `false`; with workspaces on, `published` and `internal` visibility also count as listed). Returns the profile fields, `callerLevel` and appearance | R3, R6. The empty state tells an admin how to list an agent |
-| B2 | Title, rename, pin | `title`, `pinned` on `ConversationDescriptor`; owner-only `PATCH`; the title is the first user message (truncated) unless the agent opts into LLM titles (`titleGeneration`), charged to the cost tracker | Never from a secret turn; covered by GDPR export and erasure (§2.5) |
+| B2 | Title, rename, pin | `title`, `pinned` on `ConversationDescriptor`; owner-only `PATCH`; the title is the first user message (truncated) unless the agent opts into LLM titles (`titleGeneration`, default off), charged to the cost tracker like any LLM call (D7) | Never from a secret turn; covered by GDPR export and erasure (§2.5) |
 | B3 | Search my conversations | `GET /conversationstore/conversations/search?q=`, owner-scoped, paged; a Mongo text index or Postgres `tsvector` over titles, then outputs | Privacy review before outputs are indexed; secret turns excluded; erasure removes the entries |
-| B4 | Agent presentation | `appearance {displayName, avatar, accentColor, starters[]}` and `conversationControls {undo, redo, attachments, rating, quickReplies, streaming, rawHtml}` on the agent, served by `/profile` and B1 | The white-label §4.6 seam. Export/import, agent sync, MCP tools, the operator prompt, the Manager editor |
+| B4 | Agent presentation | `appearance {displayName, avatar, accentColor, starters[]}` and `conversationControls {undo, redo, attachments, rating, quickReplies, streaming, rawHtml}` on the agent, served by `/profile` and B1 | The white-label §4.6 seam. Export/import, agent sync, MCP tools, the operator prompt, the Manager editor. `rawHtml` defaults to `false` (D9): from the release that ships it, the widget shows HTML in an agent's replies as text unless the agent enables it. The Manager never rendered raw HTML, so only widget users of agents that emit HTML see the change, and the release notes and the upgrade section of `docs/chat-ui-embedding.md` name it |
 | B5 | Memory self-service | Already enforced (R4). Add a REST test that `eddi-user` A gets 403 for B's memories | — |
 | B6 | Tool lifecycle on SSE | `tool_result {tool, ok, summary}` after each call, with the same redaction as `toolTrace` | Additive; an older client ignores it. The widget's 9-event contract test grows |
 | B7 | Reasoning on SSE | `reasoning` tokens when the provider exposes them, opt-in per agent | Off by default |
@@ -325,9 +325,9 @@ Each phase ships something a person notices, keeps `main` green, and extracts sh
 
 | Phase | Ships | Work | Exit criteria |
 |---|---|---|---|
-| **0. Baseline and quick wins** (S) | faster first load everywhere | Commit the §1.2 numbers and a budget check over `dist/` in CI. **Fonts per locale**: load a script family when its locale is active, not all eight up front. **Widget**: drop the router (three path patterns), and load the raw-HTML parser lazily (or not at all, pending B4). Record a feature matrix (§1.3) as one Playwright spec per capability, tagged by surface | Manager/Workforce first load clearly below 714 KB gz and widget clearly below 217 KB gz, with the new numbers as budgets; matrix green for what each surface supports today |
+| **0. Baseline and quick wins** (S) | faster first load everywhere | Commit the §1.2 numbers and a budget check over `dist/` in CI. **Fonts per locale**: load a script family when its locale is active, not all eight up front. **Widget**: drop the router (three path patterns), and load the raw-HTML parser only for an agent that enables raw HTML (D9; until B4 ships the setting, the widget keeps rendering HTML so nothing changes before agents can opt in). **Docs**: say plainly in `docs/open-webui-integration.md` and the README that a deployment wanting only generic chat can use Open WebUI over `/v1` (D10). Record a feature matrix (§1.3) as one Playwright spec per capability, tagged by surface | Manager/Workforce first load clearly below 714 KB gz and widget clearly below 217 KB gz, with the new numbers as budgets; matrix green for what each surface supports today |
 | **1. Workspaces and `@eddi/core`** (L) | fewer bugs, one fix fixes all | `ui/package.json` workspaces, one lockfile, Dependabot, SBOM, CodeQL and Maven updated in one PR. Then `@eddi/core`: port the **union** of the five loops' tests, then move the loops onto it one at a time, starting with the widget and `ChatPanel` | `./mvnw package` jar layout unchanged; duplicated API and SSE modules deleted; matrix unchanged |
-| **2. Catalog and Workforce for `eddi-user`** (M, backend + frontend) | an `eddi-user` can sign in to Workforce, see what they may use, and chat | B1, B5 test; Workforce becomes role-aware: editor-only screens hidden, reads move from `/groupstore` to the catalog | E2E as `eddi-user`: no 403 on any Workforce page; catalog shows only listed and usable agents; the Operator never appears |
+| **2. Catalog and Workforce for `eddi-user`** (M, backend + frontend) | an `eddi-user` can sign in to Workforce, see what they may use, and chat | B1 with the opt-in `listed` flag (D4), B5 test; Workforce becomes role-aware: editor-only screens hidden, reads move from `/groupstore` to the catalog; the Operator drawer is replaced by a link for admins (D5); `/` and `/welcome` send an `eddi-user` straight to `/workforce`, while editors and admins keep the chooser (D6) | E2E as `eddi-user`: no 403 on any Workforce page; catalog shows only listed and usable agents; the Operator never appears |
 | **3. `@eddi/ui` and the agent kind** (L) | the same chat everywhere: KaTeX, quick replies, secret input and history in the Manager and Workforce; 11 locales in the widget | Tokens, primitives and i18n into `@eddi/ui`; `AgentConversation` and the shared components; `ChatPanel`, the test drawer, the Workforce chat and member thread, and the widget move onto them; the one markdown policy | Matrix shows the **union** of capabilities on every agent surface; widget within budget; URL colour parameters and `/branding/brand.css` still apply; RTL e2e on the widget |
 | **4. Sidebar, titles, home** (L) | T1.1, T1.2, T1.4, T1.15 | B2, B4; Workforce home and sidebar | Per-item e2e |
 | **5. Workforce as its own app** (M) | Workforce loads only what it uses | `ui/workforce` with its own `main.tsx`, router, layout, MSW handlers and e2e; Manager drops the Workforce routes; Maven copies a third `dist/` | Workforce first load within its own, smaller budget; no Manager import of Workforce code (lint) |
@@ -371,17 +371,19 @@ i18n in all 11 locales in the same commit (`i18n:check` learns the package direc
 
 ---
 
-## 10. Decisions needed
+## 10. Decisions (2026-10-29)
 
-| # | Question | Recommendation |
+All ten recommendations of revision 2 were accepted. Where each one lands:
+
+| # | Decision | Lands in |
 |---|---|---|
-| Q1 | Is Workforce *the* end-user app (chats and teams, role-aware), with `/chat` as the embed surface? | Yes |
-| Q2 | Keep the `ui/manager` and `ui/chat` paths, or move to `ui/apps/*`? | Keep them |
-| Q3 | Tailwind and i18next in the widget, replacing its own CSS and `t()`? | Yes, with the colour aliases kept as a contract |
-| Q4 | Catalog listing: opt-in per agent (default off), or every usable agent? | Opt-in, so nothing is exposed by an upgrade |
-| Q5 | Workforce links to the Operator rather than mounting its drawer? | Yes |
-| Q6 | `eddi-user` lands in Workforce instead of the `/welcome` chooser? | Yes; editors and admins keep the chooser |
-| Q7 | LLM-generated titles: allowed, and who pays? | Per-agent opt-in through the cost tracker; the default is the first message |
-| Q8 | Is "Workforce" the right name for the place end users chat? | Decide before phase 4; white-labelling can rename it per deployment either way |
-| Q9 | Raw HTML in agent replies: keep it as a per-agent opt-in, or drop it? | Per-agent opt-in, off by default |
-| Q10 | Should the docs recommend Open WebUI over `/v1` for deployments that only want generic chat? | Yes, plainly |
+| D1 | **Workforce is the end-user app** (chats and teams, role-aware); `/chat` stays the embeddable single-agent surface. No third app | §4.2, §4.3; phases 2, 4, 5 |
+| D2 | **Keep `ui/manager` and `ui/chat` where they are**; add `ui/workforce` and `ui/packages/*` | §3.1; phase 1 |
+| D3 | **The widget moves to Tailwind and i18next.** The `--chat-*` variables and URL colour parameters stay as documented aliases, pinned by a test. `ui/chat/AGENTS.md` §3 and §5 change in the same PR | §3.3; phase 3 |
+| D4 | **Catalog listing is opt-in per agent and per group, default off.** An upgrade lists nothing. With workspaces on, `published` and `internal` visibility also count as listed | B1; phase 2 |
+| D5 | **Workforce links to the Operator** (`/manage/operator`) for admins instead of mounting its drawer | §2.3, §4.2; phase 2 |
+| D6 | **An `eddi-user` lands in Workforce.** `/` and `/welcome` send them to `/workforce`; editors and admins keep the chooser | §4.2; phase 2 |
+| D7 | **LLM titles are a per-agent opt-in, charged through the cost tracker.** The default title is the first user message | B2; phase 4 |
+| D8 | **The name "Workforce" stays open until phase 4 starts.** Until then the code, routes and i18n keys keep the name; a rename later is a display string (and `productName` already lets a deployment rename it) | §2.1; before phase 4 |
+| D9 | **Raw HTML in replies is a per-agent opt-in, off by default** (`conversationControls.rawHtml`). The widget keeps today's behaviour until the setting exists, so agents can opt in before the default bites | §3.3, B4; phases 0, 3 |
+| D10 | **The docs recommend Open WebUI over `/v1`** for deployments that only want generic chat | §2.8; phase 0 |
