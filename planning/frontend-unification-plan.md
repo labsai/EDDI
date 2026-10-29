@@ -1,6 +1,6 @@
 # Frontend Unification and End-User UX
 
-**Status:** Plan, revision 1 (2026-10-29). Nothing implemented.
+**Status:** Plan, revision 2 (2026-10-29). Nothing implemented.
 **Scope:** `ui/manager`, `ui/chat`, a new `ui/workforce`, shared packages under `ui/packages/`, and the backend endpoints an end-user app needs. Coordinates with [`white-label-ui-plan.md`](white-label-ui-plan.md) (branding) and [`monorepo-migration-plan.md`](monorepo-migration-plan.md) (the build wiring this extends).
 
 **Goals, as asked:**
@@ -8,6 +8,26 @@
 1. Split Workforce out of the Manager into its own app, with shared components.
 2. One set of components for the Chat UI, the Manager and Workforce.
 3. An end-user experience (outside the Manager) that holds its own against Open WebUI, LibreChat, ChatGPT, Claude.ai and LobeChat.
+
+---
+
+## 0. Revision 2: what the review changed
+
+Revision 1 was reviewed against the code and a real build, and then from eight perspectives (§2). These findings changed the plan:
+
+| # | Finding | Effect on the plan |
+|---|---|---|
+| R1 | **There are not two chat implementations but at least five**: the Manager's `ChatPanel` (`use-chat.ts`), the Operator (`use-operator-chat.ts`, 1.8k lines), the Workforce member thread (`workforce-thread.tsx`, 1.6k lines, its own stream loop and markdown), the group discussion (three transcript renderers), and the Chat UI widget. There are **14 separate `ReactMarkdown` call sites** (§1.3) | The shared layer is designed around *kinds of conversation* (§3.2), not around one chat panel. The Operator and group discussions are in scope from the start |
+| R2 | **Measured:** `/workforce` loads exactly the same files as `/manage`, **714 KB gzipped (2.3 MB raw)** before the first page. 388 KB of the 606 KB main stylesheet is 476 `@font-face` rules for all eight Noto script families. The widget loads **217 KB gzipped**, and the raw-HTML path (`rehype-raw` → `parse5`) is about as big as the widget's own code | The split now has a measured payoff and a budget. Two quick wins (fonts per locale, the widget's HTML parser) come first, independent of the refactor (§7, phase 0) |
+| R3 | **The "which agents may I use" logic already exists**: `AgentModelResolver.listModels()` filters deployed agents through `ResourceAccessGuard.requireAgentUseAccess` for `GET /v1/models` | The catalog endpoint (B1) is a thin, OIDC-authenticated wrapper over existing code, not new access control, so it moves to the front of the schedule |
+| R4 | **Self-service memory is already safe**: every `RestUserMemoryStore` method calls `ownershipValidator.validateUserAccess(identity, userId)` | B5 shrinks from a security item to a test that pins it |
+| R5 | **Workforce does not degrade for `eddi-user`, it fails**: its dashboard, board and settings read `/groupstore/...` (admin/editor only), and nothing in it checks roles | The role-aware Workforce is a prerequisite of the end-user story, not a later refinement |
+| R6 | **The catalog could list the Platform Operator, and every internal agent, to every `eddi-user`** when workspaces are off | Listing becomes an explicit, config-driven decision per agent (B1, Q4) |
+| R7 | **Sequencing**: revision 1 put four large refactor phases before any user-visible change | Re-sequenced into vertical slices that each ship something (§7). Packages are extracted when a second consumer needs them, not ahead of time |
+| R8 | **Six packages is too many** for three apps and one team | Three packages: `@eddi/core`, `@eddi/ui`, `@eddi/conversation` (§3.1) |
+| R9 | **Strategy**: EDDI already ships an OpenAI-compatible `/v1` API so that Open WebUI can be its front end (`docs/open-webui-integration.md`). Competing feature for feature on generic chat throws that away | EDDI's own end-user app matches the basics and leads where an OpenAI-protocol client cannot follow: approvals, teams, structured input, memory transparency, branding (§5) |
+| R10 | **The widget forgets the conversation on reload** on the direct route: nothing keeps `conversationId` (only the managed `intent/userId` route resumes) | Added to Tier 1 (T1.15) |
+| R11 | **HTTP/1.1 caps a browser at six connections per origin** (noted in `ui/manager/src/main.tsx` and `session-log-store.ts`). An end-user app with a chat stream, a team stream and notifications in two tabs reaches it | One multiplexed per-user event stream, and HTTP/2 guidance for deployments (B12, §2.6) |
 
 ---
 
@@ -19,278 +39,349 @@
 |---|---|---|---|---|
 | Manager | `/manage/**` | `ui/manager` (`manage.html`) | React 19, Tailwind v4, Radix, TanStack Query, Zustand, i18next (11 locales), React Router data router | admins, editors |
 | Welcome chooser | `/welcome` (`/` redirects there) | `ui/manager` (`welcome.html`) | same bundle | everyone |
-| Workforce | `/workforce/**` | `ui/manager` (`workforce.html`) | **same bundle, same `main.tsx`, same router** as the Manager | meant for business users; in practice editors (see 1.4) |
+| Workforce | `/workforce/**` | `ui/manager` (`workforce.html`) | **same bundle, same `main.tsx`, same router** as the Manager | meant for business users; in practice editors (R5) |
 | Chat UI | `/chat/**` | `ui/chat` (`chat.html`) | React 19, hand-written BEM CSS, Context + `useReducer`, its own `t()` (4 locales), BrowserRouter | anyone with a link or an embed (iframe + postMessage token) |
 
-The Workforce is already a separate HTML shell served by its own resource (`RestWorkforceResource`, branded through `BrandedShellRenderer`). It is still one Vite build with three inputs (`ui/manager/vite.config.ts`, `rolldownOptions.input`), a single `<Routes>` table in `src/app.tsx`, and one provider stack. "Splitting" it is therefore mostly about **code ownership, bundle and dependency boundaries**, not about URLs. The URLs, shells and backend resources can stay exactly as they are.
+Workforce already has its own HTML shell and backend resource (`RestWorkforceResource`, branded through `BrandedShellRenderer`). It is still one Vite build with three inputs, one `<Routes>` table in `src/app.tsx` and one provider stack. The URLs, shells and backend resources can stay as they are; what changes is code ownership, bundles and dependencies.
 
-### 1.2 Size of what would be shared or split
+### 1.2 Measured bundles (2026-10-29)
 
-| Area | Files | Lines (no tests) | Tests |
+Built from `main` with `npm ci` and `vite build` (Node 22). The numbers are gzip -9 sizes of every script and stylesheet the HTML shell references before any lazy chunk.
+
+| Page | First load (gz) | Raw | Notes |
 |---|---|---|---|
-| Workforce pages + components (`pages/workforce`, `components/workforce`) | 50 | ~17.2k | 43 test files |
-| Manager chat (`components/chat`, `hooks/use-chat.ts`, `lib/api/chat.ts`) | 13 | ~5.9k | 29 test files |
-| Chat UI (`ui/chat/src`, including CSS) | 35 | ~10.7k (`ChatWidget.tsx` alone is 2.3k, `chat.css` 1.9k) | 35 test files |
+| `/manage` | 714 KB | 2.3 MB | `main` JS 1.0 MB raw / 310 KB gz; main CSS 606 KB raw / 156 KB gz |
+| `/workforce` | **714 KB** | 2.3 MB | the **identical** file set as `/manage` |
+| `/chat` | 217 KB | 0.75 MB | one 717 KB entry; KaTeX (267 KB) and highlight.js (164 KB) are already lazy |
 
-Shared code Workforce already pulls in from the Manager: `lib/api/groups`, `hooks/use-groups`, `hooks/use-chat`, `components/ui/*`, `components/groups/*` (task board, decision cards, structured entries, discussion panel), `lib/markdown-safe`, `lib/ime`, the agent picker, the theme provider, the operator drawer. About 25 Manager files outside `workforce/` mention Workforce (mode switcher, auth provider, route registry, query keys, MSW handlers, operator system prompt).
+Composition, from module sizes before minification, so read the proportions rather than the absolute numbers:
 
-### 1.3 Two chat implementations, each with fixes the other lacks
+- **Manager CSS:** 388 KB of the 606 KB is `@font-face` rules. `main.tsx` imports all eight Noto families (Arabic, Thai, Devanagari, JP, KR, SC, TC) for every user, whatever their language. The font *files* load lazily, by unicode-range; the declarations do not.
+- **Widget JS:** react-dom 524 KB, the widget's own code 193 KB, `parse5` 190 KB (pulled in by `rehype-raw` to allow raw HTML in agent replies), react-router 92 KB (for three path patterns), then the markdown pipeline.
 
-The Manager's `ChatPanel` (used by `/manage/chat`, Agent Studio and `/workforce/chat`) and the Chat UI's `ChatWidget` are independent implementations of the same backend contract: start, say, stream, undo/redo, rerun, HITL pause, attachments, secret input, ratings. Both carry hard-won contract fixes (see the "Backend contract" list in `ui/chat/AGENTS.md`: the 9 SSE events, the `{"message","code"}` error envelope, 409 restores the draft, `inputField` on `done`, the masked `input`, and so on).
+The full Manager build is 23 MB of JavaScript in 364 files. Most of it is Monaco and its workers, which load lazily.
 
-| Capability | Manager `ChatPanel` | Chat UI `ChatWidget` |
-|---|---|---|
-| Markdown | GFM; images rendered as links (`markdown-safe.tsx`) | GFM, raw HTML sanitized, KaTeX and highlight.js loaded on demand, output images |
-| Quick replies | partial | yes |
-| Agent switcher, conversation history | yes | no (one agent per URL, no history list) |
-| Debug drawer, pipeline trace, streaming toggle | yes | no |
-| Guardrail notices, review notice | yes | review notice only |
-| Embedding (postMessage token, theme and colour params, `hide*` flags) | no | yes |
-| Managed agents (`/chat/managed/:intent/:userId`) | no | yes |
-| Demo mode | MSW | `demo-api.ts` |
-| HITL | pause notice; approvals live in `/manage/approvals` | read-only paused card with cancel |
-| i18n | i18next, 11 locales, RTL tested | own `t()`, en/de/fr/es |
+### 1.3 Every conversation surface
 
-Duplicated modules, one for one: `ime.ts`, rating steps (`rating-steps.ts` / `chat-rating-steps.ts`), secret input, paused card / pause notice, the rating card and step rating, attachment staging and context building, SSE parsing (`sse-events.ts` / `sse-utils.ts` + `lib/api/chat.ts`), snapshot-to-messages. `lucide-react` is at 0.577 in one app and 1.59 in the other.
+| # | Surface | Where | State / stream | Renderer | Composer |
+|---|---|---|---|---|---|
+| 1 | Chat page | `/manage/chat` | `use-chat.ts` (1.9k lines, Zustand) | `chat-message.tsx` | in `chat-panel.tsx` |
+| 2 | Agent Studio | `/manage/studio/:id` | same `ChatPanel` | same | same |
+| 3 | Test drawer (save, deploy, chat) | everywhere in `AppLayout` | `use-chat.ts` | `chat-message.tsx` | its own, in `chat-drawer.tsx` |
+| 4 | **Platform Operator**: page and drawer | `/manage/operator`, every layout | `use-operator-chat.ts` (1.8k lines, own Zustand store, own stream loop) | its own markdown in `operator-chat.tsx` | its own, with **inline approve / reject**, request preview, cascade summary |
+| 5 | **Group discussion** | `/manage/groups/:id/workspace` | `lib/api/groups.ts` (own SSE reader) | `discussion-transcript.tsx`, `agent-response-card.tsx`, `structured-turn-card.tsx`, artifacts, task board, overview views | `discussion-input.tsx`, `human-turn-banner.tsx` |
+| 6 | Conversation detail (read-only) | `/manage/conversationview/:id` | conversation store | own list, reuses `MessageAttachments` | — |
+| 7 | Workforce chat | `/workforce/chat` | `ChatPanel` | `chat-message.tsx` | `chat-panel.tsx` |
+| 8 | **Workforce member thread** | `/workforce/:board/thread/:member` | **its own** stream loop in `workforce-thread.tsx` (1.6k lines) | its own markdown | its own |
+| 9 | Workforce board | `/workforce/:board` | `lib/api/groups.ts` | `board-transcript.tsx`, `advisor-response-card.tsx` | `board-input.tsx` |
+| 10 | Workforce history | `/workforce/:board/history` | groups API | `conversation-viewer.tsx` | — |
+| 11 | Chat UI widget | `/chat/**` | `ChatWidget.tsx` (2.3k lines) + `chat-store.tsx` | `MessageBubble.tsx` | `ChatInput.tsx`, `SecretInput.tsx` |
 
-### 1.4 The end-user gap is mostly a backend gap
+That is **five separate 1:1 turn loops** (1–3 share one) over the same `/agents/{id}/stream` contract, **three** group transcript renderers, and **14** `ReactMarkdown` call sites. They do not share one rendering policy. The Manager renders markdown images as links (`markdown-safe.tsx`, against tracking beacons). The widget renders sanitized raw HTML and output images. Some sites use neither.
 
-Somebody with only `eddi-user` cannot build a "my AI assistant" experience today, whatever the frontend does:
+What each 1:1 implementation has that the others lack:
+
+| Capability | `ChatPanel` | Operator | Workforce thread | Widget |
+|---|---|---|---|---|
+| KaTeX, highlight.js, output images | — | — | — | yes |
+| Quick replies, `inputField`, secret input | partial | — | — | yes |
+| History, agent switcher, debug drawer, streaming toggle | yes | history | — | — |
+| Inline HITL decision (approve / reject per tool call) | — (notice only) | **yes** | — (notice only) | — (read-only card, cancel) |
+| Embedding, URL theming, managed intents | — | — | — | yes |
+| i18n | 11 locales | 11 | 11 | 4 |
+
+Modules that exist twice or more: IME handling, rating steps, secret input, the paused card, the rating card, attachment staging and context building, SSE frame parsing (`sse-events.ts`, `sse-utils.ts`, the group reader), snapshot-to-messages, and the "turn failed" notice. `lucide-react` is at 0.577 in one app and 1.59 in the other.
+
+### 1.4 The backend, from an end user's side
 
 | Need | Today | Where |
 |---|---|---|
-| "Which agents may I talk to?" | **No endpoint at `eddi-user`.** `agentstore`, `deploymentstore`, `capabilities` and `descriptorstore` are `eddi-admin`/`eddi-editor` only | `IRestAgentStore`, `IRestDeploymentStore`, `IRestCapabilityRegistry`, `IRestDocumentDescriptorStore` |
-| "Which teams (groups) may I use?" | **No endpoint at `eddi-user`.** `groupstore` is admin/editor; only *running* a group discussion (`/groups/...`) admits `eddi-user` | `IRestAgentGroupStore`, `IRestGroupConversation` |
-| Agent card (name, description, rating config, review notice) | Yes, at `USE` level | `GET /agents/{agentId}/profile` |
-| "My conversations" | Yes: `GET /conversationstore/conversations` is open to `eddi-user` and owner-scoped for non-admins | `IRestConversationStore` |
-| Conversation title, rename, pin | **No.** `ConversationDescriptor` has `agentName`, `viewState`, step count, state; no title | `ConversationDescriptor` |
-| Search across my conversations | **No** (only `filter` on descriptors) | — |
-| "What do you remember about me?" | `usermemorystore` admits `eddi-user`; caller-equals-path-user enforcement **must be verified** before a self-service UI uses it | `IRestUserMemoryStore` |
-| Agent avatar, conversation starters, accent | **No.** Parked as the "per-agent appearance" seam | `white-label-ui-plan.md` §4.6 |
-| Tool progress | `tool_call` (name only) at start; arguments only later, redacted, in `task_complete.toolTrace`; no "tool finished" event | `RestAgentEngineStreaming` |
-| Model reasoning ("thinking") | **No SSE event** | — |
-| RAG sources / citations | **Unverified** whether retrieved sources reach the client in any form | `docs/rag.md` |
-| Editing an earlier message, branching | Undo/redo/rerun of the last step only; forking is on the roadmap ("Session Forking") | `IRestAgentEngine` |
-| Sharing a conversation | **No** | — |
+| "Which agents may I talk to?" | Not at `eddi-user`: `agentstore`, `deploymentstore`, `capabilities` and `descriptorstore` are admin/editor. **But** `GET /v1/models` already computes it (R3) | `AgentModelResolver`, `ResourceAccessGuard` |
+| "Which teams may I use?" | Not at `eddi-user`: `groupstore` is admin/editor; *running* a discussion (`/groups/...`) admits `eddi-user` | `IRestAgentGroupStore`, `IRestGroupConversation` |
+| Agent card | `GET /agents/{id}/profile` at `USE`: name, description, review notice, rating config | `IRestAgentProfile` |
+| My conversations | `GET /conversationstore/conversations`, owner-scoped in the query for non-admins (state and orphan checks are in memory, bounded at 500 descriptors per page) | `RestConversationStore` |
+| Title, rename, pin, search | None. `viewState` is only `UNSEEN`/`SEEN` | `ConversationDescriptor` |
+| My memory | Safe: ownership checked on every method (R4) | `RestUserMemoryStore` |
+| Stop a turn | `POST /agents/{id}/cancel` stops a paused turn, or a running one on the same pod | `IRestAgentEngine`, `docs/hitl.md` |
+| Tool progress | `tool_call` (name) before each tool; arguments later, redacted, in `task_complete.toolTrace`; no "finished" event | `RestAgentEngineStreaming` |
+| Reasoning, citations | No reasoning event. Whether retrieved RAG sources reach the client at all is **unverified** | — |
+| Edit an earlier message | Only the last step: undo, redo, rerun. Forking is on the roadmap | `IRestAgentEngine` |
+| Undo and side effects | Undo rewinds memory, but **an API call, an email or a spend already made stays made** ("undo no longer refunds spend", 2026-10 changelog) | — |
 
-This means the Workforce today is in practice an editor's tool: its wizard calls `agents/setup`, its settings page writes group configurations, and its dashboard lists groups through admin/editor endpoints.
+### 1.5 What EDDI has that the competition mostly does not
 
-### 1.5 What EDDI already has that the competition mostly does not
-
-These should drive the design, not be squeezed in afterwards:
-
-- **Multi-agent teams** with 7 discussion styles, votes, a facilitator, humans as members, shared artifacts, task lists (`docs/group-conversations.md`).
-- **Human-in-the-loop** turn and tool-call approval gates, notifications by email and Slack (`docs/hitl.md`).
-- **Persistent user memory** with visibility scoping and Dream consolidation (`docs/user-memory.md`).
-- **Deterministic behaviour rules**, quick replies, agent-requested secret input, structured `inputField`.
-- **Undo/redo**, ratings, review notices, model cascades with visible escalation, guardrails.
-- **White-labelling** at runtime, and workspaces with `USE`/`VIEW`/`EDIT`/`OWN` levels.
+Multi-agent teams (7 discussion styles, votes, a facilitator, humans as members, shared artifacts, task lists); human-in-the-loop approval gates with email and Slack notifications; persistent user memory with visibility scoping; deterministic behaviour rules, quick replies, agent-requested secret input and structured `inputField`; undo/redo; ratings and review notices; model cascades with visible escalation; guardrails; runtime white-labelling; workspaces with `USE`/`VIEW`/`EDIT`/`OWN`.
 
 ---
 
-## 2. Target architecture
+## 2. Review from eight perspectives
 
-### 2.1 Layout
+### 2.1 The end user
 
-Keep the two existing app directories where they are. Moving `ui/manager` to `ui/apps/manager` would touch `pom.xml`, `ci.yml`, the Stryker scope, `BuildQualityGatesTest`, the operator-revision copy, every AGENTS.md and dozens of docs, and conflict with every open Manager PR, for no user-visible gain.
+- They do not care that there are three apps. They care that sign-in carries over, the sidebar remembers them, and nothing loads for three seconds. 714 KB before the first paint on a phone is the most visible problem today, and the fonts are more than half of the CSS.
+- "Workforce" is a builder's name for a team-of-agents product. An end user opening it to *ask a question* needs a home with a box to type in, not a dashboard of boards. **Naming is a decision** (Q8), and white-labelling (`productName`) already lets a customer rename it.
+- Undo looks like it reverses everything. When a turn has called tools, the UI must say what undo cannot take back (§5, T1.6).
+- An approval wait is a dead end today: the user sees "paused" and nothing tells them when it continues. This is EDDI's most distinctive flow, and it needs the most care (T2.3).
+
+### 2.2 The agent designer
+
+- **Config-driven, as the root AGENTS.md demands.** Which controls a conversation offers (undo/redo, attachments, ratings, quick replies, streaming) is today decided by URL flags on the widget (`hideUndo`…) and by nothing elsewhere. The agent should declare it, served through `/profile` (B4); URL flags may only *narrow* it, never widen it.
+- **Preview what the user sees.** With one component family, the Manager's chat can offer "view as end user", which hides the admin slots. That is the concrete payoff of goal 2 for the people building agents.
+- Appearance (avatar, display name, starters, accent) and catalog listing are agent settings. They must survive ZIP export and import, agent sync, the MCP tools and the operator.
+
+### 2.3 The admin and operator
+
+- **Catalog exposure (R6).** With workspaces off, "every deployed agent" includes the Platform Operator, test agents and internal helpers. Listing must be opt-in per agent, or follow workspace visibility. Silently publishing every agent to every signed-in user on upgrade is not acceptable.
+- One sign-in: Manager and Workforce share the Keycloak client (both shells load `/manage/__auth_config__.js`). The new app needs no new client and no new redirect URIs; `/workforce/*` is already served.
+- The Operator drawer stays a Manager feature (its allow-list, gate guard and revision live in `lib/operator`). Workforce links to it for admins.
+
+### 2.4 The embedder (a site that frames `/chat`)
+
+- The widget's URL parameters, the postMessage token protocol (`docs/chat-ui-embedding.md`), the managed routes and the 16 colour variables are a **public contract**. Phase work must not break them; a contract test pins them.
+- Embedders expect a **launcher**: one `<script>` that draws a floating button and opens the iframe. EDDI only documents a bare iframe. That is cheap to add (Tier 2, T2.9).
+- Size matters most here. 217 KB gzipped is heavy for a widget on someone else's page; the `parse5` and router weight are avoidable.
+
+### 2.5 Security and privacy
+
+- **One markdown policy for all 14 call sites**: images from LLM text become links (no beacons); images the *agent designer* put in structured output may render; raw HTML only through the sanitizer; KaTeX with `trust: false`; Mermaid with `securityLevel: "strict"`, rendered lazily. A test enumerates every `ReactMarkdown` import and fails on one that bypasses the shared renderer.
+- **Derived data inherits the source's rules.** A generated title or a search index entry is conversation content: it must be covered by GDPR export and erasure, must never come from a secret-input turn, and must follow the same review visibility.
+- Catalog: an anonymous caller only ever sees published agents (as `/v1/models` already does); the opt-in listing flag (R6) applies on top.
+- Web push (later): payloads carry no content, only "something changed"; VAPID keys live in the vault.
+- Share links (later) are bearer tokens and need their own design (expiry, revocation, what an anonymous viewer can do).
+
+### 2.6 Performance and infrastructure
+
+- Budgets, measured in CI from the built `dist/`: the widget's first load, Workforce's first load, the Manager's first load. Phase 0 sets them from the numbers in §1.2.
+- **Connections (R11).** Over HTTP/1.1, Chrome allows six connections per origin across all tabs. Plan for one per-user event stream (notifications, approvals decided, team progress) and a turn stream only while a turn runs. Document HTTP/2 at the reverse proxy as the recommended production setup.
+- Long conversations: the snapshot loads every step. The message list needs windowing (virtualised rendering) before histories grow long; paging the snapshot on the server is a later backend item.
+- Build time: a third Vite build adds about a minute to `./mvnw package`, unless the apps build in one workspace run.
+
+### 2.7 Maintainers
+
+- Three AGENTS.md files encode the current conventions ("no Tailwind", "no Zustand", "own `t()`" in the widget). Each phase that changes a convention updates the file in the same PR.
+- A single root lockfile changes several things: Dependabot (`/ui/manager` and `/ui/chat` become `/ui`), the CycloneDX SBOM step (`bom-ui-manager.json`, `bom-ui-chat.json`), CodeQL's UI paths, Trivy, and the Windows `oxide-wasm32-wasi` lockfile trap. That is a reason to do it once, early, in its own PR.
+- Merging five turn loops is where regressions hide. Each has a test suite encoding real incidents. The merged controller must pass the **union** of those suites.
+
+### 2.8 Product strategy
+
+- Open WebUI already reaches EDDI agents through `/v1`. A deployment that only wants generic chat can use it today, and the docs should say so plainly.
+- What `/v1` cannot carry: approval pauses and decisions, quick replies and `inputField`, secret input, ratings, review notices, group discussions, memory transparency, a per-agent appearance, the deployment's brand. **That list is EDDI's end-user product.** Tier 1 parity is the entry ticket; Tier 2 is the reason to choose it.
+
+---
+
+## 3. Target architecture
+
+### 3.1 Layout
+
+Keep the two existing app directories. Moving `ui/manager` to `ui/apps/manager` would touch `pom.xml`, `ci.yml`, the Stryker scope, `BuildQualityGatesTest`, the operator-revision copy, Dependabot and every AGENTS.md, for no gain to users.
 
 ```
 ui/
-├── package.json            # NEW: npm workspaces root, one package-lock.json
-├── tsconfig.base.json      # NEW: shared strict compiler options, path aliases
-├── eslint.config.base.js   # NEW
+├── package.json            # npm workspaces root, one package-lock.json
+├── tsconfig.base.json
+├── eslint.config.base.js
 ├── packages/
 │   ├── core/               # @eddi/core: framework-free TypeScript
-│   ├── tokens/             # @eddi/tokens: design tokens, Tailwind v4 theme, brand scale
-│   ├── ui/                 # @eddi/ui: primitives (button, dialog, menu, tooltip, toast…)
-│   ├── i18n/               # @eddi/i18n: i18next setup, shared namespaces, locale loader
-│   ├── conversation/       # @eddi/conversation: the 1:1 chat experience
-│   └── teams/              # @eddi/teams: group transcript, board, task list, decision cards
+│   ├── ui/                 # @eddi/ui: tokens, primitives, theme, i18n setup
+│   └── conversation/       # @eddi/conversation: every kind of conversation
 ├── manager/                # app: /manage, /welcome
 ├── workforce/              # NEW app: /workforce
-└── chat/                   # app: /chat (embed and link surface)
+└── chat/                   # app: /chat
 ```
 
-### 2.2 Packages
-
-| Package | Contents | Comes from |
+| Package | Contents | Rules |
 |---|---|---|
-| `@eddi/core` | `http` (status-aware fetch, `ApiError`, `{error, code}` envelope, auth-header provider, 401 retry hook), SSE frame parser and event interpreter, conversation API (start, say, stream, undo, redo, rerun, cancel, resume, state), snapshot to messages, HITL status and poll cadence, attachments (upload, `attachment_N` context), ratings, agent profile, the backend contract types. **No React.** | Union of `ui/chat/src/api/*` and the Manager's `lib/api/{chat,sse-utils,hitl,attachments,ratings}.ts`. Where they disagree, the stricter one wins, with a test from each side |
-| `@eddi/conversation` | A **conversation controller** (a plain store with `subscribe`/`getSnapshot`, read through `useSyncExternalStore`) that owns the turn state machine now spread over `ChatWidget.tsx` and `use-chat.ts`; components: `Conversation`, `MessageList`, `Message` (markdown with sanitize, KaTeX, highlight, Mermaid, safe images), `Composer` (auto-grow, IME, attachments with drop and paste, secret input, `inputField`), `QuickReplies`, `ActivityIndicator` (typing, tool, cascade), `PausedCard`, `RatingCard`, `StepRating`, `ScrollToBottom`. **Slots** for host extras: `headerActions`, `messageActions`, `beforeComposer`, `sidePanel` | Both chats |
-| `@eddi/teams` | `BoardTranscript`, `ConversationViewer`, `AdvisorResponseCard`, `DecisionRecordCard`, `StructuredEntryBody`, `TaskBoard`, `entryTypeInfo`, the group SSE stream (moved onto the shared frame parser, closing the `readGroupSSE` debt noted in `HANDOFF.md`) | Manager `components/groups`, `components/workforce` |
-| `@eddi/ui` | Radix-based primitives and app chrome pieces shared by more than one app: button, badge, card, dialog, alert dialog, dropdown, tooltip, skeleton, error boundary, empty and error states, theme provider, toaster, command palette shell | Manager `components/ui`, parts of `components/shared` and `components/layout` |
-| `@eddi/tokens` | Semantic CSS variables (`primary`, `warning`, surfaces, text, bubble colours), the `brand-50…950` `color-mix` scale from white-label R8, dark/light, a Tailwind v4 `@theme` export; maps the Chat UI's 16 URL colour params and `/branding/brand.css` onto the same tokens | Manager `index.css`, Chat `variables.css` |
-| `@eddi/i18n` | i18next config, lazy locale loader, `productName` default variables (white-label §4.4), RTL helper; shared namespaces `conversation.*` and `teams.*` live here, in all 11 locales; each app keeps its own namespace | Manager `i18n/config.ts`, Chat `i18n.ts` |
+| `@eddi/core` | `http` (status-aware fetch, `ApiError`, the `{error, code}` envelope, an injected auth provider, 401 retry); one SSE frame parser for agent and group streams; the agent conversation API (start, say, stream, undo, redo, rerun, cancel, resume, state, profile); the group discussion API; snapshot-to-messages; HITL status; attachments; ratings; contract types | No React, no DOM beyond `fetch`. The backend contract list in `ui/chat/AGENTS.md` becomes its README and test index |
+| `@eddi/ui` | Design tokens (semantic CSS variables, white-label brand scale, dark and light, Tailwind v4 `@theme`); Radix-based primitives; theme provider; toaster; i18next setup with lazy locales, `productName` default variables and **per-locale font loading** | No API calls |
+| `@eddi/conversation` | Controllers and components for every kind of conversation (§3.2), the one markdown renderer (§2.5), and the shared `conversation.*` and `teams.*` i18n namespaces in all 11 locales | Router-free: hosts pass ids and callbacks. Never reads `window.__EDDI_*__` |
 
-Packages are consumed **as source** through workspace links (Vite compiles them), so there is no publish step and no build order. Each package has its own Vitest suite; the `i18n:check` script learns to scan packages.
+Packages are consumed **as source** through workspace links, so there is no publish step and no build order. Apps may import packages; packages never import apps; `core` imports neither React nor `ui`. ESLint `no-restricted-imports` enforces this, and a test fails on a cycle.
 
-### 2.3 Rules that keep it from rotting
+### 3.2 One family, four kinds of conversation
 
-- Apps may import packages; packages never import apps; `core` imports nothing but the platform. Enforced by an ESLint `no-restricted-imports` rule per package, plus a test that fails on a cycle.
-- Packages never call `useNavigate` or read the URL. Routing is the host's: the controller receives an `agentId`, `conversationId` and callbacks.
-- Packages never read `window.__EDDI_AUTH__` or `__EDDI_CHAT__`. Hosts pass an auth provider into `core`.
-- A **bundle budget** per app (`size-limit` or a small script over `dist/`), run in CI. Today the Chat UI is the small one, and it must stay small: it is what gets embedded in customers' pages.
+Everything in §1.3 is one of four kinds:
 
-### 2.4 Conventions that must be reconciled
+| Kind | Used by | Controller | Specific parts |
+|---|---|---|---|
+| **Agent** (1:1) | Manager chat, Studio, test drawer, Workforce chat and member thread, widget | `AgentConversation`: the turn state machine of today's five loops (streaming, 409 restores the draft, dropped vs paused turns, `inputField` on `done`, undo/redo, rerun, cancel) | — |
+| **Operator** | Operator page and drawer | `AgentConversation` plus an approval policy | Inline approval with the operator's request preview and guards, supplied by the Manager through a slot. The security-reviewed guards stay in `lib/operator` |
+| **Team** | Manager group workspace, Workforce board and history | `GroupDiscussion`: phases, member turns, human turns, decisions | Multi-speaker transcript, phase rail, decision cards, task board, artifacts |
+| **Transcript** (read-only) | Conversation detail, review, Workforce history, shared links later | none: a snapshot in, messages out | — |
+
+All four share `MessageList` (windowed, sticky scroll), `Message` (the one markdown renderer, attachments, copy, actions slot), `Composer` (IME, attachments with drop and paste, secret input, `inputField`, quick replies), `ActivityIndicator` (typing, tool, cascade, guardrail), `PausedCard` and `RatingCard`.
+
+The controllers are plain stores with `subscribe` and `getSnapshot`, read through `useSyncExternalStore`, because the apps use different state libraries and the turn logic must be testable without React. Hosts add their extras through slots: `headerActions`, `messageActions`, `beforeComposer`, `sidePanel`. Examples are the Manager's debug drawer, environment picker and streaming toggle, and the Operator's approval banner.
+
+### 3.3 Conventions to reconcile
 
 | Topic | Manager | Chat UI | Decision |
 |---|---|---|---|
-| Styling | Tailwind v4 | BEM, vanilla CSS, "no CSS frameworks" rule | **Tailwind v4 + tokens everywhere.** The widget renders in its own iframe, so global utility CSS cannot leak into a host page. The URL colour params keep working by setting the same variables. `ui/chat/AGENTS.md` §3/§5 change with it |
-| State | Zustand, TanStack Query | Context + reducer, "no Zustand" rule | The shared controller is framework-free. Apps keep their own choice for app state. TanStack Query for server lists (conversation list, agent catalog) in the two signed-in apps |
-| i18n | i18next, 11 locales | own `t()`, 4 locales | **i18next for all.** The widget gains 7 locales and RTL; a lazy loader keeps the cost to one locale |
-| Routing | data router | BrowserRouter | Each app its own; packages are router-free |
-| Icons | lucide 1.59 | lucide 0.577 | One version at the workspace root |
+| Styling | Tailwind v4 | BEM, "no CSS framework" | Tailwind v4 + tokens everywhere. The widget renders in its own iframe, so nothing leaks into a host page. The `--chat-*` variable names and URL colour parameters are kept as **documented aliases** of the shared tokens, pinned by a test |
+| State | Zustand, TanStack Query | Context + reducer, "no Zustand" | Framework-free controllers; each app keeps its own choice for app state; TanStack Query for server lists in the two signed-in apps |
+| i18n | i18next, 11 locales | own `t()`, 4 locales | i18next everywhere, one lazily loaded locale at a time |
+| Routing | data router | BrowserRouter (92 KB for three patterns) | Manager and Workforce keep a router. The widget parses its three path shapes itself |
+| Raw HTML in replies | not rendered | rendered through `rehype-raw` + sanitize (`parse5`, about as large as the widget's own code) | Decide per agent (B4). The default is markdown only, with the HTML parser loaded lazily when an agent enables it |
+| Icons | lucide 1.59 | lucide 0.577 | one version at the root |
 
 ---
 
-## 3. The three apps after the split
+## 4. The three apps after the split
 
-### 3.1 Manager (`/manage`, `/welcome`)
+### 4.1 Manager (`/manage`, `/welcome`)
 
-Administration and building: agents, workflows, resources, groups, operator, approvals, monitoring, settings. `/manage/chat` and Agent Studio use `@eddi/conversation` plus admin slots: agent and environment picker, streaming toggle, debug drawer, pipeline trace, raw memory. Workforce routes, the Workforce half of the mode switcher's state, `workforce-pins`, and the Workforce MSW handlers leave.
+Administration and building. It keeps the Operator, approvals, the group workspace (kind *Team*, with editor tools), Studio and the test drawer, all on `@eddi/conversation`. It gains "view as end user" in its chat. It loses the Workforce routes, `workforce-pins` and the Workforce MSW handlers.
 
-### 3.2 Workforce (`/workforce`), the end-user app
+### 4.2 Workforce (`/workforce`), the end-user app
 
-The place a signed-in person uses AI. One app for both shapes of conversation:
-
-- **Chats**: 1:1 conversations with agents.
-- **Teams**: group discussions (the current boards).
-
-Role-aware rather than two apps:
+The place a signed-in person uses AI: **chats** (agent kind) and **teams** (team kind) in one sidebar. It is role-aware:
 
 | Role | Sees |
 |---|---|
-| `eddi-user` | Home, agent and team catalog (what they may `USE`), their chats and team sessions, their memory, approvals addressed to them |
+| `eddi-user` | Home (a box to type in, starters, recent items), the catalog of agents and teams they may use, their chats and team sessions, their memory |
 | `eddi-approver` | plus an approvals inbox |
-| `eddi-editor`, `eddi-admin` | plus "Build a team" (the wizard), team settings, analytics, and a link into the Manager |
+| `eddi-editor`, `eddi-admin` | plus "Build a team" (the wizard), team settings, analytics, and a link into the Manager and its Operator |
 
-The operator drawer, which `WorkforceLayout` mounts today, is a Manager concern (its allow-list, revision and gate guards live in `lib/operator`). For admins, Workforce shows a link to `/manage/operator` instead of mounting the drawer.
+It uses the same Keycloak client as the Manager. Moving between the two apps is a full page navigation, and theme, language and pins carry over through same-origin storage.
 
-Same Keycloak client and realm as the Manager (both shells already load `/manage/__auth_config__.js`), so there is one sign-in across both apps. Switching apps is a full page navigation.
+### 4.3 Chat UI (`/chat`)
 
-### 3.3 Chat UI (`/chat`)
-
-Stays the **embeddable, link-shareable, single-agent surface**: anonymous use of published agents, managed intents, postMessage auth, URL theming, `hide*` flags, demo mode. Built from `@eddi/conversation` in a `compact` variant. Optional later: a conversation list when the embedding supplies a signed-in user.
+The embeddable, link-shareable, single-agent surface: anonymous use of published agents, managed intents, postMessage auth, URL theming, `hide*` flags, demo mode. It is the agent kind, compact variant, with no router and lazily loaded rich rendering.
 
 ---
 
-## 4. End-user UX: the bar to meet
+## 5. End-user UX: the bar to meet
 
-Benchmarked against Open WebUI, LibreChat, ChatGPT, Claude.ai and LobeChat. "Backend" names what the server must add first (§5).
+"Backend" names what the server must add first (§6).
 
-### Tier 1: table stakes (missing any of these reads as unfinished)
-
-| # | Feature | Today | Backend |
-|---|---|---|---|
-| T1.1 | Sidebar of my conversations, grouped by date, with rename, pin, delete | history popover in the Manager only | B2 |
-| T1.2 | Automatic titles | — | B2 |
-| T1.3 | Search across my conversations | — | B3 |
-| T1.4 | Home screen: agent and team catalog, recent items, "conversation starters" per agent | — | B1, B4 |
-| T1.5 | Streaming that reads well: no layout jump, sticky scroll that yields when the user scrolls up, a Stop button, visible reconnect | partial in both | — |
-| T1.6 | Edit the last message and resend; regenerate (rerun) | rerun exists | — (undo + say); B9 for older messages |
-| T1.7 | Rich output: GFM tables, code blocks with language label and copy, KaTeX, Mermaid, sanitized images, copy message | split between the two apps | — |
-| T1.8 | Attachments: paste, drop, picker, image thumbnails, per-file progress and errors | both, differently | — |
-| T1.9 | Tool activity shown as collapsible cards ("Searched the web", "Called CRM: 2 records") | name only, until next token | B6 |
-| T1.10 | Keyboard: Enter / Shift+Enter, ⌘K palette, ⌘⇧O new chat, Esc to stop, ↑ to edit last | partial | — |
-| T1.11 | Mobile and PWA: installable, safe areas, a bottom-sheet composer, the virtual keyboard not covering input | Workforce has a mobile layout | — |
-| T1.12 | Accessibility: live region for streamed text, focus management, contrast in both themes, axe clean | partial | — |
-| T1.13 | 11 locales with RTL, light/dark/system | Manager only | — |
-| T1.14 | Thumbs up/down and optional reason on replies | both | — |
-
-### Tier 2: where EDDI should be better than anyone
+### Tier 1: table stakes
 
 | # | Feature | Backend |
 |---|---|---|
-| T2.1 | **Teams in the same sidebar as chats.** Start a team session from a template, watch members discuss live, see votes and decision records, join as the human member | B1 |
+| T1.1 | Sidebar of my chats and team sessions, grouped by date; rename, pin, delete | B2 |
+| T1.2 | Automatic titles | B2 |
+| T1.3 | Search my conversations | B3 |
+| T1.4 | Home: a composer first, the catalog, recent items, per-agent starters | B1, B4 |
+| T1.5 | Streaming that reads well: no layout jump, sticky scroll that yields when the user scrolls up, Stop, visible reconnect | — (Stop aborts the stream and calls `/cancel`, which stops a running turn only on the pod running it, `docs/hitl.md`; in a cluster the UI must say when the turn kept going) |
+| T1.6 | Edit the last message (undo + say) and regenerate (rerun), with a **notice when the turn ran tools** whose effects stay | B6 for knowing which tools ran |
+| T1.7 | Rich output: GFM tables, code with language label and copy, KaTeX, Mermaid, safe images, copy message; one policy (§2.5) | — |
+| T1.8 | Attachments: paste, drop, picker, image thumbnails, per-file progress and errors | — |
+| T1.9 | Tool activity as collapsible cards | B6 |
+| T1.10 | Keyboard: Enter / Shift+Enter, ⌘K, new chat, Esc to stop, ↑ to edit last | — |
+| T1.11 | Mobile and PWA: installable, safe areas, a composer the virtual keyboard does not cover | — |
+| T1.12 | Accessibility: a live region for streamed text, focus management, contrast in both themes, axe clean | — |
+| T1.13 | 11 locales with RTL; light, dark, system | — |
+| T1.14 | Thumbs and an optional reason on replies | — |
+| T1.15 | A reload or a second tab returns to the same conversation (the widget's direct route included, R10) | — |
+| T1.16 | First load within budget (§7 phase 0) | — |
+
+### Tier 2: where EDDI should lead
+
+| # | Feature | Backend |
+|---|---|---|
+| T2.1 | **Teams beside chats**: start a team session from a template, watch the discussion live, see votes and decisions, take part as the human member | B1 (groups) |
 | T2.2 | **@mention** an agent or a team inside a chat to hand the question over | B1; a design pass on how the transcript records the hand-off |
-| T2.3 | **Approvals in the flow.** A paused turn shows who must approve and by when; the user is notified (web notification, existing email) when it continues; an approver decides in place if they hold the role | existing HITL endpoints; B8 for push |
-| T2.4 | **"What I remember about you".** A memory panel: list, search, delete one, delete all, and see which agent wrote what. A GDPR asset, not a hidden feature | B5 |
-| T2.5 | **Structured input.** `inputField` (secret, email, choice) and quick replies as first-class composer modes, not just pills | — |
-| T2.6 | **Shared artifacts** of a team session in a side panel (the canvas pattern), with versions | existing group artifacts |
-| T2.7 | **Visible model cascade and guardrails** in plain language ("escalated to a stronger model", "answer revised by a check") | — |
-| T2.8 | Long jobs: self-continuation and scheduled runs reported as progress, with a notification when done | B8 |
+| T2.3 | **Approvals in the flow**: a paused turn says who must approve and by when; the user is notified when it continues; an approver decides in place. The Operator's inline approval, generalised and still security-reviewed | existing HITL endpoints; B12 |
+| T2.4 | **"What I remember about you"**: list, search, delete one, delete all, which agent wrote what | existing (R4) |
+| T2.5 | **Structured input** as composer modes: `inputField`, quick replies, secret input | — |
+| T2.6 | **Shared artifacts** of a team session in a side panel, with versions | existing group artifacts |
+| T2.7 | Cascades and guardrails explained in plain words | — |
+| T2.8 | Long jobs (self-continuation, schedules) shown as progress, with a notification when done | B12 |
+| T2.9 | **Embed launcher**: `<script src="/chat/embed.js">` draws a floating button and opens the iframe, with the existing token hand-off | — |
 
-### Tier 3: worth doing after the above
+### Tier 3: later
 
-Voice input (browser speech recognition first, server STT later) and read-aloud; reasoning display (B7); citations for RAG answers (B10); share a read-only link (B11); export to Markdown or PDF; projects or folders; a personal prompt library with `/` commands; side-by-side comparison of two agents; temporary chats that are not kept.
+Voice input (browser speech recognition first) and read-aloud; reasoning display (B7); citations (B10); share links (B11); export to Markdown or PDF; projects or folders; a prompt library with `/` commands; comparing two agents side by side; temporary chats.
 
-### Explicitly not planned
+### Not planned
 
-Picking a raw model in the end-user app. EDDI's unit is the *agent*, whose model the designer chose; a model picker would bypass cascades, cost ceilings and guardrails. (The Manager keeps its model tooling.)
+A raw model picker in the end-user app. EDDI's unit is the agent, whose model its designer chose. A model picker would bypass cascades, cost ceilings and guardrails.
 
 ---
 
-## 5. Backend work the UX depends on
-
-Each item is config-driven where an agent designer could reasonably want a say (root AGENTS.md §1).
+## 6. Backend work
 
 | # | Item | Shape | Notes |
 |---|---|---|---|
-| **B1** | **Catalog of what the caller may use** | `GET /catalog/agents` and `GET /catalog/groups` at `eddi-user`, deployed only, returning the `AgentProfile` fields plus `callerLevel` and appearance (B4) | Filtered in the query like the workspace-aware listings. Nothing about how an agent is built. Without workspaces enabled, what "everything" means for `eddi-user` needs a decision (§8 Q4) |
-| B2 | Conversation title, rename, pin | `title`, `pinned` on `ConversationDescriptor`; `PATCH /conversationstore/conversations/{id}` owner-only; auto-title after the first agent reply, optionally by an LLM the agent names (`titleGeneration` on `AgentConfiguration`, off = first user message, truncated) | Auto-titling with an LLM is a cost, so it goes through the cost tracker and is off by default |
-| B3 | Search my conversations | `GET /conversationstore/conversations/search?q=` over titles and outputs, owner-scoped, paged | Mongo text index, Postgres `tsvector`. Size and privacy review before indexing outputs |
-| B4 | Agent appearance | `appearance {displayName, avatar, accentColor, starters[]}` on the agent, served by `/profile` and B1 | The white-label §4.6 seam. Needs ZIP export/import and the Manager editor |
-| B5 | Self-service memory | Verify `usermemorystore` refuses a `userId` other than the caller's for non-admins; otherwise add `/usermemorystore/memories/me/...` | Security review item, not optional |
-| B6 | Tool lifecycle on SSE | `tool_result {tool, ok, summary}` after each call, using the same redaction as `toolTrace` | Additive: an older client ignores the event. The 9-event contract test in `ui/chat` is extended, not broken |
-| B7 | Reasoning on SSE | `reasoning` token events when the provider exposes them, opt-in per agent | Provider support varies; off by default |
-| B8 | Notifications to the browser | Reuse workspace notifications; add web push (VAPID) for "your approval is decided" and "your long job finished" | Later phase |
-| B9 | Edit an earlier message | Depends on Session Forking (roadmap) | Tier 1 ships "edit last" only |
-| B10 | Citations | Surface the RAG sources the turn used, with titles and links, in `task_complete` | Verify what `docs/rag.md` stores first |
-| B11 | Share link | Read-only snapshot with a signed, revocable token | Its own security design |
+| **B1** | **Catalog** | `GET /catalog/agents` and `GET /catalog/groups` at `eddi-user`: deployed and usable (reuse `AgentModelResolver` / `ResourceAccessGuard`), **and listed** (a per-agent and per-group `listed` flag, default `false`; with workspaces on, `published` and `internal` visibility also count as listed). Returns the profile fields, `callerLevel` and appearance | R3, R6. The empty state tells an admin how to list an agent |
+| B2 | Title, rename, pin | `title`, `pinned` on `ConversationDescriptor`; owner-only `PATCH`; the title is the first user message (truncated) unless the agent opts into LLM titles (`titleGeneration`), charged to the cost tracker | Never from a secret turn; covered by GDPR export and erasure (§2.5) |
+| B3 | Search my conversations | `GET /conversationstore/conversations/search?q=`, owner-scoped, paged; a Mongo text index or Postgres `tsvector` over titles, then outputs | Privacy review before outputs are indexed; secret turns excluded; erasure removes the entries |
+| B4 | Agent presentation | `appearance {displayName, avatar, accentColor, starters[]}` and `conversationControls {undo, redo, attachments, rating, quickReplies, streaming, rawHtml}` on the agent, served by `/profile` and B1 | The white-label §4.6 seam. Export/import, agent sync, MCP tools, the operator prompt, the Manager editor |
+| B5 | Memory self-service | Already enforced (R4). Add a REST test that `eddi-user` A gets 403 for B's memories | — |
+| B6 | Tool lifecycle on SSE | `tool_result {tool, ok, summary}` after each call, with the same redaction as `toolTrace` | Additive; an older client ignores it. The widget's 9-event contract test grows |
+| B7 | Reasoning on SSE | `reasoning` tokens when the provider exposes them, opt-in per agent | Off by default |
+| B8 | — | merged into B12 | — |
+| B9 | Edit an earlier message | Session Forking (roadmap) | Tier 1 ships "edit last" only |
+| B10 | Citations | The RAG sources a turn used, in `task_complete` | Verify what RAG keeps first |
+| B11 | Share link | A read-only snapshot behind a signed, revocable token | Its own security design |
+| **B12** | **Per-user event stream** | `GET /me/events` (SSE): approvals decided, team progress, long jobs finished, workspace notifications. One connection per tab; web push later | R11. Payloads carry ids, not content |
+
+Every item goes through the root AGENTS.md §4.6 checklist: docs, changelog fragment, MCP skills, and whether the Platform Operator needs to know (then bump `operator-revision.json`).
 
 ---
 
-## 6. Phases
+## 7. Phases: vertical slices
 
-Each phase is shippable and leaves `main` green. Phases 1–4 change no behaviour a user would notice; they move code behind tests.
+Each phase ships something a person notices, keeps `main` green, and extracts shared code only once a second consumer needs it.
 
-| Phase | What | Exit criteria |
+| Phase | Ships | Work | Exit criteria |
+|---|---|---|---|
+| **0. Baseline and quick wins** (S) | faster first load everywhere | Commit the §1.2 numbers and a budget check over `dist/` in CI. **Fonts per locale**: load a script family when its locale is active, not all eight up front. **Widget**: drop the router (three path patterns), and load the raw-HTML parser lazily (or not at all, pending B4). Record a feature matrix (§1.3) as one Playwright spec per capability, tagged by surface | Manager/Workforce first load clearly below 714 KB gz and widget clearly below 217 KB gz, with the new numbers as budgets; matrix green for what each surface supports today |
+| **1. Workspaces and `@eddi/core`** (L) | fewer bugs, one fix fixes all | `ui/package.json` workspaces, one lockfile, Dependabot, SBOM, CodeQL and Maven updated in one PR. Then `@eddi/core`: port the **union** of the five loops' tests, then move the loops onto it one at a time, starting with the widget and `ChatPanel` | `./mvnw package` jar layout unchanged; duplicated API and SSE modules deleted; matrix unchanged |
+| **2. Catalog and Workforce for `eddi-user`** (M, backend + frontend) | an `eddi-user` can sign in to Workforce, see what they may use, and chat | B1, B5 test; Workforce becomes role-aware: editor-only screens hidden, reads move from `/groupstore` to the catalog | E2E as `eddi-user`: no 403 on any Workforce page; catalog shows only listed and usable agents; the Operator never appears |
+| **3. `@eddi/ui` and the agent kind** (L) | the same chat everywhere: KaTeX, quick replies, secret input and history in the Manager and Workforce; 11 locales in the widget | Tokens, primitives and i18n into `@eddi/ui`; `AgentConversation` and the shared components; `ChatPanel`, the test drawer, the Workforce chat and member thread, and the widget move onto them; the one markdown policy | Matrix shows the **union** of capabilities on every agent surface; widget within budget; URL colour parameters and `/branding/brand.css` still apply; RTL e2e on the widget |
+| **4. Sidebar, titles, home** (L) | T1.1, T1.2, T1.4, T1.15 | B2, B4; Workforce home and sidebar | Per-item e2e |
+| **5. Workforce as its own app** (M) | Workforce loads only what it uses | `ui/workforce` with its own `main.tsx`, router, layout, MSW handlers and e2e; Manager drops the Workforce routes; Maven copies a third `dist/` | Workforce first load within its own, smaller budget; no Manager import of Workforce code (lint) |
+| **6. Operator and team kinds** (L) | approvals and teams look and behave the same in the Manager and Workforce | `Operator` (the approval slot, guards untouched) and `GroupDiscussion` + team components; the three transcript renderers become one | Operator Stryker scope still green; the HITL guard tests unchanged and passing |
+| **7. Rest of Tier 1** (L) | T1.3, T1.5–T1.14 | B3, B6 | Lighthouse accessibility and PWA ≥ 95 on Workforce |
+| **8. Tier 2** (XL) | T2.1–T2.9 | B12 | Per item |
+| **9. Tier 3** | as prioritised then | — | — |
+
+Phases 0 and 2 can start at once and in parallel. Phase 5, the split you asked for, comes *after* the shared packages exist, because before that it would copy code rather than share it.
+
+### What every phase checks
+
+i18n in all 11 locales in the same commit (`i18n:check` learns the package directories in phase 1); the Platform Operator's prompt and allow-list (§6); MSW handlers and the OpenAPI contract `EXEMPT` list; the Stryker scope for moved files; the three AGENTS.md files; a changelog fragment; `docs/chat-ui-embedding.md` and a new end-user guide for Workforce.
+
+---
+
+## 8. Success measures
+
+| Measure | Source | Target |
 |---|---|---|
-| **0. Baseline** (S) | Record bundle sizes per entry, Lighthouse and axe on `/chat` and `/workforce`, screenshots of every chat state; turn §1.3 into an executable feature matrix (one Playwright spec per capability, tagged by app) | Numbers committed under `planning/`; matrix spec green on both apps for what each supports today |
-| **1. Workspace scaffolding** (M) | `ui/package.json` workspaces, one lockfile, `tsconfig.base.json`, shared ESLint base, empty `packages/*`; `pom.xml`: one `npm ci` at `ui/`, then `npm run build -w manager -w chat`; `ci.yml` jobs install at the root | `./mvnw package` produces a byte-equivalent jar layout; all UI CI jobs green; the Windows lockfile check in `ui/manager/AGENTS.md` moved to the root |
-| **2. `@eddi/core`** (L) | Merge both API layers. Port **both** test suites onto the merged module first, then switch the apps one at a time | Both apps' tests pass against `core`; duplicated modules deleted; no behaviour change in the matrix |
-| **3. Tokens, primitives, i18n** (L) | `@eddi/tokens` (with the white-label brand scale; keep shrinking the 360 remaining `amber-*` utilities), `@eddi/ui`, `@eddi/i18n`; Chat UI moves to Tailwind and i18next | Chat bundle within +15% of baseline (set the budget then); URL colour params and `/branding/brand.css` still apply; RTL e2e passes on the widget |
-| **4. `@eddi/conversation` and `@eddi/teams`** (XL) | The controller first (pure, heavily unit-tested, both apps' turn edge cases as fixtures), then components; Manager `ChatPanel` becomes `Conversation` plus admin slots; the widget becomes `Conversation compact`; Workforce chat and boards use them | The feature matrix shows the **union** of capabilities on every surface where they make sense (KaTeX in the Manager, history in Workforce…) |
-| **5. Workforce app split** (M) | `ui/workforce` with its own `main.tsx`, router, layout, MSW handlers and e2e; Manager loses `/workforce` routes; Maven copies a third `dist/`; `RestWorkforceResource` unchanged | Manager bundle shrinks by the Workforce code; `e2e/workforce.spec.ts` moved and green; no Manager import of `workforce/` (lint-enforced) |
-| **6. Backend B1, B2, B4, B5, B6** (L) | Catalog, titles, appearance, memory self-service check, tool results | Unit and IT tests per endpoint; docs pages; MCP/operator checks per root AGENTS.md §4.6 |
-| **7. End-user Tier 1** (XL) | T1.1–T1.14 in Workforce, the conversation-level ones also in `/chat` | Each item has an e2e spec; Lighthouse PWA and accessibility ≥ 95 on Workforce |
-| **8. Tier 2** (XL) | T2.1–T2.8 | Per item |
-| **9. Tier 3** | as prioritised then | — |
-
-**Order:** phase 0 now; phases 1–3 can run while the backend phase 6 starts in parallel, because B1, B2 and B5 do not depend on the frontend refactor. Phase 7 needs 4, 5 and 6.
-
-### Things each phase must not forget
-
-- **i18n**: every new key in `en.json` goes to all 11 locales in the same commit; `i18n:check` must learn the package directories in phase 1.
-- **Platform Operator**: every backend item in phase 6, and the removal of the Workforce operator drawer, is checked against `system-prompt.ts` and `tool-scopes.ts`; any change there bumps `operator-revision.json`.
-- **MSW**: handlers follow the code into the new app; the OpenAPI contract test's `EXEMPT` list is updated with new endpoints.
-- **Stryker scope** in `stryker.config.json` follows any moved file.
-- **Changelog fragment** per PR (root AGENTS.md §2 rule 8).
-- **Docs**: `docs/chat-ui-embedding.md` (unchanged contract, new internals), a new end-user guide page for Workforce, `docs/agent-manager-gui.md`.
+| First load (gz) per page | the CI budget check | set in phase 0, never raised without a decision |
+| Time from send to first visible token | client timing, reported with ratings (opt-in) | not worse than the backend's own first-token time plus 100 ms |
+| Turns that fail visibly (error, dropped, refused) per 1000 | client error codes | down after phase 3 |
+| Reply rating (thumbs up share) | existing ratings | tracked per agent; the UI change must not move it down |
+| Conversation surfaces with their own turn loop | code (§1.3) | 5 → 1 |
+| `ReactMarkdown` call sites outside the shared renderer | the guard test | 14 → 0 |
 
 ---
 
-## 7. Risks
+## 9. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Merging two chats loses one side's contract fixes | Phase 2 and 4 port **both** test suites first; the merged code must pass the union. The backend contract list in `ui/chat/AGENTS.md` becomes the `@eddi/core` README and its test index |
-| A long refactor conflicts with ongoing Manager feature work | Phases are small PRs; move files with `git mv` in their own commits; announce the freeze window for `components/chat` and `components/workforce` per phase |
-| The widget gets heavier | Bundle budget in CI from phase 1; KaTeX, highlight and Mermaid stay lazy |
-| Workforce becomes unusable for `eddi-user` until B1 lands | Ship B1 early (phase 6 runs in parallel); until then Workforce behaves as today for editors |
-| One lockfile hits the Windows `oxide-wasm32-wasi` pruning trap harder | Keep the lockfile check; run it in CI on the root lock |
-| Tailwind preflight inside the widget changes rendering for embedders | Visual regression screenshots of the widget's public states, taken in phase 0, compared in phase 3 |
+| Merging five turn loops loses one's incident fixes | The union of their tests first; the merged controller must pass all of them; migrate one surface per PR |
+| The Operator's approval UI is security-reviewed for one surface | Its guards and request preview stay in `lib/operator` and plug in through a slot; its tests and Stryker scope are untouched |
+| A long refactor conflicts with ongoing Manager work | Small PRs; `git mv` in separate commits; announce a short freeze per directory per phase |
+| Listing agents to end users exposes internal agents | Opt-in `listed` flag, default off (B1) |
+| Tailwind preflight changes the widget for embedders | Screenshots of the widget's public states from phase 0, compared in phase 3; the colour aliases pinned by a test |
+| The single lockfile hits the Windows `oxide-wasm32-wasi` trap harder | Keep the lockfile check and run it in CI on the root lock |
+| HTTP/1.1 connection cap in the end-user app | B12, and HTTP/2 guidance (§2.6) |
 
 ---
 
-## 8. Decisions needed
+## 10. Decisions needed
 
 | # | Question | Recommendation |
 |---|---|---|
-| Q1 | Is Workforce *the* end-user app (chats + teams, role-aware), with `/chat` kept as the embed surface? Or should a third app exist? | Workforce as the end-user app; two end-user surfaces, not three |
-| Q2 | Keep `ui/manager` and `ui/chat` paths and add `ui/workforce` + `ui/packages`, or move everything to `ui/apps/*`? | Keep the paths (§2.1) |
-| Q3 | Accept Tailwind and i18next in the Chat UI, replacing its "no CSS framework" and own-`t()` rules? | Yes (§2.4) |
-| Q4 | Without workspaces enabled, which agents does the catalog (B1) list for `eddi-user`: every deployed agent, or only ones marked public? | Every deployed agent in production, matching what `/agents/{id}/start` already allows; workspaces narrows it |
-| Q5 | Should the Workforce drop the operator drawer and link to the Manager instead? | Yes (§3.2) |
-| Q6 | Is `/` → `/welcome` still right, or should signed-in `eddi-user`s land directly in Workforce? | Role-aware: `eddi-user` goes to `/workforce`, editors and admins keep the chooser |
-| Q7 | Auto-titles with an LLM: allowed at all, and who pays? | Per-agent opt-in, through the cost tracker; default is the first user message |
+| Q1 | Is Workforce *the* end-user app (chats and teams, role-aware), with `/chat` as the embed surface? | Yes |
+| Q2 | Keep the `ui/manager` and `ui/chat` paths, or move to `ui/apps/*`? | Keep them |
+| Q3 | Tailwind and i18next in the widget, replacing its own CSS and `t()`? | Yes, with the colour aliases kept as a contract |
+| Q4 | Catalog listing: opt-in per agent (default off), or every usable agent? | Opt-in, so nothing is exposed by an upgrade |
+| Q5 | Workforce links to the Operator rather than mounting its drawer? | Yes |
+| Q6 | `eddi-user` lands in Workforce instead of the `/welcome` chooser? | Yes; editors and admins keep the chooser |
+| Q7 | LLM-generated titles: allowed, and who pays? | Per-agent opt-in through the cost tracker; the default is the first message |
+| Q8 | Is "Workforce" the right name for the place end users chat? | Decide before phase 4; white-labelling can rename it per deployment either way |
+| Q9 | Raw HTML in agent replies: keep it as a per-agent opt-in, or drop it? | Per-agent opt-in, off by default |
+| Q10 | Should the docs recommend Open WebUI over `/v1` for deployments that only want generic chat? | Yes, plainly |
