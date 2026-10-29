@@ -27,6 +27,16 @@ copy of each page, the sidebar, and Astro's build output.
   is stale, and if any docs link in the backend, the UIs, README or the plugin does not land
   on a page.
 
+## Reading layout
+
+On desktop both sidebars can be **resized** — drag the edge, or focus it and use ← → (Home/End for
+the limits, double-click to reset) — and **hidden** with the buttons in the header: before the logo
+for the navigation, before "Website" for the table of contents. The choice is remembered per
+browser (`localStorage`, key `eddi-docs-layout`) and applied before first paint, so pages do not
+jump. Phones keep Starlight's own menu. The pure logic and its tests are
+[`src/lib/sidebar-layout.mjs`](src/lib/sidebar-layout.mjs); the browser side is
+[`src/components/LayoutToggle.astro`](src/components/LayoutToggle.astro).
+
 ## Commands
 
 Node 24 (`.nvmrc`, the same version the UIs build with; Astro needs at least 22.23.4).

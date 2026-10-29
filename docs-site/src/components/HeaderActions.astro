@@ -3,7 +3,11 @@
 // (eddi.technology, src/components/Header.astro): a link back to the site, the
 // "Get Started" call to action and the GitHub icon — same markup and styles — so the
 // docs read as part of the same site. The theme toggle follows (ThemeToggle.astro).
+// First, the show/hide button for the table of contents, the sidebar on this side.
+import LayoutToggle from './LayoutToggle.astro';
 ---
+
+<LayoutToggle side="right" />
 
 <a href="https://eddi.technology/" class="eddi-nav-link">Website</a>
 <a href="https://eddi.technology/getting-started/" class="eddi-cta">Get Started</a>

@@ -1,0 +1,174 @@
+---
+// Show/hide button for one sidebar, and (once per page, Astro bundles the script once) the code
+// that makes both sidebars resizable and hideable. Widths and hidden state live in localStorage
+// under STORAGE_KEY and are applied before first paint by the script in astro.config.mjs; the
+// pure logic and its tests are in src/lib/sidebar-layout.mjs. Desktop only: below the
+// breakpoints Starlight's own mobile menu and "On this page" dropdown are left as they are.
+interface Props {
+	side: 'left' | 'right';
+}
+const { side } = Astro.props;
+const what = side === 'left' ? 'navigation' : 'table of contents';
+---
+
+<button
+	type="button"
+	class="eddi-layout-toggle"
+	data-side={side}
+	aria-controls={side === 'left' ? 'starlight__sidebar' : undefined}
+	aria-expanded="true"
+	aria-label={`Hide ${what}`}
+	title={`Hide ${what}`}
+	data-label-what={what}
+>
+	{
+		side === 'left' ? (
+			<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line></svg>
+		) : (
+			<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"></rect><line x1="15" y1="3" x2="15" y2="21"></line></svg>
+		)
+	}
+</button>
+
+<script>
+	import { applyState, DEFAULT_WIDTH, LIMITS, parseState, stepWidth, STORAGE_KEY, widthFromPointer } from '../lib/sidebar-layout.mjs';
+
+	type Side = 'left' | 'right';
+	const root = document.documentElement;
+
+	function load() {
+		try {
+			return parseState(localStorage.getItem(STORAGE_KEY));
+		} catch {
+			return parseState(null);
+		}
+	}
+
+	let state = load();
+
+	function save() {
+		try {
+			localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+		} catch {
+			// Storage blocked: the layout still changes for this page.
+		}
+	}
+
+	function hiddenKey(side: Side) {
+		return side === 'left' ? 'leftHidden' : 'rightHidden';
+	}
+
+	/** Keeps every toggle and handle in step with the state. */
+	function render() {
+		applyState(root, state);
+		for (const button of document.querySelectorAll<HTMLButtonElement>('.eddi-layout-toggle')) {
+			const side = button.dataset.side as Side;
+			const shown = !state[hiddenKey(side)];
+			const label = `${shown ? 'Hide' : 'Show'} ${button.dataset.labelWhat}`;
+			button.setAttribute('aria-expanded', String(shown));
+			button.setAttribute('aria-label', label);
+			button.title = label;
+		}
+		for (const handle of document.querySelectorAll<HTMLElement>('.eddi-resizer')) {
+			handle.setAttribute('aria-valuenow', String(state[handle.dataset.side as Side]));
+		}
+	}
+
+	function setWidth(side: Side, px: number, persist: boolean) {
+		state = { ...state, [side]: px };
+		render();
+		if (persist) save();
+	}
+
+	for (const button of document.querySelectorAll<HTMLButtonElement>('.eddi-layout-toggle')) {
+		button.addEventListener('click', () => {
+			const key = hiddenKey(button.dataset.side as Side);
+			state = { ...state, [key]: !state[key] };
+			render();
+			save();
+		});
+	}
+
+	/** A drag handle on the inner edge of one sidebar, also operable from the keyboard. */
+	function addResizer(side: Side) {
+		const what = side === 'left' ? 'navigation' : 'table of contents';
+		const handle = document.createElement('div');
+		handle.className = 'eddi-resizer';
+		handle.dataset.side = side;
+		handle.tabIndex = 0;
+		handle.setAttribute('role', 'separator');
+		handle.setAttribute('aria-orientation', 'vertical');
+		handle.setAttribute('aria-label', `Resize ${what}`);
+		handle.setAttribute('aria-valuemin', String(LIMITS[side][0]));
+		handle.setAttribute('aria-valuemax', String(LIMITS[side][1]));
+		handle.title = `Drag to resize the ${what}, double-click to reset`;
+
+		handle.addEventListener('pointerdown', (event) => {
+			if (event.button !== 0) return;
+			event.preventDefault();
+			handle.setPointerCapture(event.pointerId);
+			root.setAttribute('data-eddi-resizing', '');
+			// clientWidth, not innerWidth: the right pane ends where the scrollbar starts.
+			const move = (e: PointerEvent) => setWidth(side, widthFromPointer(side, e.clientX, root.clientWidth), false);
+			const end = () => {
+				root.removeAttribute('data-eddi-resizing');
+				handle.removeEventListener('pointermove', move);
+				handle.removeEventListener('pointerup', end);
+				handle.removeEventListener('pointercancel', end);
+				save();
+			};
+			handle.addEventListener('pointermove', move);
+			handle.addEventListener('pointerup', end);
+			handle.addEventListener('pointercancel', end);
+		});
+		handle.addEventListener('dblclick', () => setWidth(side, DEFAULT_WIDTH, true));
+		handle.addEventListener('keydown', (event) => {
+			const next = stepWidth(side, state[side], event.key);
+			if (next === null) return;
+			event.preventDefault();
+			setWidth(side, next, true);
+		});
+		document.body.append(handle);
+	}
+
+	if (root.hasAttribute('data-has-sidebar')) addResizer('left');
+	if (root.hasAttribute('data-has-toc')) addResizer('right');
+	render();
+</script>
+
+<style>
+	.eddi-layout-toggle {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		width: 2.25rem;
+		height: 2.25rem;
+		padding: 0;
+		background: none;
+		border: none;
+		border-radius: 0.375rem;
+		cursor: pointer;
+		color: var(--eddi-text-muted);
+		transition: color 0.15s, background 0.15s;
+	}
+	.eddi-layout-toggle:hover {
+		color: var(--eddi-text);
+		background: var(--eddi-surface);
+	}
+	.eddi-layout-toggle[aria-expanded='false'] {
+		color: var(--eddi-accent-text);
+	}
+
+	/* Only where the side exists: the navigation from 50rem, the table of contents from 72rem. */
+	@media screen and (min-width: 50rem) {
+		:global([data-has-sidebar]) .eddi-layout-toggle[data-side='left'] {
+			display: inline-flex;
+		}
+	}
+	@media screen and (min-width: 72rem) {
+		:global([data-has-toc]) .eddi-layout-toggle[data-side='right'] {
+			display: inline-flex;
+		}
+	}
+</style>
