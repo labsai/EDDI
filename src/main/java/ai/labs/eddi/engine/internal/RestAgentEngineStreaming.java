@@ -174,6 +174,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // 413 InputTooLargeExceptionMapper answers, not an SSE 'error' event on a 200
         // stream. ConversationService re-checks, and the catch below still maps it.
         conversationService.requireInputWithinLimit(inputData);
+        // Untyped context entries, likewise a plain 400 before the stream opens.
+        RestAgentEngine.requireTypedContext(inputData.getContext());
 
         // Engine-reserved context keys are only ever set by EDDI itself — see
         // ClientContextGuard. Same boundary as the non-streaming twin.

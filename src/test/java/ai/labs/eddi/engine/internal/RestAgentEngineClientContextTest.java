@@ -14,10 +14,12 @@ import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.container.AsyncResponse;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
@@ -33,11 +35,14 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -132,5 +137,59 @@ class RestAgentEngineClientContextTest {
         verify(conversationService).sayStreaming(eq(CONV_ID), any(), any(), any(), captor.capture(), any());
         assertOnlyOrdinaryKeysRemain(captor.getValue().getContext());
         assertFalse(captor.getValue().getContext().containsKey("groupId"));
+    }
+
+    /**
+     * The body a caller sends when it wraps the context map in {@code "context"}:
+     * Jackson turns {@code context} into one entry with no type. That used to reach
+     * the pipeline and answer 500.
+     */
+    private static Map<String, Context> untypedContext() {
+        Map<String, Context> context = new HashMap<>();
+        context.put("language", new Context(Context.ContextType.string, "en"));
+        context.put("context", new Context());
+        return context;
+    }
+
+    private static void assertInvalidContext(BadRequestException e) {
+        assertEquals(400, e.getResponse().getStatus());
+        var body = (Map<?, ?>) e.getResponse().getEntity();
+        var error = (TurnError) body.get("error");
+        assertEquals("INVALID_CONTEXT", error.code());
+        assertTrue(error.message().contains("'context'"), error.message());
+    }
+
+    @Test
+    @DisplayName("starting a conversation with an untyped context entry is a 400, not a 500")
+    void startRefusesUntypedContext() throws Exception {
+        var e = assertThrows(BadRequestException.class, () -> restAgentEngine.startConversationWithContext(AGENT_ID,
+                Deployment.Environment.production, "user-1", untypedContext()));
+
+        assertInvalidContext(e);
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a turn with an untyped context entry is a 400 before it is queued")
+    void sayRefusesUntypedContext() throws Exception {
+        var e = assertThrows(BadRequestException.class, () -> restAgentEngine.sayWithinContext(CONV_ID, false, false, List.of(),
+                new InputData("hello", untypedContext()), mock(AsyncResponse.class)));
+
+        assertInvalidContext(e);
+        verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), eq(false), any());
+    }
+
+    @Test
+    @DisplayName("a streaming turn with an untyped context entry is a 400 before the stream opens")
+    void sayStreamingRefusesUntypedContext() throws Exception {
+        var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class));
+        var eventSink = mock(SseEventSink.class);
+
+        var e = assertThrows(BadRequestException.class, () -> streaming.sayStreaming(CONV_ID, false, false, List.of(),
+                new InputData("hello", untypedContext()), eventSink, mock(Sse.class)));
+
+        assertInvalidContext(e);
+        verify(conversationService, never()).sayStreaming(anyString(), any(), any(), any(), any(), any());
+        verify(eventSink, never()).send(any());
     }
 }
