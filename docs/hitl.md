@@ -689,8 +689,8 @@ would keep mailing a revoked approver forever. Name the approvers' shared mailbo
 **Observability and audit.** `eddi_email_outbound_total{kind="notify",outcome="sent|retry|failed|suppressed|not_allowed|rate_limited"}` and
 the `eddi_email_ledger_pending` gauge ([metrics.md](metrics.md#hitl-metrics)). Every sent or failed notification
 writes an `email.notify` audit-ledger entry with the conversation, the outcome, the Message-ID, the relay's reply and
-the recipient as a SHA-256 hash plus its domain — the audit ledger is write-once, so the address itself is not
-written there. Ledger rows (which do hold the address) are erased and exported with the person's other data by
+the recipient as `recipientPseudonym` (the keyed GDPR pseudonym token, not an unkeyed hash) plus `recipientDomain` —
+the audit ledger is write-once, so the address itself is not written there. Ledger rows (which do hold the address) are erased and exported with the person's other data by
 `DELETE /admin/gdpr/{userId}` and the export, matched through the user id when it is an address and the email the
 user directory recorded for that principal.
 

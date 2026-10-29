@@ -45,3 +45,23 @@ describe("isValidNotifyAddress", () => {
     }
   });
 });
+
+describe("internationalised domains — the server converts the domain to ASCII", () => {
+  it("accepts an IDN domain, in Unicode or punycode form", () => {
+    expect(isValidNotifyAddress("ops@bücher.example")).toBe(true);
+    expect(isValidNotifyAddress("ops@xn--bcher-kva.example")).toBe(true);
+    expect(parseNotifyRecipients("ops@bücher.example").error).toBeNull();
+  });
+
+  it("still refuses a non-ASCII local part and a malformed IDN domain", () => {
+    expect(isValidNotifyAddress("jürgen@bücher.example")).toBe(false);
+    expect(isValidNotifyAddress("ops@bücher")).toBe(false);
+    expect(isValidNotifyAddress("ops@bü cher.example")).toBe(false);
+  });
+
+  it("treats the Unicode and punycode spellings of one domain as a duplicate", () => {
+    const parsed = parseNotifyRecipients("ops@bücher.example, OPS@xn--bcher-kva.example");
+    expect(parsed.error).toBe("duplicate");
+    expect(parsed.index).toBe(1);
+  });
+});

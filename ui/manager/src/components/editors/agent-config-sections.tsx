@@ -1275,14 +1275,21 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   const [notifyOn, setNotifyOn] = useState(savedRecipients.length > 0);
   const [recipientsDraft, setRecipientsDraft] = useState(savedRecipients.join(", "));
   const savedRecipientsKey = savedRecipients.join(",");
+  // Set when the USER switches notifications off: the stored list is then empty
+  // on purpose, and the typed list is kept so switching back on (before saving)
+  // restores it instead of coming back empty.
+  const switchedOffByUser = useRef(false);
   useEffect(() => {
+    if (savedRecipientsKey) switchedOffByUser.current = false;
     // Resync only when the stored list differs from what the draft says — a
     // commit of the user's own typing must not reformat the field under them.
-    setRecipientsDraft((draft) =>
-      parseNotifyRecipients(draft).recipients.join(",") === savedRecipientsKey
-        ? draft
-        : savedRecipientsKey.split(",").filter(Boolean).join(", "),
-    );
+    if (!(switchedOffByUser.current && !savedRecipientsKey)) {
+      setRecipientsDraft((draft) =>
+        parseNotifyRecipients(draft).recipients.join(",") === savedRecipientsKey
+          ? draft
+          : savedRecipientsKey.split(",").filter(Boolean).join(", "),
+      );
+    }
     if (savedRecipientsKey) setNotifyOn(true);
   }, [savedRecipientsKey]);
   const parsedRecipients = parseNotifyRecipients(recipientsDraft);
@@ -1299,6 +1306,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
   function setNotify(on: boolean) {
     setNotifyOn(on);
     if (!on) {
+      switchedOffByUser.current = true;
       patchHitl({ notify: null });
       return;
     }
