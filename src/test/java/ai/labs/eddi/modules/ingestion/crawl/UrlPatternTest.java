@@ -7,11 +7,15 @@ package ai.labs.eddi.modules.ingestion.crawl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -132,6 +136,98 @@ class UrlPatternTest {
         long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 
         assertTrue(elapsedMillis < 2000, "matching took " + elapsedMillis + "ms — possible backtracking blowup");
+    }
+
+    @Test
+    @DisplayName("many single stars and a suffix the path lacks finish promptly")
+    void manyStarsAndAnImpossibleSuffixTerminate() {
+        // The regex translation backtracked through every split of the "a" run
+        // between the stars — exponential in the star count, so a 40-star pattern
+        // against a 200-character segment would not finish at all.
+        UrlPattern pattern = UrlPattern.compile("/" + "*a".repeat(40) + "z").orElseThrow();
+        String path = "/" + "a".repeat(200);
+        UrlPattern doubled = UrlPattern.compile("/" + "**a".repeat(40) + "z").orElseThrow();
+        String deep = "/" + "a/".repeat(100);
+
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> {
+            assertFalse(pattern.matches(path));
+            assertFalse(doubled.matches(deep));
+        });
+    }
+
+    @Test
+    @DisplayName("** also crosses a decoded line terminator, so it cannot be used to slip past an exclusion")
+    void doubleStarCrossesLineTerminators() {
+        // URI#getPath decodes %0A; the regex "." in the old translation stopped at it.
+        assertTrue(matches("/private/**", "/private/a\nb"));
+        assertTrue(matches("/private/*", "/private/a\nb"));
+    }
+
+    /**
+     * The token matcher must mean exactly what the regex translation meant (line
+     * terminators aside, which the test above covers). Compare the two over every
+     * short glob and path on an alphabet with a slash, where wildcard overlaps are
+     * dense.
+     */
+    @Test
+    @DisplayName("the matcher agrees with the regex translation it replaced")
+    void equivalentToTheRegexTranslation() {
+        List<String> globs = allStrings(new char[]{'a', '/', '*', '?'}, 5);
+        List<String> paths = allStrings(new char[]{'a', 'b', '/'}, 5);
+        for (String glob : globs) {
+            if (glob.isBlank()) {
+                continue;
+            }
+            UrlPattern pattern = UrlPattern.compile(glob).orElseThrow();
+            Pattern reference = Pattern.compile(referenceRegex(glob));
+            for (String path : paths) {
+                assertEquals(reference.matcher(path).matches(), pattern.matches(path), () -> "glob '" + glob + "' on '" + path + "'");
+            }
+        }
+    }
+
+    /** The translation {@code UrlPattern} used before it stopped using a regex. */
+    private static String referenceRegex(String glob) {
+        String pattern = glob;
+        if (!pattern.startsWith("/") && !pattern.startsWith("**")) {
+            pattern = "**/" + pattern;
+        }
+        StringBuilder regex = new StringBuilder();
+        int index = 0;
+        while (index < pattern.length()) {
+            char character = pattern.charAt(index);
+            switch (character) {
+                case '*' -> {
+                    boolean doubled = index + 1 < pattern.length() && pattern.charAt(index + 1) == '*';
+                    if (doubled) {
+                        regex.append(".*");
+                        index++;
+                    } else {
+                        regex.append("[^/]*");
+                    }
+                }
+                case '?' -> regex.append("[^/]");
+                default -> regex.append(Pattern.quote(String.valueOf(character)));
+            }
+            index++;
+        }
+        return regex.toString();
+    }
+
+    private static List<String> allStrings(char[] alphabet, int maxLength) {
+        List<String> out = new ArrayList<>();
+        out.add("");
+        int from = 0;
+        for (int len = 1; len <= maxLength; len++) {
+            int to = out.size();
+            for (int i = from; i < to; i++) {
+                for (char c : alphabet) {
+                    out.add(out.get(i) + c);
+                }
+            }
+            from = to;
+        }
+        return out;
     }
 
     @Test

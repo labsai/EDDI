@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -150,6 +151,35 @@ class TemplateSyntaxMigratorTest {
         String input = "[[${#strings.toLowerCase(#strings.replace(name, ' ', '-'))}]]";
         String expected = "{name.replace(' ', '-').toLowerCase()}";
         assertEquals(expected, migrator.migrate(input));
+    }
+
+    @Test
+    void migrateStrings_whitespaceAroundArguments_isKeptAsBefore() {
+        // Edge cases of the possessive/lookahead rewrite: whitespace after the comma
+        // is dropped, and an argument that is nothing but whitespace survives.
+        assertEquals("{name.replace(' ', '-').toLowerCase()}", migrator.migrate("[[${#strings.toLowerCase(#strings.replace(name,   ' ', '-'))}]]"));
+        assertEquals("{name.trim().toLowerCase()}", migrator.migrate("[[${#strings.toLowerCase(#strings.trim(name))}]]"));
+        assertEquals("{name.pad().toLowerCase()}", migrator.migrate("[[${#strings.toLowerCase(#strings.pad(name,   ))}]]"));
+        assertEquals("x.foo( )", migrator.migrate("#strings.foo(x, )"));
+        assertEquals("x.foo( )", migrator.migrate("#strings.foo(x,  )"));
+        assertEquals("x.foo(a  b)", migrator.migrate("#strings.foo(x,   a  b)"));
+        assertEquals("#strings.foo(x,", migrator.migrate("#strings.foo(x,"));
+    }
+
+    /**
+     * A long whitespace run after the comma and no closing parenthesis: the greedy
+     * forms tried every split of the run between "\s*" and the argument group, for
+     * every candidate. Quadratic, so 200 000 spaces took minutes.
+     */
+    @Test
+    void migrateStrings_unterminatedCallWithLongWhitespace_finishesPromptly() {
+        String spaces = " ".repeat(200_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            String nested = "[[${#strings.a(#strings.b(x," + spaces;
+            assertEquals(nested, migrator.migrate(nested));
+            String flat = "#strings.a(x," + spaces;
+            assertEquals(flat, migrator.migrate(flat));
+        });
     }
 
     // --- Multiple patterns in one string ---

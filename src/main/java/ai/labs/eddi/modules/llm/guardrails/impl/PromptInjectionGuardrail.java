@@ -50,16 +50,24 @@ public class PromptInjectionGuardrail implements ContentGuardrail {
     /**
      * The built-in list. Each needs an imperative override shape, so ordinary text
      * that merely mentions instructions or prompts does not match.
+     * <p>
+     * Whitespace runs are possessive ({@code \s++}, {@code \s*+}). These patterns
+     * screen raw user text, and two greedy runs with nothing but optional words
+     * between them can divide one long whitespace run between them in every way:
+     * {@code ignore} followed by 100 000 spaces and no instruction word was
+     * quadratic, as was {@code <} followed by spaces. Possessive changes no match
+     * here: whatever follows each run starts with a non-whitespace character or is
+     * itself an optional whitespace run, so a run never has to give anything back.
      */
     static final List<String> DEFAULT_PATTERNS = List.of(
-            "\\b(ignore|disregard|forget|override|bypass)\\s+(all\\s+|any\\s+|the\\s+|your\\s+)?(of\\s+)?(the\\s+|your\\s+)?(previous|prior|above|earlier|preceding|system|original|initial)?\\s*(instructions?|prompts?|rules|directives|guidelines)\\b",
+            "\\b(ignore|disregard|forget|override|bypass)\\s++(all\\s++|any\\s++|the\\s++|your\\s++)?(of\\s++)?(the\\s++|your\\s++)?(previous|prior|above|earlier|preceding|system|original|initial)?\\s*+(instructions?|prompts?|rules|directives|guidelines)\\b",
             "\\b(reveal|print|show|repeat|output|display|leak)\\b[^.\\n]{0,30}\\b(your|the)\\b[^.\\n]{0,20}\\b(system prompt|system message|initial instructions|hidden instructions)\\b",
             "\\byou are now\\b[^.\\n]{0,40}\\b(dan|developer mode|jailbroken|unrestricted|unfiltered|no longer bound)\\b",
             "\\b(enter|enable|activate|switch to)\\b[^.\\n]{0,20}\\b(developer mode|dan mode|jailbreak mode|god mode)\\b",
             "\\bpretend\\b[^.\\n]{0,40}\\b(no|without)\\b[^.\\n]{0,20}\\b(restrictions|rules|guidelines|filters)\\b",
             "\\bnew instructions?\\s*:",
-            "<\\s*/?\\s*(system|im_start|im_end)\\s*>",
-            "\\[\\s*(system|inst)\\s*\\]");
+            "<\\s*+/?\\s*+(system|im_start|im_end)\\s*+>",
+            "\\[\\s*+(system|inst)\\s*+\\]");
 
     @Override
     public String type() {
