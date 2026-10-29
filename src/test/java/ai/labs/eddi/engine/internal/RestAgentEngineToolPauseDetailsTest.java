@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
@@ -89,6 +90,9 @@ class RestAgentEngineToolPauseDetailsTest {
         var snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationState(state);
         doReturn(snapshot).when(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+        lenient().doReturn(snapshot).when(conversationService).getConversationMemorySnapshotForApprover(CONVERSATION_ID);
+        lenient().doAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationService)
+                .getConversationMemoryTail(CONVERSATION_ID);
         return snapshot;
     }
 
@@ -423,6 +427,69 @@ class RestAgentEngineToolPauseDetailsTest {
 
             var pauseDetails = (Map<String, Object>) summaryOf(response).get("pauseDetails");
             assertEquals(List.of("notify_manager"), pauseDetails.get("actions"));
+        }
+
+        /**
+         * The tail a store actually returns: only the last step, with the true count.
+         */
+        private void stubSlicedTail(ConversationMemorySnapshot full) throws Exception {
+            var sliced = new ConversationMemorySnapshot();
+            sliced.setConversationState(full.getConversationState());
+            sliced.setHitlPauseType(full.getHitlPauseType());
+            sliced.setHitlPauseReason(full.getHitlPauseReason());
+            sliced.getConversationSteps().add(full.getConversationSteps().getLast());
+            doReturn(new ConversationMemoryTail(sliced, full.getConversationSteps().size(), 0, 0, null)).when(conversationService)
+                    .getConversationMemoryTail(CONVERSATION_ID);
+        }
+
+        private ConversationMemorySnapshot.ConversationStepSnapshot stepWithActions(List<String> actions) {
+            var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+            var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot("actions", actions, null, null, "wf-1", true));
+            step.getWorkflows().add(workflow);
+            return step;
+        }
+
+        @Test
+        @DisplayName("history-free tail: the paused step's actions come from the tail alone — the history is never loaded")
+        void slicedTailAnswersFromTheLastStep() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("RULE");
+            snapshot.getConversationSteps().add(stepWithActions(List.of("CONVERSATION_START")));
+            snapshot.getConversationSteps().add(stepWithActions(List.of("PAUSE_CONVERSATION", "notify_manager")));
+            stubSlicedTail(snapshot);
+
+            var pauseDetails = (Map<String, Object>) summaryOf(restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary")).get("pauseDetails");
+
+            assertEquals(List.of("PAUSE_CONVERSATION", "notify_manager"), pauseDetails.get("actions"));
+            verify(conversationService, never()).getConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("history-free tail whose last step has no actions → the full history is walked, same answer as before")
+        void slicedTailFallsBackToTheFullHistory() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPauseType("RULE");
+            snapshot.getConversationSteps().add(stepWithActions(List.of("notify_manager")));
+            snapshot.getConversationSteps().add(new ConversationMemorySnapshot.ConversationStepSnapshot());
+            stubSlicedTail(snapshot);
+
+            var pauseDetails = (Map<String, Object>) summaryOf(restAgentEngine.getApprovalStatus(CONVERSATION_ID, "summary")).get("pauseDetails");
+
+            assertEquals(List.of("notify_manager"), pauseDetails.get("actions"));
+            verify(conversationService).getConversationMemorySnapshot(CONVERSATION_ID);
+        }
+
+        @Test
+        @DisplayName("detail=full reads the approver snapshot, never the tail")
+        void detailFullUsesTheApproverRead() throws Exception {
+            snapshotInState(ConversationState.AWAITING_HUMAN);
+
+            restAgentEngine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            verify(conversationService).getConversationMemorySnapshotForApprover(CONVERSATION_ID);
+            verify(conversationService, never()).getConversationMemoryTail(anyString());
+            verify(conversationService, never()).getConversationMemorySnapshot(anyString());
         }
 
         @Test

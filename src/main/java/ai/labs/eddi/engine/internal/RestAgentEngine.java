@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -825,9 +826,11 @@ public class RestAgentEngine implements IRestAgentEngine {
     public Response getApprovalStatus(String conversationId, String detail) {
         String ownerId = validateConversationOwnership(conversationId, true);
         try {
-            var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
-            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             if ("full".equals(detail)) {
+                // The whole snapshot is the response here, so only the pending batch's
+                // resume-only fields — stripped below anyway — are left on the server.
+                var snapshot = conversationService.getConversationMemorySnapshotForApprover(conversationId);
+                boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
                 // Approver-only callers (not owner, not admin) may read the full
                 // memory only while the conversation is actually awaiting approval —
                 // the approver role exists to decide pending approvals, not as a
@@ -848,6 +851,12 @@ public class RestAgentEngine implements IRestAgentEngine {
                 // See ConversationMemoryUtilities#sanitizePendingToolCallsForApprover.
                 return Response.ok(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot)).build();
             }
+            // The summary describes the pause, not the history: the tail read leaves the
+            // step history (0.5-3 MB for a tool-using agent) on the server. This card
+            // used to wait tens of seconds for it on a slow database link.
+            var tail = conversationService.getConversationMemoryTail(conversationId);
+            var snapshot = tail.snapshot();
+            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
             // cancel that predates bookmark clearing) never mislead dashboards.
@@ -866,7 +875,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             // Structured pauseDetails (Task 11) — computed at read time, never
             // persisted. Absent entirely once the conversation is no longer
             // paused, same suppression rule as the bookmark fields above.
-            summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, snapshot) : null);
+            summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, tail) : null);
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -885,12 +894,14 @@ public class RestAgentEngine implements IRestAgentEngine {
      * {@code argumentsRaw}); RULE pauses (and legacy null-pauseType snapshots)
      * expose the pause reason and the ACTIONS data of the paused step.
      */
-    private Map<String, Object> buildPauseDetails(String conversationId, ConversationMemorySnapshot snapshot) {
+    private Map<String, Object> buildPauseDetails(String conversationId, ConversationMemoryTail tail)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = tail.snapshot();
         String pauseType = snapshot.getHitlPauseType();
         if ("TOOL_CALL".equals(pauseType)) {
             return buildToolCallPauseDetails(conversationId, snapshot);
         }
-        return buildRulePauseDetails(snapshot);
+        return buildRulePauseDetails(conversationId, tail);
     }
 
     private Map<String, Object> buildToolCallPauseDetails(String conversationId, ConversationMemorySnapshot snapshot) {
@@ -984,12 +995,29 @@ public class RestAgentEngine implements IRestAgentEngine {
         return redacted;
     }
 
-    private Map<String, Object> buildRulePauseDetails(ConversationMemorySnapshot snapshot) {
+    private Map<String, Object> buildRulePauseDetails(String conversationId, ConversationMemoryTail tail)
+            throws ResourceStoreException, ResourceNotFoundException {
         var details = new LinkedHashMap<String, Object>();
         details.put("type", "RULE");
-        details.put("reason", snapshot.getHitlPauseReason());
-        details.put("actions", findPausedStepActions(snapshot));
+        details.put("reason", tail.snapshot().getHitlPauseReason());
+        details.put("actions", findPausedStepActions(conversationId, tail));
         return details;
+    }
+
+    /**
+     * {@link #findPausedStepActions(ConversationMemorySnapshot)} from the tail. A
+     * rule pause stores its actions in the paused (last) step, so the tail's one
+     * step answers it. Only when that step carries no actions does the search walk
+     * further back — and then over the full history, loaded for that case alone, so
+     * the answer is the one the full snapshot always gave.
+     */
+    private List<String> findPausedStepActions(String conversationId, ConversationMemoryTail tail)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var actions = findPausedStepActions(tail.snapshot());
+        if (actions.isEmpty() && !tail.holdsAllSteps()) {
+            return findPausedStepActions(conversationService.getConversationMemorySnapshot(conversationId));
+        }
+        return actions;
     }
 
     /**

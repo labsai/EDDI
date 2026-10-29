@@ -181,9 +181,15 @@ public class McpHitlTools {
         }
         try {
             String ownerId = hitlAccessGuard.requireConversationHitlAccess(conversationId);
-            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            // Same reads as the REST surface: the full snapshot (less the resume-only
+            // batch fields the projection strips anyway) for detail=full, the history-free
+            // tail for the summary, which reads only the header.
+            boolean full = "full".equals(detail);
+            ConversationMemorySnapshot snapshot = full
+                    ? conversationService.getConversationMemorySnapshotForApprover(conversationId)
+                    : conversationService.getConversationMemoryTail(conversationId).snapshot();
             boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
-            if ("full".equals(detail)) {
+            if (full) {
                 if (!paused && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, ownerId)) {
                     return errorJson("Full approval status is available to approvers only while awaiting approval — "
                             + "use the summary view", "FORBIDDEN", null);

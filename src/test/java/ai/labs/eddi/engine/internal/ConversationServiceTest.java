@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
@@ -704,6 +705,53 @@ class ConversationServiceTest {
 
             assertNotNull(result);
             assertEquals(AGENT_ID, result.getAgentId());
+        }
+
+        @Test
+        @DisplayName("current step only → the history-free tail read, never the full document")
+        void currentStepOnlyReadsTheTail() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            doReturn(ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationMemoryStore).loadConversationMemoryTail(CONVERSATION_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+
+            SimpleConversationMemorySnapshot result = conversationService.readConversation(CONVERSATION_ID, false, true,
+                    List.of("conversationOutputs"));
+
+            assertEquals(AGENT_ID, result.getAgentId());
+            assertEquals(1, result.getConversationOutputs().size());
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("current step only, env-qualified → tail read, agent still checked")
+        void currentStepOnlyEnvQualifiedReadsTheTail() throws Exception {
+            var snapshot = createMinimalSnapshot("different-agent", USER_ID);
+            doReturn(ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationMemoryStore).loadConversationMemoryTail(CONVERSATION_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+
+            assertThrows(AgentMismatchException.class,
+                    () -> conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID, false, true, null));
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("current step only, unknown conversation → 404 as before")
+        void currentStepOnlyUnknownConversation() throws Exception {
+            doReturn(null).when(conversationMemoryStore).loadConversationMemoryTail(CONVERSATION_ID);
+
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.readConversation(CONVERSATION_ID, false, true, null));
+        }
+
+        @Test
+        @DisplayName("whole history (returnCurrentStepOnly=false) → the full read, as before")
+        void wholeHistoryReadsTheFullDocument() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+
+            conversationService.readConversation(CONVERSATION_ID, false, false, null);
+
+            verify(conversationMemoryStore, never()).loadConversationMemoryTail(anyString());
         }
     }
 

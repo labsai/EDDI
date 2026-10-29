@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -469,6 +470,36 @@ public interface IConversationService {
      *             if the conversation is not found
      */
     ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * The conversation's current state without its history, for reads that show
+     * only where the conversation is now (the approval-status summary). Loads the
+     * last step and output and the server-computed totals instead of the whole
+     * stored document — see {@link ConversationMemoryTail}. Never persist or resume
+     * from it.
+     *
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    ConversationMemoryTail getConversationMemoryTail(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * The full snapshot for the approver view
+     * ({@code approval-status?detail=full}), possibly without the pending batch's
+     * resume-only fields, which that view strips anyway — see
+     * {@code IConversationMemoryStore#loadConversationMemorySnapshotForApprover}.
+     * Never persist or resume from it.
+     *
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    ConversationMemorySnapshot getConversationMemorySnapshotForApprover(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**

@@ -306,12 +306,36 @@ public class ConversationMemoryUtilities {
      * carried a cost.
      */
     static Double conversationCost(List<ConversationStepSnapshot> steps, List<ConversationStepSnapshot> redoCache) {
-        Double live = conversationCost(steps);
-        Double undone = conversationCost(redoCache);
+        return combineCost(conversationCost(steps), conversationCost(redoCache));
+    }
+
+    /** The live and the undone spend added up — {@code null} only when both are. */
+    static Double combineCost(Double live, Double undone) {
         if (live == null) {
             return undone;
         }
         return undone == null ? live : live + undone;
+    }
+
+    /**
+     * {@link #conversationCost(List)} over values a store already extracted from
+     * the spend entries, in document order: the same filter (a finite, non-negative
+     * number) and the same left-to-right summation, so the total is bit-identical
+     * to the one computed from the steps themselves.
+     */
+    static Double sumSpend(List<?> spendValues) {
+        if (spendValues == null) {
+            return null;
+        }
+        double total = 0.0;
+        boolean found = false;
+        for (Object value : spendValues) {
+            if (value instanceof Number cost && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
+                total += cost.doubleValue();
+                found = true;
+            }
+        }
+        return found ? total : null;
     }
 
     private static boolean isSpendKey(String key) {
@@ -428,24 +452,63 @@ public class ConversationMemoryUtilities {
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
                                                                                    boolean returnDetailed, boolean returnCurrentStepOnly) {
 
-        var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
-        newSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
-
         var allOutputs = conversationMemorySnapshot.getConversationOutputs();
         var allSteps = conversationMemorySnapshot.getConversationSteps();
         // A secret turn is masked with the forms found in its output AND its step, so
         // each side can be paired with the other — but only when the two lists agree:
         // on a drifted document an index names different turns on each side.
         boolean paired = allOutputs.size() == allSteps.size();
-
         var conversationOutputs = returnCurrentStepOnly ? List.of(allOutputs.getLast()) : allOutputs;
-        int outputOffset = returnCurrentStepOnly ? allOutputs.size() - 1 : 0;
+        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
+        return convertSimpleConversationMemory(conversationMemorySnapshot, conversationOutputs, conversationSteps, paired, allSteps.size() > 1,
+                !conversationMemorySnapshot.getRedoCache().isEmpty(), conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()),
+                returnDetailed);
+    }
+
+    /**
+     * The simple projection of the current step from a
+     * {@link ConversationMemoryTail} — the same result
+     * {@link #convertSimpleConversationMemory(ConversationMemorySnapshot, boolean, boolean)}
+     * gives with {@code returnCurrentStepOnly} for the full snapshot of the same
+     * conversation, built from its last step and output plus the totals the tail
+     * carries. An empty conversation fails exactly as the full projection does
+     * ({@link NoSuchElementException} from {@code getLast()}).
+     */
+    static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemoryTail tail, boolean returnDetailed) {
+        var snapshot = tail.snapshot();
+        var lastOutput = List.of(snapshot.getConversationOutputs().getLast());
+        var lastStep = List.of(snapshot.getConversationSteps().getLast());
+        return convertSimpleConversationMemory(snapshot, lastOutput, lastStep, tail.outputCount() == tail.stepCount(), tail.stepCount() > 1,
+                tail.redoCount() > 0, tail.conversationCost(), returnDetailed);
+    }
+
+    /**
+     * Shared body of both simple projections.
+     *
+     * @param conversationOutputs
+     *            the outputs to render — all of them, or only the last
+     * @param conversationSteps
+     *            the steps to render, index-aligned with
+     *            {@code conversationOutputs} whenever {@code paired}
+     * @param paired
+     *            whether the STORED outputs and steps have the same length, so an
+     *            index names the same turn on both sides
+     */
+    private static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
+                                                                                    List<ConversationOutput> conversationOutputs,
+                                                                                    List<ConversationStepSnapshot> conversationSteps,
+                                                                                    boolean paired, boolean undoAvailable, boolean redoAvailable,
+                                                                                    Double conversationCost, boolean returnDetailed) {
+
+        var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot, undoAvailable, redoAvailable);
+        newSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
+
         var newConversationOutputs = newSnapshot.getConversationOutputs();
         for (int index = 0; index < conversationOutputs.size(); index++) {
             var conversationOutput = conversationOutputs.get(index);
             boolean secretTurn = isSecretTurnOutput(conversationOutput);
             List<String> needles = secretTurn
-                    ? secretTurnNeedles(conversationOutput, paired ? allSteps.get(outputOffset + index) : null)
+                    ? secretTurnNeedles(conversationOutput, paired ? conversationSteps.get(index) : null)
                     : List.of();
             if (returnDetailed) {
                 // returnDetailed is caller-controlled and reachable by any chatting user, so
@@ -486,11 +549,11 @@ public class ConversationMemoryUtilities {
             }
         }
 
-        newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
-        newSnapshot.setConversationCost(conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()));
+        // turnError reads only the last output, which the rendered list always ends
+        // with.
+        newSnapshot.setError(turnError(newSnapshot.getConversationState(), conversationOutputs));
+        newSnapshot.setConversationCost(conversationCost);
 
-        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
-        int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
         for (int index = 0; index < conversationSteps.size(); index++) {
             var conversationStepSnapshot = conversationSteps.get(index);
             var simpleConversationStep = new SimpleConversationStep();
@@ -500,7 +563,7 @@ public class ConversationMemoryUtilities {
             // of another turn's output.
             boolean secretTurn = isSecretTurnStep(conversationStepSnapshot);
             List<String> needles = secretTurn
-                    ? secretTurnNeedles(paired ? allOutputs.get(stepOffset + index) : null, conversationStepSnapshot)
+                    ? secretTurnNeedles(paired ? conversationOutputs.get(index) : null, conversationStepSnapshot)
                     : List.of();
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
@@ -698,7 +761,8 @@ public class ConversationMemoryUtilities {
         return current;
     }
 
-    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
+    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot,
+                                                                            boolean undoAvailable, boolean redoAvailable) {
 
         var simpleSnapshot = new SimpleConversationMemorySnapshot();
 
@@ -728,8 +792,8 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setHitlPauseType(conversationMemorySnapshot.getHitlPauseType());
         simpleSnapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(conversationMemorySnapshot.getHitlPendingToolCalls()));
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
-        simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
-        simpleSnapshot.setRedoAvailable(!conversationMemorySnapshot.getRedoCache().isEmpty());
+        simpleSnapshot.setUndoAvailable(undoAvailable);
+        simpleSnapshot.setRedoAvailable(redoAvailable);
         return simpleSnapshot;
     }
 
@@ -1171,7 +1235,23 @@ public class ConversationMemoryUtilities {
                                                                                            List<String> returningFields) {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+        return applyReturningFields(memorySnapshot, returnCurrentStepOnly, returningFields);
+    }
 
+    /**
+     * {@link #convertSimpleConversationMemorySnapshot(ConversationMemorySnapshot, Boolean, Boolean, List)}
+     * with {@code returnCurrentStepOnly=true}, from a
+     * {@link ConversationMemoryTail} instead of the full snapshot — same fields,
+     * same values, without the history ever having been loaded.
+     */
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(ConversationMemoryTail tail, Boolean returnDetailed,
+                                                                                           List<String> returningFields) {
+        var memorySnapshot = convertSimpleConversationMemory(tail, returnDetailed);
+        return applyReturningFields(memorySnapshot, true, returningFields);
+    }
+
+    private static SimpleConversationMemorySnapshot applyReturningFields(SimpleConversationMemorySnapshot memorySnapshot,
+                                                                         Boolean returnCurrentStepOnly, List<String> returningFields) {
         // Blank entries mean NO filter, not "select nothing". A present-but-empty
         // query parameter (?returningFields=) binds as [""], and LLM-generated
         // tools make that shape routine: every generated parameter is required,
