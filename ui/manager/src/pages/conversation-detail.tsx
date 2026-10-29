@@ -75,10 +75,10 @@ const stateIcons: Record<
   { icon: typeof Circle; color: string; bg: string }
 > = {
   READY: { icon: Circle, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-warn-500", bg: "bg-warn-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
-  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
+  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-warn-500", bg: "bg-warn-500/10" },
   AWAITING_HUMAN: { icon: Hand, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
@@ -346,10 +346,10 @@ export function ConversationDetailPage() {
       {waitingForPause && (
         <div
           role="status"
-          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-muted-foreground"
+          className="flex items-center gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 px-4 py-3 text-sm text-muted-foreground"
           data-testid="awaiting-pause-notice"
         >
-          <Clock className="h-4 w-4 shrink-0 animate-pulse text-amber-500" aria-hidden="true" />
+          <Clock className="h-4 w-4 shrink-0 animate-pulse text-warn-500" aria-hidden="true" />
           {t("conversationDetail.waitingForPause", "Waiting for the pause to be saved…")}
         </div>
       )}
@@ -610,7 +610,7 @@ function HighlightText({ text, highlight }: { text: string; highlight?: string }
     <>
       {parts.map((part, i) =>
         regex.test(part) ? (
-          <mark key={i} className="bg-amber-300/60 dark:bg-amber-500/40 rounded-sm px-0.5">
+          <mark key={i} className="bg-ochre-300/60 dark:bg-ochre-500/40 rounded-sm px-0.5">
             {part}
           </mark>
         ) : (
@@ -688,11 +688,11 @@ function ChatBubbleStep({
       {actions.length > 0 && (
         <div className="flex justify-center">
           <div className="flex flex-wrap items-center justify-center gap-1">
-            <Zap className="h-3 w-3 text-amber-500" />
+            <Zap className="h-3 w-3 text-ochre-500" />
             {actions.map((action, i) => (
               <span
                 key={i}
-                className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400"
+                className="rounded-md bg-ochre-500/10 px-2 py-0.5 text-[10px] font-medium text-ochre-600 dark:text-ochre-400"
               >
                 {action}
               </span>
@@ -815,7 +815,7 @@ function syntaxHighlightJson(json: string): string {
   return escaped.replace(
     /("(\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
     (match) => {
-      let cls = "color: var(--color-amber-400)"; // number
+      let cls = "color: var(--color-ochre-400)"; // number
       if (/^"/.test(match)) {
         if (/:$/.test(match)) {
           cls = "color: var(--color-primary)"; // key

@@ -389,7 +389,7 @@ export function AgentWizardPage() {
           )}
           {result.deployed === false && result.deploymentStatus && (
             <div
-              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-sm font-medium text-amber-600 dark:text-amber-400"
+              className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-warn-500/10 px-3 py-1 text-sm font-medium text-warn-600 dark:text-warn-400"
               data-testid="wizard-deploy-status"
             >
               <AlertCircle className="h-3.5 w-3.5" />
@@ -416,7 +416,7 @@ export function AgentWizardPage() {
               the agent they just created cannot use its credential. */}
           {typeof result.resources?.vaultWarning === "string" && (
             <p
-              className="mx-auto mt-3 max-w-md text-start text-xs text-amber-700 dark:text-amber-300"
+              className="mx-auto mt-3 max-w-md text-start text-xs text-warn-700 dark:text-warn-300"
               data-testid="wizard-vault-warning"
             >
               <AlertCircle className="me-1 inline h-3.5 w-3.5 align-text-bottom" />
@@ -433,9 +433,9 @@ export function AgentWizardPage() {
                 )}
               </p>
               <div className="mt-1.5 flex items-center gap-2">
-                <KeyRound className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+                <KeyRound className="h-3.5 w-3.5 shrink-0 text-warn-500" />
                 <code
-                  className="min-w-0 flex-1 truncate font-mono text-xs text-amber-700 dark:text-amber-300"
+                  className="min-w-0 flex-1 truncate font-mono text-xs text-warn-700 dark:text-warn-300"
                   title={result.apiKeyVaultReference}
                   data-testid="wizard-vault-reference"
                 >
@@ -1552,7 +1552,7 @@ function FeaturesStep({
           />
           {(state.enableQuickReplies || state.enableSentimentAnalysis) && (
             <div className="space-y-3 ps-9">
-              <div className="flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400" data-testid="structured-output-info">
+              <div className="flex items-start gap-2 rounded-md bg-warn-500/10 px-3 py-2 text-[11px] text-warn-700 dark:text-warn-400" data-testid="structured-output-info">
                 <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                 <span>
                   {t(

@@ -81,15 +81,23 @@ Declared in `@theme` in `src/index.css`; `.dark` overrides them. Use the semanti
 | `sidebar` / `sidebar-foreground` | `#ffffff` / `#44403c` | sidebar surface + text |
 | `sidebar-border` | `#e7e5e4` | sidebar hairlines |
 | `sidebar-accent` / `-foreground` | `#b45309` / `#ffffff` | active nav; dark mode restores bright gold `#f59e0b` on `#0c0a09` |
+| `brand-50` … `brand-950` | Tailwind amber | brand scale for accents, selection, primary emphasis; a white-label brand re-derives it from its primary |
+| `warn-50` … `warn-950` | Tailwind amber | caution: warnings, HITL pauses/pending approvals, unsaved markers, in-progress/degraded, secret notices; never re-branded |
+| `ochre-50` … `ochre-950` | Tailwind amber | fixed categorical amber hue, NOT a warning: per-type badges, section accents, avatar/syntax colours, cost, highlights; never re-branded |
 
 Other constants: `--radius: 0.5rem` (`rounded-lg` fields/buttons, `rounded-xl` cards and
 containers, `rounded-full` badges), `--font-sans` is Noto Sans Variable with per-script
 fallbacks — do not set another font.
 
-Status colors outside the token set (emerald for success/deploy, amber for dirty state,
+Status colors outside the token set (emerald for success/deploy, `warn` for dirty state,
 blue for update) exist in a few places; the `warning` token is what the Button, Badge and
 AlertDialog `warning` variants use. Reuse the existing pattern rather than inventing
-a new palette: `text-emerald-600 dark:text-emerald-400`, `bg-amber-100 … dark:bg-amber-900/30`.
+a new palette: `text-emerald-600 dark:text-emerald-400`, `bg-warn-100 … dark:bg-warn-900/30`.
+
+**Never write `amber-N`** — `src/__tests__/no-hardcoded-amber.test.ts` fails on it. Pick by
+meaning: `brand-N` if the colour should follow a white-label brand, `warn-N` if it means
+caution ("look at this"), `ochre-N` if amber is just one hue of a categorical palette
+(a type badge, a section accent, an avatar colour) that must not follow the brand.
 
 ## Examples
 
@@ -127,8 +135,8 @@ Search field (note `ps-9` and `start-3`, not `pl-9`/`left-3`):
 - **Do not add a shadcn/ui component** because it "looks the same". If the primitive is
   missing, write it into `src/components/ui/` in the house style (`cva` + `cn()`, tokens,
   `forwardRef`, `displayName`) so it is reusable and syncable.
-- **Do not use raw hex or Tailwind's default palette for brand color** — `bg-amber-500` is
-  not `bg-primary`. (Third-party brand marks like Slack's `#4A154B` are the exception.)
+- **Do not use raw hex or Tailwind's default palette for brand color** — use `bg-primary`
+  or the `brand-N` scale. (Third-party brand marks like Slack's `#4A154B` are the exception.)
 - **Do not restyle a variant at the call site.** Add the variant to the `cva` config.
 - **Do not use directional spacing** (`pl-`, `pr-`, `ml-`, `mr-`, `left-`, `right-`,
   `text-left`, `text-right`).

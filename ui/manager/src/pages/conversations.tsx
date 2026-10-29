@@ -47,10 +47,10 @@ const stateIcons: Record<
   { icon: typeof Circle; color: string; bg: string }
 > = {
   READY: { icon: Circle, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-warn-500", bg: "bg-warn-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
-  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
+  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-warn-500", bg: "bg-warn-500/10" },
   AWAITING_HUMAN: { icon: Hand, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 

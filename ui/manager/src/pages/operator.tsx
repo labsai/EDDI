@@ -647,7 +647,7 @@ export function OperatorPage() {
           here rather than letting a green status badge imply everything is fine. */}
       {canaryWarning && (
         <div
-          className="flex flex-wrap items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+          className="flex flex-wrap items-start gap-3 rounded-md border border-warn-500/40 bg-warn-500/10 p-3 text-sm text-warn-700 dark:text-warn-400"
           role="alert"
           data-testid="operator-canary-warning"
         >

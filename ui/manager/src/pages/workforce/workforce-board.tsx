@@ -1147,10 +1147,10 @@ function WorkforceBoard() {
           where to look. */}
       {selectedConversation?.state === "AWAITING_APPROVAL" && (
         <div
-          className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs"
+          className="mx-4 mb-2 flex items-center gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 px-3 py-2 text-xs"
           data-testid="board-awaiting-approval-banner"
         >
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-warn-500" />
           <span className="flex-1 text-muted-foreground">
             {t(
               "Workforce.board.awaitingApprovalHint",
@@ -1164,7 +1164,7 @@ function WorkforceBoard() {
               ...(version ? { version: String(version) } : {}),
               conversation: selectedConversation.id,
             }).toString()}`}
-            className="font-medium text-amber-500 underline-offset-2 hover:underline"
+            className="font-medium text-warn-500 underline-offset-2 hover:underline"
             data-testid="board-awaiting-approval-review"
           >
             {t("Workforce.board.reviewInManager", "Review it")}

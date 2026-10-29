@@ -18,11 +18,11 @@
   --color-destructive: #dc2626;
   --color-destructive-foreground: #ffffff;
   /* Warning — amber has been the app's caution colour since the start; this
-     gives it a name. Light mode uses amber-800, not the brand's amber-500: the
-     token is overwhelmingly read as text, and #f59e0b is only ~2.1:1 on white.
-     amber-800 rather than amber-700 because the token tints its own background
-     (`bg-warning/10 text-warning`), and amber-700 lands at 4.38:1 there — under
-     AA. amber-800 holds >=5.6:1 at every alpha the app ships. Same trade the
+     gives it a name. Light mode uses amber 800, not the brand's amber 500: the
+     token is overwhelmingly read as text, and the brand gold is only ~2.1:1 on white.
+     Amber 800 rather than 700 because the token tints its own background
+     (`bg-warning/10 text-warning`), and amber 700 lands at 4.38:1 there — under
+     AA. Amber 800 holds >=5.6:1 at every alpha the app ships. Same trade the
      sidebar accent makes below, one step further. */
   --color-warning: #92400e;
   --color-warning-foreground: #ffffff;
@@ -45,9 +45,68 @@
   --color-sidebar-foreground: #44403c;
   --color-sidebar-border: #e7e5e4;
   /* Darker amber so the active nav label (text-sidebar-accent) stays legible on
-     white (bright #f59e0b is only ~1.8:1); dark mode restores bright gold below. */
+     white (the bright brand gold is only ~1.8:1); dark mode restores bright gold below. */
   --color-sidebar-accent: #b45309;
   --color-sidebar-accent-foreground: #ffffff;
+
+  /* Three full colour scales replace the Tailwind amber palette in components.
+     All three equal amber today, so nothing renders differently; they differ
+     in what they mean and in what a brand may do to them.
+
+     brand-50…950 — the brand: accents, selection, primary emphasis. A branded
+     deployment's /branding/brand.css redefines these from its primary colour
+     (BrandDelivery), so every `bg-brand-500/10` follows the brand.
+
+     warn-50…950 — caution, never re-branded: warnings, HITL pauses and
+     pending approvals, unsaved-changes markers, in-progress or degraded
+     status, the mock-data banner, secret and rotation notices. Use it when
+     the colour says "look at this".
+
+     ochre-50…950 — a fixed categorical amber hue, never re-branded, and NOT
+     a warning: one entry of a per-type, per-section or per-category palette
+     (resource-type badges, editor section accents, avatar colours, syntax
+     colours, cost figures, search highlights). Use it when amber is just this
+     thing's colour among blue, emerald, rose and the rest.
+
+     Plain `@theme`, not `@theme inline`: the utilities then read
+     `var(--color-brand-500)` at runtime, which is what lets brand.css reach
+     them. `src/__tests__/no-hardcoded-amber.test.ts` fails on any `amber-N`
+     utility, so new code has to pick one of the three. */
+  --color-brand-50: var(--color-amber-50);
+  --color-brand-100: var(--color-amber-100);
+  --color-brand-200: var(--color-amber-200);
+  --color-brand-300: var(--color-amber-300);
+  --color-brand-400: var(--color-amber-400);
+  --color-brand-500: var(--color-amber-500);
+  --color-brand-600: var(--color-amber-600);
+  --color-brand-700: var(--color-amber-700);
+  --color-brand-800: var(--color-amber-800);
+  --color-brand-900: var(--color-amber-900);
+  --color-brand-950: var(--color-amber-950);
+
+  --color-warn-50: var(--color-amber-50);
+  --color-warn-100: var(--color-amber-100);
+  --color-warn-200: var(--color-amber-200);
+  --color-warn-300: var(--color-amber-300);
+  --color-warn-400: var(--color-amber-400);
+  --color-warn-500: var(--color-amber-500);
+  --color-warn-600: var(--color-amber-600);
+  --color-warn-700: var(--color-amber-700);
+  --color-warn-800: var(--color-amber-800);
+  --color-warn-900: var(--color-amber-900);
+  --color-warn-950: var(--color-amber-950);
+
+  --color-ochre-50: var(--color-amber-50);
+  --color-ochre-100: var(--color-amber-100);
+  --color-ochre-200: var(--color-amber-200);
+  --color-ochre-300: var(--color-amber-300);
+  --color-ochre-400: var(--color-amber-400);
+  --color-ochre-500: var(--color-amber-500);
+  --color-ochre-600: var(--color-amber-600);
+  --color-ochre-700: var(--color-amber-700);
+  --color-ochre-800: var(--color-amber-800);
+  --color-ochre-900: var(--color-amber-900);
+  --color-ochre-950: var(--color-amber-950);
 
   --radius: 0.5rem;
   --font-sans: 'Noto Sans Variable', 'Noto Sans Arabic Variable', 'Noto Sans Thai Variable', 'Noto Sans Devanagari Variable', 'Noto Sans JP Variable', 'Noto Sans KR Variable', 'Noto Sans SC Variable', 'Noto Sans TC Variable', ui-sans-serif, system-ui, sans-serif;
@@ -67,7 +126,7 @@
   --color-secondary-foreground: #fafaf9;
   --color-muted: #27272a;
   --color-muted-foreground: #a1a1aa;
-  /* Bright amber-400 reads at ~11:1 on the dark surfaces; its foreground goes
+  /* Bright amber 400 reads at ~11:1 on the dark surfaces; its foreground goes
      near-black, matching the brand accent pair. */
   --color-warning: #fbbf24;
   --color-warning-foreground: #0c0a09;
@@ -77,6 +136,9 @@
   /* Bright gold reads well on the dark sidebar (restores the brand accent). */
   --color-sidebar-accent: #f59e0b;
   --color-sidebar-accent-foreground: #0c0a09;
+  /* Scrollbar thumb on the dark surfaces (zinc 700, zinc 600 on hover). */
+  --color-scrollbar-thumb: #3f3f46;
+  --color-scrollbar-thumb-hover: #52525b;
 }
 
 /* Base styles */
@@ -94,7 +156,7 @@
   }
 
   .dark * {
-    scrollbar-color: #3f3f46 transparent;
+    scrollbar-color: var(--color-scrollbar-thumb) transparent;
   }
 
   /* WebKit (Chrome, Edge, Safari) */
@@ -117,11 +179,11 @@
   }
 
   .dark ::-webkit-scrollbar-thumb {
-    background: #3f3f46;
+    background: var(--color-scrollbar-thumb);
   }
 
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: #52525b;
+    background: var(--color-scrollbar-thumb-hover);
   }
 
   ::-webkit-scrollbar-corner {
@@ -256,12 +318,12 @@
   .welcome-modal-card {
     backdrop-filter: blur(16px);
     background: rgba(24, 24, 27, 0.95);
-    border: 1px solid rgba(245, 158, 11, 0.15);
+    border: 1px solid color-mix(in srgb, var(--color-primary) 15%, transparent);
     /* This hero card is ALWAYS dark, so pin the sidebar tokens its text/borders
        read to light values — otherwise light-mode's dark --color-sidebar-*
        tokens render dark-on-dark (unreadable). */
     --color-sidebar-foreground: #e4e4e7;
-    --color-sidebar-border: rgba(245, 158, 11, 0.2);
+    --color-sidebar-border: color-mix(in srgb, var(--color-primary) 20%, transparent);
   }
 
   /* Carousel dot transitions */

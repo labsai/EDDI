@@ -175,8 +175,8 @@ function StatusBadge({ schedule }: { schedule: ScheduleConfiguration }) {
         label: t("schedules.statusActive", "Active"),
       },
       FAILED: {
-        bg: "bg-amber-500/10",
-        text: "text-amber-500",
+        bg: "bg-warn-500/10",
+        text: "text-warn-500",
         label: t("schedules.statusFailed", "Failed"),
       },
       DEAD_LETTERED: {
@@ -342,7 +342,7 @@ function FireStatusBadge({ status }: { status: FireLogStatus }) {
   }
   if (status === "DEAD_LETTERED") {
     return (
-      <span className="inline-flex items-center gap-1 text-amber-500">
+      <span className="inline-flex items-center gap-1 text-warn-500">
         ⚠ {t("schedules.fireDeadLettered", "Dead-lettered")}
       </span>
     );
@@ -572,7 +572,7 @@ function FailedFiresPanel({
     >
       <div className="border-b border-border px-5 py-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold text-foreground">
-          <AlertTriangle className="h-4 w-4 text-amber-500" />
+          <AlertTriangle className="h-4 w-4 text-warn-500" />
           {t("schedules.failedTitle", "Failed & Dead-Lettered Fires")}
         </h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
@@ -1704,7 +1704,7 @@ export function SchedulesPage() {
             </div>
             <p
               className={`mt-2 text-2xl font-bold tabular-nums ${
-                failed > 0 ? "text-amber-500" : "text-foreground"
+                failed > 0 ? "text-warn-500" : "text-foreground"
               }`}
             >
               {failed}
@@ -1766,7 +1766,7 @@ export function SchedulesPage() {
           {t("schedules.tabFailed", "Failed / Dead-letter")}
           {failedFiresCount > 0 && (
             <span
-              className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-xs font-semibold text-amber-500"
+              className="rounded-full bg-warn-500/15 px-1.5 py-0.5 text-xs font-semibold text-warn-500"
               data-testid="failed-tab-count"
             >
               {failedFiresCount}
@@ -1874,7 +1874,7 @@ export function SchedulesPage() {
                             </span>
                             {hitl && (
                               <span
-                                className="ms-2 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+                                className="ms-2 inline-flex items-center gap-1 rounded-full bg-warn-500/10 px-2 py-0.5 text-[10px] font-medium text-warn-600"
                                 title={t(
                                   "schedules.hitlTimeoutHint",
                                   "System-managed HITL approval timeout — resolve it via the conversation's approval, not here."
@@ -1956,7 +1956,7 @@ export function SchedulesPage() {
                           <td className="px-5 py-3">
                             <StatusBadge schedule={s} />
                             {s.failCount > 0 && (
-                              <span className="ms-1.5 text-xs text-amber-500">
+                              <span className="ms-1.5 text-xs text-warn-500">
                                 ×{s.failCount}
                               </span>
                             )}
@@ -2075,7 +2075,7 @@ export function SchedulesPage() {
                                   onClick={() => handleRetry(s.id!)}
                                   disabled={retryMutation.isPending}
                                   title={t("schedules.retry", "Retry")}
-                                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-amber-500/10 hover:text-amber-500 disabled:opacity-50"
+                                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-warn-500/10 hover:text-warn-500 disabled:opacity-50"
                                   data-testid={`retry-${s.id}`}
                                 >
                                   <RotateCcw className="h-4 w-4" />

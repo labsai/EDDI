@@ -54,11 +54,11 @@ const LEVEL_CONFIG: Record<string, { label: string; className: string }> = {
   },
   WARNING: {
     label: "WARN",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    className: "bg-warn-500/15 text-warn-400 border-warn-500/30",
   },
   WARN: {
     label: "WARN",
-    className: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    className: "bg-warn-500/15 text-warn-400 border-warn-500/30",
   },
   INFO: {
     label: "INFO",
@@ -348,7 +348,7 @@ function LiveTab() {
           onClick={() => setPaused(!paused)}
           className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
             paused
-              ? "border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20"
+              ? "border-warn-500/30 bg-warn-500/10 text-warn-400 hover:bg-warn-500/20"
               : "border-input bg-background text-foreground hover:bg-muted"
           }`}
           data-testid="pause-button"
@@ -390,8 +390,8 @@ function LiveTab() {
             <span className="h-2 w-2 rounded-full bg-red-500" />
             {t("logs.errorCount", "{{count}} errors", { count: levelStats.error })}
           </span>
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
-            <span className="h-2 w-2 rounded-full bg-amber-500" />
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-warn-400">
+            <span className="h-2 w-2 rounded-full bg-warn-500" />
             {t("logs.warnCount", "{{count}} warns", { count: levelStats.warn })}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400">
@@ -701,8 +701,8 @@ function HistoryTab() {
             <span className="h-2 w-2 rounded-full bg-red-500" />
             {t("logs.errorCount", "{{count}} errors", { count: levelStats.error })}
           </span>
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400">
-            <span className="h-2 w-2 rounded-full bg-amber-500" />
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-warn-400">
+            <span className="h-2 w-2 rounded-full bg-warn-500" />
             {t("logs.warnCount", "{{count}} warns", { count: levelStats.warn })}
           </span>
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-400">

@@ -860,10 +860,10 @@ function WorkforceSettings() {
               one the backend only ever wrote to its own log. */}
           {moderatorlessPhases.length > 0 && (
             <div
-              className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+              className="flex items-start gap-2.5 rounded-lg border border-warn-500/30 bg-warn-500/5 px-3 py-2.5"
               data-testid="moderatorless-phase-warning"
             >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-500" />
               <p className="text-xs text-muted-foreground">
                 {t(
                   "Workforce.settings.moderatorlessWarning",
@@ -879,12 +879,12 @@ function WorkforceSettings() {
               says so until the transcript comes back hollow. */}
           {roleGaps.length > 0 && (
             <div
-              className="flex flex-col gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+              className="flex flex-col gap-1.5 rounded-lg border border-warn-500/30 bg-warn-500/5 px-3 py-2.5"
               data-testid="role-coverage-warning"
             >
               {roleGaps.map((gap) => (
                 <div key={gap.role} className="flex items-start gap-2.5">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-500" />
                   <p className="text-xs text-muted-foreground">
                     {t(
                       "groups.roleCoverageWarning",
@@ -1723,7 +1723,7 @@ function WorkforceSettings() {
             className={cn(
               "text-xs transition-opacity duration-200",
               isDirty
-                ? "text-amber-500 opacity-100"
+                ? "text-warn-500 opacity-100"
                 : "text-muted-foreground opacity-0"
             )}
           >

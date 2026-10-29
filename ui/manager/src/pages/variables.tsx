@@ -533,7 +533,7 @@ export function VariablesPage() {
                   autoComplete="off"
                   autoFocus={editMode}
                 />
-                <p className="mt-1 flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                <p className="mt-1 flex items-center gap-1 text-[10px] text-warn-600 dark:text-warn-400">
                   <Info className="h-3 w-3 shrink-0" />
                   {t(
                     "variables.valueWarning",

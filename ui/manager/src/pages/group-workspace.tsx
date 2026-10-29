@@ -49,7 +49,7 @@ const STATUS_FALLBACK: Record<string, string> = {
 const STATUS_BADGE: Record<string, string> = {
   PENDING: "bg-muted text-muted-foreground",
   ASSIGNED: "bg-blue-500/10 text-blue-600",
-  IN_PROGRESS: "bg-amber-500/10 text-amber-600",
+  IN_PROGRESS: "bg-warn-500/10 text-warn-600",
   COMPLETED: "bg-sky-500/10 text-sky-600",
   VERIFIED: "bg-emerald-500/10 text-emerald-600",
   FAILED: "bg-destructive/10 text-destructive",
@@ -247,7 +247,7 @@ export function GroupWorkspacePage() {
 
       {isRunning && (
         <div
-          className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-400"
+          className="flex items-center gap-2 rounded-lg border border-warn-500/30 bg-warn-500/5 p-3 text-sm text-warn-700 dark:text-warn-400"
           data-testid="workspace-running-banner"
         >
           <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />

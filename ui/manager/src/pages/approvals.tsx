@@ -240,7 +240,7 @@ function ApprovalQueueRow({
         <td className="px-4 py-3 text-muted-foreground max-w-xs truncate max-md:block max-md:max-w-none max-md:whitespace-normal max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pauseReason", "Reason")}>
           {item.pauseType === "TOOL_CALL" && (
             <span
-              className="me-1.5 inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600"
+              className="me-1.5 inline-flex items-center gap-1 rounded-full bg-warn-500/10 px-2 py-0.5 text-[10px] font-medium text-warn-600"
               data-testid={`tool-badge-${item.conversationId}`}
             >
               <Wrench className="h-3 w-3" /> {t("hitl.tool", "Tool")}
@@ -1015,7 +1015,7 @@ export function ApprovalsPage() {
         <span className={cn(
           "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-sm font-medium",
           filtered.length > 0
-            ? "bg-amber-500/10 text-amber-600"
+            ? "bg-warn-500/10 text-warn-600"
             : "bg-emerald-500/10 text-emerald-600"
         )}>
           {filtered.length > 0 ? (
@@ -1031,7 +1031,7 @@ export function ApprovalsPage() {
         </span>
         {regularTruncated && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-regular-truncated">
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            <AlertTriangle className="h-3.5 w-3.5 text-warn-500" />
             {t(
               "hitl.regularTruncated",
               "Showing the first {{limit}} conversation approvals — more are pending. Decide some to see the rest.",
@@ -1041,7 +1041,7 @@ export function ApprovalsPage() {
         )}
         {groupsTruncated && (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="approvals-truncated">
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            <AlertTriangle className="h-3.5 w-3.5 text-warn-500" />
             {t("hitl.groupsTruncated", "More group approvals exist than are shown here.")}
           </span>
         )}

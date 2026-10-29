@@ -75,8 +75,8 @@ export function TriggersPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-amber-500/10">
-              <Zap className="h-5 w-5 text-amber-500" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-ochre-500/10">
+              <Zap className="h-5 w-5 text-ochre-500" />
             </div>
             {t("triggers.title", "Agent Triggers")}
           </h1>
@@ -229,7 +229,7 @@ function TriggerCard({
           <span className="text-muted-foreground" aria-hidden="true">
             {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </span>
-          <Zap className="h-4 w-4 text-amber-500 shrink-0" aria-hidden="true" />
+          <Zap className="h-4 w-4 text-ochre-500 shrink-0" aria-hidden="true" />
           <span className="flex-1 font-semibold text-sm text-foreground font-mono">{trigger.intent}</span>
           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
             {t("agents.count", { count: trigger.agentDeployments.length })}

@@ -100,7 +100,7 @@ import {
 /* ─── Status icons (labels resolved via i18n in component) ─── */
 const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-warn-500", bg: "bg-warn-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted" },
 };
@@ -615,7 +615,7 @@ export function AgentDetailPage() {
               <button
                 type="button"
                 onClick={() => setShowReviewDialog(true)}
-                className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 hover:bg-amber-200 transition-colors dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50"
+                className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 text-xs font-medium text-warn-800 hover:bg-warn-200 transition-colors dark:bg-warn-900/30 dark:text-warn-400 dark:hover:bg-warn-900/50"
                 title={t("agentDetail.reviewChanges", "Review changes")}
                 data-testid="dirty-indicator"
               >
@@ -941,7 +941,7 @@ export function AgentDetailPage() {
                 className={cn(
                   "group flex items-center gap-3 px-5 py-4 transition-colors",
                   isStale
-                    ? "bg-amber-50/50 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+                    ? "bg-warn-50/50 dark:bg-warn-900/10 hover:bg-warn-50 dark:hover:bg-warn-900/20"
                     : "hover:bg-secondary/50"
                 )}
               >
@@ -963,7 +963,7 @@ export function AgentDetailPage() {
                       v{wfVersion}
                     </span>
                     {isStale && (
-                      <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                      <span className="text-[10px] text-warn-600 dark:text-warn-400 font-medium">
                         {t("agentDetail.outdated", "outdated")}
                       </span>
                     )}
@@ -974,7 +974,7 @@ export function AgentDetailPage() {
                     <button
                       onClick={(e) => { e.preventDefault(); handleUpdateWorkflowVersion(wfUri, latestVer!); }}
                       disabled={isSaving}
-                      className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors disabled:opacity-50"
+                      className="inline-flex items-center gap-1 rounded-md bg-warn-100 px-2 py-1 text-[10px] font-semibold text-warn-800 hover:bg-warn-200 dark:bg-warn-900/30 dark:text-warn-400 dark:hover:bg-warn-900/50 transition-colors disabled:opacity-50"
                       title={t("agentDetail.updateToLatest", "Update to latest version")}
                       data-testid={`update-workflow-${wfId}`}
                     >
@@ -1105,13 +1105,13 @@ export function AgentDetailPage() {
           long, and the edit is usually made far below them. */}
       {isDirty && (
         <div
-          className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-card/95 px-4 py-3 shadow-lg backdrop-blur"
+          className="sticky bottom-4 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-warn-500/30 bg-card/95 px-4 py-3 shadow-lg backdrop-blur"
           role="region"
           aria-label={t("editor.dirty", "Unsaved changes")}
           data-testid="unsaved-bar"
         >
           <p className="flex items-center gap-2 text-sm text-foreground">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden="true" />
+            <span className="h-2 w-2 shrink-0 rounded-full bg-warn-500" aria-hidden="true" />
             {t("agentDetail.unsavedSections", "Sections with unsaved changes: {{count}}", {
               count: modifiedSectionCount,
             })}
@@ -1315,10 +1315,10 @@ function ModifiedPill() {
   const { t } = useTranslation();
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+      className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 text-[10px] font-medium text-warn-800 dark:bg-warn-900/30 dark:text-warn-400"
       data-testid="section-modified"
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      <span className="h-1.5 w-1.5 rounded-full bg-warn-500" aria-hidden="true" />
       {t("editor.modified", "Modified")}
     </span>
   );
