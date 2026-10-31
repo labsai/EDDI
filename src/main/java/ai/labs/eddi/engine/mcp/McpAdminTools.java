@@ -664,7 +664,7 @@ public class McpAdminTools {
             int ver = agentVersion != null ? agentVersion : 1;
 
             @SuppressWarnings("unchecked")
-            List<Map<String, String>> parsed = jsonSerialization.deserialize(resourceMappings, List.class);
+            List<Map<String, String>> parsed = readCallerJson("resourceMappings", () -> jsonSerialization.deserialize(resourceMappings, List.class));
             if (parsed == null || parsed.isEmpty()) {
                 return resultJson("no_changes", Map.of("agentId", agentId, "reason", "Empty resource mappings"));
             }
@@ -784,6 +784,14 @@ public class McpAdminTools {
         }
     }
 
+    /**
+     * Strict parse of a caller's {@code config} argument; malformed JSON is the
+     * caller's error ({@link McpToolUtils#readCallerJson}), not an internal one.
+     */
+    private <T> T parseConfig(String json, Class<T> type) throws IOException {
+        return readCallerJson("config", () -> configParser.parse(json, type));
+    }
+
     // ==================== Type Dispatch Helpers ====================
 
     /**
@@ -792,19 +800,19 @@ public class McpAdminTools {
     private Response updateResourceByType(String type, String id, int version, String configJson) throws IOException {
         return switch (type) {
             case "behavior" -> getRestStore(IRestRuleSetStore.class).updateRuleSet(id, version,
-                    configParser.parse(configJson, RuleSetConfiguration.class));
+                    parseConfig(configJson, RuleSetConfiguration.class));
             case "langchain" ->
-                getRestStore(IRestLlmStore.class).updateLlm(id, version, configParser.parse(configJson, LlmConfiguration.class));
+                getRestStore(IRestLlmStore.class).updateLlm(id, version, parseConfig(configJson, LlmConfiguration.class));
             case "httpcalls" -> getRestStore(IRestApiCallsStore.class).updateApiCalls(id, version,
-                    configParser.parse(configJson, ApiCallsConfiguration.class));
+                    parseConfig(configJson, ApiCallsConfiguration.class));
             case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).updateMcpCalls(id, version,
-                    configParser.parse(configJson, McpCallsConfiguration.class));
+                    parseConfig(configJson, McpCallsConfiguration.class));
             case "output" -> getRestStore(IRestOutputStore.class).updateOutputSet(id, version,
-                    configParser.parse(configJson, OutputConfigurationSet.class));
+                    parseConfig(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).updatePropertySetter(id, version,
-                    configParser.parse(configJson, PropertySetterConfiguration.class));
+                    parseConfig(configJson, PropertySetterConfiguration.class));
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class).updateRegularDictionary(id, version,
-                    configParser.parse(configJson, DictionaryConfiguration.class));
+                    parseConfig(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException(
                     "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
@@ -816,18 +824,18 @@ public class McpAdminTools {
     private Response createResourceByType(String type, String configJson) throws IOException {
         return switch (type) {
             case "behavior" ->
-                getRestStore(IRestRuleSetStore.class).createRuleSet(configParser.parse(configJson, RuleSetConfiguration.class));
-            case "langchain" -> getRestStore(IRestLlmStore.class).createLlm(configParser.parse(configJson, LlmConfiguration.class));
+                getRestStore(IRestRuleSetStore.class).createRuleSet(parseConfig(configJson, RuleSetConfiguration.class));
+            case "langchain" -> getRestStore(IRestLlmStore.class).createLlm(parseConfig(configJson, LlmConfiguration.class));
             case "httpcalls" ->
-                getRestStore(IRestApiCallsStore.class).createApiCalls(configParser.parse(configJson, ApiCallsConfiguration.class));
+                getRestStore(IRestApiCallsStore.class).createApiCalls(parseConfig(configJson, ApiCallsConfiguration.class));
             case "mcpcalls" ->
-                getRestStore(IRestMcpCallsStore.class).createMcpCalls(configParser.parse(configJson, McpCallsConfiguration.class));
+                getRestStore(IRestMcpCallsStore.class).createMcpCalls(parseConfig(configJson, McpCallsConfiguration.class));
             case "output" ->
-                getRestStore(IRestOutputStore.class).createOutputSet(configParser.parse(configJson, OutputConfigurationSet.class));
+                getRestStore(IRestOutputStore.class).createOutputSet(parseConfig(configJson, OutputConfigurationSet.class));
             case "propertysetter" -> getRestStore(IRestPropertySetterStore.class)
-                    .createPropertySetter(configParser.parse(configJson, PropertySetterConfiguration.class));
+                    .createPropertySetter(parseConfig(configJson, PropertySetterConfiguration.class));
             case "dictionaries" -> getRestStore(IRestDictionaryStore.class)
-                    .createRegularDictionary(configParser.parse(configJson, DictionaryConfiguration.class));
+                    .createRegularDictionary(parseConfig(configJson, DictionaryConfiguration.class));
             default -> throw new IllegalArgumentException(
                     "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };
@@ -932,7 +940,8 @@ public class McpAdminTools {
             return errorJson("config is required");
         try {
             var triggerStore = getRestStore(IRestAgentTriggerStore.class);
-            AgentTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, AgentTriggerConfiguration.class);
+            AgentTriggerConfiguration triggerConfig = readCallerJson("config",
+                    () -> jsonSerialization.deserialize(config, AgentTriggerConfiguration.class));
 
             if (triggerConfig.getIntent() == null || triggerConfig.getIntent().isBlank()) {
                 return errorJson("intent is required in config");
@@ -962,7 +971,8 @@ public class McpAdminTools {
             return errorJson("config is required");
         try {
             var triggerStore = getRestStore(IRestAgentTriggerStore.class);
-            AgentTriggerConfiguration triggerConfig = jsonSerialization.deserialize(config, AgentTriggerConfiguration.class);
+            AgentTriggerConfiguration triggerConfig = readCallerJson("config",
+                    () -> jsonSerialization.deserialize(config, AgentTriggerConfiguration.class));
             Response response = triggerStore.updateAgentTrigger(intent, triggerConfig);
 
             var result = new LinkedHashMap<String, Object>();
@@ -1358,7 +1368,7 @@ public class McpAdminTools {
             // ChannelIntegrationConfiguration
             // is a first-party config model, so a typo'd key must be rejected here too
             // rather than dropped into a silently different integration.
-            var channelConfig = configParser.parse(config, ChannelIntegrationConfiguration.class);
+            var channelConfig = parseConfig(config, ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
                     IRestChannelIntegrationStore.class);
             Response response = channelStore.createChannel(channelConfig);
@@ -1397,7 +1407,7 @@ public class McpAdminTools {
             // ChannelIntegrationConfiguration
             // is a first-party config model, so a typo'd key must be rejected here too
             // rather than dropped into a silently different integration.
-            var channelConfig = configParser.parse(config, ChannelIntegrationConfiguration.class);
+            var channelConfig = parseConfig(config, ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
                     IRestChannelIntegrationStore.class);
             Response response = channelStore.updateChannel(resourceId, ver, channelConfig);
