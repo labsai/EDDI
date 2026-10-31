@@ -150,7 +150,7 @@ class TemplatingEngineResourceLimitsTest {
                         }
                         built.incrementAndGet();
                         EvaluatedParams params = EvaluatedParams.evaluate(ctx);
-                        return params.stage.thenApply(ignored -> {
+                        return params.stage.thenApply(_ -> {
                             try {
                                 Object[] args = (Object[]) params.getVarargsResults(join ? 2 : 1, Object.class);
                                 List<String> rendered = new ArrayList<>();
