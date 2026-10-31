@@ -22,6 +22,8 @@ Three CI failures present on `main` (and so on every PR) at 01c3250.
   900 s fork timeout then killed whichever class was running (usually `PostgresGroupVerdictIT`,
   which is innocent). The test now carries the profile.
 
+- **The rating card never opened for an agent that sends no greeting** (`ChatWidget.tsx`). With no messages the transcript renders its empty state, and the card was only rendered in the non-empty branch, so "Rate this conversation" set the state and nothing appeared. The Backend E2E agent has an empty workflow, so its ratings test waited for a star that was never rendered. The card now renders in both branches; a ChatWidget test covers the empty transcript.
+
 ### Design decisions
 
 - No timeout was raised and nothing was skipped; the stall's cause was removed.
