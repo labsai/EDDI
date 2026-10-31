@@ -25,6 +25,7 @@ Behaviours, chosen by the last user message:
 """
 import hashlib
 import json
+import os
 import sys
 import threading
 import time
@@ -40,7 +41,15 @@ def log(entry):
         LOG.flush()
 
 
+MAX_BODY = 1 << 20  # a chat request from the demo is a few KB; refuse anything near this
+
+
 class Handler(BaseHTTPRequestHandler):
+    # Socket read/write deadline. Without it a peer that sends headers and then
+    # stalls holds a handler thread (and its socket) forever. The long scripted
+    # delays below are server-side sleeps and are not affected.
+    timeout = 10
+
     def log_message(self, *args):
         pass
 
@@ -61,6 +70,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         start = time.time()
         n = int(self.headers.get("Content-Length", 0))
+        if n < 0 or n > MAX_BODY:
+            self._send(413, {"error": {"message": "request too large"}})
+            return
         body = json.loads(self.rfile.read(n) or b"{}")
         msgs = body.get("messages", [])
         last = msgs[-1] if msgs else {}
@@ -119,7 +131,11 @@ class Server(ThreadingHTTPServer):
 def main():
     global LOG
     with open(sys.argv[1], "a", encoding="utf-8") as LOG:
-        Server(("0.0.0.0", int(sys.argv[2])), Handler).serve_forever()
+        # The nodes run in containers and reach this process through
+        # host.docker.internal, which on Linux is the docker0 bridge address and
+        # not loopback - so the default stays all-interfaces. Set MOCK_LLM_BIND=127.0.0.1
+        # on Docker Desktop (macOS/Windows) to keep it off the LAN.
+        Server((os.environ.get("MOCK_LLM_BIND", "0.0.0.0"), int(sys.argv[2])), Handler).serve_forever()
 
 
 if __name__ == "__main__":

@@ -1473,6 +1473,18 @@ wait_for_ready() {
 
 # ── Configure Keycloak client (post-start) ────────────────
 
+# True when the Docker daemon (the trusted source) reports a running container for
+# the given compose service. The installer sends stored admin passwords to
+# http://localhost:<port>; checking the daemon first means a different local
+# process squatting on a stopped service's port is not handed them. Answers "yes"
+# when the daemon cannot be asked, so behaviour there is unchanged.
+# Args: service
+compose_service_running() {
+  local ids
+  ids=$(docker ps -q --filter "label=com.docker.compose.service=$1" --filter "status=running" 2>/dev/null) || return 0
+  [[ -n "$ids" ]]
+}
+
 # Prints a password-grant access token for USER against REALM's admin-cli, or
 # nothing. The password travels on stdin, so it is neither in the process table
 # nor in shell history. Args: kc_base json_tool realm user password
@@ -1488,13 +1500,27 @@ kc_password_token() {
   printf '%s' "$token"
 }
 
+# curl with a Keycloak bearer token, passed through a 0600 curl config file so it
+# never appears in argv (/proc/<pid>/cmdline, ps) the way -H would. The remaining
+# arguments are plain curl arguments; stdin is left to the caller (request bodies).
+# Args: token curl_args...
+kc_authed_curl() {
+  local token="$1" cfg rc
+  shift
+  cfg=$(umask 077; mktemp "${TMPDIR:-/tmp}/eddi-kc-auth.XXXXXX") || return 1
+  printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
+  curl -K "$cfg" "$@"
+  rc=$?
+  rm -f "$cfg"
+  return $rc
+}
+
 # PUTs a password credential for a user. The JSON body is built from stdin and
 # streamed to curl, again keeping the password out of argv. Prints the HTTP
 # status. Args: kc_base json_tool realm user_id password temporary(true|false)
 kc_reset_password() {
   local kc_base="$1" json_tool="$2" realm="$3" user_id="$4" password="$5" temporary="$6" status=""
-  status=$(printf '%s' "$password" | kc_json "$json_tool" password-body "$temporary" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
-    -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  status=$(printf '%s' "$password" | kc_json "$json_tool" password-body "$temporary" | kc_authed_curl "$KC_ADMIN_TOKEN" -s -o /dev/null -w "%{http_code}" -X PUT \
     -H "Content-Type: application/json" \
     --data-binary @- \
     "${kc_base}/admin/realms/${realm}/users/${user_id}/reset-password" 2>/dev/null) || status="000"
@@ -1513,6 +1539,11 @@ kc_reset_password() {
 # the password in .env is the one that is true.
 keycloak_admin_login() {
   local kc_base="$1" json_tool="$2"
+  if ! compose_service_running keycloak; then
+    warn "No running keycloak container found - not sending Keycloak admin credentials to ${kc_base}."
+    KC_ADMIN_TOKEN=""
+    return 0
+  fi
   local user="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
   KC_ADMIN_TOKEN=$(kc_password_token "$kc_base" "$json_tool" master "$user" "$KC_BOOTSTRAP_ADMIN_PASSWORD")
   [[ -n "$KC_ADMIN_TOKEN" ]] && return 0
@@ -1522,7 +1553,7 @@ keycloak_admin_login() {
   [[ -n "$KC_ADMIN_TOKEN" ]] || return 0
 
   local users_json admin_id status
-  users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  users_json=$(kc_authed_curl "$KC_ADMIN_TOKEN" -sf \
     "${kc_base}/admin/realms/master/users?username=admin&exact=true" 2>/dev/null) || users_json=""
   admin_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || admin_id=""
   if [[ -n "$admin_id" && -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]]; then
@@ -1567,14 +1598,14 @@ set_first_login_passwords() {
 
   local account users_json user_id creds_json cred_count password status problems=""
   for account in "${accounts[@]}"; do
-    users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    users_json=$(kc_authed_curl "$KC_ADMIN_TOKEN" -sf \
       "${kc_base}/admin/realms/eddi/users?username=${account}&exact=true" 2>/dev/null) || users_json=""
     user_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || user_id=""
     if [[ -z "$user_id" ]]; then
       problems="${problems} ${account}(not found)"
       continue
     fi
-    creds_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+    creds_json=$(kc_authed_curl "$KC_ADMIN_TOKEN" -sf \
       "${kc_base}/admin/realms/eddi/users/${user_id}/credentials" 2>/dev/null) || creds_json=""
     cred_count=$(printf '%s' "$creds_json" | kc_json "$json_tool" length) || cred_count=""
     if [[ -z "$cred_count" ]]; then
@@ -1606,11 +1637,11 @@ set_first_login_passwords() {
   # "exist without a password" would be wrong exactly there.
   if [[ "$DEMO_USERS" != "true" ]]; then
     for account in viewer user; do
-      users_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+      users_json=$(kc_authed_curl "$KC_ADMIN_TOKEN" -sf \
         "${kc_base}/admin/realms/eddi/users?username=${account}&exact=true" 2>/dev/null) || users_json=""
       user_id=$(printf '%s' "$users_json" | kc_json "$json_tool" first-id) || user_id=""
       [[ -n "$user_id" ]] || continue
-      creds_json=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+      creds_json=$(kc_authed_curl "$KC_ADMIN_TOKEN" -sf \
         "${kc_base}/admin/realms/eddi/users/${user_id}/credentials" 2>/dev/null) || creds_json=""
       cred_count=$(printf '%s' "$creds_json" | kc_json "$json_tool" length) || cred_count=""
       if [[ -n "$cred_count" && "$cred_count" != "0" ]]; then
@@ -1628,7 +1659,7 @@ set_first_login_passwords() {
 # Args: kc_base json_tool client_uuid
 close_spa_password_grant() {
   local kc_base="$1" json_tool="$2" client_uuid="$3" client_config updated status
-  client_config=$(curl -sf -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" \
+  client_config=$(kc_authed_curl "$KC_ADMIN_TOKEN" -sf \
     "${kc_base}/admin/realms/eddi/clients/${client_uuid}" 2>/dev/null) || client_config=""
   if [[ -z "$client_config" ]]; then
     printf '000'
@@ -1642,8 +1673,8 @@ close_spa_password_grant() {
     updated=$(printf '%s' "$client_config" | python3 -c 'import sys, json; d = json.load(sys.stdin); d["directAccessGrantsEnabled"] = False; print(json.dumps(d))' 2>/dev/null) || updated=""
   fi
   [[ -n "$updated" ]] || { printf '000'; return 0; }
-  status=$(printf '%s' "$updated" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
-    -H "Authorization: Bearer ${KC_ADMIN_TOKEN}" -H "Content-Type: application/json" \
+  status=$(printf '%s' "$updated" | kc_authed_curl "$KC_ADMIN_TOKEN" -s -o /dev/null -w "%{http_code}" -X PUT \
+    -H "Content-Type: application/json" \
     --data-binary @- "${kc_base}/admin/realms/eddi/clients/${client_uuid}" 2>/dev/null) || status="000"
   printf '%s' "$status"
 }
@@ -1796,14 +1827,11 @@ repair_keycloak_identity_scopes() {
   local scopes_created=0 scopes_attached=0 scopes_failed=""
 
   echo -ne "  Checking Keycloak identity scopes  "
-  all_scopes_json=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  all_scopes_json=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/client-scopes" 2>/dev/null) || all_scopes_json=""
-  default_json=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  default_json=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/clients/${client_uuid}/default-client-scopes" 2>/dev/null) || default_json=""
-  optional_json=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  optional_json=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/clients/${client_uuid}/optional-client-scopes" 2>/dev/null) || optional_json=""
 
   if [[ -z "$all_scopes_json" || -z "$default_json" || -z "$optional_json" || ! -f "$realm_file" ]]; then
@@ -1818,8 +1846,7 @@ repair_keycloak_identity_scopes() {
     scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope") || scope_id=""
     if [[ -z "$scope_id" ]]; then
       scope_def=$(kc_json "$json_tool" scope-def "$scope" < "$realm_file") || scope_def=""
-      if [[ -z "$scope_def" ]] || ! curl -sf -o /dev/null -X POST \
-          -H "Authorization: Bearer ${admin_token}" \
+      if [[ -z "$scope_def" ]] || ! kc_authed_curl "$admin_token" -sf -o /dev/null -X POST \
           -H "Content-Type: application/json" \
           "${kc_base}/admin/realms/eddi/client-scopes" \
           -d "$scope_def" 2>/dev/null; then
@@ -1828,8 +1855,7 @@ repair_keycloak_identity_scopes() {
       fi
       created_now=true
       scopes_created=$((scopes_created + 1))
-      all_scopes_json=$(curl -sf \
-        -H "Authorization: Bearer ${admin_token}" \
+      all_scopes_json=$(kc_authed_curl "$admin_token" -sf \
         "${kc_base}/admin/realms/eddi/client-scopes" 2>/dev/null) || all_scopes_json="[]"
       scope_id=$(echo "$all_scopes_json" | kc_json "$json_tool" scope-id "$scope") || scope_id=""
       if [[ -z "$scope_id" ]]; then
@@ -1844,8 +1870,7 @@ repair_keycloak_identity_scopes() {
     if [[ "$created_now" != "true" && ( "$scope" == "web-origins" || "$scope" == "acr" ) ]]; then
       continue
     fi
-    if curl -sf -o /dev/null -X PUT \
-        -H "Authorization: Bearer ${admin_token}" \
+    if kc_authed_curl "$admin_token" -sf -o /dev/null -X PUT \
         "${kc_base}/admin/realms/eddi/clients/${client_uuid}/default-client-scopes/${scope_id}" \
         2>/dev/null; then
       scopes_attached=$((scopes_attached + 1))
@@ -1902,7 +1927,12 @@ repair_running_keycloak() {
   if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/keycloak/eddi-realm.json" ]]; then
     cp "$SCRIPT_DIR/keycloak/eddi-realm.json" "$realm_defs" 2>/dev/null || true
   else
-    curl -fsSL "${COMPOSE_BASE_URL}/keycloak/eddi-realm.json" -o "$realm_defs" 2>/dev/null || true
+    if curl -fsSL "${COMPOSE_BASE_URL}/keycloak/eddi-realm.json" -o "$realm_defs" 2>/dev/null; then
+      # These definitions are POSTed to Keycloak with admin authority, so they get
+      # the same release-manifest check as every other download.
+      load_release_checksums
+      verify_download "keycloak/eddi-realm.json" "$realm_defs"
+    fi
   fi
 
   # The already-running path never ran resolve_stack_passwords; read what the
@@ -1923,8 +1953,7 @@ repair_running_keycloak() {
     return 0
   fi
   set_first_login_passwords "$kc_base" "$json_tool"
-  clients_json=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  clients_json=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null) || clients_json=""
   client_uuid=$(echo "$clients_json" | kc_json "$json_tool" first-id) || client_uuid=""
   if [[ -z "$client_uuid" ]]; then
@@ -1988,8 +2017,7 @@ configure_keycloak_client() {
 
   # Get the eddi-frontend client UUID
   local clients_json client_uuid=""
-  clients_json=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  clients_json=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/clients?clientId=eddi-frontend" 2>/dev/null) || true
 
   if [[ "$json_tool" == "jq" ]]; then
@@ -2014,8 +2042,7 @@ configure_keycloak_client() {
   # username and password for a token without a browser. The Manager signs in
   # through the authorization-code flow and never used it.
   local client_config updated_config=""
-  client_config=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  client_config=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/clients/${client_uuid}" 2>/dev/null) || true
 
   if [[ -z "$client_config" ]]; then
@@ -2049,8 +2076,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
   fi
 
   local update_status
-  update_status=$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \
-    -H "Authorization: Bearer ${admin_token}" \
+  update_status=$(kc_authed_curl "$admin_token" -sf -o /dev/null -w "%{http_code}" -X PUT \
     -H "Content-Type: application/json" \
     "${kc_base}/admin/realms/eddi/clients/${client_uuid}" \
     -d "$updated_config" \
@@ -2075,8 +2101,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_config=""
   echo -ne "  Applying EDDI login theme  "
 
   local realm_config updated_realm=""
-  realm_config=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  realm_config=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi" 2>/dev/null) || true
 
   if [[ -z "$realm_config" ]]; then
@@ -2121,8 +2146,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   local theme_status
   # No -f here: with it curl exits non-zero on 4xx/5xx and the real status is
   # lost to the || fallback, so every failure would report HTTP 000.
-  theme_status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
-    -H "Authorization: Bearer ${admin_token}" \
+  theme_status=$(kc_authed_curl "$admin_token" -s -o /dev/null -w "%{http_code}" -X PUT \
     -H "Content-Type: application/json" \
     "${kc_base}/admin/realms/eddi" \
     -d "$updated_realm" \
@@ -2143,8 +2167,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_realm=""
   echo -ne "  Theming admin console login  "
 
   local master_config master_theme updated_master=""
-  master_config=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  master_config=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/master" 2>/dev/null) || master_config=""
 
   if [[ -z "$master_config" ]]; then
@@ -2203,8 +2226,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_master=""
   fi
 
   local master_status
-  master_status=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
-    -H "Authorization: Bearer ${admin_token}" \
+  master_status=$(kc_authed_curl "$admin_token" -s -o /dev/null -w "%{http_code}" -X PUT \
     -H "Content-Type: application/json" \
     "${kc_base}/admin/realms/master" \
     -d "$updated_master" \
@@ -2227,8 +2249,7 @@ print(json.dumps(d))" 2>/dev/null) || updated_master=""
   # silently stripping them during an upgrade would be worse than leaving them.
   # Fresh installs get the safe value from eddi-realm.json.
   local default_composites elevated=""
-  default_composites=$(curl -sf \
-    -H "Authorization: Bearer ${admin_token}" \
+  default_composites=$(kc_authed_curl "$admin_token" -sf \
     "${kc_base}/admin/realms/eddi/roles/default-roles-eddi/composites" 2>/dev/null) || default_composites=""
 
   if [[ -n "$default_composites" ]]; then
@@ -2316,6 +2337,10 @@ grafana_login_status() {
 # that never answers is reported as unverified, not as a wrong password.
 confirm_grafana_login() {
   local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
+  if ! compose_service_running grafana; then
+    warn "No running grafana container found - not sending Grafana credentials to ${g_base}."
+    return 0
+  fi
   until curl -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
     if (( waited >= 60 )); then
       warn "Grafana did not answer on ${g_base} within 60s, so the installer could not confirm that it accepts GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env."

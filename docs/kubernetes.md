@@ -733,7 +733,7 @@ helm install eddi ./helm/eddi \
 | `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |
 | `eddi.shutdownDrainTimeoutSeconds` | `""` | 65 s: a terminating pod lets its running turns finish |
 | `podDisruptionBudget.*` | off | `minAvailable: 1` when the release never runs fewer than two replicas (`eddi.replicas`, or `autoscaling.minReplicas` while autoscaling), so a drain never takes the last pod; `maxUnavailable: 1` otherwise |
-| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused |
+| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused. `externalUrl` must not carry credentials (an `@` is refused: it is written to a ConfigMap); put them in `nats.externalUsername` / `nats.externalPassword`, which go to the Secret |
 | `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
 | `nats.cluster.routeUsername` / `routePassword` | `route` / `""` | The routes between the NATS nodes authenticate with their own credentials, which client permissions do not cover; `routePassword` is required whenever the in-chart NATS runs more than one node |
 | `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects |

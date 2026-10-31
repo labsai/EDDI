@@ -18,7 +18,7 @@ while NATS is down, are not among them.
 
 The three EDDI nodes run the **published** `labsai/eddi` image with your locally built
 `target/quarkus-app` mounted over `/deployments`, so the demo exercises exactly one build inside
-the shipped runtime. Nothing is published beyond `127.0.0.1`.
+the shipped runtime. The containers and nginx publish only on `127.0.0.1`; the mock LLM listens on all interfaces by default so Linux containers can reach it through the docker bridge (it has read timeouts and a body-size cap). Set `MOCK_LLM_BIND=127.0.0.1` on Docker Desktop to keep it loopback-only.
 
 ## Run it
 

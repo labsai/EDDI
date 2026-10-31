@@ -221,6 +221,14 @@ $secretInstalled = $false
 if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Namespace'")) {
     $secretFile = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString() + ".properties")
     try {
+        # Create the file empty and restrict it BEFORE the key is written: a file made
+        # by Set-Content gets the umask default (0644 under 022), so another local
+        # user could read the key from a shared temp directory until Remove-Item ran.
+        # On Windows the per-user temp directory already limits access.
+        [System.IO.File]::WriteAllBytes($secretFile, [byte[]]@())
+        if ((Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue) -or (Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue)) {
+            [System.IO.File]::SetUnixFileMode($secretFile, [System.IO.UnixFileMode]'UserRead, UserWrite')
+        }
         Set-Content -Path $secretFile -Value "eddi.vault.master-key=$VaultKey" -Encoding utf8 -NoNewline
         # stderr is captured rather than discarded, and the exit code is checked.
         # $ErrorActionPreference = 'Stop' does not apply to native commands, so a

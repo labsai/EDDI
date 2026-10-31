@@ -3,6 +3,13 @@
 # Customize:
 #   - Set your hostname in spec.rules[].host
 #   - Uncomment TLS section for HTTPS
+#
+# WARNING: as shipped this Ingress serves plain HTTP. The Manager sends secret
+# values, vault master keys and bearer tokens over this same origin, so do not
+# expose it beyond a trusted network until TLS is enabled below (or terminated in
+# front of the controller) and HTTP is redirected to HTTPS. nginx-ingress does
+# that redirect by default once a tls block is present; set
+# nginx.ingress.kubernetes.io/ssl-redirect: "true" to force it on other setups.
 #   - Change ingressClassName to match your cluster's Ingress controller
 apiVersion: networking.k8s.io/v1
 kind: Ingress

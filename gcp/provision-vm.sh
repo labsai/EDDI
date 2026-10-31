@@ -116,7 +116,9 @@ ${BOLD}Create options:${RESET}
   --i-understand-public     Open the firewall to 0.0.0.0/0 AND allow an
                             open-access (no-auth) VM. Exposes EDDI to the whole
                             internet.
-  --vault-key=KEY           Set EDDI vault master key (min 16 chars)
+  --vault-key=KEY           REMOVED: startup-script metadata is readable by every process
+                            on the VM, so the key is generated on the VM instead
+                            (read it from ~/eddi/.env after install)
   --https                   Set up nginx + Let's Encrypt HTTPS (implies --with-auth)
   --letsencrypt-email=EMAIL Email for Let's Encrypt notifications
   --static-ip               Reserve a static external IP address
@@ -408,7 +410,8 @@ build_startup_script() {
   if [[ "$WITH_AUTH" == "true" ]];       then install_flags+=" --with-auth"; fi
   if [[ "$WITH_MONITORING" == "true" ]]; then install_flags+=" --with-monitoring"; fi
   if [[ "$WITH_POSTGRES" == "true" ]];   then install_flags+=" --db=postgres"; fi
-  if [[ -n "${VAULT_KEY_ARG:-}" ]];      then install_flags+=" --vault-key=${VAULT_KEY_ARG}"; fi
+  # No --vault-key here: the startup script is instance metadata and is echoed into
+  # /var/log/eddi-install.log, so the VM generates its own master key (install.sh).
 
   # Capture provision-time values into locals so the heredoc picks them up cleanly
   local p_branch="${EDDI_BRANCH}"
@@ -1411,7 +1414,6 @@ SETUP_HTTPS="false"
 LETSENCRYPT_EMAIL="admin@example.com"
 STATIC_IP="false"
 NO_WAIT="false"
-VAULT_KEY_ARG=""
 EXTERNAL_IP=""
 RESERVED_IP=""
 # Firewall exposure. By default every ingress rule is scoped to the IP running
@@ -1443,7 +1445,7 @@ for arg in "$@"; do
     --project=*)            GCP_PROJECT="${arg#*=}" ;;
     --eddi-branch=*)        EDDI_BRANCH="${arg#*=}" ;;
     --eddi-version=*)       EDDI_VERSION="${arg#*=}" ;;
-    --vault-key=*)          VAULT_KEY_ARG="${arg#*=}" ;;
+    --vault-key=*)          echo "ERROR: --vault-key is no longer supported: it would be uploaded as instance metadata and logged. The VM generates its own key (see ~/eddi/.env)." >&2; exit 1 ;;
     --letsencrypt-email=*)  LETSENCRYPT_EMAIL="${arg#*=}" ;;
     --with-auth)            WITH_AUTH="true" ;;
     --with-monitoring)      WITH_MONITORING="true" ;;

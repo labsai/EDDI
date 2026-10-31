@@ -384,8 +384,15 @@ postgres:
 nats:
   # Deploy a JetStream cluster in this release. Alternatively leave false and
   # point externalUrl at your own NATS (a comma-separated list of servers).
+  # No credentials in the URL (nats://user:pass@host): it lands in a ConfigMap,
+  # and the chart refuses an "@" in it. Use externalUsername/externalPassword.
   enabled: false
   externalUrl: ""
+  # Credentials for an external NATS (nats.externalUrl), kept in the chart's
+  # Secret rather than the ConfigMap. Ignored when nats.enabled=true (see
+  # nats.auth for the in-chart cluster).
+  externalUsername: ""
+  externalPassword: ""
   # JetStream nodes. 3 gives R3 buckets and streams that survive the loss of one
   # node; 1 is a development setup.
   replicas: 3

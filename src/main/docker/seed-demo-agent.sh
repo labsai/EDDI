@@ -275,10 +275,16 @@ store_vault_key() {
     # Both lists are required on a create under eddi.vault.grant-enforcement=enforce
     # (the default). allowedHosts is where the key may be sent: the provider's own
     # endpoint, so an edited config cannot send it anywhere else.
-    curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME" \
-        -H 'Content-Type: application/json' \
-        -d "{\"value\": \"$EDDI_DEMO_LLM_API_KEY\", \"description\": \"Demo LLM provider key (seeded by seed-demo-agent.sh)\", \"allowedAgents\": [\"*\"], \"allowedHosts\": [\"$VAULT_KEY_HOST\"]}" \
-        -o /dev/null
+    # The body goes to curl on stdin (printf is a shell builtin), never as an -d argument:
+    # argv is visible in the process table, the key must not be. The key is JSON-escaped
+    # first so a quote or backslash in it cannot break out of the string.
+    json_key=$(printf '%s' "$EDDI_DEMO_LLM_API_KEY" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+    printf '{"value": "%s", "description": "Demo LLM provider key (seeded by seed-demo-agent.sh)", "allowedAgents": ["*"], "allowedHosts": ["%s"]}' \
+        "$json_key" "$VAULT_KEY_HOST" \
+        | curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME" \
+            -H 'Content-Type: application/json' \
+            --data-binary @- \
+            -o /dev/null
 }
 
 # Where the provider key may be sent. EDDI_DEMO_LLM_ALLOWED_HOST overrides it,

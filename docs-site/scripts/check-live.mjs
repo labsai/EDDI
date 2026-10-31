@@ -27,6 +27,11 @@ if (errors.length) {
   process.exit(1);
 }
 
+// Compared by parsed origin, not string prefix: "https://docs.eddi.technology.evil.example"
+// starts with the base but is a different host.
+const allowedOrigins = new Set([new URL(base).origin]);
+if (legacyBase) allowedOrigins.add(new URL(legacyBase).origin);
+
 /** Follows redirects by hand, so each hop's status is visible. */
 async function land(url) {
   const hops = [];
@@ -37,7 +42,7 @@ async function land(url) {
     const location = res.headers.get('location');
     if (res.status >= 300 && res.status < 400 && location) {
       current = new URL(location, current).href;
-      if (!current.startsWith(base) && !(legacyBase && current.startsWith(legacyBase))) {
+      if (!allowedOrigins.has(new URL(current).origin)) {
         return { url: current, status: res.status, hops, external: true };
       }
       continue;

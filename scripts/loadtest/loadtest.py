@@ -11,7 +11,7 @@
     python scripts/loadtest/loadtest.py down
 
 `up` starts the database, the WireMock LLM and EDDI and creates one deployed LLM agent (`cluster-up`
-does the same for N replicas on NATS behind nginx, from docker-compose.cluster.yml); what it started is kept in results/.state.json. Every
+does the same for N replicas on NATS behind nginx, from docker-compose.cluster.yml); what it started is kept in .state/state.json (owner-only; not in results/, which is world-writable). Every
 measuring command snapshots /q/metrics and the database's operation counters, drives the load
 (k6 for turns and group discussions, drivers/stream_driver.py for SSE), samples the saturation
 gauges every second, snapshots again and writes results/<label>-<kind>-….json. `report` renders
@@ -36,7 +36,10 @@ import urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 RESULTS = os.path.join(HERE, "results")
-STATE = os.path.join(RESULTS, ".state.json")
+# Startup state decides which image and host path `docker compose` runs, so it lives in an owner-only
+# directory of its own, not in results/ (made world-writable for the k6 container).
+STATE_DIR = os.path.join(HERE, ".state")
+STATE = os.path.join(STATE_DIR, "state.json")
 PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "eddi-loadtest")
 EDDI_PORT = int(os.environ.get("LOADTEST_EDDI_PORT", "7370"))
 EDDI = f"http://127.0.0.1:{EDDI_PORT}"
@@ -159,6 +162,8 @@ def wait_until(fn, timeout, interval=1.0):
 
 def load_state():
     try:
+        if os.path.islink(STATE):
+            return {}
         with open(STATE, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
@@ -176,8 +181,16 @@ def ensure_results():
 
 def save_state(state):
     ensure_results()
-    with open(STATE, "w", encoding="utf-8") as f:
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    if os.name == "posix":
+        os.chmod(STATE_DIR, 0o700)
+    # Write a temp file inside the private directory and rename it over the target: the target is
+    # replaced, never opened, so a symlink planted at STATE is overwritten rather than followed.
+    tmp = STATE + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2)
+    os.replace(tmp, STATE)
 
 
 def node_urls(state=None):
@@ -1106,7 +1119,7 @@ def cmd_report(args):
 # fresh stack up for every point so each starts from an empty database, warms it up, measures one
 # steady run and writes results/cluster-scaling-<date>.md.
 
-CLUSTER_STATE = os.path.join(RESULTS, ".cluster-state.json")
+CLUSTER_STATE = os.path.join(STATE_DIR, "cluster-state.json")
 CLUSTER_PROJECT = "eddi-loadtest-cluster"
 # Counters compared before/after a run on every node, on top of COUNTED.
 CLUSTER_COUNTED = re.compile(r"^(eddi_cluster_lease_acquire_seconds_(count|sum)|eddi_cluster_fence_rejected_total|"

@@ -121,6 +121,9 @@
 {{- if and .Values.nats.enabled .Values.nats.externalUrl }}
 {{- fail "nats.enabled=true and nats.externalUrl are both set: EDDI would connect to the in-chart cluster and the external URL would be silently inert. Choose one." }}
 {{- end }}
+{{- if contains "@" (default "" .Values.nats.externalUrl) }}
+{{- fail "nats.externalUrl contains \"@\", i.e. embedded credentials: the URL is written to a ConfigMap, which is readable without Secret access. Remove the credentials from the URL and supply them through nats.externalUsername and nats.externalPassword (stored in a Secret)." }}
+{{- end }}
 {{- else if ne (include "eddi.messagingType" .) "in-memory" }}
 {{- fail "eddi.messagingType must be \"in-memory\" or \"nats\"; any other value fails EDDI's boot." }}
 {{- else }}
