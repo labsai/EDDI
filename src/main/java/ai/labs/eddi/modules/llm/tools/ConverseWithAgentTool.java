@@ -111,17 +111,17 @@ public class ConverseWithAgentTool {
      * and per-task count. A bare {@code new DynamicAgentConfig()} would be
      * {@code enabled=false} and refuse everything.
      */
-    /** The stricter of this agent's limit and the one the chain carried in. */
-    private int effectiveMaxDepth() {
-        int own = config.getMaxDelegationDepth();
-        return inheritedMaxDepth == null ? own : Math.min(own, inheritedMaxDepth);
-    }
-
     private static DynamicAgentConfig permissiveDefault() {
         var permissive = new DynamicAgentConfig();
         permissive.setEnabled(true);
         permissive.setAllowDelegation(true);
         return permissive;
+    }
+
+    /** The stricter of this agent's limit and the one the chain carried in. */
+    private int effectiveMaxDepth() {
+        int own = config.getMaxDelegationDepth();
+        return inheritedMaxDepth == null ? own : Math.min(own, inheritedMaxDepth);
     }
 
     /**

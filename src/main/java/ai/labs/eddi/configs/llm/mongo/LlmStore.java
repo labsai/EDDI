@@ -15,9 +15,9 @@ import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import org.jboss.logging.Logger;
 
 /**

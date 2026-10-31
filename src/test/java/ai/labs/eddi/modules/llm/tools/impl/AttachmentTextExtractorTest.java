@@ -277,13 +277,6 @@ class AttachmentTextExtractorTest {
         }
     }
 
-    // ==================== Helpers ====================
-
-    /**
-     * One page whose content streams are FlateDecode-compressed runs of spaces
-     * (valid, empty page content) of the given decoded sizes, after a line of text
-     * — a deflate bomb in miniature.
-     */
     @Nested
     class WorkBudget {
 
@@ -319,6 +312,13 @@ class AttachmentTextExtractorTest {
         }
     }
 
+    // ==================== Helpers ====================
+
+    /**
+     * One page whose content streams are FlateDecode-compressed runs of spaces
+     * (valid, empty page content) of the given decoded sizes, after a line of text
+     * — a deflate bomb in miniature.
+     */
     private static byte[] pdfWithFlateContents(int... decodedSizes) throws Exception {
         try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             var page = new PDPage();
