@@ -26,8 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atMost;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -52,10 +54,11 @@ class ConfigGraphResolverTest {
     private final Map<String, AgentGroupConfiguration> groups = new HashMap<>();
 
     private ConfigGraphResolver resolver;
+    private IAgentStore agentStore;
 
     @BeforeEach
     void setUp() throws Exception {
-        IAgentStore agentStore = mock(IAgentStore.class);
+        agentStore = mock(IAgentStore.class);
         IWorkflowStore workflowStore = mock(IWorkflowStore.class);
         IAgentGroupStore groupStore = mock(IAgentGroupStore.class);
 
@@ -206,5 +209,40 @@ class ConfigGraphResolverTest {
     @DisplayName("an id that is neither agent nor group yields an empty graph, not an error")
     void unknownRoot() {
         assertTrue(resolver.referencedResourceIds("0000000000000000000000").isEmpty());
+    }
+
+    @Test
+    @DisplayName("a HUMAN member's id is a principal, never followed as a configuration reference")
+    void humanMembersAreNotTraversed() {
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(
+                new AgentGroupConfiguration.GroupMember(AGENT, "agent", null, null, null),
+                new AgentGroupConfiguration.GroupMember(AGENT_2, "a person", null, null, AgentGroupConfiguration.MemberType.HUMAN)));
+        groups.put(GROUP, config);
+        agent(AGENT, WORKFLOW);
+        agent(AGENT_2, WORKFLOW_2);
+        workflow(WORKFLOW);
+        workflow(WORKFLOW_2);
+
+        Set<String> reached = resolver.referencedResourceIds(GROUP);
+
+        assertTrue(reached.contains(AGENT), "reached: " + reached);
+        assertFalse(reached.contains(AGENT_2), "a HUMAN member id must not enter the cascade: " + reached);
+        assertFalse(reached.contains(WORKFLOW_2), "nor anything beneath it: " + reached);
+    }
+
+    @Test
+    @DisplayName("seeding stops at the graph budget instead of reading every stored member")
+    void seedingIsBudgeted() throws Exception {
+        String[] members = new String[ConfigGraphResolver.MAX_GRAPH_SIZE * 3];
+        for (int i = 0; i < members.length; i++) {
+            members[i] = String.format("member%016d", i);
+        }
+        group(GROUP, members);
+
+        resolver.referencedResourceIds(GROUP);
+
+        // One agent read and one group read per seeded id at most, plus the root's.
+        verify(agentStore, atMost(ConfigGraphResolver.MAX_GRAPH_SIZE + 1)).getCurrentResourceId(anyString());
     }
 }

@@ -562,7 +562,10 @@ public class ResourceSharingService {
         // You cannot pass on access you were only lent. A referenced resource the
         // caller can read but does not own is left exactly as it was, and reported.
         if (!accessGuard.canAccess(descriptor, AccessLevel.OWN)) {
-            skipped.add(new ShareTarget(id, descriptor.getName()));
+            // The name only for a resource the caller may see: a cascade can reach ids
+            // the caller cannot read, and the response must not be a way to learn
+            // their names.
+            skipped.add(new ShareTarget(id, accessGuard.canAccess(descriptor, AccessLevel.VIEW) ? descriptor.getName() : null));
             return;
         }
         change.accept(descriptor);
