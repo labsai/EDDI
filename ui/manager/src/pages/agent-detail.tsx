@@ -70,7 +70,7 @@ import {
   type AgentEdit,
 } from "@/lib/agent-draft";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { agentKeys } from "@/lib/query-keys";
+import { agentKeys, chatKeys } from "@/lib/query-keys";
 import { MAX_CONTINUATIONS } from "@/lib/continuation";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
@@ -718,7 +718,7 @@ export function AgentDetailPage() {
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
                     queryClient.invalidateQueries({ queryKey: ["agents"] });
-                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                    queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);

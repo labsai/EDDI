@@ -3,7 +3,7 @@ import { useQuery, useQueries, useInfiniteQuery, useMutation, useQueryClient, ke
 import { ENVIRONMENTS, type Environment } from "@/lib/constants";
 import { withAnyDeployedVersion } from "@/lib/deployment-environments";
 import { updateDescriptor } from "@/lib/api/descriptors";
-import { agentKeys, agentDeploymentQueries } from "@/lib/query-keys";
+import { agentKeys, agentDeploymentQueries, chatKeys } from "@/lib/query-keys";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import {
   getAgentDescriptors,
@@ -410,7 +410,7 @@ export function useUndeployAgent() {
     },
     onSuccess: (_, { environment = "production", agentId, version }) => {
       void queryClient.invalidateQueries(agentDeploymentQueries([agentId]));
-      void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+      void queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
 
       const depKey = [...agentKeys.all, "deployment", environment, agentId, version];
       const depsKey = [...agentKeys.all, "deploymentStatuses", agentId, version];
