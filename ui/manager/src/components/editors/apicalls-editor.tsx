@@ -1851,8 +1851,6 @@ export interface ApiCallsEditorProps {
   onChange: (data: HttpCallsConfig) => void;
   readOnly?: boolean;
 }
-/** @deprecated Use ApiCallsEditorProps */
-export type HttpCallsEditorProps = ApiCallsEditorProps;
 
 export function ApiCallsEditor({
   data,

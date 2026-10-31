@@ -2150,8 +2150,6 @@ export interface LlmEditorProps {
   onChange: (data: LangchainConfig) => void;
   readOnly?: boolean;
 }
-/** @deprecated Use LlmEditorProps */
-export type LangchainEditorProps = LlmEditorProps;
 
 export function LlmEditor({
   data,
