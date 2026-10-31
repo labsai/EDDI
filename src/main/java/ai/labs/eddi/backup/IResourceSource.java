@@ -7,6 +7,7 @@ package ai.labs.eddi.backup;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
+import jakarta.ws.rs.BadRequestException;
 
 import java.util.List;
 import java.util.Map;
@@ -20,6 +21,27 @@ import java.util.Map;
  * @since 6.0.0
  */
 public interface IResourceSource extends AutoCloseable {
+
+    /**
+     * The most workflow references a source agent may carry. Each one is read and
+     * kept in full — from a ZIP, or fetched from a remote instance — so without a
+     * bound a small agent document naming the same workflow a hundred thousand
+     * times expanded into gigabytes, or as many sequential requests, before
+     * anything was validated. Real agents have a handful.
+     */
+    int MAX_WORKFLOW_REFERENCES = 256;
+
+    /**
+     * @throws BadRequestException
+     *             when the agent names more than {@link #MAX_WORKFLOW_REFERENCES}
+     *             workflows
+     */
+    static void requireWorkflowCountWithinLimit(List<?> workflowUris) {
+        if (workflowUris != null && workflowUris.size() > MAX_WORKFLOW_REFERENCES) {
+            throw new BadRequestException("The source agent names " + workflowUris.size() + " workflows; at most "
+                    + MAX_WORKFLOW_REFERENCES + " are supported");
+        }
+    }
 
     /** Agent config + metadata from the source. */
     AgentSourceData readAgent();

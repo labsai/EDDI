@@ -216,6 +216,11 @@ public class ZipArchive implements IZipArchive {
                     throw new ZipLimitExceededException("Zip archive has too many entries (limit " + maxEntries + ", "
                             + MAX_ENTRIES_PROPERTY + ")");
                 }
+                if (depthOf(entry.getName()) > MAX_ENTRY_DEPTH) {
+                    // mkdirs creates every missing ancestor, and only the entry count was
+                    // budgeted — so one entry could make thousands of directories.
+                    throw new MalformedArchiveException("Zip entry is nested deeper than " + MAX_ENTRY_DEPTH + " directories");
+                }
                 File destFile = new File(targetDir, entry.getName());
                 String destFilePath;
                 try {
@@ -232,6 +237,12 @@ public class ZipArchive implements IZipArchive {
                 }
 
                 if (entry.isDirectory()) {
+                    // A directory holds no data. One that does skipped the inflation
+                    // counters below, and closeEntry() then inflated its payload
+                    // unmetered — refused at its first byte instead.
+                    if (zipIn.read() != -1) {
+                        throw new MalformedArchiveException("Zip directory entry carries data");
+                    }
                     if (!destFile.mkdirs() && !destFile.isDirectory()) {
                         throw new IOException("Could not create directory: " + destFilePath);
                     }
@@ -249,6 +260,25 @@ public class ZipArchive implements IZipArchive {
             // mismatch, cut-off upload). Never quotes the entry contents.
             throw new MalformedArchiveException("Zip archive is corrupt or truncated: " + e.getMessage());
         }
+    }
+
+    /**
+     * The deepest any legitimate archive goes is about six levels
+     * ({@code <agent>/<version>/<workflow>/<version>/<file>}); this leaves ample
+     * room and still bounds the directories one entry can create.
+     */
+    static final int MAX_ENTRY_DEPTH = 32;
+
+    /** How many path segments an entry name has. */
+    static int depthOf(String entryName) {
+        int depth = 1;
+        for (int i = 0; i < entryName.length(); i++) {
+            char c = entryName.charAt(i);
+            if ((c == '/' || c == '\\') && i < entryName.length() - 1) {
+                depth++;
+            }
+        }
+        return depth;
     }
 
     private void extractFile(ZipInputStream zipIn, File destFile, String entryName, long[] totalInflated) throws IOException {
