@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import jakarta.enterprise.inject.Instance;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.IDeadLetterStore;
@@ -558,6 +560,34 @@ class ClusterConversationCoordinatorTest {
         List<DeadLetterEntry> listed = coordinator.getDeadLetters();
         assertEquals(1, listed.size(), "and no longer kept locally");
         assertFalse(listed.get(0).id().startsWith("local-"));
+    }
+
+    /**
+     * A node cut off from NATS during a GDPR erasure missed the stop and the shared
+     * purge; forwarding its local copy afterwards re-published the erased input.
+     */
+    @Test
+    @DisplayName("a local dead letter of a conversation that no longer exists is discarded, not forwarded")
+    @SuppressWarnings("unchecked")
+    void localDeadLetterOfAnErasedConversationIsDiscarded() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-erased", failing);
+        await(failing);
+        awaitIdle();
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-erased")).thenReturn(null);
+        coordinator.memoryStore = memory;
+
+        store.down = false;
+        assertEquals(0, coordinator.forwardLocalDeadLetters());
+
+        assertTrue(store.entries.isEmpty(), "the erased turn must not reach the shared stream");
+        assertTrue(coordinator.getDeadLetters().isEmpty(), "nor stay on this node");
     }
 
     @Test

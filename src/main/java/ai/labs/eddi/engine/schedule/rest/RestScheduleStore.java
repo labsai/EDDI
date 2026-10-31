@@ -565,7 +565,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             int attemptNumber = schedule.getFailCount() + 1;
             ScheduleFireLog fireLog = null;
             try {
-                fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), attemptNumber);
+                // Bounded like a polled fire: unbounded, a long run outlived its claim's
+                // lease and the poller started the same schedule a second time.
+                String instanceId = pollerService.getInstanceId();
+                fireLog = SchedulePollerService.runWithinDeadline(() -> fireExecutor.fire(schedule, instanceId, attemptNumber),
+                        pollerService.manualFireDeadline());
             } finally {
                 // Always release the claim, whatever happened — a manual fire that left
                 // the row CLAIMED would block the poller until the lease expired.
@@ -772,6 +776,10 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private static String manualFireRefusalReason(ScheduleConfiguration schedule) {
         FireStatus status = schedule != null ? schedule.getFireStatus() : null;
+        if (schedule != null && !schedule.isEnabled()) {
+            return "This schedule is disabled, and a disabled schedule cannot be claimed or fired. "
+                    + "Use POST /schedulestore/schedules/{id}/enable first.";
+        }
         if (FireStatus.DEAD_LETTERED == status) {
             return "This schedule is dead-lettered after " + schedule.getFailCount()
                     + " failed attempt(s) and will not fire until it is requeued. "

@@ -146,6 +146,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
 | `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
 | `eddi.nats.tls.enabled` | `false` | TLS to NATS |
+| `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host in `eddi.nats.servers` (HTTPS-style endpoint identification; an IP address needs an IP SAN). `false` trusts any certificate the trust store accepts, for any host |
 | `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
 | `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
 | `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
@@ -401,7 +402,7 @@ Full guide: [hitl.md](hitl.md).
 |---|---|---|
 | `eddi.hitl.tool.enabled` | `true` | Per-tool-call approval gating |
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
-| `eddi.hitl.tool.journal-retention` | `30d` | How long tool-approval journal entries are kept |
+| `eddi.hitl.tool.journal-retention` | `30d` | How long completed tool-approval journal entries are kept. A claim left `EXECUTING` by a crash inside the tool is kept until its conversation is deleted, so a later approval of the same pause cannot run the call again |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |

@@ -135,6 +135,51 @@ class SchedulePollerServiceTest {
         verify(scheduleStore).markCompleted(eq("sched-1"), any(), any()); // nextFire recomputed
     }
 
+    /**
+     * A due row still CLAIMED is a fire that never reported (its node died, or it
+     * wedged past the interrupt). Re-firing it at once with failCount untouched
+     * made a node-killing fire kill every node in turn, forever.
+     */
+    @Test
+    void poll_staleClaim_countsAsAFailedAttemptInsteadOfRefiringAtOnce() throws Exception {
+        var schedule = makeCronSchedule("sched-stale", "0 9 * * *", "Hello");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setFailCount(1);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-stale"), eq("test-instance"), any(), any())).thenReturn(true);
+
+        poller.pollDueSchedules();
+
+        verifyNoInteractions(fireExecutor);
+        verify(scheduleStore).markFailed(eq("sched-stale"), any(), any());
+    }
+
+    @Test
+    void poll_staleClaimAtTheRetryLimit_isDeadLettered() throws Exception {
+        var schedule = makeCronSchedule("sched-poison", "0 9 * * *", "Hello");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setFailCount(4);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-poison"), eq("test-instance"), any(), any())).thenReturn(true);
+
+        poller.pollDueSchedules();
+
+        verifyNoInteractions(fireExecutor);
+        verify(scheduleStore).markDeadLettered(eq("sched-poison"), any());
+    }
+
+    @Test
+    void runWithinDeadline_abandonsAFireThatOutlivesItsBound() throws Exception {
+        var started = new CountDownLatch(1);
+        ScheduleFireLog result = SchedulePollerService.runWithinDeadline(() -> {
+            started.countDown();
+            Thread.sleep(10_000);
+            return makeFireLog("slow", FireStatus.COMPLETED.name());
+        }, Duration.ofMillis(200));
+        assertTrue(started.await(1, TimeUnit.SECONDS));
+        assertNull(result, "a fire cut off at its bound reports no outcome, which is recorded as a failure");
+    }
+
     @Test
     void poll_claimSuccess_populatesFireIdOnInMemorySchedule() throws Exception {
         // tryClaim() only returns a boolean; it does not hand back the fireId it

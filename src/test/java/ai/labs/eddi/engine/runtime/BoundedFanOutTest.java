@@ -220,6 +220,40 @@ class BoundedFanOutTest {
             assertEquals(1, started.get(), "nothing starts after the caller gave up waiting");
         }
 
+        /**
+         * The item passed its checks, the caller timed out and read it as not yet
+         * started, and then it started anyway: reported "not sent", it sent. The item
+         * here is held inside its admission check while the caller gives up.
+         */
+        @Test
+        @DisplayName("an item the caller reported as not started never starts afterwards")
+        void anItemReportedNotStartedCannotStartLater() throws Exception {
+            CountDownLatch inAdmission = new CountDownLatch(1);
+            CountDownLatch releaseAdmission = new CountDownLatch(1);
+            AtomicInteger sent = new AtomicInteger();
+            BoundedFanOut.Admission slowGate = index -> {
+                inAdmission.countDown();
+                try {
+                    releaseAdmission.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return null;
+            };
+            List<Callable<String>> items = List.of(() -> {
+                sent.incrementAndGet();
+                return "sent";
+            });
+
+            List<String> results = BoundedFanOut.run(items, 1, slowGate, OUTCOMES, null, 100, "test");
+            assertTrue(inAdmission.await(1, TimeUnit.SECONDS));
+            releaseAdmission.countDown();
+            Thread.sleep(200);
+
+            assertEquals("unfinished:0:false", results.get(0));
+            assertEquals(0, sent.get(), "reported as not started, so it must not have been sent");
+        }
+
         @Test
         @DisplayName("items that finish within the budget are returned as usual")
         void withinBudget() {

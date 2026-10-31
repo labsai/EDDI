@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.IDeadLetterStore;
@@ -21,6 +22,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.inject.Singleton;
 import jakarta.enterprise.inject.Typed;
 import jakarta.inject.Inject;
+import jakarta.enterprise.inject.Instance;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -92,6 +94,16 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     private volatile long cachedTurnDeadLetters;
     private volatile long turnDeadLettersAt;
     private volatile long deadLetterCountAt;
+
+    /**
+     * Read before a locally kept dead letter is forwarded: a node that was cut off
+     * from NATS during a GDPR erasure missed both the cluster stop and the purge of
+     * the shared stream, and forwarding its copy afterwards re-published the erased
+     * turn's input to every node. Lazily resolved (and absent in unit tests) so the
+     * coordinator does not pull the memory store into its own construction.
+     */
+    @Inject
+    Instance<IConversationMemoryStore> memoryStore;
 
     @Inject
     public ClusterConversationCoordinator(IRuntime runtime, MeterRegistry meterRegistry, NatsLeaseManager leases,
@@ -291,6 +303,12 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     public synchronized int forwardLocalDeadLetters() {
         int forwarded = 0;
         for (DeadLetterEntry local : super.getDeadLetters()) {
+            if (conversationGone(local.conversationId())) {
+                super.discardDeadLetter(local.id());
+                LOGGER.infof("Discarded local dead letter %s instead of forwarding it: its conversation no longer exists "
+                        + "(erased or deleted while this node was cut off)", sanitize(local.id()));
+                continue;
+            }
             try {
                 deadLetterStore.append(local.conversationId(), local.error(), local.timestamp(), local.turn(), local.reason(),
                         local.fence());
@@ -306,6 +324,23 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             LOGGER.infof("Forwarded %d dead letter(s) kept on this node while NATS was unreachable to the shared stream", forwarded);
         }
         return forwarded;
+    }
+
+    /**
+     * Whether the dead letter's conversation is provably gone. Anything uncertain —
+     * no store, an unreadable store — keeps the dead letter: losing one is worse
+     * than forwarding one that a later erasure purges again.
+     */
+    boolean conversationGone(String conversationId) {
+        if (conversationId == null || memoryStore == null || !memoryStore.isResolvable()) {
+            return false;
+        }
+        try {
+            return memoryStore.get().getConversationState(conversationId) == null;
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not check conversation %s before forwarding its dead letter: %s", sanitize(conversationId), e.getMessage());
+            return false;
+        }
     }
 
     @Override

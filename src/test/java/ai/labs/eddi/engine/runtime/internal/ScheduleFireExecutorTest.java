@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import org.junit.jupiter.api.BeforeEach;
@@ -164,6 +165,43 @@ class ScheduleFireExecutorTest {
         when(maintenance.run()).thenThrow(new IllegalStateException("db down"));
         assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "node-1", 1).status());
         verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * The startup workflow of a conversation the fire starts runs under the fire's
+     * allowance, and the turn gets only what is left of it — one budget, not two.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void fire_newConversation_startupAndTurnShareOneMaxCostPerFire() throws Exception {
+        var schedule = makeCronSchedule("sched-cap", "new");
+        schedule.setMaxCostPerFire(0.5);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-cap", null));
+        var done = new SimpleConversationMemorySnapshot();
+        done.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(done);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+        var spied = spy(executor);
+        doReturn(0.2).when(spied).startupSpend("conv-cap");
+
+        spied.fire(schedule, "instance-1", 1);
+
+        ArgumentCaptor<Map<String, Context>> startContext = ArgumentCaptor.forClass(Map.class);
+        verify(conversationService).startConversation(any(), eq("agent-1"), eq("system:scheduler"), startContext.capture());
+        assertEquals(0.5, startContext.getValue().get(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE).getValue());
+        ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
+        assertEquals(0.3, (double) input.getValue().getContext().get(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE).getValue(), 1e-9);
+    }
+
+    @Test
+    void remainingAllowance_neverTurnsAnExhaustedCapIntoUnlimited() {
+        assertEquals(0.3, ScheduleFireExecutor.remainingAllowance(0.5, 0.2), 1e-9);
+        assertEquals(Double.MIN_VALUE, ScheduleFireExecutor.remainingAllowance(0.5, 0.7));
+        assertEquals(0.0, ScheduleFireExecutor.remainingAllowance(0.0, 0.7), "zero means unlimited and stays so");
     }
 
     @Test
