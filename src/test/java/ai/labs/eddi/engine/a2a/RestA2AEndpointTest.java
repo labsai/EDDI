@@ -375,6 +375,18 @@ class RestA2AEndpointTest {
     }
 
     @Test
+    void handleJsonRpc_invalidRequest_serializesANullIdMember() throws Exception {
+        endpoint = createEndpoint(true, false);
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, null);
+
+        var tree = new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(response.getEntity()));
+        assertTrue(tree.has("id"), "JSON-RPC 2.0 requires the id member on every response");
+        assertTrue(tree.get("id").isNull(), "an unreadable request is answered with id null");
+        assertFalse(tree.has("result"), "an error response carries no result member");
+    }
+
+    @Test
     void handleJsonRpc_disabled_doesNotConsultTheUseGate() {
         endpoint = createEndpoint(false, false);
 
