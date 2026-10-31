@@ -311,7 +311,9 @@ knowledge base with the same name, which in 6.5.0 shared its store. To migrate o
 everything, and documents ingested through `/ingest` have to be ingested again. The old location is
 left in place — drop the table or collection by hand once nothing uses it. Renaming a 6.5.0 knowledge
 base does the same migration automatically: in 6.5.0 a rename already moved it to a new, empty store —
-the one named after its new name, which could be another knowledge base's. A knowledge base with an
+the one named after its new name, which could be another knowledge base's. Removing the explicit
+`table`/`collectionName`/`indexName` of a 6.5.0 knowledge base migrates it the same way, since its default
+location would otherwise be whatever its (possibly changed) name maps to. A knowledge base with an
 explicit `table`/`collectionName`/`indexName` stays in the same table when it is switched: its old
 chunks are no longer tagged with the id retrieval filters on, so they stop being returned (and stay
 in the table); sources re-ingest and re-tag everything, `/ingest` documents have to be ingested again.
@@ -331,7 +333,11 @@ Rules enforced when a knowledge base is saved:
   location another knowledge base already uses only if you may edit that knowledge base too (`public.t`
   and `t` are the same pgvector table). A pgvector `table` must be a plain identifier, optionally
   qualified with a schema (letters, digits, `_`, `$`; no quotes, spaces or punctuation), because the
-  store puts it into SQL as it is. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
+  store puts it into SQL as it is. An Elasticsearch `indexName` must name one index (lower-case letters,
+  digits, `_`, `-`, `.`, not starting with `-`/`_`/`+`): Elasticsearch reads it as an index expression, so
+  a wildcard (`*`), a list (`a,b`) or an exclusion would search indexes the check never compared. If the
+  deployment holds more knowledge bases than the collision check can scan (20,000), an explicit location is
+  refused rather than saved unchecked. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
   own chunks. These checks run when the value is new or changed; a stored value is never refused on a
   save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
   edit rights on a knowledge base that is actually on another server.

@@ -66,6 +66,13 @@ public final class KnowledgeBaseStorage {
     private static final Pattern PG_QUALIFIED_IDENTIFIER = Pattern
             .compile("[A-Za-z_][A-Za-z0-9_$]{0,62}(?:\\.[A-Za-z_][A-Za-z0-9_$]{0,62})?");
 
+    /**
+     * One concrete Elasticsearch index: lower case, no wildcard ({@code *},
+     * {@code ?}), no list ({@code ,}), no exclusion or leading {@code -}/{@code _}/
+     * {@code +}, no cross-cluster {@code :} and no date-math {@code <...>}.
+     */
+    private static final Pattern PLAIN_ES_INDEX = Pattern.compile("[a-z0-9][a-z0-9_.\\-]{0,254}");
+
     private KnowledgeBaseStorage() {
     }
 
@@ -251,6 +258,16 @@ public final class KnowledgeBaseStorage {
      */
     public static boolean isPlainPgIdentifier(String table) {
         return table != null && PG_QUALIFIED_IDENTIFIER.matcher(table.trim()).matches();
+    }
+
+    /**
+     * Whether {@code indexName} names exactly one Elasticsearch index. The store
+     * passes it to the search API as an index EXPRESSION, so {@code *} or
+     * {@code a,b} would search every matching index, past a collision check that
+     * compares literal names.
+     */
+    public static boolean isPlainElasticsearchIndex(String indexName) {
+        return indexName != null && PLAIN_ES_INDEX.matcher(indexName.trim()).matches();
     }
 
     /** The pgvector table name 6.5.0 derived from a knowledge base name. */
