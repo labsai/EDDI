@@ -146,7 +146,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
 | `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
 | `eddi.nats.tls.enabled` | `false` | TLS to NATS |
-| `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host in `eddi.nats.servers` (HTTPS-style endpoint identification; an IP address needs an IP SAN). `false` trusts any certificate the trust store accepts, for any host |
+| `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host(s) in `eddi.nats.url` (HTTPS-style endpoint identification; an IP address needs an IP SAN). `false` trusts any certificate the trust store accepts, for any host |
 | `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
 | `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
 | `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
