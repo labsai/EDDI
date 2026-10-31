@@ -19,6 +19,7 @@ import concurrent.futures as cf
 import json
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
@@ -45,6 +46,11 @@ MOCK_LOG = os.path.join(HERE, "mock-requests.jsonl")
 
 
 # ------------------------------------------------------------------ helpers
+
+def docker_desktop():
+    """True when the daemon is Docker Desktop (whose containers run in a VM), on any host OS."""
+    return sh("docker", "info", "--format", "{{.OperatingSystem}}").stdout.strip() == "Docker Desktop"
+
 
 def sh(*cmd, check=False, quiet=True):
     r = subprocess.run(list(cmd), capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -230,16 +236,35 @@ class Infra:
         if os.path.exists(MOCK_LOG):
             os.remove(MOCK_LOG)
         env = dict(os.environ)
-        if sys.platform.startswith("linux") and "MOCK_LLM_BIND" not in env:
-            # host.docker.internal resolves to the docker0 gateway on Linux, so the mock binds
-            # there: reachable from the nodes, not from the LAN.
+        if sys.platform.startswith("linux") and "MOCK_LLM_BIND" not in env and not docker_desktop():
+            # With Docker Engine on Linux, host.docker.internal resolves to the docker0 gateway,
+            # an address of this host, so the mock binds there: reachable from the nodes, not
+            # from the LAN. Docker Desktop (for Linux too) keeps that bridge inside its VM and
+            # forwards host.docker.internal to the host's loopback, so there the default is right.
             gw = sh("docker", "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}").stdout.strip()
             if gw:
                 env["MOCK_LLM_BIND"] = gw
             else:
                 print("WARN: could not read the docker bridge gateway; the nodes may not reach the mock LLM. Set MOCK_LLM_BIND.")
         self.mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_llm.py"), MOCK_LOG, str(MOCK_PORT)], env=env)  # nosec B603 - fixed interpreter and script path, no shell
-        time.sleep(1)
+        # Do not carry on against a mock that is not there: a bind that fails (an address this
+        # host does not have, a port in use) ends the process, and every scenario would then
+        # fail far from the cause.
+        bind = env.get("MOCK_LLM_BIND", "127.0.0.1")
+        bind = {"": "127.0.0.1", "0.0.0.0": "127.0.0.1", "::": "::1"}.get(bind, bind)  # nosec B104 - mapped TO loopback for the probe
+        deadline = time.time() + 15
+        while True:
+            if self.mock.poll() is not None:
+                raise SystemExit(f"the mock LLM exited with status {self.mock.returncode} before listening on "
+                                 f"{bind}:{MOCK_PORT}; set MOCK_LLM_BIND to an address of this host the nodes can reach")
+            try:
+                socket.create_connection((bind, MOCK_PORT), timeout=1).close()
+                break
+            except OSError:
+                if time.time() > deadline:
+                    self.mock.kill()
+                    raise SystemExit(f"the mock LLM did not start listening on {bind}:{MOCK_PORT} within 15 s")
+                time.sleep(0.2)
 
     def up(self):
         sh("docker", "network", "create", NET)
