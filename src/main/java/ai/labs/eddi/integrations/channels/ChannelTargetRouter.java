@@ -358,6 +358,22 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * Whether a deployed agent's legacy {@code ChannelConnector} serves
+     * {@code platformChannelId}. Unlike {@link #isChannelOwned} this ignores
+     * standalone integrations: their cached map lags a just-saved change by up to
+     * the refresh interval, while the integration store itself is the authority on
+     * them.
+     */
+    public boolean isServedByLegacyConnector(String channelType, String platformChannelId) {
+        refreshIfNeeded();
+        if (platformChannelId == null || platformChannelId.isBlank()) {
+            return false;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        return CHANNEL_TYPE_SLACK.equals(normalizedType) && legacyMap.containsKey(platformChannelId);
+    }
+
+    /**
      * Whether any integration or legacy connector owns {@code platformChannelId}.
      * An owned channel whose owner has no signing secret can never be verified, and
      * the webhook refuses its events rather than falling back to the pool.

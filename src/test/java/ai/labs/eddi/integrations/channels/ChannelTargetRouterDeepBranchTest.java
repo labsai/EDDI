@@ -616,4 +616,18 @@ class ChannelTargetRouterDeepBranchTest {
             assertTrue(secrets.contains("sec1"));
         }
     }
+
+    @Test
+    @DisplayName("isServedByLegacyConnector sees legacy connectors only, never a cached integration")
+    void legacyOnlyOwnership() throws Exception {
+        setField(router, "integrationMap", Map.of("slack:C0INT", new ChannelIntegrationConfiguration()));
+        setField(router, "legacyMap", Map.of("C0LEG", new LegacyTarget("agent1", "token", "secret", null)));
+
+        assertTrue(router.isServedByLegacyConnector("slack", "C0LEG"));
+        assertTrue(router.isServedByLegacyConnector("SLACK", "C0LEG"));
+        assertFalse(router.isServedByLegacyConnector("slack", "C0INT"));
+        assertFalse(router.isServedByLegacyConnector("webhook", "C0LEG"));
+        assertFalse(router.isServedByLegacyConnector("slack", " "));
+        assertTrue(router.isChannelOwned("slack", "C0INT"));
+    }
 }

@@ -70,6 +70,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
     private final SecretResolver secretResolver;
+    private final ChannelTargetRouter channelTargetRouter;
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
@@ -77,12 +78,26 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         this(channelStore, documentDescriptorStore, resourceAccessGuard, null);
     }
 
-    @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard,
             SecretResolver secretResolver) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, secretResolver, null);
+    }
+
+    /**
+     * @param channelTargetRouter
+     *            consulted for legacy connectors serving a channel; {@code null}
+     *            (the shorter constructors, used by tests) skips only that check
+     */
+    @Inject
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            SecretResolver secretResolver,
+            ChannelTargetRouter channelTargetRouter) {
         this.secretResolver = secretResolver;
+        this.channelTargetRouter = channelTargetRouter;
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -181,13 +196,6 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * on this node costs nothing measurable.
      */
     private final Object uniquenessLock = new Object();
-
-    /**
-     * Field-injected so the constructors (and the tests built with them) stay as
-     * they are; {@code null} there, which skips only the legacy-connector check.
-     */
-    @Inject
-    ChannelTargetRouter channelTargetRouter;
 
     @Override
     public Response updateChannel(String id, Integer version,
@@ -575,9 +583,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (channelId == null || channelId.isBlank() || channelId.equals(previousChannelId)) {
             return;
         }
-        // validateUniqueChannelId has already refused another standalone integration
-        // owning it, so an owner left at this point is a legacy connector.
-        if (channelTargetRouter.isChannelOwned(config.getChannelType(), channelId)) {
+        // Legacy connectors only: validateUniqueChannelId has already judged the
+        // standalone integrations against the store, while the router's cached copy of
+        // them can lag a just-saved move of this channel by a minute and would refuse a
+        // legitimate save as a "legacy" takeover.
+        if (channelTargetRouter.isServedByLegacyConnector(config.getChannelType(), channelId)) {
             throw new BadRequestException("channelId '" + channelId + "' is already served by an agent's legacy channel connector. "
                     + "Migrate that connector to a channel integration (or remove it) before binding the channel here.");
         }

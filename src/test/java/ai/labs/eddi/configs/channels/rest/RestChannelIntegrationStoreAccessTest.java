@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -163,12 +164,13 @@ class RestChannelIntegrationStoreAccessTest {
     @DisplayName("binding a channelId a deployed agent's legacy connector serves is refused")
     void refusesLegacyConnectorTakeover() throws Exception {
         var router = mock(ChannelTargetRouter.class);
-        when(router.isChannelOwned("slack", "C0LEGACY")).thenReturn(true);
-        store.channelTargetRouter = router;
+        when(router.isServedByLegacyConnector("slack", "C0LEGACY")).thenReturn(true);
+        var withRouter = new RestChannelIntegrationStore(channelStore, mock(IDocumentDescriptorStore.class), accessGuard, null, router);
         var cfg = config(ChannelTarget.TargetType.AGENT, AGENT_ID);
         cfg.setPlatformConfig(new HashMap<>(Map.of("channelId", "C0LEGACY")));
 
-        assertThrows(BadRequestException.class, () -> store.createChannel(cfg));
+        var e = assertThrows(BadRequestException.class, () -> withRouter.createChannel(cfg));
+        assertTrue(e.getMessage().contains("legacy channel connector"), e.getMessage());
 
         verify(channelStore, never()).create(org.mockito.ArgumentMatchers.any());
     }
