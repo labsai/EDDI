@@ -49,7 +49,6 @@ import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.modules.llm.impl.ToolBudgetEnforcement;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
-import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
@@ -64,6 +63,7 @@ import java.net.URI;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -225,8 +225,7 @@ public class McpAdminTools {
             return resultJson("undeployed", Map.of("agentId", agentId, "version", ver, "environment", env.name(), "endedConversations", endAll,
                     "status", response.getStatus()));
         } catch (Exception e) {
-            LOGGER.error("MCP undeploy_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to undeploy agent", e);
+            return toolFailure(LOGGER, "undeploy_agent", "Failed to undeploy agent", e);
         }
     }
 
@@ -267,8 +266,7 @@ public class McpAdminTools {
         } catch (NumberFormatException e) {
             return errorJson("fromVersions must be a comma separated list of version numbers");
         } catch (Exception e) {
-            LOGGER.error("MCP upgrade_conversations failed for Agent " + LogSanitizer.sanitize(agentId), e);
-            return errorJson("Failed to upgrade conversations", e);
+            return toolFailure(LOGGER, "upgrade_conversations", "Failed to upgrade conversations", e);
         }
     }
 
@@ -288,8 +286,7 @@ public class McpAdminTools {
             }
             return jsonSerialization.serialize(entity);
         } catch (Exception e) {
-            LOGGER.error("MCP get_deployment_status failed for Agent " + agentId, e);
-            return errorJson("Failed to get deployment status", e);
+            return toolFailure(LOGGER, "get_deployment_status", "Failed to get deployment status", e);
         }
     }
 
@@ -305,8 +302,7 @@ public class McpAdminTools {
             List<DocumentDescriptor> descriptors = getRestStore(IRestWorkflowStore.class).readWorkflowDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
-            LOGGER.error("MCP list_workflows failed", e);
-            return errorJson("Failed to list workflows", e);
+            return toolFailure(LOGGER, "list_workflows", "Failed to list workflows", e);
         }
     }
 
@@ -359,8 +355,7 @@ public class McpAdminTools {
             return resultJson("created", Map.of("agentId", agentId != null ? agentId : "unknown", "name", name != null ? name : "", "description",
                     description != null ? description : "", "location", location != null ? location : "unknown", "status", response.getStatus()));
         } catch (Exception e) {
-            LOGGER.error("MCP create_agent failed", e);
-            return errorJson("Failed to create agent", e);
+            return toolFailure(LOGGER, "create_agent", "Failed to create agent", e);
         }
     }
 
@@ -380,8 +375,7 @@ public class McpAdminTools {
             return resultJson("deleted",
                     Map.of("agentId", agentId, "version", ver, "permanent", isPermanent, "cascade", isCascade, "status", response.getStatus()));
         } catch (Exception e) {
-            LOGGER.error("MCP delete_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to delete agent", e);
+            return toolFailure(LOGGER, "delete_agent", "Failed to delete agent", e);
         }
     }
 
@@ -436,8 +430,7 @@ public class McpAdminTools {
 
             return resultJson("updated", result);
         } catch (Exception e) {
-            LOGGER.error("MCP update_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to update agent", e);
+            return toolFailure(LOGGER, "update_agent", "Failed to update agent", e);
         }
     }
 
@@ -463,8 +456,7 @@ public class McpAdminTools {
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP read_workflow failed for workflow " + workflowId, e);
-            return errorJson("Failed to read workflow", e);
+            return toolFailure(LOGGER, "read_workflow", "Failed to read workflow", e);
         }
     }
 
@@ -495,8 +487,7 @@ public class McpAdminTools {
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP read_resource failed for " + resourceType + "/" + resourceId, e);
-            return errorJson("Failed to read resource", e);
+            return toolFailure(LOGGER, "read_resource", "Failed to read resource", e);
         }
     }
 
@@ -584,8 +575,7 @@ public class McpAdminTools {
             result.put("status", response.getStatus());
             return resultJson("updated", result);
         } catch (Exception e) {
-            LOGGER.error("MCP update_resource failed for " + resourceType + "/" + resourceId, e);
-            return errorJson("Failed to update resource", e);
+            return toolFailure(LOGGER, "update_resource", "Failed to update resource", e);
         }
     }
 
@@ -617,8 +607,7 @@ public class McpAdminTools {
             result.put("status", response.getStatus());
             return resultJson("created", result);
         } catch (Exception e) {
-            LOGGER.error("MCP create_resource failed for " + resourceType, e);
-            return errorJson("Failed to create resource", e);
+            return toolFailure(LOGGER, "create_resource", "Failed to create resource", e);
         }
     }
 
@@ -646,8 +635,7 @@ public class McpAdminTools {
             return resultJson("deleted",
                     Map.of("resourceType", type, "resourceId", resourceId, "version", ver, "permanent", isPermanent, "status", response.getStatus()));
         } catch (Exception e) {
-            LOGGER.error("MCP delete_resource failed for " + resourceType + "/" + resourceId, e);
-            return errorJson("Failed to delete resource", e);
+            return toolFailure(LOGGER, "delete_resource", "Failed to delete resource", e);
         }
     }
 
@@ -693,8 +681,7 @@ public class McpAdminTools {
         } catch (AgentCascadeService.CascadeException e) {
             return errorJson(e.getMessage());
         } catch (Exception e) {
-            LOGGER.error("MCP apply_agent_changes failed for Agent " + agentId, e);
-            return errorJson("Failed to apply Agent changes", e);
+            return toolFailure(LOGGER, "apply_agent_changes", "Failed to apply Agent changes", e);
         }
     }
 
@@ -730,6 +717,10 @@ public class McpAdminTools {
             // Walk workflows → extensions
             var workflowStore = getRestStore(IRestWorkflowStore.class);
             var workflows = new ArrayList<Map<String, Object>>();
+            // Each distinct workflow is read and expanded once: an agent listing the
+            // same reference many times must not multiply store reads and response
+            // size. A repeat is listed, marked, and not expanded again.
+            var expanded = new HashSet<String>();
 
             for (URI wfUri : agentConfig.getWorkflows()) {
                 String wfId = extractIdFromLocation(wfUri.toString());
@@ -741,6 +732,12 @@ public class McpAdminTools {
                 wfInfo.put("workflowId", wfId);
                 wfInfo.put("workflowVersion", wfVersion);
                 wfInfo.put("workflowUri", wfUri.toString());
+
+                if (!expanded.add(wfId + "?version=" + wfVersion)) {
+                    wfInfo.put("duplicate", true);
+                    workflows.add(wfInfo);
+                    continue;
+                }
 
                 try {
                     WorkflowConfiguration wfConfig = workflowStore.readWorkflow(wfId, wfVersion);
@@ -765,7 +762,10 @@ public class McpAdminTools {
                         wfInfo.put("extensionCount", extensions.size());
                     }
                 } catch (Exception wfErr) {
-                    wfInfo.put("error", "Failed to read workflow: " + wfErr.getMessage());
+                    // Only a failure the caller can act on is described; a server-side
+                    // one is logged, not echoed.
+                    LOGGER.debugf(wfErr, "list_agent_resources could not read workflow %s", wfId);
+                    wfInfo.put("error", "Failed to read workflow" + (isCallerFacing(wfErr) ? ": " + describe(wfErr) : ""));
                 }
 
                 workflows.add(wfInfo);
@@ -780,8 +780,7 @@ public class McpAdminTools {
             result.put("workflows", workflows);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP list_agent_resources failed for Agent " + agentId, e);
-            return errorJson("Failed to list Agent resources", e);
+            return toolFailure(LOGGER, "list_agent_resources", "Failed to list Agent resources", e);
         }
     }
 
@@ -919,8 +918,7 @@ public class McpAdminTools {
             result.put("triggers", triggers);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP list_agent_triggers failed", e);
-            return errorJson("Failed to list Agent triggers", e);
+            return toolFailure(LOGGER, "list_agent_triggers", "Failed to list Agent triggers", e);
         }
     }
 
@@ -947,8 +945,7 @@ public class McpAdminTools {
             result.put("status", response.getStatus());
             return resultJson("created", result);
         } catch (Exception e) {
-            LOGGER.error("MCP create_agent_trigger failed", e);
-            return errorJson("Failed to create Agent trigger", e);
+            return toolFailure(LOGGER, "create_agent_trigger", "Failed to create Agent trigger", e);
         }
     }
 
@@ -973,8 +970,7 @@ public class McpAdminTools {
             result.put("status", response.getStatus());
             return resultJson("updated", result);
         } catch (Exception e) {
-            LOGGER.error("MCP update_agent_trigger failed for intent " + intent, e);
-            return errorJson("Failed to update Agent trigger", e);
+            return toolFailure(LOGGER, "update_agent_trigger", "Failed to update Agent trigger", e);
         }
     }
 
@@ -992,8 +988,7 @@ public class McpAdminTools {
             result.put("status", response.getStatus());
             return resultJson("deleted", result);
         } catch (Exception e) {
-            LOGGER.error("MCP delete_agent_trigger failed for intent " + intent, e);
-            return errorJson("Failed to delete Agent trigger", e);
+            return toolFailure(LOGGER, "delete_agent_trigger", "Failed to delete Agent trigger", e);
         }
     }
 
@@ -1100,8 +1095,7 @@ public class McpAdminTools {
         } catch (IllegalArgumentException e) {
             return errorJson("Invalid schedule", e);
         } catch (Exception e) {
-            LOGGER.error("MCP create_schedule failed", e);
-            return errorJson("Failed to create schedule", e);
+            return toolFailure(LOGGER, "create_schedule", "Failed to create schedule", e);
         }
     }
 
@@ -1146,8 +1140,7 @@ public class McpAdminTools {
             result.put("schedules", items);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP list_schedules failed", e);
-            return errorJson("Failed to list schedules", e);
+            return toolFailure(LOGGER, "list_schedules", "Failed to list schedules", e);
         }
     }
 
@@ -1186,8 +1179,7 @@ public class McpAdminTools {
             result.put("recentFires", fireLogs);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP read_schedule failed for " + scheduleId, e);
-            return errorJson("Failed to read schedule", e);
+            return toolFailure(LOGGER, "read_schedule", "Failed to read schedule", e);
         }
     }
 
@@ -1205,8 +1197,7 @@ public class McpAdminTools {
             scheduleStore.deleteSchedule(scheduleId);
             return resultJson("schedule_deleted", Map.of("scheduleId", scheduleId));
         } catch (Exception e) {
-            LOGGER.error("MCP delete_schedule failed for " + scheduleId, e);
-            return errorJson("Failed to delete schedule", e);
+            return toolFailure(LOGGER, "delete_schedule", "Failed to delete schedule", e);
         }
     }
 
@@ -1285,8 +1276,7 @@ public class McpAdminTools {
             }
             return resultJson("schedule_fired", result);
         } catch (Exception e) {
-            LOGGER.error("MCP fire_schedule_now failed for " + scheduleId, e);
-            return errorJson("Failed to fire schedule", e);
+            return toolFailure(LOGGER, "fire_schedule_now", "Failed to fire schedule", e);
         }
     }
 
@@ -1301,8 +1291,7 @@ public class McpAdminTools {
             return resultJson("schedule_requeued",
                     Map.of("scheduleId", scheduleId, "status", "PENDING", "message", "Schedule requeued for next poll cycle"));
         } catch (Exception e) {
-            LOGGER.error("MCP retry_failed_schedule failed for " + scheduleId, e);
-            return errorJson("Failed to retry schedule", e);
+            return toolFailure(LOGGER, "retry_failed_schedule", "Failed to retry schedule", e);
         }
     }
 
@@ -1323,8 +1312,7 @@ public class McpAdminTools {
             var descriptors = channelStore.readChannelDescriptors(filterStr, 0, limitInt);
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
-            LOGGER.error("MCP list_channel_integrations failed", e);
-            return errorJson("Failed to list channel integrations", e);
+            return toolFailure(LOGGER, "list_channel_integrations", "Failed to list channel integrations", e);
         }
     }
 
@@ -1348,8 +1336,7 @@ public class McpAdminTools {
             result.put("configuration", config);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
-            LOGGER.error("MCP read_channel_integration failed for " + resourceId, e);
-            return errorJson("Failed to read channel integration", e);
+            return toolFailure(LOGGER, "read_channel_integration", "Failed to read channel integration", e);
         }
     }
 
@@ -1390,8 +1377,7 @@ public class McpAdminTools {
             }
             return resultJson("created", created);
         } catch (Exception e) {
-            LOGGER.error("MCP create_channel_integration failed", e);
-            return errorJson("Failed to create channel integration", e);
+            return toolFailure(LOGGER, "create_channel_integration", "Failed to create channel integration", e);
         }
     }
 
@@ -1424,8 +1410,7 @@ public class McpAdminTools {
                     "newVersion", newVersion,
                     "status", response.getStatus()));
         } catch (Exception e) {
-            LOGGER.error("MCP update_channel_integration failed for " + resourceId, e);
-            return errorJson("Failed to update channel integration", e);
+            return toolFailure(LOGGER, "update_channel_integration", "Failed to update channel integration", e);
         }
     }
 
@@ -1451,8 +1436,7 @@ public class McpAdminTools {
                     "permanent", isPermanent,
                     "status", response.getStatus()));
         } catch (Exception e) {
-            LOGGER.error("MCP delete_channel_integration failed for " + resourceId, e);
-            return errorJson("Failed to delete channel integration", e);
+            return toolFailure(LOGGER, "delete_channel_integration", "Failed to delete channel integration", e);
         }
     }
 }

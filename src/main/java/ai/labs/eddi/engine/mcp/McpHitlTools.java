@@ -592,7 +592,18 @@ public class McpHitlTools {
             GroupConversation result = groupConversationService.submitHumanInput(
                     conversationId, memberId, content, principalWithMcpPrefix());
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", "HUMAN_INPUT").increment();
-            return jsonSerialization.serialize(result);
+            // Submitting a turn is not reading the discussion: the pending member is
+            // refused the full view by get_group_approval_status, so the response to
+            // their submission must not hand it over either. Owner and admins get
+            // the conversation; everyone else an acknowledgement.
+            if (hitlAccessGuard.mayReadResumedDiscussion(result.getUserId())) {
+                return jsonSerialization.serialize(result);
+            }
+            var acknowledgement = new LinkedHashMap<String, Object>();
+            acknowledgement.put("groupConversationId", conversationId);
+            acknowledgement.put("accepted", true);
+            acknowledgement.put("state", result.getState() != null ? result.getState().name() : "");
+            return jsonSerialization.serialize(acknowledgement);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
         } catch (NotFoundException e) {

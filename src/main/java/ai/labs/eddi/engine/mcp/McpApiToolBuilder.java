@@ -17,6 +17,7 @@ import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.oas.models.servers.Server;
+import io.swagger.v3.oas.models.servers.ServerVariable;
 import io.swagger.v3.parser.ObjectMapperFactory;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
@@ -889,20 +890,15 @@ public final class McpApiToolBuilder {
     static String convertPathParams(String path, Map<String, String> variableNames) {
         var matcher = PATH_PARAM_PATTERN.matcher(path);
         var sb = new StringBuilder();
-        Set<String> taken = new HashSet<>(variableNames.values());
+        Set<String> taken = reservedNames();
+        taken.addAll(variableNames.values());
+        Map<String, Integer> nextSuffix = new HashMap<>();
         Map<String, String> undeclared = new HashMap<>();
         while (matcher.find()) {
             String paramName = matcher.group(1);
             String variableName = variableNames.get(paramName);
             if (variableName == null) {
-                variableName = undeclared.computeIfAbsent(paramName, name -> {
-                    String base = safeVariableName(name);
-                    String candidate = base;
-                    for (int suffix = 2; !taken.add(candidate); suffix++) {
-                        candidate = base + "_" + suffix;
-                    }
-                    return candidate;
-                });
+                variableName = undeclared.computeIfAbsent(paramName, name -> distinctName(safeVariableName(name), taken, nextSuffix));
             }
             matcher.appendReplacement(sb, Matcher.quoteReplacement("{" + variableName + "}"));
         }
@@ -946,19 +942,53 @@ public final class McpApiToolBuilder {
         if (parameters == null) {
             return names;
         }
-        Set<String> taken = new HashSet<>();
+        Set<String> taken = reservedNames();
+        Map<String, Integer> nextSuffix = new HashMap<>();
         for (Parameter param : parameters) {
             if (param == null || param.getName() == null || names.containsKey(param.getName())) {
                 continue;
             }
-            String base = safeVariableName(param.getName());
-            String candidate = base;
-            for (int suffix = 2; !taken.add(candidate); suffix++) {
-                candidate = base + "_" + suffix;
-            }
-            names.put(param.getName(), candidate);
+            names.put(param.getName(), distinctName(safeVariableName(param.getName()), taken, nextSuffix));
         }
         return names;
+    }
+
+    /**
+     * The names a generated variable may never take: the top-level namespaces the
+     * request template is rendered against ({@code properties}, {@code memory},
+     * ...). A spec parameter called {@code properties} would otherwise render the
+     * conversation's internal map into the request, because the template merge
+     * drops a tool argument that collides with one (it is renamed
+     * {@code properties_2} instead).
+     */
+    private static Set<String> reservedNames() {
+        return new HashSet<>(RESERVED_TEMPLATE_KEYS);
+    }
+
+    /**
+     * The top-level template namespaces a generated call is rendered against. Kept
+     * in step with {@code HttpCallToolsProvider.RESERVED_TEMPLATE_KEYS} (package
+     * private there), which drops a tool argument colliding with one of them.
+     */
+    static final Set<String> RESERVED_TEMPLATE_KEYS = Set.of("context", "properties", "memory", "snippets", "vars", "userInfo",
+            "conversationInfo", "conversationLog");
+
+    /**
+     * {@code base}, or {@code base_N} with the smallest free N. The next suffix to
+     * try is remembered per base, so many names reducing to the same identifier
+     * cost linear, not quadratic, work.
+     */
+    private static String distinctName(String base, Set<String> taken, Map<String, Integer> nextSuffix) {
+        if (taken.add(base)) {
+            return base;
+        }
+        int suffix = nextSuffix.getOrDefault(base, 2);
+        String candidate;
+        do {
+            candidate = base + "_" + suffix++;
+        } while (!taken.add(candidate));
+        nextSuffix.put(base, suffix);
+        return candidate;
     }
 
     /**
@@ -1145,9 +1175,38 @@ public final class McpApiToolBuilder {
         }
         if (openAPI.getServers() != null && !openAPI.getServers().isEmpty()) {
             Server server = openAPI.getServers().get(0);
-            return server.getUrl();
+            return literalServerUrl(server);
         }
         return "https://api.example.com"; // fallback
+    }
+
+    /**
+     * The spec's server URL as literal text. OpenAPI writes server variables as
+     * {@code {name}} - the same syntax as the request template the URL becomes part
+     * of - so a {@code {properties.x}} left in a third-party spec would be rendered
+     * against the conversation at call time and sent to the spec publisher's host.
+     * Declared variables are replaced by their defaults; a URL that still contains
+     * a brace is refused, and the author passes {@code apiBaseUrl} instead.
+     */
+    static String literalServerUrl(Server server) {
+        String url = server.getUrl();
+        if (url == null) {
+            return null;
+        }
+        Map<String, ServerVariable> variables = server.getVariables();
+        if (variables != null) {
+            for (var entry : variables.entrySet()) {
+                String value = entry.getValue() != null ? entry.getValue().getDefault() : null;
+                if (value != null && value.indexOf('{') < 0 && value.indexOf('}') < 0) {
+                    url = url.replace("{" + entry.getKey() + "}", value);
+                }
+            }
+        }
+        if (url.indexOf('{') >= 0 || url.indexOf('}') >= 0) {
+            throw new IllegalArgumentException("The spec's server URL contains a template expression that is not a declared server "
+                    + "variable with a default; pass apiBaseUrl to set the base URL explicitly.");
+        }
+        return url;
     }
 
     /**

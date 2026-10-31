@@ -204,6 +204,20 @@ final class McpToolUtils {
     }
 
     /**
+     * {@link #toolFailure(Logger, String, Throwable)} with a caller-facing
+     * description of what failed (e.g. {@code "Failed to read resource"}): a
+     * failure the caller can fix is described after it, anything else is logged
+     * under a reference and never echoed.
+     */
+    static String toolFailure(Logger log, String tool, String what, Throwable e) {
+        if (isCallerFacing(e)) {
+            log.debugf("%s rejected: %s", tool, describe(e));
+            return errorJson(what + ": " + describe(e));
+        }
+        return internalFailure(log, tool, what, e);
+    }
+
+    /**
      * The error for a failure that is this server's problem: the exception is
      * logged in full (with the stack) under a short reference id, and the caller
      * gets {@code what} plus that reference — errorCode {@code INTERNAL}, the

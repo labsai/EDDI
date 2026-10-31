@@ -286,6 +286,20 @@ class McpAdminToolsCrudTest {
     }
 
     @Test
+    void deleteResource_internalFailure_isNotEchoedToTheCaller() throws IOException {
+        // A store's raw message can name hosts and collections: an AUTHOR caller gets
+        // a reference to quote, not the text.
+        when(httpCallsStore.deleteApiCalls(RESOURCE_ID, 1, false))
+                .thenThrow(new IllegalStateException("mongodb://db-internal:27017 replica set rs0 unreachable"));
+
+        String result = tools.deleteResource("httpcalls", RESOURCE_ID, 1, false);
+
+        assertTrue(result.contains("Failed to delete resource"), result);
+        assertTrue(result.contains("INTERNAL"), result);
+        assertFalse(result.contains("db-internal"), result);
+    }
+
+    @Test
     void deleteResource_missingType_returnsError() {
         String result = tools.deleteResource(null, RESOURCE_ID, 1, false);
         assertTrue(result.contains("error"));
@@ -491,6 +505,22 @@ class McpAdminToolsCrudTest {
         assertTrue(result.contains("Test Agent"));
         verify(AgentStore).readAgent(AGENT_ID, 1);
         verify(WorkflowStore).readWorkflow(PKG_ID, 1);
+    }
+
+    @Test
+    void listAgentResources_readsEachDistinctWorkflowOnce() throws IOException {
+        var agentConfig = new AgentConfiguration();
+        URI wf = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1");
+        agentConfig.setWorkflows(List.of(wf, wf, wf, wf));
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
+        var pkgConfig = new WorkflowConfiguration();
+        pkgConfig.setWorkflowSteps(List.of());
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+        tools.listAgentResources(AGENT_ID, 1);
+
+        verify(WorkflowStore, times(1)).readWorkflow(PKG_ID, 1);
     }
 
     @Test
