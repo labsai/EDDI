@@ -74,6 +74,7 @@ class McpHitlToolsCoverageTest {
         guard = mock(HitlAccessGuard.class);
         // The default caller owns what it touches; the approver-only tests override it.
         when(guard.mayCancelExecuting(any())).thenReturn(true);
+        when(guard.mayReadResumedDiscussion(any())).thenReturn(true);
         ownershipValidator = mock(OwnershipValidator.class);
         json = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
@@ -568,5 +569,35 @@ class McpHitlToolsCoverageTest {
                 .thenThrow(new ResourceStoreException("db"));
         String out = tools.cancelGroupDiscussion("g1", "gc1");
         assertTrue(out.contains("\"errorCode\":\"INTERNAL\""), out);
+    }
+
+    @Test
+    void cancelGroup_approverOnly_runningDiscussion_forbidden_neverSignalsIt() throws Exception {
+        when(guard.mayCancelExecuting(any())).thenReturn(false);
+        when(groupConversationService.cancelPausedDiscussion(eq("gc1"), any())).thenReturn(false);
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+        verify(groupConversationService, never()).cancelDiscussion(any(), any());
+    }
+
+    @Test
+    void cancelGroup_approverOnly_pausedDiscussion_cancelled() throws Exception {
+        when(guard.mayCancelExecuting(any())).thenReturn(false);
+        when(groupConversationService.cancelPausedDiscussion(eq("gc1"), any())).thenReturn(true);
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+        assertTrue(out.contains("CANCELLED"), out);
+        verify(groupConversationService, never()).cancelDiscussion(any(), any());
+    }
+
+    @Test
+    void approveGroup_approverOnly_getsStateReceiptNotTheConversation() throws Exception {
+        when(guard.mayReadResumedDiscussion(any())).thenReturn(false);
+        var resumed = new GroupConversation();
+        resumed.setUserId("owner");
+        resumed.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.resumeDiscussion(eq("gc1"), any(), isNull())).thenReturn(resumed);
+        when(json.serialize(any())).thenAnswer(inv -> String.valueOf((Object) inv.getArgument(0)));
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null);
+        assertTrue(out.equals("{state=IN_PROGRESS}"), out);
     }
 }

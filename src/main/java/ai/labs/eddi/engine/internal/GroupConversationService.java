@@ -65,7 +65,6 @@ import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
-import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
@@ -108,7 +107,6 @@ import java.util.concurrent.atomic.DoubleAdder;
 public class GroupConversationService implements IGroupConversationService, UserErasureParticipant {
 
     private static final Logger LOGGER = Logger.getLogger(GroupConversationService.class);
-    private static final Environment DEFAULT_ENV = Environment.production;
 
     /**
      * Default per-agent-turn timeout (seconds) when not configured via
@@ -852,11 +850,6 @@ public class GroupConversationService implements IGroupConversationService, User
         // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
         boolean costCeilingSynthesizeNow = false;
 
-        // I2: set when a phase returns END_DISCUSSION. Nothing produces that signal
-        // yet — I12's facilitator will — but the loop honors it now so adding the
-        // producer later cannot have it silently degrade to "end this phase only".
-        boolean endDiscussionEarly = false;
-
         try {
             // F1: publish the live instance this leg runs with. Covers both a fresh
             // start and a resume re-entry (this method is the single entry point for
@@ -1367,12 +1360,6 @@ public class GroupConversationService implements IGroupConversationService, User
                         LOGGER.infof("Phase '%s' of group %s ended early after repeat %d: %s",
                                 LogSanitizer.sanitize(phase.name()), LogSanitizer.sanitize(gc.getGroupId()), repeat,
                                 LogSanitizer.sanitize(outcome.reason()));
-                        if (outcome.signal() == PhaseOutcome.PhaseExitSignal.END_DISCUSSION) {
-                            // Nothing produces this yet (I12's facilitator will). Handled
-                            // rather than ignored so the signal cannot be added later and
-                            // silently behave as END_REPEATS.
-                            endDiscussionEarly = true;
-                        }
                         break;
                     }
                     previousRepeatEntries = repeatEntries;
@@ -1458,7 +1445,7 @@ public class GroupConversationService implements IGroupConversationService, User
                 // them via the context (and save-time validation refuses the combo).
                 if (config.getFacilitator() != null && config.getFacilitator().enabled()
                         && config.getFacilitator().checkAfter() == AgentGroupConfiguration.FacilitatorCheckpoint.EACH_PHASE
-                        && !costCeilingSynthesizeNow && !endDiscussionEarly) {
+                        && !costCeilingSynthesizeNow) {
                     var facilitatorCtx = new FacilitatorEngine.CheckpointContext(
                             phaseIdx, Math.max(phase.repeats(), 1) - 1, false, false, false,
                             phaseIdx + 1 < phaseList.size());
@@ -1482,14 +1469,6 @@ public class GroupConversationService implements IGroupConversationService, User
                     }
                 }
 
-                // I2: END_DISCUSSION ends the phase loop itself, unlike END_REPEATS
-                // which only ended the repeat loop above. Placed after the HITL gate so
-                // an approval that was already due is still honored.
-                if (endDiscussionEarly) {
-                    LOGGER.infof("Group discussion %s ending early after phase %d on an END_DISCUSSION signal", LogSanitizer.sanitize(gc.getId()),
-                            phaseIdx);
-                    break;
-                }
             }
 
             // Extract synthesis from the last SYNTHESIS phase entry.
@@ -2063,6 +2042,33 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     /**
+     * The cost ceiling a follow-up turn runs under: the group's current
+     * {@code protocol.maxCostPerDiscussion}, tightened by the budget a nested
+     * discussion inherited — the same resolution {@code executeDiscussion} applies
+     * to every phase turn. {@code null} means unlimited. A config that cannot be
+     * loaded leaves only the inherited ceiling (the follow-up then fails on the
+     * same unreadable config anyway, through its timeout lookup).
+     * <p>
+     * Public: called back from GroupLifecycleOps.followUpWithMember.
+     */
+    public Double resolveEffectiveCostCeiling(GroupConversation gc) {
+        Double own = null;
+        try {
+            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+            if (currentGroupId != null) {
+                AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+                if (config != null) {
+                    own = resolveProtocol(config).maxCostPerDiscussion();
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not resolve the cost ceiling for group %s: %s",
+                    LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+        }
+        return effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+    }
+
+    /**
      * Determines which members participate in a phase based on the
      * {@code participants} field: "ALL", "MODERATOR", or "ROLE:&lt;name&gt;".
      */
@@ -2348,14 +2354,6 @@ public class GroupConversationService implements IGroupConversationService, User
     private String resolveTaskAssignment(String assignToRole, List<GroupMember> members,
                                          String moderatorAgentId, int taskIndex) {
         return taskForceEngine.resolveTaskAssignment(assignToRole, members, moderatorAgentId, taskIndex);
-    }
-
-    private GroupMember findMember(List<GroupMember> members, String agentId) {
-        return taskForceEngine.findMember(members, agentId);
-    }
-
-    private GroupMember findMemberIncludingDynamic(List<GroupMember> configMembers, GroupConversation gc, String agentId) {
-        return taskForceEngine.findMemberIncludingDynamic(configMembers, gc, agentId);
     }
 
     // =================================================================
@@ -2736,6 +2734,20 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     @Override
+    public boolean cancelPausedDiscussion(String conversationId, ControlSignal mode)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        // No cross-node forwarding: a paused discussion runs nowhere, and the
+        // paused-state CAS fails if a resume elsewhere already moved it on.
+        return hitlCoordinator.cancelPausedDiscussion(conversationId, mode);
+    }
+
+    @Override
+    public boolean cancelPausedDiscussion(String conversationId, ControlSignal mode, String expectedPauseId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return hitlCoordinator.cancelPausedDiscussion(conversationId, mode, expectedPauseId);
+    }
+
+    @Override
     public GroupConversation resumeDiscussion(String groupConversationId, GroupApprovalRequest request,
                                               GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
@@ -2753,8 +2765,8 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     @Override
-    public void skipHumanTurnOnTimeout(String groupConversationId) {
-        hitlCoordinator.skipHumanTurnOnTimeout(groupConversationId);
+    public void skipHumanTurnOnTimeout(String groupConversationId, String expectedPauseId) {
+        hitlCoordinator.skipHumanTurnOnTimeout(groupConversationId, expectedPauseId);
     }
 
     private void restoreGroupPause(GroupConversation gc, int phaseIndex, String phaseName,
