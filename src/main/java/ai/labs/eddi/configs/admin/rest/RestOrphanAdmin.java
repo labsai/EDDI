@@ -638,6 +638,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     if (agentConfig.getWorkflows() != null) {
                         for (URI workflowUri : agentConfig.getWorkflows()) {
                             referencedResources.add(resourceKey(workflowUri));
+                            // The exact workflow version this agent pins, not only the
+                            // workflow's current one (step 1b): a newer workflow version
+                            // that dropped a dependency must not make the dependency of
+                            // the pinned version look orphaned, deployed agent or not.
+                            failureReason = collectExtensionUrisOfPinnedWorkflow(workflowUri, referencedResources, failureReason);
                         }
                     }
                 } catch (IResourceStore.ResourceNotFoundException e) {
@@ -741,9 +746,10 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
     }
 
     /**
-     * Reads the exact workflow version a deployed Agent pins — which the
-     * descriptor-driven walk in {@link #scanReferencedUris()} does not see, because
-     * that only visits current versions — and records its extension references.
+     * Reads the exact workflow version an Agent (current or deployed) pins — which
+     * the descriptor-driven walk in {@link #scanReferencedUris()} does not see,
+     * because that only visits current versions — and records its extension
+     * references.
      */
     private String collectExtensionUrisOfPinnedWorkflow(URI workflowUri, Set<String> referencedResources, String currentFailure) {
         var resourceId = RestUtilities.extractResourceId(workflowUri);
@@ -756,8 +762,8 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
         } catch (IResourceStore.ResourceNotFoundException e) {
             return currentFailure;
         } catch (Exception e) {
-            log.warnf("Error reading deployed workflow %s: %s", workflowUri, e.getMessage());
-            return "could not read deployed workflow " + workflowUri + ": " + e.getMessage();
+            log.warnf("Error reading pinned workflow %s: %s", workflowUri, e.getMessage());
+            return "could not read pinned workflow " + workflowUri + ": " + e.getMessage();
         }
     }
 

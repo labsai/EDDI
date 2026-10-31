@@ -10,12 +10,16 @@ import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import jakarta.ws.rs.BadRequestException;
 import io.quarkus.security.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -131,5 +135,41 @@ class RestChannelIntegrationStoreAccessTest {
 
         verify(accessGuard).requireAgentUseAccess(AGENT_ID);
         verify(channelStore).create(org.mockito.ArgumentMatchers.any());
+    }
+    @Test
+    @DisplayName("duplicating a channel re-checks USE on its targets, as a create does")
+    void refusesDuplicateForUngrantedAgent() throws Exception {
+        String sourceId = "dddddddddddddddddddddddd";
+        when(channelStore.getCurrentResourceId(sourceId)).thenReturn(new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return sourceId;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return 1;
+            }
+        });
+        when(channelStore.read(sourceId, 1)).thenReturn(config(ChannelTarget.TargetType.AGENT, AGENT_ID));
+        doThrow(new ForbiddenException("nope")).when(accessGuard).requireAgentUseAccess(AGENT_ID);
+
+        assertThrows(ForbiddenException.class, () -> store.duplicateChannel(sourceId, 1));
+
+        verify(channelStore, never()).create(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("binding a channelId a deployed agent's legacy connector serves is refused")
+    void refusesLegacyConnectorTakeover() throws Exception {
+        var router = mock(ChannelTargetRouter.class);
+        when(router.isChannelOwned("slack", "C0LEGACY")).thenReturn(true);
+        store.channelTargetRouter = router;
+        var cfg = config(ChannelTarget.TargetType.AGENT, AGENT_ID);
+        cfg.setPlatformConfig(new HashMap<>(Map.of("channelId", "C0LEGACY")));
+
+        assertThrows(BadRequestException.class, () -> store.createChannel(cfg));
+
+        verify(channelStore, never()).create(org.mockito.ArgumentMatchers.any());
     }
 }

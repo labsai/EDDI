@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -171,25 +172,49 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 : ConfigSecretRedactor.redact(stored, ChannelIntegrationConfiguration.class);
     }
 
+    /**
+     * Cluster mode aside, makes each uniqueness check and the write it guards one
+     * step. The checks scan the stored integrations and the write follows, so two
+     * concurrent saves claiming the same {@code channelType:channelId} (or name)
+     * both passed the scan and both landed, leaving a duplicate routing key the
+     * router resolved by iteration order. Channel writes are rare; serialising them
+     * on this node costs nothing measurable.
+     */
+    private final Object uniquenessLock = new Object();
+
+    /**
+     * Field-injected so the constructors (and the tests built with them) stay as
+     * they are; {@code null} there, which skips only the legacy-connector check.
+     */
+    @Inject
+    ChannelTargetRouter channelTargetRouter;
+
     @Override
     public Response updateChannel(String id, Integer version,
                                   ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
-        validateUniqueChannelId(channelConfiguration, id);
-        validateUniqueName(channelConfiguration, id);
-        Response response = restVersionInfo.update(id, version, channelConfiguration);
-        syncDescriptor(id, channelConfiguration);
-        return response;
+        synchronized (uniquenessLock) {
+            validateUniqueChannelId(channelConfiguration, id);
+            refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
+            validateUniqueName(channelConfiguration, id);
+            Response response = restVersionInfo.update(id, version, channelConfiguration);
+            syncDescriptor(id, channelConfiguration);
+            return response;
+        }
     }
 
     @Override
     public Response createChannel(ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
-        validateUniqueChannelId(channelConfiguration, null);
-        validateUniqueName(channelConfiguration, null);
-        Response response = restVersionInfo.create(channelConfiguration);
+        Response response;
+        synchronized (uniquenessLock) {
+            validateUniqueChannelId(channelConfiguration, null);
+            refuseLegacyConnectorTakeover(channelConfiguration, null);
+            validateUniqueName(channelConfiguration, null);
+            response = restVersionInfo.create(channelConfiguration);
+        }
         URI location = response.getLocation();
         if (location != null) {
             try {
@@ -219,8 +244,15 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             config.setName(deriveUniqueDuplicateName(config.getName(), config.getChannelType()));
         }
         validateConfiguration(config);
-        validateUniqueName(config, null);
-        Response response = restVersionInfo.create(config);
+        // A copy is a new standing route, so its targets need the same USE check a
+        // create runs: duplicating an old version used to restore a route to an
+        // agent the caller may not use.
+        requireUseOnTargets(config);
+        Response response;
+        synchronized (uniquenessLock) {
+            validateUniqueName(config, null);
+            response = restVersionInfo.create(config);
+        }
         URI location = response.getLocation();
         if (location != null) {
             try {
@@ -524,6 +556,39 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             throw e;
         } catch (Exception e) {
             LOG.warn("Failed to check channel ID uniqueness — allowing save", e);
+        }
+    }
+
+    /**
+     * Refuses a {@code channelId} a deployed agent's legacy
+     * {@code ChannelConnector} already serves. The router lets a standalone
+     * integration take precedence over a legacy connector for the same channel, so
+     * saving one silently replaced that agent's routing and signing identity,
+     * though its author could not edit the agent. Keeping the channel an
+     * integration already had is not a takeover.
+     */
+    private void refuseLegacyConnectorTakeover(ChannelIntegrationConfiguration config, String previousChannelId) {
+        if (channelTargetRouter == null || config.getPlatformConfig() == null) {
+            return;
+        }
+        String channelId = config.getPlatformConfig().get("channelId");
+        if (channelId == null || channelId.isBlank() || channelId.equals(previousChannelId)) {
+            return;
+        }
+        // validateUniqueChannelId has already refused another standalone integration
+        // owning it, so an owner left at this point is a legacy connector.
+        if (channelTargetRouter.isChannelOwned(config.getChannelType(), channelId)) {
+            throw new BadRequestException("channelId '" + channelId + "' is already served by an agent's legacy channel connector. "
+                    + "Migrate that connector to a channel integration (or remove it) before binding the channel here.");
+        }
+    }
+
+    private String storedChannelId(String id, Integer version) {
+        try {
+            ChannelIntegrationConfiguration stored = channelStore.read(id, restVersionInfo.validateParameters(id, version));
+            return stored == null || stored.getPlatformConfig() == null ? null : stored.getPlatformConfig().get("channelId");
+        } catch (Exception e) {
+            return null; // unreadable: judge the channelId as new, the stricter answer
         }
     }
 

@@ -641,6 +641,43 @@ class RestOrphanAdminSafetyTest {
         }
 
         @Test
+        @DisplayName("an extension used by the workflow version a current, undeployed agent pins is not an orphan")
+        void currentAgentPinnedWorkflowVersionProtectsItsExtensions() throws Exception {
+            String workflowId = "aabbccddeeff11223344558b";
+            String outputId = "aabbccddeeff11223344558c";
+            URI pinnedWorkflowUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1");
+            URI outputUri = URI.create("eddi://ai.labs.output/outputstore/outputsets/" + outputId + "?version=1");
+
+            // The agent pins workflow v1, which uses the output set ...
+            AgentConfiguration agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(pinnedWorkflowUri));
+            WorkflowConfiguration pinned = new WorkflowConfiguration();
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setConfig(new HashMap<>(Map.of("uri", outputUri.toString())));
+            pinned.setWorkflowSteps(List.of(step));
+            // ... while the workflow's current version (v2) no longer does.
+
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(AGENT_URI, "undeployed-agent")));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=2"),
+                            "edited-workflow")));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.output"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(outputUri, "still-needed-output")));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(agent);
+            when(workflowStore.read(workflowId, 2)).thenReturn(emptyWorkflow());
+            when(workflowStore.read(workflowId, 1)).thenReturn(pinned);
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+
+            OrphanReport report = restOrphanAdmin.scanOrphans(false);
+
+            assertTrue(report.getOrphans().stream().noneMatch(o -> o.getResourceUri().toString().contains(outputId)),
+                    "the pinned workflow version's output set must not be reported as an orphan");
+        }
+
+        @Test
         @DisplayName("a deployment store that cannot be read makes the scan incomplete and refuses the purge")
         void unreadableDeploymentStoreRefusesThePurge() throws Exception {
             when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
