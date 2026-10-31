@@ -21,8 +21,33 @@ import {
 export const KNOWN_TOOL_SOURCES: readonly string[] = TOOL_SOURCES;
 
 const PATTERN_MAX_LENGTH = 256;
-// Mirrors Java LEGAL_CHARS `[A-Za-z0-9_\-.:*]+` used with a full-string match.
-const LEGAL_PATTERN_CHARS = /^[A-Za-z0-9_.:*-]+$/;
+// Mirrors Java LEGAL_CHARS `[A-Za-z0-9_\-.:*/{}]+` used with a full-string match.
+// `/ { }` let a pattern name an endpoint path template such as
+// `http.post:/agentstore/agents/{id}`.
+const LEGAL_PATTERN_CHARS = /^[A-Za-z0-9_.:*/{}-]+$/;
+
+/** The only source whose tools carry an endpoint, hence the only one qualifiable by method. */
+const HTTP_SOURCE = "http";
+/** HTTP methods that may qualify the http source, as `http.post:…`. */
+const KNOWN_METHODS: readonly string[] = ["get", "post", "put", "patch", "delete", "head", "options"];
+
+/** Whether a prefix is `http.<method>`, e.g. `http.post`. Mirrors the Java check. */
+function isMethodQualifiedSource(prefix: string): boolean {
+  const dot = prefix.indexOf(".");
+  if (dot <= 0) return false;
+  return prefix.substring(0, dot) === HTTP_SOURCE && KNOWN_METHODS.includes(prefix.substring(dot + 1));
+}
+
+/**
+ * Whether a (possibly wildcard) prefix could match a real endpoint key, i.e.
+ * some `http.<method>`. `mcp*` contains a `*` yet can never match `http.post`.
+ */
+function prefixCanMatchAnHttpEndpoint(prefix: string): boolean {
+  const regex = new RegExp(
+    "^" + prefix.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
+  );
+  return KNOWN_METHODS.some((method) => regex.test(`${HTTP_SOURCE}.${method}`));
+}
 
 const ON_NO_PROGRESS_VALUES = ["WAIT_FOR_HUMAN", "AUTO_REJECT", "ABORT"];
 
@@ -63,7 +88,7 @@ export function validateToolPattern(pattern: string): string | null {
     return `pattern exceeds ${PATTERN_MAX_LENGTH} characters`;
   }
   if (!LEGAL_PATTERN_CHARS.test(pattern)) {
-    return `pattern '${pattern}' contains illegal characters — allowed: A-Za-z0-9_-.:* (tool names never contain spaces)`;
+    return `pattern '${pattern}' contains illegal characters — allowed: A-Za-z0-9_-.:* plus / { } for endpoint paths (tool names never contain spaces)`;
   }
   if (pattern.startsWith(":") || pattern.endsWith(":")) {
     return `pattern '${pattern}' must not start or end with a colon — the colon separates a source prefix (e.g. 'mcp:read_*') from the tool name`;
@@ -71,8 +96,18 @@ export function validateToolPattern(pattern: string): string | null {
   const colon = pattern.indexOf(":");
   if (colon > 0) {
     const prefix = pattern.substring(0, colon);
-    if (!prefix.includes("*") && !KNOWN_TOOL_SOURCES.includes(prefix)) {
-      return `unknown tool source prefix '${prefix}:' in pattern '${pattern}'${suggestionFor(prefix)} — known sources: ${KNOWN_TOOL_SOURCES.join(", ")}`;
+    const target = pattern.substring(colon + 1);
+    const methodQualified = isMethodQualifiedSource(prefix);
+    if (!prefix.includes("*") && !KNOWN_TOOL_SOURCES.includes(prefix) && !methodQualified) {
+      return `unknown tool source prefix '${prefix}:' in pattern '${pattern}'${suggestionFor(prefix)} — known sources: ${KNOWN_TOOL_SOURCES.join(", ")}; only the http source may be qualified by method, e.g. 'http.post:'`;
+    }
+    // The remaining shapes save and match nothing, which for a require-pattern is
+    // an ungated call. An endpoint path always begins with a slash.
+    if (target.startsWith("/") && !methodQualified && !prefixCanMatchAnHttpEndpoint(prefix)) {
+      return `pattern '${pattern}' targets an endpoint path but its prefix can never match one, so the pattern matches nothing — endpoint patterns look like 'http.post:${target}'`;
+    }
+    if (methodQualified && !target.startsWith("/") && !target.startsWith("*")) {
+      return `pattern '${pattern}' is method-qualified, so its target is an endpoint path and must begin with '/' (or '*') — did you mean '${prefix}:/${target}'?`;
     }
   }
   return null;
