@@ -109,11 +109,20 @@ export function ExportAgentDialog({
   }
 
   function handleExport() {
+    // Snippets and schedules are filtered by their OWN parameters on the
+    // backend; an omitted one exports every row of that type, so a deselected
+    // snippet or schedule would still land in the archive. Send the selection
+    // whenever the preview listed rows of the type (an empty list = none).
+    const selectedOfType = (type: string): string[] | undefined => {
+      const rows = (preview?.resources ?? []).filter((r) => r.resourceType === type);
+      return rows.length > 0 ? rows.filter((r) => selected.has(r.resourceId)).map((r) => r.resourceId) : undefined;
+    };
     exportMutation.mutate(
       {
         agentId,
         version: agentVersion,
         selectedResourceIds: Array.from(selected),
+        selection: { snippets: selectedOfType("snippet"), schedules: selectedOfType("schedule") },
       },
       { onSuccess: () => handleClose() }
     );

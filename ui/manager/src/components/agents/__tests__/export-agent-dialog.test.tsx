@@ -114,4 +114,40 @@ describe("ExportAgentDialog", () => {
     await user.click(checkbox);
     expect(checkbox.checked).toBe(false);
   });
+
+  it("sends snippet and schedule selections separately so deselected rows are not exported", async () => {
+    const user = userEvent.setup();
+    let requested: URL | null = null;
+    server.use(
+      http.post("*/backup/export/:agentId/preview", () =>
+        HttpResponse.json({
+          agentId: "agent1",
+          agentName: "Support Agent",
+          agentVersion: 3,
+          resources: [
+            { resourceId: "agent1", resourceVersion: 3, resourceType: "agent", name: "Support Agent", parentWorkflowId: null, workflowIndex: -1, required: true },
+            { resourceId: "snip-a", resourceVersion: 1, resourceType: "snippet", name: "Snippet A", parentWorkflowId: null, workflowIndex: -1, required: false },
+            { resourceId: "snip-b", resourceVersion: 1, resourceType: "snippet", name: "Snippet B", parentWorkflowId: null, workflowIndex: -1, required: false },
+            { resourceId: "sched-1", resourceVersion: null, resourceType: "schedule", name: "Nightly", parentWorkflowId: null, workflowIndex: -1, required: false },
+          ],
+        }),
+      ),
+      http.post("*/backup/export/:agentId", ({ request }) => {
+        requested = new URL(request.url);
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderWithProviders(<ExportAgentDialog {...defaultProps} />);
+    await waitFor(() => expect(screen.getByText("Snippet A")).toBeInTheDocument());
+
+    for (const name of ["Snippet B", "Nightly"]) {
+      await user.click(screen.getByText(name).closest("label")!.querySelector("input[type='checkbox']")!);
+    }
+    await user.click(screen.getByTestId("export-confirm-btn"));
+
+    await waitFor(() => expect(requested).not.toBeNull());
+    expect(requested!.searchParams.get("selectedSnippets")).toBe("snip-a");
+    // Present-but-empty: "none of the schedules", not "all of them".
+    expect(requested!.searchParams.get("selectedSchedules")).toBe("");
+  });
 });
