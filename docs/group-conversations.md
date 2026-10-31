@@ -656,7 +656,8 @@ its explicit tool selection: a member whose `builtInToolsWhitelist` is non-empty
 receives the artifact tools only if the list names `artifacts`, and the task
 tools only if it names `group_tasks` — a group opt-in never widens a whitelist
 the member's own configuration narrowed. An omitted or empty whitelist admits
-both, as before. Artifact,
+both, as before. When upgrading, add the two slugs to any member whitelist that
+should keep these tools; the Manager's tool picker offers both. Artifact,
 task and dynamic-agent tool results are never served from the tool cache: every
 member runs as the same user, so a cached `listArtifacts()` would hide a peer's
 new artifact. `markFinal: true` freezes an
