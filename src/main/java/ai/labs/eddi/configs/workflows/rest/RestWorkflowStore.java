@@ -31,6 +31,7 @@ import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,7 +48,6 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     private static final String KEY_TYPE = "type";
     private static final String KEY_DICTIONARIES = "dictionaries";
     private static final String DICTIONARY_TYPE_HOST = "ai.labs.parser.dictionaries.regular";
-    private static final String EDDI_SCHEME_PREFIX = "eddi://";
     /**
      * Referenced types a caller needs only USE on, because using them is what a
      * reference does — an agent or a group is talked to, never read. Everything
@@ -241,22 +241,31 @@ public class RestWorkflowStore implements IRestWorkflowStore {
                 continue;
             }
             addReference(step.getConfig(), references);
-            Map<String, Object> extensions = step.getExtensions();
-            if (extensions == null) {
+            addExtensionReferences(step.getExtensions(), references);
+        }
+        return references;
+    }
+
+    /**
+     * Adds every resource named by an extension element's {@code config.uri} (the
+     * {@code "dictionaries": [{"type": ..., "config": {"uri": ...}}]} shape a
+     * parser step and a standalone parser configuration share), keyed as
+     * {@link #referencedResources} keys them.
+     */
+    public static void addExtensionReferences(Map<String, Object> extensions, Map<String, URI> references) {
+        if (extensions == null) {
+            return;
+        }
+        for (Object extensionValue : extensions.values()) {
+            if (!(extensionValue instanceof List<?> elements)) {
                 continue;
             }
-            for (Object extensionValue : extensions.values()) {
-                if (!(extensionValue instanceof List<?> elements)) {
-                    continue;
-                }
-                for (Object element : elements) {
-                    if (element instanceof Map<?, ?> elementMap && elementMap.get(KEY_CONFIG) instanceof Map<?, ?> config) {
-                        addReference(config, references);
-                    }
+            for (Object element : elements) {
+                if (element instanceof Map<?, ?> elementMap && elementMap.get(KEY_CONFIG) instanceof Map<?, ?> config) {
+                    addReference(config, references);
                 }
             }
         }
-        return references;
     }
 
     private static void addReference(Map<?, ?> config, Map<String, URI> references) {
@@ -265,18 +274,22 @@ public class RestWorkflowStore implements IRestWorkflowStore {
             return;
         }
         String text = raw.toString().trim();
-        if (!text.startsWith(EDDI_SCHEME_PREFIX)) {
-            return;
-        }
         URI uri;
         try {
             uri = URI.create(text);
         } catch (IllegalArgumentException e) {
             return;
         }
+        // Not filtered on a literal "eddi://" prefix: the engine resolves a step by
+        // URI.create + host and never looks at the scheme, so "Eddi://ai.labs.llm/…"
+        // or "x://ai.labs.llm/…" runs exactly the configuration "eddi://…" does. A
+        // reference the check skipped but the engine executes was a way round it.
+        if (uri.getScheme() == null || uri.getHost() == null) {
+            return;
+        }
         IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(uri);
         if (resourceId != null && resourceId.getId() != null && !resourceId.getId().isBlank()) {
-            references.putIfAbsent(uri.getHost() + "|" + resourceId.getId(), uri);
+            references.putIfAbsent(uri.getHost().toLowerCase(Locale.ROOT) + "|" + resourceId.getId(), uri);
         }
     }
 
