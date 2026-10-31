@@ -22,7 +22,6 @@ public class PunctuationNormalizerProvider implements INormalizerProvider {
 
     private static final String KEY_REMOVE_PUNCTUATION = "removePunctuation";
     private static final String KEY_PUNCTUATION_REGEX_PATTERN = "punctuationRegexPattern";
-    private String punctuationRegexPattern = PunctuationNormalizer.PUNCTUATION;
 
     @Override
     public String getId() {
@@ -42,6 +41,10 @@ public class PunctuationNormalizerProvider implements INormalizerProvider {
             removePunctuation = Boolean.parseBoolean(config.get(KEY_REMOVE_PUNCTUATION).toString());
         }
 
+        // A local, never a field: this provider is an application-wide singleton, and
+        // a field set from one parser's configuration became the default of every
+        // parser built after it.
+        String punctuationRegexPattern = PunctuationNormalizer.PUNCTUATION;
         if (config.containsKey(KEY_PUNCTUATION_REGEX_PATTERN)) {
             punctuationRegexPattern = config.get(KEY_PUNCTUATION_REGEX_PATTERN).toString();
         }
@@ -54,7 +57,7 @@ public class PunctuationNormalizerProvider implements INormalizerProvider {
         Map<String, ConfigValue> ret = new HashMap<>();
 
         ret.put(KEY_REMOVE_PUNCTUATION, new ConfigValue("Remove Punctuation", BOOLEAN, true, false));
-        ret.put(KEY_PUNCTUATION_REGEX_PATTERN, new ConfigValue("Punctuation RegEx Pattern", STRING, true, punctuationRegexPattern));
+        ret.put(KEY_PUNCTUATION_REGEX_PATTERN, new ConfigValue("Punctuation RegEx Pattern", STRING, true, PunctuationNormalizer.PUNCTUATION));
 
         return ret;
     }
