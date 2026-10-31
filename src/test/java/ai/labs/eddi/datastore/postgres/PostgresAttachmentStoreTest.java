@@ -314,4 +314,18 @@ class PostgresAttachmentStoreTest {
         // then — createStatement (schema init) should only be called once
         verify(connection, times(1)).createStatement();
     }
+    @Test
+    void grantAccess_unknownBlob_throwsNotFound_likeTheMongoStore() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertThrows(IAttachmentStore.AttachmentNotFoundException.class, () -> sut.grantAccess("missing-ref", "conv-2"));
+    }
+    @Test
+    void delete_rowWithNoOwner_failsClosed() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn(null);
+
+        assertThrows(AttachmentStoreException.class, () -> sut.delete("legacy-ref", "conv-1"));
+        verify(preparedStatement, never()).executeUpdate();
+    }
 }

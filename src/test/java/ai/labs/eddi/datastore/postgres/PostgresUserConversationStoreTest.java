@@ -144,7 +144,7 @@ class PostgresUserConversationStoreTest extends PostgresTestBase {
 
         @Test
         @DisplayName("deleteAllForUser non-existent — returns 0")
-        void deleteNonExistent() {
+        void deleteNonExistent() throws Exception {
             assertEquals(0, store.deleteAllForUser("ghost"));
         }
     }

@@ -285,7 +285,9 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         }
         Document metadata = file.getMetadata();
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
-        if (owner != null && !owner.equals(requestingConversationId)) {
+        // Fails closed: a blob that records no owner (a pre-ownership legacy blob) is
+        // nobody's to delete through a conversation, rather than everybody's.
+        if (owner == null || !owner.equals(requestingConversationId)) {
             throw new AttachmentAccessDeniedException(
                     "Delete denied: attachment belongs to '%s', requested from '%s'"
                             .formatted(owner, requestingConversationId));
@@ -420,14 +422,14 @@ public class GridFsAttachmentStore implements IAttachmentStore {
 
     private void authorize(GridFSFile file, String requester) throws AttachmentStoreException {
         Document metadata = file.getMetadata();
-        if (metadata == null) {
-            return; // legacy blobs without metadata remain accessible
-        }
-        String owner = metadata.getString(META_CONVERSATION_ID);
-        if (owner == null || owner.equals(requester)) {
+        // Fails closed, as the PostgreSQL store does: a blob with no recorded owner
+        // (a pre-ownership legacy blob) used to be readable by any conversation that
+        // knew its reference. Ownership that cannot be established is not ownership.
+        String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
+        if (owner != null && owner.equals(requester)) {
             return;
         }
-        List<String> grants = metadata.getList(META_GRANTS, String.class);
+        List<String> grants = metadata != null ? metadata.getList(META_GRANTS, String.class) : null;
         if (grants != null && grants.contains(requester)) {
             return;
         }

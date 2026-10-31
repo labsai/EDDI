@@ -176,15 +176,17 @@ public class PostgresUserConversationStore implements IUserConversationStore {
     // === GDPR ===
 
     @Override
-    public long deleteAllForUser(String userId) {
+    public long deleteAllForUser(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "DELETE FROM user_conversations WHERE user_id = ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             return ps.executeUpdate();
         } catch (SQLException e) {
-            LOGGER.error("Failed to delete all user conversations", e);
-            return 0;
+            // Thrown, not swallowed into "0 deleted": the GDPR erasure cascade records a
+            // failed step only from an exception, so a zero here reported the user's
+            // mappings as erased while they were still stored.
+            throw new IResourceStore.ResourceStoreException("Failed to delete all user conversations: " + e.getLocalizedMessage(), e);
         }
     }
 

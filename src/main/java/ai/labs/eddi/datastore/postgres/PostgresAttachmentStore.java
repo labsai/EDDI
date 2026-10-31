@@ -200,7 +200,9 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             ps.setString(3, storageRef);
             int updated = ps.executeUpdate();
             if (updated == 0) {
-                throw new AttachmentStoreException("Attachment not found: " + storageRef);
+                // The same subtype the MongoDB store throws, so a caller telling "gone"
+                // from "the store failed" gets the same answer on both backends.
+                throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
             }
             LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                     sanitize(conversationId), storageRef);
@@ -224,7 +226,8 @@ public class PostgresAttachmentStore implements IAttachmentStore {
                     owner = rs.getString("conversation_id");
                 }
             }
-            if (owner != null && !owner.equals(requestingConversationId)) {
+            // Fails closed for a row that records no owner, as the read path does.
+            if (owner == null || !owner.equals(requestingConversationId)) {
                 throw new AttachmentAccessDeniedException(
                         "Delete denied: attachment belongs to '%s', requested from '%s'"
                                 .formatted(owner, requestingConversationId));

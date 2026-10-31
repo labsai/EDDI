@@ -384,6 +384,23 @@ class MongoResourceStorageTest {
     }
 
     @Test
+    @DisplayName("findResources — a sorted page breaks ties on _id, so skip/limit paging is stable")
+    void findResourcesSortHasUniqueTiebreaker() {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
+        when(iterable.sort(any(Bson.class))).thenReturn(iterable);
+        when(iterable.limit(anyInt())).thenReturn(iterable);
+        when(iterable.skip(anyInt())).thenReturn(iterable);
+
+        storage.findResources(new IResourceFilter.QueryFilters[0], "lastModifiedOn", 20, 10);
+
+        ArgumentCaptor<Bson> sort = ArgumentCaptor.forClass(Bson.class);
+        verify(iterable).sort(sort.capture());
+        Document order = (Document) sort.getValue();
+        assertEquals(List.of("lastModifiedOn", "_id"), List.copyOf(order.keySet()));
+    }
+
+    @Test
     @DisplayName("readMany — one query for the whole page, results in request order")
     void readManyKeepsRequestOrder() {
         String otherId = "aabbccddeeff112233445577";

@@ -880,7 +880,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         // is
         // a server-side error ("$and/$or/$nor must be a nonempty array").
         Bson query = connectedFilters.isEmpty() ? new Document() : Filters.and(connectedFilters);
-        Document sort = sortField != null ? new Document(sortField, -1) : new Document();
+        // _id breaks ties: documents sharing a sort value (the same lastModified) have
+        // no
+        // defined order between them, so skip/limit paging could repeat one document on
+        // two pages and never return another.
+        Document sort = sortField != null ? new Document(sortField, -1).append(ID_FIELD, -1) : new Document();
         int effectiveLimit = IResourceStorage.resolveLimit(limit);
 
         var iterable = currentCollection.find(query.toBsonDocument()).sort(sort).limit(effectiveLimit).skip(skip > 0 ? skip : 0);
