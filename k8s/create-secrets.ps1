@@ -196,6 +196,27 @@ if (-not $nsExists) {
 # Normal creation relies instead on `kubectl create` refusing with AlreadyExists
 # — evaluated by the API server against the live object, atomically, at the
 # moment of the write. That refusal is handled below.
+#
+# The key reaches kubectl through a file, so a private directory for it is made
+# first — BEFORE the -Force delete, so that nothing which can fail here runs after
+# the live Secret is gone. On Linux/macOS `mktemp -d` creates the directory with
+# mode 0700 in the same call, so no other local user can open the file inside it,
+# whatever the umask; changing a file's mode after creating it leaves a window,
+# and .NET's Unix file-mode API needs PowerShell 7.3+. On Windows the per-user temp
+# directory already limits access.
+$onUnix = (Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue) -or (Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue)
+if ($onUnix) {
+    $secretDir = & mktemp -d 2>$null | Select-Object -First 1
+}
+else {
+    $secretDir = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString())
+    New-Item -ItemType Directory -Path $secretDir -ErrorAction SilentlyContinue | Out-Null
+}
+if (-not $secretDir -or -not (Test-Path -LiteralPath $secretDir -PathType Container)) {
+    Write-Error -Message "  ❌ Could not create a private temporary directory for the key file. Nothing was changed in the cluster."
+    exit 1
+}
+
 if ($Force) {
     if ($PSCmdlet.ShouldProcess("Kubernetes", "Delete existing 'eddi-secrets' in '$Namespace' if exists")) {
         kubectl delete secret eddi-secrets --namespace=$Namespace --ignore-not-found 2>$null | Out-Null
@@ -219,16 +240,10 @@ if ($Force) {
 # act on the next steps and the pod waits forever for a Secret nobody made.
 $secretInstalled = $false
 if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Namespace'")) {
-    $secretFile = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString() + ".properties")
+    $secretFile = Join-Path $secretDir "application-secrets.properties"
     try {
-        # Create the file empty and restrict it BEFORE the key is written: a file made
-        # by Set-Content gets the umask default (0644 under 022), so another local
-        # user could read the key from a shared temp directory until Remove-Item ran.
-        # On Windows the per-user temp directory already limits access.
-        [System.IO.File]::WriteAllBytes($secretFile, [byte[]]@())
-        if ((Get-Variable -Name IsLinux -ValueOnly -ErrorAction SilentlyContinue) -or (Get-Variable -Name IsMacOS -ValueOnly -ErrorAction SilentlyContinue)) {
-            [System.IO.File]::SetUnixFileMode($secretFile, [System.IO.UnixFileMode]'UserRead, UserWrite')
-        }
+        # Inside the private directory made above, so the umask-default mode
+        # Set-Content gives the file does not expose it.
         Set-Content -Path $secretFile -Value "eddi.vault.master-key=$VaultKey" -Encoding utf8 -NoNewline
         # stderr is captured rather than discarded, and the exit code is checked.
         # $ErrorActionPreference = 'Stop' does not apply to native commands, so a
@@ -241,7 +256,7 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
         $createExit = $LASTEXITCODE
     }
     finally {
-        Remove-Item -Path $secretFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $secretDir -Recurse -Force -ErrorAction SilentlyContinue
     }
     if ($createExit -ne 0) {
         Write-Information -MessageData ($createOutput | Out-String).Trim() -InformationAction Continue
@@ -259,6 +274,8 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
     Write-Information -MessageData "  Creating eddi-secrets... ✅" -InformationAction Continue
     $secretInstalled = $true
 }
+# Still there only when ShouldProcess declined the create; it holds no key then.
+Remove-Item -LiteralPath $secretDir -Recurse -Force -ErrorAction SilentlyContinue
 
 if (-not $secretInstalled) {
     # The only way here is ShouldProcess declining — -WhatIf, or a -Confirm

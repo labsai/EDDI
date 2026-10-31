@@ -140,6 +140,12 @@ class InfraReviewHardeningTest {
         assertTrue(seed.contains("--data-binary @-"));
         assertFalse(seed.contains("-d \"{\\\"value\\\""), "the key must not be a curl -d argument");
         String ps1 = read("k8s/create-secrets.ps1");
-        assertTrue(ps1.indexOf("SetUnixFileMode") > 0 && ps1.indexOf("SetUnixFileMode") < ps1.indexOf("Set-Content -Path $secretFile"));
+        // A 0700 directory made in one call (mktemp -d), not a chmod after the file
+        // exists; and before the -Force delete, so its failure cannot strand a cluster
+        // without its Secret. SetUnixFileMode would need PowerShell 7.3+.
+        int privateDir = ps1.indexOf("$secretDir = & mktemp -d");
+        assertTrue(privateDir > 0 && privateDir < ps1.indexOf("kubectl delete secret eddi-secrets"));
+        assertTrue(ps1.indexOf("$secretFile = Join-Path $secretDir") > privateDir);
+        assertFalse(ps1.contains("SetUnixFileMode"));
     }
 }
