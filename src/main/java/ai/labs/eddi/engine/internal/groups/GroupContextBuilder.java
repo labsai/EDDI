@@ -448,16 +448,7 @@ public class GroupContextBuilder {
         List<TranscriptEntry> filtered = new ArrayList<>();
         for (int i = 0; i < entries.size(); i++) {
             TranscriptEntry e = entries.get(i);
-            boolean included = e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
-                    && e.type() != TranscriptEntryType.QUESTION && isVisibleToPeers(e, currentPhaseIdx) && switch (scope) {
-                        case FULL -> true;
-                        case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
-                        case ANONYMOUS -> true; // Content included, attribution stripped
-                        case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
-                        case NONE -> false;
-                        case TASK_ONLY, TASK_WITH_DEPS -> false; // Handled by task-specific logic
-                    };
-            if (included) {
+            if (inScope(e, scope, currentPhaseIdx, speaker)) {
                 rawIndices.add(i);
                 filtered.add(e);
             }
@@ -713,6 +704,55 @@ public class GroupContextBuilder {
      * {@code HUMAN_INPUT}, {@code RETRO}) is peer-visible, same as every pre-F4
      * entry type.
      */
+    private static boolean inScope(TranscriptEntry e, ContextScope scope, int currentPhaseIdx, GroupMember speaker) {
+        return e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
+                && e.type() != TranscriptEntryType.QUESTION && isVisibleToPeers(e, currentPhaseIdx) && switch (scope) {
+                    case FULL -> true;
+                    case LAST_PHASE -> e.phaseIndex() >= currentPhaseIdx - 1;
+                    case ANONYMOUS -> true; // Content included, attribution stripped
+                    case OWN_FEEDBACK -> speaker.agentId().equals(e.targetAgentId());
+                    case NONE -> false;
+                    case TASK_ONLY, TASK_WITH_DEPS -> false; // Handled by task-specific logic
+                };
+    }
+
+    /**
+     * The transcript a member's turn receives as the {@code groupTranscript}
+     * context key — the same visibility the phase's {@code contextScope} grants its
+     * rendered prompt. That key reaches any template in the member's own workflow,
+     * so handing it the raw transcript let a member see what its scope withholds
+     * (other phases under {@code LAST_PHASE}, attribution under {@code ANONYMOUS},
+     * everything under {@code NONE}, a still-blind ballot).
+     * <p>
+     * {@code SYNTHESIS} and {@code RETRO} keep the whole transcript, as their
+     * rendered prompts do. Under {@code FULL} the raw entries are kept (error and
+     * skip records included, as before) minus those not yet visible to peers.
+     * {@code ANONYMOUS} entries lose speaker, target and signature fields.
+     */
+    public List<TranscriptEntry> scopedTranscript(List<TranscriptEntry> snapshot, DiscussionPhase phase, int currentPhaseIdx,
+                                                  GroupMember speaker) {
+        if (phase == null || phase.type() == PhaseType.SYNTHESIS || phase.type() == PhaseType.RETRO) {
+            return snapshot;
+        }
+        ContextScope scope = phase.contextScope();
+        if (scope == ContextScope.FULL) {
+            return snapshot.stream().filter(e -> e.type() == null || isVisibleToPeers(e, currentPhaseIdx)).toList();
+        }
+        if (scope == null || scope == ContextScope.NONE) {
+            return List.of();
+        }
+        List<TranscriptEntry> scoped = new ArrayList<>();
+        for (TranscriptEntry e : snapshot) {
+            if (e.type() == null || !inScope(e, scope, currentPhaseIdx, speaker)) {
+                continue;
+            }
+            scoped.add(scope == ContextScope.ANONYMOUS
+                    ? new TranscriptEntry(null, null, e.content(), e.phaseIndex(), e.phaseName(), e.type(), e.timestamp(), null, null)
+                    : e);
+        }
+        return List.copyOf(scoped);
+    }
+
     private static boolean isVisibleToPeers(TranscriptEntry e, int currentPhaseIdx) {
         return switch (e.type()) {
             case ABSTAINED, CONVERGENCE, FACILITATION -> false;
