@@ -13,15 +13,20 @@ import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -47,12 +52,21 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     private static final String VERSION_QUERY_PARAM = "?version=";
 
     private final IDocumentDescriptorStore documentDescriptorStore;
+    /**
+     * Where the reverse lookup reads the referenced resource's LIVE version from,
+     * whatever its type — the descriptor's lags it (see
+     * {@link ResourceUtilities#clampToLiveVersion}). Resolved lazily: the library
+     * reaches back to this store through the REST facades.
+     */
+    private final Provider<IResourceClientLibrary> resourceClientLibrary;
 
     @Inject
-    public WorkflowStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, IDocumentDescriptorStore documentDescriptorStore) {
+    public WorkflowStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, IDocumentDescriptorStore documentDescriptorStore,
+            Provider<IResourceClientLibrary> resourceClientLibrary) {
         super(storageFactory, "workflows", documentBuilder, WorkflowConfiguration.class, WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD,
                 WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD);
         this.documentDescriptorStore = documentDescriptorStore;
+        this.resourceClientLibrary = resourceClientLibrary;
     }
 
     @Override
@@ -74,44 +88,11 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
-
-        // Parsed, not scraped. The previous "everything after the last '='" split
-        // threw NumberFormatException — undeclared by this interface — for any URI
-        // without a version query or with a second query parameter, and callers such
-        // as RestWorkflowStore.deleteResourceSafely feed step config.uri values in
-        // verbatim. There the throw is caught and logged as "reference check failed",
-        // so one unversioned reference turned cascade cleanup into a permanent no-op.
-        URI parsedResourceUri = parseResourceUri(resourceURI);
-        String resourceURIPart = RestUtilities.pathWithoutVersionQuery(parsedResourceUri);
-        Integer version = resourceURIPart == null ? null : RestUtilities.extractResourceId(parsedResourceUri).getVersion();
-        if (resourceURIPart == null || version == null || version < 1) {
-            throw new IResourceStore.ResourceStoreException(
-                    "Reverse lookup requires a versioned resource URI ('...?version=<n>' with n >= 1), got: " + resourceURI);
-        }
-        version = ResourceUtilities.clampToCurrentVersion(documentDescriptorStore,
-                RestUtilities.extractResourceId(parsedResourceUri).getId(), version);
-        resourceURIPart = resourceURIPart + VERSION_QUERY_PARAM;
+        ReverseLookup lookup = reverseLookup(resourceURI, includePreviousVersions);
+        int version = lookup.startVersion();
 
         do {
-            resourceURI = resourceURIPart + version;
-
-            // Search both config URI paths in current + history
-            List<IResourceStore.IResourceId> allIds = new LinkedList<>();
-
-            // Search in config.uri field
-            allIds.addAll(resourceStorage.findResourceIdsContaining(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, resourceURI));
-            allIds.addAll(resourceStorage.findHistoryResourceIdsContaining(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, resourceURI));
-
-            // Search in dictionaries config.uri field
-            allIds.addAll(resourceStorage.findResourceIdsContaining(WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI));
-            allIds.addAll(resourceStorage.findHistoryResourceIdsContaining(WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI));
-
-            // Sort and deduplicate
-            Comparator<IResourceStore.IResourceId> comparator = Comparator.comparing(IResourceStore.IResourceId::getId)
-                    .thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
-            allIds = allIds.stream().sorted(comparator).collect(Collectors.toList());
-
-            for (IResourceStore.IResourceId workflowId : allIds) {
+            for (IResourceStore.IResourceId workflowId : referrersOf(lookup.uriWithoutVersion() + version)) {
                 if (isStaleReference(workflowId.getId(), workflowId.getVersion())) {
                     continue;
                 }
@@ -136,6 +117,71 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
         } while (includePreviousVersions && version >= 1);
 
         return ret;
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> getWorkflowVersionsContainingResource(String resourceURI)
+            throws IResourceStore.ResourceStoreException {
+        ReverseLookup lookup = reverseLookup(resourceURI, true);
+        Set<String> seen = new HashSet<>();
+        List<IResourceStore.IResourceId> ret = new ArrayList<>();
+        for (int version = lookup.startVersion(); version >= 1; version--) {
+            for (IResourceStore.IResourceId workflowId : referrersOf(lookup.uriWithoutVersion() + version)) {
+                if (seen.add(workflowId.getId() + "#" + workflowId.getVersion())) {
+                    ret.add(workflowId);
+                }
+            }
+        }
+        return ret;
+    }
+
+    /** Where a reverse lookup for one resource URI starts. */
+    private record ReverseLookup(String uriWithoutVersion, int startVersion) {
+    }
+
+    private ReverseLookup reverseLookup(String resourceURI, boolean walk) throws IResourceStore.ResourceStoreException {
+        // Parsed, not scraped. The previous "everything after the last '='" split
+        // threw NumberFormatException — undeclared by this interface — for any URI
+        // without a version query or with a second query parameter, and callers such
+        // as RestWorkflowStore.deleteResourceSafely feed step config.uri values in
+        // verbatim. There the throw is caught and logged as "reference check failed",
+        // so one unversioned reference turned cascade cleanup into a permanent no-op.
+        URI parsedResourceUri = parseResourceUri(resourceURI);
+        String resourceURIPart = RestUtilities.pathWithoutVersionQuery(parsedResourceUri);
+        Integer version = resourceURIPart == null ? null : RestUtilities.extractResourceId(parsedResourceUri).getVersion();
+        if (resourceURIPart == null || version == null || version < 1) {
+            throw new IResourceStore.ResourceStoreException(
+                    "Reverse lookup requires a versioned resource URI ('...?version=<n>' with n >= 1), got: " + resourceURI);
+        }
+        // Only a walk is clamped: an exact lookup is a fixed handful of queries, and
+        // rewriting its version would answer for a version the caller did not ask
+        // about.
+        if (walk) {
+            IResourceStore.IResourceId live = resourceClientLibrary.get().getCurrentResourceId(parsedResourceUri);
+            version = ResourceUtilities.clampToLiveVersion(live == null ? null : live.getVersion(), version);
+        }
+        return new ReverseLookup(resourceURIPart + VERSION_QUERY_PARAM, version);
+    }
+
+    /**
+     * Every workflow id/version, current or historical, that references exactly
+     * {@code resourceURI} from a step's {@code config.uri} or a step's
+     * dictionaries, sorted by id and then version, newest first.
+     */
+    private List<IResourceStore.IResourceId> referrersOf(String resourceURI) {
+        List<IResourceStore.IResourceId> allIds = new LinkedList<>();
+
+        // Search in config.uri field
+        allIds.addAll(resourceStorage.findResourceIdsContaining(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, resourceURI));
+        allIds.addAll(resourceStorage.findHistoryResourceIdsContaining(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, resourceURI));
+
+        // Search in dictionaries config.uri field
+        allIds.addAll(resourceStorage.findResourceIdsContaining(WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI));
+        allIds.addAll(resourceStorage.findHistoryResourceIdsContaining(WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD, resourceURI));
+
+        Comparator<IResourceStore.IResourceId> comparator = Comparator.comparing(IResourceStore.IResourceId::getId)
+                .thenComparingInt(IResourceStore.IResourceId::getVersion).reversed();
+        return allIds.stream().sorted(comparator).collect(Collectors.toList());
     }
 
     /**

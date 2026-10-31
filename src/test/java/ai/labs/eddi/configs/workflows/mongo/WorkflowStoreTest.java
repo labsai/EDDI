@@ -11,6 +11,8 @@ import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.configs.descriptors.ResourceUtilities;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +34,7 @@ class WorkflowStoreTest {
 
     private IResourceStorage<WorkflowConfiguration> resourceStorage;
     private IDocumentDescriptorStore documentDescriptorStore;
+    private IResourceClientLibrary resourceClientLibrary;
     private WorkflowStore store;
 
     @BeforeEach
@@ -45,7 +48,8 @@ class WorkflowStoreTest {
                 eq("workflowSteps.config.uri"), eq("workflowSteps.extensions.dictionaries.config.uri")))
                 .thenReturn(resourceStorage);
 
-        store = new WorkflowStore(storageFactory, documentBuilder, documentDescriptorStore);
+        resourceClientLibrary = mock(IResourceClientLibrary.class);
+        store = new WorkflowStore(storageFactory, documentBuilder, documentDescriptorStore, () -> resourceClientLibrary);
     }
 
     // ==================== persisted field paths ====================
@@ -155,20 +159,113 @@ class WorkflowStoreTest {
         assertEquals(1, result.size());
     }
 
+    private static final String OUTPUT_ID = "aabbccddeeff112233445566";
+    private static final String OUTPUT_URI = "eddi://ai.labs.output/outputstore/outputsets/" + OUTPUT_ID;
+
+    private static IResourceStore.IResourceId resourceId(String id, int version) {
+        IResourceStore.IResourceId resourceId = mock(IResourceStore.IResourceId.class);
+        when(resourceId.getId()).thenReturn(id);
+        when(resourceId.getVersion()).thenReturn(version);
+        return resourceId;
+    }
+
     @Test
-    @DisplayName("getWorkflowDescriptorsContainingResource — a huge caller-supplied version walks only the versions that exist")
+    @DisplayName("getWorkflowDescriptorsContainingResource: a huge caller-supplied version walks only the versions that exist")
     void clampsVersionWalkToCurrentResourceVersion() throws Exception {
-        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
-        when(current.getVersion()).thenReturn(2);
-        when(documentDescriptorStore.getCurrentResourceId("aabbccddeeff112233445566")).thenReturn(current);
+        IResourceStore.IResourceId current = resourceId(OUTPUT_ID, 2);
+        when(resourceClientLibrary.getCurrentResourceId(URI.create(OUTPUT_URI + "?version=2000000000"))).thenReturn(current);
         when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
         when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
 
-        store.getWorkflowDescriptorsContainingResource("eddi://ai.labs.output/outputstore/outputsets/aabbccddeeff112233445566?version=2000000000",
-                true);
+        store.getWorkflowDescriptorsContainingResource(OUTPUT_URI + "?version=2000000000", true);
 
         // two config-uri paths per version, two versions
         verify(resourceStorage, times(4)).findResourceIdsContaining(anyString(), anyString());
+    }
+
+    /**
+     * Descriptors advance only on an HTTP PUT/PATCH, so an in-process update leaves
+     * the descriptor at v1 while the resource is at v2. The cascade delete and the
+     * orphan purge ask at the live version (v2); clamping to the descriptor's v1
+     * dropped every workflow that references v2 and reported the resource
+     * unreferenced.
+     */
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource: the walk starts at the resource's live version, not a stale descriptor's")
+    void clampUsesLiveVersionNotStaleDescriptor() throws Exception {
+        IResourceStore.IResourceId staleDescriptor = resourceId(OUTPUT_ID, 1);
+        IResourceStore.IResourceId live = resourceId(OUTPUT_ID, 2);
+        lenient().when(documentDescriptorStore.getCurrentResourceId(OUTPUT_ID)).thenReturn(staleDescriptor);
+        when(resourceClientLibrary.getCurrentResourceId(URI.create(OUTPUT_URI + "?version=2"))).thenReturn(live);
+        IResourceStore.IResourceId referrer = resourceId("111111111111111111111111", 1);
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findResourceIdsContaining(WorkflowStore.WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, OUTPUT_URI + "?version=2"))
+                .thenReturn(List.of(referrer));
+        when(resourceStorage.getCurrentVersion("111111111111111111111111")).thenReturn(1);
+        DocumentDescriptor descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/111111111111111111111111?version=1"));
+        when(documentDescriptorStore.readDescriptor("111111111111111111111111", 1)).thenReturn(descriptor);
+
+        List<DocumentDescriptor> result = store.getWorkflowDescriptorsContainingResource(OUTPUT_URI + "?version=2", true);
+
+        assertEquals(1, result.size(), "the workflow referencing the live version must be found");
+    }
+
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource: an exact lookup queries the version it was asked about, unclamped")
+    void exactLookupIsNotClamped() throws Exception {
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        IResourceStore.IResourceId live = resourceId(OUTPUT_ID, 2);
+        lenient().when(resourceClientLibrary.getCurrentResourceId(any())).thenReturn(live);
+        lenient().when(documentDescriptorStore.getCurrentResourceId(OUTPUT_ID)).thenReturn(live);
+
+        store.getWorkflowDescriptorsContainingResource(OUTPUT_URI + "?version=5", false);
+
+        verify(resourceStorage).findResourceIdsContaining(WorkflowStore.WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, OUTPUT_URI + "?version=5");
+        verify(resourceStorage, times(2)).findResourceIdsContaining(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource: an unknown live version refuses a walk above the ceiling instead of truncating it")
+    void unknownLiveVersionRefusesWalkAboveCeiling() throws Exception {
+        when(resourceClientLibrary.getCurrentResourceId(any())).thenReturn(null);
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.getWorkflowDescriptorsContainingResource(
+                OUTPUT_URI + "?version=" + (ResourceUtilities.MAX_REVERSE_LOOKUP_VERSIONS + 1), true));
+        verifyNoInteractions(resourceStorage);
+    }
+
+    @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource: an unknown live version still walks a version within the ceiling in full")
+    void unknownLiveVersionWalksWithinCeiling() throws Exception {
+        when(resourceClientLibrary.getCurrentResourceId(any())).thenReturn(null);
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+
+        store.getWorkflowDescriptorsContainingResource(OUTPUT_URI + "?version=3", true);
+
+        verify(resourceStorage, times(6)).findResourceIdsContaining(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("getWorkflowVersionsContainingResource: keeps superseded workflow versions an agent may still pin")
+    void workflowVersionsIncludeSupersededVersions() throws Exception {
+        IResourceStore.IResourceId live = resourceId(OUTPUT_ID, 1);
+        when(resourceClientLibrary.getCurrentResourceId(any())).thenReturn(live);
+        IResourceStore.IResourceId superseded = resourceId("111111111111111111111111", 1);
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(WorkflowStore.WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, OUTPUT_URI + "?version=1"))
+                .thenReturn(List.of(superseded));
+        lenient().when(resourceStorage.getCurrentVersion("111111111111111111111111")).thenReturn(2);
+
+        List<IResourceStore.IResourceId> versions = store.getWorkflowVersionsContainingResource(OUTPUT_URI + "?version=1");
+
+        assertEquals(1, versions.size());
+        assertEquals("111111111111111111111111", versions.get(0).getId());
+        assertEquals(1, versions.get(0).getVersion());
     }
 
     @Test

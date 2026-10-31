@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
@@ -19,6 +20,7 @@ import ai.labs.eddi.utils.RuntimeUtilities;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
@@ -38,11 +40,20 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
     static final int FIRST_COMPATIBILITY_GENERATION = 1;
 
     private final IDocumentDescriptorStore documentDescriptorStore;
+    /**
+     * Where the reverse lookup reads a workflow's LIVE version from — the
+     * descriptor's lags it (see {@link ResourceUtilities#clampToLiveVersion}).
+     * Resolved lazily: the workflow store's own graph reaches back to the agent
+     * store through the REST facades.
+     */
+    private final Provider<IWorkflowStore> workflowStore;
 
     @Inject
-    public AgentStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, DocumentDescriptorStore documentDescriptorStore) {
+    public AgentStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, DocumentDescriptorStore documentDescriptorStore,
+            Provider<IWorkflowStore> workflowStore) {
         super(storageFactory, "agents", documentBuilder, AgentConfiguration.class, WORKFLOWS_FIELD);
         this.documentDescriptorStore = documentDescriptorStore;
+        this.workflowStore = workflowStore;
     }
 
     @Override
@@ -177,8 +188,10 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
-        if (workflowVersion != null) {
-            workflowVersion = ResourceUtilities.clampToCurrentVersion(documentDescriptorStore, workflowId, workflowVersion);
+        // Only a walk is clamped: an exact lookup is two queries, and rewriting its
+        // version would answer for a version the caller did not ask about.
+        if (includePreviousVersions && workflowVersion != null) {
+            workflowVersion = ResourceUtilities.clampToLiveVersion(liveWorkflowVersion(workflowId), workflowVersion);
         }
         do {
             String workflowUri = WORKFLOW_RESOURCE_URI + workflowId + VERSION_QUERY_PARAM + workflowVersion;
@@ -218,5 +231,15 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         } while (includePreviousVersions && workflowVersion >= 1);
 
         return ret;
+    }
+
+    /** The workflow's live version from its own store, or null when it has none. */
+    private Integer liveWorkflowVersion(String workflowId) {
+        try {
+            IResourceStore.IResourceId current = workflowStore.get().getCurrentResourceId(workflowId);
+            return current == null ? null : current.getVersion();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
     }
 }
