@@ -126,4 +126,65 @@ class DependencyTest {
         assertEquals(IRuleCondition.ExecutionState.SUCCESS, state);
         assertEquals(1, bottomExecutions.get());
     }
+
+    /**
+     * Rule names need not be unique. A cached rule must not answer for a rule of
+     * the same name that is on the active trace, or a rule that depends on its own
+     * name passes instead of failing as an infinite loop.
+     */
+    @Test
+    void cachedRuleOfTheSameNameDoesNotHideACycle() {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+
+        var firstX = new Rule("x");
+        firstX.setConditions(List.of(succeeding()));
+        var a = new Rule("a");
+        a.setConditions(new LinkedList<>(List.of(dependencyOn("x", ruleSet))));
+        var secondX = new Rule("x");
+        secondX.setConditions(new LinkedList<>(List.of(dependencyOn("x", ruleSet))));
+        group.setRules(new LinkedList<>(List.of(firstX, a, secondX)));
+        ruleSet.setRuleGroups(List.of(group));
+
+        assertThrows(Rule.InfiniteLoopException.class, () -> TemplateDataScope.call(memory, () -> {
+            assertEquals(IRuleCondition.ExecutionState.SUCCESS, a.execute(memory, new ArrayList<>()));
+            return secondX.execute(memory, new ArrayList<>());
+        }));
+    }
+
+    private static Dependency dependencyOn(String reference, RuleSet ruleSet) {
+        var dependency = new Dependency();
+        dependency.setConfigs(Map.of("reference", reference));
+        dependency.setContainingRuleSet(ruleSet);
+        return dependency;
+    }
+
+    private static IRuleCondition succeeding() {
+        return new IRuleCondition() {
+            @Override
+            public String getId() {
+                return "succeeding";
+            }
+
+            @Override
+            public Map<String, String> getConfigs() {
+                return Map.of();
+            }
+
+            @Override
+            public void setConfigs(Map<String, String> configs) {
+            }
+
+            @Override
+            public ExecutionState execute(IConversationMemory m, List<Rule> trace) {
+                return ExecutionState.SUCCESS;
+            }
+
+            @Override
+            public IRuleCondition clone() {
+                return this;
+            }
+        };
+    }
 }
