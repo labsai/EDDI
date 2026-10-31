@@ -176,10 +176,10 @@ public final class A2AWireFormat {
         }
         String text = extractText(message.get("parts"));
 
-        String contextId = optionalString(message.get("contextId"));
+        String contextId = optionalId(message.get("contextId"), "contextId");
         if (contextId == null) {
             // Pre-0.2 peers put it next to the message rather than inside it.
-            contextId = optionalString(params.get("contextId"));
+            contextId = optionalId(params.get("contextId"), "contextId");
         }
 
         boolean returnImmediately = false;
@@ -193,9 +193,9 @@ public final class A2AWireFormat {
             historyLength = optionalInt(configuration.get("historyLength"));
         }
 
-        String legacyTaskId = dialect == Dialect.LEGACY ? optionalString(params.get("id")) : null;
-        String taskId = dialect == Dialect.LEGACY ? null : optionalString(message.get("taskId"));
-        return new SendRequest(text, optionalString(message.get("messageId")), contextId, taskId, legacyTaskId, returnImmediately,
+        String legacyTaskId = dialect == Dialect.LEGACY ? optionalId(params.get("id"), "id") : null;
+        String taskId = dialect == Dialect.LEGACY ? null : optionalId(message.get("taskId"), "taskId");
+        return new SendRequest(text, optionalId(message.get("messageId"), "messageId"), contextId, taskId, legacyTaskId, returnImmediately,
                 historyLength, dialect);
     }
 
@@ -206,7 +206,7 @@ public final class A2AWireFormat {
      *             when it is missing
      */
     public static String requireTaskId(Map<String, Object> params) {
-        String taskId = params == null ? null : optionalString(params.get("id"));
+        String taskId = params == null ? null : optionalId(params.get("id"), "id");
         if (taskId == null) {
             throw new InvalidA2ARequestException("Missing task id");
         }
@@ -420,6 +420,34 @@ public final class A2AWireFormat {
     /**
      * A missing key, an explicit JSON null and a blank string all read as absent.
      */
+    /**
+     * Longest caller-chosen identifier (task, context, message, JSON-RPC id)
+     * accepted. Identifiers are echoed into every streamed event, so an unbounded
+     * one multiplies the response by the number of chunks; real ids are UUIDs.
+     */
+    public static final int MAX_ID_LENGTH = 256;
+
+    /**
+     * {@link #optionalString} for an identifier, refused when longer than
+     * {@link #MAX_ID_LENGTH}.
+     */
+    static String optionalId(Object raw, String name) {
+        String value = optionalString(raw);
+        if (value != null && value.length() > MAX_ID_LENGTH) {
+            throw new InvalidA2ARequestException("'" + name + "' is longer than " + MAX_ID_LENGTH + " characters");
+        }
+        return value;
+    }
+
+    /**
+     * Whether a JSON-RPC request id is one this endpoint echoes: absent, a number,
+     * or a string of at most {@link #MAX_ID_LENGTH} characters (JSON-RPC 2.0 allows
+     * nothing else).
+     */
+    public static boolean isAcceptableRequestId(Object id) {
+        return id == null || id instanceof Number || (id instanceof String text && text.length() <= MAX_ID_LENGTH);
+    }
+
     static String optionalString(Object raw) {
         if (raw == null) {
             return null;
