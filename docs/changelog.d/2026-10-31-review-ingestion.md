@@ -16,8 +16,11 @@ work out of all proportion to its size before any limit was consulted.
   The same doubling existed for a `summary` or `figcaption` nested below a `details`/`figure`; those are
   now taken from direct children only. A per-conversion work budget (`Walk`) backs this up: at most
   1,000,000 elements visited, and the walk stops writing once the text written is certain to be
-  truncated by the caller's cap. Ordinary tables render exactly as before; a table with several
-  `tbody`s or a `tfoot` now keeps those rows instead of silently dropping them.
+  truncated by the caller's cap; whitespace-only text between tags is not charged, or an indented page
+  with a small cap stopped before its first paragraph. Ordinary tables render as before (checked
+  differentially against the previous converter); a table with several `tbody`s, a `tfoot` or a
+  multi-row `thead` now keeps those rows instead of silently dropping them, and a table whose `thead`
+  is empty takes its first body row as the header.
 - **Trailing newlines in a `<pre>` were trimmed quadratically** — one `substring` per newline. Now one
   backward scan and one copy.
 - **Sitemap `<loc>` text was copied once per nesting level** (`WebCrawler.collectText`): only a leaf
@@ -26,8 +29,10 @@ work out of all proportion to its size before any limit was consulted.
   one the text-sitemap reader compares against, in place of a unicode escape.
 - **Exclude globs no longer compile to a backtracking regex** (`UrlPattern`). A pattern with several
   wildcards could take combinatorial time on a near-miss path from a crawled page; matching now steps
-  the set of reachable pattern positions per character — pattern length × path length, always. Glob
-  semantics are unchanged.
+  the set of reachable pattern positions per character — pattern length × path length, always. It
+  steps by code point, as the regex did, so `?` still matches one supplementary character. The one
+  difference: `*`, `**` and `?` now match a line terminator (a decoded `%0A` in a path), which the
+  regex's `.` did not, so such a path can no longer slip past an exclusion.
 - **Spreadsheet cells were copied in full before the character limit was checked** (`MarkdownTable`).
   One shared string referenced from 64 header cells rendered hundreds of MB. Each cell is cut to what
   can still fit before it is normalised and escaped.
@@ -40,7 +45,10 @@ work out of all proportion to its size before any limit was consulted.
 - **Chunk settings are bounded**: `chunkSize` 1–32768 and `chunkOverlap` ≤ half of it are enforced in
   `RagConfiguration.validate()`, and both ingestion paths (`IngestionPipeline`, `RagIngestionService`)
   read them through `chunkSizeOrDefault()`/`chunkOverlapOrDefault()`, which clamp a configuration
-  stored before the check. The crawl pipeline's fallback for an explicit `null` was 1000/100 and is now
+  stored before the check. An imported archive's out-of-range values are clamped the same way
+  (`RagConfiguration.clampChunkSettings()`, from `RestImportService` on create and update) rather than
+  failing the import, and the Manager's chunk-size slider now pulls the overlap down to half the new
+  size, so the default overlap of 64 no longer makes a chunk size of 64 unsaveable. The crawl pipeline's fallback for an explicit `null` was 1000/100 and is now
   the documented 512/64; `RagIngestionService` threw on an explicit `null`.
 - **PDF**: `PdfStreamBudget` remembered neither the next `endstream` nor the last `obj`, so a file of
   unterminated `stream` keywords was scanned in quadratic time — both are now carried forward.
@@ -72,4 +80,6 @@ work out of all proportion to its size before any limit was consulted.
 [`IngestionPipeline.java`](../../src/main/java/ai/labs/eddi/modules/ingestion/IngestionPipeline.java),
 [`RagIngestionService.java`](../../src/main/java/ai/labs/eddi/modules/rag/RagIngestionService.java),
 [`RagConfiguration.java`](../../src/main/java/ai/labs/eddi/configs/rag/model/RagConfiguration.java),
+[`RestImportService.java`](../../src/main/java/ai/labs/eddi/backup/impl/RestImportService.java),
+[`rag-editor.tsx`](../../ui/manager/src/components/editors/rag-editor.tsx),
 [`rag.md`](../rag.md), and the matching tests.

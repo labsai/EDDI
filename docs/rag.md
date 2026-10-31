@@ -82,7 +82,7 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `storeNamespace` | `id` for every new KB | How the vector store is addressed: `id` (by this KB's id — its own store) or, for a KB created before 6.6, absent/`name` (the 6.5.0 layout, by name). Set by EDDI; see [Knowledge base isolation](#knowledge-base-isolation) |
 | `chunkStrategy` | `recursive` | Document chunking strategy |
 | `chunkSize` | `512` | Chunk size in characters, 1–32768 |
-| `chunkOverlap` | `64` | Chunk overlap in characters, at most half of `chunkSize`. Saving a larger value is refused; a stored configuration that predates the check is clamped when it is ingested |
+| `chunkOverlap` | `64` | Chunk overlap in characters, at most half of `chunkSize`. Saving a larger value is refused; a stored configuration that predates the check is clamped when it is ingested or imported |
 | `maxResults` | `5` | Default top-K results |
 | `minScore` | `0.6` | Default minimum similarity score (0.0–1.0) |
 
