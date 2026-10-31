@@ -98,11 +98,20 @@ public final class SlackUserIdentity {
     private static final Pattern SLACK_USER_ID = Pattern.compile("^[UW][A-Z0-9]{1,63}$");
 
     /**
-     * Whether {@code userId} names a Slack user inside EDDI: the namespaced form,
-     * or a raw id stored by a release before namespacing. Other identity sources
-     * (OIDC principals, REST callers) cannot produce the prefix.
+     * Whether {@code userId} is a principal only Slack can have produced: the
+     * namespaced {@code slack:} form. No other identity source can carry the prefix
+     * — {@code ReservedPrincipals} refuses it at authentication, and a non-admin
+     * cannot name another user id.
+     * <p>
+     * A raw, pre-namespacing id ({@link #isLegacySlackUserId}) does <b>not</b>
+     * count: it is only a shape, and an OIDC principal named {@code U123ABC} has
+     * the same shape. Treating it as Slack would let such a user own a conversation
+     * behind a hand-made {@code channel:slack:...} trigger intent and have its HITL
+     * outcome posted with that channel's bot token. A legacy thread mapping is
+     * re-keyed to the namespaced id on the thread's next message
+     * ({@link SlackEventHandler}), after which it qualifies.
      */
     public static boolean isSlackPrincipal(String userId) {
-        return userId != null && (userId.startsWith(PREFIX) || isLegacySlackUserId(userId));
+        return userId != null && userId.startsWith(PREFIX);
     }
 }

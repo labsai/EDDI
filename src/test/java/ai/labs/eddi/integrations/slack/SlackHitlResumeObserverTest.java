@@ -172,6 +172,23 @@ class SlackHitlResumeObserverTest {
     }
 
     @Test
+    void onResumeCompleted_ownerWithOnlyASlackShapedName_isNotPosted() throws Exception {
+        // An OIDC user whose principal happens to look like a raw Slack id owns the
+        // conversation behind a hand-made channel:slack trigger: the shape of a name
+        // is not evidence that Slack started the conversation.
+        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "U123ABC",
+                Deployment.Environment.production, "agent-1", "conv-9");
+        when(userConversationStore.readUserConversationByConversationId("conv-9")).thenReturn(mapping);
+        when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-9", HitlVerdict.APPROVED, "U123ABC", snapshotWithText("injected")));
+
+        verifyNoInteractions(slackApi);
+        verify(router, never()).getBotToken(any(), any());
+    }
+
+    @Test
     void onResumeCompleted_nonSlackConversation_ignored() throws Exception {
         var mapping = new UserConversation("intent:mcp:something", "U1",
                 Deployment.Environment.production, "agent-1", "conv-2");

@@ -291,7 +291,8 @@ class SlackUserIdentityTest {
     @Test
     void slackPrincipals() {
         assertTrue(SlackUserIdentity.isSlackPrincipal("slack:T1:U123"));
-        assertTrue(SlackUserIdentity.isSlackPrincipal("U123ABC"));
+        // A raw, pre-namespacing id is only a shape: an OIDC principal can have it.
+        assertFalse(SlackUserIdentity.isSlackPrincipal("U123ABC"));
         assertFalse(SlackUserIdentity.isSlackPrincipal("alice"));
         assertFalse(SlackUserIdentity.isSlackPrincipal(null));
     }
