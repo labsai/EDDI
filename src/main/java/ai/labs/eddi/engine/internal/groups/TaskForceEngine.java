@@ -1052,7 +1052,7 @@ public class TaskForceEngine {
             // a markdown fence or prose). Not first '[' to last ']': a bracketed
             // aside such as "Checked [details]: [...]" made that slice unparseable,
             // which sent the whole phase down the fail-open auto-verify path.
-            List<?> items = EmbeddedJson.soleArray(content, this::readJsonList);
+            List<?> items = EmbeddedJson.soleArray(content, this::readVerdictList);
             if (items == null || items.isEmpty()) {
                 return false;
             }
@@ -1119,6 +1119,17 @@ public class TaskForceEngine {
     }
 
     /**
+     * As {@link #readJsonList}, but for applying verdicts: the array must hold an
+     * element shaped like a verdict, so an unrelated object array in the same reply
+     * is neither the verdict list nor a rival to it. (Display formatting keeps the
+     * lenient reader: it renders whatever the verifier wrote.)
+     */
+    private List<?> readVerdictList(String json) {
+        List<?> list = readJsonList(json);
+        return list != null && list.stream().anyMatch(TaskForceEngine::isVerdictShaped) ? list : null;
+    }
+
+    /**
      * A JSON array span as a list of verdict objects, or {@code null} when it is
      * not one - an array of plain values ({@code [1]}, a citation in the prose) is
      * not a verdict and must not count as one.
@@ -1126,7 +1137,7 @@ public class TaskForceEngine {
     private List<?> readJsonList(String json) {
         try {
             List<?> list = jsonSerialization.deserialize(json, List.class);
-            return list != null && list.stream().anyMatch(TaskForceEngine::isVerdictShaped) ? list : null;
+            return list != null && list.stream().anyMatch(Map.class::isInstance) ? list : null;
         } catch (Exception e) {
             return null;
         }
