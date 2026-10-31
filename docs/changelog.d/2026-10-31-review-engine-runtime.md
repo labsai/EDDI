@@ -14,10 +14,10 @@ Fixes from the CodeRabbit review and the full code review (against `01c3250`) fo
 - `RestInterfaceFactory` addresses the HTTP listener EDDI is bound to (`SelfUrlResolver`'s logic), not always `127.0.0.1`, and forwards no caller token when that address cannot be resolved.
 
 **Scheduling and cluster**
-- A schedule whose claim expired without an outcome (its node died or the fire wedged) counts as a failed attempt instead of being re-fired at once with `failCount` untouched — a node-killing fire could never dead-letter. The poll runs with `concurrentExecution = SKIP`. `tryClaim` re-checks `enabled` (MongoDB and PostgreSQL). `POST /{id}/fire` is bounded by the fire timeout like a polled fire, so a manual Dream or ingestion run cannot outlast its lease and start twice.
+- A schedule whose claim expired without an outcome (its node died or the fire wedged) counts as a failed attempt instead of being re-fired at once with `failCount` untouched — a node-killing fire could never dead-letter. The poll runs with `concurrentExecution = SKIP`. `tryClaim` re-checks `enabled` (MongoDB and PostgreSQL). `POST /{id}/fire` and the MCP `fire_schedule_now` tool are bounded by the fire timeout like a polled fire, so a manual Dream or ingestion run cannot outlast its lease and start twice. A disabled schedule can no longer be fired manually.
 - A scheduled fire that starts a conversation runs the agent's startup workflow under `maxCostPerFire`, and the turn gets the remainder.
 - A dead letter a node kept locally while cut off from NATS is discarded, not forwarded, when its conversation no longer exists (erased in the meantime).
-- NATS TLS verifies the broker host name (`eddi.nats.tls.verify-hostname`, default `true`); jnats sets no endpoint identification, so any trusted certificate for any host was accepted.
+- NATS TLS verifies the broker host name (`eddi.nats.tls.verify-hostname`, default `true`); jnats sets no endpoint identification, so any trusted certificate for any host was accepted. **Upgrade note:** the broker certificate must now carry a SAN for every host in `eddi.nats.servers` (an IP SAN for an IP address); see [Clustering](../clustering.md).
 - `CacheFactory.evictLocal` remembers key hashes instead of SHA-256-ing every cached key on every eviction event. `BoundedLogStore`'s DB queue is capped (50,000; drops are counted and logged at flush). `BoundedFanOut` claims "not started" by compare-and-set, so an item reported as not sent can no longer go on and send. `AgentTestRunner` charges an abandoned (timed-out) turn's cost when it completes.
 
 **HITL**
@@ -39,11 +39,11 @@ Fixes from the CodeRabbit review and the full code review (against `01c3250`) fo
 - The audit chain check finds holes between sequenced rows in a window that also holds unsequenced rows (was `UNAVAILABLE`), and with signing on ignores positions claimed by v1/v2-signed rows, whose signature does not cover the sequence.
 
 **Mail**
-- `DkimVerifier` refuses a header block with a bare CR (the MIME parser splits a header there, the verifier did not). `QuoteStripper`'s label patterns are possessive (quadratic backtracking on long blank runs).
+- `DkimVerifier` refuses a header block with a bare CR or LF (the MIME parser splits a header there, the verifier did not). `QuoteStripper`'s label patterns are possessive (quadratic backtracking on long blank runs).
 
 **Cleanup:** unused `ClusterConfig.withDegradedNonces/withDegradedRateLimits/withHitlRecovery` removed; misplaced Javadoc in `ScheduleFireExecutor` and `SchedulePollerService` moved to its methods; the nine fire-log blocks in `ScheduleFireExecutor` share `recordFire`.
 
-Docs: [Scheduling](../scheduling.md), [Alerts](../alerts.md), [Audit Ledger](../audit-ledger.md), [HITL](../hitl.md), [Secrets Vault](../secrets-vault.md), [Configuration Reference](../configuration-reference.md).
+Docs: [Clustering](../clustering.md), [Scheduling](../scheduling.md), [Alerts](../alerts.md), [Audit Ledger](../audit-ledger.md), [HITL](../hitl.md), [Secrets Vault](../secrets-vault.md), [Configuration Reference](../configuration-reference.md).
 
 ### Design decisions
 

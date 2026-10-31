@@ -205,6 +205,16 @@ rate-limit and audit-position buckets. Keep the NATS credentials in a Secret, re
 NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and turn on
 `nats.tls` when pod traffic is not already encrypted.
 
+**NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
+`true`). Before this check existed, any certificate the trust store accepted was
+accepted for any host. On upgrade, the broker certificate must name every host in
+`eddi.nats.servers` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. With
+the Helm chart's in-cluster NATS those hosts are `<fullname>-nats-<n>.<fullname>-nats` (the chart's full name), so a
+`*.<fullname>-nats` SAN covers them, while a certificate issued only for the fully qualified
+`…svc.cluster.local` names does not. A node whose broker certificate does not match logs a
+TLS handshake failure and stays in degraded mode. Reissue the certificate, or set
+`EDDI_NATS_TLS_VERIFY_HOSTNAME=false` to go back to the old behaviour.
+
 ### Upgrading from the build-profile NATS coordinator
 
 The `nats` Maven build profile and its coordinator are gone; the published
