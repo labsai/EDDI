@@ -260,8 +260,8 @@ public class McpCallsTask implements ILifecycleTask {
                     ? mocked.bodyAsText()
                     : RetryConfiguration.executeWithRetry(
                             () -> executeMetered(toolName, toolRequest, executor, conversationId),
-                            mcpCall.getRetry(),
-                            "MCP call '" + callName + "'");
+                            effectiveRetry(mcpCall),
+                            "MCP call '" + callName + "'", new long[1], memory.getTurnDeadline());
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
 
             // 6. Store result in memory
@@ -508,5 +508,23 @@ public class McpCallsTask implements ILifecycleTask {
         descriptor.setDisplayName("MCP Calls");
         descriptor.getConfigs().put("uri", new ExtensionDescriptor.ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, false, null));
         return descriptor;
+    }
+
+    /**
+     * The retry policy of a call: its own {@code retry} block, or a single attempt
+     * when it has none. A retry re-sends the tool call, and an MCP tool may well
+     * have a side effect (create, send, charge) that a timeout does not undo — so
+     * retrying is something a config asks for, not something a missing block
+     * implies. (A null policy used to fall through to the shared defaults: three
+     * attempts.)
+     */
+    static RetryConfiguration effectiveRetry(McpCall mcpCall) {
+        RetryConfiguration retry = mcpCall.getRetry();
+        if (retry != null) {
+            return retry;
+        }
+        RetryConfiguration singleAttempt = new RetryConfiguration();
+        singleAttempt.setMaxAttempts(1);
+        return singleAttempt;
     }
 }
