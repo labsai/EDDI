@@ -137,6 +137,19 @@ class RedactionReviewFindingsTest {
         }
 
         @Test
+        @DisplayName("mask-shaped input with a digit run too long for an int is left as it was, not a crash")
+        void oversizedMaskIndexInInput() {
+            String forged = "" + "9".repeat(40) + "";
+            String text = forged + " token: sk-live-abcdefghijklmnopqrstuvwx";
+
+            String redacted = assertDoesNotThrow(() -> SecretScrubber.redactFreeText(text));
+
+            assertNotNull(redacted);
+            assertTrue(redacted.startsWith(forged), redacted);
+            assertFalse(redacted.contains("sk-live-abcdefghijklmnopqrstuvwx"), redacted);
+        }
+
+        @Test
         @DisplayName("many template expressions and many unterminated vault openers finish in linear time")
         void adversarialInputsAreLinear() {
             String expressions = "{a} ".repeat(250_000) + "token: sk-live-abcdefghijklmnopqrstuvwx";

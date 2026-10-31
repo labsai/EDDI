@@ -548,8 +548,18 @@ public class SecretScrubber {
         Matcher masks = MASK.matcher(redacted);
         var restored = new StringBuilder(redacted.length());
         while (masks.find()) {
-            int index = Integer.parseInt(masks.group(1));
-            String original = index < masked.size() ? masked.get(index) : masks.group();
+            // The mask characters are private-use code points, but nothing stops the
+            // input from carrying them itself: a digit run too long for an int is not one
+            // of our masks and is left as it was.
+            String original = masks.group();
+            try {
+                int index = Integer.parseInt(masks.group(1));
+                if (index < masked.size()) {
+                    original = masked.get(index);
+                }
+            } catch (NumberFormatException notOurMask) {
+                // keep the token unchanged
+            }
             masks.appendReplacement(restored, Matcher.quoteReplacement(original));
         }
         masks.appendTail(restored);
