@@ -1406,6 +1406,9 @@ export function closeGroupConversation(
  * discussion.
  * POST /groups/{groupId}/conversations/{groupConversationId}/human-input
  * Body: HumanInputRequest { memberId, content }.
+ * Response: the full GroupConversation only for its owner or an admin; the
+ * pending member gets `{ groupConversationId, accepted, state }` instead, so
+ * callers must not read conversation fields off the result.
  * Failures: 400 (blank content, unknown member, or memberId not matching the
  * pending turn), 403 (not the pending member/admin), 404, 409 (concurrent
  * modification or the discussion left AWAITING_HUMAN_INPUT some other way).
