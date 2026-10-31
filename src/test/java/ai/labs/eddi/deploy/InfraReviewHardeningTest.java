@@ -67,14 +67,21 @@ class InfraReviewHardeningTest {
     }
 
     @Test
-    @DisplayName("keycloak-admin-rotate marks the volume verified only after logging in with the configured credentials")
+    @DisplayName("keycloak-admin-rotate checks the original admin account and marks the volume only after a configured login")
     void adminRotateRequiresPositiveLogin() throws IOException {
         String yml = read("docker-compose.auth.yml");
-        int failedDefault = yml.indexOf("--password admin >/dev/null 2>&1; then");
-        int configured = yml.indexOf("--password \"$$KC_BOOTSTRAP_ADMIN_PASSWORD\" >/dev/null 2>&1; then", failedDefault);
-        assertTrue(failedDefault > 0 && configured > failedDefault, "configured credentials must be tried before the marker");
-        int firstTouch = yml.indexOf("touch \"$$marker\"", failedDefault);
-        assertTrue(firstTouch > configured, "the marker must not be written on a bare failed default login");
+        int start = yml.indexOf("  keycloak-admin-rotate:\n");
+        String rotate = yml.substring(start, yml.indexOf("\n  keycloak:\n", start));
+        // kcadm reads the configured password from KC_CLI_PASSWORD, so it never sits in argv.
+        assertTrue(rotate.contains("KC_CLI_PASSWORD: \"${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}\""));
+        assertFalse(rotate.contains("--password \"$$KC_BOOTSTRAP_ADMIN_PASSWORD\""), "the configured password must not be a kcadm argument");
+        // A renamed admin user leaves the original admin/admin account behind.
+        int originalAdmin = rotate.indexOf("[ \"$$KC_ADMIN_USER\" != \"admin\" ] && login_default admin; then rotate admin; fi");
+        int configured = rotate.indexOf("--user \"$$KC_ADMIN_USER\" </dev/null >/dev/null 2>&1; then");
+        int touch = rotate.indexOf("touch \"$$marker\"");
+        assertTrue(originalAdmin > 0 && configured > originalAdmin, "the original admin account must be checked before the configured login");
+        assertTrue(touch > configured && rotate.indexOf("touch \"$$marker\"", touch + 1) < 0,
+                "the marker is written once, after the configured login succeeded");
     }
 
     @Test
