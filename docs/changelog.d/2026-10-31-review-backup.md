@@ -38,16 +38,18 @@ the backup / import / sync path. Several authorization findings only matter with
 - A source resource two workflows share is matched per workflow: extension diffs carry
   their workflow's `workflowIndex`, and the executor looks diffs up per workflow (#8).
 - A 409 is retried against the store's version only when the descriptor lags the store
-  (a lost descriptor write); a version whose descriptor moved is somebody's edit and is
-  reported, not overwritten.
+  (a lost descriptor write) or when the newer version is one this run wrote itself (a
+  target resource two workflows share is written once per workflow); any other version
+  whose descriptor moved is somebody's edit and is reported, not overwritten.
 - `createExtension` decodes the JSON before `requireMayAuthor`, so a JSON-escaped
   `${caller:token}` no longer passes the check; a created RAG config gets
   `KnowledgeBaseStorageGuard.prepareNew`.
 - A newly created workflow runs the reference check before any of its resources is
   written.
 - `ScrubbedSecrets` restores a *literal* target credential only when the object's
-  destination (`…Url`, `uri`, `endpoint`, `host`, absolute `path`) is unchanged; vault
-  references still come from the target. The identity lookup for array elements is
+  destination (`…Url`, `uri`, `endpoint`, `host`, absolute `path`) is unchanged, compared
+  by origin with scheme and host case-folded and a default port equal to an omitted one;
+  vault references still come from the target. The identity lookup for array elements is
   indexed once per list instead of a scan per element.
 - Source readers refuse more than 256 workflow references; the remote source fetches each
   document once per sync.
@@ -63,7 +65,10 @@ the backup / import / sync path. Several authorization findings only matter with
 
 - Export keeps "VIEW on the agent covers the graph beneath it" for the structural step
   references (a non-cascading share still exports); only references the authoring check
-  never saw need their own `VIEW`.
+  never saw need their own `VIEW`. That includes the dictionaries a *parser document*
+  names (the parser store does not vet them on write), so a recipient of a non-cascading
+  share whose agent uses parser-document dictionaries they cannot see now gets a 403
+  instead of an archive.
 - Minimal edits outside `backup/`: `RestWorkflowStore.referencedResources` and
   `ConnectionReadRedactor.redactLegacyLiterals` made public for reuse;
   `SecretScrubber` gained the credential-query-name rule.

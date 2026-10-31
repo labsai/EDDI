@@ -217,13 +217,29 @@ final class ScrubbedSecrets {
                 URI uri = URI.create(trimmed);
                 if (uri.getHost() != null) {
                     String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
-                    return scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT) + ":" + uri.getPort();
+                    return scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT) + ":" + effectivePort(scheme, uri.getPort());
                 }
             } catch (IllegalArgumentException unparseable) {
                 // a template or otherwise not a URI: compared as written
             }
         }
         return trimmed;
+    }
+
+    /**
+     * The port a request actually uses: an explicit default ({@code :443} on https)
+     * and an omitted one are the same destination, and treating them as different
+     * would replace a working credential with a placeholder.
+     */
+    private static int effectivePort(String scheme, int port) {
+        if (port != -1) {
+            return port;
+        }
+        return switch (scheme) {
+            case "http", "ws" -> 80;
+            case "https", "wss" -> 443;
+            default -> -1;
+        };
     }
 
     private static boolean isAbsolute(String value) {

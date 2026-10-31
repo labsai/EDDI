@@ -87,6 +87,19 @@ class ScrubbedSecretsDestinationTest {
     }
 
     @Test
+    @DisplayName("the same origin spelled with its default port, other case or a trailing slash is not a change")
+    void equivalentOriginSpellings() throws Exception {
+        String source = """
+                {"targetServerUrl":"HTTPS://Billing.Example.com:443/","httpCalls":[
+                  {"name":"charge","request":{"path":"/charge",
+                     "headers":{"Authorization":"${vault:REDACTED}"}}}]}""";
+
+        String merged = ScrubbedSecrets.restore(source, TARGET, jsonSerialization);
+
+        assertTrue(merged.contains("live-billing-token"), "the request still goes to the same origin: " + merged);
+    }
+
+    @Test
     @DisplayName("a vault reference is still the target's under a changed destination")
     void vaultReferenceTravels() throws Exception {
         String target = """
