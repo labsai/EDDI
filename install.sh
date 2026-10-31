@@ -1473,23 +1473,33 @@ wait_for_ready() {
 
 # ── Configure Keycloak client (post-start) ────────────────
 
-# True when the Docker daemon (the trusted source) reports a running container for
-# the given compose service. The installer sends stored admin passwords to
-# http://localhost:<port>; checking the daemon first means a different local
-# process squatting on a stopped service's port is not handed them. Answers "yes"
-# when the daemon cannot be asked, so behaviour there is unchanged.
-# Args: service
+# True when the Docker daemon (the trusted source) reports a running container of
+# THIS installation's compose project, for the given service, publishing the given
+# host port. The installer sends stored admin passwords to http://localhost:<port>;
+# checking the daemon first means a different local process squatting on a stopped
+# service's port is not handed them - nor is a same-named service of another
+# compose project, which says nothing about who holds this port. Answers "no" when
+# the daemon cannot be asked: the credentials are then withheld, not guessed at.
+# Args: service host_port
 compose_service_running() {
   local ids
-  ids=$(docker ps -q --filter "label=com.docker.compose.service=$1" --filter "status=running" 2>/dev/null) || return 0
+  ids=$(docker ps -q \
+    --filter "label=com.docker.compose.project=$(compose_project_name)" \
+    --filter "label=com.docker.compose.service=$1" \
+    --filter "publish=$2" \
+    --filter "status=running" 2>/dev/null) || return 1
   [[ -n "$ids" ]]
 }
 
 # Prints a password-grant access token for USER against REALM's admin-cli, or
 # nothing. The password travels on stdin, so it is neither in the process table
-# nor in shell history. Args: kc_base json_tool realm user password
+# nor in shell history. It is sent only when Docker reports this installation's
+# keycloak container on kc_base's port (compose_service_running), so every
+# caller is covered, including the ones that do not go through
+# keycloak_admin_login. Args: kc_base json_tool realm user password
 kc_password_token() {
   local kc_base="$1" json_tool="$2" realm="$3" user="$4" password="$5" token=""
+  compose_service_running keycloak "${kc_base##*:}" || return 0
   token=$(printf '%s' "$password" | curl -sf -X POST \
     --data-urlencode "client_id=admin-cli" \
     --data-urlencode "grant_type=password" \
@@ -1507,6 +1517,10 @@ kc_password_token() {
 kc_authed_curl() {
   local token="$1" cfg rc
   shift
+  # The token is written into curl config syntax, so a value with quotes or line
+  # breaks (from whatever answered on the Keycloak port) could add curl options of
+  # its own. Accept only the characters a JWT / opaque bearer token is made of.
+  [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || return 1
   cfg=$(umask 077; mktemp "${TMPDIR:-/tmp}/eddi-kc-auth.XXXXXX") || return 1
   printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
   curl -K "$cfg" "$@"
@@ -1539,7 +1553,7 @@ kc_reset_password() {
 # the password in .env is the one that is true.
 keycloak_admin_login() {
   local kc_base="$1" json_tool="$2"
-  if ! compose_service_running keycloak; then
+  if ! compose_service_running keycloak "${kc_base##*:}"; then
     warn "No running keycloak container found - not sending Keycloak admin credentials to ${kc_base}."
     KC_ADMIN_TOKEN=""
     return 0
@@ -1729,7 +1743,12 @@ ensure_stack_passwords_for_running_install() {
     [[ -n "$GRAFANA_ADMIN_USER" ]] || GRAFANA_ADMIN_USER=$(env_file_value GRAFANA_ADMIN_USER)
     g_user="${GRAFANA_ADMIN_USER:-admin}"
     [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(generate_password)
-    g_status=$(grafana_login_status "$g_base" "$g_user" admin)
+    if compose_service_running grafana "${g_port:-3000}"; then
+      g_status=$(grafana_login_status "$g_base" "$g_user" admin)
+    else
+      warn "No running grafana container found - not sending Grafana credentials to ${g_base}."
+      g_status="none"
+    fi
     if [[ "$g_status" == "200" ]]; then
       if [[ "$json_tool" == "jq" ]]; then
         body=$(printf '%s' "$GRAFANA_ADMIN_PASSWORD" | jq -Rsc '{oldPassword: "admin", newPassword: ., confirmNew: .}' 2>/dev/null) || body=""
@@ -1925,13 +1944,18 @@ repair_running_keycloak() {
     return 0
   fi
   if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/keycloak/eddi-realm.json" ]]; then
-    cp "$SCRIPT_DIR/keycloak/eddi-realm.json" "$realm_defs" 2>/dev/null || true
+    cp "$SCRIPT_DIR/keycloak/eddi-realm.json" "$realm_defs" 2>/dev/null || : > "$realm_defs"
   else
     if curl -fsSL "${COMPOSE_BASE_URL}/keycloak/eddi-realm.json" -o "$realm_defs" 2>/dev/null; then
       # These definitions are POSTed to Keycloak with admin authority, so they get
       # the same release-manifest check as every other download.
       load_release_checksums
       verify_download "keycloak/eddi-realm.json" "$realm_defs"
+    else
+      # A failed transfer can leave a partial file that still parses; it was never
+      # verified, so nothing from it may reach Keycloak. An empty file defines no
+      # scopes, and the repair then reports them as not created.
+      : > "$realm_defs"
     fi
   fi
 
@@ -2337,7 +2361,7 @@ grafana_login_status() {
 # that never answers is reported as unverified, not as a wrong password.
 confirm_grafana_login() {
   local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
-  if ! compose_service_running grafana; then
+  if ! compose_service_running grafana "${GRAFANA_PORT:-3000}"; then
     warn "No running grafana container found - not sending Grafana credentials to ${g_base}."
     return 0
   fi

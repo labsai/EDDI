@@ -46,6 +46,18 @@ class InfraReviewHardeningTest {
         assertTrue(sh.contains("verify_download \"keycloak/eddi-realm.json\" \"$realm_defs\""));
         assertTrue(sh.contains("compose_service_running keycloak"));
         assertTrue(sh.contains("compose_service_running grafana"));
+        // The listener check matches this installation's project and the port the
+        // credentials go to, and withholds them when Docker cannot be asked.
+        assertTrue(sh.contains("--filter \"label=com.docker.compose.project=$(compose_project_name)\""));
+        assertTrue(sh.contains("--filter \"publish=$2\""));
+        assertTrue(sh.contains("--filter \"status=running\" 2>/dev/null) || return 1"), "a failed docker query must fail closed");
+        // Every password grant goes through the check, not only keycloak_admin_login's.
+        assertTrue(sh.contains("compose_service_running keycloak \"${kc_base##*:}\" || return 0"));
+        // A token is written into curl config syntax only if it is plain token characters.
+        int guard = sh.indexOf("[[ \"$token\" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || return 1");
+        assertTrue(guard > 0 && guard < sh.indexOf("printf 'header = \"Authorization: Bearer"));
+        // A failed realm download leaves no unverified partial file behind.
+        assertTrue(sh.contains("      : > \"$realm_defs\""));
     }
 
     @Test

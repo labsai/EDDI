@@ -118,7 +118,7 @@ ${BOLD}Create options:${RESET}
                             internet.
   --vault-key=KEY           REMOVED: startup-script metadata is readable by every process
                             on the VM, so the key is generated on the VM instead
-                            (read it from ~/eddi/.env after install)
+                            (read it from /root/.eddi/.env on the VM after install)
   --https                   Set up nginx + Let's Encrypt HTTPS (implies --with-auth)
   --letsencrypt-email=EMAIL Email for Let's Encrypt notifications
   --static-ip               Reserve a static external IP address
@@ -1445,7 +1445,7 @@ for arg in "$@"; do
     --project=*)            GCP_PROJECT="${arg#*=}" ;;
     --eddi-branch=*)        EDDI_BRANCH="${arg#*=}" ;;
     --eddi-version=*)       EDDI_VERSION="${arg#*=}" ;;
-    --vault-key=*)          echo "ERROR: --vault-key is no longer supported: it would be uploaded as instance metadata and logged. The VM generates its own key (see ~/eddi/.env)." >&2; exit 1 ;;
+    --vault-key=*)          echo "ERROR: --vault-key is no longer supported: it would be uploaded as instance metadata and logged. The VM generates its own key (in /root/.eddi/.env on the VM)." >&2; exit 1 ;;
     --letsencrypt-email=*)  LETSENCRYPT_EMAIL="${arg#*=}" ;;
     --with-auth)            WITH_AUTH="true" ;;
     --with-monitoring)      WITH_MONITORING="true" ;;
