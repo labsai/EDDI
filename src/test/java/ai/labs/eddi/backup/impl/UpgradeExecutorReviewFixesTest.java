@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.security.CallerTokenAuthorPolicy;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
@@ -296,7 +297,7 @@ class UpgradeExecutorReviewFixesTest {
         // A fresh copy per call, like the real deserializer: the executor edits the
         // copy.
         when(jsonSerialization.deserialize("wf-json", WorkflowConfiguration.class))
-                .thenAnswer(inv -> new com.fasterxml.jackson.databind.ObjectMapper().convertValue(config, WorkflowConfiguration.class));
+                .thenAnswer(inv -> new ObjectMapper().convertValue(config, WorkflowConfiguration.class));
         var source = source(List.of(new WorkflowSourceData("src-wf", "WF", 0, config,
                 Map.of(key, new ExtensionSourceData("src-rag", "KB", "rag", "eddi://ai.labs.rag", "{\"rag\":1}")))));
         givenPreview(List.of(
