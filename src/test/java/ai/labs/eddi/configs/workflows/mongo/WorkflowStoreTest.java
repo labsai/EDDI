@@ -156,6 +156,22 @@ class WorkflowStoreTest {
     }
 
     @Test
+    @DisplayName("getWorkflowDescriptorsContainingResource — a huge caller-supplied version walks only the versions that exist")
+    void clampsVersionWalkToCurrentResourceVersion() throws Exception {
+        IResourceStore.IResourceId current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(2);
+        when(documentDescriptorStore.getCurrentResourceId("aabbccddeeff112233445566")).thenReturn(current);
+        when(resourceStorage.findResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+        when(resourceStorage.findHistoryResourceIdsContaining(anyString(), anyString())).thenReturn(List.of());
+
+        store.getWorkflowDescriptorsContainingResource("eddi://ai.labs.output/outputstore/outputsets/aabbccddeeff112233445566?version=2000000000",
+                true);
+
+        // two config-uri paths per version, two versions
+        verify(resourceStorage, times(4)).findResourceIdsContaining(anyString(), anyString());
+    }
+
+    @Test
     @DisplayName("getWorkflowDescriptorsContainingResource — returns empty when no matches")
     void getWorkflowDescriptorsContainingResourceEmpty() throws Exception {
         when(resourceStorage.findResourceIdsContaining(anyString(), anyString()))

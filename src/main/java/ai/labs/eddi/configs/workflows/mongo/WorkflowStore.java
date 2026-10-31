@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.workflows.mongo;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -87,6 +88,8 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             throw new IResourceStore.ResourceStoreException(
                     "Reverse lookup requires a versioned resource URI ('...?version=<n>' with n >= 1), got: " + resourceURI);
         }
+        version = ResourceUtilities.clampToCurrentVersion(documentDescriptorStore,
+                RestUtilities.extractResourceId(parsedResourceUri).getId(), version);
         resourceURIPart = resourceURIPart + VERSION_QUERY_PARAM;
 
         do {

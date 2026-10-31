@@ -25,6 +25,38 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 public class ResourceUtilities {
     private static final String COPY_APPENDIX = " - Copy";
 
+    /**
+     * Ceiling on how many integer versions a reverse-reference lookup may walk when
+     * the referenced resource's current version cannot be established (it was
+     * deleted, or has no descriptor).
+     */
+    public static final int MAX_REVERSE_LOOKUP_VERSIONS = 1000;
+
+    /**
+     * The highest version a reverse-reference lookup for {@code resourceId} should
+     * start from.
+     * <p>
+     * The lookups in {@code AgentStore} and {@code WorkflowStore} issue several
+     * queries per integer version, walking down to 1. The starting version comes
+     * from a caller-supplied {@code ?version=} parameter, so without a clamp a
+     * single request asking for version 2,000,000,000 kept a worker issuing
+     * billions of queries. No reference can point at a version that never existed,
+     * so the walk starts at the resource's current version (descriptors share the
+     * resource's id and version). When that is unknown the walk is capped at
+     * {@link #MAX_REVERSE_LOOKUP_VERSIONS} instead.
+     */
+    public static int clampToCurrentVersion(IDocumentDescriptorStore descriptorStore, String resourceId, int requestedVersion) {
+        Integer current = null;
+        try {
+            IResourceStore.IResourceId currentId = descriptorStore.getCurrentResourceId(resourceId);
+            current = currentId == null ? null : currentId.getVersion();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            // deleted or descriptor-less: fall back to the fixed ceiling below
+        }
+        int ceiling = current != null && current > 0 ? current : MAX_REVERSE_LOOKUP_VERSIONS;
+        return Math.min(requestedVersion, ceiling);
+    }
+
     public static IResourceStore.IResourceId validateUri(String resourceUriString) {
         if (resourceUriString.startsWith("eddi://")) {
             URI resourceUri = URI.create(resourceUriString);

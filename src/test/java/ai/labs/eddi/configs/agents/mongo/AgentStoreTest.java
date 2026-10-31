@@ -4,6 +4,7 @@
 package ai.labs.eddi.configs.agents.mongo;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStorage;
@@ -266,6 +267,31 @@ class AgentStoreTest {
             var result = agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, 1, false);
 
             assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("a caller-supplied version far above the workflow's current one walks only the versions that exist")
+        void clampsVersionWalkToCurrentWorkflowVersion() throws Exception {
+            var current = createResourceId(WORKFLOW_ID, 3);
+            when(documentDescriptorStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(current);
+
+            agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, 2_000_000_000, true);
+
+            verify(resourceStorage, times(3)).findResourceIdsContaining(eq("workflows"), anyString());
+            verify(resourceStorage).findResourceIdsContaining("workflows",
+                    "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=3");
+        }
+
+        @Test
+        @DisplayName("an unknown workflow caps the version walk at the fixed ceiling")
+        void capsVersionWalkWhenWorkflowUnknown() throws Exception {
+            when(documentDescriptorStore.getCurrentResourceId(WORKFLOW_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, Integer.MAX_VALUE, true);
+
+            verify(resourceStorage, times(ResourceUtilities.MAX_REVERSE_LOOKUP_VERSIONS))
+                    .findResourceIdsContaining(eq("workflows"), anyString());
         }
 
         @Test

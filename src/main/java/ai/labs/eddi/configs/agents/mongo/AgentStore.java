@@ -177,6 +177,9 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
 
         List<DocumentDescriptor> ret = new LinkedList<>();
+        if (workflowVersion != null) {
+            workflowVersion = ResourceUtilities.clampToCurrentVersion(documentDescriptorStore, workflowId, workflowVersion);
+        }
         do {
             String workflowUri = WORKFLOW_RESOURCE_URI + workflowId + VERSION_QUERY_PARAM + workflowVersion;
 
