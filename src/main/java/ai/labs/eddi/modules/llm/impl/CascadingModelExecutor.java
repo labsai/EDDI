@@ -1715,7 +1715,11 @@ class CascadingModelExecutor {
         if (bestSoFar != null) {
             return withRun(bestSoFar, totals, trace);
         }
-        throw new LifecycleException("Model cascade failed: no steps produced a result. Errors: " + String.join("; ", errors));
+        // Every step tried so far failed, but they were paid for: a run ceiling
+        // (duration, deadline, maxCostPerRun) reached after them must not lose that.
+        throw UnrecordedSpend.attach(
+                new LifecycleException("Model cascade failed: no steps produced a result. Errors: " + String.join("; ", errors)),
+                totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
     }
 
     private void recordStepMetrics(String modelType, long durationMs, double confidence, Map<String, Object> tokenUsage, double stepCost) {

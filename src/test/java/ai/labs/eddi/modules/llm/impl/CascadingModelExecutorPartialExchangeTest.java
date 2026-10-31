@@ -353,6 +353,22 @@ class CascadingModelExecutorPartialExchangeTest {
     }
 
     @Test
+    @DisplayName("a run ceiling reached after a failed priced step: the failure still carries that step's spend")
+    void runCeilingAfterFailedStepCarriesItsSpend() {
+        scriptPricedModel(SecondRequest.FAILS, false);
+        var cascade = pricedTwoStepCascade();
+        // Step 0's answered round ($0.01) already reaches the ceiling, so step 1
+        // never starts and nothing produced a result.
+        cascade.setMaxCostPerRun(0.005);
+
+        var failure = assertThrows(LifecycleException.class, () -> run(cascade));
+
+        var spend = UnrecordedSpend.drain(failure);
+        assertEquals(0.01, spend.llmCostUsd(), 1e-9);
+        assertEquals(1_000_000L, ((Number) spend.tokenUsage().get("inputTokens")).longValue());
+    }
+
+    @Test
     @DisplayName("a cascade whose every step fails carries the spend of all of them on its failure")
     void exhaustedCascadeCarriesItsSpend() {
         scriptPricedModel(SecondRequest.FAILS, true);
