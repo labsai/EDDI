@@ -91,6 +91,8 @@ same message, `Quota accounting unavailable — denying request for safety`, sur
 caller cannot tell which backend refused and cannot get a different answer by retrying against
 another node.
 
+The agent gate (`maxAgentsPerTenant`) also counts the deployed agents, from the deployment records and every node's runtime registry (any `READY` version, not only the newest — a failed newer version does not hide a live older one). When that count cannot be read the deploy is refused with the same `503`, counted on `eddi_tenant_quota_unavailable_total{type="agent"}` — but only while an agent limit is in force; with no quota, a disabled one or `maxAgentsPerTenant: -1` the outage blocks nothing.
+
 The monthly cost gate is the exception to the `503`, because it runs inside a turn: when the
 month's spend cannot be read, an LLM task skips its model call and serves its fallback answer
 (`llm:spend_refused:<taskId>` with `reason: tenant_accounting_unavailable`), a tool call gets an

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -68,6 +69,7 @@ class RestAgentAdministrationUndeployResilienceTest {
     private IConversationDescriptorStore conversationDescriptorStore;
     private IConversationService conversationService;
     private RestAgentAdministration admin;
+    private IDocumentDescriptorStore agentDescriptors;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -92,8 +94,12 @@ class RestAgentAdministrationUndeployResilienceTest {
         var restConversationStore = new RestConversationStore(mock(IDocumentDescriptorStore.class), conversationDescriptorStore,
                 conversationMemoryStore, conversationService, mock(IUserMemoryStore.class), runtime, accessGuard,
                 mock(ResourceAccessGuard.class), 365, 90, attachments);
+        agentDescriptors = mock(IDocumentDescriptorStore.class);
+        var currentId = mock(IResourceStore.IResourceId.class);
+        when(currentId.getVersion()).thenReturn(3);
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenReturn(currentId);
         admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore, conversationMemoryStore,
-                restConversationStore, mock(IDocumentDescriptorStore.class), mock(IDeploymentListener.class), mock(IScheduleStore.class),
+                restConversationStore, agentDescriptors, mock(IDeploymentListener.class), mock(IScheduleStore.class),
                 mock(TenantQuotaService.class), mock(ResourceAccessGuard.class));
     }
 
@@ -153,6 +159,27 @@ class RestAgentAdministrationUndeployResilienceTest {
         verify(agentFactory).undeployAgent(ENV, AGENT, 3);
         verify(agentFactory, never()).undeployAgent(ENV, AGENT, 2);
         verify(agentFactory).undeployAgent(ENV, AGENT, 1);
+    }
+
+    @Test
+    @DisplayName("undeployThisAndAllPreviousAgentVersions above the agent's current version is refused before any work")
+    void bulkUndeployBeyondCurrentVersionIsRefused() throws Exception {
+        Response response = admin.undeployAgent(ENV, AGENT, Integer.MAX_VALUE, false, true);
+
+        assertEquals(400, response.getStatus());
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
+        verify(conversationMemoryStore, never()).getActiveConversationCount(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("undeployThisAndAllPreviousAgentVersions of an agent with no documents and nothing deployed is a 404")
+    void bulkUndeployOfUnknownAgentIsNotFound() throws Exception {
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        Response response = admin.undeployAgent(ENV, AGENT, 5, false, true);
+
+        assertEquals(404, response.getStatus());
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
     }
 
     @Test

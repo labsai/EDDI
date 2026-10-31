@@ -8,9 +8,11 @@ import ai.labs.eddi.engine.model.LogEntry;
 import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -291,6 +293,49 @@ class RestLogAdminExtendedTest {
 
             Thread.sleep(2500);
             verify(eventSink, never()).send(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("Token expiry")
+    class TokenExpiry {
+
+        @Test
+        @DisplayName("stops delivering and closes the stream once the opening access token has expired")
+        void streamEndsWithTheToken() {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            when(eventSink.isClosed()).thenReturn(false);
+            when(eventSink.send(any())).thenReturn(CompletableFuture.completedFuture(null));
+            var logEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder().name("log").mediaType(any()).data(any(Class.class), any()).build()).thenReturn(logEvent);
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt())).thenReturn(List.of());
+            var captor = ArgumentCaptor.forClass(Consumer.class);
+            when(boundedLogStore.addListener(captor.capture())).thenReturn("listener-exp");
+
+            long t0 = System.currentTimeMillis();
+            var time = new AtomicLong(t0);
+            var admin = new RestLogAdmin(boundedLogStore, databaseLogs, instanceIdProducer, time::get);
+            var identity = mock(SecurityIdentity.class);
+            var jwt = mock(JsonWebToken.class);
+            // Expires 60 s after the stream opens (JWT exp is in seconds).
+            when(jwt.getExpirationTime()).thenReturn(t0 / 1000L + 60L);
+            when(identity.getPrincipal()).thenReturn(jwt);
+            admin.identity = identity;
+
+            admin.streamLogs(null, null, null, eventSink, sse);
+            @SuppressWarnings("unchecked")
+            Consumer<LogEntry> listener = captor.getValue();
+
+            listener.accept(logEntry("agent-1", "conv-1", "INFO"));
+            verify(eventSink, times(1)).send(logEvent);
+
+            time.set(t0 + 61_000L);
+            listener.accept(logEntry("agent-1", "conv-1", "INFO"));
+            verify(eventSink, times(1)).send(logEvent);
+
+            verify(boundedLogStore, timeout(5000)).removeListener("listener-exp");
+            verify(eventSink, timeout(5000)).close();
         }
     }
 

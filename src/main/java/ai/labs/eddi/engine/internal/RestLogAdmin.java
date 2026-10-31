@@ -11,12 +11,14 @@ import ai.labs.eddi.engine.runtime.BoundedLogStore;
 import ai.labs.eddi.engine.runtime.IDatabaseLogs;
 import ai.labs.eddi.engine.runtime.InstanceIdProducer;
 import ai.labs.eddi.utils.PageBounds;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.sse.OutboundSseEvent;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 
 import java.util.List;
@@ -44,6 +46,13 @@ public class RestLogAdmin implements IRestLogAdmin {
     private final IDatabaseLogs databaseLogs;
     private final InstanceIdProducer instanceIdProducer;
     private final LongSupplier clock;
+
+    /**
+     * The caller, read when a stream opens. Field-injected so the constructors keep
+     * their signatures; null in tests that build this class by hand.
+     */
+    @Inject
+    SecurityIdentity identity;
 
     @Inject
     public RestLogAdmin(BoundedLogStore boundedLogStore, IDatabaseLogs databaseLogs, InstanceIdProducer instanceIdProducer) {
@@ -76,6 +85,12 @@ public class RestLogAdmin implements IRestLogAdmin {
     public void streamLogs(String agentId, String conversationId, String level, SseEventSink eventSink, Sse sse) {
 
         AtomicLong lastEventTime = new AtomicLong(clock.getAsLong());
+        // Read here: the identity is bound to the request, not to the threads below.
+        // The stream must not outlive the access token it was opened with — admin-only
+        // log records would otherwise keep flowing to a revoked or expired token for up
+        // to the 24 h lifetime. The client reconnects with its refreshed token, which
+        // is checked again.
+        final long tokenExpiresAt = tokenExpiry();
 
         // Send initial batch from ring buffer
         List<LogEntry> initial = boundedLogStore.getEntries(agentId, conversationId, level, 50);
@@ -85,7 +100,7 @@ public class RestLogAdmin implements IRestLogAdmin {
 
         // Register listener for live push
         String listenerId = boundedLogStore.addListener(entry -> {
-            if (eventSink.isClosed())
+            if (eventSink.isClosed() || isExpired(tokenExpiresAt))
                 return;
 
             // Apply filters
@@ -104,7 +119,7 @@ public class RestLogAdmin implements IRestLogAdmin {
             long maxLifetimeMs = TimeUnit.HOURS.toMillis(24);
             long start = clock.getAsLong();
             try {
-                while (!eventSink.isClosed() && (clock.getAsLong() - start) < maxLifetimeMs) {
+                while (!eventSink.isClosed() && (clock.getAsLong() - start) < maxLifetimeMs && !isExpired(tokenExpiresAt)) {
                     Thread.sleep(2000);
                     if ((clock.getAsLong() - lastEventTime.get()) > HEARTBEAT_INTERVAL_MS) {
                         try {
@@ -140,6 +155,18 @@ public class RestLogAdmin implements IRestLogAdmin {
 
         log.debugv("SSE log stream started (listenerId={0}, agentId={1}, level={2})", listenerId, sanitize(agentId),
                 sanitize(level));
+    }
+
+    /** When the caller's access token expires (epoch millis), or 0 without one. */
+    long tokenExpiry() {
+        if (identity != null && identity.getPrincipal() instanceof JsonWebToken jwt && jwt.getExpirationTime() > 0) {
+            return jwt.getExpirationTime() * 1000L;
+        }
+        return 0;
+    }
+
+    private boolean isExpired(long tokenExpiresAt) {
+        return tokenExpiresAt > 0 && clock.getAsLong() >= tokenExpiresAt;
     }
 
     @Override
