@@ -146,6 +146,23 @@ class ApiCallExecutorAllowedHostsTest {
         verify(mockRequest).setFollowRedirects(false);
     }
 
+    /**
+     * A redirect handler re-sends the body on a 307/308, and the secret's
+     * allowedHosts policy only judged the first destination.
+     */
+    @Test
+    @DisplayName("a vault secret in the body alone disables redirects")
+    void bodySecretDisablesRedirects() throws Exception {
+        ApiCall call = callWithHeaders(Map.of("Accept", "application/json"));
+        call.getRequest().setMethod("POST");
+        call.getRequest().setContentType("application/json");
+        call.getRequest().setBody("{\"key\":\"${vault:api-key}\"}");
+
+        executor.execute(call, memory, templateData(), SERVER);
+
+        verify(mockRequest).setFollowRedirects(false);
+    }
+
     @Test
     @DisplayName("a header without any reference leaves redirects alone")
     void plainHeaderKeepsRedirects() throws Exception {
