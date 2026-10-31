@@ -66,11 +66,20 @@ class ToolLoopStreamingChatModel implements ChatModel {
      * failure by its cause chain and message, and this one must read as
      * non-retryable whatever the provider said. The provider's failure is attached
      * as a suppressed exception (not walked by the classifier) and logged.
+     * <p>
+     * The message is a fixed string for the same reason. It used to carry the
+     * number of characters forwarded, and the classifier's last-resort wording test
+     * reads a standalone {@code 429}, {@code 502}, {@code 503} or {@code 504} as a
+     * transient HTTP status: a round that failed after exactly 503 characters was
+     * retried into the same sink. The count and the model type go to the log, which
+     * {@link #partiallyStreamed} writes before raising this.
      */
     static final class PartiallyStreamedRoundException extends RuntimeException {
-        PartiallyStreamedRoundException(String modelType, int forwardedChars, Throwable providerFailure) {
-            super(String.format("[%s] Streaming model round failed after %d characters had been sent to the client; "
-                    + "not retried, a retry would send them again", modelType, forwardedChars));
+        static final String MESSAGE = "Streaming model round failed after part of its text had been sent to the client; "
+                + "not retried, a retry would send that text again";
+
+        PartiallyStreamedRoundException(Throwable providerFailure) {
+            super(MESSAGE);
             if (providerFailure != null) {
                 addSuppressed(providerFailure);
             }
@@ -234,6 +243,6 @@ class ToolLoopStreamingChatModel implements ChatModel {
         }
         LOGGER.warnf("[%s] Streaming model round failed after %d characters were sent to the client; not retrying it: %s", modelType,
                 forwardedChars, failure.getMessage());
-        return new PartiallyStreamedRoundException(modelType, forwardedChars, failure);
+        return new PartiallyStreamedRoundException(failure);
     }
 }
