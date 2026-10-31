@@ -5593,7 +5593,7 @@
     "checking": "Wird geprüft…",
     "autoCheck": "Bei jedem Seitenaufruf automatisch prüfen",
     "autoCheckHint": "Führt pro Browser-Neuladen eine Prüfung durch und zeigt einen Hinweis, wenn eine neuere Version vorliegt.",
-    "privacyNote": "Die Prüfung kontaktiert ausschließlich api.github.com direkt aus Ihrem Browser. Es werden keine Daten der Installation übertragen.",
+    "privacyNote": "Die Prüfung kontaktiert ausschließlich api.github.com direkt aus Ihrem Browser. Ihr Browser fügt die Adresse dieser Seite (den Request-Origin) hinzu; weitere Daten der Installation werden nicht übertragen.",
     "neverChecked": "Noch keine Prüfung durchgeführt.",
     "upToDate": "Sie verwenden die neueste Version ({{version}}).",
     "updateAvailable": "EDDI {{version}} ist verfügbar",

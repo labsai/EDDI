@@ -5593,7 +5593,7 @@
     "checking": "Checking…",
     "autoCheck": "Check automatically on every page load",
     "autoCheckHint": "Runs one check per browser reload and shows a banner when a newer release exists.",
-    "privacyNote": "Checks contact api.github.com directly from your browser — no other host, and no deployment data is sent.",
+    "privacyNote": "Checks contact api.github.com directly from your browser — no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
     "neverChecked": "No check run yet.",
     "upToDate": "You are running the latest release ({{version}}).",
     "updateAvailable": "EDDI {{version}} is available",

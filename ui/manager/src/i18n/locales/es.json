@@ -5653,7 +5653,7 @@
     "checking": "Comprobando…",
     "autoCheck": "Comprobar automáticamente en cada carga de página",
     "autoCheckHint": "Ejecuta una comprobación por recarga del navegador y muestra un aviso si existe una versión más reciente.",
-    "privacyNote": "La comprobación contacta únicamente con api.github.com desde tu navegador. No se envía ningún dato del despliegue.",
+    "privacyNote": "La comprobación contacta únicamente con api.github.com desde tu navegador. El navegador adjunta la dirección de este sitio (el origen de la solicitud); no se envía ningún otro dato del despliegue.",
     "neverChecked": "Aún no se ha realizado ninguna comprobación.",
     "upToDate": "Estás usando la última versión ({{version}}).",
     "updateAvailable": "EDDI {{version}} está disponible",
