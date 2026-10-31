@@ -22,12 +22,15 @@ import ai.labs.eddi.modules.llm.tools.impl.ReadAttachmentTool;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -89,6 +92,8 @@ class ContextualToolsProvider implements ToolSourceProvider {
      */
     private final LiveDiscussionRegistry liveDiscussionRegistry;
 
+    private final GuardrailService guardrailService;
+
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor) {
         this(userMemoryStore, attachmentStore, attachmentTextExtractor, null);
@@ -96,6 +101,18 @@ class ContextualToolsProvider implements ToolSourceProvider {
 
     ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
             AttachmentTextExtractor attachmentTextExtractor, LiveDiscussionRegistry liveDiscussionRegistry) {
+        this(userMemoryStore, attachmentStore, attachmentTextExtractor, liveDiscussionRegistry, null);
+    }
+
+    /**
+     * @param guardrailService
+     *            re-applies a task's input guardrails to the turns the recall tool
+     *            returns; null returns them as stored
+     */
+    ContextualToolsProvider(IUserMemoryStore userMemoryStore, IAttachmentStore attachmentStore,
+            AttachmentTextExtractor attachmentTextExtractor, LiveDiscussionRegistry liveDiscussionRegistry,
+            GuardrailService guardrailService) {
+        this.guardrailService = guardrailService;
         this.liveDiscussionRegistry = liveDiscussionRegistry;
         this.userMemoryStore = userMemoryStore;
         this.attachmentStore = attachmentStore;
@@ -268,6 +285,20 @@ class ContextualToolsProvider implements ToolSourceProvider {
     }
 
     /**
+     * The task's input guardrails applied to a stored user text
+     * ({@link GuardrailService#screenHistoricInput}), or null when there are none.
+     */
+    private UnaryOperator<String> historicInputScreen(LlmConfiguration.Task task, IConversationMemory memory) {
+        List<LlmConfiguration.GuardrailConfig> configs = task.getInputGuardrails();
+        if (guardrailService == null || configs == null || configs.isEmpty()) {
+            return null;
+        }
+        var context = new GuardrailContext(null, task.getId(), memory.getConversationId(), memory.getAgentId(), null, List.of(), null,
+                memory.getTurnDeadline());
+        return text -> guardrailService.screenHistoricInput(configs, text, context);
+    }
+
+    /**
      * Constructs and adds a ConversationRecallTool if a rolling summary is active.
      * The tool is created per-invocation with the conversation's output list and
      * the summary step boundary.
@@ -283,8 +314,11 @@ class ContextualToolsProvider implements ToolSourceProvider {
             return;
 
         int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
+        // The recalled turns are re-screened by the task's input guardrails, as the
+        // history window and the summarizer's input are: a turn a guardrail redacted
+        // for the model must not come back verbatim through the tool.
         var tool = new ConversationRecallTool(List.copyOf(ConversationLogGenerator.modelFacingOutputs(memory)), throughStep,
-                summaryConfig.getMaxRecallTurns());
+                summaryConfig.getMaxRecallTurns(), historicInputScreen(task, memory));
         tools.add(tool);
         LOGGER.debugf("[RECALL] ConversationRecallTool enabled: summaryThroughStep=%d, maxRecallTurns=%d", throughStep,
                 summaryConfig.getMaxRecallTurns());

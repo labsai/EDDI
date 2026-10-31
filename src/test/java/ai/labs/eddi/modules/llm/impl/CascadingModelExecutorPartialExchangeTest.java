@@ -30,6 +30,7 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +46,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -134,7 +136,7 @@ class CascadingModelExecutorPartialExchangeTest {
                         any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         return new ToolLoopRunner(toolExecutionService, truncator, null, null, new ToolApprovalGate(), null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
     }
@@ -289,5 +291,77 @@ class CascadingModelExecutorPartialExchangeTest {
         assertEquals(0, toolResults(firstRequestOfStepOne(2)));
         assertEquals(2, orderExecutions.get(), "with carrying off the next step starts from scratch, as documented");
         assertFalse(result.trace().getFirst().containsKey("completedToolMessages"));
+    }
+
+    // === Spend of a failed step (review finding #2) ===
+
+    /**
+     * Every answered request reports 1M input tokens. Step 0 (cheap, $0.01 per
+     * round) asks for the tool, then its next request hangs or fails; step 1 ($0.10
+     * per round) answers — or, with {@code strongFails}, fails too after its own
+     * priced tool round.
+     */
+    private void scriptPricedModel(SecondRequest second, boolean strongFails) {
+        AtomicInteger call = new AtomicInteger();
+        when(model.chat(any(ChatRequest.class))).thenAnswer(inv -> {
+            ChatRequest request = inv.getArgument(0);
+            int n = call.getAndIncrement();
+            if (n == 1 || (strongFails && n == 3)) {
+                if (second == SecondRequest.HANGS && n == 1) {
+                    Thread.sleep(10_000);
+                }
+                throw new IllegalStateException("provider rejected the request");
+            }
+            boolean orderPlaced = request.messages().stream()
+                    .anyMatch(m -> m instanceof ToolExecutionResultMessage r && "placeOrder".equals(r.toolName()));
+            AiMessage answer = orderPlaced && !strongFails
+                    ? AiMessage.from(LONG_ANSWER)
+                    : AiMessage.from(ToolExecutionRequest.builder().id("c" + n).name("placeOrder").arguments("{\"item\":\"pizza\"}").build());
+            return ChatResponse.builder().aiMessage(answer).tokenUsage(new TokenUsage(1_000_000, 0)).build();
+        });
+    }
+
+    private static ModelCascadeConfig pricedTwoStepCascade() {
+        var cascade = twoStepCascade();
+        cascade.setCarryToolResultsOnEscalation(false);
+        cascade.getSteps().get(0).setInputPricePer1M(0.01);
+        cascade.getSteps().get(1).setInputPricePer1M(0.10);
+        return cascade;
+    }
+
+    @Test
+    @DisplayName("a step that fails after a priced round: its round is in the run's cost")
+    void failedStepRoundIsCharged() throws Exception {
+        scriptPricedModel(SecondRequest.FAILS, false);
+
+        var result = run(pricedTwoStepCascade());
+
+        assertEquals(1, result.stepUsed());
+        // step 0: one answered round ($0.01); step 1: two rounds ($0.20).
+        assertEquals(0.21, result.runCostUsd(), 1e-9, result.trace().toString());
+    }
+
+    @Test
+    @DisplayName("a step that times out after a priced round: its round is in the run's cost")
+    void timedOutStepRoundIsCharged() throws Exception {
+        scriptPricedModel(SecondRequest.HANGS, false);
+
+        var result = run(pricedTwoStepCascade());
+
+        assertEquals(1, result.stepUsed());
+        assertEquals(0.21, result.runCostUsd(), 1e-9, result.trace().toString());
+    }
+
+    @Test
+    @DisplayName("a cascade whose every step fails carries the spend of all of them on its failure")
+    void exhaustedCascadeCarriesItsSpend() {
+        scriptPricedModel(SecondRequest.FAILS, true);
+
+        var failure = assertThrows(LifecycleException.class, () -> run(pricedTwoStepCascade()));
+
+        var spend = UnrecordedSpend.drain(failure);
+        // step 0: one answered round at $0.01; step 1: one at $0.10.
+        assertEquals(0.11, spend.llmCostUsd(), 1e-9);
+        assertEquals(2_000_000L, ((Number) spend.tokenUsage().get("inputTokens")).longValue());
     }
 }

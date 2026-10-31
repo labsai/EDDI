@@ -72,7 +72,9 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -397,11 +399,42 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * and {@code audit:cost} (see {@link ToolApprovalRequiredException#addSpend}).
      */
     private void recordPrePauseSpend(IWritableConversationStep currentStep, ToolApprovalRequiredException pause) {
+        recordSpend(currentStep, pause.getTokenUsageSoFar(), pause.getCostSoFarUsd());
+    }
+
+    /**
+     * The one place a model phase's spend reaches the step: its tokens into
+     * {@code audit:token_usage}, its price into {@code audit:cost} — what the
+     * {@code /v1} adapter reports, {@code TurnCostMeter} charges to the tenant and
+     * every later spend check counts. Every exit of a model phase passes through
+     * here: a returned phase ({@link #accumulateUsageAndCost}), a pause
+     * ({@link #recordPrePauseSpend}) and a failure
+     * ({@link #recordFailedPhaseSpend}).
+     */
+    private void recordSpend(IWritableConversationStep currentStep, Map<?, ?> tokenUsage, double costUsd) {
         if (currentStep == null) {
             return;
         }
-        accumulateTokenUsage(currentStep, pause.getTokenUsageSoFar());
-        accumulateCost(currentStep, pause.getCostSoFarUsd());
+        if (tokenUsage != null) {
+            accumulateTokenUsage(currentStep, tokenUsage);
+        }
+        accumulateCost(currentStep, costUsd);
+    }
+
+    /**
+     * Records what a failed model phase spent before it failed — the tool rounds,
+     * tool calls and cascade steps it completed, carried on the failure
+     * ({@link UnrecordedSpend}). A pause is not a failure: it carries its own spend
+     * and is recorded once, by {@link #execute}.
+     */
+    private void recordFailedPhaseSpend(IWritableConversationStep currentStep, Throwable failure) {
+        if (failure instanceof ToolApprovalRequiredException) {
+            return;
+        }
+        UnrecordedSpend.Spend spend = UnrecordedSpend.drain(failure);
+        if (!spend.isEmpty()) {
+            recordSpend(currentStep, spend.tokenUsage(), spend.totalUsd());
+        }
     }
 
     /**
@@ -573,7 +606,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             String existingSummary = ConversationSummarizer.readSummary(memory);
             if (existingSummary != null) {
                 int throughStep = ConversationSummarizer.readSummaryThroughStep(memory);
-                summaryPrefix = "## CONVERSATION SUMMARY (turns 1-" + throughStep + " condensed)\n" + existingSummary + "\n\n"
+                // Marked like retrieved context: the summary is derived from user and tool
+                // text (a model's condensation of it), not the designer's instructions, and
+                // it sits in the system role on every later turn.
+                summaryPrefix = "## CONVERSATION SUMMARY (turns 1-" + throughStep + " condensed)\n"
+                        + markRetrievedContext(task, "conversation-summary", existingSummary) + "\n\n"
                         + "[You can use the recallConversationDetail tool to access full details from these summarized turns.]";
                 skipSteps = throughStep;
                 LOGGER.debugf("[SUMMARY] Using rolling summary for task '%s': covers turns 1-%d, recent window from step %d", taskId, throughStep,
@@ -831,7 +868,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 // Tool spend of the run. This branch builds a FRESH metadata map instead of
                 // adopting the agent's, so without this the entire tool cost of an agent-mode
                 // cascade (the DEFAULT — enableInAgentMode defaults to true) never reaches
-                // accumulateAuditEvidence's cascadeCostUsd + toolCostUsd sum, and the ledger
+                // pricedCost's cascadeCostUsd + toolCostUsd sum, and the ledger
                 // reports token cost only. The non-cascade branches below assign the agent's
                 // whole map and always carried it.
                 responseMetadata.put("toolCostUsd", cascadeResult.runToolCostUsd());
@@ -977,7 +1014,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         } catch (LlmSpendGate.SpendRefusedException refused) {
             // Not a failure of the model phase — it never started — so neither onError
             // nor the circuit is involved: the fallback answer is served unconditionally,
-            // where the model's answer would have gone.
+            // where the model's answer would have gone. A cascade refused before a later
+            // step still paid for its earlier ones.
+            recordFailedPhaseSpend(currentStep, refused);
             fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
             responseContent = fallbackServed.content();
             responseMetadata = new HashMap<>();
@@ -991,9 +1030,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 countFailure(e, resolveModelNameOf(processedParams, resolvedType));
             }
             if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(e)) {
+                recordFailedPhaseSpend(currentStep, e);
                 throw e;
             }
             markUncommitted(currentStep, dataBefore);
+            // After markUncommitted: the spend is not part of the failed attempt's data,
+            // it is what the attempt cost.
+            recordFailedPhaseSpend(currentStep, e);
             fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", e, convertObject, memory.getConversationId(),
                     memory.getAgentId(), null);
             responseContent = fallbackServed.content();
@@ -1043,6 +1086,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 // deliberate failure of the model phase: with onError=fallback it is
                 // absorbed like any other.
                 if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(validationFailure)) {
+                    // The model answered (and was paid) before its answer was rejected.
+                    accumulateUsageAndCost(currentStep, responseMetadata, task);
+                    recordFailedPhaseSpend(currentStep, validationFailure);
                     throw validationFailure;
                 }
                 markUncommitted(currentStep, dataBefore);
@@ -1053,6 +1099,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         }
 
         recordAbnormalFinish(currentStep, responseMetadata);
+
+        // The model phase's spend, recorded here — once, as soon as the phase is over
+        // — rather than among the audit evidence below: JSON conversion and
+        // postResponse can still fail the task, and a failure there used to lose the
+        // whole answer's cost. Recorded whether or not the audit ledger is on: the
+        // /v1 adapter reports the tokens and TurnCostMeter charges the cost.
+        accumulateUsageAndCost(currentStep, responseMetadata, task);
 
         if (fallbackServed != null && eventSink != null && !addToOutputExplicitlyFalse && !modelTextStreamed) {
             eventSink.onToken(fallbackServed.text());
@@ -1113,13 +1166,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
-            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
-        } else {
-            // The turn's token counts are also the caller's: the OpenAI-compatible /v1
-            // adapter reports them as `usage`; and its cost is the tenant's — it is what
-            // TurnCostMeter charges to the monthly budget. Both are recorded without the
-            // rest of the audit evidence when the ledger is off (eddi.audit.enabled=false).
-            accumulateUsageAndCost(currentStep, responseMetadata, task);
+            // Tokens and cost were recorded when the model phase ended.
+            accumulateToolCalls(currentStep, toolTrace, task.getId());
         }
 
         // Store tool trace if available
@@ -1208,14 +1256,50 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 // credentials.
                 var effectiveSummaryConfig = resolveEffectiveSummaryConfig(summaryConfig, resolvedType,
                         resolveModelNameOf(processedParams, resolvedType));
-                conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
-                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()));
+                // The summarizer sees what the main model may see: the task's input
+                // guardrails are re-applied to the turns it condenses. It is a paid call
+                // like any other — asked of the spend gate first, and priced and recorded
+                // on the step afterwards.
+                Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
+                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
+                        historicInputScreen(memory, task), summaryAdmission(memory));
+                recordSpend(currentStep, summaryUsage, ModelPrices.ofTask(task).cost(summaryUsage));
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
                 // Non-fatal — conversation continues, summary will catch up next turn
             }
         }
+    }
+
+    /**
+     * The task's input guardrails as they apply to a stored user text of an earlier
+     * turn ({@link GuardrailService#screenHistoricInput}) — for the model-facing
+     * renderings of turns outside the history window (the rolling summary, the
+     * recall tool). Null when the task has no input guardrails.
+     */
+    UnaryOperator<String> historicInputScreen(IConversationMemory memory, Task task) {
+        if (guardrailService == null || isNullOrEmpty(task.getInputGuardrails())) {
+            return null;
+        }
+        var context = guardrailContext(memory, task, List.of());
+        return text -> guardrailService.screenHistoricInput(task.getInputGuardrails(), text, context);
+    }
+
+    /**
+     * The spend check of a rolling-summary call: the conversation's ceiling and the
+     * tenant budget, as for any other paid call of the turn. The answer's own cost
+     * is already on the step.
+     */
+    private BooleanSupplier summaryAdmission(IConversationMemory memory) {
+        if (spendGate == null) {
+            return null;
+        }
+        return () -> {
+            try (LlmSpendGate.Admission admission = spendGate.admit(memory, 0.0, 0.0)) {
+                return admission.allowed();
+            }
+        };
     }
 
     /**
@@ -1572,11 +1656,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (responseMetadata == null) {
             return;
         }
-        Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
-        if (tokenUsage != null) {
-            accumulateTokenUsage(currentStep, tokenUsage);
-        }
-        accumulateCost(currentStep, pricedCost(responseMetadata, task));
+        recordSpend(currentStep, responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null, pricedCost(responseMetadata, task));
     }
 
     /**
@@ -1592,7 +1672,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         Map<?, ?> tokenUsage = responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null;
         double llmCostUsd = responseMetadata.containsKey("cascadeCostUsd")
                 ? asDouble(responseMetadata.get("cascadeCostUsd"))
-                : TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), tokenUsage);
+                : ModelPrices.ofTask(task).cost(tokenUsage);
         return llmCostUsd + asDouble(responseMetadata.get("toolCostUsd"));
     }
 
@@ -1606,7 +1686,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (step != null && metadata != null && !metadata.containsKey("cascadeCostUsd") && metadata.get("tokenUsage") instanceof Map<?, ?> usage) {
             @SuppressWarnings("unchecked")
             Map<String, Object> tokenUsage = (Map<String, Object>) usage;
-            metadata.put("cascadeCostUsd", CascadingModelExecutor.computeCost(step, task.getModelCascade(), tokenUsage));
+            metadata.put("cascadeCostUsd", ModelPrices.ofCascadeStep(step, task.getModelCascade()).cost(tokenUsage));
         }
     }
 
@@ -2166,6 +2246,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         } catch (LlmSpendGate.SpendRefusedException refused) {
             // Not a failure of the model phase — it never started — so onError is not
             // involved: the fallback answer is served unconditionally (live-path parity).
+            recordFailedPhaseSpend(currentStep, refused);
             fallbackServed = serveSpendRefusal(task, templateDataObjects, currentStep, refused.refusal(), convertObject, memory);
             result = null;
         } catch (ToolApprovalRequiredException rePause) {
@@ -2184,9 +2265,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             // propagates as before.
             countFailure(failure, resolveModelNameOf(processedParams, resolvedType));
             if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(failure)) {
+                recordFailedPhaseSpend(currentStep, failure);
                 throw failure;
             }
             markUncommitted(currentStep, dataBefore);
+            recordFailedPhaseSpend(currentStep, failure);
             fallbackServed = fallbackHandler.serve(task, templateDataObjects, currentStep, "onError", failure, convertObject,
                     memory.getConversationId(), memory.getAgentId(), null);
             result = null;
@@ -2234,6 +2317,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 }
             } catch (LifecycleException validationFailure) {
                 if (!fallbackOnError || memory.isCancelled() || LlmFallbackHandler.isControlFlow(validationFailure)) {
+                    // The resumed answer was paid for before it was rejected.
+                    accumulateUsageAndCost(currentStep, responseMetadata, task);
+                    recordFailedPhaseSpend(currentStep, validationFailure);
                     throw validationFailure;
                 }
                 markUncommitted(currentStep, dataBefore);
@@ -2242,6 +2328,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 responseContent = fallbackServed.content();
             }
         }
+        // The post-resume spend, once the phase is over (live-path parity): added to
+        // the step totals, which already hold the pre-pause segment
+        // (recordPrePauseSpend).
+        accumulateUsageAndCost(currentStep, responseMetadata, task);
+
         boolean outputSuppressed = "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT));
         var resumeSink = memory.getEventSink();
         if (fallbackServed != null && resumeSink != null && !outputSuppressed && !modelTextStreamed) {
@@ -2299,15 +2390,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             var modelNameData = dataFactory.createData(MemoryKeys.AUDIT_MODEL_NAME, modelName);
             currentStep.storeData(modelNameData);
 
-            // Adds the post-resume spend to the step totals, which already hold the
-            // pre-pause segment (see the comment above).
-            accumulateAuditEvidence(currentStep, responseMetadata, toolTrace, task);
-        } else {
-            // The turn's token counts are also the caller's: the OpenAI-compatible /v1
-            // adapter reports them as `usage`; and its cost is the tenant's — it is what
-            // TurnCostMeter charges to the monthly budget. Both are recorded without the
-            // rest of the audit evidence when the ledger is off (eddi.audit.enabled=false).
-            accumulateUsageAndCost(currentStep, responseMetadata, task);
+            // Tokens and cost were recorded when the resumed phase ended.
+            accumulateToolCalls(currentStep, toolTrace, task.getId());
         }
 
         // Tool trace (mirror executeTask)
@@ -2949,8 +3033,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      */
     private static final Set<String> PROVIDER_BOUND_PARAMETERS = Stream.concat(Stream.of(
             "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
-            "baseUrl", "endpoint",
-            "compartmentId", "configProfile", "projectId", "region", "location"),
+            "baseUrl", "endpoint", "apiEndpoint",
+            "compartmentId", "configProfile", "projectId", "region", "location",
+            "organizationId", "deploymentName", "serviceVersion",
+            // Request-override containers: a custom header routinely carries a
+            // vendor credential or tenant id, and custom parameters are
+            // vendor-specific request fields.
+            "customHeaders", "customQueryParams", "customParameters"),
             ModelParameterKeys.MODEL_KEYS.stream()).collect(Collectors.toUnmodifiableSet());
 
     /**
@@ -3254,7 +3343,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             metadata.put("tokenUsage", total);
         }
         // Under the cascade, cost is not derived from tokenUsage but carried in
-        // cascadeCostUsd (accumulateAuditEvidence) — so the reprompts' cost, priced
+        // cascadeCostUsd (pricedCost) — so the reprompts' cost, priced
         // with the winning step's prices, is added there.
         if (metadata.containsKey("cascadeCostUsd") && cascadeRepromptCost > 0.0) {
             metadata.put("cascadeCostUsd", asDouble(metadata.get("cascadeCostUsd")) + cascadeRepromptCost);
@@ -3339,8 +3428,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (metadata.containsKey(KEY_REPROMPT_COST)) {
             return asDouble(metadata.get(KEY_REPROMPT_COST));
         }
-        return TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                metadata.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null);
+        return ModelPrices.ofTask(task).cost(metadata.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null);
     }
 
     /** Plain chat: the same model over the same request. */
@@ -3426,9 +3514,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 metadata = result.responseMetadata();
             }
             Map<String, Object> priced = metadata != null ? new HashMap<>(metadata) : new HashMap<>();
-            Double inPrice = step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascadeConfig.getInputPricePer1M();
-            Double outPrice = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascadeConfig.getOutputPricePer1M();
-            priced.put(KEY_REPROMPT_COST, TokenPricing.cost(inPrice, outPrice, priced.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null));
+            priced.put(KEY_REPROMPT_COST, ModelPrices.ofCascadeStep(step, cascadeConfig)
+                    .cost(priced.get("tokenUsage") instanceof Map<?, ?> usage ? usage : null));
             return new FormatRetryRunner.Attempt(text, priced);
         }, memory, task, circuit);
     }

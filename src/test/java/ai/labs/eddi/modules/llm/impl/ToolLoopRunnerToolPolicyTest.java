@@ -95,7 +95,7 @@ class ToolLoopRunnerToolPolicyTest {
         service.init();
 
         truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(service, truncator, null, null, new ToolApprovalGate(),
                 new ToolApprovalGateSupport(new ChatTranscriptCodec()), null, new ToolResultGuardrail(new SimpleMeterRegistry()));
@@ -173,7 +173,7 @@ class ToolLoopRunnerToolPolicyTest {
     @Test
     @DisplayName("discover_tools activates from its untruncated result even when a response limit applies")
     void discoverToolsParsesUntruncatedResult() {
-        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> {
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> {
             String result = i.getArgument(2);
             return result.substring(0, Math.min(20, result.length()));
         });

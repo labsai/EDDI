@@ -61,6 +61,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -291,9 +292,10 @@ class ToolLoopRunner {
 
     /**
      * Dollar cost the tools of THIS model call added, as the difference between two
-     * snapshots of the conversation total. Clamped at zero because
-     * {@link ToolCostTracker#resetConversation} can fire between the snapshots and
-     * would otherwise yield a negative "cost".
+     * snapshots of the conversation total. Clamped at zero because the tracker can
+     * drop the conversation's entry between the snapshots (its size-bounded
+     * eviction, {@link ToolCostTracker#resetAll}), which would otherwise yield a
+     * negative "cost".
      */
     double toolCostDelta(String conversationId, double costBefore) {
         return Math.max(0.0, conversationToolCost(conversationId) - costBefore);
@@ -367,6 +369,14 @@ class ToolLoopRunner {
         // One backoff budget for every model request of this loop run, so per-request
         // retries keep the documented total ceiling instead of one per request.
         long[] backoffSpentMs = new long[1];
+        // What this run has spent and not yet recorded: its model rounds at the
+        // prices of the model it runs on (a cascade step's, when a cascade runs it)
+        // and its tool calls. One figure for every exit and every check — the
+        // mid-loop ceiling, the tenant check before each tool call, the pause and a
+        // failure — so they cannot price the same rounds differently.
+        ModelPrices prices = exchangeRecorder != null && exchangeRecorder.prices() != null ? exchangeRecorder.prices() : ModelPrices.ofTask(task);
+        DoubleSupplier runSpend = () -> prices.cost(tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
+                + toolCostDelta(conversationId, toolCostBefore);
         try {
             tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
@@ -420,10 +430,7 @@ class ToolLoopRunner {
 
             for (int i = startIteration; i < maxIterations; i++) {
                 if (ceilingApplies && (modelAnswered || resumed)) {
-                    double spent = costBeforeLoop
-                            + TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                                    tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
-                            + toolCostDelta(conversationId, toolCostBefore);
+                    double spent = costBeforeLoop + runSpend.getAsDouble();
                     if (spent >= costCeiling.getAsDouble()) {
                         String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
                                 spent);
@@ -508,6 +515,9 @@ class ToolLoopRunner {
                 // Accumulate token usage for cost/observability reporting.
                 if (chatResponse.metadata() != null && chatResponse.metadata().tokenUsage() != null) {
                     tokenHolder[0] = ToolContextBudget.sumTokens(tokenHolder[0], chatResponse.metadata().tokenUsage());
+                    if (exchangeRecorder != null) {
+                        exchangeRecorder.recordUsage(chatResponse.metadata().tokenUsage());
+                    }
                 }
 
                 if (aiMessage.hasToolExecutionRequests()) {
@@ -591,7 +601,7 @@ class ToolLoopRunner {
                                 executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
                                         () -> executeToolCall(allowedReq, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                                 toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                                                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
+                                                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -634,14 +644,12 @@ class ToolLoopRunner {
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
                             var pause = new ToolApprovalRequiredException(
                                     ToolApprovalGateSupport.buildPauseReason(effectiveToolApprovals, gateResult, governingRule), batch);
-                            // What this run spent up to the pause — its model rounds at the
-                            // task's prices and its tool calls (for a resume, from before the
-                            // approved calls). LlmTask records it on the step as the pause
-                            // passes, so the resume's spend checks count it.
+                            // What this run spent up to the pause — its model rounds and its
+                            // tool calls (for a resume, from before the approved calls).
+                            // LlmTask records it on the step as the pause passes, so the
+                            // resume's spend checks count it.
                             Map<String, Object> usageSoFar = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
-                            pause.addSpend(usageSoFar,
-                                    TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(), usageSoFar)
-                                            + toolCostDelta(conversationId, toolCostBefore));
+                            pause.addSpend(usageSoFar, runSpend.getAsDouble());
                             throw pause;
                         }
                     }
@@ -672,7 +680,7 @@ class ToolLoopRunner {
                         executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
                                 () -> executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                         toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
+                                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
 
@@ -708,16 +716,27 @@ class ToolLoopRunner {
             }
             return finish(currentMessages, transcriptOut, iterationBudgetSpentMessage(maxIterations));
         } catch (ToolApprovalRequiredException e) {
-            // The pause signal travels up unchanged.
+            // The pause signal travels up unchanged; it carries its own spend.
             throw e;
         } catch (LifecycleException.LifecycleInterruptedException e) {
             // Deliberately NOT unchanged: see wrapLoopFailure.
-            throw wrapLoopFailure(e);
+            throw withRunSpend(wrapLoopFailure(e), tokenHolder, prices, runSpend);
         } catch (LifecycleException e) {
-            throw e;
+            throw withRunSpend(e, tokenHolder, prices, runSpend);
         } catch (Exception e) {
-            throw wrapLoopFailure(e);
+            throw withRunSpend(wrapLoopFailure(e), tokenHolder, prices, runSpend);
         }
+    }
+
+    /**
+     * Attaches what this run spent before it failed to the failure
+     * ({@link UnrecordedSpend}): the rounds the model answered and the tools that
+     * ran are paid for whether or not the run returns.
+     */
+    private static <T extends Exception> T withRunSpend(T failure, TokenUsage[] tokenHolder, ModelPrices prices, DoubleSupplier runSpend) {
+        Map<String, Object> usage = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
+        double llmCost = prices.cost(usage);
+        return UnrecordedSpend.attach(failure, usage, llmCost, runSpend.getAsDouble() - llmCost);
     }
 
     /**
@@ -1086,8 +1105,8 @@ class ToolLoopRunner {
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         return executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit,
-                maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)
-                .governed();
+                maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs,
+                NO_RUN_SPEND).governed();
     }
 
     /**
@@ -1112,8 +1131,73 @@ class ToolLoopRunner {
     }
 
     /**
+     * The spend side of a tool result's {@code summarize} truncation: admitted
+     * while the conversation's cost ceiling and the tenant budget allow another
+     * paid call (with this run's unrecorded spend counted), and charged to the
+     * conversation as a priced tool call ({@code summarizeToolResponse}) — so it
+     * lands in the run's tool cost, {@code audit:cost} and
+     * {@code maxBudgetPerConversation} like any other. Priced at the task's own
+     * rates: the summarizer runs on the task's provider, and no separate price is
+     * configured for it.
+     */
+    private ToolResponseTruncator.SummarizerSpend summarizerSpend(IConversationMemory memory, LlmConfiguration.Task task,
+                                                                  String conversationId, boolean enableCostTracking, DoubleSupplier runSpend) {
+        return new ToolResponseTruncator.SummarizerSpend() {
+            @Override
+            public boolean admit() {
+                double unsettled = runSpend != null ? runSpend.getAsDouble() : 0.0;
+                if (memory != null) {
+                    OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
+                    if (LlmSpendGate.ceilingApplies(ceiling) && LlmSpendGate.conversationCost(memory) + unsettled >= ceiling.getAsDouble()) {
+                        return false;
+                    }
+                }
+                if (tenantQuotaService == null) {
+                    return true;
+                }
+                try {
+                    return tenantQuotaService
+                            .checkCostBudget(tenantQuotaService.getDefaultTenantId(),
+                                    Math.max(0.0, LlmSpendGate.unmeteredStepCost(memory) + unsettled))
+                            .allowed();
+                } catch (RuntimeException e) {
+                    // Fail closed, as every other tenant check: the result is truncated.
+                    return false;
+                }
+            }
+
+            @Override
+            public void charge(Map<String, Object> tokenUsage) {
+                if (!enableCostTracking || conversationId == null || toolExecutionService == null
+                        || toolExecutionService.getCostTracker() == null) {
+                    return;
+                }
+                double price = ModelPrices.ofTask(task).cost(tokenUsage);
+                toolExecutionService.getCostTracker()
+                        .trackToolCall(new ToolInvocation(SUMMARIZER_DISPATCH_NAME, SUMMARIZER_DISPATCH_NAME, price), conversationId);
+            }
+        };
+    }
+
+    /**
+     * The tool name a {@code summarize} truncation's model call is charged under.
+     */
+    static final String SUMMARIZER_DISPATCH_NAME = "summarizeToolResponse";
+
+    /**
+     * Unsettled spend of a call made outside a running loop (a resume's approved
+     * call).
+     */
+    static final DoubleSupplier NO_RUN_SPEND = () -> 0.0;
+
+    /**
      * {@link #executeSingleToolCallResult} with the raw result kept alongside the
-     * governed one. The only addition over that method's contract is the record.
+     * governed one, and with the spend of the loop run making the call.
+     *
+     * @param runSpend
+     *            what the calling loop run has spent and not yet recorded — the
+     *            tenant budget is checked against it as well, as
+     *            {@link LlmSpendGate} checks every other paid call of a turn
      */
     ToolCallResult executeToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                    List<Map<String, Object>> trace,
@@ -1122,7 +1206,7 @@ class ToolLoopRunner {
                                    int defaultRateLimit, Double maxBudget, String conversationId,
                                    boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                    LlmConfiguration.Task task, boolean isLazy,
-                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
         // Live "Using {tool}…" signal for streaming clients — name only, before
         // execution, so the status line moves the moment work starts rather than
         // when the whole loop summarizes at turn end.
@@ -1213,11 +1297,18 @@ class ToolLoopRunner {
             return new ToolCallResult("Error: " + budgetError);
         }
 
-        // Check tenant-level monthly cost budget (MCP governance)
+        // Check tenant-level monthly cost budget (MCP governance), with what this turn
+        // has spent and the monthly counter has not been charged yet: the step's
+        // unmetered audit:cost (earlier tasks, a pre-pause segment) and this loop
+        // run's own rounds and tools. The counter is charged when the turn settles,
+        // so without it every tool call of a long loop was compared against the
+        // counter as it stood before the turn — the same figure LlmSpendGate.admit
+        // passes for every other paid call.
         if (tenantQuotaService != null) {
             QuotaCheckResult costCheck;
             try {
-                costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+                double unsettled = LlmSpendGate.unmeteredStepCost(memory) + (runSpend != null ? runSpend.getAsDouble() : 0.0);
+                costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId(), Math.max(0.0, unsettled));
             } catch (RuntimeException e) {
                 // Same guard as LlmSpendGate: a check that throws is a defect, not an
                 // outage (the service answers those) — refuse the tool call (fail
@@ -1354,7 +1445,7 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters());
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, enableCostTracking, runSpend));
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");

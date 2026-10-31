@@ -69,15 +69,14 @@ These calls are **not** metered today, priced or not:
 
 | Call | Why |
 |---|---|
-| Rolling conversation summary (`conversationSummary`) | The summarizer reports no token usage back to the task |
-| Tool-response summarization (`toolResponseLimits.summarizerModel`) | Same |
 | Group transcript window summaries and stance summaries | Group-level calls outside any member conversation |
 | Embeddings (RAG retrieval, knowledge-base ingestion) | Embedding calls are not priced anywhere |
-| The model calls of an LLM task before it paused for a **tool-call** approval | That segment's usage is lost when the pause unwinds the tool loop (the audit ledger has the same gap); calls of earlier tasks in the same turn are metered |
 | A turn stopped by **lease loss** in cluster mode | Nothing of the turn is stored; the node that took the conversation over runs it again and meters that run |
 
 A replayed idempotent turn (`Idempotency-Key`) is answered from the stored outcome and is not
-metered again.
+metered again. A turn whose model phase **failed** is metered for what it spent before the failure
+(the answered tool-loop rounds, the tools that ran, the cascade steps that were tried); the rolling
+summary and `toolResponseLimits` summarization are metered at the task's prices.
 
 To bound one conversation rather than the whole tenant, set the agent-level
 `maxCostPerConversationUsd` — see [LLM Configuration → Per-conversation LLM cost

@@ -1096,7 +1096,7 @@ A `block` is a returned value, never an exception, so a block message can never 
 | Type | Phases | Finds | Parameters |
 |---|---|---|---|
 | `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
-| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked; a card followed by its CVV or expiry, `4111 1111 1111 1111 123`, is found by checking the digit groups of the run, never by splitting an unseparated number), phone numbers (grouped, or unspaced with a leading `+`, e.g. `+15551234567`; an unspaced number without `+` is not treated as a phone number); rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
 | `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
@@ -1330,7 +1330,7 @@ All three are checked at deploy time: a missing parameter, a bad issue code or a
 
 **Could not decide.** Safe is a positive finding: only an expression that evaluates to `true` passes. These are *could not decide*, and `failMode` applies (closed — the answer is withheld without a reprompt — by default for `block` and `reprompt`):
 
-- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals);
+- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals) — also in an earlier object of the reply that extraction would otherwise skip for a later one;
 - `expression_undecided:<cause>` — evaluation failed: `null_operand`, `type_mismatch` (a number compared with a string, `sum` over text), `division_by_zero`, `empty_aggregate` (`min`/`max` of nothing), `bad_argument`, `number_out_of_range` (more than 1000 digits or a scale beyond ±1000), `fan_out`, `step_budget`, or `not_boolean` (the expression produced a number, a string or a list).
 
 **Bounds.** An expression has at most 2000 characters, 32 levels of nesting, 500 parts and 32 segments per path. Evaluating it reads at most 10,000 values per path and takes at most 200,000 steps; past either, it cannot decide. Each distinct expression is compiled once and kept in a bounded cache (512 entries).
@@ -1339,13 +1339,13 @@ All three are checked at deploy time: a missing parameter, a bad issue code or a
 
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer, and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks the spend gate and that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; a reached spend limit or an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.) A reprompted answer is screened by the output guardrails again from the first one, but it is **not** run through `responseValidation` a second time — a guardrail that must enforce the answer's shape belongs in `outputGuardrails` (`json-object`) itself.
 - An `onError` fallback is the author's own text and is not screened.
 
 ### Streaming
 
-Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
+Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming — unless their `failMode` is `closed`: a `warn` guardrail that fails closed withholds the answer when it cannot check it, so it buffers too. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
 
 ### Audit, events and metrics
 
@@ -1866,7 +1866,7 @@ back into the full text through the `conversationRecall` built-in tool.
 | Parameter                      | Type    | Description                                                                                     | Default |
 | ------------------------------ | ------- | ----------------------------------------------------------------------------------------------- | ------- |
 | `enabled`                      | boolean | Master switch. Nothing is summarized while this is false                                         | false   |
-| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset              | (inherit) |
+| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset. When it names a different provider, the task's credentials, endpoint and account settings, model keys, `customHeaders`, `customQueryParams` and `customParameters` are not inherited; only vendor-neutral tuning (temperature, maxTokens, timeout, ...) carries over | (inherit) |
 | `llmModel`                     | string  | Model for the summarization call. Inherits the parent task's model when unset                    | (inherit) |
 | `maxSummaryTokens`             | int     | Token ceiling on the generated summary                                                           | 800     |
 | `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
@@ -2151,6 +2151,17 @@ prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
 
+A call that **times out** is charged like one that returned: the abandoned tool
+keeps running and its upstream request is normally already under way. A call the
+tool itself reports as failed is not charged, nor is a rate-limited or cached one.
+A `toolPricing` value that is not a finite number is ignored for the default price.
+The running total is held in memory per process (shared across a NATS cluster);
+when the tracker trims its oldest entries, a conversation already found over its
+budget is kept until every under-budget one has gone. It does not survive a
+restart — for a durable per-conversation bound use the agent-level
+`maxCostPerConversationUsd`, which is computed from the conversation's stored
+`audit:cost` and includes tool cost.
+
 Enforcement is the **default** (since 6.6.0): a configured ceiling refuses the
 tool call after the one that crosses it. To keep a ceiling advisory, opt out with
 `enforceBudget: false` on the task, or `eddi.tools.budget.enforce-by-default=false`
@@ -2208,18 +2219,22 @@ tool cost. It is checked
   records `llm:spend_refused:<taskId>` with `reason: conversation_ceiling`, and
   `eddi_llm_spend_refused_total{reason="conversation_ceiling"}` counts it;
 - **between the rounds of a tool loop**: the loop adds what it has spent so far (its tokens at the
-  task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
-  answers that the conversation reached its cost limit — the tool calls already made have taken
-  effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
-  cascade's own step prices apply at the next task-level check;
+  prices of the model it runs on — a cascade step's own prices, else the cascade's defaults, when a
+  cascade runs it — and its tool cost) and, once that reaches the ceiling, stops issuing model calls
+  and answers that the conversation reached its cost limit — the tool calls already made have taken
+  effect;
 - **when a tool-call approval resumes the turn**: the same check runs before the approved calls
   execute, so a conversation spent while it waited serves the fallback answer and the approved
   calls do not run; and the resumed loop checks again before its first model request, counting
   what the approved calls charged. What the turn spent *before* the pause counts too: when a tool
-  loop pauses, its model rounds so far (at the task's prices, as in the loop check above, and any
-  earlier cascade steps at theirs) and its tool cost are added to the step's `audit:cost` and
-  `audit:token_usage` right away, so the resume's checks and its final total include them exactly
-  once.
+  loop pauses, its model rounds so far (priced as in the loop check above, and any earlier cascade
+  steps at theirs) and its tool cost are added to the step's `audit:cost` and `audit:token_usage`
+  right away, so the resume's checks and its final total include them exactly once. A model phase
+  that **fails** is treated the same way: the rounds the model answered, the tools that ran and the
+  cascade steps that were tried before the failure (a provider error after retries, a context-length
+  rejection, a cascade step timeout, every step of a cascade failing) are added to the step's
+  `audit:cost` and `audit:token_usage` whether the failure ends the turn or `onError: fallback`
+  absorbs it — so the tenant budget is charged for them and the next turn's checks count them.
 - **before every further paid call of the task** — a same-model re-ask (`responseValidation`
   `retry`), a cascade's escalation to its next step and that step's re-asks, an output guardrail's
   `reprompt`, and a [`classifier`](#the-classifier-type-a-safety-classifier-model) or
@@ -2238,6 +2253,17 @@ tool cost. It is checked
   Each refusal is also counted by `eddi_llm_spend_refused_total{reason}` with the same reasons as the
   primary call (`conversation_ceiling`, `tenant_budget`, `tenant_accounting_unavailable`): the
   tenant's monthly budget is checked before these calls too.
+- **before a rolling-summary call and a tool result's `summarize` truncation**: both are paid model
+  calls. A refused summary is skipped (the turns keep reaching the model verbatim and the next turn
+  tries again); a refused tool-result summary falls back to plain truncation. Both are priced at the
+  task's own `inputPricePer1M` / `outputPricePer1M` (no separate price is configured for the
+  summarizer) and recorded: the summary on the step's `audit:cost`, the tool-result summary as a
+  priced tool call (`summarizeToolResponse`).
+
+The tenant's monthly budget checked before each **tool call** counts the turn's unsettled spend as
+well — the step's not-yet-metered `audit:cost` and what the running tool loop has spent — exactly as
+the checks before a model call do; it used to compare against the counter as it stood before the
+turn.
 
   A refusal is a safety stop: a refused guardrail reprompt blocks the answer even when that
   guardrail's `onExhausted` is `deliver-best`, because delivering a "best" attempt after the spend
