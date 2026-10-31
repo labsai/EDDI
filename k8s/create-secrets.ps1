@@ -209,8 +209,10 @@ if ($onUnix) {
     $secretDir = & mktemp -d 2>$null | Select-Object -First 1
 }
 else {
+    # A local scratch directory, not a cluster change: -WhatIf does not apply to it
+    # (here or in the two Remove-Item calls below), or a dry run would stop right here.
     $secretDir = Join-Path ([System.IO.Path]::GetTempPath()) ("eddi-secrets-" + [guid]::NewGuid().ToString())
-    New-Item -ItemType Directory -Path $secretDir -ErrorAction SilentlyContinue | Out-Null
+    New-Item -ItemType Directory -Path $secretDir -ErrorAction SilentlyContinue -WhatIf:$false -Confirm:$false | Out-Null
 }
 if (-not $secretDir -or -not (Test-Path -LiteralPath $secretDir -PathType Container)) {
     Write-Error -Message "  ❌ Could not create a private temporary directory for the key file. Nothing was changed in the cluster."
@@ -256,7 +258,7 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
         $createExit = $LASTEXITCODE
     }
     finally {
-        Remove-Item -LiteralPath $secretDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $secretDir -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false -Confirm:$false
     }
     if ($createExit -ne 0) {
         Write-Information -MessageData ($createOutput | Out-String).Trim() -InformationAction Continue
@@ -275,7 +277,7 @@ if ($PSCmdlet.ShouldProcess("Kubernetes", "Create secret 'eddi-secrets' in '$Nam
     $secretInstalled = $true
 }
 # Still there only when ShouldProcess declined the create; it holds no key then.
-Remove-Item -LiteralPath $secretDir -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath $secretDir -Recurse -Force -ErrorAction SilentlyContinue -WhatIf:$false -Confirm:$false
 
 if (-not $secretInstalled) {
     # The only way here is ShouldProcess declining — -WhatIf, or a -Confirm
