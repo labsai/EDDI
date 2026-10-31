@@ -524,8 +524,9 @@ class ToolLoopRunner {
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
-                    // calls. clearedCalls carries the calls a human approved on resume
-                    // (bound to id + tool + arguments, each usable once). Inert when
+                    // calls. clearedCalls carries the approved calls the resumer already
+                    // ran (bound to id + tool + arguments); a reissue of one is gated
+                    // again as a repeat. Inert when
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
                     var screened = refuseDoomedGatedCalls(

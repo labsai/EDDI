@@ -140,7 +140,7 @@ public final class TaskToolApprovalsResolver {
         merged.setPauseReason(firstNonBlank(taskLevel.getPauseReason(), agent.getPauseReason()));
         merged.setPendingMessage(firstNonBlank(taskLevel.getPendingMessage(), agent.getPendingMessage()));
         merged.setInGroupTurns(firstNonBlank(taskLevel.getInGroupTurns(), agent.getInGroupTurns()));
-        merged.setRules(mergeRules(agent.getRules(), taskLevel.getRules()));
+        merged.setRules(mergeRules(agent.getRules(), taskLevel.getRules(), merged.getTimeoutPolicy()));
         return merged;
     }
 
@@ -186,8 +186,16 @@ public final class TaskToolApprovalsResolver {
      * unchanged. On an identical match the task's (demoted-safe) rule sorts first
      * at equal specificity, so a task can tighten a specific rule but never loosen
      * one.
+     * <p>
+     * A task rule with no {@code timeoutPolicy} inherits the scalar one. When that
+     * scalar is the agent's {@code AUTO_APPROVE}, such a rule would auto-approve
+     * every call it matches — and, sorting first, hide an agent rule for the same
+     * calls that requires a human ({@code WAIT_INDEFINITELY}). Telling which agent
+     * rules a task glob shadows is not decidable cheaply, so a policy-less task
+     * rule is pinned to {@code WAIT_INDEFINITELY} whenever it would inherit
+     * {@code AUTO_APPROVE}: stricter at worst, never looser.
      */
-    private static List<ApprovalRule> mergeRules(List<ApprovalRule> agentRules, List<ApprovalRule> taskRules) {
+    private static List<ApprovalRule> mergeRules(List<ApprovalRule> agentRules, List<ApprovalRule> taskRules, HitlTimeoutPolicy inherited) {
         if ((taskRules == null || taskRules.isEmpty())) {
             return agentRules;
         }
@@ -196,7 +204,9 @@ public final class TaskToolApprovalsResolver {
             if (rule == null) {
                 continue;
             }
-            if (rule.getTimeoutPolicy() == HitlTimeoutPolicy.AUTO_APPROVE) {
+            boolean wouldAutoApprove = rule.getTimeoutPolicy() == HitlTimeoutPolicy.AUTO_APPROVE
+                    || (rule.getTimeoutPolicy() == null && inherited == HitlTimeoutPolicy.AUTO_APPROVE);
+            if (wouldAutoApprove) {
                 var demoted = new ApprovalRule();
                 demoted.setMatch(rule.getMatch());
                 demoted.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);

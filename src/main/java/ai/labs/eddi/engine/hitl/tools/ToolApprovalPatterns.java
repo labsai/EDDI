@@ -38,7 +38,48 @@ public final class ToolApprovalPatterns {
     }
 
     /**
-     * '*' is the only wildcard; every other char is a quoted literal (ReDoS-safe).
+     * Whether {@code text} matches {@code glob} as a whole — {@code *} matches any
+     * run of characters, everything else is literal.
+     * <p>
+     * The approval gate matches with this, not with {@link #compile}: one regex
+     * {@code .*} per wildcard backtracks super-linearly when a match fails
+     * ({@code a*a*a*…b} against a long tool name), and the tool name comes from the
+     * model. This is the classic two-pointer glob match — on a mismatch it resumes
+     * only from the most recent {@code *} — so the work is bounded by
+     * {@code glob.length() * text.length()} with no backtracking blow-up.
+     */
+    public static boolean matches(String glob, String text) {
+        if (glob == null || text == null) {
+            return false;
+        }
+        int g = 0;
+        int t = 0;
+        int star = -1;
+        int resume = 0;
+        while (t < text.length()) {
+            if (g < glob.length() && glob.charAt(g) == '*') {
+                star = g++;
+                resume = t;
+            } else if (g < glob.length() && glob.charAt(g) == text.charAt(t)) {
+                g++;
+                t++;
+            } else if (star >= 0) {
+                g = star + 1;
+                t = ++resume;
+            } else {
+                return false;
+            }
+        }
+        while (g < glob.length() && glob.charAt(g) == '*') {
+            g++;
+        }
+        return g == glob.length();
+    }
+
+    /**
+     * '*' is the only wildcard; every other char is a quoted literal. A regex form
+     * of the glob for callers that need a {@link Pattern}; the gate itself matches
+     * with {@link #matches}, which cannot backtrack.
      */
     public static Pattern compile(String glob) {
         String[] parts = glob.split("\\*", -1);
@@ -110,9 +151,8 @@ public final class ToolApprovalPatterns {
      * question the gate asks at runtime.
      */
     private static boolean prefixCanMatchAnHttpEndpoint(String prefix) {
-        Pattern compiled = compile(prefix);
         for (String method : KNOWN_METHODS) {
-            if (compiled.matcher(HTTP_SOURCE + "." + method).matches()) {
+            if (matches(prefix, HTTP_SOURCE + "." + method)) {
                 return true;
             }
         }
