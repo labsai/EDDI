@@ -1398,6 +1398,25 @@ export function closeGroupConversation(
 }
 
 /**
+ * What `POST .../human-input` answers a pending member who is neither the
+ * discussion's owner nor an admin: an acknowledgement, not the conversation.
+ * `state` is the server's state name, or `""` when it has none.
+ */
+export interface HumanInputAcknowledgement {
+  groupConversationId: string;
+  accepted: true;
+  state: GroupConversationState | "";
+}
+
+/** Either shape `submitHumanInput` resolves to; narrow before reading fields. */
+export type HumanInputResult = GroupConversation | HumanInputAcknowledgement;
+
+/** Whether a `submitHumanInput` result is the acknowledgement, not the conversation. */
+export function isHumanInputAcknowledgement(result: HumanInputResult): result is HumanInputAcknowledgement {
+  return "accepted" in result && !("transcript" in result);
+}
+
+/**
  * Submit a HUMAN group member's turn (I6) — records their reply as the pending
  * transcript entry and resumes an AWAITING_HUMAN_INPUT discussion from the next
  * speaker. Only the pending member's own principal (or an admin) may call this;
@@ -1418,8 +1437,8 @@ export function submitHumanInput(
   gcId: string,
   memberId: string,
   content: string,
-): Promise<GroupConversation> {
-  return api.post<GroupConversation>(
+): Promise<HumanInputResult> {
+  return api.post<HumanInputResult>(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/human-input`,
     { memberId, content },
   );

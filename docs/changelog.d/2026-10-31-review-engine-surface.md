@@ -23,7 +23,9 @@ the external surfaces: `integrations/**`, `engine/mcp`, `engine/security`,
   editor-chosen approval channel; resume outcomes are posted only for
   conversations owned by a Slack principal (`SlackUserIdentity.isSlackPrincipal`),
   so a hand-made `channel:slack:...` trigger intent cannot post with another
-  integration's identity.
+  integration's identity. Only the reserved `slack:` form counts: a raw
+  `U123ABC`-shaped owner is just a shape an OIDC principal can share, so a legacy
+  thread mapping gets resume posts again once its next message re-keys it.
 - **Event user ids are validated** (`[UW][A-Z0-9]+`) before they become
   `slack:<team>:<user>`, so a teamless signer cannot alias a workspace-qualified
   user by sending `user: "T1:U2"`.
@@ -33,11 +35,20 @@ the external surfaces: `integrations/**`, `engine/mcp`, `engine/security`,
 
 ### MCP
 
-- `chat_managed` re-checks USE on the retained conversation's own agent.
+- `chat_managed` re-checks USE on the retained conversation's own agent, and a
+  refusal there is the neutral "you may not continue this conversation" (the
+  owner does own it), not "you do not own this managed conversation".
 - `submit_group_human_input` (and REST `POST .../human-input`) return an
-  acknowledgement unless the caller is the owner or an admin.
+  acknowledgement unless the caller is the owner or an admin. The Manager's
+  `submitHumanInput` resolves to `GroupConversation | HumanInputAcknowledgement`
+  (narrow with `isHumanInputAcknowledgement`).
 - `McpAdminTools` no longer echoes raw exception text: caller-fixable failures are
   described, everything else returns a log reference (`toolFailure` overload).
+  Two refusals stay caller errors rather than `INTERNAL`: a guard's Quarkus
+  `ForbiddenException` (`ResourceAccessGuard`, `OwnershipValidator`) answers
+  errorCode `FORBIDDEN` with its reason, and malformed JSON in a `config` /
+  `resourceMappings` argument answers "config is not valid JSON (line L, column
+  C)" (`McpToolUtils.readCallerJson`) — resources, channels and triggers alike.
   `list_agent_resources` reads each distinct workflow once.
 - `McpApiToolBuilder`: spec parameter names that collide with template namespaces
   are renamed (`properties_2`); suffix allocation is linear; a spec server URL is
@@ -53,6 +64,8 @@ the external surfaces: `integrations/**`, `engine/mcp`, `engine/security`,
   counting the attempt; a cascade skips `HUMAN` group members, budgets its
   seeding, and omits the name of a skipped resource the caller cannot view.
 - A2A caps caller-chosen ids at 256 characters and refuses non-scalar JSON-RPC ids.
+  Every JSON-RPC response now carries the `id` member, `"id": null` for an
+  unreadable request, as JSON-RPC 2.0 requires (`JsonRpcResponse` was NON_NULL).
 - httpcalls: a cross-origin redirect hop keeps only content-negotiation headers
   (a credential can sit in any header name); with SSRF protection off a redirect
   hop's *connected* peer is held to the previous hop's address class.
@@ -84,6 +97,8 @@ the external surfaces: `integrations/**`, `engine/mcp`, `engine/security`,
 [`ConfigGraphResolver.java`](../../src/main/java/ai/labs/eddi/engine/security/spaces/ConfigGraphResolver.java),
 [`WorkspaceNotifications.java`](../../src/main/java/ai/labs/eddi/engine/security/spaces/notifications/WorkspaceNotifications.java),
 [`A2AWireFormat.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2AWireFormat.java),
+[`A2AModels.java`](../../src/main/java/ai/labs/eddi/engine/a2a/A2AModels.java),
+[`McpToolUtils.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpToolUtils.java),
 [`HttpClientModule.java`](../../src/main/java/ai/labs/eddi/engine/httpclient/bootstrap/HttpClientModule.java);
 docs: [`slack-integration.md`](../slack-integration.md), [`webhook-triggers.md`](../webhook-triggers.md),
 [`httpcalls.md`](../httpcalls.md), [`security.md`](../security.md), [`a2a-protocol.md`](../a2a-protocol.md),
