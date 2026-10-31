@@ -160,10 +160,10 @@ services:
           # The default no longer works - but "not admin/admin" is not proof the volume is safe:
           # a renamed KC_BOOTSTRAP_ADMIN_USERNAME fails here too while the original admin/admin
           # survives. Only a successful login with the configured credentials certifies it.
-          # kcadm reads the password from stdin when --password is absent, keeping it off its command line.
-          if printf '%s\n' "$$KC_BOOTSTRAP_ADMIN_PASSWORD" \
-              | "$$kcadm" config credentials --config "$$cfg" --server http://keycloak:8080 --realm master \
-                --user "$$KC_ADMIN_USER" >/dev/null 2>&1; then
+          # --password must stay on the command line: without it kcadm prompts on the console and,
+          # with no TTY in this one-shot container, fails ("Console is not active") instead of reading stdin.
+          if "$$kcadm" config credentials --config "$$cfg" --server http://keycloak:8080 --realm master \
+              --user "$$KC_ADMIN_USER" --password "$$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null 2>&1; then
             touch "$$marker"   # keycloak-guard may now allow a wider bind
             exit 0
           fi

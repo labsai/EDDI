@@ -71,7 +71,7 @@ class InfraReviewHardeningTest {
     void adminRotateRequiresPositiveLogin() throws IOException {
         String yml = read("docker-compose.auth.yml");
         int failedDefault = yml.indexOf("--password admin >/dev/null 2>&1; then");
-        int configured = yml.indexOf("--user \"$$KC_ADMIN_USER\" >/dev/null 2>&1; then", failedDefault);
+        int configured = yml.indexOf("--password \"$$KC_BOOTSTRAP_ADMIN_PASSWORD\" >/dev/null 2>&1; then", failedDefault);
         assertTrue(failedDefault > 0 && configured > failedDefault, "configured credentials must be tried before the marker");
         int firstTouch = yml.indexOf("touch \"$$marker\"", failedDefault);
         assertTrue(firstTouch > configured, "the marker must not be written on a bare failed default login");
