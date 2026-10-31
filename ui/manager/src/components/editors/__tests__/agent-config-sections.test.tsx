@@ -464,7 +464,7 @@ describe("UserMemorySection", () => {
     await user.clear(input);
     onChange.mockClear();
     await user.type(input, "0");
-    const last = onChange.mock.calls.at(-1)![0] as Agent;
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as Agent;
     expect(last.userMemoryConfig?.dream?.pruneStaleAfterDays).toBe(0);
   });
 
@@ -479,7 +479,7 @@ describe("UserMemorySection", () => {
     renderWithProviders(<UserMemorySection agent={agentWithDream} onChange={onChange} />);
     const input = screen.getByText("Prune After (days)").parentElement!.querySelector("input")!;
     await user.clear(input);
-    const last = onChange.mock.calls.at(-1)![0] as Agent;
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as Agent;
     expect(last.userMemoryConfig?.dream?.pruneStaleAfterDays).toBe(90);
   });
 
