@@ -1428,9 +1428,11 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
   Selectors are also capped at 256 characters. Use `:contains(text)` / `:containsOwn(text)`.
   A selector containing a backslash is refused too: jsoup decodes CSS escapes before it picks the
   pseudo-selector, so `:\6d atches(...)` would otherwise slip past the name check.
-- **Sibling combinators are refused** (`~` and `+`, anywhere in the selector): jsoup evaluates
-  them by walking every preceding sibling of every candidate, which is quadratic in a page's width
-  and cannot be interrupted. Select through the parent instead (`ul > li`, `li:eq(2)`).
+- **Sibling combinators are refused** (`~` and `+` used as combinators, including inside `:has()` or
+  `:not()`): jsoup evaluates them by walking every preceding sibling of every candidate, which is
+  quadratic in a page's width and cannot be interrupted. Select through the parent instead
+  (`ul > li`, `li:eq(2)`). The same characters inside a quoted string, an attribute selector, a text
+  argument (`:contains(C++)`) or an index formula (`:nth-child(2n+1)`) are not combinators and pass. A selector with an unterminated quote, bracket or argument is refused.
 - **Parsing is contained.** Parsing the page and evaluating the selector run on a small pool of
   platform threads with a hard deadline, instead of on the virtual thread the tool call arrived
   on (where CPU-bound work holds a carrier thread, and there are only as many carriers as cores).

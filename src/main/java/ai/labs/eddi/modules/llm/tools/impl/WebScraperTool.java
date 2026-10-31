@@ -116,6 +116,14 @@ public class WebScraperTool {
      * {@code :matchText}, rewrite the document — plus the {@code ~=} attribute
      * operator, which jsoup also evaluates as a regex. Matched case-insensitively.
      */
+    /**
+     * Pseudo-selectors whose parenthesised argument is text or an index, never a
+     * selector — exactly the names jsoup's {@code QueryParser} reads that way.
+     */
+    private static final Set<String> LITERAL_ARGUMENT_PSEUDOS = Set.of("contains", "containsOwn", "containsData",
+            "containsWholeText", "containsWholeOwnText", "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type", "eq",
+            "lt", "gt");
+
     private static final Pattern REGEX_SELECTOR = Pattern.compile("(?i):match(es|esown|eswholetext|eswholeowntext|text)\\b|~=");
 
     private final OutboundHttp http;
@@ -411,11 +419,102 @@ public class WebScraperTool {
         // Sibling combinators make jsoup walk every preceding sibling of every
         // candidate: quadratic (or worse, chained) in a page's width, CPU work the
         // parse timeout cannot interrupt, holding a shared parser worker meanwhile.
-        if (cssSelector.indexOf('~') >= 0 || cssSelector.indexOf('+') >= 0) {
+        if (hasSiblingCombinator(cssSelector)) {
             return "Error: sibling combinators ('~' and '+') are not supported. Select the parent and its children instead "
                     + "(e.g. 'ul > li' or 'li:eq(2)').";
         }
         return null;
+    }
+
+    /**
+     * Whether {@code selector} uses {@code ~} or {@code +} as a combinator. The two
+     * characters are also ordinary text inside a quoted string, an attribute
+     * selector ({@code [href*=a+b]}), a text pseudo's argument
+     * ({@code :contains(C++)}) and an index formula ({@code :nth-child(2n+1)}) —
+     * none of which is a combinator — so those spans are skipped. The argument of a
+     * structural pseudo ({@code :has}, {@code :not}, {@code :is}) is a selector
+     * itself and is scanned. Package-private for tests.
+     */
+    static boolean hasSiblingCombinator(String selector) {
+        int i = 0;
+        int n = selector.length();
+        while (i < n) {
+            char c = selector.charAt(i);
+            if (c == '"' || c == '\'') {
+                i = skipQuoted(selector, i);
+            } else if (c == '[') {
+                i = skipBalanced(selector, i, '[', ']');
+            } else if (c == '(' && isLiteralArgumentPseudo(selector, i)) {
+                i = skipBalanced(selector, i, '(', ')');
+            } else if (c == '~' || c == '+') {
+                return true;
+            } else {
+                i++;
+            }
+            if (i < 0) {
+                // An unterminated quote, bracket or argument: fail closed rather than
+                // trust that whatever follows is text.
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when the pseudo-class directly before {@code openParen} takes text or an
+     * index formula, not a selector — the pseudos jsoup's {@code QueryParser} reads
+     * with a balanced-parenthesis chomp of raw text ({@code :contains*}) or an
+     * index ({@code :nth-*}, {@code :eq}, {@code :lt}, {@code :gt}). Names compare
+     * exactly, as jsoup's do ({@code :CONTAINS(} is a parse error there, so it is
+     * not skipped here either). A structural pseudo ({@code :has}, {@code :not},
+     * {@code :is}) is not literal: its argument is a selector and is scanned like
+     * the rest.
+     */
+    private static boolean isLiteralArgumentPseudo(String selector, int openParen) {
+        int start = openParen;
+        while (start > 0 && (Character.isLetter(selector.charAt(start - 1)) || selector.charAt(start - 1) == '-')) {
+            start--;
+        }
+        if (start == 0 || selector.charAt(start - 1) != ':') {
+            return false;
+        }
+        return LITERAL_ARGUMENT_PSEUDOS.contains(selector.substring(start, openParen));
+    }
+
+    /**
+     * Index just past the quoted string opening at {@code open}, or {@code -1} when
+     * it is unterminated.
+     */
+    private static int skipQuoted(String s, int open) {
+        int close = s.indexOf(s.charAt(open), open + 1);
+        return close < 0 ? -1 : close + 1;
+    }
+
+    /**
+     * Index just past the closer matching the opener at {@code open}, honouring
+     * quotes, or {@code -1} when it is unbalanced or a quote inside is
+     * unterminated.
+     */
+    private static int skipBalanced(String s, int open, char opener, char closer) {
+        int depth = 0;
+        int i = open;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\'') {
+                i = skipQuoted(s, i);
+                if (i < 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (c == opener) {
+                depth++;
+            } else if (c == closer && --depth == 0) {
+                return i + 1;
+            }
+            i++;
+        }
+        return -1;
     }
 
     @Tool("Gets metadata from a web page (title, description, keywords)")
