@@ -152,6 +152,8 @@ class SchedulePollerServiceTest {
 
         verifyNoInteractions(fireExecutor);
         verify(scheduleStore).markFailed(eq("sched-stale"), any(), any());
+        // One failed attempt, counted once.
+        assertEquals(1.0, meterRegistry.counter("eddi.schedule.fire.failed").count());
     }
 
     @Test
@@ -178,6 +180,33 @@ class SchedulePollerServiceTest {
         }, Duration.ofMillis(200));
         assertTrue(started.await(1, TimeUnit.SECONDS));
         assertNull(result, "a fire cut off at its bound reports no outcome, which is recorded as a failure");
+        assertFalse(Thread.currentThread().isInterrupted(), "the abandoned worker's cancellation is not the caller's interrupt");
+    }
+
+    /**
+     * A zero bound (what a mocked {@code manualFireDeadline()} returns) used to
+     * mean "wait 1 ms", abandoning a fire that had not even been scheduled yet.
+     */
+    @Test
+    void runWithinDeadline_nonPositiveBoundMeansTheDefault() throws Exception {
+        ScheduleFireLog result = SchedulePollerService.runWithinDeadline(() -> {
+            Thread.sleep(50);
+            return makeFireLog("quick", FireStatus.COMPLETED.name());
+        }, Duration.ZERO);
+        assertNotNull(result);
+    }
+
+    @Test
+    void runWithinDeadline_reassertsAnInterruptTheFireEndedWith() throws Exception {
+        try {
+            SchedulePollerService.runWithinDeadline(() -> {
+                Thread.currentThread().interrupt();
+                return makeFireLog("int", FireStatus.FAILED.name());
+            }, Duration.ofSeconds(5));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
     }
 
     @Test

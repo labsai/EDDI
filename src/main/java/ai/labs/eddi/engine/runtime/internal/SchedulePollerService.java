@@ -282,7 +282,8 @@ public class SchedulePollerService {
      * was instead: retried with backoff, dead-lettered after {@code max-retries}.
      */
     private void onUnreportedFire(ScheduleConfiguration schedule) {
-        fireFailedCounter.increment();
+        // No fireFailedCounter.increment() here: onFireFailed counts the attempt (or
+        // the dead letter), exactly as for a fire that reported its failure.
         LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) was still claimed when its lease expired: the previous fire never reported "
                 + "an outcome (its node stopped, or the fire wedged). Counting it as a failed attempt.", schedule.getName(),
                 schedule.getId());
@@ -679,12 +680,22 @@ public class SchedulePollerService {
      * {@link #dispatchClaimed}. Otherwise the fire behaves as if it had run on the
      * caller's thread: what it throws is rethrown, and an interrupt it re-asserted
      * on the way out is re-asserted on the caller.
+     * <p>
+     * Only an interrupt the fire itself ended with is carried over. The interrupt
+     * that {@code cancel(true)} delivers to a fire cut off at the deadline belongs
+     * to the abandoned worker; carrying it over (it can land after the timeout,
+     * whenever the worker unwinds) interrupted the caller — the request thread —
+     * for nothing. A caller interrupted while waiting cancels the fire and keeps
+     * its own interrupt.
      *
+     * @param deadline
+     *            the bound; {@code null} or not positive means the default
      * @return the fire log, or {@code null} when the fire was cut off at the
-     *         deadline - {@link #recordManualFireOutcome} records that as a failure
+     *         deadline or the caller was interrupted -
+     *         {@link #recordManualFireOutcome} records that as a failure
      */
     public static ScheduleFireLog runWithinDeadline(Callable<ScheduleFireLog> fire, Duration deadline) throws Exception {
-        Duration bound = deadline != null ? deadline : Duration.ofMinutes(5).plusSeconds(30);
+        Duration bound = deadline != null && deadline.isPositive() ? deadline : Duration.ofMinutes(5).plusSeconds(30);
         AtomicBoolean endedInterrupted = new AtomicBoolean();
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         try {
@@ -696,25 +707,35 @@ public class SchedulePollerService {
                 }
             });
             try {
-                return future.get(Math.max(bound.toMillis(), 1L), TimeUnit.MILLISECONDS);
+                ScheduleFireLog log = future.get(Math.max(bound.toMillis(), 1L), TimeUnit.MILLISECONDS);
+                restoreInterrupt(endedInterrupted.get());
+                return log;
             } catch (TimeoutException e) {
                 future.cancel(true);
                 LOGGER.errorf("[SCHEDULE] A manual fire exceeded its %s bound (eddi.schedule.fire-timeout plus grace) and was interrupted",
                         bound);
                 return null;
+            } catch (InterruptedException e) {
+                future.cancel(true);
+                Thread.currentThread().interrupt();
+                return null;
             } catch (ExecutionException e) {
+                // The worker's finally ran before the future completed exceptionally.
+                restoreInterrupt(endedInterrupted.get());
                 if (e.getCause() instanceof Exception cause) {
                     throw cause;
                 }
                 throw e;
-            } finally {
-                if (endedInterrupted.get()) {
-                    Thread.currentThread().interrupt();
-                }
             }
         } finally {
             // As in dispatchClaimed: never await a fire wedged in a non-interruptible call.
             executor.shutdownNow();
+        }
+    }
+
+    private static void restoreInterrupt(boolean interrupted) {
+        if (interrupted) {
+            Thread.currentThread().interrupt();
         }
     }
 

@@ -471,7 +471,7 @@ target must be written:
   node down in turn, forever.
 - A **disabled** schedule cannot be claimed, by the poller or by `POST /{id}/fire`:
   one disabled between the poll's read and its claim is no longer fired.
-- `POST /{id}/fire` runs under the same bound as a polled fire
+- `POST /{id}/fire` (and the MCP `fire_schedule_now` tool) runs under the same bound as a polled fire
   (`eddi.schedule.fire-timeout` plus a 30 s grace) instead of without limit, so a
   manual Dream or ingestion run cannot outlast its claim's lease and be started a
   second time by the poller.
