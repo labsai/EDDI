@@ -5394,7 +5394,7 @@
         "dynamicAgentCreation": "该组在运行时可以创建新智能体,而这些智能体本身不受审批门控。",
         "dynamicAgentRecruitment": "该组可以将其他已有智能体纳入其讨论。",
         "autoApproveOnTimeout": "该资源的审批在超时后会自动通过,无人监督。",
-        "agentCreatedWithoutGate": "该智能体正在创建时没有审批关卡。它之后的每一次写入都将在无人监督的情况下执行。",
+        "agentCreatedWithoutGate": "该智能体创建时并未对每种写入方法设置审批关卡。未受关卡约束的写入将在无人监督的情况下执行。",
         "agentCreatedWithBroadEndpoints": "该智能体正在创建时被授予其 API 的写入权限——不限于读取。",
         "agentCreatedWithExternalTools": "该智能体正在创建时被授予外部 MCP 服务器提供的全部工具。具体有哪些工具由该服务器决定，并且它之后可以更改。",
         "unchecked": "正文过长,无法扫描是否存在权限授予——请在批准前完整阅读。",

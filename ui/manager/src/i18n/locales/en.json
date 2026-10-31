@@ -5394,7 +5394,7 @@
         "dynamicAgentCreation": "This group may create new agents while it runs. Those agents are not themselves approval-gated.",
         "dynamicAgentRecruitment": "This group may pull other existing agents into its discussions.",
         "autoApproveOnTimeout": "Approvals for this resource are granted automatically when they time out, with nobody watching.",
-        "agentCreatedWithoutGate": "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
+        "agentCreatedWithoutGate": "This agent is being created without an approval gate on every write method. Writes it does not gate will execute unsupervised.",
         "agentCreatedWithBroadEndpoints": "This agent is being created with write access to its API — not limited to reads.",
         "agentCreatedWithExternalTools": "This agent is being created with every tool an external MCP server offers. That server decides what those are, and can change them later.",
         "unchecked": "The body was too long to scan for capability grants — read it in full before approving.",
