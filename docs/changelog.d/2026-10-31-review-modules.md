@@ -9,7 +9,7 @@ Fixes from the code review and the CodeRabbit sweep over the pipeline modules
 
 **apicalls**
 
-- A delayed HTTP call (`preRequest.delayBeforeExecutingInMillis`, retry backoff) no longer hands its blocking send to the single shared `eddi-scheduler` thread. The delay is served on the calling turn thread, so one slow request cannot queue every delayed call in the node behind it, and an interrupted wait sends nothing instead of leaving a queued send to fire later.
+- A delayed HTTP call (`preRequest.delayBeforeExecutingInMillis`, retry backoff) no longer hands its blocking send to the single shared `eddi-scheduler` thread. The delay is served on the calling turn thread, so one slow request cannot queue every delayed call in the node behind it, and an interrupted wait sends nothing instead of leaving a queued send to fire later; the thread's interrupt flag is restored when the step fails on it.
 - Vault references are found with the linear `SecretReference.scanner()` (request building) and a new linear scanner in `ConfigReferenceGuard`, instead of regex `find()` loops that rescanned the remaining text at every unterminated `${vault:` opener (quadratic work on a long input).
 - A vault secret resolved into the URL, body or a query value now disables redirect following, as a header secret already did; the redirect handler would otherwise replay the body on a 307/308 to a host the secret's `allowedHosts` never judged.
 - The malformed-JSON warning no longer logs a resolved credential that the parser quoted in its message.
@@ -22,7 +22,7 @@ Fixes from the code review and the CodeRabbit sweep over the pipeline modules
 
 **properties**
 
-- `scope: "secret"` with `toObjectPath` is rejected on save and at run time (the copy returned before any vaulting). A secret instruction whose value is converted to an object and refused now scrubs the raw input first. Properties extracted earlier in the turn can no longer put a vaulted plaintext back or overwrite the new vault reference. The live output scrub is deep, so a credential in a typed output item (an LLM reply) is removed.
+- `scope: "secret"` with `toObjectPath` is rejected on save and at run time (the copy returned before any vaulting). A secret instruction whose value is converted to an object and refused now scrubs the raw input first. Properties extracted earlier in the turn can no longer put a vaulted plaintext back or overwrite a vault reference created in the same execution (one from an earlier turn stays replaceable, as before). The live output scrub is deep, so a credential in a typed output item (an LLM reply) is removed.
 
 **rules**
 
@@ -32,7 +32,7 @@ Fixes from the code review and the CodeRabbit sweep over the pipeline modules
 
 **mcpcalls**
 
-- An MCP call without a `retry` block now makes a single attempt (it used to fall through to the shared three-attempt default, so a side-effecting tool could run three times), and retries stop when the turn deadline leaves no room.
+- An MCP call without a `retry` block now makes a single attempt (it used to fall through to the shared three-attempt default, so a side-effecting tool could run three times), and retries stop when the turn deadline leaves no room. Inside a turn deadline the attempt runs on the retry helper's executor, so the task now carries the turn's caller across (`CallerIdentityContext.propagate`): without it an MCP server's `apiKey: "${caller:token}"` would have found no caller there and failed closed.
 
 **templating**
 
