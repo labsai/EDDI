@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,7 +21,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -182,7 +182,13 @@ public class VaultHostAllowlist {
             try {
                 allowedHosts = secretProvider.getMetadata(ref).allowedHosts();
             } catch (ISecretProvider.SecretNotFoundException e) {
-                continue; // The resolver fails closed on a missing secret.
+                // Fail closed. This used to be skipped on the grounds that the resolver
+                // refuses a missing secret, but this check runs AFTER resolution on the
+                // API-call path: a secret deleted in between (or served from the
+                // resolver's cache) would leave with no host check at all. Before
+                // resolution, the request fails on the missing secret anyway.
+                throw new HostNotAllowedException(usedFor + " uses " + reference + ", which does not exist (it may just have been "
+                        + "deleted), so its allowedHosts cannot be checked and the request is refused.");
             } catch (ISecretProvider.SecretProviderException e) {
                 LOGGER.errorf("Could not read the allowed hosts of %s for %s: %s", sanitize(reference), sanitize(usedFor), e.getMessage());
                 throw new HostNotAllowedException("The allowed hosts of " + reference + " could not be read, so " + usedFor
@@ -213,17 +219,19 @@ public class VaultHostAllowlist {
         requireAllowed(referencesIn(params.values()), destination, usedFor);
     }
 
-    /** Every vault reference string occurring in {@code values}, de-duplicated. */
+    /**
+     * Every vault reference string occurring in {@code values}, de-duplicated.
+     * Found with the linear {@link SecretReference#scanner()}, not the regex, whose
+     * {@code find()} rescans the rest of the text at each unterminated opener.
+     */
     public static Set<String> referencesIn(Iterable<String> values) {
         var references = new LinkedHashSet<String>();
-        Pattern pattern = SecretReference.compiledPattern();
         for (String value : values) {
-            if (value == null || !SecretReference.isVaultReference(value)) {
+            if (value == null) {
                 continue;
             }
-            Matcher matcher = pattern.matcher(value);
-            while (matcher.find()) {
-                references.add(matcher.group());
+            for (ReferenceScanner.Match match : SecretReference.scanner().findAll(value)) {
+                references.add(match.text());
             }
         }
         return references;

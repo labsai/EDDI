@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.secrets.impl;
 
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.crypto.EnvelopeCrypto;
+import ai.labs.eddi.secrets.crypto.VaultChecksum;
 import ai.labs.eddi.secrets.crypto.VaultSaltManager;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
@@ -24,8 +26,10 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -135,5 +139,45 @@ class VaultLegacySealingRetirementTest {
         };
 
         assertEquals("flakier-value", provider.resolve(new SecretReference("acme", "flakier")));
+    }
+
+    @Test
+    @DisplayName("the re-seal on read also replaces a legacy bare SHA-256 checksum with the keyed form")
+    void legacyChecksumIsReplacedOnRead() throws Exception {
+        EncryptedSecret row = seedLegacy("old-checksum", "old-checksum-value");
+        row.setChecksum("5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8");
+
+        assertEquals("old-checksum-value", provider.resolve(new SecretReference("acme", "old-checksum")));
+
+        assertTrue(persistence.secrets.get("acme/old-checksum").getChecksum().startsWith(VaultChecksum.KEYED_PREFIX),
+                "a bare SHA-256 is an offline guessing oracle and must not outlive the re-seal");
+    }
+
+    @Test
+    @DisplayName("a rotation racing a delete is refused as a create without a grant, never re-created with the wildcard default")
+    void rotationRacingADeleteDoesNotRecreateTheRowOpen() throws Exception {
+        var racing = new InMemorySecretPersistence();
+        // The delete lands between store()'s read and its write.
+        racing.beforeUpdateIfPresent = () -> racing.secrets.remove("acme/scoped");
+        var racingProvider = new VaultSecretProvider(Optional.of(MASTER), racing, new VaultSaltManager(racing), new SimpleMeterRegistry(), null);
+        racingProvider.initMetrics();
+        racingProvider.onStartup(mock(StartupEvent.class));
+        var scoped = new SecretReference("acme", "scoped");
+        racingProvider.store(scoped, "v1", null, List.of("agent-one"));
+
+        assertThrows(IllegalArgumentException.class, () -> racingProvider.store(scoped, "v2", null, null));
+
+        assertFalse(racing.secrets.containsKey("acme/scoped"), "the rotation must not resurrect the deleted row with allowedAgents [*]");
+    }
+
+    @Test
+    @DisplayName("with eddi.vault.accept-unbound-legacy-data=false a legacy row no longer opens, and is not re-sealed")
+    void unboundFallbackCanBeRetiredForSecrets() throws Exception {
+        seedLegacy("legacy", "legacy-value");
+        provider.acceptUnboundLegacyData = false;
+
+        assertThrows(ISecretProvider.SecretProviderException.class, () -> provider.resolve(new SecretReference("acme", "legacy")));
+        assertEquals(0, persistence.resealInPlaceCalls);
+        assertEquals("bound-value", provider.resolve(new SecretReference("acme", "bound")));
     }
 }

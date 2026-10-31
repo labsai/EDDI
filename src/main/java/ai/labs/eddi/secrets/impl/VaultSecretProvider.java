@@ -153,6 +153,30 @@ public class VaultSecretProvider implements ISecretProvider {
     @ConfigProperty(name = "eddi.vault.allow-weak-master-key", defaultValue = "false")
     boolean allowWeakMasterKey;
 
+    /**
+     * Whether a value sealed before ciphertexts were bound to their rows (no AAD)
+     * still opens through the unbound fallback.
+     * <p>
+     * The fallback keeps pre-binding data readable without a migration step, but
+     * for as long as it exists such a value can be transplanted into another row by
+     * someone with database write access. Named secrets re-seal themselves on read;
+     * sealed runtime data (OAuth grants) is re-sealed when written again or by
+     * {@code POST /secretstore/secrets/{tenantId}/rotate-dek}. Once
+     * {@code eddi.vault.legacy-unbound.opened.count} stays at zero after a
+     * rotation, setting this to {@code false} retires the fallback for good: an
+     * unbound value then fails like any other tampered ciphertext. Field-injected,
+     * like {@link #allowWeakMasterKey}; {@code true} when built without a
+     * container, so existing data keeps opening.
+     */
+    @ConfigProperty(name = "eddi.vault.accept-unbound-legacy-data", defaultValue = "true")
+    boolean acceptUnboundLegacyData = true;
+
+    /**
+     * Every open that needed the unbound fallback — what tells an operator it is
+     * safe to retire.
+     */
+    private Counter legacyUnboundOpenedCounter;
+
     // ─── Metrics ───
     private Counter resolveCounter;
     private Counter storeCounter;
@@ -196,6 +220,7 @@ public class VaultSecretProvider implements ISecretProvider {
         // and folding the two would hide it.
         this.grantUpdateCounter = meterRegistry.counter("eddi.vault.grant.update.count");
         this.errorCounter = meterRegistry.counter("eddi.vault.errors.count");
+        this.legacyUnboundOpenedCounter = meterRegistry.counter("eddi.vault.legacy-unbound.opened.count");
         this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.duration");
         this.storeTimer = meterRegistry.timer("eddi.vault.store.duration");
     }
@@ -365,7 +390,17 @@ public class VaultSecretProvider implements ISecretProvider {
                     existingOpt.map(EncryptedSecret::getId).orElse(null), existingOpt.map(EncryptedSecret::getCreatedAt).orElse(now),
                     existingOpt.isPresent() ? now : null);
 
-            persistence.upsertSecret(secret);
+            // A rotation is an update and never an insert. As an upsert, a row deleted
+            // between the read above and this write was re-created with the insert
+            // defaults, the wildcard grant included, from a call that supplied no grant
+            // at all. Now the vanished row makes this a create, with a create's check.
+            boolean updated = existingOpt.isPresent() && persistence.updateSecretIfPresent(secret);
+            if (!updated) {
+                if (existingOpt.isPresent()) {
+                    requireExplicitGrant(reference, allowedAgents);
+                }
+                persistence.upsertSecret(secret);
+            }
             LOGGER.infof("Secret stored: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");
         } catch (PersistenceException e) {
             errorCounter.increment();
@@ -762,7 +797,7 @@ public class VaultSecretProvider implements ISecretProvider {
             if (activeDekId.equals(rowDekId)) {
                 return true;
             }
-            String plaintext = decryptSecretWithFallback(current, dekFor(tenantId, rowDekId));
+            String plaintext = openSecret(current, dekFor(tenantId, rowDekId)).plaintext();
             EnvelopeCrypto.EncryptionResult enc = EnvelopeCrypto.encrypt(plaintext, activeDek,
                     secretAad(tenantId, current.getKeyName(), activeDekId));
             current.setEncryptedValue(enc.ciphertext());
@@ -1354,6 +1389,7 @@ public class VaultSecretProvider implements ISecretProvider {
             } catch (EnvelopeCrypto.CryptoException legacyFailed) {
                 throw boundFailed;
             }
+            requireUnboundAccepted("sealed data of tenant " + tenantId, boundFailed);
             // The provider does not own these rows (a participant does), so it cannot
             // re-seal them here; a DEK rotation does. Said once per tenant.
             if (legacySealedDataLogged.add(tenantId)) {
@@ -2125,9 +2161,14 @@ public class VaultSecretProvider implements ISecretProvider {
         return (tenantId + "|" + keyName + "|" + dekId).getBytes(java.nio.charset.StandardCharsets.UTF_8);
     }
 
+    /** A decrypted secret and whether it only opened through the legacy path. */
+    private record Opened(String plaintext, boolean legacy) {
+    }
+
     /**
      * Decrypt a stored secret, verifying the row-identity AAD, and falling back to
-     * a no-AAD decrypt for rows written before AAD binding existed.
+     * a no-AAD decrypt for rows written before AAD binding existed, saying which
+     * path opened the row.
      * <p>
      * GCM authenticates or fails, so a legacy (no-AAD) row cannot be read with the
      * AAD and vice versa; trying the AAD first and the legacy form only on failure
@@ -2135,15 +2176,6 @@ public class VaultSecretProvider implements ISecretProvider {
      * from another key — fails both and surfaces as a decryption failure, which is
      * the intended outcome.
      */
-    private String decryptSecretWithFallback(EncryptedSecret secret, byte[] dek) {
-        return openSecret(secret, dek).plaintext();
-    }
-
-    /** A decrypted secret and whether it only opened through the legacy path. */
-    private record Opened(String plaintext, boolean legacy) {
-    }
-
-    /** {@link #decryptSecretWithFallback}, saying which path opened the row. */
     private Opened openSecret(EncryptedSecret secret, byte[] dek) {
         byte[] aad = secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId());
         try {
@@ -2151,11 +2183,31 @@ public class VaultSecretProvider implements ISecretProvider {
         } catch (EnvelopeCrypto.CryptoException withAadFailed) {
             // Legacy row written before AAD binding — retry without AAD. If this also
             // fails, the original (AAD) failure is the more informative one to surface.
+            String opened;
             try {
-                return new Opened(EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek), true);
+                opened = EnvelopeCrypto.decrypt(secret.getEncryptedValue(), secret.getIv(), dek);
             } catch (EnvelopeCrypto.CryptoException legacyFailed) {
                 throw withAadFailed;
             }
+            requireUnboundAccepted("secret " + secret.getTenantId() + "/" + secret.getKeyName(), withAadFailed);
+            return new Opened(opened, true);
+        }
+    }
+
+    /**
+     * Counts an open through the unbound fallback, or refuses it once
+     * {@link #acceptUnboundLegacyData} is off, by rethrowing the bound failure so
+     * the value fails exactly as a tampered one does.
+     */
+    private void requireUnboundAccepted(String what, EnvelopeCrypto.CryptoException boundFailure) {
+        if (legacyUnboundOpenedCounter != null) {
+            legacyUnboundOpenedCounter.increment();
+        }
+        if (!acceptUnboundLegacyData) {
+            LOGGER.errorf("[VAULT] Refused to open %s: it is sealed without row binding (no AAD) and "
+                    + "eddi.vault.accept-unbound-legacy-data=false. Re-enable it, run POST /secretstore/secrets/{tenantId}/rotate-dek, then "
+                    + "turn it off again.", sanitize(what));
+            throw boundFailure;
         }
     }
 
@@ -2190,8 +2242,15 @@ public class VaultSecretProvider implements ISecretProvider {
         try {
             EnvelopeCrypto.EncryptionResult bound = EnvelopeCrypto.encrypt(plaintext, dek,
                     secretAad(secret.getTenantId(), secret.getKeyName(), secret.getDekId()));
+            // A row this old usually carries a bare SHA-256 checksum too: an offline
+            // guessing oracle for anyone who can read the row or a backup. The
+            // plaintext was just authenticated, so the same guarded write replaces it
+            // with the keyed form, as a DEK rotation does. Null leaves it as it is.
+            String keyedChecksum = secret.getChecksum() != null && !secret.getChecksum().startsWith(VaultChecksum.KEYED_PREFIX)
+                    ? VaultChecksum.compute(checksumKey(), secret.getTenantId(), plaintext)
+                    : null;
             boolean written = persistence.resealSecretInPlace(secret.getTenantId(), secret.getKeyName(), secret.getDekId(), secret.getIv(),
-                    bound.ciphertext(), bound.iv());
+                    bound.ciphertext(), bound.iv(), keyedChecksum);
             if (legacySealingLogged.add(id)) {
                 if (written) {
                     LOGGER.infof("[VAULT] Secret '%s' was sealed before row binding (no AAD); re-sealed it bound on read.", sanitize(id));
