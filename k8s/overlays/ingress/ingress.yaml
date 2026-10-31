@@ -7,9 +7,11 @@
 # WARNING: as shipped this Ingress serves plain HTTP. The Manager sends secret
 # values, vault master keys and bearer tokens over this same origin, so do not
 # expose it beyond a trusted network until TLS is enabled below (or terminated in
-# front of the controller) and HTTP is redirected to HTTPS. nginx-ingress does
-# that redirect by default once a tls block is present; set
-# nginx.ingress.kubernetes.io/ssl-redirect: "true" to force it on other setups.
+# front of the controller) and HTTP is redirected to HTTPS. ingress-nginx does
+# that redirect by default once a tls block is present (to force it explicitly,
+# set its nginx.ingress.kubernetes.io/ssl-redirect: "true" annotation). Other
+# controllers ignore that annotation: configure their own HTTP-to-HTTPS redirect
+# (e.g. a Traefik redirectScheme middleware).
 #   - Change ingressClassName to match your cluster's Ingress controller
 apiVersion: networking.k8s.io/v1
 kind: Ingress

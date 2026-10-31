@@ -276,11 +276,24 @@ store_vault_key() {
     # (the default). allowedHosts is where the key may be sent: the provider's own
     # endpoint, so an edited config cannot send it anywhere else.
     # The body goes to curl on stdin (printf is a shell builtin), never as an -d argument:
-    # argv is visible in the process table, the key must not be. The key is JSON-escaped
-    # first so a quote or backslash in it cannot break out of the string.
+    # argv is visible in the process table, the key must not be. This image (curl on
+    # Alpine) has no JSON encoder, so the values are restricted to printable ASCII -
+    # which every provider key and host name is - and only then are quote and backslash
+    # escaped, the two characters printable ASCII needs escaped in a JSON string. A key
+    # with a line break or another control character is refused rather than altered:
+    # command substitution would silently drop a trailing newline, and a raw control
+    # character would make the body invalid JSON.
+    for value in "$EDDI_DEMO_LLM_API_KEY" "$VAULT_KEY_HOST"; do
+        # Counted, not compared to "": $(...) would strip the very newline being looked for.
+        if [ "$(printf '%s' "$value" | LC_ALL=C tr -d '\040-\176' | wc -c)" -ne 0 ]; then
+            echo "[seed] ERROR: EDDI_DEMO_LLM_API_KEY / EDDI_DEMO_LLM_ALLOWED_HOST may contain only printable ASCII (no line breaks or other control characters)." >&2
+            exit 1
+        fi
+    done
     json_key=$(printf '%s' "$EDDI_DEMO_LLM_API_KEY" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
+    json_host=$(printf '%s' "$VAULT_KEY_HOST" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
     printf '{"value": "%s", "description": "Demo LLM provider key (seeded by seed-demo-agent.sh)", "allowedAgents": ["*"], "allowedHosts": ["%s"]}' \
-        "$json_key" "$VAULT_KEY_HOST" \
+        "$json_key" "$json_host" \
         | curl -sfS -X PUT "$EDDI/secretstore/secrets/default/$VAULT_KEY_NAME" \
             -H 'Content-Type: application/json' \
             --data-binary @- \

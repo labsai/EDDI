@@ -29,6 +29,7 @@ import shlex
 # The driver's job is to run `docker compose`, `docker` and `git`: fixed argument lists, no shell.
 import subprocess  # nosec B404
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -182,15 +183,27 @@ def ensure_results():
 def save_state(state):
     ensure_results()
     os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    # makedirs and chmod both follow a symlink, so one planted at STATE_DIR would move the state
+    # (and the chmod) somewhere else entirely.
+    if os.path.islink(STATE_DIR):
+        raise SystemExit(f"refusing to write state through a symlinked directory: {STATE_DIR}")
     if os.name == "posix":
         os.chmod(STATE_DIR, 0o700)
-    # Write a temp file inside the private directory and rename it over the target: the target is
-    # replaced, never opened, so a symlink planted at STATE is overwritten rather than followed.
-    tmp = STATE + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
-    os.replace(tmp, STATE)
+    # A fresh, exclusively created temp file (mkstemp: O_CREAT|O_EXCL, mode 0600) per save, renamed
+    # over the target. Exclusive creation never follows or reuses an existing path, overlapping
+    # writers (two `up`s, even for different compose projects) never share one, and the target is
+    # replaced rather than opened, so a symlink planted at STATE is overwritten, not followed.
+    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".state-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, STATE)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def node_urls(state=None):
