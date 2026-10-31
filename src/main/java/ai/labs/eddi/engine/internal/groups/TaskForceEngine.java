@@ -464,6 +464,12 @@ public class TaskForceEngine {
                                 producedNothing = hasNoTaskResult(entry);
                                 if (producedNothing) {
                                     taskList.failTask(task.id(), noResultReason(entry));
+                                    if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                                        // The wave controller only stops on a recorded error. Without
+                                        // one it re-queries the list and runs the still-ASSIGNED tasks
+                                        // in the next wave although the policy says ABORT.
+                                        errors.add(new GroupDiscussionException(noResultReason(entry)));
+                                    }
                                 } else if (taskLevelHitl && phase.requiresApproval()) {
                                     // HITL TASK-level: submit for approval only when BOTH
                                     // taskLevelHitl AND this phase requires approval. Otherwise
@@ -1101,6 +1107,18 @@ public class TaskForceEngine {
     }
 
     /**
+     * Whether a decoded array element looks like a verification verdict: an object
+     * that names the task ({@code subject}); {@code passed} and {@code feedback}
+     * are optional ({@code passed} defaults to true). Decoding succeeding says
+     * nothing about shape - a {@code Sources: [{"title": ...}]} list in the same
+     * reply is a map too, and counting it made the reply ambiguous, which
+     * auto-verified every task instead of applying the failed verdict.
+     */
+    private static boolean isVerdictShaped(Object item) {
+        return item instanceof Map<?, ?> map && map.get("subject") != null;
+    }
+
+    /**
      * A JSON array span as a list of verdict objects, or {@code null} when it is
      * not one - an array of plain values ({@code [1]}, a citation in the prose) is
      * not a verdict and must not count as one.
@@ -1108,7 +1126,7 @@ public class TaskForceEngine {
     private List<?> readJsonList(String json) {
         try {
             List<?> list = jsonSerialization.deserialize(json, List.class);
-            return list != null && list.stream().anyMatch(Map.class::isInstance) ? list : null;
+            return list != null && list.stream().anyMatch(TaskForceEngine::isVerdictShaped) ? list : null;
         } catch (Exception e) {
             return null;
         }
@@ -1431,7 +1449,7 @@ public class TaskForceEngine {
      * A SKIPPED or ERROR turn — or one with no content at all — is no task result.
      */
     static boolean hasNoTaskResult(TranscriptEntry entry) {
-        return entry == null || entry.content() == null
+        return entry == null || entry.content() == null || entry.content().isBlank()
                 || entry.type() == TranscriptEntryType.SKIPPED || entry.type() == TranscriptEntryType.ERROR;
     }
 

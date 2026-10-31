@@ -66,6 +66,21 @@ class EmbeddedJsonTest {
     }
 
     @Test
+    void exhaustedCandidateBudget_withAnUnexaminedSuffix_isAmbiguous() {
+        // 31 unparseable braces use up all but one candidate; the real object is the
+        // 32nd, and a contradictory one sits beyond the budget, never examined.
+        String text = "{x}".repeat(EmbeddedJson.MAX_CANDIDATES - 1) + " {\"vote\": \"A\"} then {\"vote\": \"B\"}";
+        assertNull(EmbeddedJson.soleObject(text, EmbeddedJsonTest::read),
+                "a rival that may sit in the unexamined suffix must not be assumed absent");
+    }
+
+    @Test
+    void exhaustedCandidateBudget_withNothingLeftToExamine_stillReturnsTheMatch() {
+        String text = "{x}".repeat(EmbeddedJson.MAX_CANDIDATES - 1) + " {\"vote\": \"A\"}";
+        assertEquals("A", EmbeddedJson.soleObject(text, EmbeddedJsonTest::read).path("vote").asText());
+    }
+
+    @Test
     void nothingParsable_returnsNull() {
         assertNull(EmbeddedJson.soleObject("no json { here", EmbeddedJsonTest::read));
         assertNull(EmbeddedJson.soleObject(null, EmbeddedJsonTest::read));

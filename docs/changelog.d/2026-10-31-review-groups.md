@@ -61,6 +61,11 @@ delegators (covered directly by `TaskForceEngineTest`).
   write in the storage layer.
 - The remaining ~24 private delegators in `GroupConversationService` stay until their reflective tests are ported.
 
+- Second review round: the follow-up cost-ceiling lookup propagates store failures instead of meaning "unlimited"; an
+  exhausted `EmbeddedJson` candidate budget is ambiguous, not a unique match; an ABORT no-result task turn stops the
+  following waves; a blank task result is no result; a verification array is accepted only when an element carries a
+  `subject`.
+
 **Files:** [`GroupHitlCoordinator.java`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupHitlCoordinator.java),
 [`RestGroupConversation.java`](../../src/main/java/ai/labs/eddi/engine/internal/RestGroupConversation.java),
 [`McpHitlTools.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpHitlTools.java),

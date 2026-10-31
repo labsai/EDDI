@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.MemberUnavailablePolicy;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TurnOrder;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
@@ -520,6 +521,65 @@ class TaskForceEngineTest {
                 "a skipped turn under SKIP is not reported as a task error");
         assertEquals(SharedTaskList.TaskStatus.ASSIGNED, taskList.findById(write.id()).status(), "its dependent must not run without the output");
         verify(memberTurnExecutor, times(1)).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any());
+    }
+
+    @Test
+    void abortPolicy_noResultTurn_stopsTheNextWaveFromRunningTheRemainingTasks() throws Exception {
+        var engine = engine();
+        var gc = new GroupConversation();
+        gc.setId("gc-tf-abort");
+        var taskList = new SharedTaskList();
+        var first = taskList.addTask(new TaskItem("t-1", "First", "gather", SharedTaskList.TaskStatus.ASSIGNED, AGENT_A, AGENT_A,
+                List.of(), null, null, false, 1, Instant.now(), null));
+        var second = taskList.addTask(new TaskItem("t-2", "Second", "write", SharedTaskList.TaskStatus.ASSIGNED, AGENT_A, AGENT_A,
+                List.of(), null, null, false, 2, Instant.now(), null));
+        gc.setTaskList(taskList);
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(member(AGENT_A)));
+        var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL", TurnOrder.PARALLEL, ContextScope.TASK_ONLY, false, null, 1, false);
+        var protocol = new ProtocolConfig(30, MemberFailurePolicy.ABORT, 0, MemberUnavailablePolicy.SKIP);
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenReturn(new TranscriptEntry(AGENT_A, AGENT_A, null, 0, "Execute", TranscriptEntryType.SKIPPED,
+                        Instant.now(), "timed out", null));
+
+        assertThrows(GroupDiscussionException.class, () -> engine.executeTaskExecutionPhase(gc, config, List.of(member(AGENT_A)), phase,
+                protocol, "Q", 0, null, new AtomicInteger(), 50));
+
+        assertEquals(SharedTaskList.TaskStatus.FAILED, taskList.findById(first.id()).status());
+        assertEquals(SharedTaskList.TaskStatus.ASSIGNED, taskList.findById(second.id()).status(),
+                "ABORT means the remaining tasks are not started in a further wave");
+        verify(memberTurnExecutor, times(1)).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any());
+    }
+
+    @Test
+    void blankContent_isNoTaskResult() {
+        var blank = new TranscriptEntry(AGENT_A, AGENT_A, "   ", 0, "Execute", TranscriptEntryType.OPINION, Instant.now(), null, null);
+        var real = new TranscriptEntry(AGENT_A, AGENT_A, "done", 0, "Execute", TranscriptEntryType.OPINION, Instant.now(), null, null);
+        assertTrue(TaskForceEngine.hasNoTaskResult(blank));
+        assertFalse(TaskForceEngine.hasNoTaskResult(real));
+    }
+
+    @Test
+    void tryParseVerificationJson_unrelatedObjectArray_isNotARivalToTheVerdictArray() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setTaskList(new SharedTaskList());
+        var task = new TaskItem("X", "desc", 1);
+        gc.getTaskList().addTask(task);
+        gc.getTaskList().assignTask(task.id(), AGENT_A, "A");
+        gc.getTaskList().startTask(task.id());
+        gc.getTaskList().completeTask(task.id(), "done");
+        var completedTask = gc.getTaskList().findById(task.id());
+        var engine = engine();
+        var mapper = new ObjectMapper();
+        when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), List.class));
+
+        boolean result = engine.tryParseVerificationJson(gc, List.of(completedTask),
+                "Sources: [{\"title\":\"reference\"}] Verdicts: [{\"subject\":\"X\",\"passed\":false,\"feedback\":\"wrong\"}]", null);
+
+        assertTrue(result, "a Sources list is not a verdict array and must not make the reply ambiguous");
+        assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
     }
 
     @Test

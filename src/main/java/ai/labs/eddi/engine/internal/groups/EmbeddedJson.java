@@ -112,14 +112,20 @@ public final class EmbeddedJson {
         if (text == null || text.isEmpty()) {
             return null;
         }
-        int[] budget = {MAX_CANDIDATES};
+        int[] budget = {MAX_CANDIDATES, 0};
         Match<T> first = nextMatch(text, 0, open, close, parser, budget);
         if (first == null) {
             return null;
         }
         // A rival after the accepted span makes the reply ambiguous. The budget is
         // shared, so the whole call stays bounded however the candidates fall.
-        return nextMatch(text, first.end(), open, close, parser, budget) == null ? first : null;
+        if (nextMatch(text, first.end(), open, close, parser, budget) != null) {
+            return null;
+        }
+        // Running out of budget with candidates still unexamined is not proof that
+        // the first match is the only one: a contradictory rival may sit in the
+        // unread suffix, so treat it as ambiguous rather than accept the first.
+        return budget[1] != 0 ? null : first;
     }
 
     private static <T> Match<T> nextMatch(String text, int from, char open, char close, Function<String, T> parser,
@@ -133,6 +139,9 @@ public final class EmbeddedJson {
                 return new Match<>(parsed, start + span.length());
             }
             start = text.indexOf(open, start + 1);
+        }
+        if (start >= 0) {
+            budget[1] = 1; // stopped by the budget, not by the end of the text
         }
         return null;
     }

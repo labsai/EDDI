@@ -2046,25 +2046,21 @@ public class GroupConversationService implements IGroupConversationService, User
      * {@code protocol.maxCostPerDiscussion}, tightened by the budget a nested
      * discussion inherited — the same resolution {@code executeDiscussion} applies
      * to every phase turn. {@code null} means unlimited. A config that cannot be
-     * loaded leaves only the inherited ceiling (the follow-up then fails on the
-     * same unreadable config anyway, through its timeout lookup).
+     * loaded is NOT treated as "no ceiling": the store failure (or a missing group)
+     * propagates, so a transient error cannot let a follow-up run a paid member
+     * turn unchecked. (resolveAgentTimeoutSeconds swallows its own lookup errors
+     * and falls back to a default, so it would not catch this either.)
      * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember.
      */
-    public Double resolveEffectiveCostCeiling(GroupConversation gc) {
-        Double own = null;
-        try {
-            IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
-            if (currentGroupId != null) {
-                AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
-                if (config != null) {
-                    own = resolveProtocol(config).maxCostPerDiscussion();
-                }
-            }
-        } catch (Exception e) {
-            LOGGER.debugf("Could not resolve the cost ceiling for group %s: %s",
-                    LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+    public Double resolveEffectiveCostCeiling(GroupConversation gc)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        IResourceStore.IResourceId currentGroupId = groupStore.getCurrentResourceId(gc.getGroupId());
+        if (currentGroupId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Group not found.");
         }
+        AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
+        Double own = config != null ? resolveProtocol(config).maxCostPerDiscussion() : null;
         return effectiveCostCeiling(own, gc.getInheritedCostCeiling());
     }
 
