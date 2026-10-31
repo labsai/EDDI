@@ -667,7 +667,13 @@ export function GroupDetailPage() {
       {
         onSuccess: () => {
           toast.success(t("groups.discussionDeleted", "Discussion deleted"));
-          if (selectedConvId === convId) setSelectedConvId(null);
+          if (selectedConvId === convId) {
+            // Hold the clear: the conversation list still contains the deleted
+            // discussion until its refetch lands, and the auto-select effect would
+            // otherwise put it straight back on screen.
+            userClearedRef.current = true;
+            setSelectedConvId(null);
+          }
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }

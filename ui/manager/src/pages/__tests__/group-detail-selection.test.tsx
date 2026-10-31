@@ -136,6 +136,34 @@ describe("GroupDetailPage — deleting a discussion", () => {
     await waitFor(() => expect(deleted).toEqual([target]));
   });
 
+  it("does not put the deleted discussion straight back on screen", async () => {
+    // The list still holds the deleted discussion until its refetch lands (here,
+    // for good — the fixture keeps serving it), and the auto-select effect used
+    // to re-select the newest entry the moment the selection was cleared.
+    const deleted: string[] = [];
+    server.use(
+      http.delete("*/groups/:groupId/conversations/:conversationId", ({ params }) => {
+        deleted.push(String(params.conversationId));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderGroupDetail();
+    const ids = await conversationIds();
+    const target = ids[0]!;
+    await waitFor(() =>
+      expect(screen.getByTestId(`discussion-item-${target}`)).toHaveAttribute("aria-current", "true"),
+    );
+
+    await userEvent.click(screen.getByTestId(`delete-discussion-${target}`));
+    await screen.findByText(/removed permanently|cannot be undone/i);
+    await userEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+    await waitFor(() => expect(deleted).toEqual([target]));
+
+    await new Promise((r) => setTimeout(r, 150));
+    expect(screen.getByTestId(`discussion-item-${target}`)).not.toHaveAttribute("aria-current", "true");
+  });
+
   it("keeps the delete and cancel controls reachable without a mouse", async () => {
     renderGroupDetail();
     const ids = await conversationIds();

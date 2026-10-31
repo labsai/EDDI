@@ -4701,7 +4701,7 @@
     "exportNo": "Exclue des exports",
     "copyVars": "Copier la référence ${vars:…}",
     "refCopied": "Copié : {{ref}}",
-    "infoLine1": "Utilisez {{vars.<key>}} dans les prompts système ou ${vars:<key>} n'importe où dans les configurations d'agents.",
+    "infoLine1": "Utilisez {vars.<key>} dans les prompts système ou ${vars:<key>} n'importe où dans les configurations d'agents.",
     "infoLine2": "Les modifications prennent effet sous 2 minutes (TTL du cache). Pour les valeurs sensibles, utilisez plutôt le coffre-fort de secrets.",
     "keyExists": "Une variable nommée « {{key}} » existe déjà. Modifiez-la plutôt depuis la liste."
   },

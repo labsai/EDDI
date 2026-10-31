@@ -4648,7 +4648,7 @@
     "exportNo": "Von Exporten ausgeschlossen",
     "copyVars": "${vars:…}-Referenz kopieren",
     "refCopied": "Kopiert: {{ref}}",
-    "infoLine1": "Verwenden Sie {{vars.<key>}} in System-Prompts oder ${vars:<key>} an beliebiger Stelle in Agent-Konfigurationen.",
+    "infoLine1": "Verwenden Sie {vars.<key>} in System-Prompts oder ${vars:<key>} an beliebiger Stelle in Agent-Konfigurationen.",
     "infoLine2": "Änderungen werden innerhalb von 2 Minuten wirksam (Cache-TTL). Verwenden Sie für sensible Werte stattdessen den Secrets-Vault.",
     "keyExists": "Eine Variable namens „{{key}}“ existiert bereits. Bearbeiten Sie sie stattdessen in der Liste."
   },

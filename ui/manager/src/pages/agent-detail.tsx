@@ -61,7 +61,7 @@ import {
 } from "@/hooks/use-agents";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
   applyChangedFields,
@@ -450,6 +450,8 @@ export function AgentDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // Gone: unsaved edits are moot, and `isDirty` has not re-rendered yet.
+          allowNextNavigation();
           navigate("/manage/agents");
         },
         onError: (err) => toast.error(getErrorMessage(err)),

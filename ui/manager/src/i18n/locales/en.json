@@ -2284,7 +2284,7 @@
     "exportNo": "Excluded from exports",
     "copyVars": "Copy ${vars:…} reference",
     "refCopied": "Copied: {{ref}}",
-    "infoLine1": "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
+    "infoLine1": "Use {vars.<key>} in system prompts or ${vars:<key>} anywhere in agent configurations.",
     "infoLine2": "Changes take effect within 2 minutes (cache TTL). For sensitive values, use the Secrets Vault instead.",
     "tableTitle_one": "{{count}} variable",
     "tableTitle_other": "{{count}} variables",

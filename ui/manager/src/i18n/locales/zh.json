@@ -4648,7 +4648,7 @@
     "exportNo": "从导出中排除",
     "copyVars": "复制 ${vars:…} 引用",
     "refCopied": "已复制：{{ref}}",
-    "infoLine1": "在系统提示中使用 {{vars.<key>}}，或在代理配置的任何位置使用 ${vars:<key>}。",
+    "infoLine1": "在系统提示中使用 {vars.<key>}，或在代理配置的任何位置使用 ${vars:<key>}。",
     "infoLine2": "更改将在 2 分钟内生效（缓存 TTL）。敏感值请改用密钥保管库。",
     "keyExists": "名为“{{key}}”的变量已存在。请改为在列表中编辑它。"
   },
