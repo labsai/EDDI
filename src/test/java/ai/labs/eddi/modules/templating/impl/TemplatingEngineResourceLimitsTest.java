@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.templating.impl;
 
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateEngineException;
 import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.Settings;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.TemplateLimitExceededException;
 import io.quarkus.qute.Engine;
 import io.quarkus.qute.EvalContext;
 import io.quarkus.qute.NamespaceResolver;
@@ -80,6 +81,33 @@ class TemplatingEngineResourceLimitsTest {
 
     private static TemplatingEngine engine() {
         return new TemplatingEngine(sourceWithUncheckedFmt(), Settings.defaults());
+    }
+
+    @Nested
+    @DisplayName("str:concat and str:join pre-check")
+    class Concatenation {
+
+        @Test
+        @DisplayName("parts that add up to more than the limit are refused before they are joined")
+        void refusedBeforeJoining() {
+            String big = "x".repeat(600);
+            assertThrows(TemplateLimitExceededException.class, () -> BoundedFormat.requireConcatenationWithin(List.of(big, big), false, 1_000));
+            // the delimiter repeats between parts
+            assertThrows(TemplateLimitExceededException.class,
+                    () -> BoundedFormat.requireConcatenationWithin(List.of("-".repeat(600), "a", "b", "c"), true, 1_000));
+            // a list argument counts element by element
+            assertThrows(TemplateLimitExceededException.class,
+                    () -> BoundedFormat.requireConcatenationWithin(List.of(",", List.of(big, big)), true, 1_000));
+        }
+
+        @Test
+        @DisplayName("results within the limit pass, and a huge delimiter count saturates instead of overflowing")
+        void withinTheLimit() {
+            BoundedFormat.requireConcatenationWithin(List.of("a", "b", "c"), false, 1_000);
+            BoundedFormat.requireConcatenationWithin(List.of(", ", "a", "b", "c"), true, 1_000);
+            assertThrows(TemplateLimitExceededException.class, () -> BoundedFormat
+                    .requireConcatenationWithin(List.of("x".repeat(100_000), "a", "b"), true, 1_000));
+        }
     }
 
     @Nested
