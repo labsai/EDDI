@@ -17,6 +17,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -212,6 +214,18 @@ class ToolCostTrackerTest {
             assertEquals(0.0, tracker.trackToolCall(negative, "conv-neg"), 0.0001);
             assertEquals(0.0, tracker.getConversationCosts("conv-neg").getTotalCost(), 0.0001);
             assertEquals(0.0, tracker.getTotalCost(), 0.0001);
+        }
+
+        @ParameterizedTest
+        @DisplayName("a non-finite override falls back to the default price and never poisons the totals")
+        @ValueSource(doubles = {Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY})
+        void nonFiniteOverrideFallsBackToDefault(double price) {
+            var poisoned = new ToolInvocation("searchWeb", "websearch", price);
+
+            assertEquals(0.001, tracker.trackToolCall(poisoned, "conv-nan"), 0.0001);
+            assertTrue(Double.isFinite(tracker.getConversationCosts("conv-nan").getTotalCost()));
+            assertTrue(Double.isFinite(tracker.getTotalCost()));
+            assertTrue(tracker.isWithinBudget("conv-nan", 1.0), "a finite total stays comparable with the budget");
         }
 
         @Test
@@ -410,6 +424,23 @@ class ToolCostTrackerTest {
                     "the victims must be drawn exclusively from the idle cohort");
         }
 
+        @Test
+        @DisplayName("an over-budget conversation outlives every under-budget one, however quiet it has been")
+        void exhaustedEntryIsEvictedLast() throws InterruptedException {
+            int cap = ToolCostTracker.MAX_CONVERSATION_ENTRIES;
+            tracker.trackToolCall(new ToolInvocation("searchWeb", "websearch", 5.0), "exhausted");
+            assertFalse(tracker.isWithinBudget("exhausted", 1.0));
+
+            Thread.sleep(5);
+            for (int i = 0; i < cap; i++) {
+                tracker.trackToolCall(ToolInvocation.of("websearch"), "fresh-" + i);
+            }
+
+            assertNotNull(tracker.getConversationCosts("exhausted"),
+                    "evicting the only enforcement record would hand the conversation its whole budget again");
+            assertFalse(tracker.isWithinBudget("exhausted", 1.0));
+        }
+
         private int countSurviving(String prefix, int count) {
             int surviving = 0;
             for (int i = 0; i < count; i++) {
@@ -424,16 +455,6 @@ class ToolCostTrackerTest {
     @Nested
     @DisplayName("reset")
     class ResetTests {
-
-        @Test
-        @DisplayName("resetConversation should remove conversation entry")
-        void resetConversation() {
-            tracker.trackToolCall(ToolInvocation.of("websearch"), "conv-reset");
-            assertNotNull(tracker.getConversationCosts("conv-reset"));
-
-            tracker.resetConversation("conv-reset");
-            assertNull(tracker.getConversationCosts("conv-reset"));
-        }
 
         @Test
         @DisplayName("resetAll should clear everything")

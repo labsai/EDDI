@@ -211,8 +211,8 @@ class ToolExecutionTimeoutTest {
     }
 
     @Test
-    @DisplayName("an abandoned call is neither cached nor charged for")
-    void timedOutCallIsNotCachedAndNotCharged() {
+    @DisplayName("an abandoned call is not cached, but it is charged — its upstream request is already under way")
+    void timedOutCallIsNotCachedButCharged() {
         var attempts = new AtomicInteger();
         var interrupted = new CountDownLatch(1);
         when(cacheService.get(SCOPE, "hangingTool", "args")).thenReturn(null);
@@ -222,7 +222,7 @@ class ToolExecutionTimeoutTest {
 
         assertTrue(result.startsWith("Error: Execution timed out"), result);
         verify(cacheService, never()).put(anyString(), any(ToolInvocation.class), anyString(), anyString());
-        verify(costTracker, never()).trackToolCall(any(ToolInvocation.class), anyString());
+        verify(costTracker).trackToolCall(ToolInvocation.of("hangingTool"), "conv-1");
     }
 
     @Test
