@@ -152,6 +152,50 @@ class MongoSecretPersistenceTest {
         assertThrows(PersistenceException.class, () -> persistence.upsertSecret(secret));
     }
 
+    // ==================== updateSecretIfPresent ====================
+
+    @Test
+    @DisplayName("updateSecretIfPresent — the upsert's update, scoped to tenant and key, never inserting and never defaulting a grant")
+    void updateSecretIfPresentNeverInserts() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedAgents(null);
+
+        assertTrue(persistence.updateSecretIfPresent(secret));
+
+        var filter = ArgumentCaptor.forClass(Bson.class);
+        var update = ArgumentCaptor.forClass(Bson.class);
+        // The two-argument overload: no UpdateOptions, so no upsert.
+        verify(secretsCollection).updateOne(filter.capture(), update.capture());
+        verify(secretsCollection, never()).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
+        String filterJson = filter.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(filterJson.contains("\"tenantId\": \"" + TENANT + "\""), filterJson);
+        assertTrue(filterJson.contains("\"keyName\": \"api-key\""), filterJson);
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).getDocument("$set");
+        assertFalse(set.containsKey("allowedAgents"), "a null grant is 'keep the stored one', never a write");
+        assertEquals("enc-val", set.getString("encryptedValue").getValue());
+    }
+
+    @Test
+    @DisplayName("updateSecretIfPresent — a vanished row answers false, matched count rather than modified count")
+    void updateSecretIfPresentVanishedRow() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(0L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertFalse(persistence.updateSecretIfPresent(createTestSecret()));
+    }
+
+    @Test
+    @DisplayName("updateSecretIfPresent — throws PersistenceException on MongoException")
+    void updateSecretIfPresentError() {
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenThrow(new MongoException("fail"));
+
+        assertThrows(PersistenceException.class, () -> persistence.updateSecretIfPresent(createTestSecret()));
+    }
+
     // ==================== findSecret ====================
 
     @Test
@@ -406,6 +450,22 @@ class MongoSecretPersistenceTest {
         when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
 
         assertFalse(persistence.resealSecretInPlace(TENANT, "my-key", "dek-0", "old-iv", "new-ciphertext", "new-iv"));
+    }
+
+    @Test
+    @DisplayName("resealSecretInPlace — with a checksum, the keyed checksum is written in the same guarded update")
+    void resealSecretInPlaceReplacesTheChecksum() {
+        UpdateResult result = mock(UpdateResult.class);
+        when(result.getMatchedCount()).thenReturn(1L);
+        when(secretsCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+
+        assertTrue(persistence.resealSecretInPlace(TENANT, "my-key", "dek-0", "old-iv", "new-ciphertext", "new-iv", "keyed-checksum"));
+
+        var update = ArgumentCaptor.forClass(Bson.class);
+        verify(secretsCollection).updateOne(any(Bson.class), update.capture());
+        BsonDocument set = update.getValue().toBsonDocument(BsonDocument.class, MongoClientSettings.getDefaultCodecRegistry()).getDocument("$set");
+        assertEquals(Set.of("encryptedValue", "iv", "checksum"), set.keySet());
+        assertEquals("keyed-checksum", set.getString("checksum").getValue());
     }
 
     // ==================== updateSecretGrant ====================

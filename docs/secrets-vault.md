@@ -471,7 +471,7 @@ bound form. Until a grant has been rewritten or swept, it can still be opened
 unbound — run a DEK rotation if you want that window closed now.
 
 *Retiring the fallback.* Every open that needed the unbound form, secret or sealed
-data, is counted in `eddi.vault.legacy-unbound.opened.count`. Once it stays at zero
+data, is counted in `eddi.vault.legacy.unbound.opened.count`. Once it stays at zero
 after a `rotate-dek` on every tenant, set `eddi.vault.accept-unbound-legacy-data=false`
 (default `true`): the fallback is then gone for good, and an unbound value fails like
 any other tampered ciphertext instead of opening. Turn it back on, rotate and turn it

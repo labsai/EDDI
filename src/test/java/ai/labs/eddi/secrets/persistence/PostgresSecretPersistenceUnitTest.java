@@ -263,6 +263,62 @@ class PostgresSecretPersistenceUnitTest {
     }
 
     @Test
+    void resealSecretInPlace_withChecksum_writesItAndKeepsTheGuardLast() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertTrue(persistence.resealSecretInPlace("tenant-1", "key-1", "dek-0", "old-iv", "new-ciphertext", "new-iv", "keyed-checksum"));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String statement = sql.getAllValues().getLast();
+        assertTrue(statement.contains("SET encrypted_value = ?, iv = ?, checksum = ?"), statement);
+        verify(preparedStatement).setString(1, "new-ciphertext");
+        verify(preparedStatement).setString(2, "new-iv");
+        verify(preparedStatement).setString(3, "keyed-checksum");
+        verify(preparedStatement).setString(4, "tenant-1");
+        verify(preparedStatement).setString(5, "key-1");
+        verify(preparedStatement).setString(6, "dek-0");
+        verify(preparedStatement).setString(7, "old-iv");
+    }
+
+    // ─── updateSecretIfPresent ───
+
+    @Test
+    void updateSecretIfPresent_isAnUpdateScopedToTenantAndKey_andKeepsANullGrant() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+        EncryptedSecret secret = createTestSecret();
+        secret.setAllowedAgents(null);
+
+        assertTrue(persistence.updateSecretIfPresent(secret));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        String statement = sql.getAllValues().getLast();
+        assertTrue(statement.strip().startsWith("UPDATE secret_vault_secrets"), statement);
+        assertFalse(statement.contains("INSERT"), statement);
+        assertTrue(statement.contains("WHERE tenant_id = ? AND key_name = ?"), statement);
+        verify(preparedStatement).setString(1, "encVal");
+        verify(preparedStatement).setBoolean(7, false); // allowed_agents kept as stored
+        verify(preparedStatement).setString(8, null);
+        verify(preparedStatement).setString(13, "tenant-1");
+        verify(preparedStatement).setString(14, "api-key");
+    }
+
+    @Test
+    void updateSecretIfPresent_vanishedRow_returnsFalse() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(0);
+
+        assertFalse(persistence.updateSecretIfPresent(createTestSecret()));
+    }
+
+    @Test
+    void updateSecretIfPresent_sqlException_throwsPersistenceException() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+
+        assertThrows(PersistenceException.class, () -> persistence.updateSecretIfPresent(createTestSecret()));
+    }
+
+    @Test
     void resealSecretInPlace_guardLost_returnsFalse() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(0);
 

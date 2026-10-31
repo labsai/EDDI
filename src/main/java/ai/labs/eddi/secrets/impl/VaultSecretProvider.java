@@ -162,7 +162,7 @@ public class VaultSecretProvider implements ISecretProvider {
      * someone with database write access. Named secrets re-seal themselves on read;
      * sealed runtime data (OAuth grants) is re-sealed when written again or by
      * {@code POST /secretstore/secrets/{tenantId}/rotate-dek}. Once
-     * {@code eddi.vault.legacy-unbound.opened.count} stays at zero after a
+     * {@code eddi.vault.legacy.unbound.opened.count} stays at zero after a
      * rotation, setting this to {@code false} retires the fallback for good: an
      * unbound value then fails like any other tampered ciphertext. Field-injected,
      * like {@link #allowWeakMasterKey}; {@code true} when built without a
@@ -220,7 +220,7 @@ public class VaultSecretProvider implements ISecretProvider {
         // and folding the two would hide it.
         this.grantUpdateCounter = meterRegistry.counter("eddi.vault.grant.update.count");
         this.errorCounter = meterRegistry.counter("eddi.vault.errors.count");
-        this.legacyUnboundOpenedCounter = meterRegistry.counter("eddi.vault.legacy-unbound.opened.count");
+        this.legacyUnboundOpenedCounter = meterRegistry.counter("eddi.vault.legacy.unbound.opened.count");
         this.resolveTimer = meterRegistry.timer("eddi.vault.resolve.duration");
         this.storeTimer = meterRegistry.timer("eddi.vault.store.duration");
     }
