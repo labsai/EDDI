@@ -220,7 +220,7 @@ class ConfigJsonPatcherTest {
      */
     private static final String STORED_PLAINTEXT = """
             {"tasks":[{"actions":["help"],"type":"openai","description":"d",
-             "parameters":{"apiKey":"sk-live-0123456789abcdefghijklmnop","modelName":"gpt-a"}}]}
+             "parameters":{"apiKey":"plain-test-credential-0123456789abcdef","modelName":"gpt-a"}}]}
             """;
 
     @Test
@@ -243,7 +243,7 @@ class ConfigJsonPatcherTest {
                 [{"op":"move","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/parameters/modelName"}]
                 """, LlmConfiguration.class, true));
         assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, """
-                [{"op":"test","path":"/tasks/0/parameters/apiKey","value":"sk-live-0123456789abcdefghijklmnop"}]
+                [{"op":"test","path":"/tasks/0/parameters/apiKey","value":"plain-test-credential-0123456789abcdef"}]
                 """, LlmConfiguration.class, true));
     }
 
@@ -254,7 +254,7 @@ class ConfigJsonPatcherTest {
         var patched = patcher.apply(plaintext, "[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/modelName\",\"value\":\"gpt-b\"}]",
                 LlmConfiguration.class, true);
         assertEquals("gpt-b", patched.tasks().get(0).getParameters().get("modelName"));
-        assertEquals("sk-live-0123456789abcdefghijklmnop", patched.tasks().get(0).getParameters().get("apiKey"));
+        assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("apiKey"));
     }
 
     @Test
@@ -263,11 +263,11 @@ class ConfigJsonPatcherTest {
         var plaintext = mapper.readValue("""
                 {"tasks":[{"actions":["a"],"type":"openai","description":"first","parameters":{"modelName":"gpt-a"}},
                  {"actions":["b"],"type":"openai","description":"second",
-                  "parameters":{"apiKey":"sk-live-0123456789abcdefghijklmnop","modelName":"gpt-b"}}]}
+                  "parameters":{"apiKey":"plain-test-credential-0123456789abcdef","modelName":"gpt-b"}}]}
                 """, LlmConfiguration.class);
         var patched = patcher.apply(plaintext, "[{\"op\":\"remove\",\"path\":\"/tasks/0\"}]", LlmConfiguration.class, true);
         assertEquals(1, patched.tasks().size());
-        assertEquals("sk-live-0123456789abcdefghijklmnop", patched.tasks().get(0).getParameters().get("apiKey"));
+        assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("apiKey"));
     }
 
     @Test
@@ -277,7 +277,7 @@ class ConfigJsonPatcherTest {
         var patched = patcher.apply(plaintext, """
                 [{"op":"copy","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/parameters/backupKey"}]
                 """, LlmConfiguration.class, false);
-        assertEquals("sk-live-0123456789abcdefghijklmnop", patched.tasks().get(0).getParameters().get("backupKey"));
+        assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("backupKey"));
     }
 
     @Test
