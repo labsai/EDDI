@@ -23,6 +23,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -98,6 +99,38 @@ class TemplatingEngineResourceLimitsTest {
             // a list argument counts element by element
             assertThrows(TemplateLimitExceededException.class,
                     () -> BoundedFormat.requireConcatenationWithin(List.of(",", List.of(big, big)), true, 1_000));
+        }
+
+        /**
+         * The pre-check is registered in the engine and answers "not found" when the
+         * result fits, so the next {@code str} resolver (the generated one in
+         * production, an unchecked stand-in here) still builds it.
+         */
+        @Test
+        @DisplayName("through the engine: a result within the limit is still built, one past it never reaches the builder")
+        void registeredInTheEngine() throws Exception {
+            AtomicInteger built = new AtomicInteger();
+            Engine source = Engine.builder().addDefaults().strictRendering(false)
+                    .addNamespaceResolver(NamespaceResolver.builder("str").resolveAsync(ctx -> {
+                        if (!"concat".equals(ctx.getName())) {
+                            return Results.notFound(ctx);
+                        }
+                        built.incrementAndGet();
+                        return evaluate(ctx).thenApply(values -> {
+                            StringBuilder joined = new StringBuilder();
+                            values.forEach(joined::append);
+                            return (Object) joined.toString();
+                        });
+                    }).build())
+                    .build();
+            var engine = new TemplatingEngine(source, settings(1_000, Settings.defaults().timeoutMillis()));
+
+            assertEquals("ab", engine.processTemplate("{str:concat(a, b)}", Map.of("a", "a", "b", "b")));
+            assertEquals(1, built.get());
+
+            String big = "x".repeat(600);
+            assertThrows(TemplateEngineException.class, () -> engine.processTemplate("{str:concat(s, s)}", Map.of("s", big)));
+            assertEquals(1, built.get(), "the over-limit concatenation must be refused before the builder runs");
         }
 
         @Test
