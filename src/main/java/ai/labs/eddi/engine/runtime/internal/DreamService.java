@@ -1081,22 +1081,6 @@ public class DreamService {
     }
 
     /**
-     * Privacy boundary (finding G8): a {@code self}-scoped memory is readable only
-     * by the agent that wrote it. Consolidating one into a shared entry would
-     * either lose it for its owner or — as the previous implementation did by
-     * upgrading the merged visibility to {@code global} — expose it to every other
-     * agent. Since {@code summarizeGroupBy} defaults to {@code "category"} and
-     * {@code preserveAgentProvenance} defaults to {@code false}, cross-agent
-     * grouping was the default path, so that widening was the default behaviour.
-     * <p>
-     * Any group whose most restrictive visibility is {@code self} is therefore
-     * split per {@code sourceAgentId}, producing one consolidated entry per
-     * contributing agent, each keeping {@code self} and its own provenance. Groups
-     * that are already {@code group}- or {@code global}-scoped are left untouched —
-     * they were shared to begin with. Entries without a {@code sourceAgentId} are
-     * kept in their own bucket rather than folded into an arbitrary agent's.
-     */
-    /**
      * The readership boundaries a consolidation must not cross: {@code self}
      * memories per agent ({@link #splitSelfScopedGroupsByAgent}), then
      * {@code group} memories per group set
@@ -1146,6 +1130,22 @@ public class DreamService {
                         .collect(Collectors.joining(","));
     }
 
+    /**
+     * Privacy boundary (finding G8): a {@code self}-scoped memory is readable only
+     * by the agent that wrote it. Consolidating one into a shared entry would
+     * either lose it for its owner or — as the previous implementation did by
+     * upgrading the merged visibility to {@code global} — expose it to every other
+     * agent. Since {@code summarizeGroupBy} defaults to {@code "category"} and
+     * {@code preserveAgentProvenance} defaults to {@code false}, cross-agent
+     * grouping was the default path, so that widening was the default behaviour.
+     * <p>
+     * Any group whose most restrictive visibility is {@code self} is therefore
+     * split per {@code sourceAgentId}, producing one consolidated entry per
+     * contributing agent, each keeping {@code self} and its own provenance. Groups
+     * that are already {@code group}- or {@code global}-scoped are left untouched —
+     * they were shared to begin with. Entries without a {@code sourceAgentId} are
+     * kept in their own bucket rather than folded into an arbitrary agent's.
+     */
     private static Map<String, List<UserMemoryEntry>> splitSelfScopedGroupsByAgent(
                                                                                    Map<String, List<UserMemoryEntry>> groups) {
         Map<String, List<UserMemoryEntry>> result = new LinkedHashMap<>();
