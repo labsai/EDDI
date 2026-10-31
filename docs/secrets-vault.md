@@ -218,6 +218,8 @@ Blocking at resolution would fail in the middle of a live conversation, after th
 
 The gate lives in `AgentFactory.deployAgent` — the one boundary every deployment path funnels through (REST administration, conversation-triggered deployment, the scheduled deployment poller). Placing it there rather than at each caller means it cannot be bypassed by reaching deployment through a different entry point.
 
+One path uses an agent's configuration without deploying it: a scheduled **Dream** consolidation reads the stored agent version (a pinned, never-deployed one included) and hands `userMemoryConfig.dream.parameters` to the model. It runs the same check against that exact version before the cycle starts, and refuses the cycle in `enforce` mode.
+
 ### Modes
 
 Configured with `eddi.vault.grant-enforcement`:

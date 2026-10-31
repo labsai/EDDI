@@ -430,6 +430,40 @@ class GdprComplianceServiceTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void deleteUserData_attachmentDeleteFails_keepsSnapshotsForTheRetry() throws Exception {
+        // The snapshot is what lists the conversation under the user: deleting it
+        // after its blobs failed to delete leaves a retry no id to find them by.
+        Instance<IAttachmentStore> attachInstance = mock(Instance.class);
+        when(attachInstance.isResolvable()).thenReturn(true);
+        var attachmentStorage = mock(IAttachmentStore.class);
+        when(attachInstance.get()).thenReturn(attachmentStorage);
+        when(attachmentStorage.deleteByConversation("conv-1")).thenThrow(new RuntimeException("blob store down"));
+        var serviceWithAttachments = newService(attachInstance);
+        when(conversationMemoryStore.getConversationIdsByUserId(USER_ID)).thenReturn(List.of("conv-1"));
+
+        GdprDeletionResult result = serviceWithAttachments.deleteUserData(USER_ID);
+
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+        assertTrue(result.failedSteps().contains("attachments"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
+        assertFalse(result.complete());
+    }
+
+    @Test
+    void deleteUserData_mappingIntentsUnreadable_keepsMappingsForTheRetry() throws Exception {
+        // The intents are the cache keys; deleting the rows without them leaves the
+        // cache serving the erased mapping and a retry nothing to evict.
+        when(userConversationStore.getAllForUser(USER_ID)).thenThrow(new RuntimeException("db down"));
+
+        GdprDeletionResult result = service.deleteUserData(USER_ID);
+
+        verify(userConversationStore, never()).deleteAllForUser(USER_ID);
+        assertTrue(result.failedSteps().contains("conversationMappings"), result.failedSteps().toString());
+        assertFalse(result.complete());
+    }
+
+    @Test
     void exportUserData_aggregatesAllStores() throws Exception {
         // Given
         var memory1 = mock(UserMemoryEntry.class);
@@ -691,6 +725,24 @@ class GdprComplianceServiceTest {
         verify(userMemoryStore).upsertReserved(argThat(entry -> "_gdpr_processing_restricted".equals(entry.key())
                 && "true".equals(entry.value())
                 && entry.userId().equals(USER_ID)));
+    }
+
+    @Test
+    void restrictProcessing_removesALegacyAgentOwnedRowFirst() throws Exception {
+        // The global upsert keeps an existing row's sourceAgentId; the enforcement
+        // check refuses rows that have one, so the restriction would never apply.
+        var legacy = new UserMemoryEntry("row-1", USER_ID, "_gdpr_processing_restricted", "true", "gdpr",
+                Property.Visibility.global, "agent-x", List.of(), null, false, 0, Instant.now(), Instant.now());
+        var unrelated = new UserMemoryEntry("row-2", USER_ID, "colour", "blue", "fact",
+                Property.Visibility.global, "agent-x", List.of(), null, false, 0, Instant.now(), Instant.now());
+        when(userMemoryStore.getAllEntries(USER_ID)).thenReturn(List.of(legacy, unrelated));
+
+        service.restrictProcessing(USER_ID);
+
+        var order = inOrder(userMemoryStore);
+        order.verify(userMemoryStore).deleteEntry("row-1");
+        order.verify(userMemoryStore).upsertReserved(any());
+        verify(userMemoryStore, never()).deleteEntry("row-2");
     }
 
     @Test
@@ -1725,8 +1777,9 @@ class GdprComplianceServiceTest {
         assertEquals(3, result.attachmentsDeleted(),
                 "only the conversation that actually failed may be missing from the count");
         assertFalse(result.complete());
-        assertEquals(List.of("attachments"), result.failedSteps(),
-                "one step name, however many conversations failed inside it");
+        assertEquals(List.of("attachments", "conversations"), result.failedSteps(),
+                "one step name, however many conversations failed inside it — and the snapshots are kept for the retry");
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
     }
 
     /**
@@ -1746,8 +1799,10 @@ class GdprComplianceServiceTest {
         GdprDeletionResult result = newService(attachmentStorageInstance).deleteUserData(USER_ID);
 
         assertTrue(result.failedSteps().contains("attachments"), result.failedSteps().toString());
-        assertEquals(1, result.conversationsDeleted(),
-                "the cascade must carry on past a step that could not start");
+        // The cascade carries on past a step that could not start — but keeps the
+        // snapshots that name the conversations whose uploads may still be stored.
+        assertEquals(0, result.conversationsDeleted());
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
         verify(auditStore).pseudonymizeByUserId(eq(USER_ID), anyString());
     }
 
@@ -1775,8 +1830,8 @@ class GdprComplianceServiceTest {
     /**
      * The intents are read before the rows are deleted precisely because the cache
      * is keyed by intent — once the rows are gone there is no way to work out which
-     * keys to evict. A failure to read them therefore gets its own step name: the
-     * mappings are still deleted, but the cache goes on serving them.
+     * keys to evict. A failure to read them therefore gets its own step name, and
+     * the rows are kept for the retry that can still evict them.
      */
     @Test
     void deleteUserData_reportsAFailureToReadTheMappedIntents() throws Exception {
@@ -1787,7 +1842,7 @@ class GdprComplianceServiceTest {
 
         GdprDeletionResult result = service.deleteUserData(USER_ID);
 
-        assertEquals(2, result.conversationMappingsDeleted(), "the rows themselves were still erased");
+        assertEquals(0, result.conversationMappingsDeleted(), "kept: they are the only record of the cache keys to evict");
         assertFalse(result.complete());
         assertTrue(result.failedSteps().contains("conversationMappingIntents"),
                 "an unevictable cache keeps serving erased mappings, and the response has to say so: "

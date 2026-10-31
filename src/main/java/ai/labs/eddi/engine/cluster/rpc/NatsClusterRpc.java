@@ -169,7 +169,7 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
     public Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request) {
         long start = System.nanoTime();
         Map<String, Map<String, Object>> replies = new LinkedHashMap<>();
-        int expected = Math.max(0, presence.members().size() - 1);
+        int expected = expectedPeers();
         String outcome = "ok";
         Connection connection;
         try {
@@ -224,6 +224,11 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
             record(op, outcome, start);
         }
         return replies;
+    }
+
+    @Override
+    public int expectedPeers() {
+        return Math.max(0, presence.members().size() - 1);
     }
 
     @Override
