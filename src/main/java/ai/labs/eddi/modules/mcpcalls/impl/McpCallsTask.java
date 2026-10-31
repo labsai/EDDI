@@ -316,6 +316,11 @@ public class McpCallsTask implements ILifecycleTask {
         } catch (ITemplatingEngine.TemplateEngineException | IOException e) {
             LOGGER.errorf(e, "MCP template error for '%s'", mcpCall.getName());
             throw new LifecycleException("MCP call template failed: " + e.getMessage(), e);
+        } catch (LifecycleException.LifecycleInterruptedException e) {
+            // The turn was interrupted (cancelled, or its deadline abandoned the attempt):
+            // that is not a failed call. No error entry, no postResponse, and no later
+            // call — continueOnError covers a tool failing, not the turn stopping.
+            throw e;
         } catch (LifecycleException e) {
             // Retry exhaustion or non-retryable error from RetryConfiguration
             // Store error data, then check continueOnError
