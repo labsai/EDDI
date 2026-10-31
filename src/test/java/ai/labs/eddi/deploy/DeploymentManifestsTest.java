@@ -4513,6 +4513,17 @@ class DeploymentManifestsTest {
             assertEquals(generated, noTool.acceptedAfter(),
                     INSTALL_SH + " left admin/admin in place on a host without jq or python3. " + noTool);
 
+            // Docker is the trusted source for who holds the port: no matching
+            // container, or no answer from the daemon, means no password is sent.
+            for (String dockerMode : List.of("absent", "down")) {
+                GrafanaRun withheld = runGrafanaConfirm("admin", generated, true, false, true, dockerMode);
+                assertEquals(0, withheld.exitCode(), INSTALL_SH + " failed instead of skipping the Grafana check. " + withheld);
+                assertEquals("", withheld.curlArguments(),
+                        INSTALL_SH + " contacted Grafana's port although Docker did not report this installation's "
+                                + "grafana container there (" + dockerMode + "). " + withheld);
+                assertTrue(withheld.output().contains("not sending Grafana credentials"), withheld.toString());
+            }
+
             for (GrafanaRun run : List.of(fresh, legacy, foreign, stored, refused, refusedStored, noTool)) {
                 assertFalse(run.curlArguments().contains(generated) || run.curlArguments().contains("StoredInEnvPassword"),
                         INSTALL_SH + " put the Grafana admin password on curl's command line, where the process "
@@ -4533,15 +4544,25 @@ class DeploymentManifestsTest {
             return runGrafanaConfirm(grafanaAccepts, envPassword, generated, false, true);
         }
 
+        private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated,
+                                             boolean refuseChange, boolean withJsonTool)
+                throws IOException, InterruptedException {
+            return runGrafanaConfirm(grafanaAccepts, envPassword, generated, refuseChange, withJsonTool, "running");
+        }
+
         /**
          * @param refuseChange
          *            the stand-in Grafana answers the password change with a 500 and
          *            keeps its password
          * @param withJsonTool
          *            pass jq/python3 to the function, or nothing — a host with neither
+         * @param dockerMode
+         *            what the stand-in Docker daemon reports: {@code running} (this
+         *            installation's grafana publishes the port), {@code absent} (no
+         *            such container) or {@code down} (the daemon cannot be asked)
          */
         private GrafanaRun runGrafanaConfirm(String grafanaAccepts, String envPassword, boolean generated,
-                                             boolean refuseChange, boolean withJsonTool)
+                                             boolean refuseChange, boolean withJsonTool, String dockerMode)
                 throws IOException, InterruptedException {
             Path bash = locateBash();
             assumeTrue(bash != null, "no non-WSL bash available to run " + INSTALL_SH + "; CI's ubuntu-latest runner has one");
@@ -4589,11 +4610,32 @@ class DeploymentManifestsTest {
                     """, StandardCharsets.US_ASCII);
             curl.toFile().setExecutable(true, false);
 
+            // install.sh asks the Docker daemon whether this installation's grafana
+            // container publishes the port before it sends a password there. The stub
+            // answers like a daemon: a container id only for exactly that project,
+            // service and port; nothing for anything else; a failure when "down".
+            Path docker = directory.resolve("docker");
+            Files.writeString(docker, """
+                    #!/usr/bin/env bash
+                    [[ "$DOCKER_STUB_MODE" == "down" ]] && exit 1
+                    [[ "$1" == "ps" ]] || exit 2
+                    [[ "$DOCKER_STUB_MODE" == "running" ]] || exit 0
+                    args=" $* "
+                    case "$args" in *" label=com.docker.compose.project=eddi-stub "*) ;; *) exit 0 ;; esac
+                    case "$args" in *" label=com.docker.compose.service=grafana "*) ;; *) exit 0 ;; esac
+                    case "$args" in *" publish=3000 "*) ;; *) exit 0 ;; esac
+                    echo 0123456789ab
+                    """, StandardCharsets.US_ASCII);
+            docker.toFile().setExecutable(true, false);
+
             Path harness = directory.resolve("harness.sh");
             Files.writeString(harness, "set -euo pipefail\n"
                     + "info() { echo \"INFO $1\"; }\nwarn() { echo \"WARN $1\"; }\nfail() { echo -e \"FAIL $1\"; exit 1; }\n"
+                    + functionBody(installer, "compose_project_name() {") + "\n"
+                    + functionBody(installer, "compose_service_running() {") + "\n"
                     + functionBody(installer, "grafana_login_status() {") + "\n"
                     + functionBody(installer, "confirm_grafana_login() {") + "\n"
+                    + "unset COMPOSE_PROJECT_NAME LOCAL_IMAGE\n"
                     + "EDDI_DIR=/eddi-stub GRAFANA_PORT=3000\n"
                     + "GRAFANA_ADMIN_PASSWORD='" + envPassword + "'\n"
                     + "GRAFANA_PASSWORD_GENERATED=" + generated + "\n"
@@ -4605,6 +4647,7 @@ class DeploymentManifestsTest {
             builder.environment().put("GRAFANA_STUB_STATE", slashed(state));
             builder.environment().put("GRAFANA_STUB_ARGV", slashed(argv));
             builder.environment().put("GRAFANA_STUB_REFUSE_CHANGE", String.valueOf(refuseChange));
+            builder.environment().put("DOCKER_STUB_MODE", dockerMode);
             Process process = builder.start();
             String output;
             try (var stream = process.getInputStream()) {

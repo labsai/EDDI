@@ -53,7 +53,8 @@ class InfraReviewHardeningTest {
         assertTrue(sh.contains("--filter \"status=running\" 2>/dev/null) || return 1"), "a failed docker query must fail closed");
         // Every password grant goes through the check, not only keycloak_admin_login's.
         assertTrue(sh.contains("compose_service_running keycloak \"${kc_base##*:}\" || return 0"));
-        // A token is written into curl config syntax only if it is plain token characters.
+        // A token is written into curl config syntax only if it is plain token
+        // characters.
         int guard = sh.indexOf("[[ \"$token\" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || return 1");
         assertTrue(guard > 0 && guard < sh.indexOf("printf 'header = \"Authorization: Bearer"));
         // A failed realm download leaves no unverified partial file behind.
@@ -84,7 +85,8 @@ class InfraReviewHardeningTest {
         String yml = read("docker-compose.auth.yml");
         int start = yml.indexOf("  keycloak-admin-rotate:\n");
         String rotate = yml.substring(start, yml.indexOf("\n  keycloak:\n", start));
-        // kcadm reads the configured password from KC_CLI_PASSWORD, so it never sits in argv.
+        // kcadm reads the configured password from KC_CLI_PASSWORD, so it never sits in
+        // argv.
         assertTrue(rotate.contains("KC_CLI_PASSWORD: \"${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}\""));
         assertFalse(rotate.contains("--password \"$$KC_BOOTSTRAP_ADMIN_PASSWORD\""), "the configured password must not be a kcadm argument");
         // A renamed admin user leaves the original admin/admin account behind.
