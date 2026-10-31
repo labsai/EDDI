@@ -11,11 +11,13 @@ import org.junit.jupiter.api.Test;
 import com.sun.management.ThreadMXBean;
 
 import java.lang.management.ManagementFactory;
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
@@ -451,5 +453,127 @@ class HtmlToMarkdownConverterSalvageTest {
         String result = converter.convert("<p>Text <strong></strong> more</p>", null);
 
         assertFalse(result.contains("****"), "empty strong should not leave marker soup, was: " + result);
+    }
+
+    @Test
+    @DisplayName("nested tables are rendered once per level, not once per ancestor")
+    void nestedTablesStayLinear() {
+        // Rows and cells were found with descendant selectors, so every table also
+        // rendered the rows of every table nested inside it — and then rendered them
+        // again inside the cell that holds them. Each level doubled the work, and the
+        // cells restarted the depth count at zero so MAX_DEPTH never applied. Twenty
+        // levels, well under a kilobyte, did not finish.
+        int levels = 20;
+        StringBuilder html = new StringBuilder("<body>");
+        for (int i = 0; i < levels; i++) {
+            html.append("<table><tr><td>c").append(i).append(" ");
+        }
+        html.append("innermost");
+        for (int i = 0; i < levels; i++) {
+            html.append("</td><td>s").append(i).append("</td></tr><tr><td>r").append(i).append("</td></tr></table>");
+        }
+        String page = html.append("</body>").toString();
+
+        String result = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> converter.convert(page, null, 10_000_000));
+
+        assertEquals(1, occurrences(result, "innermost"), "nested content must appear exactly once, was: " + result);
+        for (int i = 0; i < levels; i++) {
+            assertEquals(1, occurrences(result, "r" + i + " "), "row r" + i + " must appear exactly once, was: " + result);
+        }
+    }
+
+    @Test
+    @DisplayName("a table renders only its own rows; a nested table stays inside its cell")
+    void nestedTableStaysInItsCell() {
+        String html = """
+                <table>
+                  <tr><th>Key</th><th>Value</th></tr>
+                  <tr><td>outer</td><td><table><tr><td>inner1</td></tr><tr><td>inner2</td></tr></table></td></tr>
+                </table>
+                """;
+
+        String result = converter.convert(html, null);
+
+        // The inner table is flattened into its cell once, its pipes escaped — and
+        // its rows do not reappear as rows of the outer table.
+        assertEquals("| Key | Value | \n| --- | --- | \n| outer | \\| inner1 \\| \\| --- \\| \\| inner2 \\| |", result);
+    }
+
+    @Test
+    @DisplayName("ordinary tables render exactly as before the ownership fix")
+    void ordinaryTablesRenderUnchanged() {
+        String simple = "<table><tr><th>Name</th><th>Age</th></tr><tr><td>Alice</td><td>30</td></tr></table>";
+        assertEquals("| Name | Age | \n| --- | --- | \n| Alice | 30 |", converter.convert(simple, null));
+
+        String sectioned = "<table><thead><tr><th>H1</th><th>H2</th></tr></thead>"
+                + "<tbody><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></tbody></table>";
+        assertEquals("| H1 | H2 | \n| --- | --- | \n| a | b | \n| c | d |", converter.convert(sectioned, null));
+
+        String headless = "<table><tbody><tr><td>x</td><td>y</td></tr><tr><td>z</td><td>w</td></tr></tbody></table>";
+        assertEquals("| x | y | \n| --- | --- | \n| z | w |", converter.convert(headless, null));
+    }
+
+    @Test
+    @DisplayName("a summary or caption nested inside another is not rendered twice per level")
+    void nestedSummariesAndCaptionsStayLinear() {
+        // selectFirst found a summary or figcaption anywhere below, rendered it as
+        // the label and again where it sits. A label that itself holds the same
+        // structure doubled at every level.
+        int levels = 25;
+        String details = "<details><div><summary>".repeat(levels) + "deepest" + "</summary></div></details>".repeat(levels);
+        String figures = "<figure><div><figcaption>".repeat(levels) + "deepest" + "</figcaption></div></figure>".repeat(levels);
+
+        String detailsResult = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> converter.convert("<body>" + details + "</body>", null, 10_000_000));
+        String figuresResult = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> converter.convert("<body>" + figures + "</body>", null, 10_000_000));
+
+        assertEquals(1, occurrences(detailsResult, "deepest"), detailsResult);
+        assertEquals(1, occurrences(figuresResult, "deepest"), figuresResult);
+    }
+
+    @Test
+    @DisplayName("a code block ending in millions of newlines is trimmed in linear time")
+    void trailingNewlinesAreTrimmedInLinearTime() {
+        // One substring per trailing newline copied the remaining text each time:
+        // quadratic, minutes of CPU for a block a 5 MB page can easily hold.
+        String text = "code" + "\n".repeat(2_000_000);
+
+        String stripped = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                () -> HtmlToMarkdownConverter.stripTrailingNewline(text));
+        assertEquals("code", stripped);
+        assertEquals("a\r\nb", HtmlToMarkdownConverter.stripTrailingNewline("a\r\nb\r\n\n"));
+        assertEquals("", HtmlToMarkdownConverter.stripTrailingNewline("\n\r"));
+
+        String result = assertTimeoutPreemptively(Duration.ofSeconds(10),
+                () -> converter.convert("<pre>" + text + "</pre>", null, 1_000));
+        assertTrue(result.contains("code"), result);
+    }
+
+    @Test
+    @DisplayName("stopping the walk early leaves the truncated output exactly as a full walk would")
+    void earlyStopKeepsTheTruncatedPrefix() {
+        // The walk stops writing once the output is certain to be truncated. What
+        // survives the cap must be the same text a complete walk would have kept.
+        StringBuilder html = new StringBuilder("<body>");
+        for (int i = 0; i < 20_000; i++) {
+            html.append("<p>Paragraph ").append(i).append(" with <b>some</b> text.</p>");
+        }
+        String page = html.append("</body>").toString();
+        int cap = 2_000;
+
+        String full = converter.convert(page, null, 100_000_000);
+        String capped = converter.convert(page, null, cap);
+
+        String notice = "\n\n[Content truncated - exceeded " + cap + " character limit]";
+        assertEquals(full.substring(0, cap - notice.length()) + notice, capped);
+    }
+
+    private static int occurrences(String haystack, String needle) {
+        int count = 0;
+        for (int at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length())) {
+            count++;
+        }
+        return count;
     }
 }
