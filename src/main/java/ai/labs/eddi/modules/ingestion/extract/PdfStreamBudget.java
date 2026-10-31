@@ -78,6 +78,14 @@ public final class PdfStreamBudget {
     public static void requireWithin(byte[] pdf, long maxStreamBytes, Instant deadline) {
         int from = 0;
         int keyword;
+        // The first "endstream" at or after the last stream's data, remembered across
+        // streams: -2 until searched, -1 once there are none left. Searching afresh
+        // for every opening keyword scanned to the end of the file each time an
+        // opening had no terminator, so a file of unterminated "stream"s cost the
+        // square of its size.
+        int endstream = -2;
+        int lastObj = -1;
+        int objScannedTo = 0;
         while ((keyword = indexOf(pdf, STREAM_KEYWORD, from, pdf.length)) >= 0) {
             from = keyword + STREAM_KEYWORD.length;
             if (isEndstream(pdf, keyword)) {
@@ -85,11 +93,20 @@ public final class PdfStreamBudget {
             }
             requireBefore(deadline);
             int start = dataStart(pdf, from);
-            int end = indexOf(pdf, ENDSTREAM_KEYWORD, start, pdf.length);
-            if (end < 0) {
-                end = pdf.length;
+            if (endstream != -1 && endstream < start) {
+                endstream = indexOf(pdf, ENDSTREAM_KEYWORD, start, pdf.length);
             }
-            List<String> filters = filtersOf(dictionaryBefore(pdf, keyword));
+            int end = endstream < 0 ? pdf.length : endstream;
+            // Likewise the latest "obj" in front of the keyword: only the bytes since
+            // the previous keyword are new, so only they are searched. Searching up
+            // to MAX_DICTIONARY_BYTES back for every keyword cost that much per
+            // keyword in a file that has no object headers.
+            int found = lastIndexOf(pdf, OBJ_KEYWORD, Math.max(0, objScannedTo - OBJ_KEYWORD.length + 1), keyword);
+            if (found >= 0) {
+                lastObj = found;
+            }
+            objScannedTo = keyword;
+            List<String> filters = filtersOf(dictionaryBefore(pdf, lastObj, keyword));
             if (filters == null) {
                 continue;
             }
@@ -98,6 +115,15 @@ public final class PdfStreamBudget {
                 throw new UnreadableDocumentException("This PDF contains a compressed stream that expands to more "
                         + "than " + megabytes(maxStreamBytes) + " MB, which is more than one document may take "
                         + "while it is read. If the file is genuine, save a copy with smaller images, or split it.");
+            }
+            if (endstream < 0) {
+                // This stream had no terminator, so it was measured to the end of the
+                // file, and every later keyword lies inside the bytes just measured.
+                // Decoding again from each of them cost the rest of the file once per
+                // keyword. Whatever a later stream hides, the decode budget still
+                // counts when PDFBox reads it — this scan is the pre-filter, not the
+                // bound.
+                return;
             }
         }
     }
@@ -203,11 +229,13 @@ public final class PdfStreamBudget {
      * The dictionary text in front of a {@code stream} keyword: from the object's
      * {@code obj} keyword to the stream. Null when no object header is near enough
      * to trust.
+     *
+     * @param obj
+     *            where the latest {@code obj} keyword before the stream starts, or
+     *            -1 when there is none
      */
-    private static String dictionaryBefore(byte[] pdf, int keyword) {
-        int floor = Math.max(0, keyword - MAX_DICTIONARY_BYTES);
-        int obj = lastIndexOf(pdf, OBJ_KEYWORD, floor, keyword);
-        if (obj < 0) {
+    private static String dictionaryBefore(byte[] pdf, int obj, int keyword) {
+        if (obj < 0 || obj < keyword - MAX_DICTIONARY_BYTES) {
             return null;
         }
         return new String(pdf, obj, keyword - obj, StandardCharsets.ISO_8859_1);
