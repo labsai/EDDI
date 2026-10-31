@@ -62,6 +62,13 @@ public final class SlackUserIdentity {
      *         a team
      */
     public static String eddiUserId(String teamId, String slackUserId) {
+        if (!isValidSlackUserId(slackUserId)) {
+            // The user component comes from a signed event, but "signed" only means
+            // some configured app sent it. Without this check a teamless signer could
+            // send user "T1:U2" and be named slack:T1:U2 - a workspace-qualified
+            // victim - because the components are joined with ':'.
+            throw new IllegalArgumentException("Not a Slack user id");
+        }
         if (teamId == null || teamId.isBlank()) {
             return PREFIX + slackUserId;
         }
@@ -74,5 +81,28 @@ public final class SlackUserIdentity {
      */
     public static boolean isLegacySlackUserId(String userId) {
         return userId != null && RAW_SLACK_USER_ID.matcher(userId).matches();
+    }
+
+    /**
+     * Whether {@code slackUserId} has the shape of a Slack user id ({@code U…} or
+     * {@code W…}, upper-case alphanumerics). Anything else - in particular a value
+     * containing {@code ':'} - must not become part of an EDDI user id.
+     */
+    public static boolean isValidSlackUserId(String slackUserId) {
+        return slackUserId != null && SLACK_USER_ID.matcher(slackUserId).matches();
+    }
+
+    /**
+     * A Slack user id as an event carries it: {@code U…}/{@code W…}, no separator.
+     */
+    private static final Pattern SLACK_USER_ID = Pattern.compile("^[UW][A-Z0-9]{1,63}$");
+
+    /**
+     * Whether {@code userId} names a Slack user inside EDDI: the namespaced form,
+     * or a raw id stored by a release before namespacing. Other identity sources
+     * (OIDC principals, REST callers) cannot produce the prefix.
+     */
+    public static boolean isSlackPrincipal(String userId) {
+        return userId != null && (userId.startsWith(PREFIX) || isLegacySlackUserId(userId));
     }
 }

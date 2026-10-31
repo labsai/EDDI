@@ -143,7 +143,7 @@ class SlackHitlResumeObserverTest {
 
     @Test
     void onResumeCompleted_slackConversation_postsToChannelAndThread() throws Exception {
-        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "U1",
+        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
@@ -153,6 +153,22 @@ class SlackHitlResumeObserverTest {
 
         verify(slackApi).postMessage(eq("Bearer xoxb-token"), eq("C123"), eq("1700.0001"),
                 contains("Order placed."));
+    }
+
+    @Test
+    void onResumeCompleted_slackShapedIntentNotOwnedByASlackUser_isNotPosted() throws Exception {
+        // An editor's own trigger named after someone else's Slack channel: the
+        // managed conversation is owned by the REST caller, not a Slack principal.
+        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "alice",
+                Deployment.Environment.production, "agent-1", "conv-9");
+        when(userConversationStore.readUserConversationByConversationId("conv-9")).thenReturn(mapping);
+        when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-9", HitlVerdict.APPROVED, "alice", snapshotWithText("injected")));
+
+        verifyNoInteractions(slackApi);
+        verify(router, never()).getBotToken(any(), any());
     }
 
     @Test
@@ -192,7 +208,7 @@ class SlackHitlResumeObserverTest {
     @Test
     void onResumeCompleted_followupIntent_postsToParentThread() throws Exception {
         // H9: follow-up conversations (channel:followup:...) also receive the push.
-        var mapping = new UserConversation("channel:followup:C123:1700.9999", "U1",
+        var mapping = new UserConversation("channel:followup:C123:1700.9999", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-5");
         when(userConversationStore.readUserConversationByConversationId("conv-5")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
@@ -207,7 +223,7 @@ class SlackHitlResumeObserverTest {
     @Test
     void onResumeCompleted_errorState_postsFailure_notContinuationOutput() throws Exception {
         // H5: an ERROR resume must render a failure and NOT append the (stale) output.
-        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "U1",
+        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-6");
         when(userConversationStore.readUserConversationByConversationId("conv-6")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
@@ -226,7 +242,7 @@ class SlackHitlResumeObserverTest {
     @Test
     void onResumeCompleted_nullVerdictCancellation_postsCancelledMessage() throws Exception {
         // H-consume: verdict-less cancellation still informs the thread.
-        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "U1",
+        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-7");
         when(userConversationStore.readUserConversationByConversationId("conv-7")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
@@ -258,7 +274,7 @@ class SlackHitlResumeObserverTest {
 
     @Test
     void onResumeCompleted_longContinuation_isChunkedAndKeepsTheMentionInTheFirstMessage() throws Exception {
-        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "U1",
+        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
@@ -279,7 +295,7 @@ class SlackHitlResumeObserverTest {
 
     @Test
     void onResumeCompleted_failedFirstMessage_stopsTheContinuation() throws Exception {
-        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "U1",
+        var mapping = new UserConversation("channel:slack:C123:agent-1:1700.0001", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");
