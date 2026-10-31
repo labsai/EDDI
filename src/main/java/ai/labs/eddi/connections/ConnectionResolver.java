@@ -149,6 +149,7 @@ public class ConnectionResolver {
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
+            requireSecretHostsAllowed(connection, targetUrl);
             ResolvedCredential credential = resolveCredential(connection, principalOverride);
             record(connection, "success", sample);
             return credential;
@@ -268,6 +269,7 @@ public class ConnectionResolver {
                                 + "or an OAuth connection for XOAUTH2.");
             }
             requireTargetAllowed(connection, targetUrl);
+            requireSecretHostsAllowed(connection, targetUrl);
             StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
             if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank() || staticAuth.getPasswordRef() == null
                     || staticAuth.getPasswordRef().isBlank()) {
@@ -634,6 +636,25 @@ public class ConnectionResolver {
         }
         throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
                 + origin + ". Add that origin to its baseUrlAllowlist if it is intended.");
+    }
+
+    /**
+     * The other owner's list: every vault secret a STATIC or BASIC connection's
+     * credential is built from may restrict the hosts it is sent to, and the
+     * connection's own allowlist does not speak for the secret's owner. OAuth
+     * access tokens are not vault secrets; their client secret is checked against
+     * the token endpoint where it is sent.
+     */
+    private void requireSecretHostsAllowed(ConnectionConfiguration connection, URI targetUrl) {
+        StaticAuth staticAuth = connection.getStaticAuth();
+        if (staticAuth == null || connection.getBinding() == Binding.CALLER_SUPPLIED
+                || (connection.getAuthType() != AuthType.STATIC && connection.getAuthType() != AuthType.BASIC)) {
+            return;
+        }
+        String destination = targetUrl.toString();
+        credentialReferenceResolver.requireHostsAllowed(staticAuth.getValueTemplate(), destination, connection.getName(), "credential");
+        credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
+        credentialReferenceResolver.requireHostsAllowed(staticAuth.getPasswordRef(), destination, connection.getName(), "password");
     }
 
     /**

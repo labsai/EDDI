@@ -7,10 +7,13 @@ package ai.labs.eddi.connections;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
-import java.util.regex.Pattern;
+import java.util.List;
+import java.util.Set;
 
 /**
  * Expands {@code ${vars:…}} then {@code ${vault:…}} inside one credential
@@ -42,8 +45,12 @@ public class CredentialReferenceResolver {
      * does not exist. Every form is checked, not just the vault one: a
      * {@code ${vars:}} that did not resolve fails identically and just as
      * expensively.
+     * <p>
+     * The linear {@link ReferenceScanner}, not a regex: {@code find()} over
+     * {@code [^}]*} rescans the rest of the text at each unterminated opener, and
+     * what is scanned is decrypted vault content an editor can make long.
      */
-    private static final Pattern UNRESOLVED_REFERENCE = Pattern.compile("\\$\\{(vault|eddivault|vars):[^}]*}");
+    private static final ReferenceScanner UNRESOLVED_REFERENCE = ReferenceScanner.of("vault", "eddivault", "vars");
 
     private final SecretResolver secretResolver;
     private final GlobalVariableResolver globalVariableResolver;
@@ -52,6 +59,55 @@ public class CredentialReferenceResolver {
     public CredentialReferenceResolver(SecretResolver secretResolver, GlobalVariableResolver globalVariableResolver) {
         this.secretResolver = secretResolver;
         this.globalVariableResolver = globalVariableResolver;
+    }
+
+    /**
+     * Enforces each vault secret's own {@code allowedHosts} on connection
+     * credentials. Field-injected, like the resolver's optional collaborators, so a
+     * resolver built without a container still works; without it only the
+     * connection's own allowlists apply.
+     */
+    @Inject
+    VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * Refuses when a vault secret {@code template} names (after {@code ${vars:…}}
+     * expansion, as resolution does it) restricts its hosts to a list
+     * {@code destination} is not on.
+     * <p>
+     * A connection's {@code baseUrlAllowlist} is the connection author's list; a
+     * secret's {@code allowedHosts} is the secret owner's. A direct
+     * {@code ${vault:…}} in an httpcall is checked against the second, and a
+     * connection used to bypass it, because only the final header value reached the
+     * request and the reference inside the connection never did.
+     *
+     * @throws ConnectionException
+     *             with {@code TARGET_NOT_ALLOWED} when a secret may not go there,
+     *             or its list could not be read
+     */
+    public void requireHostsAllowed(String template, String destination, String connectionName, String what) {
+        if (vaultHostAllowlist == null || template == null || template.isBlank()) {
+            return;
+        }
+        String expanded = globalVariableResolver.resolveValue(template);
+        Set<String> references = VaultHostAllowlist.referencesIn(List.of(expanded == null ? template : expanded));
+        if (references.isEmpty()) {
+            return;
+        }
+        try {
+            vaultHostAllowlist.requireAllowed(references, destination, "the " + what + " of connection '" + connectionName + "'");
+        } catch (VaultHostAllowlist.HostNotAllowedException e) {
+            throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, e.getMessage(), e);
+        }
+    }
+
+    /**
+     * {@link #resolveVaultBacked} for a value sent to {@code destination}, with
+     * that destination checked against the secret's {@code allowedHosts} first.
+     */
+    public String resolveVaultBackedFor(String template, String destination, String connectionName, String what) {
+        requireHostsAllowed(template, destination, connectionName, what);
+        return resolveVaultBacked(template, connectionName, what);
     }
 
     /**
@@ -92,7 +148,7 @@ public class CredentialReferenceResolver {
                     "The " + what + " for connection '" + connectionName + "' resolved to an empty value. Check that the referenced vault key "
                             + "or global variable exists.");
         }
-        if (UNRESOLVED_REFERENCE.matcher(resolved).find()) {
+        if (UNRESOLVED_REFERENCE.containsReference(resolved)) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' has a reference that did not resolve. The vault key or global "
                             + "variable is missing, or the vault is inactive. Refusing rather than sending the literal text, which the "
