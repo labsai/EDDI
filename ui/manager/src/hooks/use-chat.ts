@@ -1543,6 +1543,14 @@ export function useConversationHistory(agentId: string | null) {
  * started, and installed A's conversation under B's name, so every send then
  * went to agent A.
  */
+/** The conversation to load belongs to a different agent than the one requested. */
+export class ConversationAgentMismatchError extends Error {
+  constructor() {
+    super("This conversation belongs to a different agent than the one selected.");
+    this.name = "ConversationAgentMismatchError";
+  }
+}
+
 async function loadConversationIntoStore(
   agentId: string,
   conversationId: string,
@@ -1574,6 +1582,14 @@ async function loadConversationIntoStore(
   // the transcript (see the epoch note above).
   if (request !== latestLoadRequest || store.getState().conversationEpoch !== epoch) {
     return snapshot;
+  }
+
+  // The read is by conversation id alone, so a link that pairs one agent's
+  // name (and its review notice) with another agent's conversation would show
+  // the first while every send went to the second. The conversation's own
+  // agent is authoritative: refuse the mismatch rather than install it.
+  if (snapshot.agentId && snapshot.agentId !== agentId) {
+    throw new ConversationAgentMismatchError();
   }
 
   store.getState().clearMessages();
