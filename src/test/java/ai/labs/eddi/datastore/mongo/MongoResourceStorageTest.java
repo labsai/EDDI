@@ -384,8 +384,8 @@ class MongoResourceStorageTest {
     }
 
     @Test
-    @DisplayName("findResources — a sorted page breaks ties on _id, so skip/limit paging is stable")
-    void findResourcesSortHasUniqueTiebreaker() {
+    @DisplayName("findResources — the sort is the indexed field alone, so the single-field index serves it")
+    void findResourcesSortStaysIndexable() {
         FindIterable<Document> iterable = mock(FindIterable.class);
         when(currentCollection.find(any(Bson.class))).thenReturn(iterable);
         when(iterable.sort(any(Bson.class))).thenReturn(iterable);
@@ -397,7 +397,7 @@ class MongoResourceStorageTest {
         ArgumentCaptor<Bson> sort = ArgumentCaptor.forClass(Bson.class);
         verify(iterable).sort(sort.capture());
         Document order = (Document) sort.getValue();
-        assertEquals(List.of("lastModifiedOn", "_id"), List.copyOf(order.keySet()));
+        assertEquals(List.of("lastModifiedOn"), List.copyOf(order.keySet()));
     }
 
     @Test
