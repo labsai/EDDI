@@ -1064,11 +1064,13 @@ jobs:
         # Providers are resolved at execution time from the test classpath, so
         # nothing above fetches them. A tiny plain unit test forces surefire's;
         # failsafe runs the same provider artifact but its own plugin, forced by
-        # a verify that selects no integration test.
+        # a verify that selects no integration test. That verify loads no coverage,
+        # so the JaCoCo merged-check would fail it: haltOnFailure=false keeps the
+        # plugin resolved (the point) without enforcing a threshold here.
         if: steps.lookup.outputs.cache-hit != 'true'
         run: |
           ./mvnw -B -ntp -DskipUi=true -Dtest=ChangelogFragmentTest -Dsurefire.failIfNoSpecifiedTests=false test
-          ./mvnw -B -ntp -DskipUi=true -DskipUTs=true -DskipITs=false -Dit.test=NoSuchIT -Dfailsafe.failIfNoSpecifiedTests=false -Dsurefire.failIfNoSpecifiedTests=false verify
+          ./mvnw -B -ntp -DskipUi=true -DskipUTs=true -DskipITs=false -Dit.test=NoSuchIT -Djacoco.haltOnFailure=false -Dfailsafe.failIfNoSpecifiedTests=false -Dsurefire.failIfNoSpecifiedTests=false verify
 
       - name: Fetch the SBOM and license plugins
         if: steps.lookup.outputs.cache-hit != 'true'
