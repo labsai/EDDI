@@ -328,12 +328,14 @@ public class UnauthenticatedRequestGuard {
 
     /**
      * Whether a safe-method request reaches one of
-     * {@link #SIDE_EFFECTING_GET_PREFIXES}. Matrix parameters are removed first:
-     * JAX-RS routes without them, so {@code /agents;x=1/managed/...} reaches the
-     * same resource.
+     * {@link #SIDE_EFFECTING_GET_PREFIXES}. {@code HEAD} counts as {@code GET}:
+     * JAX-RS answers it by running the {@code GET} method, and a cross-site
+     * {@code fetch(url, {method: 'HEAD', mode: 'no-cors'})} needs no preflight.
+     * Matrix parameters are removed first: JAX-RS routes without them, so
+     * {@code /agents;x=1/managed/...} reaches the same resource.
      */
     static boolean hasSideEffects(String method, String path) {
-        if (path == null || !"GET".equalsIgnoreCase(method)) {
+        if (path == null || !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))) {
             return false;
         }
         String withoutMatrix = path.indexOf(';') < 0 ? path : path.replaceAll(";[^/]*", "");

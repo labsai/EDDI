@@ -156,7 +156,8 @@ filter, so it also covers `/mcp`, `/q/*` and static assets):
   `quarkus.http.cors.origins` — `Origin: null` included — or, with no `Origin`,
   `Sec-Fetch-Site: cross-site` or `same-site`. A request with neither header
   comes from a non-browser client (curl, an SDK) and passes. The same check
-  covers the `GET` routes that change state despite the method — today
+  covers the `GET` routes that change state despite the method (and `HEAD` on
+  them, which JAX-RS answers by running the `GET`) — today
   `GET /agents/managed/{intent}/{userId}…`, which creates (or replaces) the
   managed conversation — so an `<img>` or link on another site cannot start
   conversations on the instance.

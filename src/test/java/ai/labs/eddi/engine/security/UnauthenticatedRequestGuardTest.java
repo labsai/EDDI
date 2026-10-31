@@ -234,6 +234,9 @@ class UnauthenticatedRequestGuardTest {
             assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", path, "localhost:7070", null, "cross-site"));
             // A fetch from a foreign page.
             assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", path, "localhost:7070", "https://evil.example", null));
+            // HEAD runs the GET method in JAX-RS, and a no-cors fetch may send it.
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "HEAD", path, "localhost:7070", null, "cross-site"));
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "head", path, "localhost:7070", "https://evil.example", null));
             // Matrix parameters do not dodge the prefix — JAX-RS routes without them.
             assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", "/agents;x=1/managed/support/alice", "localhost:7070", null, "cross-site"));
             // Its own origin, and non-browser clients, still pass.
