@@ -413,8 +413,20 @@ public class TemplateSyntaxMigrator {
     static final long MAX_CONVERSION_WORK = 50_000_000L;
 
     /**
-     * The number of expression openers ({@code [[}, {@code [(}, {@code [#},
-     * {@code #strings.}) in {@code input} times its length.
+     * The number of anchors a conversion step may scan to the end of the text from
+     * &mdash; the output openers <code>[[${</code> and <code>[(${</code>, the
+     * directive opener {@code [#} and {@code #strings.} &mdash; times the length of
+     * {@code input}.
+     *
+     * <p>
+     * A bare {@code [[} or {@code [(} is not counted. No conversion step anchors on
+     * it: the concatenation pass and the output patterns need the <code>${</code>,
+     * and {@link #unconvertibleReason}'s literal scan continues after each closer,
+     * so it is linear. Counting it charged every nested JSON array
+     * ({@code [[1,2]]}) to the bound, and an imported resource with enough of them
+     * was left in Thymeleaf syntax while every one of its decoded values passed the
+     * import's own check.
+     * </p>
      */
     static long conversionWork(String input) {
         long openers = 0;
@@ -422,7 +434,7 @@ public class TemplateSyntaxMigrator {
             char c = input.charAt(i);
             if (c == '[') {
                 char next = input.charAt(i + 1);
-                if (next == '[' || next == '(' || next == '#') {
+                if (next == '#' || ((next == '[' || next == '(') && input.startsWith("${", i + 2))) {
                     openers++;
                 }
             } else if (c == '#' && input.startsWith("#strings.", i)) {

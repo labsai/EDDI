@@ -502,6 +502,22 @@ class TemplateSyntaxMigratorTest {
     }
 
     @Test
+    void nestedJsonArraysDoNotCountTowardTheWorkBound() {
+        // 20k "[[" from nested JSON arrays in a ~300k-character resource: counted as
+        // openers they put the text far past the bound, and the one real template in
+        // it was left in Thymeleaf syntax although nothing about it was unsafe.
+        StringBuilder json = new StringBuilder("{\"prompt\":\"Hello [[${properties.name}]]\"");
+        for (int i = 0; i < 20_000; i++) {
+            json.append(",\"m").append(i).append("\":[[").append(i).append("]]");
+        }
+        json.append('}');
+        String resource = json.toString();
+
+        assertNull(migrator.unconvertibleReason(resource));
+        assertTrue(migrator.migrate(resource).startsWith("{\"prompt\":\"Hello {properties.name}\""));
+    }
+
+    @Test
     void ordinaryTemplatesStayWellInsideTheWorkBound() {
         String template = "Hello [[${properties.name}]], " + "x".repeat(50_000) + " [(${memory.current.input})]";
         assertNull(migrator.unconvertibleReason(template));
