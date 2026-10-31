@@ -231,7 +231,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
      * anything that is not a parseable {@code eddi://} reference with an id is
      * skipped, since the engine cannot resolve it either.
      */
-    static Map<String, URI> referencedResources(WorkflowConfiguration workflowConfiguration) {
+    public static Map<String, URI> referencedResources(WorkflowConfiguration workflowConfiguration) {
         Map<String, URI> references = new LinkedHashMap<>();
         if (workflowConfiguration == null || workflowConfiguration.getWorkflowSteps() == null) {
             return references;
