@@ -79,12 +79,16 @@ export function isCascadeRequest(preview: ResolvedRequestPreview | null | undefi
 
 /**
  * Whether the backend would read this body field as `true`. The request is
- * deserialized into a boolean property, and Jackson coerces the strings
- * "true"/"True" as readily as the JSON literal — so an LLM that quotes it still
- * asks for a redeploy, and a preview that showed none would understate the write.
+ * deserialized into a Boolean property, and Jackson's default coercion accepts
+ * far more than the JSON literal: the strings "true"/"True"/"TRUE" (trimmed)
+ * and any non-zero integer — so an LLM that quotes it or writes `1` still asks
+ * for a redeploy, and a preview that showed none would understate the write.
+ * Fractional numbers and other strings are refused by the backend (400).
  */
 function isTrue(value: unknown): boolean {
-  return value === true || value === "true" || value === "True";
+  if (value === true) return true;
+  if (typeof value === "string") return ["true", "True", "TRUE"].includes(value.trim());
+  return typeof value === "number" && Number.isInteger(value) && value !== 0;
 }
 
 function pathOf(uri: string): string {
