@@ -1129,20 +1129,20 @@ public class UpgradeExecutor {
                     throw conflict;
                 }
                 boolean ownWrite = current.equals(outcome.versionsWritten.get(targetId));
-                if (!ownWrite && !descriptorLagsStore(targetId, current)) {
-                    // The newer version came through the normal write path — its
-                    // descriptor moved with it — so it is somebody's edit made after the
-                    // preview was built. Writing over it would discard that edit without
-                    // the CONFLICT the preview reports for every other local change.
+                if (!ownWrite) {
+                    // Not this run's own write, so the store holds a version nobody here
+                    // accounts for. It may be somebody's edit made after the preview was
+                    // built (its descriptor moves only after the content commits, so no
+                    // read can tell an edit in flight from a lost descriptor bump), and
+                    // writing over it would discard that edit without the CONFLICT the
+                    // preview reports for every other local change. Fail safe: report it.
                     throw new ChangedSincePreviewException(source.type() + " '" + source.name() + "' was changed on this instance"
                             + " (now v" + current + ", previewed at v" + version + ") while the sync ran; it was not"
                             + " overwritten — preview and sync again");
                 }
-                // The store knows a version this run did not, and nothing recorded it:
-                // the descriptor still names an older one. Writing the same content
-                // against the version it names is the difference between a target that
-                // heals itself and one that answers "the store did not accept the
-                // update" for ever after a single descriptor write went missing.
+                // The newer version is this run's own earlier write of the same target
+                // (two rows naming one resource): writing against it is the correct next
+                // step, not an overwrite.
                 LOGGER.infof("%s '%s' is at v%d, not v%d — retrying the update against the version the store reports",
                         LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()), current, version);
                 version = current;
@@ -1160,24 +1160,6 @@ public class UpgradeExecutor {
             LOGGER.warnf(e, "Failed to update %s '%s' (target=%s)", LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()),
                     LogSanitizer.sanitize(targetId));
             return null;
-        }
-    }
-
-    /**
-     * Whether the resource's descriptor names a version older than
-     * {@code storeVersion} — the trace of a write whose descriptor bump was lost,
-     * as opposed to an edit made through a REST store, which moves the descriptor
-     * with the content. A descriptor that cannot be read answers false: an
-     * unverifiable version is not overwritten.
-     */
-    private boolean descriptorLagsStore(String resourceId, int storeVersion) {
-        try {
-            IResourceId described = documentDescriptorStore.getCurrentResourceId(resourceId);
-            return described != null && described.getVersion() != null && described.getVersion() < storeVersion;
-        } catch (Exception e) {
-            LOGGER.debugf("Could not read the descriptor of %s to decide on a conflict retry: %s",
-                    LogSanitizer.sanitize(resourceId), LogSanitizer.sanitize(e.getMessage()));
-            return false;
         }
     }
 

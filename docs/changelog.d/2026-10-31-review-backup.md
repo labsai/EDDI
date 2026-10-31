@@ -80,6 +80,11 @@ the backup / import / sync path. Several authorization findings only matter with
   per-type behaviour (RAG preparation, storage namespace, v5 LLM defaults) that makes it
   a larger refactor than this pass.
 
+- Second review round: an upgrade write that meets a 409 for a version this run did not write is now always reported
+  as "changed on this instance" instead of being retried when the descriptor lags the store (a lost descriptor bump and a
+  save whose descriptor has not moved yet cannot be told apart, so the sync fails safe; preview and sync again). The
+  workflow-reference rule now lives once, in `RestWorkflowStore.requireAccessToReferences`, shared with the backup paths.
+
 **Files:** [`RestExportService.java`](../../src/main/java/ai/labs/eddi/backup/impl/RestExportService.java),
 [`RestImportService.java`](../../src/main/java/ai/labs/eddi/backup/impl/RestImportService.java),
 [`UpgradeExecutor.java`](../../src/main/java/ai/labs/eddi/backup/impl/UpgradeExecutor.java),

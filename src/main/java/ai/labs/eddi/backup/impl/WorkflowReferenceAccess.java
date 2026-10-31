@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.backup.impl;
 
-import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -12,7 +11,6 @@ import ai.labs.eddi.utils.RestUtilities;
 
 import java.net.URI;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -37,9 +35,6 @@ import java.util.Set;
  */
 final class WorkflowReferenceAccess {
 
-    /** Step targets that are used, not read — the REST store's rule. */
-    private static final Set<String> USE_ONLY_REFERENCE_TYPES = Set.of("ai.labs.agent", "ai.labs.group");
-
     private WorkflowReferenceAccess() {
     }
 
@@ -59,22 +54,7 @@ final class WorkflowReferenceAccess {
      *            those exist, so a refusal leaves nothing behind
      */
     static void requireAccessToReferences(ResourceAccessGuard guard, WorkflowConfiguration workflow, Set<String> exempt) {
-        if (guard == null || guard.seesEverything()) {
-            return;
-        }
-        for (Map.Entry<String, URI> reference : RestWorkflowStore.referencedResources(workflow).entrySet()) {
-            if (exempt.contains(reference.getKey())) {
-                continue;
-            }
-            URI uri = reference.getValue();
-            String resourceId = RestUtilities.extractResourceId(uri).getId();
-            String label = "configuration referenced by this workflow (" + withoutQuery(uri) + ")";
-            if (USE_ONLY_REFERENCE_TYPES.contains(uri.getHost())) {
-                guard.requireUseAccess(resourceId, label);
-            } else {
-                guard.requireAccess(resourceId, AccessLevel.VIEW, label);
-            }
-        }
+        RestWorkflowStore.requireAccessToReferences(guard, workflow, exempt);
     }
 
     /**
@@ -95,11 +75,5 @@ final class WorkflowReferenceAccess {
      */
     static String keyOf(URI uri) {
         return uri.getHost() + "|" + RestUtilities.extractResourceId(uri).getId();
-    }
-
-    private static String withoutQuery(URI uri) {
-        String text = uri.toString();
-        int query = text.indexOf('?');
-        return query >= 0 ? text.substring(0, query) : text;
     }
 }
