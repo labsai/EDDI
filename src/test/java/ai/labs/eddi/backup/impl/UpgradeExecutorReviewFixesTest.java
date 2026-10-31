@@ -171,6 +171,42 @@ class UpgradeExecutorReviewFixesTest {
                 "got: " + result.failures());
     }
 
+    @Test
+    @DisplayName("a 409 caused by this run's own earlier write of the same target is retried, not reported as a local edit")
+    void conflictFromThisRunsOwnWriteIsRetried() throws Exception {
+        givenAgentWith(List.of(workflowUri(WF_ID), workflowUri(WF2_ID)));
+        when(workflowStore.readWorkflow(WF_ID, 1)).thenReturn(llmWorkflow(LLM_ID));
+        when(workflowStore.readWorkflow(WF2_ID, 1)).thenReturn(llmWorkflow(LLM_ID));
+        when(workflowStore.updateWorkflow(anyString(), eq(1), any())).thenReturn(Response.ok().build());
+        // Both target workflows name the same LLM. The first write moves it to v2 and
+        // this run bumps its descriptor to v2; the second workflow's row was previewed
+        // at v1, so its write meets a 409 whose newer version is the run's own.
+        when(llmStore.updateLlm(eq(LLM_ID), eq(1), any()))
+                .thenReturn(Response.ok().build())
+                .thenThrow(RestUtilities.createConflictException("eddi://ai.labs.llm/llmstore/llms/", resourceIdAt(LLM_ID, 2)));
+        when(llmStore.updateLlm(eq(LLM_ID), eq(2), any())).thenReturn(Response.ok().build());
+        when(descriptorStore.getCurrentResourceId(LLM_ID)).thenReturn(resourceIdAt(LLM_ID, 2));
+
+        WorkflowConfiguration sourceConfig = llmWorkflow("eeff112233445566aabbccdd");
+        String key = WorkflowExtensions.scan(sourceConfig).getFirst().key();
+        var llm = new ExtensionSourceData("src-llm", "LLM", "langchain", "eddi://ai.labs.llm", "{\"model\":\"gpt-4\"}");
+        var source = source(List.of(
+                new WorkflowSourceData("src-wf", "WF", 0, sourceConfig, Map.of(key, llm)),
+                new WorkflowSourceData("src-wf2", "WF2", 1, llmWorkflow("eeff112233445566aabbccdd"), Map.of(key, llm))));
+        givenPreview(List.of(
+                new ResourceDiff("src-agent", "agent", "Agent", DiffAction.SKIP, AGENT_ID, 1, "targetAgent", null, null, -1),
+                new ResourceDiff("src-wf", "workflow", "WF", DiffAction.SKIP, WF_ID, 1, "position", null, null, 0),
+                new ResourceDiff("src-llm", "langchain", "LLM", DiffAction.UPDATE, LLM_ID, 1, "type", "{}", "{}", 0),
+                new ResourceDiff("src-wf2", "workflow", "WF2", DiffAction.SKIP, WF2_ID, 1, "position", null, null, 1),
+                new ResourceDiff("src-llm", "langchain", "LLM", DiffAction.UPDATE, LLM_ID, 1, "type", "{}", "{}", 1)));
+
+        UpgradeResult result = withStoresInCdi(Map.of(), () -> executor.executeUpgrade(source, AGENT_ID, null, null));
+
+        assertTrue(result.failures().stream().noneMatch(f -> f.reason().contains("changed on this instance")),
+                "got: " + result.failures());
+        verify(llmStore, times(1)).updateLlm(eq(LLM_ID), eq(2), any());
+    }
+
     // ==================== direct creates ====================
 
     @Test

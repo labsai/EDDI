@@ -433,6 +433,13 @@ public class UpgradeExecutor {
         private Boolean compatible;
         private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
+        /**
+         * Target resource id -> the version this run's own update produced. A resource
+         * two target workflows share is written once per workflow, and the second write
+         * meets a 409 naming the first one's version: that newer version is this run's,
+         * not a local edit to protect.
+         */
+        private final Map<String, Integer> versionsWritten = new HashMap<>();
 
         void failed(String sourceId, String resourceType, String name, Throwable cause) {
             String reason = cause.getMessage() != null
@@ -714,7 +721,7 @@ public class UpgradeExecutor {
             try {
                 if (action == DiffAction.UPDATE && extDiff.targetId() != null) {
                     WrittenExtension written = updateExtension(sourceExt, extDiff.targetId(), extDiff.targetVersion(),
-                            extDiff.targetContent());
+                            extDiff.targetContent(), outcome);
                     if (written != null) {
                         // Only a resource whose descriptor now names the new version counts
                         // as updated: one the deployment cannot resolve was written, but it
@@ -1108,7 +1115,7 @@ public class UpgradeExecutor {
      *             wrong thing entirely.
      */
     private WrittenExtension updateExtension(ExtensionSourceData source, String targetId, Integer targetVersion,
-                                             String targetContentJson) {
+                                             String targetContentJson, Outcome outcome) {
         ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
         try {
             String contentJson = restoreRedactedSecrets(source, source.contentJson(), targetContentJson);
@@ -1121,7 +1128,8 @@ public class UpgradeExecutor {
                 if (current == null || current.equals(version)) {
                     throw conflict;
                 }
-                if (!descriptorLagsStore(targetId, current)) {
+                boolean ownWrite = current.equals(outcome.versionsWritten.get(targetId));
+                if (!ownWrite && !descriptorLagsStore(targetId, current)) {
                     // The newer version came through the normal write path — its
                     // descriptor moved with it — so it is somebody's edit made after the
                     // preview was built. Writing over it would discard that edit without
@@ -1143,6 +1151,7 @@ public class UpgradeExecutor {
             if (resp == null || resp.getStatus() != 200) {
                 return null;
             }
+            outcome.versionsWritten.put(targetId, version + 1);
             return new WrittenExtension(
                     URI.create(ops.resourceUri() + targetId + ops.versionQueryParam() + (version + 1)), version);
         } catch (ChangedSincePreviewException e) {
