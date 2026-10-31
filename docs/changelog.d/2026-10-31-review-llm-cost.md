@@ -61,12 +61,23 @@ priced `summarizeToolResponse` tool call). A cross-provider summary no longer in
 
 **Tool cost tracking.** A non-finite `toolPricing` value fell through `Math.max` as NaN and poisoned
 every total; it now falls back to the default price. A timed-out tool call is charged. An entry found
-over budget is evicted only after every under-budget one. `ToolCostTracker.resetConversation` (unused)
-is gone.
+over budget is evicted only after every under-budget one, and the conversation whose charge triggered
+the eviction is never a victim (with the map nearly all exhausted entries it used to go with the other
+under-budget ones). A tool whose waiting pipeline thread is interrupted (a cascade step timeout, the
+agent watchdog) is charged like a timed-out one, and a timed-out cascade step is given up to
+`CANCELLED_STEP_SETTLE_MS` (1 s) to unwind before its tool spend is snapshotted, so that charge lands
+in the failed step's spend and `maxCostPerRun`. `ToolCostTracker.resetConversation` (unused) is gone.
+
+**Self-ungating argument check.** `SelfUngatingGuard.refusalFromArguments` searched the raw arguments
+only, percent-decoded, so a JSON unicode escape (`toolApprovals` or an id with one letter written as
+`\uXXXX`) passed it while every downstream JSON parser read the plain key. It now also searches every
+key and string value of the arguments parsed as JSON, re-parsing string values that are themselves
+JSON a few levels deep.
 
 **Streaming.** A tool-loop round that failed after forwarding text was retried into the same sink
 (partial + full answer); it is now raised as `PartiallyStreamedRoundException`, which the retry does
-not repeat.
+not repeat. Its message is fixed: it used to carry the forwarded character count, and a count of 429 or
+502-504 read as an HTTP status to `LlmFailureClassifier`, making exactly that failure retryable again.
 
 **Dead code / docs (§5).** `LlmSpendGate`'s misplaced Javadoc fixed; `AgentOrchestrator`'s unused
 `DEFAULT_MAX_PAUSES_PER_TURN`, `PAUSE_REASON_MAX_CHARS`, `mergeExternalTools` and the test-only
@@ -80,7 +91,10 @@ delegators removed.
 [`ConversationSummarizer.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ConversationSummarizer.java),
 [`GuardrailService.java`](../../src/main/java/ai/labs/eddi/modules/llm/guardrails/GuardrailService.java),
 [`PiiRedactionGuardrail.java`](../../src/main/java/ai/labs/eddi/modules/llm/guardrails/impl/PiiRedactionGuardrail.java),
-[`ToolCostTracker.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ToolCostTracker.java);
+[`ToolCostTracker.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ToolCostTracker.java),
+[`ToolExecutionService.java`](../../src/main/java/ai/labs/eddi/modules/llm/tools/ToolExecutionService.java),
+[`ToolLoopStreamingChatModel.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/ToolLoopStreamingChatModel.java),
+[`SelfUngatingGuard.java`](../../src/main/java/ai/labs/eddi/engine/hitl/tools/SelfUngatingGuard.java);
 docs: [`langchain.md`](../langchain.md), [`tenant-quotas.md`](../tenant-quotas.md).
 
 ### Design decisions

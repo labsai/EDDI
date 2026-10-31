@@ -225,6 +225,44 @@ class ToolExecutionTimeoutTest {
         verify(costTracker).trackToolCall(ToolInvocation.of("hangingTool"), "conv-1");
     }
 
+    /**
+     * A cascade step timeout (or the agent watchdog) interrupts the pipeline thread
+     * while it waits on the tool. That used to reach the generic failure branch,
+     * which charges nothing, so a paid tool already under way vanished from the
+     * step's spend and from maxCostPerRun.
+     */
+    @Test
+    @DisplayName("a call whose waiting thread is interrupted is charged like a timed-out one, and the interrupt is kept")
+    void interruptedWaitIsCharged() throws Exception {
+        var toolStarted = new CountDownLatch(1);
+        var workerInterrupted = new CountDownLatch(1);
+        var result = new AtomicReference<String>();
+        var flagKept = new AtomicReference<Boolean>();
+        Supplier<String> paidTool = () -> {
+            toolStarted.countDown();
+            try {
+                Thread.sleep(FOREVER_MS);
+            } catch (InterruptedException e) {
+                workerInterrupted.countDown();
+            }
+            return "never seen";
+        };
+
+        Thread pipeline = Thread.ofVirtual().start(() -> {
+            result.set(service.executeToolWrapped(ToolInvocation.of("paidSearch"), "args", SCOPE, "conv-1", paidTool, false, false, true,
+                    60, (int) FOREVER_MS));
+            flagKept.set(Thread.currentThread().isInterrupted());
+        });
+        assertTrue(toolStarted.await(5, TimeUnit.SECONDS));
+        pipeline.interrupt();
+        pipeline.join(5_000);
+
+        assertNotNull(result.get(), "the call must return to the model, not throw");
+        verify(costTracker).trackToolCall(ToolInvocation.of("paidSearch"), "conv-1");
+        assertEquals(Boolean.TRUE, flagKept.get(), "the dispatch loop relies on the interrupt flag to stop");
+        assertTrue(workerInterrupted.await(5, TimeUnit.SECONDS), "the tool is taken down with the waiting thread");
+    }
+
     @Test
     @DisplayName("expiry cancels the future, interrupting the worker so an interruptible tool unwinds")
     void expiryInterruptsTheWorker() throws Exception {

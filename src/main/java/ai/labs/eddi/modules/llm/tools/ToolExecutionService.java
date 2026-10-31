@@ -401,6 +401,24 @@ public class ToolExecutionService {
             markFailed(span, "timeout");
             return "Error: Execution timed out after " + timedOut.timeoutMs + "ms for tool: " + toolName;
 
+        } catch (InterruptedException interrupted) {
+            // The pipeline thread was cancelled while it waited on the tool — a cascade
+            // step timeout, the agent watchdog. Charged for the reason a timeout is:
+            // the tool was already handed to its worker, executeBounded has just
+            // cancelled that worker, and its upstream request (the paid search, the
+            // scrape) is normally under way. This branch used to fall through to the
+            // uncharged one below, so a cascade step abandoned mid-tool lost the tool's
+            // price from its failed-phase spend and from maxCostPerRun.
+            //
+            // The charge lands on this thread before the method returns, so a caller
+            // that waits for the cancelled step to unwind (CascadingModelExecutor does,
+            // briefly) sees it in the conversation's tool cost. The interrupt flag stays
+            // set — executeBounded re-armed it — so the dispatch loop still stops.
+            chargeQuietly(invocation, conversationId, enableCostTracking);
+            long executionTime = System.currentTimeMillis() - startTime;
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            markFailed(span, interrupted.getClass().getName());
+            return describeFailure(toolName, executionTime, interrupted);
         } catch (Exception e) {
             // Nothing below the execution step ran: a failure is neither cached nor
             // charged, whatever kind it is.

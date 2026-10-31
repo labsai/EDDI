@@ -48,6 +48,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
@@ -83,6 +84,16 @@ class CascadingModelExecutor {
     // live-streamed step's future, so the streaming executor always returns its
     // (possibly partial) result before this backstop could cancel it mid-stream.
     private static final long STREAMING_STEP_TIMEOUT_MARGIN_MS = 5_000L;
+
+    /**
+     * How long a timed-out step's thread is given to unwind after its cancel, so
+     * what it settles on the way out — the charge for a paid tool it was waiting on
+     * ({@code ToolExecutionService} charges an interrupted wait) — is in the
+     * conversation's tool cost before the failed step's spend is snapshotted. A
+     * bound, not a join: a step stuck in uninterruptible code must not hold the
+     * cascade, and its late charges are still counted by the conversation budget.
+     */
+    static final long CANCELLED_STEP_SETTLE_MS = 1_000L;
 
     /**
      * Parameter keys that must NOT be run through the template engine
@@ -1301,14 +1312,21 @@ class CascadingModelExecutor {
         // OpenTelemetry context is carried for the same reason: without it every
         // model call and tool span of the step became a new root trace instead of a
         // child of the eddi.pipeline.task span (ToolExecutionService does the same).
+        var started = new AtomicBoolean();
+        var unwound = new CountDownLatch(1);
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(() -> {
-            if (useAgentMode) {
-                return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
-                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange,
-                        recovery);
-            } else {
-                return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
-                        heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
+            started.set(true);
+            try {
+                if (useAgentMode) {
+                    return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
+                            heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange,
+                            recovery);
+                } else {
+                    return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
+                            heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
+                }
+            } finally {
+                unwound.countDown();
             }
         })));
 
@@ -1316,6 +1334,7 @@ class CascadingModelExecutor {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
+            awaitCancelledStep(started, unwound);
             increment("eddi.llm.cancelled", "scope", "cascade_step");
             throw e;
         } catch (ExecutionException e) {
@@ -1327,6 +1346,25 @@ class CascadingModelExecutor {
                 throw ex;
             }
             throw new LifecycleException("Cascade step execution failed", cause instanceof Exception ex ? ex : new RuntimeException(cause));
+        }
+    }
+
+    /**
+     * Waits, at most {@link #CANCELLED_STEP_SETTLE_MS}, for a cancelled step's body
+     * to leave. A step cancelled before it started has nothing to settle and never
+     * reaches its {@code finally}, so it is not waited for.
+     */
+    private static void awaitCancelledStep(AtomicBoolean started, CountDownLatch unwound) {
+        if (!started.get()) {
+            return;
+        }
+        try {
+            if (!unwound.await(CANCELLED_STEP_SETTLE_MS, TimeUnit.MILLISECONDS)) {
+                LOGGER.debugf("A timed-out cascade step was still running %dms after its cancel; anything it settles later is not in "
+                        + "this step's spend", CANCELLED_STEP_SETTLE_MS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
