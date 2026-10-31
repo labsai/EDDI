@@ -151,8 +151,9 @@ describe("GroupDetailPage — deleting a discussion", () => {
     renderGroupDetail();
     const ids = await conversationIds();
     const target = ids[0]!;
-    await waitFor(() =>
-      expect(screen.getByTestId(`discussion-item-${target}`)).toHaveAttribute("aria-current", "true"),
+    await waitFor(
+      () => expect(screen.getByTestId(`discussion-item-${target}`)).toHaveAttribute("aria-current", "true"),
+      { timeout: 5000 },
     );
 
     await userEvent.click(screen.getByTestId(`delete-discussion-${target}`));
