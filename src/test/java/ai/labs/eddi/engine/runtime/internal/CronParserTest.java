@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 import java.time.DayOfWeek;
+import java.time.Duration;
 
 import org.junit.jupiter.api.Test;
 
@@ -520,5 +521,23 @@ class CronParserTest {
         var fires = firesBetween("0 2,3 * * *", ZonedDateTime.of(2026, 3, 29, 0, 0, 0, 0, BERLIN),
                 ZonedDateTime.of(2026, 3, 29, 12, 0, 0, 0, BERLIN));
         assertEquals(List.of(Instant.parse("2026-03-29T01:00:00Z")), fires);
+    }
+
+    /**
+     * A huge range must be rejected by its endpoints, before it is enumerated: the
+     * old order allocated one boxed Integer per value (billions here) first.
+     */
+    @Test
+    void parseField_hugeRange_rejectedBeforeEnumeration() {
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+            assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("0-2000000000", 0, 59));
+            assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("0-2147483647/1", 0, 59));
+            assertThrows(IllegalArgumentException.class, () -> CronParser.parseField("2000000000/1", 0, 59));
+        });
+    }
+
+    @Test
+    void parseField_hugeStep_doesNotWrap() {
+        assertEquals(Set.of(0), CronParser.parseField("0-59/2147483647", 0, 59));
     }
 }
