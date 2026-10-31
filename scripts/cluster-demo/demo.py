@@ -238,7 +238,7 @@ class Infra:
                 env["MOCK_LLM_BIND"] = gw
             else:
                 print("WARN: could not read the docker bridge gateway; the nodes may not reach the mock LLM. Set MOCK_LLM_BIND.")
-        self.mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_llm.py"), MOCK_LOG, str(MOCK_PORT)], env=env)
+        self.mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_llm.py"), MOCK_LOG, str(MOCK_PORT)], env=env)  # nosec B603 - fixed interpreter and script path, no shell
         time.sleep(1)
 
     def up(self):
