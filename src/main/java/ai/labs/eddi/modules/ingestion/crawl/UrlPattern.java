@@ -63,9 +63,10 @@ public final class UrlPattern {
 
     private final String source;
     private final byte[] kinds;
-    private final char[] literals;
+    /** Code points, so that {@code ?} consumes a whole supplementary character. */
+    private final int[] literals;
 
-    private UrlPattern(String source, byte[] kinds, char[] literals) {
+    private UrlPattern(String source, byte[] kinds, int[] literals) {
         this.source = source;
         this.kinds = kinds;
         this.literals = literals;
@@ -86,10 +87,10 @@ public final class UrlPattern {
             pattern = "**/" + pattern;
         }
         byte[] kinds = new byte[pattern.length()];
-        char[] literals = new char[pattern.length()];
+        int[] literals = new int[pattern.length()];
         int count = 0;
-        for (int index = 0; index < pattern.length(); index++) {
-            char character = pattern.charAt(index);
+        for (int index = 0; index < pattern.length(); index += Character.charCount(pattern.codePointAt(index))) {
+            int character = pattern.codePointAt(index);
             if (character == '*') {
                 boolean doubled = index + 1 < pattern.length() && pattern.charAt(index + 1) == '*';
                 if (doubled) {
@@ -143,8 +144,10 @@ public final class UrlPattern {
         boolean[] next = new boolean[length + 1];
         reachable[0] = true;
         skipEmptyWildcards(reachable);
-        for (int at = 0; at < path.length(); at++) {
-            char character = path.charAt(at);
+        // By code point, as the regex this replaced did: "?" is one character of the
+        // path, and a supplementary character is one character, not two.
+        for (int at = 0; at < path.length(); at += Character.charCount(path.codePointAt(at))) {
+            int character = path.codePointAt(at);
             Arrays.fill(next, false);
             boolean any = false;
             for (int i = 0; i < length; i++) {
@@ -165,7 +168,7 @@ public final class UrlPattern {
         return reachable[length];
     }
 
-    private boolean accepts(int position, char character) {
+    private boolean accepts(int position, int character) {
         return switch (kinds[position]) {
             case LITERAL -> literals[position] == character;
             case ANYTHING -> true;

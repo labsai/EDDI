@@ -569,6 +569,21 @@ class HtmlToMarkdownConverterSalvageTest {
         assertEquals(full.substring(0, cap - notice.length()) + notice, capped);
     }
 
+    @Test
+    @DisplayName("whitespace between tags does not use up the text budget before the content")
+    void whitespaceNodesDoNotExhaustTheTextBudget() {
+        // An indented page has a whitespace node between every pair of tags. They
+        // were charged to the text budget, so with a small cap a page whose main
+        // content follows many empty elements stopped before reaching it.
+        StringBuilder html = new StringBuilder("<html><body><main>");
+        for (int i = 0; i < 15_000; i++) {
+            html.append("<span> </span>\n  ");
+        }
+        String page = html.append("<p>The answer is here.</p></main></body></html>").toString();
+
+        assertEquals("The answer is here.", converter.convert(page, null, 1_000).trim());
+    }
+
     private static int occurrences(String haystack, String needle) {
         int count = 0;
         for (int at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + needle.length())) {

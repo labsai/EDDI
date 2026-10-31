@@ -157,6 +157,17 @@ class UrlPatternTest {
     }
 
     @Test
+    @DisplayName("? consumes one whole character, including a supplementary one")
+    void questionMarkMatchesOneCodePoint() {
+        // The regex this matcher replaced worked on code points; stepping by char
+        // made "?" match only half of a character outside the BMP.
+        String face = new String(Character.toChars(0x1F600));
+        assertTrue(matches("/a?b", "/a" + face + "b"));
+        assertFalse(matches("/a??b", "/a" + face + "b"));
+        assertTrue(matches("/" + face + "/*", "/" + face + "/x"));
+    }
+
+    @Test
     @DisplayName("the pattern reports its own source for diagnostics")
     void exposesSource() {
         assertEquals("*.pdf", UrlPattern.compile("*.pdf").orElseThrow().source());

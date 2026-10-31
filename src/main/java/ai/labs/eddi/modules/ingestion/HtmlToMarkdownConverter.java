@@ -912,7 +912,14 @@ public class HtmlToMarkdownConverter {
             if (exhausted) {
                 return "";
             }
-            textChars += text.length();
+            // Whitespace-only text is not charged. An indented page has a whitespace
+            // node between every pair of tags and most never reach the output — a
+            // blank block or an empty inline is dropped — so charging them stopped a
+            // long page with a small cap before its first paragraph. How many there
+            // can be is bounded by MAX_ELEMENTS anyway.
+            if (!text.isBlank()) {
+                textChars += text.length();
+            }
             if (textChars > maxTextChars) {
                 // This text still goes out: it is what pushed the output past the
                 // point where it will be truncated. Nothing after it does.
