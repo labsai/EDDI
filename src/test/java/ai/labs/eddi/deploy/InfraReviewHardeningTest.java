@@ -104,6 +104,18 @@ class InfraReviewHardeningTest {
     }
 
     @Test
+    @DisplayName("the Helm chart sends external NATS credentials only over TLS and never drops them silently")
+    void helmGuardsExternalNatsCredentials() throws IOException {
+        String configmap = read("helm/eddi/templates/configmap.yaml");
+        assertTrue(configmap.contains("(hasPrefix \"tls://\" $s) (hasPrefix \"wss://\" $s)"));
+        assertTrue(configmap.contains("(not .Values.nats.externalAllowPlaintext)"));
+        String secret = read("helm/eddi/templates/secret.yaml");
+        assertTrue(secret.contains("nats.externalPassword is set but nats.externalUsername is not"));
+        assertTrue(secret.contains("nats.externalUsername/externalPassword are set but eddi.existingSecret is too"));
+        assertTrue(read("helm/eddi/values.yaml").contains("externalAllowPlaintext: false"));
+    }
+
+    @Test
     @DisplayName("check-live follows redirects only to the configured origins")
     void checkLiveComparesOrigins() throws IOException {
         String js = read("docs-site/scripts/check-live.mjs");

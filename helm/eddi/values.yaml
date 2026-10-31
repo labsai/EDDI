@@ -82,7 +82,8 @@ eddi:
   #     (in-chart MongoDB — percent-encode the password; or your external URI)
   #   quarkus.datasource.username= / quarkus.datasource.password=
   #     (external PostgreSQL only; the in-chart one has its own Secret)
-  #   eddi.nats.username= / eddi.nats.password=   (in-chart NATS with auth)
+  #   eddi.nats.username= / eddi.nats.password=   (in-chart NATS with auth, or
+  #     an external NATS: nats.externalUsername/externalPassword are refused here)
   # vaultMasterKey and the external-datastore credentials are then ignored.
   existingSecret: ""
 
@@ -389,10 +390,20 @@ nats:
   enabled: false
   externalUrl: ""
   # Credentials for an external NATS (nats.externalUrl), kept in the chart's
-  # Secret rather than the ConfigMap. Ignored when nats.enabled=true (see
-  # nats.auth for the in-chart cluster).
+  # Secret rather than the ConfigMap. Set both or neither. Ignored when
+  # nats.enabled=true (see nats.auth for the in-chart cluster). With
+  # eddi.existingSecret they are refused: put eddi.nats.username= /
+  # eddi.nats.password= in that Secret instead.
+  #
+  # Credentials are only sent over TLS: while they are set, every server in
+  # externalUrl must be tls:// (or wss://). EDDI then connects over TLS, trusting
+  # the JVM's default CAs. Credentials in eddi.existingSecret are invisible to the
+  # chart, so use tls:// there yourself.
   externalUsername: ""
   externalPassword: ""
+  # Accept nats:// servers with credentials anyway - only when the transport is
+  # encrypted underneath EDDI (a service mesh with mTLS, for instance).
+  externalAllowPlaintext: false
   # JetStream nodes. 3 gives R3 buckets and streams that survive the loss of one
   # node; 1 is a development setup.
   replicas: 3
