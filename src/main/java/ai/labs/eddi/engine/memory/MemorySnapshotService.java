@@ -40,7 +40,7 @@ public class MemorySnapshotService {
      * via {@link #createCheckpoint(IConversationMemory, String, String, int)}.
      * <p>
      * <strong>Today this is what every auto-checkpoint uses.</strong> The only
-     * production caller, {@code AgentOrchestrator#executeSingleToolCallResult}, has
+     * production caller, {@code ToolLoopRunner#executeSingleToolCallResult}, has
      * the conversation memory but not the agent configuration, and
      * {@code SessionManagement} has no slot on {@link IConversationMemory} — so the
      * agent-level {@code maxCheckpointsPerConversation} is NOT honoured at runtime

@@ -15,7 +15,8 @@ had spent: the tenant's monthly counter and `maxCostPerConversationUsd` never sa
   on every failure exit; the cascade folds a failed step's rounds into its run totals, prices a
   timed-out step's completed rounds from the step's `ToolExchangeRecorder` (which now records each
   round's usage as it finishes), and attaches the run's totals to the failure it finally throws —
-  including a spend refusal or an open circuit before a later step.
+  including a spend refusal, an open circuit, or a run ceiling (`maxCostPerRun`, duration, turn
+  deadline) reached before a later step when every earlier step had failed.
 - `LlmTask.recordSpend` is the one place spend reaches the step; a returned phase, a pause
   (`recordPrePauseSpend`) and a failure (`recordFailedPhaseSpend`) all pass through it. The returned
   phase's spend is now recorded as soon as the phase is over, before JSON conversion and
@@ -46,7 +47,8 @@ priced `summarizeToolResponse` tool call). A cross-provider summary no longer in
 **Guardrails.**
 - `pii-redaction` missed a card followed by its CVV or expiry: the greedy run failed Luhn as a whole
   and was skipped. The digit-group windows of the run are now checked (longest Luhn-valid window wins;
-  an unseparated number is never split). Unspaced `+E.164` numbers count as phones. Every pattern
+  an unseparated number is never split), and a run that holds no card is searched again from its next
+  digit group, so groups in front of a card (`ref 1234 4111 1111 1111 1111`) do not hide it. Unspaced `+E.164` numbers count as phones. Every pattern
   repetition is bounded, so the e-mail scan is linear (it was quadratic on a long local-part run).
 - A `warn` output guardrail with `failMode: closed` now forces buffering — it can withhold the answer.
 - The `expression` guardrail reads the answer the tolerant way too and treats a disagreement as
