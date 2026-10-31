@@ -89,9 +89,11 @@ class DamerauLevenshteinCandidateLimitTest {
     @Test
     @DisplayName("a token over the length cap is left uncorrected and no distance is computed")
     void overlongTokenIsNotCorrected() {
-        var correction = correctionOver(List.of("hallo"), 2, 5);
+        // A dictionary word one edit away: only the input-length guard keeps it out.
+        String word = "h".repeat(ICorrection.MAX_CORRECTABLE_LENGTH);
+        var correction = correctionOver(List.of(word), 2, 5);
 
-        assertTrue(correction.correctWord("h".repeat(ICorrection.MAX_CORRECTABLE_LENGTH + 1), "en", Collections.emptyList()).isEmpty());
+        assertTrue(correction.correctWord(word + "h", "en", Collections.emptyList()).isEmpty());
     }
 
     private static DamerauLevenshteinCorrection correctionOver(List<String> words, int maxDistance, int maxCandidates) {
