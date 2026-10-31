@@ -67,6 +67,19 @@ describe("parseCascadePreview", () => {
     expect(parsed.compatible).toBe(false);
   });
 
+  it("reads a quoted \"true\" as the backend does — Jackson coerces it", () => {
+    const parsed = parseCascadePreview(
+      preview({ resourceMappings: [{ oldUri: llm(1), newUri: llm(2) }], redeploy: "true", compatible: "true" }),
+    )!;
+    expect(parsed.redeploy).toBe(true);
+    expect(parsed.compatible).toBe(true);
+    const falsy = parseCascadePreview(
+      preview({ resourceMappings: [{ oldUri: llm(1), newUri: llm(2) }], redeploy: "false", compatible: "no" }),
+    )!;
+    expect(falsy.redeploy).toBe(false);
+    expect(falsy.compatible).toBe(false);
+  });
+
   it("flags a mapping that swaps to a different resource rather than a newer version", () => {
     const other = "99887766554433221100aabb";
     const parsed = parseCascadePreview(

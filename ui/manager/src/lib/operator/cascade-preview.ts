@@ -77,6 +77,16 @@ export function isCascadeRequest(preview: ResolvedRequestPreview | null | undefi
   return CASCADE_PATH.test(pathOf(preview.uri));
 }
 
+/**
+ * Whether the backend would read this body field as `true`. The request is
+ * deserialized into a boolean property, and Jackson coerces the strings
+ * "true"/"True" as readily as the JSON literal — so an LLM that quotes it still
+ * asks for a redeploy, and a preview that showed none would understate the write.
+ */
+function isTrue(value: unknown): boolean {
+  return value === true || value === "true" || value === "True";
+}
+
 function pathOf(uri: string): string {
   try {
     return new URL(uri, "http://placeholder.invalid").pathname;
@@ -126,8 +136,8 @@ export function parseCascadePreview(preview: ResolvedRequestPreview | null | und
     agentId,
     agentVersion: Number.isInteger(version) ? version : null,
     mappings,
-    redeploy: body.redeploy === true,
+    redeploy: isTrue(body.redeploy),
     environment,
-    compatible: body.compatible === true,
+    compatible: isTrue(body.compatible),
   };
 }
