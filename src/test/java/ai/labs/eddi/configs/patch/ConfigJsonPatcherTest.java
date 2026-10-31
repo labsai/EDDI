@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.io.StringReader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -214,6 +215,9 @@ class ConfigJsonPatcherTest {
         assertEquals("renamed", patched.getName());
         assertEquals("${vault:mcp-key}", patched.getApiKey());
     }
+
+    /** The plaintext credential {@link #STORED_PLAINTEXT} holds. */
+    private static final String PLAINTEXT_CREDENTIAL = "plain-test-credential-0123456789abcdef";
     /**
      * A stored LLM document holding a PLAINTEXT key, which a non-admin's reads
      * redact.
@@ -232,7 +236,7 @@ class ConfigJsonPatcherTest {
                 """, LlmConfiguration.class, true));
         String body = String.valueOf(e.getResponse().getEntity());
         assertTrue(body.contains("/tasks/0/description"), body);
-        assertTrue(!body.contains("sk-live"), body);
+        assertFalse(body.contains(PLAINTEXT_CREDENTIAL), body);
     }
 
     @Test
