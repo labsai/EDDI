@@ -264,10 +264,12 @@ public final class KnowledgeBaseStorage {
      * Whether {@code indexName} names exactly one Elasticsearch index. The store
      * passes it to the search API as an index EXPRESSION, so {@code *} or
      * {@code a,b} would search every matching index, past a collision check that
-     * compares literal names.
+     * compares literal names. Not trimmed: the store receives the configured value
+     * as it is, so a name with surrounding spaces must fail here rather than save
+     * and then fail when an agent uses it.
      */
     public static boolean isPlainElasticsearchIndex(String indexName) {
-        return indexName != null && PLAIN_ES_INDEX.matcher(indexName.trim()).matches();
+        return indexName != null && PLAIN_ES_INDEX.matcher(indexName).matches();
     }
 
     /** The pgvector table name 6.5.0 derived from a knowledge base name. */

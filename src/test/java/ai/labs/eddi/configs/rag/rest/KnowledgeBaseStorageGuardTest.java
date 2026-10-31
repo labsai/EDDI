@@ -252,7 +252,7 @@ class KnowledgeBaseStorageGuardTest {
         @Test
         @DisplayName("an Elasticsearch index expression (wildcard, list, exclusion) is refused")
         void elasticsearchIndexExpressionRefused() {
-            for (String index : List.of("*", "kb_a,kb_b", "-kb", "kb*", "remote:kb", "Kb")) {
+            for (String index : List.of("*", "kb_a,kb_b", "-kb", "kb*", "remote:kb", "Kb", " team-docs", "team-docs ")) {
                 var config = kb("alpha", "id", Map.of("indexName", index));
                 config.setStoreType("elasticsearch");
                 var previous = kb("alpha", "id", Map.of("indexName", "mine"));
