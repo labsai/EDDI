@@ -229,7 +229,16 @@ class Infra:
     def start_mock(self):
         if os.path.exists(MOCK_LOG):
             os.remove(MOCK_LOG)
-        self.mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_llm.py"), MOCK_LOG, str(MOCK_PORT)])
+        env = dict(os.environ)
+        if sys.platform.startswith("linux") and "MOCK_LLM_BIND" not in env:
+            # host.docker.internal resolves to the docker0 gateway on Linux, so the mock binds
+            # there: reachable from the nodes, not from the LAN.
+            gw = sh("docker", "network", "inspect", "bridge", "--format", "{{(index .IPAM.Config 0).Gateway}}").stdout.strip()
+            if gw:
+                env["MOCK_LLM_BIND"] = gw
+            else:
+                print("WARN: could not read the docker bridge gateway; the nodes may not reach the mock LLM. Set MOCK_LLM_BIND.")
+        self.mock = subprocess.Popen([sys.executable, os.path.join(HERE, "mock_llm.py"), MOCK_LOG, str(MOCK_PORT)], env=env)
         time.sleep(1)
 
     def up(self):

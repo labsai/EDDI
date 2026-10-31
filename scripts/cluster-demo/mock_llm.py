@@ -131,11 +131,10 @@ class Server(ThreadingHTTPServer):
 def main():
     global LOG
     with open(sys.argv[1], "a", encoding="utf-8") as LOG:
-        # The nodes run in containers and reach this process through
-        # host.docker.internal, which on Linux is the docker0 bridge address and
-        # not loopback - so the default stays all-interfaces. Set MOCK_LLM_BIND=127.0.0.1
-        # on Docker Desktop (macOS/Windows) to keep it off the LAN.
-        Server((os.environ.get("MOCK_LLM_BIND", "0.0.0.0"), int(sys.argv[2])), Handler).serve_forever()
+        # Loopback by default. The nodes reach this process through host.docker.internal,
+        # which on Linux is the docker0 bridge address, not loopback: demo.py binds there
+        # (MOCK_LLM_BIND=<bridge gateway>) instead of exposing the mock on every interface.
+        Server((os.environ.get("MOCK_LLM_BIND", "127.0.0.1"), int(sys.argv[2])), Handler).serve_forever()
 
 
 if __name__ == "__main__":
