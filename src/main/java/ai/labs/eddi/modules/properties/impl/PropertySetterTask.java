@@ -137,6 +137,15 @@ public class PropertySetterTask implements ILifecycleTask {
         // extracted properties above were read before those instructions ran, so they
         // may still carry the same text and are written after the vault scrubbed it.
         Set<String> vaultedPlaintexts = new LinkedHashSet<>();
+        // The vault references that existed before this execution, by identity: only
+        // a reference an instruction creates NOW is protected from the extracted
+        // properties below. One from an earlier turn stays replaceable, as before.
+        Set<Property> vaultedBefore = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Property existing : conversationProperties.values()) {
+            if (existing != null && Boolean.TRUE.equals(existing.getAutoVaulted())) {
+                vaultedBefore.add(existing);
+            }
+        }
         if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
             var setOnActionsList = propertySetter.getSetOnActionsList();
             for (String action : actionsData.getResult()) {
@@ -199,7 +208,7 @@ public class PropertySetterTask implements ILifecycleTask {
             currentStep.storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
             properties.forEach(property -> {
                 Property existing = conversationProperties.get(property.getName());
-                if (existing != null && Boolean.TRUE.equals(existing.getAutoVaulted())) {
+                if (existing != null && Boolean.TRUE.equals(existing.getAutoVaulted()) && !vaultedBefore.contains(existing)) {
                     // A property an instruction vaulted in this very turn: an extracted
                     // property of the same name must not replace its vault reference.
                     return;

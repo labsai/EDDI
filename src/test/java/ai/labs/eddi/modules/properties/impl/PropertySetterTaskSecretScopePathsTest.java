@@ -228,4 +228,20 @@ class PropertySetterTaskSecretScopePathsTest {
         assertTrue(reference.startsWith("${vault:"), "the vault reference survives: " + reference);
         assertFalse(memory.getConversationProperties().get("echo").getValueString().contains(TOKEN));
     }
+
+    @Test
+    @DisplayName("a vault reference from an earlier turn stays replaceable by an extracted property")
+    void earlierVaultReferenceIsNotFrozen() throws Exception {
+        var earlier = new Property("previousKey", "${vault:previousKey}", Scope.conversation);
+        earlier.setAutoVaulted(Boolean.TRUE);
+        memory.getConversationProperties().put("previousKey", earlier);
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        var replacement = new Property("previousKey", "replacement", Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(replacement))));
+
+        assertEquals("replacement", memory.getConversationProperties().get("previousKey").getValueString());
+        assertTrue(memory.getConversationProperties().get("accessToken").getValueString().startsWith("${vault:"));
+    }
 }
