@@ -122,7 +122,16 @@ export function useDeploymentStatus(agentId: string, version: number, environmen
     // caller who may edit the agent, so the page can say WHY instead of "Error".
     queryFn: () => getDeploymentStatus(environment, agentId, version, { detailed: true }),
     enabled: !!agentId && version > 0,
-    placeholderData: keepPreviousData,
+    // Keep the previous VERSION's status of the same agent in the same
+    // environment on screen while another loads — never another agent's, which a
+    // blanket `keepPreviousData` showed under the new agent's id until the
+    // request returned. A deploy/undeploy button must not act on it:
+    // callers check `isPlaceholderData`.
+    placeholderData: (previous, previousQuery) => {
+      const key = previousQuery?.queryKey;
+      const at = agentKeys.all.length;
+      return key?.[at + 1] === environment && key?.[at + 2] === agentId ? previous : undefined;
+    },
     refetchInterval: (query) => {
       // Poll every 3s while deploying
       return query.state.data?.status === "IN_PROGRESS" ? 3000 : false;
@@ -242,7 +251,9 @@ export function useDeploymentStatuses(agentId: string, version: number) {
     queryKey: [...agentKeys.all, "deploymentStatuses", agentId, version],
     queryFn: () => getDeploymentStatuses(agentId, version),
     enabled: !!agentId && version > 0,
-    placeholderData: keepPreviousData,
+    // Same agent only — see `useDeploymentStatus`.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[agentKeys.all.length + 1] === agentId ? previous : undefined,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (data?.some((d) => d.status === "IN_PROGRESS")) return 3000;

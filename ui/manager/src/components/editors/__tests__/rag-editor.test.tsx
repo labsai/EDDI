@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useLayoutEffect, useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
 import {
   RagEditor,
   type RagConfig,
@@ -806,6 +808,44 @@ describe("RagEditor", () => {
     expect(screen.getByTestId("ingestion-file-input")).not.toBeDisabled();
     await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
     expect(screen.getByTestId("ingest-text-btn")).not.toBeDisabled();
+  });
+
+  // ── Ingestion status ────────────────────────────────────────────────────────
+
+  async function ingestHello(ingestionId: string) {
+    server.use(
+      http.post("*/ragstore/rags/kb1/ingest", () => HttpResponse.json({ ingestionId })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+    );
+    await openSection(user, "Document Ingestion");
+    await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
+    await user.click(screen.getByTestId("ingest-text-btn"));
+  }
+
+  it("shows a translated label for the ingestion status, not the raw server value", async () => {
+    server.use(
+      http.get("*/ragstore/rags/kb1/ingestion/ing1/status", () => HttpResponse.json({ status: "completed" })),
+    );
+    await ingestHello("ing1");
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(screen.queryByText("completed")).not.toBeInTheDocument();
+  });
+
+  it("refuses to put an unsafe ingestion id into the status path", async () => {
+    // A response id with a slash or '..' used to retarget the polling request.
+    let polled = false;
+    server.use(
+      http.get("*/ragstore/rags/*", () => {
+        polled = true;
+        return HttpResponse.json({ status: "completed" });
+      }),
+    );
+    await ingestHello("../../other");
+    expect(await screen.findByText("Failed: could not check the status")).toBeInTheDocument();
+    expect(polled).toBe(false);
   });
 
   // ── Empty name clears to undefined ──────────────────────────────────────────

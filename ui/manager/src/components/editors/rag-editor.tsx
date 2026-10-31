@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   Database,
   Server,
@@ -19,6 +20,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api-client";
+import { seg } from "@/lib/api/path-segment";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { useOwningAgentId } from "@/hooks/use-owning-agent";
 import { ConnectionReferenceWarning } from "@/components/shared/connection-reference-warning";
@@ -572,6 +574,51 @@ function toComparable(entries: Record<string, string>, hintKeys: Set<string>): s
 
 // ─── Ingestion Panel ────────────────────────────────────────────────────────
 
+/**
+ * Sentinel for an ingestion this tab stopped watching. The server keeps
+ * ingesting after the client's poll budget is spent, so it is not a failure.
+ */
+const STATUS_STOPPED_WATCHING = "stopped-watching";
+
+/** Seconds-scale polling for the first minute, then a slower cadence, for ~11 minutes in all. */
+const FAST_POLL_ATTEMPTS = 30;
+const MAX_POLL_ATTEMPTS = 90;
+const FAST_POLL_MS = 2000;
+const SLOW_POLL_MS = 10_000;
+
+/**
+ * The text shown for an ingestion status. The stored value stays the raw status
+ * (server values like `completed`, or `failed: <reason>`) so colour and icon
+ * logic can key off it; only the label is translated.
+ */
+function ingestionStatusLabel(status: string, t: TFunction): string {
+  switch (status) {
+    case "uploading":
+      return t("ragEditor.statusUploading", "Uploading");
+    case "pending":
+      return t("ragEditor.statusPending", "Pending");
+    case "processing":
+      return t("ragEditor.statusProcessing", "Processing");
+    case "completed":
+      return t("ragEditor.statusCompleted", "Completed");
+    case STATUS_STOPPED_WATCHING:
+      return t("ragEditor.statusStopped", "Still processing on the server — stopped checking");
+    case "failed: polling error":
+      return t("ragEditor.statusPollError", "Failed: could not check the status");
+    case "failed: upload error":
+      return t("ragEditor.statusUploadError", "Failed: upload error");
+  }
+  const READ_PREFIX = "failed: could not read ";
+  if (status.startsWith(READ_PREFIX)) {
+    return t("ragEditor.statusReadError", "Failed: could not read {{name}}", {
+      name: status.slice(READ_PREFIX.length),
+    });
+  }
+  // A reason the server reported: keep it verbatim after the translated label.
+  if (status.startsWith("failed")) return t("ragEditor.statusFailed", "Failed") + status.slice("failed".length);
+  return status;
+}
+
 interface IngestionStatus {
   ingestionId: string;
   status: string;
@@ -620,13 +667,12 @@ function IngestionPanel({
   const pollStatus = useCallback(
     (ingestionId: string) => {
       let attempts = 0;
-      const MAX_POLL_ATTEMPTS = 30; // ~60 seconds at 2s intervals
       const poll = async () => {
         if (!mountedRef.current) return;
         attempts++;
         try {
           const result = await api.get<{ status: string; warning?: string }>(
-            `/ragstore/rags/${kbId}/ingestion/${ingestionId}/status`,
+            `/ragstore/rags/${seg(kbId)}/ingestion/${seg(ingestionId)}/status`,
           );
           if (!mountedRef.current) return;
           setIngestions((prev) =>
@@ -634,14 +680,17 @@ function IngestionPanel({
               ing.ingestionId === ingestionId ? { ...ing, status: result.status, warning: result.warning } : ing,
             ),
           );
-          if ((result.status === "processing" || result.status === "pending") && attempts < MAX_POLL_ATTEMPTS) {
-            setTimeout(poll, 2000);
-          } else if (attempts >= MAX_POLL_ATTEMPTS) {
-            setIngestions((prev) =>
-              prev.map((ing) =>
-                ing.ingestionId === ingestionId ? { ...ing, status: "failed: timeout" } : ing,
-              ),
-            );
+          if (result.status === "processing" || result.status === "pending") {
+            if (attempts < MAX_POLL_ATTEMPTS) {
+              setTimeout(poll, attempts < FAST_POLL_ATTEMPTS ? FAST_POLL_MS : SLOW_POLL_MS);
+            } else {
+              // Not a failure: the server is still working, this tab just stops asking.
+              setIngestions((prev) =>
+                prev.map((ing) =>
+                  ing.ingestionId === ingestionId ? { ...ing, status: STATUS_STOPPED_WATCHING } : ing,
+                ),
+              );
+            }
           }
         } catch {
           if (!mountedRef.current) return;
@@ -671,7 +720,7 @@ function IngestionPanel({
         });
         if (replace) params.set("replace", "true");
         const response = await fetch(
-          `${api.getBaseUrl()}/ragstore/rags/${kbId}/ingest?${params.toString()}`,
+          `${api.getBaseUrl()}/ragstore/rags/${seg(kbId)}/ingest?${params.toString()}`,
           {
             method: "POST",
             headers: {
@@ -874,6 +923,8 @@ function IngestionPanel({
                 <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
               ) : ing.status.startsWith("failed") ? (
                 <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+              ) : ing.status === STATUS_STOPPED_WATCHING ? (
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
                 <Loader2 className="h-3.5 w-3.5 shrink-0 text-primary animate-spin" />
               )}
@@ -887,10 +938,12 @@ function IngestionPanel({
                     ? "text-emerald-500"
                     : ing.status.startsWith("failed")
                       ? "text-destructive"
-                      : "text-primary",
+                      : ing.status === STATUS_STOPPED_WATCHING
+                        ? "text-muted-foreground"
+                        : "text-primary",
                 )}
               >
-                {ing.status}
+                {ingestionStatusLabel(ing.status, t)}
               </span>
               {ing.warning && (
                 <span className="basis-full text-[10px] text-warning" role="status">

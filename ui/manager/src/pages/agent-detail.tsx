@@ -177,8 +177,11 @@ export function AgentDetailPage() {
    * the version being loaded.
    */
   const configPending = isPlaceholderData;
-  const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
-  const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
+  const { data: deployment, isPlaceholderData: deploymentIsPlaceholder } = useDeploymentStatus(id!, resolvedVersion);
+  const { data: envStatuses, isPlaceholderData: envStatusesArePlaceholder } = useDeploymentStatuses(id!, resolvedVersion);
+  // Until the status of THIS version has arrived, what is on screen belongs to
+  // the one just left — the deploy/undeploy button must not act on it.
+  const statusPending = deploymentIsPlaceholder || envStatusesArePlaceholder;
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
   // environment a reader assumes), otherwise the first live one — which is what
   // makes a test-only agent reachable at all.
@@ -223,7 +226,7 @@ export function AgentDetailPage() {
         })
       : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
-  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS";
+  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS" || statusPending;
   /** Why production is in ERROR, when the backend said (detailed status, EDIT holders only). */
   const deploymentFailure = status === "ERROR" ? deployment?.failure : undefined;
 
