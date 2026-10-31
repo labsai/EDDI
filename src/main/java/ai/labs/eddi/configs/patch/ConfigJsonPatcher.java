@@ -416,8 +416,7 @@ public class ConfigJsonPatcher {
             Hidden original = hidden.get(text);
             if (original != null) {
                 if (!original.pointer().equals(pointer)) {
-                    relocated.add(pointer);
-                    return null;
+                    shifted.add(pointer);
                 }
                 return original.value();
             }
