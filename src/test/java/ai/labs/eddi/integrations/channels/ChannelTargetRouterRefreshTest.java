@@ -1202,4 +1202,38 @@ class ChannelTargetRouterRefreshTest {
         }
     }
 
+    // ─── isServedByLegacyConnector: live, not cached ───────────────────────────
+
+    @Nested
+    @DisplayName("isServedByLegacyConnector")
+    class ServedByLegacyConnector {
+
+        /**
+         * The legacy map is rebuilt at most once a minute and only a vault-secret
+         * change invalidates it, so a connector deployed a moment ago is absent from
+         * it. A channel save judged against the cache could take that agent's routing
+         * over.
+         */
+        @Test
+        @DisplayName("sees a legacy connector deployed after the cache was built")
+        void seesAConnectorTheCacheDoesNotHaveYet() throws Exception {
+            assertFalse(router.isChannelOwned("slack", "C0FRESH"), "builds the cache with no deployments");
+
+            setupLegacyAgent("aabbccddeeff112233445501", "C0FRESH", "xoxb-legacy", "signing-legacy", null);
+
+            assertFalse(router.isChannelOwned("slack", "C0FRESH"), "the cache is still the old one");
+            assertTrue(router.isServedByLegacyConnector("slack", "C0FRESH"));
+            assertTrue(router.isServedByLegacyConnector("SLACK", "C0FRESH"));
+            assertFalse(router.isServedByLegacyConnector("slack", "C0OTHER"));
+            assertFalse(router.isServedByLegacyConnector("webhook", "C0FRESH"));
+        }
+
+        @Test
+        @DisplayName("throws when the deployments cannot be read, so the save can refuse instead of guessing")
+        void unreadableDeploymentsThrow() {
+            when(agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production)).thenThrow(new RuntimeException("down"));
+
+            assertThrows(IllegalStateException.class, () -> router.isServedByLegacyConnector("slack", "C0ANY"));
+        }
+    }
 }

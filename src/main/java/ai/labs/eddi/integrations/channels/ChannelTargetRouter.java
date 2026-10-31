@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
@@ -358,19 +359,62 @@ public class ChannelTargetRouter {
     }
 
     /**
-     * Whether a deployed agent's legacy {@code ChannelConnector} serves
-     * {@code platformChannelId}. Unlike {@link #isChannelOwned} this ignores
-     * standalone integrations: their cached map lags a just-saved change by up to
-     * the refresh interval, while the integration store itself is the authority on
-     * them.
+     * Whether a deployed agent's legacy {@code ChannelConnector} binds
+     * {@code platformChannelId} — the authority a channel-integration save asks
+     * before it may claim a channel.
+     *
+     * <p>
+     * Read from the deployments and the deployed agent configurations themselves,
+     * not from {@link #legacyMap}: that cache is rebuilt at most once per
+     * {@link #REFRESH_INTERVAL_MS} and only a vault-secret change invalidates it,
+     * so a connector deployed a moment ago is absent from it, and a save judged
+     * against it could take that agent's routing over. Standalone integrations are
+     * ignored for the same reason in the other direction; the integration store is
+     * the authority on them. Channel saves are rare, so a live read is affordable.
+     * </p>
+     *
+     * @throws IllegalStateException
+     *             when the deployments or a deployed agent cannot be read, so the
+     *             caller can refuse the save rather than guess
      */
     public boolean isServedByLegacyConnector(String channelType, String platformChannelId) {
-        refreshIfNeeded();
         if (platformChannelId == null || platformChannelId.isBlank()) {
             return false;
         }
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        return CHANNEL_TYPE_SLACK.equals(normalizedType) && legacyMap.containsKey(platformChannelId);
+        if (!CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            return false;
+        }
+        List<AgentDeploymentStatus> statuses;
+        try {
+            statuses = agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Could not read the agent deployments", e);
+        }
+        for (AgentDeploymentStatus status : statuses) {
+            if (status.getDescriptor() == null || status.getDescriptor().isDeleted()) {
+                continue;
+            }
+            AgentConfiguration agentConfig;
+            try {
+                agentConfig = agentStore.read(status.getAgentId(), status.getAgentVersion());
+            } catch (IResourceStore.ResourceNotFoundException gone) {
+                continue; // a deployment of a deleted agent routes nothing
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                throw new IllegalStateException("Could not read deployed agent " + sanitize(status.getAgentId()), e);
+            }
+            if (agentConfig != null && agentConfig.getChannels() != null) {
+                for (ChannelConnector connector : agentConfig.getChannels()) {
+                    if (connector != null && connector.getType() != null
+                            && connector.getType().toString().equalsIgnoreCase(CHANNEL_TYPE_SLACK)
+                            && connector.getConfig() != null
+                            && platformChannelId.equals(connector.getConfig().get("channelId"))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**

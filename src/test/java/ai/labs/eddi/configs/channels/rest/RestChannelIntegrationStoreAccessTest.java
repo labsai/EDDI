@@ -12,6 +12,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import io.quarkus.security.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -171,6 +172,20 @@ class RestChannelIntegrationStoreAccessTest {
 
         var e = assertThrows(BadRequestException.class, () -> withRouter.createChannel(cfg));
         assertTrue(e.getMessage().contains("legacy channel connector"), e.getMessage());
+
+        verify(channelStore, never()).create(org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    @DisplayName("a legacy-connector check that cannot read the deployments refuses the save")
+    void unverifiableLegacyConnectorCheckRefusesTheSave() throws Exception {
+        var router = mock(ChannelTargetRouter.class);
+        when(router.isServedByLegacyConnector("slack", "C0UNKNOWN")).thenThrow(new IllegalStateException("deployments unreadable"));
+        var withRouter = new RestChannelIntegrationStore(channelStore, mock(IDocumentDescriptorStore.class), accessGuard, null, router);
+        var cfg = config(ChannelTarget.TargetType.AGENT, AGENT_ID);
+        cfg.setPlatformConfig(new HashMap<>(Map.of("channelId", "C0UNKNOWN")));
+
+        assertThrows(ServiceUnavailableException.class, () -> withRouter.createChannel(cfg));
 
         verify(channelStore, never()).create(org.mockito.ArgumentMatchers.any());
     }
