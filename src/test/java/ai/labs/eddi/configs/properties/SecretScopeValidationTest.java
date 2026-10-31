@@ -66,6 +66,18 @@ class SecretScopeValidationTest {
         }
     }
 
+    @Test
+    @DisplayName("toObjectPath under scope secret is rejected: the copy would bypass the vault")
+    void toObjectPathRejected() {
+        var copy = secret("token");
+        copy.setFromObjectPath("tokenResponse.access_token");
+        copy.setToObjectPath("copy.token");
+
+        var e = assertThrows(IllegalArgumentException.class, () -> SecretScopeValidation.validate(List.of(copy), "setProperties"));
+
+        assertTrue(e.getMessage().contains("toObjectPath"), e.getMessage());
+    }
+
     private static PropertyInstruction withInt() {
         var i = secret("pin");
         i.setValueInt(1234);

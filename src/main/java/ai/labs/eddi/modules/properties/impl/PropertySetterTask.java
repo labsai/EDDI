@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
@@ -132,6 +133,10 @@ public class PropertySetterTask implements ILifecycleTask {
 
         var templateDataObjects = memoryItemConverter.convert(memory);
         var conversationProperties = memory.getConversationProperties();
+        // Plaintexts that scope=secret instructions vaulted in this execution. The
+        // extracted properties above were read before those instructions ran, so they
+        // may still carry the same text and are written after the vault scrubbed it.
+        Set<String> vaultedPlaintexts = new LinkedHashSet<>();
         if (actionsData != null && !isNullOrEmpty(actionsData.getResult())) {
             var setOnActionsList = propertySetter.getSetOnActionsList();
             for (String action : actionsData.getResult()) {
@@ -150,7 +155,10 @@ public class PropertySetterTask implements ILifecycleTask {
                             checkNotNull(property.getName(), "property.name");
                             // One implementation for property.json and every postResponse /
                             // preRequest instruction — see PropertyInstructionExecutor.
-                            propertyInstructionExecutor.apply(property, memory, templateDataObjects);
+                            String vaulted = propertyInstructionExecutor.apply(property, memory, templateDataObjects);
+                            if (vaulted != null) {
+                                vaultedPlaintexts.add(vaulted);
+                            }
                         }
                     } catch (LifecycleException e) {
                         // Already a lifecycle-level failure — keep its message and cause intact.
@@ -185,8 +193,37 @@ public class PropertySetterTask implements ILifecycleTask {
         }
 
         if (!properties.isEmpty()) {
+            if (!vaultedPlaintexts.isEmpty()) {
+                scrubVaultedPlaintexts(properties, vaultedPlaintexts);
+            }
             currentStep.storeData(dataFactory.createData(PROPERTIES_EXTRACTED_IDENTIFIER, properties, true));
-            properties.forEach(property -> conversationProperties.put(property.getName(), property));
+            properties.forEach(property -> {
+                Property existing = conversationProperties.get(property.getName());
+                if (existing != null && Boolean.TRUE.equals(existing.getAutoVaulted())) {
+                    // A property an instruction vaulted in this very turn: an extracted
+                    // property of the same name must not replace its vault reference.
+                    return;
+                }
+                conversationProperties.put(property.getName(), property);
+            });
+        }
+    }
+
+    private static void scrubVaultedPlaintexts(List<Property> properties, Set<String> vaultedPlaintexts) {
+        for (Property property : properties) {
+            String text = property.getValueString();
+            if (text == null) {
+                continue;
+            }
+            String scrubbed = text;
+            for (String secret : vaultedPlaintexts) {
+                if (!secret.isEmpty()) {
+                    scrubbed = scrubbed.replace(secret, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+                }
+            }
+            if (!scrubbed.equals(text)) {
+                property.setValueString(scrubbed);
+            }
         }
     }
 

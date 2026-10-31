@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -117,5 +118,18 @@ class SecretPropertyVaultTest {
         assertFalse(AutoVaultedSecrets.isEmbeddable("a{b"));
         assertFalse(AutoVaultedSecrets.isEmbeddable("a$b"));
         assertFalse(AutoVaultedSecrets.isEmbeddable("a\nb"));
+    }
+
+    @Test
+    @DisplayName("a credential inside a typed output item of the step is scrubbed too")
+    void typedOutputItemIsScrubbed() throws Exception {
+        var memory = conversation("alice");
+        String secret = "sk-live-abcdef1234567890";
+        memory.getCurrentStep().addConversationOutputObject("output", new TextOutputItem("your key is " + secret));
+
+        vault.vault(memory, "apiKey", secret);
+
+        String stored = String.valueOf(memory.getCurrentStep().getConversationOutput().get("output"));
+        assertFalse(stored.contains(secret), stored);
     }
 }
