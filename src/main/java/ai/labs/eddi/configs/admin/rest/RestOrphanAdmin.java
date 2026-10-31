@@ -152,7 +152,7 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                 // can still be followed by a delete of something in use.
                 Integer version = resolveVersion(orphan);
                 if (isReferencedNow(orphan, version) || isReferencedByADeployedVersionNow(orphan)
-                        || isReferencedByAParserDocumentNow(orphan)) {
+                        || isReferencedByAParserDocumentNow(orphan) || isUsedByAWorkflowVersionACurrentAgentPinsNow(orphan, version)) {
                     log.warnf("Skipping orphan %s — it became referenced after the scan and before the purge", orphan.getResourceUri());
                     continue;
                 }
@@ -263,6 +263,53 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
             return true;
         }
         return false;
+    }
+
+    /**
+     * The fourth part of the fresh re-check, for extensions: a superseded workflow
+     * version that a CURRENT Agent still pins.
+     *
+     * <p>
+     * {@link #isReferencedNow} asks which workflows reference the extension, and
+     * that lookup answers only for a workflow's current version. The mark scan
+     * folds in the exact workflow version every current Agent pins, but an Agent
+     * re-pointed at an older workflow version in the mark/sweep window is seen by
+     * neither {@link #isReferencedNow} nor the deployed-version re-check (it is not
+     * deployed), so the extension that only that older version uses would be erased
+     * from under it. So: every workflow version, current or historical, that
+     * references the extension, and for each one whether a current Agent pins
+     * exactly that version.
+     * </p>
+     *
+     * <p>
+     * Workflows themselves need no such step: {@link #isReferencedNow} asks the
+     * Agent store with {@code includePreviousVersions=true}, which already sees an
+     * Agent pinning any version of the workflow. Fails CLOSED.
+     * </p>
+     */
+    private boolean isUsedByAWorkflowVersionACurrentAgentPinsNow(OrphanInfo orphan, Integer version) {
+        if (WORKFLOW_TYPE.equals(orphan.getType())) {
+            return false;
+        }
+        if (version == null || version < 1) {
+            log.warnf("Cannot re-check orphan %s against pinned workflow versions (no usable version) — NOT purging it",
+                    orphan.getResourceUri());
+            return true;
+        }
+        try {
+            for (IResourceStore.IResourceId workflow : workflowStore
+                    .getWorkflowVersionsContainingResource(atVersion(orphan.getResourceUri(), version).toString())) {
+                if (!agentStore.getAgentDescriptorsContainingWorkflow(workflow.getId(), workflow.getVersion(), false).isEmpty()) {
+                    log.warnf("Skipping orphan %s — a current Agent pins workflow %s (v%d), which uses it", orphan.getResourceUri(),
+                            workflow.getId(), workflow.getVersion());
+                    return true;
+                }
+            }
+            return false;
+        } catch (Exception e) {
+            log.warnf("Pinned-workflow re-check of orphan %s failed — NOT purging it: %s", orphan.getResourceUri(), e.getMessage());
+            return true;
+        }
     }
 
     /**
@@ -634,7 +681,11 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     if (resourceId == null || resourceId.getId() == null)
                         continue;
 
-                    AgentConfiguration agentConfig = agentStore.read(resourceId.getId(), resourceId.getVersion());
+                    // The Agent's LIVE version, not the descriptor's: descriptors lag every
+                    // in-process update (see liveVersion), and reading the version the
+                    // descriptor names collected the pins of a superseded Agent.
+                    AgentConfiguration agentConfig = agentStore.read(resourceId.getId(),
+                            liveVersion(agentStore.getCurrentResourceId(resourceId.getId()), resourceId));
                     if (agentConfig.getWorkflows() != null) {
                         for (URI workflowUri : agentConfig.getWorkflows()) {
                             referencedResources.add(resourceKey(workflowUri));
@@ -662,7 +713,9 @@ public class RestOrphanAdmin implements IRestOrphanAdmin {
                     if (resourceId == null || resourceId.getId() == null)
                         continue;
 
-                    WorkflowConfiguration workflowConfig = workflowStore.read(resourceId.getId(), resourceId.getVersion());
+                    // Live version for the same reason as the Agents above.
+                    WorkflowConfiguration workflowConfig = workflowStore.read(resourceId.getId(),
+                            liveVersion(workflowStore.getCurrentResourceId(resourceId.getId()), resourceId));
                     collectExtensionUris(workflowConfig, referencedResources);
                 } catch (IResourceStore.ResourceNotFoundException e) {
                     // Workflow descriptor exists but resource doesn't — genuinely

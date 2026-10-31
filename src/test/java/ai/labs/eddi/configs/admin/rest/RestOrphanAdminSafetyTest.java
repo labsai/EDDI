@@ -677,6 +677,136 @@ class RestOrphanAdminSafetyTest {
                     "the pinned workflow version's output set must not be reported as an orphan");
         }
 
+        /**
+         * Descriptors advance only on an HTTP PUT/PATCH, so an in-process update leaves
+         * the Agent's descriptor at v1 while the Agent is at v2. Reading the version
+         * the descriptor names collected the pins of the superseded Agent, so an
+         * extension only the CURRENT Agent's pinned workflow version uses looked
+         * orphaned, and the purge deleted it permanently.
+         */
+        @Test
+        @DisplayName("the scan reads the Agent's live version, not the version a stale descriptor names")
+        void staleAgentDescriptorDoesNotHideTheCurrentAgentsPins() throws Exception {
+            String workflowId = "aabbccddeeff1122334455a1";
+            String outputId = "aabbccddeeff1122334455a2";
+            URI pinnedWorkflowUri = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1");
+            URI outputUri = URI.create("eddi://ai.labs.output/outputstore/outputsets/" + outputId + "?version=1");
+
+            AgentConfiguration supersededAgent = new AgentConfiguration();
+            supersededAgent.setWorkflows(List.of());
+            AgentConfiguration currentAgent = new AgentConfiguration();
+            currentAgent.setWorkflows(List.of(pinnedWorkflowUri));
+            WorkflowConfiguration pinned = new WorkflowConfiguration();
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setConfig(new HashMap<>(Map.of("uri", outputUri.toString())));
+            pinned.setWorkflowSteps(List.of(step));
+
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            // the descriptor still says v1 ...
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.agent"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(AGENT_URI, "updated-in-process")));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=2"),
+                            "edited-workflow")));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.output"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(outputUri, "still-needed-output")));
+            // ... while the Agent itself is at v2, which pins workflow v1
+            when(agentStore.getCurrentResourceId(AGENT_ID)).thenReturn(resourceId(AGENT_ID, 2));
+            when(agentStore.read(AGENT_ID, 1)).thenReturn(supersededAgent);
+            when(agentStore.read(AGENT_ID, 2)).thenReturn(currentAgent);
+            when(workflowStore.read(workflowId, 2)).thenReturn(emptyWorkflow());
+            when(workflowStore.read(workflowId, 1)).thenReturn(pinned);
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+
+            OrphanReport report = restOrphanAdmin.scanOrphans(false);
+
+            assertTrue(report.isScanComplete(), report.getScanWarning());
+            assertTrue(report.getOrphans().stream().noneMatch(o -> o.getResourceUri().toString().contains(outputId)),
+                    "the output set the current Agent's pinned workflow uses must not be reported as an orphan");
+        }
+
+        @Test
+        @DisplayName("the scan reads a workflow's live version, not the version a stale descriptor names")
+        void staleWorkflowDescriptorDoesNotHideTheCurrentWorkflowsExtensions() throws Exception {
+            String workflowId = "aabbccddeeff1122334455a3";
+            String outputId = "aabbccddeeff1122334455a4";
+            URI outputUri = URI.create("eddi://ai.labs.output/outputstore/outputsets/" + outputId + "?version=1");
+
+            WorkflowConfiguration current = new WorkflowConfiguration();
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setConfig(new HashMap<>(Map.of("uri", outputUri.toString())));
+            current.setWorkflowSteps(List.of(step));
+
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.workflow"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + workflowId + "?version=1"),
+                            "updated-in-process")));
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.output"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(outputUri, "used-by-v2")));
+            when(workflowStore.getCurrentResourceId(workflowId)).thenReturn(resourceId(workflowId, 2));
+            when(workflowStore.read(workflowId, 1)).thenReturn(emptyWorkflow());
+            when(workflowStore.read(workflowId, 2)).thenReturn(current);
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+
+            OrphanReport report = restOrphanAdmin.scanOrphans(false);
+
+            assertTrue(report.getOrphans().stream().noneMatch(o -> o.getResourceUri().toString().contains(outputId)),
+                    "the output set the workflow's live version uses must not be reported as an orphan");
+        }
+
+        /**
+         * An Agent re-pointed at an older workflow version between the scan and the
+         * delete: the workflow reverse lookup answers only for current workflow
+         * versions, and the Agent is not deployed, so neither existing re-check saw it.
+         */
+        @Test
+        @DisplayName("the purge re-checks superseded workflow versions a current Agent pins before deleting an extension")
+        void purgeSparesAnExtensionAWorkflowVersionACurrentAgentPinsUses() throws Exception {
+            String workflowId = "aabbccddeeff1122334455a5";
+            String outputId = "aabbccddeeff1122334455a6";
+            URI outputUri = URI.create("eddi://ai.labs.output/outputstore/outputsets/" + outputId + "?version=1");
+
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.output"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(outputUri, "candidate")));
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+            when(resourceClientLibrary.getCurrentResourceId(outputUri)).thenReturn(resourceId(outputId, 1));
+            when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), anyBoolean())).thenReturn(List.of());
+            when(workflowStore.getWorkflowVersionsContainingResource(outputUri.toString())).thenReturn(List.of(resourceId(workflowId, 1)));
+            when(agentStore.getAgentDescriptorsContainingWorkflow(workflowId, 1, false))
+                    .thenReturn(List.of(descriptor(AGENT_URI, "repinned-agent")));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertEquals(0, report.getDeletedCount());
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+
+        @Test
+        @DisplayName("a pinned-workflow re-check that cannot answer keeps the extension")
+        void purgeKeepsAnExtensionWhenThePinnedWorkflowRecheckFails() throws Exception {
+            String outputId = "aabbccddeeff1122334455a7";
+            URI outputUri = URI.create("eddi://ai.labs.output/outputstore/outputsets/" + outputId + "?version=1");
+
+            when(documentDescriptorStore.readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean()))
+                    .thenReturn(List.of());
+            when(documentDescriptorStore.readDescriptors(eq("ai.labs.output"), anyString(), eq(0), anyInt(), anyBoolean()))
+                    .thenReturn(List.of(descriptor(outputUri, "candidate")));
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+            when(resourceClientLibrary.getCurrentResourceId(outputUri)).thenReturn(resourceId(outputId, 1));
+            when(workflowStore.getWorkflowDescriptorsContainingResource(anyString(), anyBoolean())).thenReturn(List.of());
+            when(workflowStore.getWorkflowVersionsContainingResource(anyString()))
+                    .thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
+
+            OrphanReport report = restOrphanAdmin.purgeOrphans(false);
+
+            assertEquals(0, report.getDeletedCount());
+            verify(resourceClientLibrary, never()).deleteResource(any(), anyBoolean());
+        }
+
         @Test
         @DisplayName("a deployment store that cannot be read makes the scan incomplete and refuses the purge")
         void unreadableDeploymentStoreRefusesThePurge() throws Exception {
