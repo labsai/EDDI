@@ -93,6 +93,19 @@ class EmbeddingModelFactoryTest {
     }
 
     @Test
+    void parameterMapsThatRenderAlike_doNotShareACachedClient() {
+        // TreeMap.toString() renders both as {apiKey=k, model=m}: a string cache key
+        // made them one entry, handing one configuration the other's client.
+        var config1 = createConfig("openai", Map.of("apiKey", "k, model=m"));
+        var config2 = createConfig("openai", Map.of("apiKey", "k", "model", "m"));
+
+        EmbeddingModel model1 = factory.getOrCreate(config1, EmbeddingInputType.DOCUMENT);
+        EmbeddingModel model2 = factory.getOrCreate(config2, EmbeddingInputType.DOCUMENT);
+
+        assertNotSame(model1, model2);
+    }
+
+    @Test
     void clearCache_shouldEvictEntries() {
         var config = createConfig("openai", Map.of("model", "text-embedding-3-small", "apiKey", "test-key"));
         EmbeddingModel before = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);

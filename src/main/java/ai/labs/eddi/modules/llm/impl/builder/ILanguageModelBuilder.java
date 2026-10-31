@@ -60,4 +60,24 @@ public interface ILanguageModelBuilder {
     default void warnAboutUnrecognisedParameters(String provider, Map<String, String> parameters) {
         ModelParameterValues.warnAboutUnrecognisedKeys(provider, parameters, recognisedParameters());
     }
+
+    /**
+     * The endpoint this builder will send to when the configuration names none of
+     * {@code ChatModelRegistry.ENDPOINT_KEYS}, if an editor can still steer that
+     * destination through other parameters — or {@code null}.
+     * <p>
+     * A provider with one fixed vendor endpoint returns {@code null}: the editor
+     * cannot choose where it goes, so a secret's {@code allowedHosts} has nothing
+     * to judge. A builder whose default depends on a parameter (an
+     * OpenAI-compatible preset's {@code region}) returns the URL it would use, so
+     * the registry can check it against every referenced secret before resolving
+     * them.
+     *
+     * @param parameters
+     *            the builder parameters with global variables resolved and vault
+     *            references still in place
+     */
+    default String defaultEndpoint(Map<String, String> parameters) {
+        return null;
+    }
 }
