@@ -202,6 +202,8 @@ def save_state(state):
         try:
             os.unlink(tmp)
         except OSError:
+            # Best-effort cleanup: the temp file may already be gone (renamed, or never
+            # written). Swallowed so the original exception below is the one raised.
             pass
         raise
 
