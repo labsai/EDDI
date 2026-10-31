@@ -640,4 +640,43 @@ class SecretRedactionFilterTest {
             assertNull(SecretRedactionFilter.maskCredentialValue(null));
         }
     }
+    @Nested
+    class CookieHeaders {
+
+        private String redactTwice(String input) {
+            String once = SecretRedactionFilter.redact(input);
+            assertEquals(once, SecretRedactionFilter.redact(once), () -> "redaction is not idempotent: " + once);
+            return once;
+        }
+
+        @Test
+        void cookieValuesAreRedactedAndNamesKept() {
+            assertEquals("Cookie: sid=<REDACTED>; theme=<REDACTED>", redactTwice("Cookie: sid=s3ss10nv4lue; theme=dark"));
+        }
+
+        @Test
+        void setCookieKeepsItsAttributes() {
+            assertEquals("Set-Cookie: JSESSIONID=<REDACTED>; Path=/; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly",
+                    redactTwice("Set-Cookie: JSESSIONID=8F2A9C11DEADBEEF; Path=/; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly"));
+        }
+
+        @Test
+        void aJsonHeaderMapStaysJson() {
+            String redacted = redactTwice("{\"Cookie\":\"sid=abc123; lang=en\",\"Accept\":\"*/*\"}");
+            assertEquals("{\"Cookie\":\"sid=<REDACTED>; lang=<REDACTED>\",\"Accept\":\"*/*\"}", redacted);
+            assertValidJson(redacted);
+        }
+
+        @Test
+        void theWalkStopsAtProseAndAtTheLineEnd() {
+            assertEquals("cookie: sid=<REDACTED> was rejected by the upstream x=y\nnext=line",
+                    redactTwice("cookie: sid=abc was rejected by the upstream x=y\nnext=line"));
+        }
+
+        @Test
+        void unrelatedWordsAreLeftAlone() {
+            String text = "cookies: none; the cookie jar holds key=value pairs";
+            assertEquals(text, redactTwice(text));
+        }
+    }
 }

@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -709,7 +711,114 @@ public final class SecretRedactionFilter {
         for (RedactionRule rule : RULES) {
             result = rule.pattern.matcher(result).replaceAll(rule.replacement);
         }
+        result = redactCookieValues(result);
         return redactBareBasicCredentials(result);
+    }
+
+    /**
+     * {@code Cookie:} or {@code Set-Cookie:} up to the start of its value — the
+     * name, an optional (possibly backslash-escaped) quote, the separator, and an
+     * optional opening quote. The value is then walked by hand in
+     * {@link #redactCookieValues}. Possessive throughout, so a run of
+     * {@code cookie:} prefixes stays linear.
+     */
+    private static final Pattern COOKIE_HEADER = Pattern
+            .compile("(?i)(?<![A-Za-z0-9_])(?:set-)?+cookie(?:\\\\*+[\"'])?+\\s*+[:=]\\s*+(?:\\\\*+[\"'])?+");
+
+    /**
+     * {@code Set-Cookie} attributes: they describe the cookie, carry nothing
+     * secret, and keeping them keeps the line useful.
+     */
+    private static final Set<String> COOKIE_ATTRIBUTES = Set.of("path", "domain", "expires", "max-age", "samesite", "priority",
+            "partitioned", "secure", "httponly");
+
+    /**
+     * A {@code Cookie} or {@code Set-Cookie} header's values, with the cookie names
+     * kept: {@code Cookie: sid=abc; theme=dark} becomes
+     * {@code Cookie: sid=<REDACTED>; theme=<REDACTED>}. A session cookie is a
+     * bearer credential, and the name-bound rules only catch the ones whose name
+     * happens to say {@code token} or {@code secret}.
+     * <p>
+     * The value is a list of {@code name=value} pairs separated by {@code ;} or
+     * {@code ,}; the walk ends at a quote, a backslash (an escaped carrier's
+     * quote), a line break, or the first item that is not a pair, so prose after
+     * the header is left alone. A value already {@link #REDACTED} is kept as it is,
+     * which is what makes a second pass a no-op.
+     */
+    private static String redactCookieValues(String text) {
+        Matcher matcher = COOKIE_HEADER.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int copied = 0;
+        int length = text.length();
+        int resumeAt;
+        do {
+            int pos = matcher.end();
+            while (pos < length) {
+                int nameStart = pos;
+                while (nameStart < length && (text.charAt(nameStart) == ' ' || text.charAt(nameStart) == '\t')) {
+                    nameStart++;
+                }
+                int nameEnd = nameStart;
+                while (nameEnd < length && isCookieNameChar(text.charAt(nameEnd))) {
+                    nameEnd++;
+                }
+                String name = text.substring(nameStart, nameEnd).toLowerCase(Locale.ROOT);
+                if (nameEnd == nameStart || nameEnd >= length || text.charAt(nameEnd) != '=') {
+                    // A bare Set-Cookie flag (Secure; HttpOnly) is stepped over; anything
+                    // else that is not a pair ends the header.
+                    if (COOKIE_ATTRIBUTES.contains(name) && nameEnd < length && (text.charAt(nameEnd) == ';' || text.charAt(nameEnd) == ',')) {
+                        pos = nameEnd + 1;
+                        continue;
+                    }
+                    pos = nameEnd;
+                    break;
+                }
+                int valueStart = nameEnd + 1;
+                int valueEnd = valueStart;
+                while (valueEnd < length && isCookieValueChar(text.charAt(valueEnd))) {
+                    valueEnd++;
+                }
+                String value = text.substring(valueStart, valueEnd);
+                if (name.equals("expires")) {
+                    // An HTTP date carries a comma and spaces ("Wed, 21 Oct 2015 …"):
+                    // step to the next ';' rather than read the rest as further pairs.
+                    while (valueEnd < length && text.charAt(valueEnd) != ';' && isCookieSpanChar(text.charAt(valueEnd))) {
+                        valueEnd++;
+                    }
+                } else if (!value.isEmpty() && !REDACTED.equals(value) && !COOKIE_ATTRIBUTES.contains(name)) {
+                    out.append(text, copied, valueStart).append(REDACTED);
+                    copied = valueEnd;
+                }
+                pos = valueEnd;
+                if (valueEnd >= length || (text.charAt(valueEnd) != ';' && text.charAt(valueEnd) != ',')) {
+                    break;
+                }
+                pos = valueEnd + 1;
+            }
+            resumeAt = Math.max(pos, matcher.end());
+        } while (resumeAt < length && matcher.find(resumeAt));
+        out.append(text, copied, length);
+        return out.toString();
+    }
+
+    private static boolean isCookieNameChar(char c) {
+        return c > ' ' && c < 0x7f && c != '=' && c != ';' && c != ',' && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}'
+                && c != '[' && c != ']';
+    }
+
+    private static boolean isCookieValueChar(char c) {
+        return c != ';' && c != ',' && c != ' ' && c != '\t' && isCookieSpanChar(c);
+    }
+
+    /**
+     * What may sit inside a header value at all: not a carrier's end or a line
+     * break.
+     */
+    private static boolean isCookieSpanChar(char c) {
+        return c != '"' && c != '\'' && c != '\\' && c != '\r' && c != '\n';
     }
 
     /**
