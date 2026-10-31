@@ -186,6 +186,10 @@ public class EmbeddingModelFactory {
         if (provider == null || provider.isEmpty()) {
             throw new IllegalArgumentException("No embedding provider configured for this knowledge base. " + SUPPORTED_PROVIDERS_HINT);
         }
+        // A secret's allowedHosts is judged first, against every endpoint key the
+        // configuration names — an unsupported key included — so a refused
+        // destination is reported as that, not as a parameter problem.
+        requireSecretsAllowedAt(provider, params);
         // Checked again here, not only at save time: a knowledge base stored before
         // the save-time check existed must not keep sending its documents to the
         // provider's public endpoint because a baseUrl it carries is ignored.
@@ -197,7 +201,6 @@ public class EmbeddingModelFactory {
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
-        requireSecretsAllowedAt(provider, params);
         params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
