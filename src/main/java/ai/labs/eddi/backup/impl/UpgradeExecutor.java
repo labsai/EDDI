@@ -1287,19 +1287,31 @@ public class UpgradeExecutor {
             }
         }
 
-        // The REST create's reference check, which the direct create below bypasses —
+        // The REST create's reference check, which the direct create below bypasses -
         // run before anything is written, so a refusal leaves no orphans. The
         // references WorkflowExtensions recognises are about to be repointed at
         // resources this run creates; any other one (a legacy authority the engine
-        // still resolves, say) would reach the store as written, naming a
-        // configuration the caller may not be able to read.
+        // still resolves, a padded uri, say) would reach the store as written, naming
+        // a configuration the caller may not be able to read.
+        //
+        // Exempting by "<host>|<id>" key would excuse an unrecognised reference that
+        // shares a key with a recognised one, so the check runs on a copy in which each
+        // recognised reference has already been replaced by a stand-in for the
+        // resource this run will create: whatever still names an original id is then
+        // checked, and only the stand-ins are exempt.
         try {
+            WorkflowConfiguration preview = jsonSerialization.deserialize(
+                    jsonSerialization.serialize(sourceWf.config()), WorkflowConfiguration.class);
             Set<String> repointed = new HashSet<>();
-            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceWf.config())) {
-                repointed.add(WorkflowReferenceAccess.keyOf(ref.extensionUri()));
+            int standIn = 0;
+            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(preview)) {
+                URI created = URI.create("eddi://" + ref.extensionUri().getHost() + "/created/" + "created-by-this-run-" + standIn++
+                        + "?version=1");
+                repointed.add(WorkflowReferenceAccess.keyOf(created));
+                ref.repointTo(created);
             }
-            WorkflowReferenceAccess.requireAccessToReferences(resourceAccessGuard, sourceWf.config(), repointed);
-        } catch (RuntimeException e) {
+            WorkflowReferenceAccess.requireAccessToReferences(resourceAccessGuard, preview, repointed);
+        } catch (Exception e) {
             outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(), e);
             return null;
         }

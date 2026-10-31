@@ -261,13 +261,42 @@ class UpgradeExecutorReviewFixesTest {
         assertTrue(result.failures().stream().anyMatch(f -> "workflow".equals(f.resourceType())), "got: " + result.failures());
     }
 
+    @Test
+    @DisplayName("an unrecognised reference sharing host and id with a recognised one is still access-checked")
+    void paddedReferenceSharingAKeyWithARecognisedOneIsStillChecked() throws Exception {
+        when(jsonSerialization.deserialize(eq("{\"rag\":1}"), eq(RagConfiguration.class))).thenReturn(new RagConfiguration());
+        var ragStore = mock(IRagStore.class);
+        var wfStore = mock(IWorkflowStore.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess(eq("112233445566aabbccddeeff"), eq(AccessLevel.VIEW), anyString());
+
+        // The same resource the recognised step names, written with leading whitespace:
+        // the REST check trims it and counts it, the backup scanner does not recognise
+        // it, so nothing repoints it and it would be stored as written.
+        WorkflowConfiguration config = ragWorkflow();
+        var padded = new WorkflowConfiguration.WorkflowStep();
+        padded.setType(URI.create("eddi://ai.labs.rag"));
+        padded.setConfig(new LinkedHashMap<>(Map.of("uri", " eddi://ai.labs.rag/ragstore/rags/112233445566aabbccddeeff?version=1")));
+        config.getWorkflowSteps().add(padded);
+
+        var source = newWorkflowWithRag(config);
+        UpgradeResult result = withStoresInCdi(Map.of(IRagStore.class, ragStore, IWorkflowStore.class, wfStore),
+                () -> executor.executeUpgrade(source, AGENT_ID, null, null));
+
+        verify(ragStore, never()).create(any()); // refused before anything is written
+        verify(wfStore, never()).create(any());
+        assertTrue(result.failures().stream().anyMatch(f -> "workflow".equals(f.resourceType())), "got: " + result.failures());
+    }
+
     // ==================== fixtures ====================
 
     private IResourceSource newWorkflowWithRag(WorkflowConfiguration config) throws Exception {
         givenAgentWith(new ArrayList<>());
         String key = WorkflowExtensions.scan(config).getFirst().key();
         when(jsonSerialization.serialize(config)).thenReturn("wf-json");
-        when(jsonSerialization.deserialize("wf-json", WorkflowConfiguration.class)).thenReturn(config);
+        // A fresh copy per call, like the real deserializer: the executor edits the
+        // copy.
+        when(jsonSerialization.deserialize("wf-json", WorkflowConfiguration.class))
+                .thenAnswer(inv -> new com.fasterxml.jackson.databind.ObjectMapper().convertValue(config, WorkflowConfiguration.class));
         var source = source(List.of(new WorkflowSourceData("src-wf", "WF", 0, config,
                 Map.of(key, new ExtensionSourceData("src-rag", "KB", "rag", "eddi://ai.labs.rag", "{\"rag\":1}")))));
         givenPreview(List.of(
