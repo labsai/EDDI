@@ -59,6 +59,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -153,6 +154,8 @@ class ConversationServiceStoreConflictTest {
         when(conversation.isEnded()).thenReturn(false);
         when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
                 .thenThrow(new ConcurrentConversationModificationException(CONVERSATION_ID, 3L));
+        TurnIdempotencyService turnIdempotency = spy(new TurnIdempotencyService(600, 10, meterRegistry, System::currentTimeMillis));
+        conversationService.turnIdempotency = turnIdempotency;
 
         conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
                 new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
@@ -166,6 +169,9 @@ class ConversationServiceStoreConflictTest {
         assertEquals(1.0, meterRegistry.counter(CONFLICT_COUNTER).count(),
                 "a refused turn persist must be counted, or the loss is as invisible as before the guard");
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        // The answer the caller got is not in the conversation: an Idempotency-Key
+        // retry must run the turn again, not be handed that answer from the cache.
+        verify(turnIdempotency).forgetUnpersisted(CONVERSATION_ID);
     }
 
     /**
