@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -86,6 +87,29 @@ class UserMemoryToolTest {
 
         assertTrue(result.contains("cancelled"), result);
         verifyNoInteractions(store);
+    }
+
+    /**
+     * An erasure that signals the turn while the insert is in flight: the insert
+     * that lands anyway is taken back instead of outliving the erasure's sweep.
+     */
+    @Test
+    void rememberFact_insertLandingAfterCancellationIsTakenBack() throws Exception {
+        var cancelled = new AtomicBoolean();
+        var racingTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, cancelled::get);
+        var written = new ArrayList<UserMemoryEntry>();
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.getAllEntries("user-1")).thenAnswer(inv -> List.copyOf(written));
+        when(store.upsert(any())).thenAnswer(inv -> {
+            written.add(stored("favorite_color", "blue", "preference", Visibility.self, "agent-1", List.of()));
+            cancelled.set(true); // the erasure signals while the write is in flight
+            return "id-favorite_color";
+        });
+
+        String result = racingTool.rememberFact("favorite_color", "blue", "preference", "self");
+
+        assertTrue(result.contains("cancelled"), result);
+        verify(store).deleteEntry("id-favorite_color");
     }
 
     /** H9c: nor may a model lift a restriction by forgetting the row. */

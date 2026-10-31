@@ -200,6 +200,11 @@ public class UserMemoryTool {
 
             UserMemoryEntry entry = UserMemoryEntry.fromToolCall(userId, agentId, conversationId, groupIds, trimmedKey, value, normalizedCategory,
                     vis);
+            // Checked again right before the write: the reads above take time, and a
+            // GDPR erasure that started meanwhile has already signalled this turn.
+            if (turnDiscarded.getAsBoolean()) {
+                return TURN_DISCARDED_REFUSAL;
+            }
             if (ownedGlobalWrite) {
                 if (!store.upsertIfOwnedBy(entry, agentId)) {
                     // Another agent claimed the key between the check above and this
@@ -208,6 +213,19 @@ public class UserMemoryTool {
                 }
             } else {
                 store.upsert(entry);
+            }
+            if (existing == null && turnDiscarded.getAsBoolean()) {
+                // The turn was cancelled — by the user, or by an erasure of this user —
+                // while the insert was in flight. An erasure signals before it deletes,
+                // so an insert that lands after its sweep is caught here and taken back
+                // rather than recreating a memory of an erased user. (An update of an
+                // existing entry is left alone: deleting it would destroy the fact it
+                // replaced, and an erasure removes it anyway.)
+                UserMemoryEntry written = findUpsertTarget(trimmedKey, vis);
+                if (written != null && written.id() != null) {
+                    store.deleteEntry(written.id());
+                }
+                return TURN_DISCARDED_REFUSAL;
             }
             if (existing == null) {
                 String overCap = settleCapacityAfterInsert(trimmedKey, vis);

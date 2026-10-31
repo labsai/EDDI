@@ -132,7 +132,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 
 > **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
 >
-> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters and run both through the secret redaction filter. The request line — the last message, which is the user's own text — is written at **DEBUG**, so `logRequests: true` shows nothing until the logger `ai.labs.eddi.modules.llm.impl` is at DEBUG; the response line stays at INFO. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
+> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters and run both through the secret redaction filter. The request line — the last message, which is the user's own text — and the response line are both written at **DEBUG**, so `logRequests: true` / `logResponses: true` show nothing until the logger `ai.labs.eddi.modules.llm.impl` is at DEBUG. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
 >
 > **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
 
@@ -1426,6 +1426,11 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
   `:matchText`, `:matchesWholeText`, `:matchesWholeOwnText` and the `[attr~=regex]` operator. jsoup
   evaluates them as Java regular expressions, and a catastrophic pattern there never finishes.
   Selectors are also capped at 256 characters. Use `:contains(text)` / `:containsOwn(text)`.
+  A selector containing a backslash is refused too: jsoup decodes CSS escapes before it picks the
+  pseudo-selector, so `:\6d atches(...)` would otherwise slip past the name check.
+- **Sibling combinators are refused** (`~` and `+`, anywhere in the selector): jsoup evaluates
+  them by walking every preceding sibling of every candidate, which is quadratic in a page's width
+  and cannot be interrupted. Select through the parent instead (`ul > li`, `li:eq(2)`).
 - **Parsing is contained.** Parsing the page and evaluating the selector run on a small pool of
   platform threads with a hard deadline, instead of on the virtual thread the tool call arrived
   on (where CPU-bound work holds a carrier thread, and there are only as many carriers as cores).
@@ -1992,7 +1997,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (t
 
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
-| **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Rate Limiting** | Token-bucket per tool, configurable limits (calls per minute; `0` blocks the tool, a negative limit is refused at save time — switch limiting off with `enableRateLimiting: false`) | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 | **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |

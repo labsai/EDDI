@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
 import ai.labs.eddi.modules.llm.tools.ToolFailureException;
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
@@ -68,6 +70,30 @@ class WebScraperToolContainmentTest {
         verify(httpClient, never()).send(any(OutboundRequest.class), any());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"p:\\6d atches(^h)", "p:\\6D atchesOwn(x)", "p\\:x"})
+    @DisplayName("a CSS-escaped selector is refused: jsoup decodes it into a regex pseudo-selector the name check never saw")
+    void escapedSelectorsAreRefused(String selector) throws Exception {
+        var tool = new WebScraperTool(httpClient, new HtmlToMarkdownConverter());
+
+        String result = tool.extractWithSelector("https://example.com", selector);
+
+        assertTrue(result.startsWith("Error: CSS escapes"), result);
+        verify(httpClient, never()).send(any(OutboundRequest.class), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"b ~ i", "b ~ b ~ i", "h1 + p", "li+li"})
+    @DisplayName("sibling combinators are refused: their evaluation is quadratic in a page's width")
+    void siblingCombinatorsAreRefused(String selector) throws Exception {
+        var tool = new WebScraperTool(httpClient, new HtmlToMarkdownConverter());
+
+        String result = tool.extractWithSelector("https://example.com", selector);
+
+        assertTrue(result.startsWith("Error: sibling combinators"), result);
+        verify(httpClient, never()).send(any(OutboundRequest.class), any());
+    }
+
     @Test
     @DisplayName("an over-long or blank selector is refused; ordinary selectors pass")
     void selectorShape() {
@@ -77,6 +103,19 @@ class WebScraperToolContainmentTest {
         assertNull(WebScraperTool.rejectSelector("table tr td:eq(1)"));
         assertNull(WebScraperTool.rejectSelector("p:contains(matches)"));
         assertNull(WebScraperTool.rejectSelector("a[href^=https]"));
+    }
+
+    @Test
+    @DisplayName("the model-chosen URL is sent STRICT, so its first hop gets the post-connect re-check too")
+    void modelChosenUrlIsSentStrict() throws Exception {
+        servePage();
+        var tool = new WebScraperTool(httpClient, new HtmlToMarkdownConverter());
+
+        tool.extractWithSelector("https://example.com", "p");
+
+        var request = ArgumentCaptor.forClass(OutboundRequest.class);
+        verify(httpClient).send(request.capture(), any());
+        assertEquals(SsrfPolicy.STRICT, request.getValue().ssrfOverride());
     }
 
     @Test

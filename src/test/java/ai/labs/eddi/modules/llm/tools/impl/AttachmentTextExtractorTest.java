@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -19,11 +20,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.util.GregorianCalendar;
@@ -281,6 +284,41 @@ class AttachmentTextExtractorTest {
      * (valid, empty page content) of the given decoded sizes, after a line of text
      * — a deflate bomb in miniature.
      */
+    @Nested
+    class WorkBudget {
+
+        @Test
+        void extractionPastTheOperatorBudgetIsRefused() throws Exception {
+            // Repeated references to an unfiltered form spend no decode budget; the
+            // stripper's own operator count is what bounds the interpretation work.
+            try (PDDocument document = Loader.loadPDF(createMultiPagePdf("one", "two", "three"))) {
+                var stripper = new AttachmentTextExtractor.BoundedTextStripper(5, Duration.ofMinutes(1));
+
+                var e = assertThrows(IOException.class, () -> stripper.getText(document));
+                assertTrue(e.getMessage().contains("content operators"), e.getMessage());
+            }
+        }
+
+        @Test
+        void interruptedExtractionStops() throws Exception {
+            try (PDDocument document = Loader.loadPDF(createPdf("hello"))) {
+                var stripper = new AttachmentTextExtractor.BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1));
+                Thread.currentThread().interrupt();
+                try {
+                    var e = assertThrows(IOException.class, () -> stripper.getText(document));
+                    assertTrue(e.getMessage().contains("interrupted"), e.getMessage());
+                } finally {
+                    Thread.interrupted();
+                }
+            }
+        }
+
+        @Test
+        void ordinaryDocumentsStillExtract() throws Exception {
+            assertTrue(new AttachmentTextExtractor(10_000).extractPdfText(createPdf("hello budget"), 10_000).contains("hello budget"));
+        }
+    }
+
     private static byte[] pdfWithFlateContents(int... decodedSizes) throws Exception {
         try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             var page = new PDPage();

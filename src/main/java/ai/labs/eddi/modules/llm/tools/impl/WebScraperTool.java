@@ -254,7 +254,8 @@ public class WebScraperTool {
     @Tool("Extracts structured data from a web page using CSS selectors")
     public String extractWithSelector(@P("Absolute http(s) URL of the page") String url,
                                       @P("CSS selector, e.g. 'h2.title' or 'table tr td:eq(1)'. Regex pseudo-selectors "
-                                              + "(:matches and friends) and the ~= operator are not supported; at most 256 characters") String cssSelector) {
+                                              + "(:matches and friends), the ~= operator, sibling combinators (~ and +) and CSS "
+                                              + "escapes are not supported; at most 256 characters") String cssSelector) {
 
         String rejection = rejectSelector(cssSelector);
         if (rejection != null) {
@@ -397,9 +398,22 @@ public class WebScraperTool {
         if (cssSelector.length() > MAX_SELECTOR_LENGTH) {
             return "Error: cssSelector is too long (max " + MAX_SELECTOR_LENGTH + " characters).";
         }
+        // jsoup decodes CSS escapes before it decides which pseudo-selector to run, so
+        // ":\6d atches(...)" reached the regex evaluator although the name check below
+        // never saw ":matches". No legitimate scraping selector needs an escape.
+        if (cssSelector.indexOf('\\') >= 0) {
+            return "Error: CSS escapes (backslashes) are not supported in cssSelector.";
+        }
         if (REGEX_SELECTOR.matcher(cssSelector).find()) {
             return "Error: regular-expression selectors (:matches, :matchesOwn, :matchText, :matchesWholeText, "
                     + ":matchesWholeOwnText, [attr~=regex]) are not supported. Use :contains(text) or :containsOwn(text) instead.";
+        }
+        // Sibling combinators make jsoup walk every preceding sibling of every
+        // candidate: quadratic (or worse, chained) in a page's width, CPU work the
+        // parse timeout cannot interrupt, holding a shared parser worker meanwhile.
+        if (cssSelector.indexOf('~') >= 0 || cssSelector.indexOf('+') >= 0) {
+            return "Error: sibling combinators ('~' and '+') are not supported. Select the parent and its children instead "
+                    + "(e.g. 'ul > li' or 'li:eq(2)').";
         }
         return null;
     }
@@ -525,13 +539,15 @@ public class WebScraperTool {
 
     /**
      * Fetches the content of a URL through {@link OutboundHttp}. The URL is
-     * SSRF-checked here, and every redirect hop by the facade.
+     * SSRF-checked here, and by the facade under {@code STRICT}: the model chose
+     * it, so the initial hop gets the facade's post-connect re-check too (DNS
+     * rebinding), not only the redirect hops {@code HOPS_ONLY} covered.
      */
     private FetchedPage fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
         OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, URI.create(url))
-                .ssrf(SsrfPolicy.HOPS_ONLY)
+                .ssrf(SsrfPolicy.STRICT)
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
                 .build();
