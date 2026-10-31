@@ -103,6 +103,15 @@ export function useRatings({ client, conversationId, profile, messages, conversa
     stepRatingsRef.current = stepRatings;
     conversationRatingRef.current = conversationRating;
   }, [conversationId, client, stepRatings, conversationRating]);
+  /**
+   * What the person changed since the restore request left. The restore's answer
+   * describes the server as it was when asked, so it must not overwrite these:
+   * a thumb tapped while the read was in flight would otherwise be undone.
+   */
+  const touchedSteps = useRef<Set<number>>(new Set());
+  const touchedConversation = useRef(false);
+  /** The conversation the restore effect last ran for. */
+  const openedFor = useRef<string | null>(null);
   /** Prompted in this page, whatever storage managed to keep. */
   const promptedRef = useRef<Set<string>>(new Set());
 
@@ -117,19 +126,35 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   useEffect(() => {
     setConversationRating(null);
     setStepRatings({});
-    setCardOpen(false);
+    // Close the card only when the person moved to ANOTHER conversation. This
+    // effect also runs when the profile merely arrives, which is after paint:
+    // a click on the header entry in that gap opened the card, and closing it
+    // here made "Rate this conversation" do nothing.
+    if (openedFor.current !== null && openedFor.current !== conversationId) setCardOpen(false);
+    openedFor.current = conversationId;
     setRestoredFor(null);
     setControls(undefined);
+    touchedSteps.current = new Set();
+    touchedConversation.current = false;
     if (!enabled || !conversationId) return;
     let cancelled = false;
     clientRef.current
       .read(conversationId)
       .then((ratings) => {
         if (cancelled) return;
-        setConversationRating(ratings.conversation);
+        if (!touchedConversation.current) setConversationRating(ratings.conversation);
         const byStep: Record<number, StoredRating> = {};
-        for (const rating of ratings.steps) byStep[rating.stepIndex] = rating;
-        setStepRatings(byStep);
+        for (const rating of ratings.steps) {
+          if (!touchedSteps.current.has(rating.stepIndex)) byStep[rating.stepIndex] = rating;
+        }
+        // Keep the person's own changes (and their rollbacks) over the server's older view.
+        setStepRatings((current) => {
+          const next = { ...byStep };
+          for (const index of touchedSteps.current) {
+            if (index in current) next[index] = current[index];
+          }
+          return next;
+        });
         setControls(ratings.controls);
       })
       .catch(() => {
@@ -157,6 +182,7 @@ export function useRatings({ client, conversationId, profile, messages, conversa
       const convId = conversationRef.current;
       if (!convId) return false;
       const previous = stepRatingsRef.current[stepIndex];
+      touchedSteps.current.add(stepIndex);
       setStepRatings((current) => {
         const next = { ...current };
         if (input) {
@@ -190,6 +216,7 @@ export function useRatings({ client, conversationId, profile, messages, conversa
       const convId = conversationRef.current;
       if (!convId) return false;
       const previous = conversationRatingRef.current;
+      touchedConversation.current = true;
       setConversationRating({
         stepIndex: CONVERSATION_STEP,
         score: input.score,
@@ -213,6 +240,7 @@ export function useRatings({ client, conversationId, profile, messages, conversa
     const convId = conversationRef.current;
     if (!convId) return false;
     const previous = conversationRatingRef.current;
+    touchedConversation.current = true;
     setConversationRating(null);
     try {
       await clientRef.current.withdrawConversation(convId);
@@ -226,6 +254,7 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   }, [fail]);
 
   const clearStep = useCallback((stepIndex: number) => {
+    touchedSteps.current.add(stepIndex);
     setStepRatings((current) => {
       if (!(stepIndex in current)) return current;
       const next = { ...current };

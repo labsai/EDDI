@@ -62,6 +62,29 @@ describe("useRatings", () => {
     expect(restored.read).toHaveBeenCalledWith("conv-1");
   });
 
+  it("keeps a thumb tapped while the restore read is still in flight", async () => {
+    // The server answers the read as it was before the tap; applying that
+    // answer verbatim would silently undo the person's rating.
+    let answer!: (value: { conversation: null; steps: [] }) => void;
+    const c = client({ read: vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve))) });
+    const { result } = setup({ client: c });
+    await act(async () => {
+      await result.current.rateStep(0, { score: 1 });
+    });
+    await act(async () => {
+      answer({ conversation: null, steps: [] });
+    });
+    expect(result.current.stepRatings[0]?.score).toBe(1);
+  });
+
+  it("does not close the card when the profile arrives after the person opened it", async () => {
+    const { result, rerender, args } = setup({ profile: null });
+    act(() => result.current.openCard());
+    expect(result.current.cardOpen).toBe(false); // no controls yet, nothing to show
+    rerender({ ...args, profile: profile() });
+    await waitFor(() => expect(result.current.cardOpen).toBe(true));
+  });
+
   it("renders the conversation's own controls once the server names them", async () => {
     // The profile follows the version a new conversation would get (thumbs);
     // this conversation runs on one that asks for stars and no reply ratings.
