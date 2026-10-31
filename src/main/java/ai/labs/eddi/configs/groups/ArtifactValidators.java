@@ -336,6 +336,14 @@ public final class ArtifactValidators {
         Pattern pattern = Pattern.compile(regex);
         return value -> {
             Long deadline = SCHEMA_REGEX_DEADLINE.get();
+            // Checked before every match as well as during it: the guard inside a match
+            // samples every 1024th character read, and each match gets a fresh counter,
+            // so a schema evaluating many patterns against many short keys (the library
+            // runs every patternProperties pattern on every property name) never
+            // reached a sample and ran on long after the budget was spent.
+            if (deadline != null && System.nanoTime() > deadline) {
+                throw new MatchDeadlineExceededException();
+            }
             CharSequence guarded = deadline != null ? deadlineGuarded(value, deadline) : deadlineGuarded(value);
             return pattern.matcher(guarded).find();
         };
