@@ -584,6 +584,8 @@ class McpConversationToolsOwnershipTest {
             String result = toolsWith(identityOf(OWNER, "eddi-viewer"), guard).chatManaged("customer_support", OWNER, "hello", null);
 
             assertDenied(result);
+            assertTrue(result.contains("you may not continue this conversation"), result);
+            assertFalse(result.contains("do not own"), "the owner does own it — the refusal must not say otherwise: " + result);
             verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
         }
     }
