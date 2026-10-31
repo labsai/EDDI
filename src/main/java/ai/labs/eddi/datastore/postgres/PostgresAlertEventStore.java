@@ -308,6 +308,13 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
+    public long releaseDigestPending(String ruleId) {
+        ensureSchema();
+        return update("UPDATE alert_events SET state = 'INBOX_ONLY', version = version + 1 WHERE rule_id = ? AND state = 'DIGEST_PENDING'",
+                List.<Object>of(ruleId), false);
+    }
+
+    @Override
     public long deleteFiredBefore(Instant cutoff) {
         ensureSchema();
         return update("DELETE FROM alert_events WHERE fired_at < ?", List.of(timestamp(cutoff)), false);

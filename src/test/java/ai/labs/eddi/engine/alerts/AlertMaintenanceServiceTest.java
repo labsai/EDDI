@@ -110,6 +110,32 @@ class AlertMaintenanceServiceTest {
     }
 
     @Test
+    @DisplayName("held events of two agents go out as one digest per agent, each labelled with its own agent — not the rule's scope")
+    void digestPerOriginatingAgent() {
+        // The rule's scope was changed to AGENT after events of another agent were
+        // held.
+        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.HOURLY);
+        when(rules.findEnabled()).thenReturn(List.of(rule));
+        List<AlertEvent> held = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            AlertEvent e = event("h" + i, rule, AlertEvent.State.DIGEST_PENDING, List.of());
+            held.add(new AlertEvent(e.id(), e.ruleId(), e.ruleName(), e.source(), e.kind(), i % 2 == 0 ? "old-agent" : AGENT, e.agentVersion(),
+                    CONVERSATION, NOW.minus(Duration.ofMinutes(90 - i)), e.summary(), e.match(), List.of(), e.state(), null, null, 0, null, null,
+                    null, null, 0));
+        }
+        when(events.findDigestPending(RULE_ID, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(held);
+
+        assertEquals(2, service.run().digests());
+
+        ArgumentCaptor<AlertEvent> digests = ArgumentCaptor.forClass(AlertEvent.class);
+        verify(events, times(2)).insert(digests.capture());
+        assertEquals(List.of("old-agent", AGENT), digests.getAllValues().stream().map(AlertEvent::agentId).toList());
+        assertEquals(List.of(List.of("h0", "h2"), List.of("h1", "h3")),
+                digests.getAllValues().stream().map(AlertEvent::digestEventIds).toList());
+    }
+
+    @Test
     @DisplayName("no digest before the interval has passed")
     void digestNotYet() {
         AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR)), null, AlertRule.DigestMode.HOURLY);

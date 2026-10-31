@@ -90,6 +90,15 @@ public interface IAlertEventStore {
      */
     long markDigested(Collection<String> ids);
 
+    /**
+     * Moves every {@code DIGEST_PENDING} event of the rule to {@code INBOX_ONLY}:
+     * the rule was deleted, disabled or lost its digest, so the maintenance pass —
+     * which only digests enabled rules — would otherwise hold them forever.
+     *
+     * @return how many moved
+     */
+    long releaseDigestPending(String ruleId);
+
     /** Deletes events fired before {@code cutoff}; returns how many. */
     long deleteFiredBefore(Instant cutoff);
 

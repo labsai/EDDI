@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -108,18 +109,32 @@ public class AlertMaintenanceService {
                 continue;
             }
             List<AlertEvent> held = eventStore.findDigestPending(rule.id(), DIGEST_BATCH);
-            if (held.isEmpty() || held.get(0).firedAt().isAfter(now.minus(interval))) {
-                continue;
-            }
-            try {
-                if (sendDigest(rule, held, now)) {
-                    sent++;
+            // One digest per originating agent: a digest is readable by whoever can read
+            // its agentId, so labelling events of agent A with the rule's current scope
+            // (agent B, after a scope change) showed A's summaries to B's editors.
+            for (List<AlertEvent> sameAgent : byAgent(held).values()) {
+                if (sameAgent.get(0).firedAt().isAfter(now.minus(interval))) {
+                    continue;
                 }
-            } catch (RuntimeException e) {
-                LOGGER.warnf(e, "Digest for alert rule %s failed", sanitize(rule.id()));
+                try {
+                    if (sendDigest(rule, sameAgent, now)) {
+                        sent++;
+                    }
+                } catch (RuntimeException e) {
+                    LOGGER.warnf(e, "Digest for alert rule %s failed", sanitize(rule.id()));
+                }
             }
         }
         return sent;
+    }
+
+    /** The held events grouped by their own agent id, each group oldest first. */
+    static Map<String, List<AlertEvent>> byAgent(List<AlertEvent> held) {
+        Map<String, List<AlertEvent>> groups = new LinkedHashMap<>();
+        for (AlertEvent event : held) {
+            groups.computeIfAbsent(String.valueOf(event.agentId()), k -> new ArrayList<>()).add(event);
+        }
+        return groups;
     }
 
     /**
@@ -139,7 +154,9 @@ public class AlertMaintenanceService {
         for (DeliveryTarget target : rule.delivery()) {
             deliveries.add(Delivery.pending(target));
         }
-        String agentId = rule.scope() == null ? null : rule.scope().singleAgent();
+        // The events' own agent, never the rule's current scope (see sendDueDigests);
+        // a batch that is not from one agent gets none — administrator-only.
+        String agentId = held.stream().map(AlertEvent::agentId).distinct().count() == 1 ? held.get(0).agentId() : null;
         String summary = rule.name() + ": " + held.size() + " alert" + (held.size() == 1 ? "" : "s") + " held back by the throttle";
         // The covered ids are the held batch, at most DIGEST_BATCH long.
         String dedupeKey = "digest|" + rule.id() + "|" + held.get(0).id();

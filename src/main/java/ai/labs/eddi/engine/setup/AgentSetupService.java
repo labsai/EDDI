@@ -453,7 +453,7 @@ public class AgentSetupService {
      * compensating action must never mask the original failure, which is what the
      * caller actually needs to see.
      */
-    private void rollbackCreatedResources(Map<String, Object> createdResources, String agentName, Exception cause) {
+    void rollbackCreatedResources(Map<String, Object> createdResources, String agentName, Exception cause) {
         if (createdResources.isEmpty()) {
             return;
         }
@@ -463,8 +463,18 @@ public class AgentSetupService {
         // Flattened, because not every recorded value is a scalar: createApiAgent
         // records its generated api-call locations as a List, and a String-only loop
         // silently left every one of those documents behind.
+        //
+        // Only the entries this invocation recorded as creation receipts (Location
+        // headers): the map also carries result metadata, and some of it is copied
+        // from the imported spec — httpCallsGroups is the operations' first tag — so
+        // a tag spelled like "/agentstore/agents/{id}?version=1" selected an existing
+        // agent for permanent deletion when a later step failed.
         var locations = new ArrayList<String>();
-        for (Object value : createdResources.values()) {
+        for (Map.Entry<String, Object> entry : createdResources.entrySet()) {
+            if (!isLocationKey(entry.getKey())) {
+                continue;
+            }
+            Object value = entry.getValue();
             if (value instanceof String uri) {
                 locations.add(uri);
             } else if (value instanceof Collection<?> many) {
@@ -513,6 +523,15 @@ public class AgentSetupService {
      * {@link #VAULTED_SECRET_KEY}.
      */
     static final String VAULTED_API_AUTH_KEY = "vaultedApiAuthKeyName";
+
+    /**
+     * Whether a {@code createdResources} key records Location headers of resources
+     * this setup created — {@code parserLocation}, {@code httpCallsLocations},
+     * {@code mcpCallsLocation_0} — rather than result metadata.
+     */
+    static boolean isLocationKey(String key) {
+        return key != null && (key.endsWith("Location") || key.endsWith("Locations") || key.startsWith("mcpCallsLocation_"));
+    }
 
     /**
      * Deletes one resource created during setup, dispatched by its Location URI.
