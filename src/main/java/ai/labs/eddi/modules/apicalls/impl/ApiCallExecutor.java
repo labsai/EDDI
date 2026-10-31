@@ -537,6 +537,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return result;
             }
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                // The wait (a delay or backoff on this thread) was cancelled; the step
+                // fails, but whoever interrupted the turn must still see the flag.
+                Thread.currentThread().interrupt();
+            }
             RuntimeException safe = withoutSecrets(e, substitutedSecrets);
             if (safe != null) {
                 LOGGER.error(safe.getMessage(), safe);

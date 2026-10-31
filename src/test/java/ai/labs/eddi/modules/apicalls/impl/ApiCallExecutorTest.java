@@ -28,11 +28,8 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.*;
 import java.util.ArrayList;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -1143,17 +1140,16 @@ class ApiCallExecutorTest {
         setupSuccessResponse(200, "ok", "text/plain");
 
         Thread.currentThread().interrupt();
+        boolean stillInterrupted;
         try {
-            try {
-                executor.execute(call, memory, new HashMap<>(), "http://example.com");
-            } catch (Exception expected) {
-                // the interrupt surfaces as a failure of the step, not as a send
-            }
+            // the interrupt surfaces as a failure of the step, not as a send
+            assertThrows(LifecycleException.class, () -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
         } finally {
-            Thread.interrupted();
+            stillInterrupted = Thread.interrupted();
         }
 
         verify(mockRequest, never()).send();
+        assertTrue(stillInterrupted, "the interrupt flag must be restored for whoever cancelled the turn");
     }
 
     // ==================== Retry with Exponential Backoff Tests
@@ -1171,7 +1167,7 @@ class ApiCallExecutorTest {
         call.setPostResponse(postResponse);
 
         // First attempt answers 503, the retry answers 200.
-        var sends = new java.util.concurrent.atomic.AtomicInteger();
+        var sends = new AtomicInteger();
         when(mockRequest.send()).thenAnswer(inv -> {
             sends.incrementAndGet();
             return mockResponse;
