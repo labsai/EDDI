@@ -769,7 +769,7 @@ function WorkforceBoard() {
             className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             aria-label={t("Workforce.back", "Back")}
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-4 w-4 rtl:rotate-180" />
           </Link>
           <h2 className="text-sm font-semibold text-foreground truncate">
             {groupConfig?.name ?? t("Workforce.board.title", "Task Force")}

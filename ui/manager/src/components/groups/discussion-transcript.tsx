@@ -530,7 +530,7 @@ export function DiscussionTranscript({
                   {t(`groups.flow.${step.replace(/\s+/g, "")}`, step)}
                 </span>
                 {idx < flowSteps.length - 1 && (
-                  <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50" />
+                  <ArrowRight className="h-2.5 w-2.5 text-muted-foreground/50 rtl:rotate-180" />
                 )}
               </span>
             );

@@ -62,7 +62,7 @@ export function EditorSection({
             {open ? (
               <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
             ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+              <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" aria-hidden="true" />
             )}
             {Icon && <Icon className={`h-5 w-5 ${accent ?? "text-primary"}`} aria-hidden="true" />}
             {label}
@@ -90,7 +90,7 @@ export function EditorSection({
         {open ? (
           <ChevronDown className="h-3 w-3" />
         ) : (
-          <ChevronRight className="h-3 w-3" />
+          <ChevronRight className="h-3 w-3 rtl:rotate-180" />
         )}
         {Icon && <Icon className={`h-3.5 w-3.5 ${accent ?? ""}`} />}
         {label}

@@ -173,7 +173,7 @@ export function CapabilitiesPage() {
                     <div className="flex items-center gap-2">
                       {isExpanded
                         ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 rtl:rotate-180" />
                       }
                       <span className="text-xs font-medium text-foreground">{entry.skill}</span>
                     </div>

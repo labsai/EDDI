@@ -905,7 +905,7 @@ function PhaseFlowPreview({ flow, phases }: { flow: string; phases: DiscussionPh
                 </div>
               </span>
               {idx < phases.length - 1 && (
-                <ArrowRight className="h-2.5 w-2.5 text-muted-foreground shrink-0" />
+                <ArrowRight className="h-2.5 w-2.5 text-muted-foreground shrink-0 rtl:rotate-180" />
               )}
             </span>
           );
@@ -924,7 +924,7 @@ function PhaseFlowPreview({ flow, phases }: { flow: string; phases: DiscussionPh
             {step}
           </span>
           {idx < steps.length - 1 && (
-            <ArrowRight className="h-2.5 w-2.5 text-muted-foreground" />
+            <ArrowRight className="h-2.5 w-2.5 text-muted-foreground rtl:rotate-180" />
           )}
         </span>
       ))}

@@ -387,7 +387,7 @@ function FireLogsRow({ scheduleId }: { scheduleId: string }) {
           {expanded ? (
             <ChevronDown className="h-3 w-3" />
           ) : (
-            <ChevronRight className="h-3 w-3" />
+            <ChevronRight className="h-3 w-3 rtl:rotate-180" />
           )}
           {t("schedules.fireHistory", "Fire History")}
         </button>

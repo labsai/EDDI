@@ -551,7 +551,7 @@ function PropertyInstructionRow({
           onClick={() => setShowAdvanced(!showAdvanced)}
           className="text-[10px] text-muted-foreground hover:text-foreground transition-colors flex items-center gap-0.5"
         >
-          {showAdvanced ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5" />}
+          {showAdvanced ? <ChevronDown className="h-2.5 w-2.5" /> : <ChevronRight className="h-2.5 w-2.5 rtl:rotate-180" />}
           {t("apiCallsEditor.advancedMapping", "Object Path Mapping")}
         </button>
         {showAdvanced && (
@@ -1409,7 +1409,7 @@ function HttpCallEditor({
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4 rtl:rotate-180" />
           )}
         </button>
         {/* Method badge */}

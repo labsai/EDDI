@@ -91,7 +91,7 @@ function SectionHeader({
           <ChevronRight
             className={cn(
               "h-4 w-4 text-muted-foreground transition-transform duration-200",
-              expanded && "rotate-90"
+              expanded ? "rotate-90" : "rtl:rotate-180"
             )}
           />
         )}
@@ -684,7 +684,7 @@ function WorkforceSettings() {
         to={`/workforce/${boardId}?version=${version}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         {t("Workforce.settings.backToBoard", "Back to Task Force")}
       </Link>
 

@@ -376,7 +376,7 @@ function MemoryRow({
           data-testid={`memory-expand-toggle-${entry.id ?? entry.key}`}
         >
           <span className="shrink-0 text-muted-foreground" aria-hidden="true">
-            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4 rtl:rotate-180" />}
           </span>
 
           {/* Key */}
