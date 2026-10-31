@@ -11,7 +11,9 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -286,5 +288,35 @@ class GlobalVariableResolverTest {
         assertFalse(GlobalVariableResolver.containsReference("plain text"));
         assertFalse(GlobalVariableResolver.containsReference(null));
         assertFalse(GlobalVariableResolver.containsReference("${vault:x}"));
+    }
+    @Test
+    @DisplayName("referencesIn answers what the ANY_REFERENCE regex answers")
+    void referencesInMatchesTheRegex() {
+        for (String value : new String[]{"a ${vault:x} b ${connection:y/z}", "${ab${cd:x}", "${:x}", "${vault:x", "${a:}${b:c}",
+                "${1a:x} ${vars:t/k}", "$${vault:k}}"}) {
+            var expected = new HashSet<String>();
+            var matcher = GlobalVariableResolver.ANY_REFERENCE.matcher(value);
+            while (matcher.find()) {
+                expected.add(matcher.group());
+            }
+            assertEquals(expected, GlobalVariableResolver.referencesIn(value), value);
+        }
+    }
+
+    @Test
+    @DisplayName("many unterminated reference openers are scanned in linear time")
+    void referencesInIsLinear() {
+        String hostile = "${a:".repeat(200_000);
+        long start = System.nanoTime();
+        assertTrue(GlobalVariableResolver.referencesIn(hostile).isEmpty());
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs < 2_000, "took " + elapsedMs + "ms");
+    }
+
+    @Test
+    @DisplayName("explicitTenantReferences finds only the full-form references")
+    void explicitTenantReferences() {
+        assertEquals(Set.of("${vars:t1/k}"), GlobalVariableResolver.explicitTenantReferences("${vars:k} ${vars:t1/k} ${vault:t/x}"));
+        assertTrue(GlobalVariableResolver.explicitTenantReferences(null).isEmpty());
     }
 }

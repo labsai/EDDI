@@ -479,4 +479,32 @@ class TemplateSyntaxMigratorTest {
         assertFalse(migrator.containsThymeleafSyntax("{quteVar}"));
         assertFalse(migrator.containsThymeleafSyntax("{\"json\": \"value\"}"));
     }
+    @Test
+    void manyUnterminatedOpenersAreRefusedQuicklyInsteadOfScannedQuadratically() {
+        // 100k openers in a 400k-character string: each conversion step used to scan
+        // from every opener to the end of the text.
+        String hostile = "[[${".repeat(100_000);
+
+        long start = System.nanoTime();
+        assertNotNull(migrator.unconvertibleReason(hostile));
+        assertEquals(hostile, migrator.migrate(hostile));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs < 2_000, "took " + elapsedMs + "ms");
+    }
+
+    @Test
+    void nestedOpenersAreScannedOnce() {
+        // N nested openers before one closer, below the work bound: the scan now
+        // continues after the closer instead of re-scanning from each opener.
+        String nested = "[[".repeat(2_000) + " x ]]";
+        assertTrue(TemplateSyntaxMigrator.conversionWork(nested) <= TemplateSyntaxMigrator.MAX_CONVERSION_WORK);
+        assertNull(migrator.unconvertibleReason(nested));
+    }
+
+    @Test
+    void ordinaryTemplatesStayWellInsideTheWorkBound() {
+        String template = "Hello [[${properties.name}]], " + "x".repeat(50_000) + " [(${memory.current.input})]";
+        assertNull(migrator.unconvertibleReason(template));
+        assertTrue(migrator.migrate(template).startsWith("Hello {properties.name},"));
+    }
 }

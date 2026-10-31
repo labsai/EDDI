@@ -183,6 +183,31 @@ class ArtifactValidatorsTest {
     }
 
     @Test
+    @DisplayName("a backtracking pattern inside a JSON schema is deadline-bound too, not an unbounded JDK match")
+    void catastrophicSchemaPattern_abortsOnDeadline() {
+        var validators = List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA,
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"(a+)+$\"}}}"));
+        String content = "{\"x\":\"" + "a".repeat(60_000) + "b\"}";
+
+        long start = System.nanoTime();
+        String rejection = ArtifactValidators.firstRejection(validators, content);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertNotNull(rejection, "a runaway schema match must refuse the write, not admit it");
+        assertTrue(rejection.contains("did not finish in time"), rejection);
+        assertTrue(elapsedMs < 5_000, "took " + elapsedMs + "ms");
+    }
+
+    @Test
+    @DisplayName("an ordinary schema pattern still matches and still rejects")
+    void schemaPatternStillWorks() {
+        var validators = List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA,
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"^ab+$\"}}}"));
+        assertNull(ArtifactValidators.firstRejection(validators, "{\"x\":\"abbb\"}"));
+        assertNotNull(ArtifactValidators.firstRejection(validators, "{\"x\":\"zzz\"}"));
+    }
+
+    @Test
     @DisplayName("a broken spec at write time fails closed — the write is refused, never admitted")
     void brokenSpecAtWriteTime_failsClosed() {
         assertNotNull(ArtifactValidators.firstRejection(

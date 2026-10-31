@@ -368,6 +368,11 @@ public class TemplateSyntaxMigrator {
         if (input == null) {
             return null;
         }
+        long work = conversionWork(input);
+        if (work > MAX_CONVERSION_WORK) {
+            return "the text holds too many template expressions (" + work / input.length() + " in " + input.length()
+                    + " characters) to convert safely";
+        }
         for (String[] delimiters : INLINE_DELIMITERS) {
             int from = 0;
             while (true) {
@@ -388,10 +393,43 @@ public class TemplateSyntaxMigrator {
                         }
                     }
                 }
-                from = bodyStart;
+                // Past the closer, not just past the opener: an opener nested in this
+                // body ends at the same closer, so rescanning from it re-checked a suffix
+                // of what was just checked, and N nested openers cost O(N * length).
+                from = close + delimiters[1].length();
             }
         }
         return null;
+    }
+
+    /**
+     * Upper bound on {@link #conversionWork}. Every conversion step anchors on an
+     * expression opener and may scan from it to the end of the text, so the cost of
+     * converting one string is bounded by openers times length; a text past this
+     * bound (thousands of unterminated openers in a long string, which is no real
+     * template) is reported unconvertible and left as it is instead of costing
+     * quadratic CPU at import or startup.
+     */
+    static final long MAX_CONVERSION_WORK = 50_000_000L;
+
+    /**
+     * The number of expression openers ({@code [[}, {@code [(}, {@code [#},
+     * {@code #strings.}) in {@code input} times its length.
+     */
+    static long conversionWork(String input) {
+        long openers = 0;
+        for (int i = 0; i + 1 < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '[') {
+                char next = input.charAt(i + 1);
+                if (next == '[' || next == '(' || next == '#') {
+                    openers++;
+                }
+            } else if (c == '#' && input.startsWith("#strings.", i)) {
+                openers++;
+            }
+        }
+        return openers * input.length();
     }
 
     /**
