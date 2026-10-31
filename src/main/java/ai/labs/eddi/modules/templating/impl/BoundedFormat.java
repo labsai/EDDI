@@ -14,6 +14,7 @@ import io.quarkus.qute.ValueResolver;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -289,36 +290,28 @@ final class BoundedFormat {
     }
 
     /**
+     * Measures the way the generated resolver will build the result. Each varargs
+     * value is one argument rendered with {@code toString()} — a {@code List}
+     * included, which renders with its brackets and separators. The one exception
+     * is Qute's: a SOLE varargs value that is an {@code Object[]} becomes the
+     * varargs array itself, so its elements are the arguments.
+     *
      * @throws TemplateLimitExceededException
      *             when the concatenation (or join, whose first value is the
      *             delimiter) of {@code values} could exceed {@code maxChars}
      */
     static void requireConcatenationWithin(List<Object> values, boolean join, int maxChars) {
+        int first = join ? 1 : 0;
         long delimiter = join && !values.isEmpty() ? lengthOf(values.getFirst(), maxChars) : 0;
+        List<?> arguments = values.subList(Math.min(first, values.size()), values.size());
+        if (arguments.size() == 1 && arguments.getFirst() != null && arguments.getFirst().getClass() == Object[].class) {
+            arguments = Arrays.asList((Object[]) arguments.getFirst());
+        }
         long total = 0;
         long parts = 0;
-        for (int i = join ? 1 : 0; i < values.size(); i++) {
-            Object value = values.get(i);
-            if (value instanceof Iterable<?> iterable) {
-                for (Object element : iterable) {
-                    total = saturatingAdd(total, lengthOf(element, maxChars));
-                    parts++;
-                    if (total > maxChars) {
-                        break;
-                    }
-                }
-            } else if (value instanceof Object[] array) {
-                for (Object element : array) {
-                    total = saturatingAdd(total, lengthOf(element, maxChars));
-                    parts++;
-                    if (total > maxChars) {
-                        break;
-                    }
-                }
-            } else {
-                total = saturatingAdd(total, lengthOf(value, maxChars));
-                parts++;
-            }
+        for (Object argument : arguments) {
+            total = saturatingAdd(total, lengthOf(argument, maxChars));
+            parts++;
             if (total > maxChars) {
                 break;
             }
