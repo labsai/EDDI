@@ -325,6 +325,23 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an absurdly long link is not followed")
+        void overlongLinksAreNotFollowed() {
+            String overlong = SITE + "/" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(overlong, SITE + "/ok"))
+                    .page(overlong, "<html><body>Long</body></html>")
+                    .page(SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site).crawl(
+                    request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertFalse(site.wasRequested(overlong));
+            assertTrue(sink.documentIds().contains(SITE + "/ok"));
+        }
+
+        @Test
         @DisplayName("a broken exclude pattern does not reduce the crawl to its seed")
         void brokenExcludeDoesNotBreakCrawl() {
             // The draft compiled patterns without escaping, and the resulting

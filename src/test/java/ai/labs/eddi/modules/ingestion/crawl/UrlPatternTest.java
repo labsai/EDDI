@@ -7,11 +7,13 @@ package ai.labs.eddi.modules.ingestion.crawl;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -132,6 +134,26 @@ class UrlPatternTest {
         long elapsedMillis = (System.nanoTime() - start) / 1_000_000;
 
         assertTrue(elapsedMillis < 2000, "matching took " + elapsedMillis + "ms — possible backtracking blowup");
+    }
+
+    @Test
+    @DisplayName("many overlapping wildcards against a near-miss path finish in linear time")
+    void overlappingWildcardsDoNotBacktrack() {
+        // As a regex this pattern is seven nested backtracking repetitions; on a
+        // path of a's that never ends in "b" the regex engine tries every way of
+        // splitting the run between them, roughly length^6 steps.
+        UrlPattern pattern = UrlPattern.compile("**a**a**a**a**a**a**b").orElseThrow();
+        String path = "/" + "a".repeat(20_000);
+
+        boolean matched = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> pattern.matches(path));
+
+        assertFalse(matched);
+        assertTrue(pattern.matches(path + "b"));
+        assertTrue(matches("/docs/*/*.pdf", "/docs/v1/a.pdf"));
+        assertFalse(matches("/docs/*/*.pdf", "/docs/v1/x/a.pdf"));
+        assertTrue(matches("**", "/"));
+        assertTrue(matches("/a/**", "/a/"));
+        assertFalse(matches("/a?", "/a"));
     }
 
     @Test
