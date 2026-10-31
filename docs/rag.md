@@ -81,8 +81,8 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `storeParameters` | — | Store-specific connection params |
 | `storeNamespace` | `id` for every new KB | How the vector store is addressed: `id` (by this KB's id — its own store) or, for a KB created before 6.6, absent/`name` (the 6.5.0 layout, by name). Set by EDDI; see [Knowledge base isolation](#knowledge-base-isolation) |
 | `chunkStrategy` | `recursive` | Document chunking strategy |
-| `chunkSize` | `512` | Chunk size in characters |
-| `chunkOverlap` | `64` | Chunk overlap in characters |
+| `chunkSize` | `512` | Chunk size in characters, 1–32768 |
+| `chunkOverlap` | `64` | Chunk overlap in characters, at most half of `chunkSize`. Saving a larger value is refused; a stored configuration that predates the check is clamped when it is ingested |
 | `maxResults` | `5` | Default top-K results |
 | `minScore` | `0.6` | Default minimum similarity score (0.0–1.0) |
 
@@ -390,7 +390,8 @@ preview, purge, and the deletion rules below.
 optional fields are simply absent rather than defaulted: without `cron` the source runs only when
 somebody asks, and without `costPerThousandSegments` a run reports no dollar figure.
 `excludePatterns` are globs matched against the URL **path** (`*` stays inside one segment, `**`
-crosses them).
+crosses them). Links longer than 8,192 characters are not followed, and sitemap entries longer than the
+protocol's 2,048 characters are ignored.
 
 **`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule
 API takes. Six- and seven-field Quartz expressions with a seconds column are **refused when the
@@ -439,7 +440,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | --- | --- | --- |
 | `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
 | `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
-| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control |
+| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control. Checked before a document is embedded: a document that would cross it waits for the next run, and one that alone needs more chunks than the ceiling is reported as failed rather than embedded in part |
 | `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
 | `tombstoneAfterMissedRuns` | `2` | Consecutive complete runs a document may be missing before its vectors go |
 | `timeBudgetMinutes` | `10` | Wall-clock ceiling for one run, 1–1440 |

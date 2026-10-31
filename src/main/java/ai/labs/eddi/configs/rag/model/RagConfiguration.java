@@ -154,11 +154,26 @@ public class RagConfiguration {
      */
     private String chunkStrategy = DEFAULT_CHUNK_STRATEGY;
 
-    /** Chunk size in characters (default: 512) */
-    private Integer chunkSize = 512;
+    static final int DEFAULT_CHUNK_SIZE = 512;
+    static final int DEFAULT_CHUNK_OVERLAP = 64;
 
-    /** Chunk overlap in characters (default: 64) */
-    private Integer chunkOverlap = 64;
+    /**
+     * Largest chunk size accepted. Far beyond what an embedding model reads in one
+     * input; it exists so that a chunk size and an overlap close to it cannot turn
+     * one document into a near-copy of itself per few characters of new text.
+     */
+    public static final int MAX_CHUNK_SIZE = 32_768;
+
+    /** Chunk size in characters (default: 512) */
+    private Integer chunkSize = DEFAULT_CHUNK_SIZE;
+
+    /**
+     * Chunk overlap in characters (default: 64), at most half the chunk size. Every
+     * chunk repeats this much of the one before it, so an overlap close to the
+     * chunk size multiplies a document's stored text by chunk size over the
+     * difference.
+     */
+    private Integer chunkOverlap = DEFAULT_CHUNK_OVERLAP;
 
     // --- Default Retrieval Parameters (overridable per LLM task) ---
 
@@ -255,6 +270,13 @@ public class RagConfiguration {
         String embeddingProblem = EmbeddingParameters.findProblem(embeddingProvider, embeddingParameters);
         if (embeddingProblem != null) {
             throw new IllegalArgumentException(embeddingProblem);
+        }
+        if (chunkSize != null && (chunkSize < 1 || chunkSize > MAX_CHUNK_SIZE)) {
+            throw new IllegalArgumentException("chunkSize must be between 1 and " + MAX_CHUNK_SIZE + ", was " + chunkSize);
+        }
+        if (chunkOverlap != null && (chunkOverlap < 0 || chunkOverlap > chunkSizeOrDefault() / 2)) {
+            throw new IllegalArgumentException("chunkOverlap must be between 0 and half the chunk size ("
+                    + chunkSizeOrDefault() / 2 + "), was " + chunkOverlap);
         }
         if (sources != null) {
             Set<String> keys = new HashSet<>();
@@ -379,6 +401,25 @@ public class RagConfiguration {
 
     public Integer getChunkSize() {
         return chunkSize;
+    }
+
+    /**
+     * The chunk size ingestion splits with: the default when unset, and within
+     * {@code 1..}{@value #MAX_CHUNK_SIZE} for a configuration stored before
+     * {@link #validate()} checked it.
+     */
+    public int chunkSizeOrDefault() {
+        int size = chunkSize == null ? DEFAULT_CHUNK_SIZE : chunkSize;
+        return Math.clamp(size, 1, MAX_CHUNK_SIZE);
+    }
+
+    /**
+     * The overlap ingestion splits with: the default when unset, and never more
+     * than half of {@link #chunkSizeOrDefault()}.
+     */
+    public int chunkOverlapOrDefault() {
+        int overlap = chunkOverlap == null ? DEFAULT_CHUNK_OVERLAP : chunkOverlap;
+        return Math.clamp(overlap, 0, chunkSizeOrDefault() / 2);
     }
 
     public void setChunkSize(Integer chunkSize) {
