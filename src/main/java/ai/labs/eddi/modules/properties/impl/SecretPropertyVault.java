@@ -342,7 +342,7 @@ public class SecretPropertyVault {
      * what a configured parser normalizer produces — the resolved secret is the
      * NORMALIZED input, never byte-identical to the raw one.
      */
-    private static boolean carriesSecret(String value, String plaintext) {
+    static boolean carriesSecret(String value, String plaintext) {
         if (isNullOrEmpty(value)) {
             return false;
         }

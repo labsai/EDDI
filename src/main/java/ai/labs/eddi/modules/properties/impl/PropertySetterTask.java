@@ -226,8 +226,18 @@ public class PropertySetterTask implements ILifecycleTask {
             }
             String scrubbed = text;
             for (String secret : vaultedPlaintexts) {
-                if (!secret.isEmpty()) {
+                if (secret.isEmpty()) {
+                    continue;
+                }
+                if (scrubbed.contains(secret)) {
                     scrubbed = scrubbed.replace(secret, MemoryKeys.SECRET_INPUT_PLACEHOLDER);
+                } else if (SecretPropertyVault.carriesSecret(scrubbed, secret)) {
+                    // A differently normalized copy (punctuation or whitespace stripped by
+                    // a parser normalizer) has no verbatim occurrence to cut out, so the
+                    // whole value goes — the same normalization-insensitive match, with
+                    // its minimum length, that scrubs the step's input.
+                    scrubbed = MemoryKeys.SECRET_INPUT_PLACEHOLDER;
+                    break;
                 }
             }
             if (!scrubbed.equals(text)) {

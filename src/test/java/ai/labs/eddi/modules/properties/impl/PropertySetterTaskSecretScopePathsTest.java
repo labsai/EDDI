@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
@@ -227,6 +228,34 @@ class PropertySetterTaskSecretScopePathsTest {
         String reference = memory.getConversationProperties().get("accessToken").getValueString();
         assertTrue(reference.startsWith("${vault:"), "the vault reference survives: " + reference);
         assertFalse(memory.getConversationProperties().get("echo").getValueString().contains(TOKEN));
+    }
+
+    @Test
+    @DisplayName("an extracted property holding a normalized copy of the vaulted plaintext is scrubbed too")
+    void normalizedCopyInExtractedPropertyIsScrubbed() throws Exception {
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        // What a punctuation normalizer leaves of the token: no verbatim occurrence.
+        String normalized = TOKEN.replace('-', ' ');
+        var echo = new Property("echo", normalized, Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(echo))));
+
+        assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, memory.getConversationProperties().get("echo").getValueString());
+        List<Property> extracted = memory.getCurrentStep().<List<Property>>getLatestData("properties:extracted").getResult();
+        assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, extracted.getFirst().getValueString());
+    }
+
+    @Test
+    @DisplayName("an extracted property shorter than the normalized-match minimum is left alone")
+    void shortExtractedValueIsNotScrubbed() throws Exception {
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        var shortValue = new Property("echo", "tok", Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(shortValue))));
+
+        assertEquals("tok", memory.getConversationProperties().get("echo").getValueString());
     }
 
     @Test
