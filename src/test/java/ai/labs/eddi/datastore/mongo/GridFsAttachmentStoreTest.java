@@ -304,12 +304,26 @@ class GridFsAttachmentStoreTest {
     }
 
     @Test
-    void delete_nullOwner_failsClosed() {
+    void delete_nullOwner_isAllowed() throws Exception {
+        // reads of an ownerless legacy blob are refused, but deleting discloses
+        // nothing and must stay possible, or erasure could never remove it
         ObjectId id = new ObjectId();
         whenFindFirst(mockFile(id, null, "text/plain", List.of(), "uuid-1"));
 
-        assertThrows(AttachmentStoreException.class, () -> sut.delete("uuid-1", "any-conv"));
-        verify(gridFSBucket, never()).delete(any(ObjectId.class));
+        assertTrue(sut.delete("uuid-1", "any-conv"));
+        verify(gridFSBucket).delete(id);
+    }
+
+    @Test
+    void delete_nullMetadata_isAllowed() throws Exception {
+        ObjectId id = new ObjectId();
+        GridFSFile f = mock(GridFSFile.class);
+        when(f.getObjectId()).thenReturn(id);
+        when(f.getMetadata()).thenReturn(null);
+        whenFindFirst(f);
+
+        assertTrue(sut.delete("any", "any-conv"));
+        verify(gridFSBucket).delete(id);
     }
 
     // ─── getMetadata() ──────────────────────────────────────────

@@ -162,7 +162,7 @@ The returned `storageRef` can then be used in subsequent conversation turns by s
 }
 ```
 
-The `storageRef` is a random UUID — unguessable, and only readable from the owning conversation or one it was explicitly granted to. A blob that records no owning conversation (one stored by a release that predates attachment ownership) can be neither read nor deleted through a conversation, on either backend: ownership that cannot be established is refused rather than assumed. The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
+The `storageRef` is a random UUID — unguessable, and only readable from the owning conversation or one it was explicitly granted to. A blob that records no owning conversation (one stored by a release that predates attachment ownership) cannot be read through any conversation, on either backend: ownership that cannot be established is refused rather than assumed. It can still be deleted by its `storageRef`, because deleting discloses nothing and refusing it would leave data no erasure could remove. Deleting a conversation, and a GDPR erasure, remove the blobs that record that conversation as their owner; an ownerless blob records none, so they do not reach it (as before). The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
 
 #### Content check
 

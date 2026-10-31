@@ -226,8 +226,9 @@ public class PostgresAttachmentStore implements IAttachmentStore {
                     owner = rs.getString("conversation_id");
                 }
             }
-            // Fails closed for a row that records no owner, as the read path does.
-            if (owner == null || !owner.equals(requestingConversationId)) {
+            // A row that records no owner stays deletable, though the read path refuses
+            // it: deleting discloses nothing, and refusing would strand personal data.
+            if (owner != null && !owner.equals(requestingConversationId)) {
                 throw new AttachmentAccessDeniedException(
                         "Delete denied: attachment belongs to '%s', requested from '%s'"
                                 .formatted(owner, requestingConversationId));

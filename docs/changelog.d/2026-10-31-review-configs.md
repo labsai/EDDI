@@ -30,7 +30,7 @@ Verified CodeRabbit findings and code-review leads (§4 Persistence, §5 dead co
 - `DescriptorStore.findByOriginId` returns every match instead of the first ten, which was a cap applied before the caller's workspace/EDIT filter and could make a merge import create a duplicate.
 - Sorted PostgreSQL `findResources` pages break ties on `id`, so offset paging over equal sort values neither repeats nor skips rows (the field index still supplies the leading key; the tie is ordered by an incremental sort). MongoDB deliberately keeps the single-key sort: its field indexes are single-field, and `{field: -1, _id: -1}` would turn every sorted page into a blocking in-memory sort over all matches.
 - `PostgresAttachmentStore.grantAccess` throws `AttachmentNotFoundException` for a missing blob, as the MongoDB store does.
-- Attachments that record no owner fail closed: the MongoDB store no longer lets any conversation read or delete them, and the PostgreSQL delete matches its read path. Docs: [Attachments guide](../attachments-guide.md).
+- Attachments that record no owner fail closed for **reads**: the MongoDB store no longer lets any conversation read them, matching PostgreSQL. **Deletes are unchanged** on both backends: an ownerless blob can still be deleted by its `storageRef`, because deleting discloses nothing and refusing it would strand personal data beyond erasure. `deleteByConversation` (conversation delete, purge, GDPR erasure) is untouched and matches on the owning conversation exactly as before. Docs: [Attachments guide](../attachments-guide.md).
 - `V6RenameMigration.saveDocument` addresses a string `_id` as stored (it queried `new ObjectId(string)`, which never matched) and counts a document only when the replace matched.
 - Dead code removed: `datastore/model/ResourceId` and its test; the unreachable null-weight check in `AgentGroupStore.validateVotePhases` (`VoteConfig` copies weights with `Map.copyOf`, which refuses null values).
 
@@ -40,7 +40,7 @@ Docs updated: [RAG](../rag.md), [Group conversations](../group-conversations.md)
 
 - **Patch protection by token, not by path rules.** Deciding which patch operations touch credentials by their pointers breaks on array shifts and nested copies; masking the document with per-request random tokens, and admitting a token at a new path only where the redaction rules still hide it, covers both and reuses the read redaction's own rules. Over-masking (no skip paths) only restricts copy/move for non-admins.
 - **Reverse-lookup clamp uses the descriptor's version** (descriptors share id and version with their resource) because the stores already hold the descriptor store; a store-level prefix query would need new queries on both backends.
-- **Ownerless attachments fail closed** even though that strands pre-ownership legacy blobs: the PostgreSQL store already refused them, and an owner nobody can establish is not an owner.
+- **Ownerless attachments fail closed for reads only**: the PostgreSQL store already refused those reads, and an owner nobody can establish is not an owner. Deletes stay allowed, since a delete that refuses data it cannot attribute would make it impossible to erase.
 
 ### Deferred
 

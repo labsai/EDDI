@@ -321,11 +321,31 @@ class PostgresAttachmentStoreTest {
         assertThrows(IAttachmentStore.AttachmentNotFoundException.class, () -> sut.grantAccess("missing-ref", "conv-2"));
     }
     @Test
-    void delete_rowWithNoOwner_failsClosed() throws Exception {
+    void delete_rowWithNoOwner_isAllowed() throws Exception {
+        // deleting discloses nothing: an ownerless legacy row must stay erasable
         when(resultSet.next()).thenReturn(true);
         when(resultSet.getString("conversation_id")).thenReturn(null);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        assertThrows(AttachmentStoreException.class, () -> sut.delete("legacy-ref", "conv-1"));
+        assertTrue(sut.delete("legacy-ref", "conv-1"));
+        verify(preparedStatement).executeUpdate();
+    }
+
+    @Test
+    void load_rowWithNoOwner_isRefused() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn(null);
+        when(resultSet.getBytes("data")).thenReturn("secret".getBytes());
+
+        assertThrows(IAttachmentStore.AttachmentAccessDeniedException.class, () -> sut.load("legacy-ref", "conv-1"));
+    }
+
+    @Test
+    void delete_ownedByAnotherConversation_isRefused() throws Exception {
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getString("conversation_id")).thenReturn("conv-owner");
+
+        assertThrows(IAttachmentStore.AttachmentAccessDeniedException.class, () -> sut.delete("ref", "conv-other"));
         verify(preparedStatement, never()).executeUpdate();
     }
 }

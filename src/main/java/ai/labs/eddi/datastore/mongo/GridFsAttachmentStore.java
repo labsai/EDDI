@@ -285,9 +285,10 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         }
         Document metadata = file.getMetadata();
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
-        // Fails closed: a blob that records no owner (a pre-ownership legacy blob) is
-        // nobody's to delete through a conversation, rather than everybody's.
-        if (owner == null || !owner.equals(requestingConversationId)) {
+        // A blob that records no owner (a pre-ownership legacy blob) stays deletable,
+        // unlike readable: deleting discloses nothing, and refusing it would leave
+        // personal data that no erasure path could remove.
+        if (owner != null && !owner.equals(requestingConversationId)) {
             throw new AttachmentAccessDeniedException(
                     "Delete denied: attachment belongs to '%s', requested from '%s'"
                             .formatted(owner, requestingConversationId));
