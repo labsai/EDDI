@@ -12,7 +12,9 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -157,24 +159,54 @@ class ConversationPurgeServiceTest {
     }
 
     @Test
-    @DisplayName("a failing checkpoint or tool-journal store does not stop the delete")
+    @DisplayName("a failing checkpoint store keeps the snapshot and descriptors, so a retry can finish the delete")
     @SuppressWarnings("unchecked")
-    void checkpointFailureDoesNotStopThePurge() throws Exception {
+    void checkpointFailureKeepsTheConversation() throws Exception {
         IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
         when(checkpoints.deleteByConversationId(CONVERSATION_ID)).thenThrow(new IllegalStateException("db down"));
         Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
         when(checkpointInstance.isResolvable()).thenReturn(true);
         when(checkpointInstance.get()).thenReturn(checkpoints);
         IHitlToolJournalStore journal = mock(IHitlToolJournalStore.class);
-        when(journal.deleteByConversationId(CONVERSATION_ID)).thenThrow(new IllegalStateException("db down"));
         Instance<IHitlToolJournalStore> journalInstance = mock(Instance.class);
         when(journalInstance.isResolvable()).thenReturn(true);
         when(journalInstance.get()).thenReturn(journal);
         var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
                 mock(Instance.class), checkpointInstance, journalInstance);
 
-        assertDoesNotThrow(() -> withCheckpoints.purge(CONVERSATION_ID));
-        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> withCheckpoints.purge(CONVERSATION_ID));
+
+        // The other dependents are still attempted...
+        verify(journal).deleteByConversationId(CONVERSATION_ID);
+        // ...but nothing that makes the conversation findable is removed.
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        verify(descriptorStore, never()).deleteAllDescriptor(anyString());
+    }
+
+    @Test
+    @DisplayName("an unavailable vault keeps a conversation that references auto-vaulted secrets")
+    @SuppressWarnings("unchecked")
+    void unavailableVaultKeepsAutoVaultedConversation() throws Exception {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setUserId("alice");
+        var vaulted = new Property("apiKey", "${eddivault:default/slot}", Property.Scope.conversation);
+        vaulted.setAutoVaulted(true);
+        snapshot.getConversationProperties().put("apiKey", vaulted);
+        when(memoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(snapshot);
+        Instance<AutoVaultedSecrets> vault = mock(Instance.class);
+        when(vault.isResolvable()).thenReturn(true);
+        when(vault.get()).thenReturn(mock(AutoVaultedSecrets.class));
+        var withVault = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, mock(Instance.class));
+        ISecretProvider provider = mock(ISecretProvider.class);
+        when(provider.isAvailable()).thenReturn(false);
+        Instance<ISecretProvider> providerInstance = mock(Instance.class);
+        when(providerInstance.isResolvable()).thenReturn(true);
+        when(providerInstance.get()).thenReturn(provider);
+        withVault.secretProvider = providerInstance;
+
+        assertFalse(withVault.deleteAutoVaultedSecrets(CONVERSATION_ID));
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> withVault.purge(CONVERSATION_ID));
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
     }
 
     @Test

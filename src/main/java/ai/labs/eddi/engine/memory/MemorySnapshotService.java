@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.engine.memory.model.MemoryCheckpoint;
 import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.engine.model.Context;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -13,8 +14,10 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -87,7 +90,7 @@ public class MemorySnapshotService {
     public MemoryCheckpoint createCheckpoint(IConversationMemory memory, String triggeredBy, String triggeredByClass, int maxCheckpoints) {
         String conversationId = memory.getConversationId();
         int stepIndex = memory.size() - 1; // 0-based step index
-        Map<String, Property> properties = extractProperties(memory);
+        Map<String, Property> properties = withoutSecretContextValues(memory, extractProperties(memory));
 
         MemoryCheckpoint checkpoint = MemoryCheckpoint.create(
                 conversationId, stepIndex, properties, triggeredBy, triggeredByClass);
@@ -178,6 +181,78 @@ public class MemorySnapshotService {
      */
     public long deleteCheckpoints(String conversationId) {
         return checkpointStore.deleteByConversationId(conversationId);
+    }
+
+    /**
+     * Context data keys of the current step: {@code context:<name>}.
+     */
+    private static final String CONTEXT_DATA_PREFIX = "context:";
+
+    /**
+     * Secret context values are searched for inside other values from this length
+     * on, and replaced where a value equals them from
+     * {@link SecretValueScrubber#MIN_SEARCHED_SECRET_INPUT_LENGTH} — the floors the
+     * turn-end scrub in {@code Conversation} applies, so a checkpoint keeps exactly
+     * what the stored turn will keep.
+     */
+    static final int MIN_SEARCHED_SECRET_CONTEXT_LENGTH = 8;
+
+    /**
+     * The properties with every value the client marked {@code "secret": true} in
+     * this turn's context removed. The turn scrubs them from its properties when it
+     * ends, but a checkpoint is written mid-turn — before every tool call — so a
+     * property instruction that copied a secret context value into an ordinary
+     * property persisted it in plaintext in {@code conversation_checkpoints}.
+     * Properties that carry none are passed through as they are.
+     */
+    static Map<String, Property> withoutSecretContextValues(IConversationMemory memory, Map<String, Property> properties) {
+        if (properties.isEmpty() || memory.getCurrentStep() == null) {
+            return properties;
+        }
+        Set<String> plaintexts = new LinkedHashSet<>();
+        Set<String> wholeStrings = new LinkedHashSet<>();
+        for (IData<?> datum : memory.getCurrentStep().getAllElements()) {
+            if (datum != null && datum.getKey() != null && datum.getKey().startsWith(CONTEXT_DATA_PREFIX)
+                    && datum.getResult() instanceof Context context && Boolean.TRUE.equals(context.getSecret())) {
+                SecretValueScrubber.collectPlaintexts(context.getValue(), plaintexts);
+                if (context.getValue() instanceof String text) {
+                    wholeStrings.add(text);
+                }
+            }
+        }
+        List<String> needles = plaintexts.stream().filter(value -> value.length() >= MIN_SEARCHED_SECRET_CONTEXT_LENGTH).toList();
+        List<String> exact = wholeStrings.stream()
+                .filter(value -> value.length() >= SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH
+                        && value.length() < MIN_SEARCHED_SECRET_CONTEXT_LENGTH)
+                .filter(value -> !"true".equalsIgnoreCase(value) && !"false".equalsIgnoreCase(value))
+                .toList();
+        if (needles.isEmpty() && exact.isEmpty()) {
+            return properties;
+        }
+        Map<String, Property> redacted = new LinkedHashMap<>();
+        properties.forEach((name, property) -> redacted.put(name, redact(property, needles, exact)));
+        return redacted;
+    }
+
+    private static Property redact(Property property, List<String> needles, List<String> exact) {
+        if (property == null) {
+            return null;
+        }
+        try {
+            Property cleaned = needles.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTyped(property, Property.class, needles, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            Property current = cleaned != null ? cleaned : property;
+            Property exactCleaned = exact.isEmpty()
+                    ? null
+                    : SecretValueScrubber.scrubTypedExact(current, Property.class, exact, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
+            return exactCleaned != null ? exactCleaned : current;
+        } catch (IllegalArgumentException e) {
+            // Could not be read back after scrubbing: checkpoint the placeholder rather
+            // than the value, which may be the secret.
+            LOGGER.warnf("Property '%s' could not be scrubbed for the checkpoint; checkpointing a placeholder", sanitize(property.getName()));
+            return new Property(property.getName(), MemoryKeys.SECRET_CONTEXT_PLACEHOLDER, property.getScope());
+        }
     }
 
     private Map<String, Property> extractProperties(IConversationMemory memory) {

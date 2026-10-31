@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -52,6 +53,14 @@ public class ConversationPurgeService {
     private final Instance<IAttachmentStore> attachmentStore;
     private final Instance<IConversationCheckpointStore> checkpointStore;
     private final Instance<IHitlToolJournalStore> toolJournalStore;
+
+    /**
+     * Consulted only to tell "no auto-vaulted slot to delete" from "the vault could
+     * not be asked". Field-injected so the constructors keep their signatures; null
+     * when the service is built by hand.
+     */
+    @Inject
+    Instance<ISecretProvider> secretProvider;
 
     @Inject
     public ConversationPurgeService(IConversationMemoryStore conversationMemoryStore, IConversationDescriptorStore conversationDescriptorStore,
@@ -114,8 +123,10 @@ public class ConversationPurgeService {
      * allowed.
      *
      * @throws ResourceStoreException
-     *             when the vault slots could not be deleted; nothing is deleted
-     *             then
+     *             when the vault slots, attachments, checkpoints or tool-journal
+     *             entries could not be deleted; the snapshot and descriptors are
+     *             then kept, so the conversation stays findable and a retry of the
+     *             same delete finishes the job
      */
     public void purge(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         checkNotNull(conversationId, "conversationId");
@@ -144,9 +155,16 @@ public class ConversationPurgeService {
             throw new ResourceStoreException("Could not delete the vault secrets of conversation " + conversationId
                     + "; the conversation was not deleted. Retry once the secrets vault is reachable.");
         }
-        deleteAttachments(conversationId);
-        deleteCheckpoints(conversationId);
-        deleteToolJournal(conversationId);
+        // Same rule for the dependent data: the snapshot and descriptors are what make
+        // the conversation findable - by its owner retrying the delete, by the
+        // retention
+        // sweep, by a user erasure. Deleting them after a failed child delete left the
+        // attachments, checkpoints (copies of the properties) or journal entries behind
+        // with nothing pointing at them, while the delete was reported as done.
+        if (!deleteDependentData(conversationId)) {
+            throw new ResourceStoreException("Could not delete every attachment, memory checkpoint and tool-journal entry of conversation "
+                    + conversationId + "; the conversation was not deleted. Retry the delete.");
+        }
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
@@ -176,7 +194,18 @@ public class ConversationPurgeService {
         }
         try {
             var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
-            int deleted = autoVaultedSecrets.get().deleteForConversation(ConversationMemory.everyPropertyVersion(memory), snapshot.getUserId());
+            var propertyVersions = ConversationMemory.everyPropertyVersion(memory);
+            if (vaultUnavailable()
+                    && propertyVersions.stream().anyMatch(property -> property != null && Boolean.TRUE.equals(property.getAutoVaulted()))) {
+                // The vault answers "nothing deleted" while it is unavailable, which reads
+                // like success - and deleting the conversation then would throw away the
+                // only references to slots that may well exist (a master key removed, a
+                // provider not up yet). Keep the conversation for a retry.
+                LOGGER.warnf("The secrets vault is unavailable; keeping conversation %s, which references auto-vaulted secrets, for a retry",
+                        sanitize(conversationId));
+                return false;
+            }
+            int deleted = autoVaultedSecrets.get().deleteForConversation(propertyVersions, snapshot.getUserId());
             if (deleted > 0) {
                 LOGGER.debugf("Deleted %d auto-vaulted secret(s) for conversation %s", deleted, sanitize(conversationId));
             }
@@ -189,11 +218,29 @@ public class ConversationPurgeService {
     }
 
     /**
-     * Deletes the conversation's memory checkpoints; best effort. The tool loop
-     * writes one before every tool call, each a full copy of the conversation's
-     * memory — left behind, a deleted conversation would live on in them.
+     * Deletes everything stored about the conversation outside its snapshot and
+     * descriptors - attachments, memory checkpoints, HITL tool-journal entries.
+     * Every part is attempted even when an earlier one fails.
+     *
+     * @return false when any part could not be deleted - the caller must then keep
+     *         the snapshot and descriptors, which a retry needs to find the
+     *         conversation again
      */
-    public void deleteCheckpoints(String conversationId) {
+    public boolean deleteDependentData(String conversationId) {
+        boolean attachments = deleteAttachments(conversationId);
+        boolean checkpoints = deleteCheckpoints(conversationId);
+        boolean journal = deleteToolJournal(conversationId);
+        return attachments && checkpoints && journal;
+    }
+
+    /**
+     * Deletes the conversation's memory checkpoints. The tool loop writes one
+     * before every tool call, each a full copy of the conversation's properties -
+     * left behind, a deleted conversation would live on in them.
+     *
+     * @return false when the store failed
+     */
+    public boolean deleteCheckpoints(String conversationId) {
         if (checkpointStore != null && checkpointStore.isResolvable()) {
             try {
                 long deleted = checkpointStore.get().deleteByConversationId(conversationId);
@@ -202,15 +249,19 @@ public class ConversationPurgeService {
                 }
             } catch (Exception e) {
                 LOGGER.warnf("Failed to delete memory checkpoints for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+                return false;
             }
         }
+        return true;
     }
 
     /**
      * Deletes the conversation's HITL tool-journal entries (the record of each
-     * gated tool call's execution); best effort, as GDPR erasure does.
+     * gated tool call's execution).
+     *
+     * @return false when the store failed
      */
-    public void deleteToolJournal(String conversationId) {
+    public boolean deleteToolJournal(String conversationId) {
         if (toolJournalStore != null && toolJournalStore.isResolvable()) {
             try {
                 long deleted = toolJournalStore.get().deleteByConversationId(conversationId);
@@ -220,12 +271,18 @@ public class ConversationPurgeService {
             } catch (Exception e) {
                 LOGGER.warnf("Failed to delete HITL tool-journal entries for conversation %s: %s", sanitize(conversationId),
                         sanitize(e.getMessage()));
+                return false;
             }
         }
+        return true;
     }
 
-    /** Deletes the conversation's stored attachments; best effort. */
-    public void deleteAttachments(String conversationId) {
+    /**
+     * Deletes the conversation's stored attachments.
+     *
+     * @return false when the store failed
+     */
+    public boolean deleteAttachments(String conversationId) {
         if (attachmentStore != null && attachmentStore.isResolvable()) {
             try {
                 long deleted = attachmentStore.get().deleteByConversation(conversationId);
@@ -234,7 +291,20 @@ public class ConversationPurgeService {
                 }
             } catch (Exception e) {
                 LOGGER.warnf("Failed to delete attachments for conversation %s: %s", sanitize(conversationId), sanitize(e.getMessage()));
+                return false;
             }
+        }
+        return true;
+    }
+
+    private boolean vaultUnavailable() {
+        if (secretProvider == null || !secretProvider.isResolvable()) {
+            return false;
+        }
+        try {
+            return !secretProvider.get().isAvailable();
+        } catch (RuntimeException e) {
+            return true;
         }
     }
 }
