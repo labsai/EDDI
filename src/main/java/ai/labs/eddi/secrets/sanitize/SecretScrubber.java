@@ -5,6 +5,7 @@
 package ai.labs.eddi.secrets.sanitize;
 
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -88,7 +89,7 @@ public class SecretScrubber {
      * strip the pointers out of a value so what remains can be judged on its own —
      * see {@link #scrubTextValue}.
      */
-    private static final Pattern VAULT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault):[^}]*\\}");
+    private static final ReferenceScanner VAULT_REFERENCE = ReferenceScanner.of("vault", "eddivault");
 
     /**
      * Splits a vault-reference remainder into candidate credential segments: any
@@ -226,6 +227,9 @@ public class SecretScrubber {
     /** Brackets a masked template expression in {@link #redactFreeText}. */
     private static final char MASK_OPEN = (char) 0xE000;
     private static final char MASK_CLOSE = (char) 0xE001;
+
+    /** One mask written by {@link #redactFreeText}, to be restored. */
+    private static final Pattern MASK = Pattern.compile(MASK_OPEN + "(\\d++)" + MASK_CLOSE);
 
     private final ObjectMapper objectMapper;
 
@@ -499,6 +503,8 @@ public class SecretScrubber {
                 continue;
             }
             String name = pair.substring(0, eq);
+            // Classified decoded as well: a server reads %61pi_key as api_key.
+            String decodedName = UriRedactor.decodeQueryComponent(name);
             String rawValue = pair.substring(eq + 1);
             String decoded;
             try {
@@ -508,7 +514,8 @@ public class SecretScrubber {
             }
             boolean pointer = WHOLE_POINTER.matcher(decoded).matches();
             boolean credential = !decoded.isEmpty() && !pointer
-                    && (isSecretFieldName(name, null) || UriRedactor.isSensitiveHeaderName(name) || redactFreeText(decoded) != null);
+                    && (isSecretFieldName(name, null) || isSecretFieldName(decodedName, null) || UriRedactor.isSensitiveHeaderName(decodedName)
+                            || redactFreeText(decoded) != null);
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return out.toString();
@@ -536,10 +543,17 @@ public class SecretScrubber {
         if (redacted.equals(input)) {
             return null;
         }
-        for (int i = 0; i < masked.size(); i++) {
-            redacted = redacted.replace(MASK_OPEN + Integer.toString(i) + MASK_CLOSE, masked.get(i));
+        // Every mask restored in ONE pass. A String.replace per expression was
+        // O(expressions x length), and a three-character {a} is an expression.
+        Matcher masks = MASK.matcher(redacted);
+        var restored = new StringBuilder(redacted.length());
+        while (masks.find()) {
+            int index = Integer.parseInt(masks.group(1));
+            String original = index < masked.size() ? masked.get(index) : masks.group();
+            masks.appendReplacement(restored, Matcher.quoteReplacement(original));
         }
-        return redacted;
+        masks.appendTail(restored);
+        return restored.toString();
     }
 
     /**
@@ -583,7 +597,9 @@ public class SecretScrubber {
                 // real credential — "Bearer sk-live-… ${vault:x}" — must NOT ride the
                 // exemption: the plaintext half would then be exported verbatim. Strip
                 // the references and judge only what is left.
-                String remainder = VAULT_REFERENCE.matcher(textValue).replaceAll("");
+                // The linear scanner, not a regex: replaceAll over [^}]* rescans to the
+                // end of the text at every unterminated opener.
+                String remainder = VAULT_REFERENCE.replaceAll(textValue, reference -> "");
                 // The non-reference remainder itself looks like a secret, so redact the
                 // whole value rather than leak the plaintext half. Losing the pointer
                 // costs nothing — this value could never be a valid single credential.

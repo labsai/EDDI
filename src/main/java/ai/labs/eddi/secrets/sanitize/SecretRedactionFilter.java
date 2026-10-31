@@ -165,8 +165,15 @@ public final class SecretRedactionFilter {
      * and replaced as a whole, while a bare reference still falls short of the
      * length floor that follows it and survives. Possessive on both counts, so a
      * reference is never given back to be re-read as value material.
+     * <p>
+     * The reference body is bounded. Unbounded, every {@code password:} followed by
+     * a reference opener with no closing brace scanned to the end of the text, and
+     * a run of them was quadratic: 200k characters took seconds. A real reference
+     * is far shorter than the bound; a longer one simply does not match the prefix,
+     * and the value class that follows stops at its brace, so it is left alone
+     * rather than misread.
      */
-    private static final String OPTIONAL_VAULT_REFERENCE = "(?:\\$\\{(?:vault|eddivault):[^}]*+\\})?+";
+    private static final String OPTIONAL_VAULT_REFERENCE = "(?:\\$\\{(?:vault|eddivault):[^}]{0,512}+\\})?+";
 
     /**
      * Rules applied after {@link #redactQuotedValues}, for values that are not a
@@ -638,7 +645,7 @@ public final class SecretRedactionFilter {
      * run: a 257-character password is still a password.
      */
     private static final Pattern CONNECTION_STRING_PASSWORD = Pattern.compile(
-            "(?i)(?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]++:");
+            "(?i)(?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]*+:");
 
     private static String redactConnectionStringPasswords(String text) {
         Matcher matcher = CONNECTION_STRING_PASSWORD.matcher(text);
@@ -677,10 +684,15 @@ public final class SecretRedactionFilter {
      * up to the path, whitespace, a quote, or a JSON delimiter — so a carrier's
      * closing quote, the next field, and a {@code ${vault:…}} reference (its brace)
      * all end the walk.
+     * <p>
+     * A comma does not: it is legal in a password, and a MongoDB host list is
+     * comma-separated ({@code u:p@h1,h2}). Stopping there truncated a password with
+     * a comma in it and left its tail legible. The next field of a JSON carrier is
+     * still beyond the closing quote, and of a log line beyond whitespace.
      */
     private static boolean isAuthorityChar(char c) {
-        return c != '/' && !Character.isWhitespace(c) && c != '"' && c != '\'' && c != '\\' && c != ',' && c != '{' && c != '}'
-                && c != '[' && c != ']';
+        return c != '/' && !Character.isWhitespace(c) && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}' && c != '['
+                && c != ']';
     }
 
     public static String redact(String message) {
@@ -755,10 +767,20 @@ public final class SecretRedactionFilter {
             while (nameEnd < length && isDirectiveNameChar(text.charAt(nameEnd))) {
                 nameEnd++;
             }
-            if (nameEnd == pos || nameEnd >= length || text.charAt(nameEnd) != '=') {
+            // Optional whitespace around '=' (RFC 7235 "BWS"): username = "x" is a
+            // directive, and stopping at the space left response= legible.
+            int equals = nameEnd;
+            while (equals < length && (text.charAt(equals) == ' ' || text.charAt(equals) == '\t')) {
+                equals++;
+            }
+            if (nameEnd == pos || equals >= length || text.charAt(equals) != '=') {
                 break;
             }
-            int valueEnd = endOfDirectiveValue(text, nameEnd + 1);
+            int valueStart = equals + 1;
+            while (valueStart < length && (text.charAt(valueStart) == ' ' || text.charAt(valueStart) == '\t')) {
+                valueStart++;
+            }
+            int valueEnd = endOfDirectiveValue(text, valueStart);
             if (valueEnd < 0) {
                 break;
             }
