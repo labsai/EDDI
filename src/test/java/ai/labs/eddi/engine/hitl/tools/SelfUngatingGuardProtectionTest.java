@@ -256,6 +256,14 @@ class SelfUngatingGuardProtectionTest {
         }
 
         @Test
+        @DisplayName("a version too long for an int is unverifiable (refused), not an exception")
+        void oversizedVersionIsUnverifiable() {
+            String huge = "https://eddi/llmstore/llms/" + UNRELATED + "?version=99999999999999999999";
+            Protection p = new Protection(AGENT, Set.of(WORKFLOW, LLM), false, null, (id, version) -> MAPPER.readTree(storedWithGate));
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON, SelfUngatingGuard.refusal("PUT", huge, "{\"tasks\":[]}", p));
+        }
+
+        @Test
         @DisplayName("a stored document without a gate may be replaced; an unreadable one may not")
         void noGateOrUnreadable() {
             assertNull(SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[]}", withStoredLlm("{\"tasks\":[{\"id\":\"t\"}]}")));

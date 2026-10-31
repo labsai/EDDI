@@ -248,7 +248,15 @@ public final class SelfUngatingGuard {
             return null;
         }
         Matcher version = VERSION_PARAM.matcher(decodedUri);
-        Integer versionNumber = version.find() ? Integer.valueOf(version.group(1)) : null;
+        Integer versionNumber;
+        try {
+            versionNumber = version.find() ? Integer.valueOf(version.group(1)) : null;
+        } catch (NumberFormatException e) {
+            // A digit run too long for an int names no version we could look up; the
+            // stored gate cannot be compared, so the write is refused like any other
+            // unverifiable one.
+            return UNVERIFIABLE_REASON;
+        }
         List<String> gatePaths = new ArrayList<>();
         try {
             collectKeyPaths(storedLlms.llmConfigOf(target.group(1), versionNumber), TOOL_APPROVALS_KEY, "", gatePaths);
