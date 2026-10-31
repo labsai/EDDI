@@ -124,7 +124,7 @@ class SecretPropertyVaultTest {
     @DisplayName("a credential inside a typed output item of the step is scrubbed too")
     void typedOutputItemIsScrubbed() throws Exception {
         var memory = conversation("alice");
-        String secret = "sk-live-abcdef1234567890";
+        String secret = "plain-test-credential-value";
         memory.getCurrentStep().addConversationOutputObject("output", new TextOutputItem("your key is " + secret));
 
         vault.vault(memory, "apiKey", secret);

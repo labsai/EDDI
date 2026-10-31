@@ -71,6 +71,7 @@ class ReservedPrincipalsTest {
             Map.entry("v4:", "ciphertext/HMAC format version"),
             Map.entry("v5:", "ciphertext/HMAC format version"),
             Map.entry("data:", "data URL scheme"),
+            Map.entry("str:", "Qute string namespace named in template-limit errors (BoundedFormat)"),
             // One entry for two uses: Map.ofEntries rejects a duplicate key, and two
             // features each adding their own "sha256:" broke class init.
             Map.entry("sha256:", "content hash prefix: brand image hash and ETag (BrandAssetValidator.hash); "
