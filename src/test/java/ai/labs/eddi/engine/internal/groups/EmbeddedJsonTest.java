@@ -52,6 +52,20 @@ class EmbeddedJsonTest {
     }
 
     @Test
+    void soleObjectWithAnyField_unrelatedObjectsAreNeitherTheValueNorARival() {
+        JsonNode node = EmbeddedJson.soleObjectWithAnyField(
+                "The format is {\"example\": true}. Mine: {\"vote\": \"A\"} (empty {} means abstain)", EmbeddedJsonTest::read,
+                "vote", "votes");
+        assertEquals("A", node.path("vote").asText());
+    }
+
+    @Test
+    void soleObjectWithAnyField_twoShapedObjectsStayAmbiguous() {
+        assertNull(EmbeddedJson.soleObjectWithAnyField("{\"vote\": \"A\"} or maybe {\"vote\": \"B\"}", EmbeddedJsonTest::read,
+                "vote"));
+    }
+
+    @Test
     void nothingParsable_returnsNull() {
         assertNull(EmbeddedJson.soleObject("no json { here", EmbeddedJsonTest::read));
         assertNull(EmbeddedJson.soleObject(null, EmbeddedJsonTest::read));

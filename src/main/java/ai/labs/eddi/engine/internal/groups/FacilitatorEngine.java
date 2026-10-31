@@ -596,7 +596,7 @@ public class FacilitatorEngine {
         }
         JsonNode node = readJson(reply);
         if (node == null) {
-            node = EmbeddedJson.soleObject(reply, FacilitatorEngine::readJson);
+            node = EmbeddedJson.soleObjectWithAnyField(reply, FacilitatorEngine::readJson, "move");
         }
         if (node == null || !node.isObject() || !node.path("move").isTextual()) {
             return null;

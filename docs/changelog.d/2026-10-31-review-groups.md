@@ -37,7 +37,11 @@ Fixes from the external code review and the CodeRabbit pass against `01c3250`, g
 - **One balanced JSON extractor for every group engine** (`EmbeddedJson`): facilitator, retro, vote, negotiation,
   bid, convergence and debate parsers, and the VERIFY phase. The greedy first-`{`-to-last-`}` slice dropped a
   ballot followed by a brace in prose; the first-`[`-to-last-`]` slice made VERIFY fail open on any bracketed
-  aside. A reply carrying two acceptable values is still ambiguous and rejected, as before. The documented
+  aside. Each engine accepts only an object carrying a key it reads (`vote`/`votes`/`statement`, `bids`, `move`,
+  `lessons`, `accept`/`proposal`/`concessions`, `passed`, `agreementScore`, `winner`), so an unrelated object in
+  the prose (an example, a quoted config, `{}`) is neither taken for the reply nor a rival to it. A reply carrying
+  two *well-shaped* values is ambiguous and rejected — unchanged for the greedy engines (two objects never parsed
+  as one), but a behaviour change for bids and bargain moves, which used to take the first. The documented
   fail-open on a truly unparseable verdict is unchanged.
 - **`groupTranscript` is scoped** by the phase's `contextScope`, like the rendered prompt, and a member
   conversation's startup step now receives the group's dynamic-agent policy instead of the permissive standalone

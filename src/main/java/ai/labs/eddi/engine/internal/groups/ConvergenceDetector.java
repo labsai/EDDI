@@ -135,7 +135,7 @@ public final class ConvergenceDetector {
         }
         JsonNode node = tryReadJson(judgeOutput);
         if (node == null) {
-            node = EmbeddedJson.soleObject(judgeOutput, ConvergenceDetector::tryReadJson);
+            node = EmbeddedJson.soleObjectWithAnyField(judgeOutput, ConvergenceDetector::tryReadJson, "passed");
         }
         if (node == null) {
             return ConvergenceVerdict.notConverged("Verdict judge output was not parseable");
@@ -251,7 +251,7 @@ public final class ConvergenceDetector {
 
         JsonNode node = tryReadJson(judgeOutput);
         if (node == null) {
-            node = EmbeddedJson.soleObject(judgeOutput, ConvergenceDetector::tryReadJson);
+            node = EmbeddedJson.soleObjectWithAnyField(judgeOutput, ConvergenceDetector::tryReadJson, "agreementScore");
         }
         if (node == null) {
             LOGGER.debugf("Convergence judge output was not parseable as JSON — treating as not converged");

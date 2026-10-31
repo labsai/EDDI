@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 import java.util.function.Function;
 
 /**
@@ -52,6 +54,31 @@ public final class EmbeddedJson {
      */
     public static <T> T soleObject(String text, Function<String, T> parser) {
         return soleValue(text, '{', '}', parser);
+    }
+
+    /**
+     * As {@link #soleObject}, accepting only an object that carries at least one of
+     * {@code fields} - the keys the caller actually reads. An unrelated object in
+     * the prose (an example, a quoted config, an empty {@code {}}) is then neither
+     * mistaken for the reply nor counted as a rival that makes the real one
+     * ambiguous.
+     *
+     * @param reader
+     *            parses a span, returning {@code null} on failure (must not throw)
+     */
+    public static JsonNode soleObjectWithAnyField(String text, Function<String, JsonNode> reader, String... fields) {
+        return soleObject(text, span -> {
+            JsonNode node = reader.apply(span);
+            if (node == null || !node.isObject()) {
+                return null;
+            }
+            for (String field : fields) {
+                if (node.has(field)) {
+                    return node;
+                }
+            }
+            return null;
+        });
     }
 
     /** As {@link #soleObject}, for a {@code [...]} array. */

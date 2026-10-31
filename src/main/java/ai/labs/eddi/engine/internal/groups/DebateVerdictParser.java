@@ -86,7 +86,7 @@ public final class DebateVerdictParser {
 
         JsonNode node = tryReadJson(judgmentOutput);
         if (node == null) {
-            node = EmbeddedJson.soleObject(judgmentOutput, DebateVerdictParser::tryReadJson);
+            node = EmbeddedJson.soleObjectWithAnyField(judgmentOutput, DebateVerdictParser::tryReadJson, "winner");
         }
         if (node == null) {
             LOGGER.debug("Debate judgment was not parseable as JSON — recording a prose-only conclusion");

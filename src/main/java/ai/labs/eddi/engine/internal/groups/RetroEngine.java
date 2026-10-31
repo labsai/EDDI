@@ -108,7 +108,7 @@ public final class RetroEngine {
         }
         JsonNode node = readJson(content);
         if (node == null) {
-            node = EmbeddedJson.soleObject(content, RetroEngine::readJson);
+            node = EmbeddedJson.soleObjectWithAnyField(content, RetroEngine::readJson, "lessons");
         }
         if (node == null || !node.path("lessons").isArray()) {
             return List.of();

@@ -146,7 +146,7 @@ public final class VoteTallyEngine {
 
         JsonNode node = readJson(content);
         if (node == null) {
-            node = EmbeddedJson.soleObject(content, VoteTallyEngine::readJson);
+            node = EmbeddedJson.soleObjectWithAnyField(content, VoteTallyEngine::readJson, "vote", "votes", "statement");
         }
         if (node != null && node.isObject()) {
             List<String> votes = new ArrayList<>();

@@ -158,7 +158,7 @@ public final class NegotiationEngine {
     static BargainMove parseBargain(String content, int maxConcessionsPerMove) {
         JsonNode node = readJson(content);
         if (node == null) {
-            node = EmbeddedJson.soleObject(content, NegotiationEngine::readJson);
+            node = EmbeddedJson.soleObjectWithAnyField(content, NegotiationEngine::readJson, "accept", "proposal", "concessions");
         }
         if (node == null || !node.isObject()) {
             return null;

@@ -122,7 +122,7 @@ public final class TaskBidEngine {
         }
         JsonNode node = readJson(content);
         if (node == null) {
-            node = EmbeddedJson.soleObject(content, TaskBidEngine::readJson);
+            node = EmbeddedJson.soleObjectWithAnyField(content, TaskBidEngine::readJson, "bids");
         }
         if (node == null || !node.path("bids").isArray()) {
             return List.of();

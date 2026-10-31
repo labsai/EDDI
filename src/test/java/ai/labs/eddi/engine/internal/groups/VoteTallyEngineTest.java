@@ -86,6 +86,18 @@ class VoteTallyEngineTest {
     }
 
     @Test
+    @DisplayName("an unrelated JSON object beside the ballot neither replaces it nor makes it ambiguous")
+    void parse_embeddedJson_unrelatedObjectIsIgnored() {
+        var b = VoteTallyEngine.parseBallot(
+                ballot("a1", "{\"vote\": \"Adopt PostgreSQL\", \"statement\": \"over Stay on MongoDB\"} "
+                        + "Config I assumed: {\"replicas\": 3}"),
+                OPTIONS, VoteMethod.MAJORITY);
+
+        assertNotNull(b);
+        assertEquals(List.of("Adopt PostgreSQL"), b.votes());
+    }
+
+    @Test
     @DisplayName("APPROVAL ballots may approve several options; duplicates collapse")
     void parse_approval() {
         var b = VoteTallyEngine.parseBallot(
