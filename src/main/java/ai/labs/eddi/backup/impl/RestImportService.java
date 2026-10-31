@@ -1887,7 +1887,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // Visible for testing
     /** Assigns source ids and validates, exactly as the REST create does. */
     void prepareImportedRag(RagConfiguration config) {
-        if (config == null || config.getSources() == null) {
+        if (config == null) {
+            return;
+        }
+        clampImportedChunking(config);
+        if (config.getSources() == null) {
             return;
         }
         for (var source : config.getSources()) {
@@ -1905,6 +1909,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // it either cannot be armed at all or is armed and never matches, while
         // every screen shows the source as scheduled.
         RagIngestionSchedules.requireValidCrons(config);
+    }
+
+    /**
+     * Chunk settings an archive from an earlier release may carry out of the range
+     * {@link RagConfiguration#validate()} now enforces are brought into it — the
+     * values its ingestion already ran with — rather than failing the import: the
+     * archive cannot be edited first.
+     */
+    private static void clampImportedChunking(RagConfiguration config) {
+        Integer size = config.getChunkSize();
+        Integer overlap = config.getChunkOverlap();
+        if (config.clampChunkSettings()) {
+            LOGGER.warnf("Imported knowledge base '%s': chunkSize %s / chunkOverlap %s are outside the accepted range "
+                    + "and were adjusted to %d / %d", LogSanitizer.sanitize(config.getName()), size, overlap,
+                    config.chunkSizeOrDefault(), config.chunkOverlapOrDefault());
+        }
     }
 
     private void syncImportedRagSchedules(URI created, RagConfiguration config) {
@@ -1930,6 +1950,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // refused switch back to "name"). Absent, the update keeps the stored value.
         if (config != null) {
             config.setStoreNamespace(null);
+            // Before the REST update, whose validate() would refuse them.
+            clampImportedChunking(config);
         }
         URI updated = updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
         if (updated != null) {

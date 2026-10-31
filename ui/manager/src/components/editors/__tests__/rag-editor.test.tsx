@@ -246,6 +246,18 @@ describe("RagEditor", () => {
     expect(screen.getByTestId("chunk-overlap")).toHaveValue("64");
   });
 
+  it("pulls the overlap down to half a smaller chunk size, which the backend requires", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} />
+    );
+    await openSection(user, "Document Chunking");
+    fireEvent.change(screen.getByTestId("chunk-size"), { target: { value: "64" } });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ chunkSize: 64, chunkOverlap: 32 })
+    );
+  });
+
   it("shows chunk preview visualization after opening chunking section", async () => {
     const user = userEvent.setup();
     renderWithProviders(

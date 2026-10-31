@@ -422,6 +422,27 @@ public class RagConfiguration {
         return Math.clamp(overlap, 0, chunkSizeOrDefault() / 2);
     }
 
+    /**
+     * Brings chunk settings written before {@link #validate()} bounded them into
+     * range, as ingestion already reads them. For an archive being imported: its
+     * owner cannot edit it first, and refusing it would make an export from an
+     * earlier release impossible to import. An unset value stays unset.
+     *
+     * @return whether either setting changed
+     */
+    public boolean clampChunkSettings() {
+        boolean changed = false;
+        if (chunkSize != null && chunkSize != chunkSizeOrDefault()) {
+            chunkSize = chunkSizeOrDefault();
+            changed = true;
+        }
+        if (chunkOverlap != null && chunkOverlap != chunkOverlapOrDefault()) {
+            chunkOverlap = chunkOverlapOrDefault();
+            changed = true;
+        }
+        return changed;
+    }
+
     public void setChunkSize(Integer chunkSize) {
         this.chunkSize = chunkSize;
     }
