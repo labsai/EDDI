@@ -170,14 +170,48 @@ public class ConfigJsonPatcher {
         }
 
         String json = patched.toString();
+        List<String> shifted = new ArrayList<>();
         if (mask != null) {
-            json = mask.restore(json);
+            json = mask.restore(json, shifted);
         }
+        T result;
         try {
-            return parser.parse(json, type);
+            result = parser.parse(json, type);
         } catch (IOException e) {
             throw badRequest("The patched document is not a valid " + type.getSimpleName() + ": " + e.getMessage());
         }
+        if (!shifted.isEmpty()) {
+            requireStillRedacted(result, type, shifted);
+        }
+        return result;
+    }
+
+    /**
+     * A credential whose token ended up at another path — most often because an
+     * {@code add} or {@code remove} earlier in an array shifted every index after
+     * it — is kept only where the redacted read still hides it. Anywhere else it
+     * would be readable by the very caller it was hidden from, so the patch is
+     * refused. Fails closed when the path no longer resolves after parsing.
+     */
+    private <T> void requireStillRedacted(T result, Class<T> type, List<String> pointers) {
+        JsonNode plain = mapper.valueToTree(result);
+        JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(result, type));
+        List<String> exposed = new ArrayList<>();
+        for (String pointer : pointers) {
+            JsonNode value = plain.at(pointer);
+            if (value.isMissingNode() || value.equals(redacted.at(pointer))) {
+                exposed.add(pointer);
+            }
+        }
+        if (!exposed.isEmpty()) {
+            throw badRequest(relocationMessage(exposed));
+        }
+    }
+
+    private static String relocationMessage(List<String> pointers) {
+        return "The patch copies or moves a stored credential (to " + String.join(", ", pointers)
+                + "). Credentials are redacted for you, so a patch may leave them in place, replace or remove them, "
+                + "but not relocate them into a field you can read.";
     }
 
     /**
@@ -325,10 +359,13 @@ public class ConfigJsonPatcher {
         }
 
         /**
-         * Puts each credential back where its token still sits at the original path,
-         * and refuses a patch that copied or moved one anywhere else.
+         * Puts each credential back wherever its token is a whole value. A token found
+         * at a path other than the one it came from is reported in {@code shifted}, for
+         * the caller to admit only where the result still redacts it; a token embedded
+         * in a larger string is refused outright, as no redaction rule matches it
+         * there.
          */
-        String restore(String patchedJson) {
+        String restore(String patchedJson, List<String> shifted) {
             JsonNode tree;
             try {
                 tree = PLAIN.readTree(patchedJson);
@@ -336,11 +373,9 @@ public class ConfigJsonPatcher {
                 throw new IllegalStateException("The patched document could not be re-read", e);
             }
             List<String> relocated = new ArrayList<>();
-            restore(tree, "", relocated);
+            restore(tree, "", relocated, shifted);
             if (!relocated.isEmpty()) {
-                throw badRequest("The patch copies or moves a stored credential (to " + String.join(", ", relocated)
-                        + "). Credentials are redacted for you, so a patch may leave them in place, replace or remove them, "
-                        + "but not relocate them.");
+                throw badRequest(relocationMessage(relocated));
             }
             try {
                 return PLAIN.writeValueAsString(tree);
@@ -349,37 +384,41 @@ public class ConfigJsonPatcher {
             }
         }
 
-        private void restore(JsonNode node, String pointer, List<String> relocated) {
+        private void restore(JsonNode node, String pointer, List<String> relocated, List<String> shifted) {
             if (node instanceof ObjectNode object) {
                 for (Map.Entry<String, JsonNode> field : object.properties()) {
                     String childPointer = pointer + "/" + escape(field.getKey());
-                    JsonNode replacement = restoredLeaf(field.getValue(), childPointer, relocated);
+                    JsonNode replacement = restoredLeaf(field.getValue(), childPointer, relocated, shifted);
                     if (replacement != null) {
                         field.setValue(replacement);
                     } else {
-                        restore(field.getValue(), childPointer, relocated);
+                        restore(field.getValue(), childPointer, relocated, shifted);
                     }
                 }
             } else if (node instanceof ArrayNode array) {
                 for (int i = 0; i < array.size(); i++) {
                     String childPointer = pointer + "/" + i;
-                    JsonNode replacement = restoredLeaf(array.get(i), childPointer, relocated);
+                    JsonNode replacement = restoredLeaf(array.get(i), childPointer, relocated, shifted);
                     if (replacement != null) {
                         array.set(i, replacement);
                     } else {
-                        restore(array.get(i), childPointer, relocated);
+                        restore(array.get(i), childPointer, relocated, shifted);
                     }
                 }
             }
         }
 
-        private JsonNode restoredLeaf(JsonNode value, String pointer, List<String> relocated) {
+        private JsonNode restoredLeaf(JsonNode value, String pointer, List<String> relocated, List<String> shifted) {
             if (!value.isTextual()) {
                 return null;
             }
             String text = value.asText();
             Hidden original = hidden.get(text);
-            if (original != null && original.pointer().equals(pointer)) {
+            if (original != null) {
+                if (!original.pointer().equals(pointer)) {
+                    relocated.add(pointer);
+                    return null;
+                }
                 return original.value();
             }
             for (String token : hidden.keySet()) {

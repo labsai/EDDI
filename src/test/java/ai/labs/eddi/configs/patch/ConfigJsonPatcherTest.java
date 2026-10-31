@@ -258,6 +258,19 @@ class ConfigJsonPatcherTest {
     }
 
     @Test
+    @DisplayName("removing an earlier array element shifts a protected credential's index without refusing the patch")
+    void protectedCredentialSurvivesIndexShift() throws Exception {
+        var plaintext = mapper.readValue("""
+                {"tasks":[{"actions":["a"],"type":"openai","description":"first","parameters":{"modelName":"gpt-a"}},
+                 {"actions":["b"],"type":"openai","description":"second",
+                  "parameters":{"apiKey":"sk-live-0123456789abcdefghijklmnop","modelName":"gpt-b"}}]}
+                """, LlmConfiguration.class);
+        var patched = patcher.apply(plaintext, "[{\"op\":\"remove\",\"path\":\"/tasks/0\"}]", LlmConfiguration.class, true);
+        assertEquals(1, patched.tasks().size());
+        assertEquals("sk-live-0123456789abcdefghijklmnop", patched.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
     @DisplayName("an administrator may still copy a credential: nothing is hidden from them")
     void adminPatchIsUnrestricted() throws Exception {
         var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
