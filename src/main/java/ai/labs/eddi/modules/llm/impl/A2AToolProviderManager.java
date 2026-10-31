@@ -334,7 +334,8 @@ public class A2AToolProviderManager {
         if (skills == null || skills.isEmpty()) {
             // Single default tool for the entire agent
             String toolName = sanitizeToolName(agentName);
-            if (claimedByAnotherPeer(toolName, executors, agentName)) {
+            if (claimedByAnotherPeer(toolName, executors)) {
+                warnClaimed(agentName, 1);
                 return;
             }
             String desc = (String) agentCard.getOrDefault("description", "Remote A2A agent: " + agentName);
@@ -355,6 +356,7 @@ public class A2AToolProviderManager {
         // Create a tool for each skill
         Set<String> seenToolNames = new HashSet<>();
         int duplicates = 0;
+        int claimed = 0;
         int admitted = 0;
         for (Map<String, Object> skill : skills) {
             if (admitted >= MAX_SKILLS_PER_AGENT) {
@@ -384,7 +386,8 @@ public class A2AToolProviderManager {
                 duplicates++;
                 continue;
             }
-            if (claimedByAnotherPeer(toolName, executors, agentName)) {
+            if (claimedByAnotherPeer(toolName, executors)) {
+                claimed++;
                 continue;
             }
 
@@ -409,6 +412,9 @@ public class A2AToolProviderManager {
             LOGGER.warnf("A2A agent '%s' advertised %d duplicate skill(s) — kept the first of each, dropped the rest",
                     sanitizeForLog(agentName), duplicates);
         }
+        if (claimed > 0) {
+            warnClaimed(agentName, claimed);
+        }
     }
 
     /**
@@ -420,13 +426,18 @@ public class A2AToolProviderManager {
      * call going to a peer other than the one described. The first registration
      * wins; set a distinct {@code name} on the agent config to keep both.
      */
-    private static boolean claimedByAnotherPeer(String toolName, Map<String, ToolExecutor> executors, String agentName) {
-        if (!executors.containsKey(toolName)) {
-            return false;
-        }
-        LOGGER.warnf("A2A agent '%s' would register tool '%s', which another A2A agent already registered — skipped; "
-                + "give the agents distinct names in the configuration", sanitizeForLog(agentName), sanitizeForLog(toolName));
-        return true;
+    private static boolean claimedByAnotherPeer(String toolName, Map<String, ToolExecutor> executors) {
+        return executors.containsKey(toolName);
+    }
+
+    /**
+     * One warning per card for its tool names another peer already claimed —
+     * counted, not listed, like duplicate skills, so a remote card cannot turn into
+     * an unbounded volume of log lines.
+     */
+    private static void warnClaimed(String agentName, int claimed) {
+        LOGGER.warnf("A2A agent '%s' would register %d tool name(s) another A2A agent already registered — skipped; "
+                + "give the agents distinct names in the configuration", sanitizeForLog(agentName), claimed);
     }
 
     /** {@code part}, cut to {@link #MAX_NAME_PART_CHARS}; null stays null. */
