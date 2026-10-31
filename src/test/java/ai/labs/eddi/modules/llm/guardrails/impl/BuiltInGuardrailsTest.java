@@ -87,7 +87,7 @@ class BuiltInGuardrailsTest {
         @ParameterizedTest
         @DisplayName("a card followed by its CVV or expiry is still redacted — the greedy run fails Luhn as a whole")
         @ValueSource(strings = {"card 4111 1111 1111 1111 123", "card 4111111111111111 123", "card 4111111111111111 12 27",
-                "card 4111-1111-1111-1111 12/27", "ref 12 4111 1111 1111 1111"})
+                "card 4111-1111-1111-1111 12/27", "ref 12 4111 1111 1111 1111", "ref 1234 4111 1111 1111 1111"})
         void creditCard_followedByCvvOrExpiry(String text) {
             var v = guardrail.evaluate(text, context(GuardrailPhase.INPUT, Map.of("patterns", "creditcard")));
             assertEquals(GuardrailVerdict.Kind.REWRITE, v.kind(), text);

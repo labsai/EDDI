@@ -120,13 +120,23 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
         Matcher matcher = KINDS.get(kind).matcher(text);
         StringBuilder out = new StringBuilder();
         int copied = 0;
+        int from = 0;
         boolean any = false;
-        while (matcher.find()) {
+        while (from <= text.length() && matcher.find(from)) {
             int start = matcher.start();
             int end = matcher.end();
+            from = end;
             if ("creditcard".equals(kind)) {
                 int[] card = cardWithin(text, start, end);
                 if (card == null) {
+                    // The greedy run may have started on digit groups in front of the
+                    // card ("ref 1234 4111 1111 1111 1111" is 20 digits, so the run
+                    // stops short of the card's last group). Look again from the next
+                    // group; each retry starts further right, so the scan stays linear.
+                    int separator = firstSeparator(text, start, end);
+                    if (separator >= 0) {
+                        from = separator + 1;
+                    }
                     continue;
                 }
                 start = card[0];
@@ -189,6 +199,16 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
             }
         }
         return best;
+    }
+
+    private static int firstSeparator(String text, int start, int end) {
+        for (int i = start; i < end; i++) {
+            char c = text.charAt(i);
+            if (c == ' ' || c == '-') {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static int countDigits(String text, int start, int end) {
