@@ -68,10 +68,18 @@ public interface IConversationService {
 
     /**
      * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
-     * READY. Updates both persistent storage and the in-memory cache atomically.
-     * Admin-only operation.
+     * READY — only while it is still in {@code expectedState}, as one
+     * compare-and-set, and the cache follows the store. Admin-only operation.
+     * <p>
+     * The caller reads the state to decide whether a reset is allowed; without the
+     * compare-and-set a turn that started, or an end that landed, between that read
+     * and the write was overwritten with READY.
+     *
+     * @return {@code false} when the conversation had left {@code expectedState} —
+     *         nothing was changed
      */
-    void resetConversationState(String conversationId, ConversationState targetState);
+    boolean resetConversationState(String conversationId, ConversationState expectedState, ConversationState targetState)
+            throws ResourceStoreException;
 
     /**
      * End a conversation with actor attribution. When the conversation was
@@ -409,6 +417,19 @@ public interface IConversationService {
      *         exist
      */
     CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException;
+
+    /**
+     * {@link #cancelPausedConversation(String, String)} bound to one pause: applies
+     * only while the conversation is still paused on the pause identified by
+     * {@code pauseId} (as {@code HitlDecision#pauseIdOf} renders it). For cancels
+     * decided for a specific pause and applied later — an ABORT timeout, the
+     * pending-approval retention sweep — so a late one can neither stop a resumed
+     * turn nor abort a newer pause. {@code null} binds to no pause.
+     *
+     * @return {@link CancelOutcome#NOTHING_TO_CANCEL} also when the conversation is
+     *         paused on a different pause
+     */
+    CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy, String pauseId) throws ResourceStoreException;
 
     /**
      * Resume a paused (HITL) conversation with the given human decision.

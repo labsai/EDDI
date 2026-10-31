@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.ConnectionWaitTimeouts;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -846,7 +847,15 @@ public class RestAgentEngine implements IRestAgentEngine {
                 // and re-redacts the served fields through the CURRENT filter, so a
                 // pause stored before a filter improvement stops leaking.
                 // See ConversationMemoryUtilities#sanitizePendingToolCallsForApprover.
-                return Response.ok(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot)).build();
+                var sanitized = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot);
+                // The compiled system prompt is the agent's configuration: an owner or
+                // approver without VIEW on the agent gets the snapshot without it, as on
+                // the raw conversation read.
+                if (resourceAccessGuard != null
+                        && (snapshot.getAgentId() == null || !resourceAccessGuard.hasAccess(snapshot.getAgentId(), AccessLevel.VIEW))) {
+                    ConversationMemoryUtilities.stripAuditData(sanitized);
+                }
+                return Response.ok(sanitized).build();
             }
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
@@ -1107,7 +1116,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             if (currentState == ConversationState.READY) {
                 return Response.ok(Map.of("message", "Conversation already in READY state")).build();
             }
-            conversationService.resetConversationState(conversationId, ConversationState.READY);
+            if (!conversationService.resetConversationState(conversationId, currentState, ConversationState.READY)) {
+                // The state moved on between the read above and the reset — a turn
+                // started, the conversation was ended or resumed. Nothing was written.
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "Conversation state changed while resetting it — read it again and retry"))
+                        .build();
+            }
             LOGGER.infof("Admin reset conversation %s from %s to READY", conversationId, currentState);
             return Response.ok(Map.of("message", "State reset from " + currentState + " to READY")).build();
         } catch (ResourceStoreException e) {

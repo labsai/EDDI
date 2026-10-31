@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -34,6 +35,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.security.Principal;
 import java.time.Instant;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
@@ -428,6 +430,31 @@ class RestAgentEngineHitlTest {
 
             assertEquals(200, response.getStatus());
             assertSame(snapshot, response.getEntity());
+        }
+
+        @Test
+        @DisplayName("detail=full withholds the compiled system prompt from a caller without VIEW on the agent")
+        void fullWithholdsCompiledPromptWithoutView() throws Exception {
+            var snapshot = snapshotInState(ConversationState.AWAITING_HUMAN);
+            snapshot.setAgentId("agent-1");
+            var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+            var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot("audit:compiled_prompt", "SYSTEM PROMPT", null,
+                    new Date(), null, false));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+            var guard = mock(ResourceAccessGuard.class);
+            doReturn(false).when(guard).hasAccess("agent-1", AccessLevel.VIEW);
+            var engine = new RestAgentEngine(conversationService, conversationMemoryStore, identity, ownershipValidator,
+                    new ConversationAccessGuard(identity, ownershipValidator, conversationDescriptorStore), guard,
+                    new HitlAccessGuard(identity, ownershipValidator, conversationDescriptorStore, conversationService,
+                            mock(IGroupConversationService.class)),
+                    hitlToolJournalStore, mock(AgentDisplayNameResolver.class), AGENT_TIMEOUT);
+
+            Response response = engine.getApprovalStatus(CONVERSATION_ID, "full");
+
+            assertEquals(200, response.getStatus());
+            assertTrue(workflow.getLifecycleTasks().isEmpty(), "audit:compiled_prompt must not be served");
         }
 
         @Test

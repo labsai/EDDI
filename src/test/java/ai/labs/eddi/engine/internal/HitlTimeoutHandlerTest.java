@@ -155,18 +155,30 @@ class HitlTimeoutHandlerTest {
     class Abort {
 
         @Test
-        @DisplayName("regular surface → calls cancelConversation with CANCEL_GRACEFUL")
-        void regularSurface_callsCancelConversation() throws Exception {
-            var metadata = Map.<String, Object>of(
-                    "policy", "ABORT",
-                    "surface", "regular",
-                    "conversationId", "conv-123");
+        @DisplayName("regular surface → cancels only the pause the timeout was armed for, never a running turn")
+        void regularSurface_cancelsItsPauseOnly() throws Exception {
+            var metadata = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_REGULAR, "conv-123", "1700000000000");
+            when(conversationService.cancelPausedConversation("conv-123", "system:timeout", "1700000000000"))
+                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
 
             handler.handleTimeout(metadata);
 
-            // system-attributed so the cancellation audit entry names the actor
-            verify(conversationService).cancelConversation("conv-123", ControlSignal.CANCEL_GRACEFUL, "system:timeout");
+            // system-attributed so the cancellation audit entry names the actor; the
+            // paused-only cancel bound to the pause id, so a fire claimed just before a
+            // resume cannot stop the resumed turn or abort a newer pause
+            verify(conversationService).cancelPausedConversation("conv-123", "system:timeout", "1700000000000");
+            verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
             verifyNoInteractions(groupConversationService);
+        }
+
+        @Test
+        @DisplayName("regular surface → a late fire that finds its pause gone completes without retrying")
+        void regularSurface_lateFireCompletes() throws Exception {
+            var metadata = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_REGULAR, "conv-123", "1700000000000");
+            when(conversationService.cancelPausedConversation("conv-123", "system:timeout", "1700000000000"))
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(metadata));
         }
 
         @Test
@@ -364,7 +376,7 @@ class HitlTimeoutHandlerTest {
         @DisplayName("ABORT whose cancel fails while still paused is retried, not dropped")
         void abortRegular_isRetried() throws Exception {
             doThrow(new IllegalStateException("store blip"))
-                    .when(conversationService).cancelConversation(eq("conv-1"), any(), anyString());
+                    .when(conversationService).cancelPausedConversation(eq("conv-1"), anyString(), any());
             when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
             assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("ABORT")));
 

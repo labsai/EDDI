@@ -275,7 +275,7 @@ class ConversationServiceProcessingGaugeTest {
     void genuineInterruptedExceptionIsRecordedAsAnError() throws Exception {
         runTurnThenFailWith(new InterruptedException("pipeline thread interrupted"));
 
-        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore).compareAndSetState(CONVERSATION_ID, ConversationState.READY, ConversationState.ERROR);
     }
 
     /**

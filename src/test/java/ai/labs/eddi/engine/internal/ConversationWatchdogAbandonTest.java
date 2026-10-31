@@ -209,7 +209,10 @@ class ConversationWatchdogAbandonTest {
         // Runs the turn: the coordinator thread blocks until the watchdog expires.
         captor.getValue().call();
         assertTrue(firstTaskRunning.await(10, TimeUnit.SECONDS), "the pipeline should have started");
-        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+        // By compare-and-set from the state it read, never a blind write (it must not
+        // overwrite an end that landed while the turn hung).
+        verify(conversationMemoryStore, atLeastOnce()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                ConversationState.EXECUTION_INTERRUPTED);
 
         // The watchdog raised the durable stop signal, not just an interrupt.
         assertTrue(turnMemory.get().isCancelled(), "the watchdog must flag the abandoned turn cancelled");
@@ -217,8 +220,6 @@ class ConversationWatchdogAbandonTest {
         // find it — it used to be unregistered the moment the watchdog returned.
         assertEquals(1, conversationService.stopInFlightWork(USER_ID),
                 "a timed-out turn that is still running must stay reachable for GDPR stop and /cancel");
-        // ...and for a coordinator that lost the turn, through the public seam.
-        assertTrue(conversationService.abandonInFlightTurn(CONVERSATION_ID));
         assertEquals(1.0, abandonedRunning(), "the zombie is visible on the gauge while it runs");
         // The dispatcher gave up, but the body is still doing work: it keeps the
         // in-flight
@@ -242,7 +243,6 @@ class ConversationWatchdogAbandonTest {
             Thread.sleep(20);
         }
         assertEquals(0, conversationService.stopInFlightWork(USER_ID), "the finished zombie must be unregistered");
-        assertFalse(conversationService.abandonInFlightTurn(CONVERSATION_ID));
         assertEquals(0.0, abandonedRunning(), "the gauge returns to 0 once the zombie ended");
         // ...and so does its permit.
         assertDoesNotThrow(() -> conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
@@ -270,9 +270,8 @@ class ConversationWatchdogAbandonTest {
         // The turn is cancelled from outside while it runs (what /cancel and the GDPR
         // sweep do: raise the flag of the in-flight memory), then fails on its way out.
         doAnswer(inv -> {
-            // Through the public seam a coordinator's lost-lease hook uses; /cancel and
-            // the GDPR sweep raise the same flag.
-            assertTrue(conversationService.abandonInFlightTurn(CONVERSATION_ID));
+            // What the GDPR sweep does; /cancel raises the same flag.
+            assertEquals(1, conversationService.stopInFlightWork(USER_ID));
             throw new IllegalStateException("aborted after the cancel");
         }).when(conversation).say(anyString(), anyMap());
 
@@ -325,7 +324,10 @@ class ConversationWatchdogAbandonTest {
 
         assertTrue(failed.await(10, TimeUnit.SECONDS), "the interrupted pipeline should have failed");
         Thread.sleep(500); // let the failure callback run
-        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+        // By compare-and-set from the state it read, never a blind write (it must not
+        // overwrite an end that landed while the turn hung).
+        verify(conversationMemoryStore, atLeastOnce()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                ConversationState.EXECUTION_INTERRUPTED);
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
     }
 
@@ -404,6 +406,13 @@ class ConversationWatchdogAbandonTest {
             persisted.set(inv.getArgument(1));
             return null;
         }).when(conversationMemoryStore).setConversationState(eq(CONVERSATION_ID), any());
+        when(conversationMemoryStore.compareAndSetState(eq(CONVERSATION_ID), any(), any())).thenAnswer(inv -> {
+            if (persisted.get() != inv.getArgument(1)) {
+                return false;
+            }
+            persisted.set(inv.getArgument(2));
+            return true;
+        });
         when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(agent);
         when(agent.continueConversation(any(), any(), any())).thenReturn(conversation);
         when(conversation.isEnded()).thenReturn(false);
