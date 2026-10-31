@@ -418,9 +418,6 @@ public final class A2AWireFormat {
     }
 
     /**
-     * A missing key, an explicit JSON null and a blank string all read as absent.
-     */
-    /**
      * Longest caller-chosen identifier (task, context, message, JSON-RPC id)
      * accepted. Identifiers are echoed into every streamed event, so an unbounded
      * one multiplies the response by the number of chunks; real ids are UUIDs.
@@ -448,6 +445,9 @@ public final class A2AWireFormat {
         return id == null || id instanceof Number || (id instanceof String text && text.length() <= MAX_ID_LENGTH);
     }
 
+    /**
+     * A missing key, an explicit JSON null and a blank string all read as absent.
+     */
     static String optionalString(Object raw) {
         if (raw == null) {
             return null;

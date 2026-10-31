@@ -506,11 +506,11 @@ public class HttpClientModule {
     }
 
     /**
-     * Removes every {@link OutboundHttp#SENSITIVE_HEADERS} entry (and the
-     * {@link TracePropagation#HEADERS trace context}) from {@code next} when it
-     * targets a different origin (scheme, host or effective port) than
-     * {@code original}. Same-origin hops keep their headers, so an in-service
-     * redirect still authenticates.
+     * Removes every header but {@link #CROSS_ORIGIN_SAFE_HEADERS} from {@code next}
+     * when it targets a different origin (scheme, host or effective port) than
+     * {@code original} - {@link OutboundHttp#SENSITIVE_HEADERS} and the
+     * {@link TracePropagation#HEADERS trace context} included. Same-origin hops
+     * keep their headers, so an in-service redirect still authenticates.
      */
     static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
         if (original == null || !sameOrigin(original, next)) {
