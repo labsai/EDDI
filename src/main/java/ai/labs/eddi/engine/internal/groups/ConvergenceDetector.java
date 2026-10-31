@@ -135,7 +135,7 @@ public final class ConvergenceDetector {
         }
         JsonNode node = tryReadJson(judgeOutput);
         if (node == null) {
-            node = tryReadJson(extractBraces(judgeOutput));
+            node = EmbeddedJson.soleObject(judgeOutput, ConvergenceDetector::tryReadJson);
         }
         if (node == null) {
             return ConvergenceVerdict.notConverged("Verdict judge output was not parseable");
@@ -251,7 +251,7 @@ public final class ConvergenceDetector {
 
         JsonNode node = tryReadJson(judgeOutput);
         if (node == null) {
-            node = tryReadJson(extractBraces(judgeOutput));
+            node = EmbeddedJson.soleObject(judgeOutput, ConvergenceDetector::tryReadJson);
         }
         if (node == null) {
             LOGGER.debugf("Convergence judge output was not parseable as JSON — treating as not converged");
@@ -292,10 +292,4 @@ public final class ConvergenceDetector {
         }
     }
 
-    /** Tier 2: the JSON object embedded in prose or a markdown fence. */
-    private static String extractBraces(String text) {
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        return start >= 0 && end > start ? text.substring(start, end + 1) : null;
-    }
 }

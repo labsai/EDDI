@@ -122,7 +122,7 @@ public final class TaskBidEngine {
         }
         JsonNode node = readJson(content);
         if (node == null) {
-            node = readJson(embeddedJson(content));
+            node = EmbeddedJson.soleObject(content, TaskBidEngine::readJson);
         }
         if (node == null || !node.path("bids").isArray()) {
             return List.of();
@@ -188,39 +188,4 @@ public final class TaskBidEngine {
         }
     }
 
-    /** JSON embedded in prose or a code fence — first balanced object. */
-    private static String embeddedJson(String content) {
-        if (content == null) {
-            return null;
-        }
-        int start = content.indexOf('{');
-        if (start < 0) {
-            return null;
-        }
-        int depth = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = start; i < content.length(); i++) {
-            char c = content.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                inString = !inString;
-            } else if (!inString) {
-                if (c == '{') {
-                    depth++;
-                } else if (c == '}') {
-                    depth--;
-                    if (depth == 0) {
-                        return content.substring(start, i + 1);
-                    }
-                }
-            }
-        }
-        return null;
-    }
 }

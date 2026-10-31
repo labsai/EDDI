@@ -86,7 +86,7 @@ public final class DebateVerdictParser {
 
         JsonNode node = tryReadJson(judgmentOutput);
         if (node == null) {
-            node = tryReadJson(extractBraces(judgmentOutput));
+            node = EmbeddedJson.soleObject(judgmentOutput, DebateVerdictParser::tryReadJson);
         }
         if (node == null) {
             LOGGER.debug("Debate judgment was not parseable as JSON — recording a prose-only conclusion");
@@ -250,13 +250,4 @@ public final class DebateVerdictParser {
         }
     }
 
-    /** Tier 2: the JSON object embedded in prose or a markdown fence. */
-    private static String extractBraces(String text) {
-        if (text == null) {
-            return null;
-        }
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        return start >= 0 && end > start ? text.substring(start, end + 1) : null;
-    }
 }

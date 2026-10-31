@@ -447,6 +447,7 @@ public class TaskForceEngine {
                             // still live, again under the task-list monitor so the reset
                             // sweep cannot interleave. Lock order is always taskList →
                             // transcript.
+                            boolean producedNothing;
                             synchronized (taskList) {
                                 if (cancellation.isCancelled()) {
                                     break;
@@ -455,11 +456,19 @@ public class TaskForceEngine {
                                     gc.getTranscript().add(entry);
                                 }
 
-                                // HITL TASK-level: submit for approval only when BOTH
-                                // taskLevelHitl AND this phase requires approval. Otherwise
-                                // auto-complete. Without this check, TASK_FORCE phases
-                                // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
-                                if (taskLevelHitl && phase.requiresApproval()) {
+                                // A member that was skipped (timed out, unavailable, paused
+                                // for HITL under onAgentFailure=SKIP) or errored produced no
+                                // result: the task FAILS. Completing it with a null result
+                                // unblocked its dependents, which then ran without the output
+                                // they depend on, and sent a "(no result)" task to VERIFY.
+                                producedNothing = hasNoTaskResult(entry);
+                                if (producedNothing) {
+                                    taskList.failTask(task.id(), noResultReason(entry));
+                                } else if (taskLevelHitl && phase.requiresApproval()) {
+                                    // HITL TASK-level: submit for approval only when BOTH
+                                    // taskLevelHitl AND this phase requires approval. Otherwise
+                                    // auto-complete. Without this check, TASK_FORCE phases
+                                    // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
                                     taskList.submitForApproval(task.id(), entry.content());
                                 } else {
                                     taskList.completeTask(task.id(), entry.content());
@@ -469,6 +478,9 @@ public class TaskForceEngine {
                             if (listener != null) {
                                 listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
                                         member.agentId(), member.displayName(), entry.content(), phaseIdx, phase.name()));
+                            }
+                            if (producedNothing && protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                                break;
                             }
 
                         } catch (MemberTurnCancelledException e) {
@@ -1030,15 +1042,11 @@ public class TaskForceEngine {
     public boolean tryParseVerificationJson(GroupConversation gc, List<TaskItem> completedTasks,
                                             String content, GroupDiscussionEventListener listener) {
         try {
-            // Extract JSON array from content (may be wrapped in markdown fences)
-            int jsonStart = content.indexOf('[');
-            int jsonEnd = content.lastIndexOf(']');
-            if (jsonStart < 0 || jsonEnd <= jsonStart) {
-                return false;
-            }
-            String json = content.substring(jsonStart, jsonEnd + 1);
-
-            var items = jsonSerialization.deserialize(json, List.class);
+            // The first balanced JSON array the reply contains (it may be wrapped in
+            // a markdown fence or prose). Not first '[' to last ']': a bracketed
+            // aside such as "Checked [details]: [...]" made that slice unparseable,
+            // which sent the whole phase down the fail-open auto-verify path.
+            List<?> items = EmbeddedJson.soleArray(content, this::readJsonList);
             if (items == null || items.isEmpty()) {
                 return false;
             }
@@ -1093,6 +1101,20 @@ public class TaskForceEngine {
     }
 
     /**
+     * A JSON array span as a list of verdict objects, or {@code null} when it is
+     * not one - an array of plain values ({@code [1]}, a citation in the prose) is
+     * not a verdict and must not count as one.
+     */
+    private List<?> readJsonList(String json) {
+        try {
+            List<?> list = jsonSerialization.deserialize(json, List.class);
+            return list != null && list.stream().anyMatch(Map.class::isInstance) ? list : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * A map value as a string, or {@code null} when the key is absent <em>or</em>
      * explicitly null.
      * <p>
@@ -1121,13 +1143,8 @@ public class TaskForceEngine {
         }
 
         try {
-            int jsonStart = rawContent.indexOf('[');
-            int jsonEnd = rawContent.lastIndexOf(']');
-            if (jsonStart < 0 || jsonEnd <= jsonStart) {
-                return rawContent;
-            }
-            String json = rawContent.substring(jsonStart, jsonEnd + 1);
-            var items = jsonSerialization.deserialize(json, List.class);
+            var match = EmbeddedJson.soleArrayMatch(rawContent, this::readJsonList);
+            List<?> items = match != null ? match.value() : null;
             if (items == null || items.isEmpty()) {
                 return rawContent;
             }
@@ -1156,7 +1173,7 @@ public class TaskForceEngine {
             }
 
             // Append any text outside the JSON (e.g. "Overall Assessment: ...")
-            String afterJson = rawContent.substring(jsonEnd + 1).trim();
+            String afterJson = rawContent.substring(match.end()).trim();
             // Strip markdown code fence closing if present
             if (afterJson.startsWith("```")) {
                 afterJson = afterJson.substring(3).trim();
@@ -1408,6 +1425,19 @@ public class TaskForceEngine {
                     member.agentId(), member.displayName(),
                     "[ERROR] " + errorMessage, phaseIdx, phase.name()));
         }
+    }
+
+    /**
+     * A SKIPPED or ERROR turn — or one with no content at all — is no task result.
+     */
+    static boolean hasNoTaskResult(TranscriptEntry entry) {
+        return entry == null || entry.content() == null
+                || entry.type() == TranscriptEntryType.SKIPPED || entry.type() == TranscriptEntryType.ERROR;
+    }
+
+    private static String noResultReason(TranscriptEntry entry) {
+        String why = entry != null && entry.errorReason() != null ? entry.errorReason() : "the member produced no result";
+        return "No result: " + why;
     }
 
     public GroupMember findMember(List<GroupMember> members, String agentId) {

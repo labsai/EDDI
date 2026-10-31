@@ -70,6 +70,22 @@ class VoteTallyEngineTest {
     }
 
     @Test
+    @DisplayName("a brace in the prose before or after the ballot no longer drops the vote")
+    void parse_embeddedJson_withBracesInProse() {
+        var after = VoteTallyEngine.parseBallot(
+                ballot("a1", "{\"vote\": \"Adopt PostgreSQL\"} — weighed against Stay on MongoDB (see {notes})."),
+                OPTIONS, VoteMethod.MAJORITY);
+        var before = VoteTallyEngine.parseBallot(
+                ballot("a2", "Considering {cost, risk}: {\"vote\": \"Stay on MongoDB\"}"),
+                OPTIONS, VoteMethod.MAJORITY);
+
+        assertNotNull(after);
+        assertEquals(List.of("Adopt PostgreSQL"), after.votes());
+        assertNotNull(before);
+        assertEquals(List.of("Stay on MongoDB"), before.votes());
+    }
+
+    @Test
     @DisplayName("APPROVAL ballots may approve several options; duplicates collapse")
     void parse_approval() {
         var b = VoteTallyEngine.parseBallot(

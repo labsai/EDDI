@@ -24,6 +24,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -483,5 +484,69 @@ class TaskForceEngineTest {
         verifyNoInteractions(memberTurnExecutor);
         assertTrue(gc.getTaskList().all().stream().allMatch(t -> t.assignedAgentId() == null),
                 "ROLE-mode tasks are none of the auction's business — the PLAN path owns them");
+    }
+
+    // =================================================================
+    // A member turn that produced nothing fails its task
+    // =================================================================
+
+    @Test
+    void skippedMemberTurn_failsTheTask_andItsDependentNeverRuns() throws Exception {
+        var engine = engine();
+        var gc = new GroupConversation();
+        gc.setId("gc-tf");
+        var taskList = new SharedTaskList();
+        var research = taskList.addTask(new TaskItem("t-1", "Research", "gather", SharedTaskList.TaskStatus.ASSIGNED, AGENT_A, AGENT_A,
+                List.of(), null, null, false, 1, Instant.now(), null));
+        var write = taskList.addTask(new TaskItem("t-2", "Write", "write", SharedTaskList.TaskStatus.ASSIGNED, AGENT_A, AGENT_A,
+                List.of("t-1"), null, null, false, 2, Instant.now(), null));
+        gc.setTaskList(taskList);
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(member(AGENT_A)));
+        var phase = new DiscussionPhase("Execute", PhaseType.EXECUTE, "ALL", TurnOrder.PARALLEL, ContextScope.TASK_ONLY, false, null, 1, false);
+        var protocol = new ProtocolConfig(30, MemberFailurePolicy.SKIP, 0, MemberUnavailablePolicy.SKIP);
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any()))
+                .thenReturn(new TranscriptEntry(AGENT_A, AGENT_A, null, 0, "Execute", TranscriptEntryType.SKIPPED,
+                        Instant.now(), "timed out", null));
+
+        engine.executeTaskExecutionPhase(gc, config, List.of(member(AGENT_A)), phase, protocol, "Q", 0, null,
+                new AtomicInteger(), 50);
+
+        assertEquals(SharedTaskList.TaskStatus.FAILED, taskList.findById(research.id()).status(), "a skipped turn is not a completed task");
+        assertEquals(SharedTaskList.TaskStatus.ASSIGNED, taskList.findById(write.id()).status(), "its dependent must not run without the output");
+        verify(memberTurnExecutor, times(1)).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any());
+    }
+
+    @Test
+    void sharedTaskList_refusesToCompleteATaskWithoutAResult() {
+        var taskList = new SharedTaskList();
+        taskList.addTask(new TaskItem("t-1", "Research", "gather", SharedTaskList.TaskStatus.IN_PROGRESS, AGENT_A, AGENT_A,
+                List.of(), null, null, false, 1, Instant.now(), null));
+
+        assertThrows(IllegalStateException.class, () -> taskList.completeTask("t-1", null));
+        assertThrows(IllegalStateException.class, () -> taskList.submitForApproval("t-1", null));
+    }
+
+    @Test
+    void tryParseVerificationJson_bracketedAsideInProse_stillReadsTheVerdict() throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setTaskList(new SharedTaskList());
+        var task = new TaskItem("X", "desc", 1);
+        gc.getTaskList().addTask(task);
+        gc.getTaskList().assignTask(task.id(), AGENT_A, "A");
+        gc.getTaskList().startTask(task.id());
+        gc.getTaskList().completeTask(task.id(), "done");
+        var completedTask = gc.getTaskList().findById(task.id());
+        var engine = engine();
+        var mapper = new ObjectMapper();
+        when(jsonSerialization.deserialize(anyString(), eq(List.class)))
+                .thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), List.class));
+
+        boolean result = engine.tryParseVerificationJson(gc, List.of(completedTask),
+                "Checked [details]: [{\"subject\":\"X\",\"passed\":false,\"feedback\":\"wrong\"}]", null);
+
+        assertTrue(result, "the bracketed aside must not hide the verdict behind it");
+        assertEquals(SharedTaskList.TaskStatus.FAILED, gc.getTaskList().findById(task.id()).status());
     }
 }
