@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -40,6 +41,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.Callable;
 
 /**
  * Lifecycle task for deterministic (action-triggered) MCP tool calls.
@@ -111,6 +113,16 @@ public class McpCallsTask implements ILifecycleTask {
     @Inject
     @ConfigProperty(name = "eddi.mcpcalls.default-rate-limit", defaultValue = "100")
     int defaultRateLimit;
+
+    /**
+     * Carries the turn's caller onto the attempt thread. Inside a turn deadline
+     * {@link RetryConfiguration#executeWithRetry} runs each attempt on its own
+     * executor, which carries tracing and the MDC but not the caller — and an MCP
+     * server's {@code apiKey: "${caller:token}"} is resolved per request from the
+     * caller bound to the sending thread. Null in hand-built tests.
+     */
+    @Inject
+    CallerIdentityContext callerIdentityContext;
 
     @Inject
     public McpCallsTask(IResourceClientLibrary resourceClientLibrary, IMemoryItemConverter memoryItemConverter, IJsonSerialization jsonSerialization,
@@ -259,7 +271,7 @@ public class McpCallsTask implements ILifecycleTask {
             String toolResult = mocked != null
                     ? mocked.bodyAsText()
                     : RetryConfiguration.executeWithRetry(
-                            () -> executeMetered(toolName, toolRequest, executor, conversationId),
+                            carryingCaller(() -> executeMetered(toolName, toolRequest, executor, conversationId)),
                             effectiveRetry(mcpCall),
                             "MCP call '" + callName + "'", new long[1], memory.getTurnDeadline());
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
@@ -508,6 +520,11 @@ public class McpCallsTask implements ILifecycleTask {
         descriptor.setDisplayName("MCP Calls");
         descriptor.getConfigs().put("uri", new ExtensionDescriptor.ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, false, null));
         return descriptor;
+    }
+
+    /** {@code attempt} bound to the caller of the turn it is created in. */
+    Callable<String> carryingCaller(Callable<String> attempt) {
+        return callerIdentityContext == null ? attempt : callerIdentityContext.propagate(attempt);
     }
 
     /**
