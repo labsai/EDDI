@@ -5,11 +5,16 @@
 package ai.labs.eddi.configs.patch;
 
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
+import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.node.TextNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.json.Json;
@@ -18,6 +23,7 @@ import jakarta.json.JsonException;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonPatch;
 import jakarta.json.JsonReader;
+import jakarta.json.JsonString;
 import jakarta.json.JsonStructure;
 import jakarta.json.JsonValue;
 import jakarta.ws.rs.BadRequestException;
@@ -27,6 +33,11 @@ import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 /**
  * Applies an RFC 6902 JSON Patch to a stored configuration document and hands
@@ -82,6 +93,15 @@ public class ConfigJsonPatcher {
     /** Upper bound on the number of operations in one patch. */
     static final int MAX_OPERATIONS = 200;
 
+    /**
+     * Copies may grow the document to at most this many times its stored
+     * {@linkplain #weight size}, plus {@link #MAX_GROWTH_BYTES}.
+     */
+    static final int MAX_GROWTH_FACTOR = 2;
+
+    /** Head-room on top of {@link #MAX_GROWTH_FACTOR}, for small documents. */
+    static final long MAX_GROWTH_BYTES = 4L * MAX_PATCH_BYTES;
+
     private final ObjectMapper mapper;
     private final StrictConfigurationParser parser;
 
@@ -92,26 +112,56 @@ public class ConfigJsonPatcher {
     }
 
     /**
+     * {@link #apply(Object, String, Class, boolean)} for a caller who may read
+     * every credential the document holds (an administrator).
+     */
+    public <T> T apply(T current, String patchBody, Class<T> type) {
+        return apply(current, patchBody, type, false);
+    }
+
+    /**
      * @param current
      *            the stored document the patch is applied to
      * @param patchBody
      *            the RFC 6902 patch, as JSON text
      * @param type
      *            the configuration model
+     * @param protectCredentials
+     *            {@code true} for a caller whose reads are redacted (anyone but an
+     *            eddi-admin). The patch is then applied to a view in which every
+     *            plaintext credential is replaced by an opaque token, and a token
+     *            is turned back into its credential only where it still sits at the
+     *            path it came from. A {@code copy} or {@code move} that would carry
+     *            a credential into an ordinary, readable field is refused, and a
+     *            {@code test} probing one never sees the value.
      * @return the patched document, parsed strictly
      * @throws BadRequestException
      *             when the body is not a patch, an operation is unsupported or
      *             fails (a {@code test} that does not hold, a path that does not
-     *             resolve), or the patched document is not a valid {@code type}
+     *             resolve), copies grow the result past {@link #MAX_GROWTH_FACTOR}
+     *             times the stored document, a protected credential would be
+     *             relocated, or the patched document is not a valid {@code type}
      */
-    public <T> T apply(T current, String patchBody, Class<T> type) {
+    public <T> T apply(T current, String patchBody, Class<T> type, boolean protectCredentials) {
         JsonArray operations = parseOperations(patchBody);
-        JsonStructure document = toJson(current);
+        CredentialMask mask = protectCredentials ? CredentialMask.of(mapper, current, type) : null;
+        JsonStructure document = mask != null ? toJson(mask.masked()) : toJson(current);
 
-        JsonValue patched;
+        long budget = MAX_GROWTH_FACTOR * weight(document, Long.MAX_VALUE) + MAX_GROWTH_BYTES;
+        JsonStructure patched = document;
         try {
-            JsonPatch patch = Json.createPatch(operations);
-            patched = patch.apply(document);
+            // One operation at a time so the size budget is checked after every copy:
+            // JSON-P results share structure, so a handful of copies of a growing
+            // container builds a document whose serialised size is exponential in the
+            // operation count. A patch is atomic either way: any failure discards the
+            // partially patched tree.
+            for (JsonValue operation : operations) {
+                JsonPatch single = Json.createPatch(Json.createArrayBuilder().add(operation).build());
+                patched = single.apply(patched);
+                if ("copy".equals(operation.asJsonObject().getString("op", null)) && weight(patched, budget) > budget) {
+                    throw badRequest("The patch grows the document past what a diff can: copy operations may at most double it.");
+                }
+            }
         } catch (JsonException | IllegalArgumentException | ClassCastException | UnsupportedOperationException e) {
             throw badRequest("The patch could not be applied: " + e.getMessage());
         }
@@ -119,10 +169,55 @@ public class ConfigJsonPatcher {
             throw badRequest("The patch must leave a JSON object, as the document is one.");
         }
 
+        String json = patched.toString();
+        if (mask != null) {
+            json = mask.restore(json);
+        }
         try {
-            return parser.parse(patched.toString(), type);
+            return parser.parse(json, type);
         } catch (IOException e) {
             throw badRequest("The patched document is not a valid " + type.getSimpleName() + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * The size of {@code value}: one per node plus the length of every string and
+     * key, counted only until it passes {@code limit}, so a document whose shared
+     * structure would be exponential to walk is rejected after linear work.
+     */
+    static long weight(JsonValue value, long limit) {
+        long[] total = {0};
+        accumulate(value, limit, total);
+        return total[0];
+    }
+
+    private static void accumulate(JsonValue value, long limit, long[] total) {
+        if (total[0] > limit) {
+            return;
+        }
+        total[0]++;
+        switch (value.getValueType()) {
+            case OBJECT -> {
+                for (Map.Entry<String, JsonValue> entry : value.asJsonObject().entrySet()) {
+                    total[0] += entry.getKey().length();
+                    accumulate(entry.getValue(), limit, total);
+                    if (total[0] > limit) {
+                        return;
+                    }
+                }
+            }
+            case ARRAY -> {
+                for (JsonValue element : value.asJsonArray()) {
+                    accumulate(element, limit, total);
+                    if (total[0] > limit) {
+                        return;
+                    }
+                }
+            }
+            case STRING -> total[0] += ((JsonString) value).getString().length();
+            default -> {
+                // numbers, booleans and null count as one node
+            }
         }
     }
 
@@ -165,6 +260,143 @@ public class ConfigJsonPatcher {
             throw new IllegalStateException("The stored document could not be serialised for patching", e);
         }
     }
+
+    /**
+     * The stored document with every plaintext credential the caller cannot read
+     * swapped for a random token, and what is needed to swap it back.
+     * <p>
+     * Which leaves are credentials is decided by {@link ConfigSecretRedactor}, the
+     * same rules the redacted read applies, by comparing the document with its
+     * redacted copy. Tokens carry {@link ConfigSecretRedactor#MARKER_PREFIX}, so
+     * one left behind would also be refused by {@code RedactionMarkerGuard}; they
+     * are random per request so a patch cannot forge one.
+     */
+    private record CredentialMask(JsonNode masked, Map<String, Hidden> hidden) {
+
+        private record Hidden(String pointer, JsonNode value) {
+        }
+
+        static <T> CredentialMask of(ObjectMapper mapper, T current, Class<T> type) {
+            JsonNode original = mapper.valueToTree(current);
+            JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(current, type));
+            JsonNode working = original.deepCopy();
+            Map<String, Hidden> hidden = new HashMap<>();
+            String nonce = UUID.randomUUID().toString();
+            mark(original, redacted, working, "", nonce, hidden);
+            return new CredentialMask(working, hidden);
+        }
+
+        private static void mark(JsonNode original, JsonNode redacted, JsonNode working, String pointer, String nonce,
+                                 Map<String, Hidden> hidden) {
+            if (original instanceof ObjectNode object && redacted instanceof ObjectNode redactedObject
+                    && working instanceof ObjectNode workingObject) {
+                for (Map.Entry<String, JsonNode> field : object.properties()) {
+                    String name = field.getKey();
+                    String childPointer = pointer + "/" + escape(name);
+                    JsonNode value = field.getValue();
+                    if (value.isTextual() && !value.equals(redactedObject.get(name))) {
+                        workingObject.put(name, token(nonce, hidden, childPointer, value));
+                    } else {
+                        mark(value, redactedObject.get(name), workingObject.get(name), childPointer, nonce, hidden);
+                    }
+                }
+            } else if (original instanceof ArrayNode array && redacted instanceof ArrayNode redactedArray
+                    && working instanceof ArrayNode workingArray) {
+                for (int i = 0; i < array.size(); i++) {
+                    String childPointer = pointer + "/" + i;
+                    JsonNode value = array.get(i);
+                    if (value.isTextual() && !value.equals(redactedArray.get(i))) {
+                        workingArray.set(i, TextNode.valueOf(token(nonce, hidden, childPointer, value)));
+                    } else {
+                        mark(value, redactedArray.get(i), workingArray.get(i), childPointer, nonce, hidden);
+                    }
+                }
+            }
+        }
+
+        private static String token(String nonce, Map<String, Hidden> hidden, String pointer, JsonNode value) {
+            String token = ConfigSecretRedactor.MARKER_PREFIX + "credential " + nonce + "#" + hidden.size() + ">";
+            hidden.put(token, new Hidden(pointer, value));
+            return token;
+        }
+
+        private static String escape(String name) {
+            return name.replace("~", "~0").replace("/", "~1");
+        }
+
+        /**
+         * Puts each credential back where its token still sits at the original path,
+         * and refuses a patch that copied or moved one anywhere else.
+         */
+        String restore(String patchedJson) {
+            JsonNode tree;
+            try {
+                tree = PLAIN.readTree(patchedJson);
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("The patched document could not be re-read", e);
+            }
+            List<String> relocated = new ArrayList<>();
+            restore(tree, "", relocated);
+            if (!relocated.isEmpty()) {
+                throw badRequest("The patch copies or moves a stored credential (to " + String.join(", ", relocated)
+                        + "). Credentials are redacted for you, so a patch may leave them in place, replace or remove them, "
+                        + "but not relocate them.");
+            }
+            try {
+                return PLAIN.writeValueAsString(tree);
+            } catch (JsonProcessingException e) {
+                throw new IllegalStateException("The patched document could not be serialised", e);
+            }
+        }
+
+        private void restore(JsonNode node, String pointer, List<String> relocated) {
+            if (node instanceof ObjectNode object) {
+                for (Map.Entry<String, JsonNode> field : object.properties()) {
+                    String childPointer = pointer + "/" + escape(field.getKey());
+                    JsonNode replacement = restoredLeaf(field.getValue(), childPointer, relocated);
+                    if (replacement != null) {
+                        field.setValue(replacement);
+                    } else {
+                        restore(field.getValue(), childPointer, relocated);
+                    }
+                }
+            } else if (node instanceof ArrayNode array) {
+                for (int i = 0; i < array.size(); i++) {
+                    String childPointer = pointer + "/" + i;
+                    JsonNode replacement = restoredLeaf(array.get(i), childPointer, relocated);
+                    if (replacement != null) {
+                        array.set(i, replacement);
+                    } else {
+                        restore(array.get(i), childPointer, relocated);
+                    }
+                }
+            }
+        }
+
+        private JsonNode restoredLeaf(JsonNode value, String pointer, List<String> relocated) {
+            if (!value.isTextual()) {
+                return null;
+            }
+            String text = value.asText();
+            Hidden original = hidden.get(text);
+            if (original != null && original.pointer().equals(pointer)) {
+                return original.value();
+            }
+            for (String token : hidden.keySet()) {
+                if (text.contains(token)) {
+                    relocated.add(pointer.isEmpty() ? "/" : pointer);
+                    break;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Re-reads the patched tree for {@link CredentialMask#restore}; plain JSON, no
+     * model binding.
+     */
+    private static final ObjectMapper PLAIN = new ObjectMapper();
 
     private static BadRequestException badRequest(String message) {
         return new BadRequestException(Response.status(Response.Status.BAD_REQUEST).entity(message).type(MediaType.TEXT_PLAIN_TYPE).build());

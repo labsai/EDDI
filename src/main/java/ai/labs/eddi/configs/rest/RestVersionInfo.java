@@ -281,7 +281,10 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
             throw sneakyThrow(e);
         }
 
-        T patched = patcher.apply(current, patchBody, type);
+        // Read unredacted so an unchanged credential survives the write, but applied so
+        // a caller whose reads are redacted cannot copy or move a credential into a
+        // field they can read back - see ConfigJsonPatcher.apply.
+        T patched = patcher.apply(current, patchBody, type, !accessGuard.isAdmin());
         Response refusal = validator != null ? validator.apply(patched) : null;
         if (refusal != null) {
             return refusal;
