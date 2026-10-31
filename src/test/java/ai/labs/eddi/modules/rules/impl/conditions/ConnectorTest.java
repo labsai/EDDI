@@ -181,4 +181,32 @@ class ConnectorTest {
         assertEquals("AND", cloned.getConfigs().get("operator"));
         assertEquals(1, cloned.getConditions().size());
     }
+
+    @Test
+    void setConfigs_operatorIsCaseInsensitive() {
+        var conn = new Connector();
+        conn.setConfigs(Map.of("operator", " or "));
+        assertEquals("OR", conn.getConfigs().get("operator"));
+
+        conn.setConfigs(Map.of("operator", "and"));
+        assertEquals("AND", conn.getConfigs().get("operator"));
+    }
+
+    @Test
+    void withoutOperator_defaultsToAnd_andNeverFailsGetConfigsOrClone() throws Exception {
+        var conn = new Connector();
+        assertEquals("AND", conn.getConfigs().get("operator"));
+        assertDoesNotThrow(conn::clone);
+    }
+
+    @Test
+    void validateConfiguration_unknownOperator_isRejected() {
+        var conn = new Connector();
+        conn.setConditions(List.of(mock(IRuleCondition.class)));
+        conn.setConfigs(Map.of("operator", "XOR"));
+
+        var thrown = assertThrows(IllegalArgumentException.class, conn::validateConfiguration);
+
+        assertTrue(thrown.getMessage().contains("XOR"), thrown.getMessage());
+    }
 }

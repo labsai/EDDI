@@ -216,7 +216,7 @@ The `connector` is there to all logical `OR` conditions within rules. By default
 | Element | Value                             |
 | ------- | --------------------------------- |
 | type    | `connector`                       |
-| values  | `operator` (either `AND` or `OR`) |
+| values  | `operator` (either `AND` or `OR`, case-insensitive; `AND` when omitted — any other value is rejected when the rule set is saved or loaded) |
 
 ### **Examples**
 
