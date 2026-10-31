@@ -376,7 +376,7 @@ class ToolCostTrackerTest {
         @DisplayName("should not evict when under limit")
         void noEvictionUnderLimit() {
             tracker.trackToolCall(ToolInvocation.of("tool"), "conv-1");
-            tracker.evictIfNeeded();
+            tracker.evictIfNeeded(null);
             assertNotNull(tracker.getConversationCosts("conv-1"));
         }
 
@@ -439,6 +439,28 @@ class ToolCostTrackerTest {
             assertNotNull(tracker.getConversationCosts("exhausted"),
                     "evicting the only enforcement record would hand the conversation its whole budget again");
             assertFalse(tracker.isWithinBudget("exhausted", 1.0));
+        }
+
+        @Test
+        @DisplayName("the conversation just charged survives even when exhausted entries leave it the only under-budget candidate")
+        void chargedConversationIsNeverEvicted() {
+            int cap = ToolCostTracker.MAX_CONVERSATION_ENTRIES;
+            int exhaustedCount = cap - 500;
+            for (int i = 0; i < exhaustedCount; i++) {
+                tracker.trackToolCall(new ToolInvocation("searchWeb", "websearch", 5.0), "exhausted-" + i);
+                assertFalse(tracker.isWithinBudget("exhausted-" + i, 1.0));
+            }
+            // 500 under-budget entries fill the map to the cap; the 501st charge goes one
+            // over it. The pass then has to remove 1 001 entries, more than the 501
+            // under-budget ones, which the exhausted-first order puts ahead of the rest.
+            for (int i = 0; i < 500; i++) {
+                tracker.trackToolCall(ToolInvocation.of("websearch"), "fresh-" + i);
+            }
+            tracker.trackToolCall(ToolInvocation.of("websearch"), "charged-now");
+
+            assertNotNull(tracker.getConversationCosts("charged-now"),
+                    "the call that triggered the eviction must keep its own record, or its next budget check starts from $0");
+            assertEquals(0, countSurviving("fresh-", 500), "the other under-budget entries still go first");
         }
 
         private int countSurviving(String prefix, int count) {

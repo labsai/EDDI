@@ -156,8 +156,8 @@ public class ToolCostTracker {
 
         /**
          * When this conversation was last written to or read. Drives eviction order —
-         * see {@link ToolCostTracker#evictIfNeeded()}. {@code volatile} rather than
-         * atomic because it is only ever overwritten with "now", so a lost update
+         * see {@link ToolCostTracker#evictIfNeeded(String)}. {@code volatile} rather
+         * than atomic because it is only ever overwritten with "now", so a lost update
          * between two racing touches costs nanoseconds of accuracy.
          */
         private volatile long lastTouchedNanos = System.nanoTime();
@@ -323,8 +323,8 @@ public class ToolCostTracker {
         conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new).addToolCost(toolName, cost);
         addSharedCost(conversationId, cost);
 
-        // Evict oldest entries if map exceeds max size
-        evictIfNeeded();
+        // Evict oldest entries if map exceeds max size — never the one just charged
+        evictIfNeeded(conversationId);
 
         // Track total cost
         totalCost.add(cost);
@@ -431,13 +431,24 @@ public class ToolCostTracker {
      * only after every under-budget entry, however quiet it has been: dropping it
      * would turn "over budget" into "never spent" for its next turn. The cap still
      * holds — if exhausted entries alone exceed it, the oldest of them go.
+     * <p>
+     * The conversation being charged is never a victim. It is the most recently
+     * touched entry, so it normally sorts last anyway — but when exhausted entries
+     * fill nearly the whole map, every under-budget entry goes first, and that
+     * included the one this very call just charged: its next budget check then
+     * found no record and treated it as new.
+     *
+     * @param chargedConversationId
+     *            the conversation whose charge triggered this pass, kept whatever
+     *            the ordering says; {@code null} for none
      */
-    void evictIfNeeded() {
+    void evictIfNeeded(String chargedConversationId) {
         if (conversationCosts.size() <= MAX_CONVERSATION_ENTRIES) {
             return;
         }
         int toRemove = conversationCosts.size() - (int) (MAX_CONVERSATION_ENTRIES * 0.9);
         var oldestFirst = conversationCosts.entrySet().stream()
+                .filter(entry -> !entry.getKey().equals(chargedConversationId))
                 .sorted(Comparator
                         .comparing((Map.Entry<String, ConversationCostMetrics> entry) -> entry.getValue().isExhausted())
                         .thenComparingLong(entry -> entry.getValue().lastTouchedNanos()))
