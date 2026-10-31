@@ -7,8 +7,6 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.alerts.OutputMatchHook;
 import ai.labs.eddi.engine.alerts.TurnOutcome;
 import ai.labs.eddi.configs.agents.AgentConfigurationCache;
-import ai.labs.eddi.configs.deployment.IDeploymentStore;
-import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.cluster.KvKeys;
@@ -231,15 +229,6 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     TurnIdempotencyService turnIdempotency;
-
-    /**
-     * Consulted before a runtime is deployed on demand, so an intentionally
-     * undeployed version is not brought back by a turn or a resume. Field-injected
-     * for the same reason as {@link #attachmentStore}; {@code null} (a directly
-     * constructed instance) skips the check.
-     */
-    @Inject
-    IDeploymentStore deploymentStore;
 
     /**
      * Charges each settled turn's priced spend to the tenant's monthly cost counter
@@ -2775,37 +2764,17 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
-    /**
-     * Whether the deployment record of this version says it was undeployed. No
-     * record — a version never deployed with {@code autoDeploy}, or one deployed
-     * transiently — and a store that cannot answer both keep the on-demand deploy
-     * (the cluster and restart behaviour it exists for).
-     */
-    private boolean wasUndeployed(Environment environment, String agentId, Integer agentVersion) {
-        if (deploymentStore == null || environment == null) {
-            return false;
-        }
-        try {
-            DeploymentInfo info = deploymentStore.getDeploymentInfo(environment.toString(), agentId, agentVersion);
-            return info != null && info.getDeploymentStatus() == DeploymentInfo.DeploymentStatus.undeployed;
-        } catch (ResourceStoreException | RuntimeException e) {
-            LOGGER.warnf("Could not read the deployment record of agent %s v%s: %s", sanitize(agentId), agentVersion, sanitize(e.getMessage()));
-            return false;
-        }
-    }
-
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {
 
         IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
         if (agent == null) {
-            if (wasUndeployed(environment, agentId, agentVersion)) {
-                // Not "missing on this node" but taken out of service: deploying it here
-                // would undo the undeploy without its EDIT, space-reference and quota
-                // checks. Callers answer as for any version that is not deployed (a
-                // resume keeps its pause, a say is refused) until it is redeployed.
-                LOGGER.infof("Agent %s v%s was undeployed in %s — not deploying it on demand", sanitize(agentId), agentVersion, environment);
-                return null;
-            }
+            // Deployed on demand even when the deployment record says "undeployed". Only
+            // existing conversations get here, pinned to this version, and the version
+            // cleanup undeploys an old version whose only open conversations are paused
+            // (AWAITING_HUMAN does not count as active) — as does retiring a version whose
+            // conversations can move on, while a resume must still finish on the version
+            // that paused it. Refusing those would strand every pending approval of the
+            // previous version at the next deploy.
             agentFactory.deployAgent(environment, agentId, agentVersion, null);
             agent = agentFactory.getAgent(environment, agentId, agentVersion);
         }

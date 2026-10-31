@@ -9,15 +9,15 @@ Verified findings from the CodeRabbit security review and the full code review a
 **Conversation state can no longer be resurrected or overwritten blindly**
 
 - The agent-timeout watchdog and the turn error path wrote `EXECUTION_INTERRUPTED` / `ERROR` with an unconditional store write. An end only raises the cooperative-cancel flag, which a hung model call never sees, so ending a stuck conversation was undone by the watchdog — and `EXECUTION_INTERRUPTED` auto-recovers on the next say, so the ended conversation was drivable again and invisible to the ENDED-only retention sweep. Both are now a compare-and-set from the state they read, never over `ENDED` (`ConversationStepRunner.transitionUnlessEnded`; both stores already had `compareAndSetState`).
-- The admin `POST …/resetState` read the state and then wrote READY: `IConversationService.resetConversationState` now takes the expected state and is a compare-and-set; a lost race answers `409`.
+- The admin `PATCH /agents/{conversationId}/state` read the state and then wrote READY: `IConversationService.resetConversationState` now takes the expected state and is a compare-and-set; a lost race answers `409`.
 - A cancelled say ends its pipeline through the `STOP_CONVERSATION` path, so the caller was told `ENDED` while the store recorded `EXECUTION_INTERRUPTED`. It is now reported as what the store holds (`ConversationService.reportCancelledTurnAsInterrupted`).
 
 **HITL**
 
-- An `ABORT` timeout (and the pending-approval retention sweep in `HitlCrashRecoveryObserver`) used the full cancel and was not bound to its pause: a fire claimed just before a resume stopped the resumed turn, or aborted a newer pause. Both now use the paused-only cancel bound to the pause id (`IConversationService.cancelPausedConversation(id, by, pauseId)`), which re-checks the pause after its compare-and-set and puts back a pause it did not mean. The group surface is left to the groups work.
+- An `ABORT` timeout (and the pending-approval retention sweep in `HitlCrashRecoveryObserver`) used the full cancel and was not bound to its pause: a fire claimed just before a resume stopped the resumed turn, or aborted a newer pause. Both now use the paused-only cancel bound to the pause id (`IConversationService.cancelPausedConversation(id, by, pauseId)`), which re-checks the pause after its compare-and-set and puts back a pause it did not mean. An `ABORT` fire that meets a resume of its pause still in flight (`IN_PROGRESS`) stays armed and is retried rather than completed, since that resume may still fail and restore the pause. The group surface is left to the groups work.
 - Resume did not apply the GDPR Art. 18 processing restriction that start and say apply; a restricted owner could drive a resumed turn (including a rejection-note revision). It now refuses with the pause restored and its timeout still armed.
 - A tool pause's timeout policy came from the governing rule of the *matched* calls only, so an `AUTO_APPROVE` rule for one endpoint auto-approved an unmatched gated call bundled into the same model message. A call that no policy-stating rule covers now contributes the policy it would inherit, strictest wins.
-- `getAgent` deployed any missing runtime on demand, so a resume (or a say) brought back a version that was intentionally undeployed, bypassing the deploy endpoint's EDIT, space-reference and quota checks — contrary to `docs/hitl.md`. A version whose deployment record says `undeployed` is no longer deployed on demand.
+- `getAgent` keeps deploying a conversation's pinned version on demand even when its deployment record says `undeployed`: the old-version cleanup undeploys a previous version whose only open conversations are paused (and retirement does the same for movable ones), so refusing would strand those approvals at the next deploy. `docs/hitl.md` claimed a resume after an undeploy returned `409`; it now describes this.
 - The approver projection stripped the revision candidate (frozen prompt + tool results) from active steps but not from the redo cache an undo fills.
 
 **Memory, retention and reads**
@@ -45,7 +45,7 @@ Verified findings from the CodeRabbit security review and the full code review a
 
 - Pause-bound cancels re-verify the pause *after* the state compare-and-set and restore it on a mismatch, before any side effect — the same pattern resume uses — rather than adding a pause-id predicate to both stores' CAS.
 - The agent quota fails closed only where a limit applies, so a deployment-store outage never blocks deploys on deployments without an agent quota.
-- `getAgent` keeps the on-demand deploy for versions with no deployment record (transient `autoDeploy=false` deploys, never-recorded versions) and on a store error, preserving the cluster/restart behaviour it exists for.
+- Whether an admin's explicit undeploy should block resuming the version's pending approvals is open: it needs an undeploy record that tells an explicit undeploy from the automatic cleanup, which writes the same `undeployed` status today.
 
 ### Deferred
 
