@@ -182,6 +182,20 @@ class HitlTimeoutHandlerTest {
         }
 
         @Test
+        @DisplayName("regular surface → a fire that meets a resume still in flight stays armed")
+        void regularSurface_resumeInFlightIsRetried() throws Exception {
+            // The paused-only cancel finds nothing to cancel because a resume holds the
+            // pause (IN_PROGRESS). That resume may still fail and restore the pause, and
+            // only this fire would then apply the ABORT.
+            var metadata = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_REGULAR, "conv-123", "1700000000000");
+            when(conversationService.cancelPausedConversation("conv-123", "system:timeout", "1700000000000"))
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+            when(conversationService.getConversationState("conv-123")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(metadata));
+        }
+
+        @Test
         @DisplayName("group surface → calls cancelDiscussion with CANCEL_GRACEFUL")
         void groupSurface_callsCancelDiscussion() throws Exception {
             var metadata = Map.<String, Object>of(

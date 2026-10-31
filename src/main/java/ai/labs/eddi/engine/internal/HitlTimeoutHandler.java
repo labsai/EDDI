@@ -239,6 +239,15 @@ public class HitlTimeoutHandler {
                     pauseId != null ? pauseId.toString() : null);
             if (outcome == IConversationService.CancelOutcome.CANCELLED) {
                 LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
+            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
+                    && conversationService.getConversationState(conversationId) == ConversationState.IN_PROGRESS) {
+                // A decision on this pause is in flight (a resume's AWAITING_HUMAN ->
+                // IN_PROGRESS CAS). If it fails before running it restores the pause and
+                // counts on this timeout, whose row it has not deleted yet; if it succeeds
+                // it deletes the row and the retry never fires. Completing here would
+                // consume the one-shot fire and leave a restored pause with no timeout at
+                // all — the rule resumeRegular applies through regularPauseStillWaiting.
+                throw new IllegalStateException("a decision on the pause is still in flight");
             } else {
                 LOGGER.infof("HITL timeout ABORT for conversation %s skipped — the pause it was armed for is no longer waiting (%s)",
                         conversationId, outcome);

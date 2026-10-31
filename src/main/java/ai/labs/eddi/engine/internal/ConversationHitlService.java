@@ -295,8 +295,9 @@ class ConversationHitlService {
 
     /**
      * Whether the conversation's stored pause is the one that started at
-     * {@code pauseId}. A snapshot that cannot be read counts as a different pause:
-     * a bound cancel then does nothing rather than risk the wrong pause.
+     * {@code pauseId}. A conversation that is gone counts as a different pause; a
+     * snapshot that cannot be read throws, so a bound cancel does nothing rather
+     * than risk the wrong pause, and a timeout retries.
      */
     private boolean isCurrentPause(String conversationId, String pauseId) throws ResourceStoreException {
         try {
