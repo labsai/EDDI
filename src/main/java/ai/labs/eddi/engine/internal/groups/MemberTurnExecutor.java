@@ -597,10 +597,6 @@ public class MemberTurnExecutor {
     }
 
     /**
-     * Start the member's private conversation for this discussion and record it on
-     * the group conversation under {@code convKey}.
-     */
-    /**
      * The group's dynamic-agent policy and the discussion-wide creation total, for
      * a member conversation's context — on every turn and at its start, since a
      * startup workflow (CONVERSATION_START) can run an LLM task too.
@@ -638,6 +634,10 @@ public class MemberTurnExecutor {
                 new Context(Context.ContextType.object, List.copyOf(gc.getCreatedAgentIds())));
     }
 
+    /**
+     * Start the member's private conversation for this discussion and record it on
+     * the group conversation under {@code convKey}.
+     */
     private String startMemberConversation(GroupConversation gc, GroupMember member, String convKey) throws Exception {
         Map<String, Context> groupContext = new LinkedHashMap<>();
         groupContext.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));

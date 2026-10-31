@@ -513,6 +513,11 @@ class TaskForceEngineTest {
                 new AtomicInteger(), 50);
 
         assertEquals(SharedTaskList.TaskStatus.FAILED, taskList.findById(research.id()).status(), "a skipped turn is not a completed task");
+        // Failed by the engine's no-result path, not by SharedTaskList refusing a null
+        // completion (which would also end in FAILED, via the state-error handler).
+        assertEquals("No result: timed out", taskList.findById(research.id()).verificationNote());
+        assertTrue(gc.getTranscript().stream().noneMatch(e -> e.content() != null && e.content().startsWith("[ERROR]")),
+                "a skipped turn under SKIP is not reported as a task error");
         assertEquals(SharedTaskList.TaskStatus.ASSIGNED, taskList.findById(write.id()).status(), "its dependent must not run without the output");
         verify(memberTurnExecutor, times(1)).executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any());
     }

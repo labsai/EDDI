@@ -688,21 +688,8 @@ public class GroupContextBuilder {
     }
 
     /**
-     * The peer-visibility matrix (Wave 0, F4) — what a group MEMBER's own turn
-     * context may include, as opposed to an observer (SSE/Slack), which reads
-     * {@code GroupConversation#getTranscript()} directly and is never filtered
-     * through this method.
-     * <p>
-     * {@code ABSTAINED}, {@code CONVERGENCE} and {@code FACILITATION} are never
-     * peer-visible — they are process bookkeeping (a pass, a judge's score, a
-     * facilitator's intervention), not a contribution another speaker should react
-     * to. {@code VOTE} and {@code BID} are blind while their own phase is still
-     * running (a ballot/bid cast so far THIS phase, {@code e.phaseIndex() ==
-     * currentPhaseIdx}) and become visible once that phase completes and a later
-     * phase looks back at it — commit-reveal, not permanent concealment. Everything
-     * else (including the newer {@code DISSENT}, {@code PROPOSAL}, {@code BARGAIN},
-     * {@code HUMAN_INPUT}, {@code RETRO}) is peer-visible, same as every pre-F4
-     * entry type.
+     * Whether {@code e} belongs in a member's context under {@code scope} — the
+     * filter the rendered prompt and {@link #scopedTranscript} share.
      */
     private static boolean inScope(TranscriptEntry e, ContextScope scope, int currentPhaseIdx, GroupMember speaker) {
         return e.content() != null && e.type() != TranscriptEntryType.ERROR && e.type() != TranscriptEntryType.SKIPPED
@@ -753,6 +740,23 @@ public class GroupContextBuilder {
         return List.copyOf(scoped);
     }
 
+    /**
+     * The peer-visibility matrix (Wave 0, F4) — what a group MEMBER's own turn
+     * context may include, as opposed to an observer (SSE/Slack), which reads
+     * {@code GroupConversation#getTranscript()} directly and is never filtered
+     * through this method.
+     * <p>
+     * {@code ABSTAINED}, {@code CONVERGENCE} and {@code FACILITATION} are never
+     * peer-visible — they are process bookkeeping (a pass, a judge's score, a
+     * facilitator's intervention), not a contribution another speaker should react
+     * to. {@code VOTE} and {@code BID} are blind while their own phase is still
+     * running (a ballot/bid cast so far THIS phase, {@code e.phaseIndex() ==
+     * currentPhaseIdx}) and become visible once that phase completes and a later
+     * phase looks back at it — commit-reveal, not permanent concealment. Everything
+     * else (including the newer {@code DISSENT}, {@code PROPOSAL}, {@code BARGAIN},
+     * {@code HUMAN_INPUT}, {@code RETRO}) is peer-visible, same as every pre-F4
+     * entry type.
+     */
     private static boolean isVisibleToPeers(TranscriptEntry e, int currentPhaseIdx) {
         return switch (e.type()) {
             case ABSTAINED, CONVERGENCE, FACILITATION -> false;
