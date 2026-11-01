@@ -146,7 +146,14 @@ public class ConversationPurgeService {
         }
         deleteAttachments(conversationId);
         deleteCheckpoints(conversationId);
-        deleteToolJournal(conversationId);
+        // A journal row names the approving user (decidedBy) and is the one record kept
+        // past the TTL when its claim was never settled: if its delete fails, nothing
+        // is
+        // deleted, so a retry can still reach it through the conversation.
+        if (!deleteToolJournal(conversationId)) {
+            throw new ResourceStoreException("Could not delete the HITL tool-journal entries of conversation " + conversationId
+                    + "; the conversation was not deleted. Retry once the journal store is reachable.");
+        }
         conversationMemoryStore.deleteConversationMemorySnapshot(conversationId);
         conversationDescriptorStore.deleteAllDescriptor(conversationId);
         LOGGER.infof("Conversation has been permanently deleted (conversationId=%s)", sanitize(conversationId));
@@ -208,9 +215,12 @@ public class ConversationPurgeService {
 
     /**
      * Deletes the conversation's HITL tool-journal entries (the record of each
-     * gated tool call's execution); best effort, as GDPR erasure does.
+     * gated tool call's execution).
+     *
+     * @return false when they could not be deleted — the conversation must then be
+     *         kept for a retry
      */
-    public void deleteToolJournal(String conversationId) {
+    public boolean deleteToolJournal(String conversationId) {
         if (toolJournalStore != null && toolJournalStore.isResolvable()) {
             try {
                 long deleted = toolJournalStore.get().deleteByConversationId(conversationId);
@@ -220,8 +230,10 @@ public class ConversationPurgeService {
             } catch (Exception e) {
                 LOGGER.warnf("Failed to delete HITL tool-journal entries for conversation %s: %s", sanitize(conversationId),
                         sanitize(e.getMessage()));
+                return false;
             }
         }
+        return true;
     }
 
     /** Deletes the conversation's stored attachments; best effort. */

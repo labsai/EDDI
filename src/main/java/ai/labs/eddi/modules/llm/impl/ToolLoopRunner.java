@@ -305,9 +305,9 @@ class ToolLoopRunner {
      * retry can never re-execute a tool that already ran. Used by the live path
      * (start iteration 0, no cleared calls) and by {@link #resumeToolLoop} (start
      * iteration {@code batch.getIterationIndex()+1}, {@code clearedCalls} = the
-     * calls a human approved, so an identical reissue is not re-gated). A fresh
-     * gated batch throws {@link ToolApprovalRequiredException} to re-pause — it
-     * escapes unchanged.
+     * approved calls the resumer already ran, so an identical reissue is gated
+     * again as a repeat). A fresh gated batch throws
+     * {@link ToolApprovalRequiredException} to re-pause — it escapes unchanged.
      *
      * @param initialMessages
      *            the message list the loop starts from (defensively copied inside);

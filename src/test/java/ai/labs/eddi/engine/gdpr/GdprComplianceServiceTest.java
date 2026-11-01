@@ -424,9 +424,12 @@ class GdprComplianceServiceTest {
         // When — should not throw
         GdprDeletionResult result = serviceWithAttachments.deleteUserData(USER_ID);
 
-        // Then — cascade continues
+        // Then — the cascade continues, but the snapshots are kept: they are the only
+        // record a retry can find the conversations through.
         assertNotNull(result);
-        verify(conversationMemoryStore).deleteConversationsByUserId(USER_ID);
+        verify(conversationMemoryStore, never()).deleteConversationsByUserId(USER_ID);
+        assertTrue(result.failedSteps().contains("conversations"), result.failedSteps().toString());
+        assertTrue(result.failedSteps().contains("conversationIdLookup"), result.failedSteps().toString());
     }
 
     @Test

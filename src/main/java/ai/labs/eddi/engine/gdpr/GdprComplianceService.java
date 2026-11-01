@@ -525,9 +525,11 @@ public class GdprComplianceService {
         // Must happen BEFORE the bulk snapshot delete (step 4b) which removes
         // the documents that getConversationIdsByUserId queries.
         List<String> conversationIds = List.of();
+        boolean conversationLookupFailed = false;
         try {
             conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
         } catch (Exception e) {
+            conversationLookupFailed = true;
             recordFailure(failedSteps, "conversationIdLookup", e, pseudonym);
         }
 
@@ -711,6 +713,14 @@ public class GdprComplianceService {
         } else if (attachmentCleanupIncomplete) {
             recordFailure(failedSteps, "conversations",
                     new IllegalStateException("kept until their attachments are erased — retry the erasure"), pseudonym);
+        } else if (conversationLookupFailed) {
+            // The ids that the journal, descriptor, checkpoint and attachment sweeps above
+            // work
+            // from could not be read, so those sweeps did nothing. The snapshots are the
+            // only
+            // record a retry can find them through: keep them.
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept because the conversation ids could not be listed — retry the erasure"), pseudonym);
         } else {
             try {
                 conversationsDeleted = conversationMemoryStore

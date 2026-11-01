@@ -117,7 +117,15 @@ public class AlertMaintenanceService {
                     continue;
                 }
                 try {
-                    if (sendDigest(rule, sameAgent, now)) {
+                    // `rule` is a snapshot from before this loop: one disabled, deleted or switched
+                    // to
+                    // no digest meanwhile has had its held events released, and must not digest
+                    // them.
+                    Optional<AlertRule> latest = ruleStore.read(rule.id());
+                    if (latest.isEmpty() || !latest.get().enabled() || interval(latest.get().effectiveDigest()) == null) {
+                        continue;
+                    }
+                    if (sendDigest(latest.get(), sameAgent, now)) {
                         sent++;
                     }
                 } catch (RuntimeException e) {
@@ -176,7 +184,13 @@ public class AlertMaintenanceService {
             });
             return false;
         }
-        eventStore.markDigested(ids);
+        if (eventStore.markDigested(ids) == 0) {
+            // Every held event was released (or digested) between the read and now, so the
+            // digest would repeat events that already reached the inbox. Withdraw it: no
+            // delivery, and not left PENDING for a retry to send later.
+            eventStore.updateDelivery(stored.get().withDelivery(List.of(), AlertEvent.State.INBOX_ONLY, null), stored.get().version());
+            return false;
+        }
         metrics.digest();
         if (!deliveries.isEmpty()) {
             deliveryService.deliver(stored.get(), rule);

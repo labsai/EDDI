@@ -84,8 +84,12 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             AgentTriggerConfiguration agentTriggerConfiguration = agentTriggersCache.get(intent);
             if (agentTriggerConfiguration == null) {
                 synchronized (cacheLock(intent)) {
-                    agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
-                    agentTriggersCache.put(intent, agentTriggerConfiguration);
+                    // An earlier thread may have filled the entry while this one waited.
+                    agentTriggerConfiguration = agentTriggersCache.get(intent);
+                    if (agentTriggerConfiguration == null) {
+                        agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
+                        agentTriggersCache.put(intent, agentTriggerConfiguration);
+                    }
                 }
             }
             // Same visibility rule as the listing, and answered like an absent intent so

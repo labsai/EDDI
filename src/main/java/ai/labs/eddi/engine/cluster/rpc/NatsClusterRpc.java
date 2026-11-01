@@ -169,7 +169,7 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
     public Map<String, Map<String, Object>> callAll(String op, Map<String, Object> request) {
         long start = System.nanoTime();
         Map<String, Map<String, Object>> replies = new LinkedHashMap<>();
-        int expected = expectedPeers();
+        int expected = cachedPeers();
         String outcome = "ok";
         Connection connection;
         try {
@@ -226,9 +226,38 @@ public class NatsClusterRpc implements IClusterRpc, ClusterStartable {
         return replies;
     }
 
+    /**
+     * Read now, uncached: an unavailable presence bucket throws
+     * {@link ClusterUnavailableException} instead of answering "no peers", so a
+     * caller that must not accept a silent cluster (GDPR erasure) fails closed. The
+     * remote nodes are counted by excluding this node's own record when it is
+     * present, not by subtracting one regardless.
+     */
     @Override
     public int expectedPeers() {
-        return Math.max(0, presence.members().size() - 1);
+        String self = connections.node().nodeId();
+        int remote = 0;
+        for (Map<String, Object> member : presence.currentMembers()) {
+            if (!self.equals(String.valueOf(member.get("node")))) {
+                remote++;
+            }
+        }
+        return remote;
+    }
+
+    /**
+     * The cached count {@link #callAll} uses to stop waiting early; best effort,
+     * never throws.
+     */
+    private int cachedPeers() {
+        String self = connections.node().nodeId();
+        int remote = 0;
+        for (Map<String, Object> member : presence.members()) {
+            if (!self.equals(String.valueOf(member.get("node")))) {
+                remote++;
+            }
+        }
+        return remote;
     }
 
     @Override

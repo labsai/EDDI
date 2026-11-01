@@ -673,6 +673,10 @@ public class AgentSetupService {
             // --- Step 2: Create ApiCalls resources (one per group) ---
             var httpCallsLocations = new ArrayList<String>();
             var groupNames = new ArrayList<String>();
+            // Registered before the loop, so a later createApiCalls failure still leaves
+            // the earlier locations visible to rollback.
+            createdResources.put("httpCallsGroups", groupNames);
+            createdResources.put("httpCallsLocations", httpCallsLocations);
             for (var entry : buildResult.configsByGroup().entrySet()) {
                 String groupName = entry.getKey();
                 var config = entry.getValue();
@@ -685,8 +689,6 @@ public class AgentSetupService {
                 int httpCallsVersion = extractVersionFromLocation(httpCallsLocation);
                 patchDescriptor(httpCallsId, httpCallsVersion, request.agentName() + " - " + groupName);
             }
-            createdResources.put("httpCallsGroups", groupNames);
-            createdResources.put("httpCallsLocations", httpCallsLocations);
             // Filter entries that matched nothing were silently ignored — report them.
             if (!buildResult.unmatchedEndpoints().isEmpty()) {
                 createdResources.put("unmatchedEndpoints", buildResult.unmatchedEndpoints());

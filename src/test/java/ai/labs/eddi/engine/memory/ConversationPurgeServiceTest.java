@@ -157,7 +157,7 @@ class ConversationPurgeServiceTest {
     }
 
     @Test
-    @DisplayName("a failing checkpoint or tool-journal store does not stop the delete")
+    @DisplayName("a failing checkpoint store does not stop the delete")
     @SuppressWarnings("unchecked")
     void checkpointFailureDoesNotStopThePurge() throws Exception {
         IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
@@ -165,16 +165,28 @@ class ConversationPurgeServiceTest {
         Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
         when(checkpointInstance.isResolvable()).thenReturn(true);
         when(checkpointInstance.get()).thenReturn(checkpoints);
+        var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
+                mock(Instance.class), checkpointInstance, mock(Instance.class));
+
+        assertDoesNotThrow(() -> withCheckpoints.purge(CONVERSATION_ID));
+        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    @Test
+    @DisplayName("a failing tool-journal delete keeps the conversation, so a retry can still reach the rows that name the approver")
+    @SuppressWarnings("unchecked")
+    void journalFailureKeepsTheConversation() throws Exception {
         IHitlToolJournalStore journal = mock(IHitlToolJournalStore.class);
         when(journal.deleteByConversationId(CONVERSATION_ID)).thenThrow(new IllegalStateException("db down"));
         Instance<IHitlToolJournalStore> journalInstance = mock(Instance.class);
         when(journalInstance.isResolvable()).thenReturn(true);
         when(journalInstance.get()).thenReturn(journal);
-        var withCheckpoints = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
-                mock(Instance.class), checkpointInstance, journalInstance);
+        var withJournal = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, mock(Instance.class),
+                mock(Instance.class), mock(Instance.class), journalInstance);
 
-        assertDoesNotThrow(() -> withCheckpoints.purge(CONVERSATION_ID));
-        verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> withJournal.purge(CONVERSATION_ID));
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(CONVERSATION_ID);
+        verify(descriptorStore, never()).deleteAllDescriptor(CONVERSATION_ID);
     }
 
     @Test

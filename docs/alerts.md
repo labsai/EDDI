@@ -308,8 +308,9 @@ Roles `eddi-admin` and `eddi-editor`, enumerated (REST has no role hierarchy;
   over several or every agent need the `eddi-admin` **role** — also while workspaces
   are not enforced, when an editor otherwise sees every agent's rules and events. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
   webhook target appears to them by scheme and host only, without the secret
-  reference. A digest of a rule over several agents names no agent and is an
-  administrator's.
+  reference. A rule over several agents produces one digest per originating agent; each
+  digest carries that agent and is readable by editors with access to it, and administrators
+  see all of them.
 
 The author (`createdBy`, `updatedBy`) and the acknowledger are always the caller,
 never taken from the body.

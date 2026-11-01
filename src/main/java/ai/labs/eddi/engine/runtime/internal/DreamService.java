@@ -251,6 +251,13 @@ public class DreamService {
                 return rejected(userId, start, grantCheck.toFailure(agentId, version).message()
                         + " The dream cycle was not started.");
             }
+            if (!grantCheck.ungranted().isEmpty()) {
+                // warn mode: the cycle runs, but operators trialling the gate
+                // (docs/secrets-vault.md)
+                // look for this line before switching to enforce.
+                LOGGER.warnf("[DREAM] %s Dream cycle allowed (eddi.vault.grant-enforcement=warn); set it to 'enforce' to block.",
+                        LogSanitizer.sanitize(grantCheck.toFailure(agentId, version).message()));
+            }
         }
 
         return process(userId, agentId, dreamConfig);
