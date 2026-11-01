@@ -248,9 +248,11 @@ public class MimeMessageParser {
             return null;
         }
         AddressNormalizer.Parsed parsed = AddressNormalizer.parseList(MimeUtility.unfold(values[0]));
-        if (parsed.addresses().size() > 1) {
+        if (parsed.addresses().size() > 1 || (parsed.invalid() > 0 && !parsed.addresses().isEmpty())) {
             // RFC 5322 allows several authors (with a Sender), DMARC does not: whose
-            // domain would be authenticated? Ambiguity is not an identity.
+            // domain would be authenticated? Ambiguity is not an identity — and an
+            // unparseable entry beside a valid one is still a second author a mail
+            // client may show.
             anomalies.add(MailAnomaly.MULTIPLE_FROM);
             return null;
         }

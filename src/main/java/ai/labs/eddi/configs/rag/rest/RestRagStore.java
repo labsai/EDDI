@@ -555,6 +555,11 @@ public class RestRagStore implements IRestRagStore {
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceStore.IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return ragStore.getCurrentResourceId(id);
     }

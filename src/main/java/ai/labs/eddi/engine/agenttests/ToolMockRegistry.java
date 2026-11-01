@@ -69,6 +69,15 @@ public final class ToolMockRegistry {
      */
     public static final String TOOL_PATH_MARKER = "__agentTestToolPathIntercepted";
 
+    /**
+     * Template-data key carrying the {@link MockResult} the LLM tool path chose for
+     * an httpcall tool. The executor answers the call with it instead of sending a
+     * request, and runs everything else — {@code saveResponse}, retries,
+     * {@code postResponse} property instructions — on it exactly as on a real
+     * response, the same way a rule-triggered call is mocked.
+     */
+    public static final String TOOL_PATH_MOCK = "__agentTestToolPathMock";
+
     static final String SOURCE_HTTP = "http";
     static final String SOURCE_MEMORY = "memory";
 
@@ -196,26 +205,40 @@ public final class ToolMockRegistry {
 
         /** null: execute for real. */
         private MockResult answer(String tool, String arguments, String source, boolean withArguments) {
+            Decision decision = decide(tool, arguments, source, withArguments);
+            record(tool, arguments, source, decision.outcome());
+            return decision.result();
+        }
+
+        /** How the call would be answered; records nothing. */
+        private Decision decide(String tool, String arguments, String source, boolean withArguments) {
             if (!mockMode && !SOURCE_MEMORY.equals(source)) {
-                record(tool, arguments, source, Outcome.LIVE);
-                return null;
+                return new Decision(Outcome.LIVE, null);
             }
             ToolMock mock = find(tool, arguments, withArguments);
             if (mock != null) {
-                record(tool, arguments, source, Outcome.MOCKED);
-                return new MockResult(mock.response().effectiveHttpCode(), mock.response().body(), Outcome.MOCKED);
+                return new Decision(Outcome.MOCKED,
+                        new MockResult(mock.response().effectiveHttpCode(), mock.response().body(), Outcome.MOCKED));
             }
             if (allowsLive()) {
                 if (SOURCE_MEMORY.equals(source)) {
-                    record(tool, arguments, source, Outcome.BLOCKED);
-                    return new MockResult(NOT_EXECUTED_HTTP_CODE, MEMORY_BLOCKED_JSON, Outcome.BLOCKED);
+                    return new Decision(Outcome.BLOCKED, new MockResult(NOT_EXECUTED_HTTP_CODE, MEMORY_BLOCKED_JSON, Outcome.BLOCKED));
                 }
-                record(tool, arguments, source, Outcome.LIVE);
-                return null;
+                return new Decision(Outcome.LIVE, null);
             }
-            record(tool, arguments, source, Outcome.NOT_EXECUTED);
-            return new MockResult(NOT_EXECUTED_HTTP_CODE, NOT_EXECUTED_JSON, Outcome.NOT_EXECUTED);
+            return new Decision(Outcome.NOT_EXECUTED, new MockResult(NOT_EXECUTED_HTTP_CODE, NOT_EXECUTED_JSON, Outcome.NOT_EXECUTED));
         }
+    }
+
+    /**
+     * How a call is to be answered.
+     *
+     * @param outcome
+     *            the outcome to record once the call is made
+     * @param result
+     *            the answer instead of executing; null for {@link Outcome#LIVE}
+     */
+    public record Decision(Outcome outcome, MockResult result) {
     }
 
     /**
@@ -246,17 +269,68 @@ public final class ToolMockRegistry {
      *            {@code memory}, …), may be null
      */
     public static String interceptToolCall(IConversationMemory memory, String tool, String arguments, String source) {
+        MockResult result = decideToolCall(memory, tool, arguments, source);
+        return result == null ? null : toolResultOf(result, source);
+    }
+
+    /**
+     * How an LLM tool call of a test conversation is answered — decided, and
+     * recorded, once. {@code null} means execute it: not a test conversation, an
+     * internal tool, or a call the suite runs live.
+     *
+     * @param source
+     *            the tool's source tag, may be null
+     */
+    public static MockResult decideToolCall(IConversationMemory memory, String tool, String arguments, String source) {
         String userId = memory != null ? memory.getUserId() : null;
         if (!AgentTestConversations.isTestUserId(userId) || INTERNAL_TOOLS.contains(tool)) {
             return null;
         }
         Session session = SESSIONS.get(userId);
-        MockResult result = session != null
+        return session != null
                 ? session.answer(tool, arguments, source, true)
                 : new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED);
-        if (result == null) {
+    }
+
+    /**
+     * How an LLM tool call of a test conversation would be answered, without
+     * recording it — for a caller that has gates of its own to pass first (budget,
+     * quota, turn deadline) and records with {@link #recordToolCall} only once the
+     * call is really made. {@code null}: not a test conversation, or an internal
+     * tool — execute it and record nothing.
+     */
+    public static Decision previewToolCall(IConversationMemory memory, String tool, String arguments, String source) {
+        String userId = memory != null ? memory.getUserId() : null;
+        if (!AgentTestConversations.isTestUserId(userId) || INTERNAL_TOOLS.contains(tool)) {
             return null;
         }
+        Session session = SESSIONS.get(userId);
+        return session != null
+                ? session.decide(tool, arguments, source, true)
+                : new Decision(Outcome.NOT_EXECUTED, new MockResult(NOT_EXECUTED_HTTP_CODE, UNKNOWN_SESSION_JSON, Outcome.NOT_EXECUTED));
+    }
+
+    /**
+     * Records a call {@link #previewToolCall} decided, now that it is made. A no-op
+     * for a conversation that is not a test, or whose session is gone.
+     */
+    public static void recordToolCall(IConversationMemory memory, String tool, String arguments, String source, Outcome outcome) {
+        String userId = memory != null ? memory.getUserId() : null;
+        if (!AgentTestConversations.isTestUserId(userId) || outcome == null) {
+            return;
+        }
+        Session session = SESSIONS.get(userId);
+        if (session != null) {
+            session.record(tool, arguments, source, outcome);
+        }
+    }
+
+    /**
+     * The tool result a decided call hands the model when no executor runs it: a
+     * refusal as its JSON, an httpcall tool's mock in the httpcall result shape
+     * ({@code {"httpCode": …, "body": …}}), any other mock as its body.
+     */
+    public static String toolResultOf(MockResult result, String source) {
         if (result.outcome() != Outcome.MOCKED) {
             return result.bodyAsText();
         }

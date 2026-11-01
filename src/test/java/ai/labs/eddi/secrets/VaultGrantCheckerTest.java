@@ -509,6 +509,20 @@ class VaultGrantCheckerTest {
             assertTrue(checker.findUngrantedReferences(agentReferencingTheVault(), "some-other-agent").isEmpty());
         }
 
+        /**
+         * Deploying before the secret exists is a supported flow — agent sync promotes
+         * a workflow to an instance that does not hold the source's secret, then
+         * deploys it. The grant the secret is later created with is checked at creation
+         * instead (VaultGrantImpactAnalyzer.refusalToCreate).
+         */
+        @Test
+        @DisplayName("a secret that does not exist is not a violation — its grant is checked when it is created")
+        void absentSecretIsNotAViolation() throws Exception {
+            when(secretProvider.getMetadata(any())).thenThrow(new ISecretProvider.SecretNotFoundException("Secret not found"));
+
+            assertTrue(checker.findUngrantedReferences(agentReferencingTheVault(), "some-other-agent").isEmpty());
+        }
+
         @Test
         @DisplayName("a disabled vault checks nothing")
         void disabledVaultChecksNothing() throws Exception {
