@@ -63,7 +63,7 @@ describe("GroupPhaseEditor", () => {
     fireEvent.click(screen.getByTestId("group-phase-save"));
 
     expect(savedConfig().phases![0]!.convergence).toEqual({
-      enabled: true, minRepeats: 2, threshold: 0.8, judge: "MODERATOR",
+      enabled: true, minRepeats: 2, threshold: 0.8, judge: "MODERATOR", mode: "SIMILARITY",
     });
   });
 
@@ -333,6 +333,87 @@ describe("GroupPhaseEditor", () => {
       const select = screen.getByTestId("phase-vote-tie-0") as HTMLSelectElement;
       const humanOption = Array.from(select.options).find((o) => o.value === "HUMAN_DECIDES")!;
       expect(humanOption.disabled).toBe(true);
+    });
+  });
+
+  describe("convergence mode (E2)", () => {
+    it("defaults to SIMILARITY and stores it explicitly", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+      expect(screen.getByTestId("phase-convergence-mode-0")).toHaveValue("SIMILARITY");
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.convergence!.mode).toBe("SIMILARITY");
+    });
+
+    it("VERDICT hides the threshold and allows a check after the first repeat", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+      fireEvent.change(screen.getByTestId("phase-convergence-mode-0"), { target: { value: "VERDICT" } });
+
+      expect(screen.queryByTestId("phase-convergence-threshold-0")).not.toBeInTheDocument();
+      expect(screen.getByTestId("phase-convergence-verdict-note-0")).toBeInTheDocument();
+      fireEvent.change(screen.getByTestId("phase-convergence-min-0"), { target: { value: "1" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      const convergence = savedConfig().phases![0]!.convergence!;
+      expect(convergence.mode).toBe("VERDICT");
+      expect(convergence.minRepeats).toBe(1);
+    });
+
+    it("switching back to SIMILARITY raises minRepeats to that mode's floor", () => {
+      const config = makeConfig({
+        phases: [
+          phase("Discussion", {
+            repeats: 4,
+            convergence: { enabled: true, minRepeats: 1, threshold: 0.8, judge: "MODERATOR", mode: "VERDICT" },
+          }),
+        ],
+      });
+      renderWithProviders(
+        <GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByTestId("phase-convergence-mode-0"), { target: { value: "SIMILARITY" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      const convergence = savedConfig().phases![0]!.convergence!;
+      expect(convergence.mode).toBe("SIMILARITY");
+      expect(convergence.minRepeats).toBe(2);
+    });
+
+    it("switching to VERDICT lowers the SIMILARITY default to 1 without touching the field", () => {
+      renderWithProviders(
+        <GroupPhaseEditor config={makeConfig()} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByTestId("phase-convergence-enable-0"));
+      fireEvent.change(screen.getByTestId("phase-convergence-mode-0"), { target: { value: "VERDICT" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      const convergence = savedConfig().phases![0]!.convergence!;
+      expect(convergence.mode).toBe("VERDICT");
+      expect(convergence.minRepeats).toBe(1);
+    });
+
+    it("switching to VERDICT keeps a minRepeats the admin raised above the default", () => {
+      const config = makeConfig({
+        phases: [
+          phase("Discussion", {
+            repeats: 4,
+            convergence: { enabled: true, minRepeats: 3, threshold: 0.8, judge: "MODERATOR", mode: "SIMILARITY" },
+          }),
+        ],
+      });
+      renderWithProviders(
+        <GroupPhaseEditor config={config} groupId="g1" groupVersion={2} onDone={vi.fn()} />,
+      );
+      fireEvent.change(screen.getByTestId("phase-convergence-mode-0"), { target: { value: "VERDICT" } });
+      fireEvent.click(screen.getByTestId("group-phase-save"));
+
+      expect(savedConfig().phases![0]!.convergence!.minRepeats).toBe(3);
     });
   });
 });

@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.engine.hitl.HitlToolCallPreview;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
-import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.output.model.OutputItem;
 
@@ -65,18 +65,6 @@ public final class SlackHitlSupport {
      * {@code hitlPauseType} value for a tool-call gate (vs. a behavior-rule pause).
      */
     public static final String PAUSE_TYPE_TOOL_CALL = "TOOL_CALL";
-
-    /**
-     * Max pending tool calls rendered as individual context blocks before
-     * collapsing into "+N more".
-     */
-    private static final int MAX_RENDERED_TOOL_CALLS = 5;
-
-    /**
-     * Display truncation applied to {@code argumentsRedacted} in the approval card
-     * ONLY.
-     */
-    private static final int TOOL_ARGS_DISPLAY_MAX_CHARS = 300;
 
     /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
     public static final String PAUSE_NOTICE = "⏸️ This conversation is awaiting human approval.";
@@ -249,8 +237,9 @@ public final class SlackHitlSupport {
      * <p>
      * When {@code pauseType} equals {@link #PAUSE_TYPE_TOOL_CALL} and
      * {@code pendingToolCalls} carries at least one call, one context block per
-     * call is appended (max {@value #MAX_RENDERED_TOOL_CALLS}, then a single "+N
-     * more" line): {@code "<toolName> — <argumentsRedacted truncated to 300
+     * call is appended (max {@value HitlToolCallPreview#MAX_RENDERED_CALLS}, then a
+     * single "+N more" line):
+     * {@code "<toolName> — <argumentsRedacted truncated to 300
      * chars>"}. {@code argumentsRedacted} is already redaction-filtered at batch
      * build time (see {@code PendingToolCallBatch}) — the 300-char DISPLAY
      * truncation happens here, and only here. This intentionally relaxes the
@@ -314,46 +303,16 @@ public final class SlackHitlSupport {
     }
 
     /**
-     * Build one context block per pending tool call (max
-     * {@value #MAX_RENDERED_TOOL_CALLS}, then a single "+N more" block). Returns an
-     * empty list when {@code batch} is null or has no calls — never throws.
+     * One context block per {@link HitlToolCallPreview#lines} line — the same
+     * preview the email notification shows. Empty when {@code batch} is null or has
+     * no calls — never throws.
      */
     private static List<Map<String, Object>> buildToolCallDetailBlocks(PendingToolCallBatch batch) {
-        if (batch == null || batch.getCalls() == null || batch.getCalls().isEmpty()) {
-            return List.of();
-        }
-        var calls = batch.getCalls();
         var detailBlocks = new ArrayList<Map<String, Object>>();
-        int rendered = Math.min(calls.size(), MAX_RENDERED_TOOL_CALLS);
-        for (int i = 0; i < rendered; i++) {
-            var call = calls.get(i);
-            String toolName = safe(call.getToolName());
-            // Re-redacted through the CURRENT filter at send time, same as the
-            // REST approval surfaces: argumentsRedacted was computed once, at
-            // pause time, and a Slack message cannot be un-sent if a stored
-            // pause predates a filter improvement.
-            String args = truncateForDisplay(SecretRedactionFilter.redact(call.getArgumentsRedacted()));
-            detailBlocks.add(context(toolName + " — " + args));
-        }
-        int remaining = calls.size() - rendered;
-        if (remaining > 0) {
-            detailBlocks.add(context("+" + remaining + " more"));
+        for (String line : HitlToolCallPreview.lines(batch)) {
+            detailBlocks.add(context(line));
         }
         return detailBlocks;
-    }
-
-    /**
-     * Truncate an already-redacted argument string to
-     * {@value #TOOL_ARGS_DISPLAY_MAX_CHARS} characters for approval-card display.
-     * This is a DISPLAY-only truncation distinct from the byte caps already applied
-     * to {@code argumentsRedacted} at batch build time.
-     */
-    private static String truncateForDisplay(String argumentsRedacted) {
-        String text = safe(argumentsRedacted);
-        if (text.length() <= TOOL_ARGS_DISPLAY_MAX_CHARS) {
-            return text;
-        }
-        return text.substring(0, TOOL_ARGS_DISPLAY_MAX_CHARS) + "…";
     }
 
     /**

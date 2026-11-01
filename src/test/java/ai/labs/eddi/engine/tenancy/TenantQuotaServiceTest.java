@@ -208,6 +208,19 @@ class TenantQuotaServiceTest {
     }
 
     @Test
+    @DisplayName("unsettled spend counts toward the cost budget; a negative or non-finite amount counts as none")
+    void unsettledSpendCounts() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true));
+        quotaService.recordCost(TENANT_ID, 99.0);
+
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, 0.5).allowed());
+        assertFalse(quotaService.checkCostBudget(TENANT_ID, 1.0).allowed(), "99 recorded + 1 unsettled reaches the 100 budget");
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, -5.0).allowed());
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, Double.NaN).allowed());
+        assertTrue(quotaService.checkCostBudget(TENANT_ID).allowed(), "the one-argument form is unchanged");
+    }
+
+    @Test
     @DisplayName("should return denied from recordCost when budget exceeded")
     void shouldReturnDeniedFromRecordCost() {
         quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true));
@@ -693,6 +706,32 @@ class TenantQuotaServiceTest {
                 "tenant", TENANT_ID, "type", "agent").count(), "deployment gate");
         assertEquals(2.0, meterRegistry.counter("eddi.tenant.quota.unavailable",
                 "tenant", TENANT_ID, "type", "cost").count(), "the pre-call gate and the post-call accounting");
+    }
+
+    /**
+     * The quota row is cached, so on a cache hit the pre-call cost gate's only
+     * store call is the monthly-cost read. That read failing used to fail OPEN on
+     * PostgreSQL (it returned $0 spent) and escape as a raw driver exception on
+     * MongoDB, failing the turn instead of serving the fallback answer.
+     */
+    @Test
+    @DisplayName("a monthly-cost read that fails refuses the pre-call gate as an accounting outage — not $0 spent, not a throw")
+    void unreadableMonthlyCostRefusesAsAccountingUnavailable() {
+        var store = new InMemoryTenantQuotaStore(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true)) {
+            @Override
+            public double getMonthlyCost(String tenantId) {
+                throw new QuotaAccountingUnavailableException(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE);
+            }
+        };
+        var service = new TenantQuotaService(store, meterRegistry, TENANT_ID);
+
+        QuotaCheckResult result = assertDoesNotThrow(() -> service.checkCostBudget(TENANT_ID));
+
+        assertFalse(result.allowed(), "fail closed");
+        assertTrue(result.accountingUnavailable());
+        assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason());
+        assertNull(meterRegistry.find("eddi.tenant.quota.denied").counter());
+        assertEquals(1.0, meterRegistry.counter("eddi.tenant.quota.unavailable", "tenant", TENANT_ID, "type", "cost").count());
     }
 
     /**

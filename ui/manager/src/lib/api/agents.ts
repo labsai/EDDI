@@ -72,6 +72,11 @@ export interface Agent {
    * anyone types.
    */
   conversationReview?: { enabled?: boolean; notice?: string | null };
+  /**
+   * Conversation ratings. Absent — or present without `enabled: true` — means
+   * off. See `RatingConfigSection` and docs/conversation-ratings.md.
+   */
+  ratingConfig?: AgentRatingConfig;
   // HITL — Human-in-the-Loop approval configuration
   hitlConfig?: import("./hitl").AgentHitlConfig;
   /**
@@ -81,6 +86,17 @@ export interface Agent {
    * see `parseCostCeiling`.
    */
   maxCostPerConversationUsd?: number;
+  /**
+   * How many turns one conversation may start itself with the reserved
+   * `CONTINUE_CONVERSATION` action, counted over the whole conversation.
+   * Absent (or 0) = off. 0..10000. See docs/long-jobs.md.
+   */
+  maxContinuations?: number;
+  /**
+   * The literal user input of every continuation turn — never a template.
+   * Absent = empty input. At most 4096 characters.
+   */
+  continuationInput?: string;
   /**
    * The version's compatibility generation — SERVER-OWNED. Two versions of an
    * agent with the same generation are compatible: a running conversation moves
@@ -325,6 +341,11 @@ export interface AgentProfile {
    * maintainers read conversations. Absent when it does not.
    */
   reviewNotice?: string | null;
+  /**
+   * How the deployed version asks for ratings (`IRestAgentProfile.RatingProfile`).
+   * Absent or null when it asks for none.
+   */
+  rating?: import("./ratings").RatingProfile | null;
 }
 
 export function getAgentProfile(agentId: string, environment = "production"): Promise<AgentProfile> {
@@ -634,4 +655,15 @@ export async function getDeploymentStatuses(
       ? r.value
       : { environment: ENVIRONMENTS[i]!, status: "NOT_FOUND" as const }
   );
+}
+
+/** `AgentConfiguration.RatingConfig`. Every field is optional; absent ones take the backend defaults. */
+export interface AgentRatingConfig {
+  enabled?: boolean;
+  scale?: "THUMBS" | "FIVE_STAR";
+  conversationRating?: { enabled?: boolean; promptText?: string | null; askOnEnd?: boolean; askAfterTurns?: number };
+  messageRating?: { enabled?: boolean };
+  comment?: { enabled?: boolean; maxLength?: number; askBelowScore?: number };
+  reasonTags?: string[];
+  ratingWindowHours?: number;
 }

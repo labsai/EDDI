@@ -827,6 +827,11 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
+    }
+
+    @Override
     public IResourceId getCurrentResourceId(String id) throws IResourceStore.ResourceNotFoundException {
         return agentStore.getCurrentResourceId(id);
     }

@@ -806,6 +806,29 @@ simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.
 
+**`convergence.mode`** selects what the judge decides. `"SIMILARITY"` (default) is the agreement score above.
+`"VERDICT"` (E2) has the moderator *review* the latest repeat's result against the discussion's question
+instead: the judge answers `{"passed": true|false, "feedback": "..."}` and the phase stops repeating as soon as
+it passes. `threshold` is not used, and because nothing is compared, `minRepeats` may be `1` (absent means 1:
+the check runs after every repeat). A refinement phase, where each repeat improves the draft on the table, is
+the case for it:
+
+```json
+{
+  "name": "Draft",
+  "type": "REVISION",
+  "repeats": 4,
+  "convergence": { "enabled": true, "mode": "VERDICT" }
+}
+```
+
+Either mode costs one moderator call per checked repeat, counted against `maxTurns` and stopped by the cost
+ceiling, and neither ends a phase on doubt: an unparseable reply or a judge failure keeps it going. What stops
+it differs. `SIMILARITY` stops once the agreement score reaches `threshold`. `VERDICT` stops only on a JSON
+boolean `"passed": true`; prose or a string `"true"` keeps it going. The verdict is recorded as a `CONVERGENCE` transcript entry
+(`Verdict: passed — …` or `Verdict: not passed — …`), which, like the similarity verdict, is not shown to the
+members. An unknown `mode` is refused at save time.
+
 **`allowAbstention` (I4)** appends an instruction telling members they may reply
 with the single token `PASS` when they have nothing to add. A passing member
 produces an `ABSTAINED` entry carrying no content: peers, the synthesizer and
@@ -868,6 +891,43 @@ The TASK_FORCE style uses a 4-phase pipeline: **Plan → Execute → Verify → 
 2. **EXECUTE** — Agents execute their assigned tasks in parallel (each sees only `TASK_ONLY` or `TASK_WITH_DEPS` context)
 3. **VERIFY** — The moderator reviews each task result against the original goal
 4. **SYNTHESIS** — The moderator combines all verified results into a coherent final deliverable
+
+#### Rework within a run (`maxReworks`)
+
+By default a task that fails VERIFY is `FAILED`, which is final. With `maxReworks` on the group, the verifier's
+verdict becomes a request for another attempt:
+
+```json
+{ "style": "TASK_FORCE", "maxReworks": 2, "protocol": { "maxTurns": 40 } }
+```
+
+Inside the VERIFY phase, every task that failed goes back to `ASSIGNED` with the verifier's `feedback` as its
+`verificationNote`. The EXECUTE phase before VERIFY runs it again, and the member's input ends with
+*"Reviewer feedback on the previous attempt (address this): …"*, the same channel `onTaskRejection: RETRY` uses
+for a human reviewer's note. VERIFY then checks the new result. Each task is reworked at most `maxReworks`
+times in a run; after that it stays `FAILED`. A dependent task that was waiting on a reworked one runs in the
+same wave once its dependency completes, and is verified with it.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxReworks` | integer, `0`..`5` | `0` | Reworks per task within one run. `0` keeps a failed verification final, the behaviour before 6.6 |
+
+- **Budgets.** A rework round needs one turn per reworked task plus one for the verifier. When
+  `protocol.maxTurns` has no room for that, or the cost ceiling is reached, the tasks stay `FAILED` and the
+  transcript says *"Rework stopped: …"*. A rework that was scheduled but could not run ends `FAILED` too, never
+  stranded `ASSIGNED`.
+- **Human approval wins.** When the EXECUTE phase gates tasks for approval (`hitlConfig.granularity: TASK` and
+  `requiresApproval`), `maxReworks` is not applied (a warning is logged): the human's decision on each task is
+  the check, and `onTaskRejection: RETRY` is how a person asks for another attempt.
+- **Records.** Every return is a `VERIFICATION` transcript entry, *"Returned for rework (1/2): <subject> —
+  <feedback>"*, and is counted by `eddi_group_task_reworks_total`. The per-task counts are stored with the
+  discussion (`taskList.reworkCounts`), so the bound holds across a pause.
+- **Feedback is model text.** The verifier's feedback reaches the member as part of its input, as every group
+  member already reads its peers' contributions. It is never template source.
+
+**An unparseable verdict** (the verifier did not return the JSON array) still auto-verifies every task of that
+pass, as before. It is no longer silent: it is logged as a warning naming the group and counted by
+`eddi_group_verify_unparseable_total`. A steady rate means the moderator's model ignores the verdict format.
 
 #### Pre-Configured Tasks
 
@@ -1158,7 +1218,7 @@ summarizer's.
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
-| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up |
+| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up. Like a continuation it needs the transcript's owner (or an admin) **and** current USE on the group: owning the transcript does not keep a member runnable after the group was unshared (`403`; the MCP `followup_with_member` refuses the same way) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
