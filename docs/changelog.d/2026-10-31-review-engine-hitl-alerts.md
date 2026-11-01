@@ -29,11 +29,16 @@ Fixes from the CodeRabbit review and the full code review (against `01c3250`) fo
 
 Docs: [Alerts](../alerts.md), [Audit Ledger](../audit-ledger.md), [HITL](../hitl.md), [Secrets Vault](../secrets-vault.md).
 
+- Second review round: a digest is skipped when its rule was disabled or deleted after the pass began, and withdrawn (not delivered) when every held event was released first; `NatsClusterRpc.expectedPeers` reads presence uncached, fails closed when it cannot, and excludes this node by id; erasure keeps conversation snapshots when the conversation-id lookup failed; a failed tool-journal delete keeps the conversation (`ConversationPurgeService.purge` throws) so a retry can still reach the rows naming the approver; Dream `warn` mode logs ungranted vault references; agent-trigger cache misses re-check inside the stripe lock; `AgentSetupService` registers API-call locations before the creation loop so rollback sees them; two docs/Javadoc corrections.
+
 ### Design decisions
 
 - **A repeat of an executed approved call goes back to a human** rather than replaying the journaled result: replay needs a new result path through `ToolLoopRunner`; re-gating is safe with the code this group owns.
 
 ### Not done (deferred)
+
+- **Stale cached alert rules** can, for up to the rule cache TTL (60 s) on another replica, still create a `DIGEST_PENDING` event after the rule was disabled; such an event stays visible in the inbox until retention. Reconciling them needs a store query for held events of rules that are no longer digest rules.
+- **Mongo journal TTL migration during a rolling update:** an old pod can recreate the unfiltered `idx_journal_ttl_claimed` after a new pod dropped it, until it is stopped. Finish the upgrade (no old pods) before relying on the EXECUTING-claim retention; a versioned migration marker is not part of this change.
 
 - **Audit tail / whole-trail deletion** stays undetectable: it needs an anchored chain head stored outside the trail (or a predecessor digest in a new canonical form), which is a format change.
 - **Interim narration of a tool-approval pause** is not screened by the task's output guardrails: the narration is built in `modules/llm` (`ToolApprovalGateSupport`), where the guardrails live.
