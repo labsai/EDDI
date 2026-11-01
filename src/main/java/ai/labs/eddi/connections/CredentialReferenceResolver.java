@@ -90,7 +90,20 @@ public class CredentialReferenceResolver {
             return;
         }
         String expanded = globalVariableResolver.resolveValue(template);
-        Set<String> references = VaultHostAllowlist.referencesIn(List.of(expanded == null ? template : expanded));
+        requireExpandedHostsAllowed(expanded == null ? template : expanded, destination, connectionName, what);
+    }
+
+    /**
+     * The host check on a template that has already been expanded. What is checked
+     * must be exactly what is then resolved: expanding a second time between the
+     * two lets a global variable changed in the gap point the resolution at a vault
+     * secret whose {@code allowedHosts} nobody checked.
+     */
+    private void requireExpandedHostsAllowed(String expanded, String destination, String connectionName, String what) {
+        if (vaultHostAllowlist == null || expanded == null || expanded.isBlank()) {
+            return;
+        }
+        Set<String> references = VaultHostAllowlist.referencesIn(List.of(expanded));
         if (references.isEmpty()) {
             return;
         }
@@ -106,8 +119,24 @@ public class CredentialReferenceResolver {
      * that destination checked against the secret's {@code allowedHosts} first.
      */
     public String resolveVaultBackedFor(String template, String destination, String connectionName, String what) {
-        requireHostsAllowed(template, destination, connectionName, what);
-        return resolveVaultBacked(template, connectionName, what);
+        if (template == null || template.isBlank()) {
+            return resolveVaultBacked(template, connectionName, what); // refuses, with the actionable message
+        }
+        // One expansion serves the check and the resolution.
+        String expanded = globalVariableResolver.resolveValue(template);
+        requireExpandedHostsAllowed(expanded, destination, connectionName, what);
+        return resolveVaultBackedFrom(template, expanded, connectionName, what);
+    }
+
+    /**
+     * {@link #resolveRequired} for a value sent to {@code destination}, with that
+     * destination checked against the {@code allowedHosts} of every secret the
+     * (once-expanded) value references first.
+     */
+    public String resolveRequiredFor(String template, String destination, String connectionName, String what) {
+        String expanded = globalVariableResolver.resolveValue(template);
+        requireExpandedHostsAllowed(expanded == null ? template : expanded, destination, connectionName, what);
+        return resolveRequiredFrom(template, expanded, connectionName, what);
     }
 
     /**
@@ -128,7 +157,10 @@ public class CredentialReferenceResolver {
      *             a revoked grant.
      */
     public String resolveRequired(String template, String connectionName, String what) {
-        String expanded = globalVariableResolver.resolveValue(template);
+        return resolveRequiredFrom(template, globalVariableResolver.resolveValue(template), connectionName, what);
+    }
+
+    private String resolveRequiredFrom(String template, String expanded, String connectionName, String what) {
         if (template != null && !template.equals(expanded) && !ConnectionConfiguration.isAcceptableValueTemplate(expanded)) {
             // A ${vars:} in a header template may stand for a vault reference or for
             // the scaffolding around one ("Bearer "). It may not stand for the
@@ -178,12 +210,16 @@ public class CredentialReferenceResolver {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' is empty. Re-save the connection with a ${vault:…} reference.");
         }
-        String expanded = globalVariableResolver.resolveValue(template);
+        return resolveVaultBackedFrom(template, globalVariableResolver.resolveValue(template), connectionName, what);
+    }
+
+    private String resolveVaultBackedFrom(String template, String expanded, String connectionName, String what) {
         if (!ConnectionConfiguration.isVaultReferenceOnly(expanded)) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "The " + what + " for connection '" + connectionName + "' " + notVaultBacked(template, expanded));
         }
-        return resolveRequired(expanded, connectionName, what);
+        // The expansion is final: no second ${vars:} pass over it.
+        return resolveRequiredFrom(expanded, expanded, connectionName, what);
     }
 
     /**

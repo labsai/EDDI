@@ -140,6 +140,29 @@ class ConnectionResolverTest {
         verify(secretResolver, never()).resolveValue(anyString());
     }
 
+    @Test
+    @DisplayName("a BASIC connection is held only to the secrets it sends, not to a stale valueTemplate it still carries")
+    void basicIgnoresAnUnusedValueTemplate() {
+        var connection = staticConnection(); // carries valueTemplate "Bearer ${vault:jira-token}"
+        connection.setAuthType(AuthType.BASIC);
+        connection.getStaticAuth().setUsername("svc-eddi");
+        connection.getStaticAuth().setPasswordRef("${vault:jira-password}");
+        register(connection);
+        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver);
+        VaultHostAllowlist allowlist = mock(VaultHostAllowlist.class);
+        // The leftover template's secret does not allow this host; the password's does.
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist)
+                .requireAllowed(eq(Set.of("${vault:jira-token}")), anyString(), anyString());
+        credentialResolver.vaultHostAllowlist = allowlist;
+        var resolver = new ConnectionResolver(registry, credentialResolver, callerIdentityContext, new SimpleMeterRegistry(),
+                accessTokenSupplier, true);
+
+        var credential = resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null);
+
+        assertEquals("Basic " + Base64.getEncoder().encodeToString("svc-eddi:hunter2".getBytes(StandardCharsets.UTF_8)),
+                credential.headerValue());
+    }
+
     @Nested
     @DisplayName("CALLER_SUPPLIED")
     class CallerSupplied {

@@ -672,7 +672,15 @@ public final class SecretRedactionFilter {
                 out.append(text, copied, start).append(REDACTED);
                 copied = lastAt;
             }
-            from = Math.max(end, start);
+            // Resume right after this match's own prefix, not at the end of the walk: the
+            // walk can run
+            // through the scheme of the NEXT connection string in a comma-joined list (it
+            // stops at the
+            // '/' of its "://"), and a search starting beyond that scheme would never see
+            // it, leaving
+            // that string's password legible. The walk stops at the next "://", so this
+            // stays linear.
+            from = start;
         }
         if (copied == 0) {
             return text;

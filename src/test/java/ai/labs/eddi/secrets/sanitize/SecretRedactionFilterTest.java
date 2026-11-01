@@ -41,6 +41,15 @@ class SecretRedactionFilterTest {
     }
 
     @Test
+    void everyPasswordInACommaJoinedConnectionStringListIsRedacted() {
+        String result = SecretRedactionFilter.redact("redis://:p1secret@h1,redis://:p2secret@h2");
+
+        assertFalse(result.contains("p1secret"), result);
+        assertFalse(result.contains("p2secret"), result);
+        assertTrue(result.contains("@h1") && result.contains("@h2"), result);
+    }
+
+    @Test
     void redact_openaiKey() {
         String input = "Using key sk-abcdefghij1234567890abcdef to call API";
         String result = SecretRedactionFilter.redact(input);

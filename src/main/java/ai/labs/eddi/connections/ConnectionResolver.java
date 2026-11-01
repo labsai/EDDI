@@ -149,8 +149,7 @@ public class ConnectionResolver {
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
-            requireSecretHostsAllowed(connection, targetUrl);
-            ResolvedCredential credential = resolveCredential(connection, principalOverride);
+            ResolvedCredential credential = resolveCredential(connection, targetUrl, principalOverride);
             record(connection, "success", sample);
             return credential;
         } catch (ConnectionException e) {
@@ -269,7 +268,6 @@ public class ConnectionResolver {
                                 + "or an OAuth connection for XOAUTH2.");
             }
             requireTargetAllowed(connection, targetUrl);
-            requireSecretHostsAllowed(connection, targetUrl);
             StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
             if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank() || staticAuth.getPasswordRef() == null
                     || staticAuth.getPasswordRef().isBlank()) {
@@ -277,7 +275,10 @@ public class ConnectionResolver {
                         "Connection '" + connection.getName() + "' is BASIC but lacks staticAuth.username or staticAuth.passwordRef. "
                                 + "Re-save the connection to apply the current validation rules.");
             }
-            String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+            String destination = targetUrl.toString();
+            credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
+            String password = credentialReferenceResolver.resolveVaultBackedFor(staticAuth.getPasswordRef(), destination, connection.getName(),
+                    "password");
             record(connection, "success", sample);
             return new BasicLogin(staticAuth.getUsername(), password);
         } catch (ConnectionException e) {
@@ -385,7 +386,7 @@ public class ConnectionResolver {
         }
     }
 
-    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {
+    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, URI targetUrl, String principalOverride) {
         // Binding decides before authType does: CALLER_SUPPLIED is always STATIC, but
         // its value comes from the turn rather than from the document, so it must not
         // reach the STATIC branch below — that one resolves a valueTemplate this
@@ -394,8 +395,8 @@ public class ConnectionResolver {
             return callerSuppliedCredential(connection);
         }
         return switch (connection.getAuthType()) {
-            case STATIC -> staticCredential(connection);
-            case BASIC -> basicCredential(connection);
+            case STATIC -> staticCredential(connection, targetUrl);
+            case BASIC -> basicCredential(connection, targetUrl);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
         };
     }
@@ -411,14 +412,17 @@ public class ConnectionResolver {
      * circuit breaker, which then told the operator the server was down and
      * suppressed discovery for everybody configured against it.
      */
-    private ResolvedCredential staticCredential(ConnectionConfiguration connection) {
+    private ResolvedCredential staticCredential(ConnectionConfiguration connection, URI targetUrl) {
         StaticAuth staticAuth = requireStaticAuth(connection, "STATIC");
         if (staticAuth.getValueTemplate() == null || staticAuth.getValueTemplate().isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "Connection '" + connection.getName() + "' is STATIC but has no staticAuth.valueTemplate, so there is no credential to "
                             + "send. Re-save the connection to apply the current validation rules.");
         }
-        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection));
+        // Only the field this auth type sends: a STATIC connection's username or
+        // passwordRef is not part of the request.
+        return new ResolvedCredential(staticAuth.getHeaderName(), credentialReferenceResolver.resolveRequiredFor(staticAuth.getValueTemplate(),
+                targetUrl.toString(), connection.getName(), "credential"));
     }
 
     private static StaticAuth requireStaticAuth(ConnectionConfiguration connection, String authType) {
@@ -495,7 +499,7 @@ public class ConnectionResolver {
      * read back to check which account it belongs to, and hides a password inside
      * something that does not look like one.
      */
-    private ResolvedCredential basicCredential(ConnectionConfiguration connection) {
+    private ResolvedCredential basicCredential(ConnectionConfiguration connection, URI targetUrl) {
         StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
         // A null username would be sent as the literal "null:password" — an
         // authentication failure with no visible cause. Refused instead.
@@ -509,7 +513,12 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
                             + "the current validation rules.");
         }
-        String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+        // Only the fields a BASIC login sends: not valueTemplate, which a BASIC
+        // document may still carry.
+        String destination = targetUrl.toString();
+        credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
+        String password = credentialReferenceResolver.resolveVaultBackedFor(staticAuth.getPasswordRef(), destination, connection.getName(),
+                "password");
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
         return new ResolvedCredential(staticAuth.getHeaderName(), "Basic " + encoded);
@@ -636,25 +645,6 @@ public class ConnectionResolver {
         }
         throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED, "Connection '" + connection.getName() + "' may not be sent to "
                 + origin + ". Add that origin to its baseUrlAllowlist if it is intended.");
-    }
-
-    /**
-     * The other owner's list: every vault secret a STATIC or BASIC connection's
-     * credential is built from may restrict the hosts it is sent to, and the
-     * connection's own allowlist does not speak for the secret's owner. OAuth
-     * access tokens are not vault secrets; their client secret is checked against
-     * the token endpoint where it is sent.
-     */
-    private void requireSecretHostsAllowed(ConnectionConfiguration connection, URI targetUrl) {
-        StaticAuth staticAuth = connection.getStaticAuth();
-        if (staticAuth == null || connection.getBinding() == Binding.CALLER_SUPPLIED
-                || (connection.getAuthType() != AuthType.STATIC && connection.getAuthType() != AuthType.BASIC)) {
-            return;
-        }
-        String destination = targetUrl.toString();
-        credentialReferenceResolver.requireHostsAllowed(staticAuth.getValueTemplate(), destination, connection.getName(), "credential");
-        credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
-        credentialReferenceResolver.requireHostsAllowed(staticAuth.getPasswordRef(), destination, connection.getName(), "password");
     }
 
     /**

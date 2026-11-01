@@ -72,6 +72,33 @@ class CredentialReferenceResolverHostsTest {
     }
 
     @Test
+    @DisplayName("the value that is host-checked is the value that is resolved, even if a variable changes in between")
+    void oneExpansionServesTheCheckAndTheResolution() {
+        // The variable answers differently on its second read, as if an editor changed
+        // it
+        // between the allowlist check and the resolution.
+        when(globalVariableResolver.resolveValue("${vars:cred}")).thenReturn("${vault:allowed-key}").thenReturn("${vault:other-key}");
+
+        resolver.resolveVaultBackedFor("${vars:cred}", "https://api.example.com", "jira", "client secret");
+
+        verify(allowlist).requireAllowed(eq(Set.of("${vault:allowed-key}")), eq("https://api.example.com"), anyString());
+        verify(secretResolver).resolveValue("${vault:allowed-key}");
+        verify(secretResolver, never()).resolveValue("${vault:other-key}");
+    }
+
+    @Test
+    @DisplayName("resolveRequiredFor likewise resolves exactly what it checked")
+    void requiredFlowUsesOneExpansion() {
+        when(globalVariableResolver.resolveValue("Bearer ${vars:cred}")).thenReturn("Bearer ${vault:allowed-key}")
+                .thenReturn("Bearer ${vault:other-key}");
+
+        resolver.resolveRequiredFor("Bearer ${vars:cred}", "https://api.example.com", "jira", "credential");
+
+        verify(secretResolver).resolveValue("Bearer ${vault:allowed-key}");
+        verify(secretResolver, never()).resolveValue("Bearer ${vault:other-key}");
+    }
+
+    @Test
     @DisplayName("a template with no vault reference asks nothing")
     void noReferenceNoCheck() {
         assertDoesNotThrow(() -> resolver.requireHostsAllowed("alice", "https://jira.example.com", "jira", "username"));
