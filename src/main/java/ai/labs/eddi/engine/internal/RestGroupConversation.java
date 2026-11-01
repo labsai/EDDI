@@ -455,6 +455,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // to drive — not every authenticated caller's, as requireOwnerOrAdmin would
             // have it (L9 of the 2026-10-15 security review).
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // A follow-up runs a member agent at the group's cost, like a continuation:
+            // owning the transcript is not the same as still being allowed to run it.
+            requireGroupUseAccess(groupId);
             GroupConversation result = groupConversationService.followUpWithMember(gcId, request.targetAgentId(), request.question());
             return Response.ok(result).build();
         } catch (ForbiddenException e) {
@@ -793,9 +796,20 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
         requireResumeUseAccess(groupId);
         setDecidedByFromIdentity(request);
-        var listener = createStreamingListener(eventSink, sse);
         try {
-            groupConversationService.resumeDiscussion(gcId, request, listener);
+            // Deciding a pause and reading the resumed discussion are separate rights
+            // (as on the agent resume: "a reply is a read"). An approver-only caller
+            // gets the outcome of their decision, not the member turns that follow it.
+            var owner = groupConversationService.readGroupConversation(gcId).getUserId();
+            if (hitlAccessGuard.mayReadResumedDiscussion(owner)) {
+                groupConversationService.resumeDiscussion(gcId, request, createStreamingListener(eventSink, sse));
+            } else {
+                var approverListener = new ApproverStreamingListener(eventSink, sse);
+                groupConversationService.resumeDiscussion(gcId, request, approverListener);
+                // Only now is the resumed run enqueued: a submit failure throws
+                // above with the pause restored, and the catch below reports it.
+                approverListener.resumeEnqueued();
+            }
         } catch (IResourceStore.ResourceModifiedException e) {
             // Curated messages throughout (parity with the non-streaming
             // approveGroupPhase): never forward e.getMessage() over SSE — it can
@@ -927,11 +941,15 @@ public class RestGroupConversation implements IRestGroupConversation {
             summary.put("timeoutPolicy", paused && gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : "");
             summary.put("awaitingApprovalTaskIds", awaitingTaskIds);
             // I6: a human-turn pause carries WHO is up and WHAT they were asked —
-            // the summary is that member's working view, no transcript needed.
+            // the summary is that member's working view, no transcript needed. The
+            // prompt itself is discussion content, so only the member, the owner,
+            // admins (and an approver inside an APPROVAL pause) receive it.
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                    summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                }
             }
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -1133,6 +1151,81 @@ public class RestGroupConversation implements IRestGroupConversation {
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
             }
         };
+    }
+
+    /**
+     * The stream an approver-only caller (neither owner nor admin) gets from
+     * {@code approve/stream}: the outcome of their decision and nothing after it.
+     * The {@code hitl_resume} event confirms the decision was applied and ends the
+     * stream; a rejection ends it with the terminal state but no synthesized
+     * answer; errors and cancellation are forwarded as usual. Every content-bearing
+     * event of the resumed run (member responses, decisions, artifacts, stances,
+     * the synthesis) falls through to the listener's no-op defaults.
+     * <p>
+     * {@code onHitlResume} fires when the resume is committed, before the resumed
+     * run is submitted, and a submit failure rolls the pause back and throws. So
+     * the event is held until {@link #resumeEnqueued()} — called once
+     * {@code resumeDiscussion} has returned — and only then sent with the stream
+     * closed behind it. Until then the stream stays open for the error the endpoint
+     * sends when the submit fails. A terminal event that lands in that window is
+     * the run's real outcome and is reported as such: completion means the resume
+     * ran, so the held {@code hitl_resume} ends the stream; an error or a
+     * cancellation (a cancel signalled during a rolled-back submit, say) replaces
+     * it.
+     */
+    private final class ApproverStreamingListener implements GroupDiscussionEventListener {
+
+        private final SseEventSink eventSink;
+        private final Sse sse;
+        private GroupConversationEventSink.HitlResumeEvent pendingResume;
+
+        private ApproverStreamingListener(SseEventSink eventSink, Sse sse) {
+            this.eventSink = eventSink;
+            this.sse = sse;
+        }
+
+        @Override
+        public synchronized void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
+            pendingResume = event;
+        }
+
+        /**
+         * The resumed run is enqueued: send the held {@code hitl_resume} and end the
+         * stream.
+         */
+        synchronized void resumeEnqueued() {
+            if (pendingResume == null) {
+                return;
+            }
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(pendingResume));
+            pendingResume = null;
+            closeQuietly(eventSink);
+        }
+
+        @Override
+        public synchronized void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
+            if (pendingResume != null) {
+                resumeEnqueued();
+                return;
+            }
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
+                    toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null)));
+            closeQuietly(eventSink);
+        }
+
+        @Override
+        public synchronized void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
+            pendingResume = null;
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+            closeQuietly(eventSink);
+        }
+
+        @Override
+        public synchronized void onCancelled(GroupConversationEventSink.CancelledEvent event) {
+            pendingResume = null;
+            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
+            closeQuietly(eventSink);
+        }
     }
 
     private void sendEvent(SseEventSink eventSink, Sse sse, String eventName, String data) {

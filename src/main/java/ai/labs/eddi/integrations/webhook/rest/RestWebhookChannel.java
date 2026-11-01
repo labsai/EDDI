@@ -50,7 +50,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * request's HMAC signature, checked against that ONE integration's secret, is
  * its authentication, and the check fails closed. Order of operations:
  * <ol>
- * <li>Look up the integration (404 if none).</li>
+ * <li>Look up the integration (an unknown id answers 401, exactly like a bad
+ * signature, so ids cannot be probed).</li>
  * <li>Read at most {@code eddi.webhook.max-body-bytes} raw bytes (413 beyond).
  * The body is taken as a stream of bytes, not a {@code String}: the MAC covers
  * the bytes the sender signed, and a charset decode/re-encode round trip could
@@ -78,6 +79,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class RestWebhookChannel {
 
     private static final Logger LOGGER = Logger.getLogger(RestWebhookChannel.class);
+    private static final String INVALID_SIGNATURE = "Invalid or missing signature.";
     private static final Pattern INTEGRATION_ID = Pattern.compile("^[0-9a-fA-F-]{18,64}$");
 
     private final ChannelTargetRouter router;
@@ -141,7 +143,11 @@ public class RestWebhookChannel {
                 ? router.getWebhookIntegration(integrationId)
                 : Optional.empty();
         if (found.isEmpty()) {
-            return error(404, "No webhook integration with this id.");
+            // Indistinguishable from a bad signature (401, same body): a probe cannot
+            // tell a real integration id from a made-up one. The log line keeps a
+            // mistyped URL diagnosable on the operator's side.
+            LOGGER.warnf("Webhook %s: request refused (unknown integration)", sanitize(String.valueOf(integrationId)));
+            return error(401, INVALID_SIGNATURE);
         }
         ChannelIntegrationConfiguration integration = found.get();
         WebhookChannelSettings settings = WebhookChannelSettings.from(integration.getPlatformConfig());
@@ -150,7 +156,7 @@ public class RestWebhookChannel {
                 name -> headers.get(name.toLowerCase(Locale.ROOT)));
         if (verification.result() != WebhookSignatureVerifier.Result.VALID) {
             LOGGER.warnf("Webhook %s: request refused (%s)", sanitize(integrationId), verification.result());
-            return error(401, "Invalid or missing signature.");
+            return error(401, INVALID_SIGNATURE);
         }
 
         InboundEvent event;
@@ -182,8 +188,11 @@ public class RestWebhookChannel {
         if (dispatch.error() != null) {
             entity.put("error", dispatch.error());
         }
+        if (dispatch.reason() != null) {
+            entity.put("reason", dispatch.reason());
+        }
         var builder = Response.status(dispatch.status()).type(MediaType.APPLICATION_JSON).entity(json(entity));
-        if (dispatch.status() == 409 && dispatch.duplicate()) {
+        if (dispatch.status() == 409 && WebhookEventHandler.REASON_IN_PROGRESS.equals(dispatch.reason())) {
             // A repeat of a delivery still being processed: retry soon, and it is
             // answered 200 (accepted) or processed afresh (first one refused).
             builder.header("Retry-After", "5");

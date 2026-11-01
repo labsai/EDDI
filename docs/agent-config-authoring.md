@@ -93,7 +93,7 @@ Within a group, rules are evaluated in order and — by default (`executionStrat
 
 ### Quick reply expressions must be unique identifiers
 
-Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, and `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)). Use dedicated identifiers:
+Do NOT reuse system action names as quick reply expressions. The reserved actions are `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL human-approval gate — see [Human-in-the-Loop](hitl.md)), and `CONTINUE_CONVERSATION` (the agent starts its own next turn; off unless the agent sets `maxContinuations` — see [Long Jobs](long-jobs.md)). Use dedicated identifiers:
 
 ```
 ❌ WRONG:  "expressions" : "CONVERSATION_START"   (system action name)

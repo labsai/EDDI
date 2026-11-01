@@ -120,6 +120,16 @@ Provider data residency: [PRIVACY.md](../PRIVACY.md); provider BAAs:
 
 ---
 
+## Other outbound recipients
+
+Besides the LLM provider, these leave the deployment as a side effect of a feature, not of a conversation's content:
+
+| Recipient | When | What it receives | Notes |
+|---|---|---|---|
+| **DNS resolver** (`eddi.email.dns.servers`, else the system's resolvers) | Mail sender authentication checks a received message ([security.md](security.md#mail-sender-authentication--dkim-and-dmarc)) | TXT queries naming the signing domain and selector of each DKIM signature (`<selector>._domainkey.<d>`) and the `From` domain or its organisational domain (`_dmarc.<domain>`) — so the resolver, and the authoritative servers it asks, learn which domains mail arrived from and when. Never an address, a local part, a subject or a body | Answers are cached (TTL-honouring, capped at `eddi.email.dns.cache-max-ttl`), which also limits how often a sender's domain is queried. Queries are plain DNS, unencrypted; point `eddi.email.dns.servers` at a resolver inside the deployment's network to keep them there |
+
+---
+
 ## Data Store Inventory
 
 | Data Store | Contains PII | Encryption | Retention | On GDPR erasure | Regulatory Notes |
@@ -132,6 +142,7 @@ Provider data residency: [PRIVACY.md](../PRIVACY.md); provider BAAs:
 | **Group Conversations** | ✅ multi-agent transcripts | TDE (deployer) | Until deleted | ✅ Deleted | Group discussion content |
 | **Shared Artifacts** | ✅ user/agent-authored content | TDE (deployer) | Until deleted | ✅ Deleted | Owned by the creating user |
 | **HITL Tool Journal** | ✅ tool name, capped tool result, approver identity | TDE (deployer) | With owning conversation | ✅ Deleted | Human-approval audit trail |
+| **Email message ledger** | ✅ recipient address of each HITL notification, conversation id, Message-ID — never a body | TDE (deployer) | `eddi.email.ledger-retention` (default `30d`) | ✅ Deleted (matched by the user id's address and the user directory's recorded email) | The SMTP relay of `eddi.mail.smtp.*` is a processor: it receives each notification's recipient, the agent name, pause reason and redacted tool arguments; see [hitl.md](hitl.md#email-notifications) |
 | **Schedules** | ✅ userId, trigger payloads | TDE (deployer) | Until deleted | ✅ Deleted | Owned by the creating user |
 | **Audit Ledger** | ✅ userId, prompts, responses, LLM detail, tool calls; admin actions name their actor | TDE (deployer) + HMAC (when a key is set) | Indefinite — no application-level expiry | ⚠️ Rows kept; content **redacted**, userId **pseudonymized** (`eddi.audit.erasure-mode`) | EU AI Act Arts. 12/19 record-keeping |
 | **Audit dead-letter sink** | ✅ whole audit entries | Deployer | Never expired by EDDI | ❌ Not reached | Only written when the ledger cannot persist; see [GDPR guide](gdpr-compliance.md#the-audit-dead-letter-sink-holds-personal-data-and-erasure-does-not-reach-it) |

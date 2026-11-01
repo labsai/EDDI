@@ -551,6 +551,28 @@ class MongoScheduleStoreTest {
     }
 
     @Test
+    @DisplayName("countPendingSchedulesByName — counts enabled and undeploy-disabled rows of the name, not fired one-shots")
+    void countPendingSchedulesByNameFiltersOnPendingRows() throws Exception {
+        when(scheduleCollection.countDocuments(any(Bson.class))).thenReturn(1L);
+
+        assertEquals(1, store.countPendingSchedulesByName("continuation-conv-1"));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).countDocuments(filter.capture());
+        String rendered = filter.getValue().toString();
+        assertTrue(rendered.contains("continuation-conv-1") && rendered.contains("enabled")
+                && rendered.contains(ScheduleConfiguration.DISABLED_BY_UNDEPLOY), rendered);
+    }
+
+    @Test
+    @DisplayName("countPendingSchedulesByName — a driver failure becomes a ResourceStoreException")
+    void countPendingSchedulesByNameStoreFailureIsWrapped() {
+        when(scheduleCollection.countDocuments(any(Bson.class))).thenThrow(new IllegalStateException("cluster down"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.countPendingSchedulesByName("continuation-conv-1"));
+    }
+
+    @Test
     @DisplayName("deleteSchedulesByName — cascades the fire logs of every matched schedule, before AND after")
     void deleteSchedulesByNameCascadesFireLogs() throws Exception {
         stubScheduleIdProjection("sched-9");

@@ -261,7 +261,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
         // instead of matching nothing.
         String sql = """
                 UPDATE secret_vault_secrets
-                   SET encrypted_value = ?, iv = ?, dek_id = ?, last_rotated_at = ?
+                   SET encrypted_value = ?, iv = ?, dek_id = ?, last_rotated_at = ?, checksum = ?
                  WHERE tenant_id = ? AND key_name = ? AND dek_id IS NOT DISTINCT FROM ?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
@@ -269,9 +269,10 @@ public class PostgresSecretPersistence implements ISecretPersistence {
             ps.setString(2, secret.getIv());
             ps.setString(3, secret.getDekId());
             ps.setTimestamp(4, instantToTimestamp(secret.getLastRotatedAt()));
-            ps.setString(5, secret.getTenantId());
-            ps.setString(6, secret.getKeyName());
-            ps.setString(7, expectedDekId);
+            ps.setString(5, secret.getChecksum());
+            ps.setString(6, secret.getTenantId());
+            ps.setString(7, secret.getKeyName());
+            ps.setString(8, expectedDekId);
             return ps.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new PersistenceException("Failed to re-seal secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
@@ -626,6 +627,19 @@ public class PostgresSecretPersistence implements ISecretPersistence {
                 PreparedStatement ps = conn.prepareStatement("DELETE FROM secret_vault_meta WHERE key = ?")) {
             ps.setString(1, key);
             ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new PersistenceException("Failed to delete meta value: " + key, e);
+        }
+    }
+
+    @Override
+    public boolean deleteMetaValueIfEquals(String key, String expected) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("DELETE FROM secret_vault_meta WHERE key = ? AND value = ?")) {
+            ps.setString(1, key);
+            ps.setString(2, expected);
+            return ps.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new PersistenceException("Failed to delete meta value: " + key, e);
         }

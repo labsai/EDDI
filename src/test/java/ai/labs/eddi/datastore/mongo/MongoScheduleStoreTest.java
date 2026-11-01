@@ -537,6 +537,77 @@ class MongoScheduleStoreTest extends MongoTestBase {
         }
     }
 
+    // ─── Used-up one-shot pruning ───────────────────────────────
+
+    @Nested
+    @DisplayName("deleteUsedUpOneShotsByName")
+    class PruneUsedUpOneShots {
+
+        private static final String NAME = "continuation-conv-1";
+
+        /** A one-shot due a minute ago, as the engine arms a continuation. */
+        private String oneShot(String name) throws Exception {
+            var cfg = new ScheduleConfiguration();
+            cfg.setName(name);
+            cfg.setAgentId("agent-1");
+            cfg.setTriggerType(ScheduleConfiguration.TriggerType.CRON);
+            Instant due = Instant.now().minusSeconds(60);
+            cfg.setOneTimeAt(due.toString());
+            cfg.setNextFire(due);
+            cfg.setEnabled(true);
+            cfg.setFireStatus(FireStatus.PENDING);
+            return store.createSchedule(cfg);
+        }
+
+        /** Claim and complete it as the poller does for a fired one-shot. */
+        private String usedUp(String name) throws Exception {
+            String id = oneShot(name);
+            assertTrue(store.tryClaim(id, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+            store.markCompleted(id, null);
+            return id;
+        }
+
+        @Test
+        @DisplayName("deletes exactly the used-up one-shots of the name, with their fire logs, and keeps every other row")
+        void prunesOnlyUsedUpRows() throws Exception {
+            String spent = usedUp(NAME);
+            store.logFire(new ScheduleFireLog("fire-spent", spent, "fk-spent", Instant.now(), Instant.now(), Instant.now(),
+                    "COMPLETED", "node-1", "conv-1", null, 1, 0.0));
+
+            String pending = oneShot(NAME);
+
+            String claimed = oneShot(NAME);
+            assertTrue(store.tryClaim(claimed, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+
+            String deadLettered = oneShot(NAME);
+            assertTrue(store.tryClaim(deadLettered, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+            store.markDeadLettered(deadLettered);
+
+            // Fired and completed, then switched off by an undeploy: only the reason
+            // differs.
+            String undeployDisabled = usedUp(NAME);
+            store.setScheduleEnabled(undeployDisabled, false, null, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+
+            // Fired once as a recurring schedule, then disabled by hand: it keeps its next
+            // fire.
+            String handDisabled = oneShot(NAME);
+            assertTrue(store.tryClaim(handDisabled, "node-1", Instant.now(), Instant.now().minusSeconds(300)));
+            store.markCompleted(handDisabled, Instant.now().plusSeconds(3600));
+            store.setScheduleEnabled(handDisabled, false, null);
+
+            String otherName = usedUp("continuation-conv-2");
+
+            assertEquals(1, store.deleteUsedUpOneShotsByName(NAME));
+
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.readSchedule(spent));
+            assertTrue(store.readFireLogs(spent, 10).isEmpty(), "the pruned row's fire log goes with it");
+            for (String kept : List.of(pending, claimed, deadLettered, undeployDisabled, handDisabled, otherName)) {
+                assertEquals(kept, store.readSchedule(kept).getId());
+            }
+            assertEquals(0, store.deleteUsedUpOneShotsByName(NAME), "nothing used up is left");
+        }
+    }
+
     // ─── Helpers ────────────────────────────────────────────────
 
     private static ScheduleConfiguration newSchedule(String name, String agentId) {

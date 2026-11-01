@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -18,6 +20,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -38,6 +42,7 @@ class VaultGrantImpactAnalyzerTest {
 
     private VaultGrantChecker checker;
     private IAgentFactory agentFactory;
+    private IDeploymentStore deploymentStore;
     private VaultGrantImpactAnalyzer analyzer;
 
     @BeforeEach
@@ -45,7 +50,19 @@ class VaultGrantImpactAnalyzerTest {
         checker = mock(VaultGrantChecker.class);
         agentFactory = mock(IAgentFactory.class);
         when(agentFactory.getAllDeployedAgents(any())).thenReturn(List.of());
-        analyzer = new VaultGrantImpactAnalyzer(checker, agentFactory);
+        deploymentStore = mock(IDeploymentStore.class);
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenReturn(List.of());
+        analyzer = new VaultGrantImpactAnalyzer(checker, agentFactory, deploymentStore);
+    }
+
+    /** A deployment recorded in the shared database — possibly on another node. */
+    private static DeploymentInfo recorded(String id, Integer version, Deployment.Environment environment) {
+        DeploymentInfo info = new DeploymentInfo();
+        info.setAgentId(id);
+        info.setAgentVersion(version);
+        info.setEnvironment(environment);
+        info.setDeploymentStatus(DeploymentInfo.DeploymentStatus.deployed);
+        return info;
     }
 
     /** A deployed agent in the runtime registry. */
@@ -119,7 +136,7 @@ class VaultGrantImpactAnalyzerTest {
     }
 
     @Test
-    @DisplayName("an agent that is registered but not READY is not reported")
+    @DisplayName("an agent whose deployment failed (ERROR) is not reported")
     void skipsAgentsThatAreNotReady() throws Exception {
         // A deployment that never came up is not a deployment this change breaks.
         deployedInProduction(agent("agentTwo", 3, Deployment.Status.ERROR));
@@ -243,5 +260,137 @@ class VaultGrantImpactAnalyzerTest {
         assertFalse(impact.complete());
         // The readable agent is still reported; the unreadable one is not guessed at.
         assertEquals(List.of(new AffectedAgent("agentThree", 1, "production")), impact.agentsLosingAccess());
+    }
+
+    // ─── creating a secret that deployed agents already reference ───
+
+    /**
+     * The deploy gate lets a reference to an absent secret through (agent sync
+     * deploys before the target holds the secret). Creating it later with a grant
+     * that leaves such an agent out is the grant the gate would have refused.
+     */
+    @Test
+    @DisplayName("enforce: creating a secret whose grant leaves out a deployed agent referencing it is refused, naming the agent")
+    void creationLeavingOutAReferencingAgentIsRefused() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        String refusal = analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE);
+
+        assertNotNull(refusal);
+        assertTrue(refusal.contains("agentTwo"), refusal);
+        assertTrue(refusal.contains(SECRET.toReferenceString()), refusal);
+    }
+
+    @Test
+    @DisplayName("creating a secret is allowed when its grant names every referencing agent, or is the wildcard")
+    void creationNamingTheReferencingAgentsIsAllowed() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne", "agentTwo"), VaultGrantGate.Mode.ENFORCE));
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("*"), VaultGrantGate.Mode.ENFORCE));
+    }
+
+    @Test
+    @DisplayName("warn and off allow the creation; off does not even scan")
+    void creationFollowsTheEnforcementMode() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.WARN));
+        verify(checker).checkReferences(eq("agentTwo"), anyInt(), eq(SECRET));
+
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.OFF));
+        verify(checker).checkReferences(eq("agentTwo"), anyInt(), eq(SECRET));
+    }
+
+    /**
+     * An empty list from a scan that could not read an agent is "not known", not
+     * "nothing references it". Letting the creation through would hand the value to
+     * that agent, if it does reference the secret, for as long as it stays
+     * deployed; refusing costs a retry.
+     */
+    @Test
+    @DisplayName("enforce: an agent whose configuration cannot be read blocks the creation, and is named")
+    void unreadableAgentBlocksCreation() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.UNKNOWN);
+
+        String refusal = analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE);
+
+        assertNotNull(refusal);
+        assertTrue(refusal.contains("agentTwo"), refusal);
+        assertTrue(refusal.contains("could not be read"), refusal);
+        // The way out it names: the agent on the grant needs no scan.
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne", "agentTwo"), VaultGrantGate.Mode.ENFORCE));
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.WARN));
+    }
+
+    @Test
+    @DisplayName("enforce: a registry that cannot be listed blocks the creation")
+    void failedListingBlocksCreation() throws Exception {
+        when(agentFactory.getAllDeployedAgents(any())).thenThrow(new RuntimeException("registry unavailable"));
+
+        String refusal = analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE);
+
+        assertNotNull(refusal);
+        assertTrue(refusal.contains("could not all be listed"), refusal);
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.WARN));
+        assertNull(analyzer.refusalToCreate(SECRET, List.of("*"), VaultGrantGate.Mode.ENFORCE));
+    }
+
+    // ─── the fleet, not only this node ───
+
+    /**
+     * The runtime registry is per node, the vault is shared. An agent deployed on
+     * another node shows up only in the deployment records.
+     */
+    @Test
+    @DisplayName("an agent deployed only on another node is found through the deployment records")
+    void findsAgentsDeployedOnOtherNodes() throws Exception {
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                .thenReturn(List.of(recorded("agentTwo", 3, Deployment.Environment.production)));
+        when(checker.checkReferences(eq("agentTwo"), eq(3), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertEquals(List.of(new AffectedAgent("agentTwo", 3, "production")),
+                analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess());
+        String refusal = analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE);
+        assertNotNull(refusal);
+        assertTrue(refusal.contains("agentTwo"), refusal);
+    }
+
+    @Test
+    @DisplayName("an agent both running here and recorded is checked and reported once")
+    void runtimeAndRecordAreOneAgent() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.READY));
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                .thenReturn(List.of(recorded("agentTwo", 3, Deployment.Environment.production)));
+        when(checker.checkReferences(eq("agentTwo"), eq(3), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertEquals(List.of(new AffectedAgent("agentTwo", 3, "production")),
+                analyzer.agentsLosingAccess(SECRET, List.of("agentOne")).agentsLosingAccess());
+        verify(checker).checkReferences(eq("agentTwo"), eq(3), eq(SECRET));
+    }
+
+    @Test
+    @DisplayName("deployment records that cannot be read leave the answer incomplete, and block an enforced creation")
+    void unreadableRecordsAreIncomplete() throws Exception {
+        when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)).thenThrow(new RuntimeException("db down"));
+
+        var impact = analyzer.agentsLosingAccess(SECRET, List.of("agentOne"));
+
+        assertTrue(impact.agentsLosingAccess().isEmpty());
+        assertFalse(impact.complete());
+        assertNotNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE));
+    }
+
+    @Test
+    @DisplayName("an agent still coming up counts: the deploy gate already let it through")
+    void agentInProgressCounts() throws Exception {
+        deployedInProduction(agent("agentTwo", 3, Deployment.Status.IN_PROGRESS));
+        when(checker.checkReferences(eq("agentTwo"), anyInt(), eq(SECRET))).thenReturn(ReferenceCheck.REFERENCES);
+
+        assertNotNull(analyzer.refusalToCreate(SECRET, List.of("agentOne"), VaultGrantGate.Mode.ENFORCE));
     }
 }

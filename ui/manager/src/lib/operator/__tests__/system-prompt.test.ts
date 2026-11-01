@@ -1152,3 +1152,50 @@ describe("batched changes: the plan shape the operator is taught", () => {
     expect(section(full)).not.toMatch(/\{/);
   });
 });
+
+describe("conversation ratings", () => {
+  const RATING_READS = ["GET /ratings", "GET /ratings/summary", "GET /ratings/attention-count"];
+
+  it("is taught when the three rating reads are granted — in both scopes", () => {
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain("Conversation ratings (feedback from the people chatting):");
+      expect(body).toContain("AGENT_ID_REQUIRED");
+      expect(body).toContain("groupBy=agentVersion");
+      expect(body).toContain("ratingWindowHours");
+      expect(body).toContain("needsAttention=true");
+    }
+  });
+
+  it("is absent when any one of the reads is missing — it names all three", () => {
+    for (const missing of RATING_READS) {
+      const endpoints = READ_ENDPOINTS.filter((e) => e !== missing);
+      expect(buildOperatorPromptBody(endpoints)).not.toContain("Conversation ratings (feedback");
+    }
+  });
+
+  it("says triage and export stay with the admin, because neither is granted", () => {
+    expect(buildOperatorPromptBody(WITH_A_WRITE)).toContain("You cannot mark ratings reviewed");
+  });
+
+  it("explains that the agentVersion filter cannot express 'since'", () => {
+    expect(buildOperatorPromptBody(READ_ENDPOINTS)).toContain("matches ONE version exactly");
+  });
+});
+
+describe("alerts", () => {
+  it("is taught when the alert reads are granted, in both scopes", () => {
+    for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
+      expect(body).toContain("Alerts (rules that tell people when something needs them):");
+      expect(body).toContain("TURN_DEADLINE");
+      expect(body).toContain("OUTPUT_MATCH");
+      expect(body).toContain("alerts-maintenance");
+      expect(body).toContain("never shows a webhook's URL");
+      expect(body).toContain("You cannot acknowledge alerts");
+    }
+  });
+
+  it("is absent without the reads", () => {
+    const endpoints = READ_ENDPOINTS.filter((e) => e !== "GET /alerts/rules");
+    expect(buildOperatorPromptBody(endpoints)).not.toContain("Alerts (rules that tell people");
+  });
+});
