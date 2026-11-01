@@ -51,6 +51,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         validateWorkflowUris(agentConfiguration);
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
+        validateContinuation(agentConfiguration);
         // Store-owned: whatever the body claims is replaced. A new agent — including a
         // duplicate or an import — starts its own chain, compatible with nothing.
         agentConfiguration.setCompatibilityGeneration(FIRST_COMPATIBILITY_GENERATION);
@@ -73,6 +74,7 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         validateWorkflowUris(agentConfiguration);
         HitlConfigValidation.validate(agentConfiguration.getHitlConfig());
         validateUserMemoryConfig(agentConfiguration);
+        validateContinuation(agentConfiguration);
         // Only the current version can be updated (the historized store refuses any
         // other), so the version replaced here always carries the agent's highest
         // generation and this rule keeps generations monotonic without looking at
@@ -123,6 +125,30 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
             }
         }
     }
+
+    /**
+     * {@code maxContinuations} within {@code 0}..{@value #MAX_CONTINUATIONS} and
+     * {@code continuationInput} at most {@value #MAX_CONTINUATION_INPUT_LENGTH}
+     * characters. A bound the engine enforces on every agent: a typo of one extra
+     * zero must not turn a job of 100 turns into one of 1,000,000.
+     */
+    public static void validateContinuation(AgentConfiguration agentConfiguration) {
+        Integer max = agentConfiguration.getMaxContinuations();
+        if (max != null && (max < 0 || max > MAX_CONTINUATIONS)) {
+            throw new IllegalArgumentException("maxContinuations must be between 0 and " + MAX_CONTINUATIONS + ", got: " + max);
+        }
+        String input = agentConfiguration.getContinuationInput();
+        if (input != null && input.length() > MAX_CONTINUATION_INPUT_LENGTH) {
+            throw new IllegalArgumentException("continuationInput must be at most " + MAX_CONTINUATION_INPUT_LENGTH
+                    + " characters, got: " + input.length());
+        }
+    }
+
+    /** Upper bound of {@code maxContinuations}. */
+    public static final int MAX_CONTINUATIONS = 10_000;
+
+    /** Upper bound of {@code continuationInput}, in characters. */
+    public static final int MAX_CONTINUATION_INPUT_LENGTH = 4096;
 
     /**
      * Write-time bound on the Dream consolidation settings.

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.impl.builder.AnthropicLanguageModelBuilder;
 import ai.labs.eddi.modules.llm.impl.builder.ModelParameterCatalog;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
@@ -64,11 +65,13 @@ import java.util.Set;
  * <h2>Budget</h2> {@code maxRetries} is per model (cascade step) and shared by
  * every policy; a re-ask is skipped when the remaining time cannot fit it
  * ({@link RemainingBudget}, {@code minAttemptMs}), when the retry cost cap is
- * reached, or when {@link ReaskGate} says the model is known-bad (the R8 hook).
- * Every skipped or failed re-ask leaves the reply as it was: the caller
- * escalates or falls back; the runner never throws for a format problem. Token
- * usage of every attempt is summed into the result, so retries show up in the
- * cost figures.
+ * reached, when {@link ReaskSpend} refuses it (the conversation's
+ * {@code maxCostPerConversationUsd} or the tenant's monthly budget, counting
+ * what this model's attempts have already cost), or when {@link ReaskGate} says
+ * the model is known-bad (the R8 hook). Every skipped or failed re-ask leaves
+ * the reply as it was: the caller escalates or falls back; the runner never
+ * throws for a format problem. Token usage of every attempt is summed into the
+ * result, so retries show up in the cost figures.
  */
 final class FormatRetryRunner {
 
@@ -79,6 +82,10 @@ final class FormatRetryRunner {
      * Longest bad reply echoed back as the assistant turn of a corrective re-ask.
      */
     static final int MAX_ECHOED_REPLY_CHARS = 16_000;
+    /**
+     * The {@code eddi.llm.recovery} outcome of a re-ask the spend checks refused.
+     */
+    static final String SKIPPED_SPEND = "skipped_spend";
     /** The output-token cap of a truncation re-ask never exceeds this. */
     static final int MAX_OUTPUT_TOKENS_CEILING = 32_768;
 
@@ -131,6 +138,35 @@ final class FormatRetryRunner {
         ReaskGate ALWAYS = trigger -> true;
 
         boolean allowReask(Trigger trigger);
+    }
+
+    /**
+     * The spend check of a re-ask: asked right before it starts, with what the
+     * attempts of this run have cost so far (they are not in {@code audit:cost}
+     * yet) and what the re-ask is expected to cost (the last attempt's price).
+     * {@link #NONE} admits everything — a policy without a spend gate.
+     */
+    @FunctionalInterface
+    interface ReaskSpend {
+        ReaskSpend NONE = (pendingUsd, expectedUsd) -> LlmSpendGate.Admission.ALLOWED;
+
+        LlmSpendGate.Admission admit(double pendingUsd, double expectedUsd);
+
+        /** The check of a conversation's memory through the task's spend gate. */
+        static ReaskSpend of(LlmSpendGate gate, IConversationMemory memory) {
+            return gate == null || memory == null ? NONE : (pendingUsd, expectedUsd) -> gate.admit(memory, pendingUsd, expectedUsd);
+        }
+
+        /**
+         * This check with {@code offsetUsd} more already spent and unrecorded (the
+         * earlier steps of a cascade run).
+         */
+        default ReaskSpend plus(double offsetUsd) {
+            if (!(offsetUsd > 0.0) || !Double.isFinite(offsetUsd)) {
+                return this;
+            }
+            return (pendingUsd, expectedUsd) -> admit(pendingUsd + offsetUsd, expectedUsd);
+        }
     }
 
     /** Rebuilds the request with a smaller history window; null when it cannot. */
@@ -202,7 +238,20 @@ final class FormatRetryRunner {
      */
     record Policy(Set<Trigger> retryOn, int maxRetries, double truncationFactor, String correctiveMessage, long minAttemptMs,
             Double maxRetryCostUsd, Double inputPricePer1M, Double outputPricePer1M, boolean convertToObject, Integer baseMaxOutputTokens,
-            String responseSchema, List<String> nonBlankFields, String taskId, String emptyAction) {
+            String responseSchema, List<String> nonBlankFields, String taskId, String emptyAction, ReaskSpend spend) {
+
+        Policy {
+            spend = spend != null ? spend : ReaskSpend.NONE;
+        }
+
+        /**
+         * This policy with a spend check: every re-ask is admitted by it before it
+         * starts. Null keeps {@link ReaskSpend#NONE}.
+         */
+        Policy withSpend(ReaskSpend newSpend) {
+            return new Policy(retryOn, maxRetries, truncationFactor, correctiveMessage, minAttemptMs, maxRetryCostUsd, inputPricePer1M,
+                    outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema, nonBlankFields, taskId, emptyAction, newSpend);
+        }
 
         /**
          * The policy a task (and optionally a cascade step) runs under, or null when
@@ -246,7 +295,7 @@ final class FormatRetryRunner {
             }
             return new Policy(Set.copyOf(on), retries, validation.getTruncationRetryFactor(), corrective, validation.getMinAttemptMs(),
                     validation.getMaxRetryCostUsd(), inputPricePer1M, outputPricePer1M, convertToObject, baseMaxOutputTokens, responseSchema,
-                    nonBlankFields, taskId, validation.getOnEmpty());
+                    nonBlankFields, taskId, validation.getOnEmpty(), null);
         }
 
         private static void addIfRetry(Set<Trigger> on, Trigger trigger, String action) {
@@ -300,6 +349,13 @@ final class FormatRetryRunner {
             if (smaller == null || smaller.isEmpty()) {
                 throw e;
             }
+            // The refused attempt cost nothing; the re-ask still may not start past the
+            // conversation's ceiling or the tenant's budget.
+            LlmSpendGate.Admission admission = policy.spend().admit(0.0, 0.0);
+            if (!admission.allowed()) {
+                count("retry", SKIPPED_SPEND, Trigger.CONTEXT_TOO_LONG);
+                throw e;
+            }
             reasks = 1;
             listener.onReask(Trigger.CONTEXT_TOO_LONG, reasks);
             current = smaller;
@@ -312,6 +368,8 @@ final class FormatRetryRunner {
                 count("retry", "failed", Trigger.CONTEXT_TOO_LONG);
                 listener.onReaskDone(Trigger.CONTEXT_TOO_LONG, reasks, "failed", elapsedMs(started));
                 throw second;
+            } finally {
+                admission.close();
             }
             count("retry", "recovered", Trigger.CONTEXT_TOO_LONG);
             listener.onReaskDone(Trigger.CONTEXT_TOO_LONG, reasks, "recovered", elapsedMs(started));
@@ -368,6 +426,17 @@ final class FormatRetryRunner {
             if (skip == null && (trigger == Trigger.INVALID_JSON || trigger == Trigger.SCHEMA_MISMATCH)) {
                 request = withCorrective(messages, attempt.text(), detection.reason(), policy.correctiveMessage());
             }
+            // Last, so nothing is reserved for a re-ask that another check skips: the
+            // conversation's ceiling and the tenant budget, with what this run has spent
+            // so far (not yet in audit:cost) and the last attempt's price as the
+            // expected cost of the next one.
+            LlmSpendGate.Admission admission = null;
+            if (skip == null) {
+                admission = policy.spend().admit(priced(policy, totalUsage), priced(policy, tokenUsage(attempt)));
+                if (!admission.allowed()) {
+                    skip = SKIPPED_SPEND;
+                }
+            }
             if (skip != null) {
                 count("retry", skip, trigger);
                 LOGGER.debugf("Not re-asking (%s) for %s", skip, trigger.label());
@@ -389,6 +458,8 @@ final class FormatRetryRunner {
                 listener.onReaskDone(trigger, reasks, "failed", elapsedMs(started));
                 LOGGER.warnf("Re-ask (%s) failed: %s — keeping the earlier reply", trigger.label(), e.getMessage());
                 return new Outcome(withUsage(attempt, totalUsage), trigger, detection.reason(), reasks, messages);
+            } finally {
+                admission.close();
             }
             CascadingModelExecutor.mergeTokenUsage(totalUsage, tokenUsage(next));
             CascadingModelExecutor.mergeTokenUsage(retryUsage, tokenUsage(next));
@@ -483,6 +554,12 @@ final class FormatRetryRunner {
 
     private static double retryCost(Policy policy, Map<String, Object> retryUsage) {
         return TokenPricing.cost(policy.inputPricePer1M(), policy.outputPricePer1M(), retryUsage);
+    }
+
+    /** {@code usage} at the policy's prices; 0 for an unpriced model. */
+    private static double priced(Policy policy, Map<String, Object> usage) {
+        double cost = TokenPricing.cost(policy.inputPricePer1M(), policy.outputPricePer1M(), usage);
+        return Double.isFinite(cost) && cost > 0.0 ? cost : 0.0;
     }
 
     /**

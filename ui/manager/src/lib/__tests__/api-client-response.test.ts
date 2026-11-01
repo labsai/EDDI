@@ -138,3 +138,27 @@ describe("Bean Validation 400s", () => {
     await expect(api.put(PATH, {})).rejects.toMatchObject({ message: "members must not be empty" });
   });
 });
+
+describe("error codes", () => {
+  it("keeps the stable code of an {error, message} body beside the message", async () => {
+    server.use(
+      http.patch(URL, () =>
+        HttpResponse.json({ error: "RATING_CHANGED", message: "The rating was changed meanwhile" }, { status: 409 }),
+      ),
+    );
+
+    await expect(api.patch(PATH, {})).rejects.toMatchObject({
+      status: 409,
+      code: "RATING_CHANGED",
+      message: "The rating was changed meanwhile",
+    });
+  });
+
+  it("has no code when `error` is the only field, which is then the message", async () => {
+    server.use(http.get(URL, () => HttpResponse.json({ error: "System prompt is required" }, { status: 400 })));
+
+    const error = await api.get(PATH).catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 400, message: "System prompt is required" });
+    expect((error as { code?: string }).code).toBeUndefined();
+  });
+});

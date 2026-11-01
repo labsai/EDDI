@@ -144,12 +144,25 @@ public class AttachmentForwarder {
                         ModelCapabilityService.Support visionOverride,
                         ModelCapabilityService.Support documentsOverride,
                         ModelCapabilityService.Support audioOverride) {
+        forward(messages, memory, provider, model, visionOverride, documentsOverride, audioOverride, true);
+    }
+
+    /**
+     * As above; {@code record=false} builds the content without touching the step
+     * data or the meters. A cascade step on a different endpoint re-forwards the
+     * same attachments for its own prompt, and the turn's errors and counts were
+     * already recorded once, by the task-level pass.
+     */
+    public void forward(List<ChatMessage> messages, IConversationMemory memory, String provider, String model,
+                        ModelCapabilityService.Support visionOverride,
+                        ModelCapabilityService.Support documentsOverride,
+                        ModelCapabilityService.Support audioOverride, boolean record) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
         List<Attachment> attachments = readAttachments(memory);
         if (attachments.isEmpty()) {
-            noteAttachmentsFromEarlierTurns(messages, memory, provider, model, visionOverride);
+            noteAttachmentsFromEarlierTurns(messages, memory, provider, model, visionOverride, record);
             return;
         }
         int lastUserIdx = lastUserMessageIndex(messages);
@@ -178,8 +191,10 @@ public class AttachmentForwarder {
             messages.set(lastUserIdx, UserMessage.from(contents));
             LOGGER.debugf("Forwarded %d attachment content item(s) to the LLM", added);
         }
-        recordMetrics(added, errors.size());
-        persist(memory.getCurrentStep(), extracts, errors);
+        if (record) {
+            recordMetrics(added, errors.size());
+            persist(memory.getCurrentStep(), extracts, errors);
+        }
     }
 
     /**
@@ -214,7 +229,7 @@ public class AttachmentForwarder {
      */
     private void noteAttachmentsFromEarlierTurns(List<ChatMessage> messages, IConversationMemory memory,
                                                  String provider, String model,
-                                                 ModelCapabilityService.Support visionOverride) {
+                                                 ModelCapabilityService.Support visionOverride, boolean record) {
         List<Attachment> earlier = AttachmentContextExtractor.attachmentsFromPreviousTurns(memory);
         if (earlier.isEmpty()) {
             return;
@@ -288,13 +303,15 @@ public class AttachmentForwarder {
         if (contents.size() > original.contents().size()) {
             messages.set(lastUserIdx, UserMessage.from(contents));
         }
-        if (reinlinedCounter != null && inlined > 0) {
-            reinlinedCounter.increment(inlined);
+        if (record) {
+            if (reinlinedCounter != null && inlined > 0) {
+                reinlinedCounter.increment(inlined);
+            }
+            if (errorsCounter != null && !errors.isEmpty()) {
+                errorsCounter.increment(errors.size());
+            }
+            persist(memory.getCurrentStep(), List.of(), errors);
         }
-        if (errorsCounter != null && !errors.isEmpty()) {
-            errorsCounter.increment(errors.size());
-        }
-        persist(memory.getCurrentStep(), List.of(), errors);
         LOGGER.debugf("Earlier-turn attachments for conversation='%s': %d image(s) re-inlined, %d noted",
                 LogSanitizer.sanitize(memory.getConversationId()), inlined, noteOnly.size());
     }

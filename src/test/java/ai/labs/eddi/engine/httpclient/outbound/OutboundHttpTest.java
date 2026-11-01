@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.httpclient.outbound;
 
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
+import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.vertx.core.Vertx;
 import org.junit.jupiter.api.DisplayName;
@@ -16,6 +17,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -424,6 +426,104 @@ class OutboundHttpTest {
 
             assertEquals("not on the allowlist: https://other.example/", e.getMessage());
             assertEquals(1, engine.hops.size());
+        }
+    }
+
+    @Nested
+    @DisplayName("DNS rebinding — the hop's check runs again after the exchange")
+    class Rebinding {
+
+        private static final URI REBINDING = URI.create("https://rebind.example/data");
+
+        /**
+         * Answers {@code first} to the first lookup and {@code later} to every one
+         * after it.
+         */
+        private UrlValidationUtils.HostResolver rebinding(String first, String later, int[] lookups) {
+            return host -> {
+                lookups[0]++;
+                return new InetAddress[]{InetAddress.getByName(lookups[0] == 1 ? first : later)};
+            };
+        }
+
+        private OutboundHttp facade(ScriptedEngine engine, UrlValidationUtils.HostResolver resolver) {
+            return new OutboundHttp(OutboundSettings.defaults(Duration.ofSeconds(10)), engine, false, meters, resolver);
+        }
+
+        @Test
+        @DisplayName("STRICT: a name that passes as public and connects to loopback gets no response back")
+        void strictDiscardsResponseOfRebindingTarget() {
+            TrackingStream body = new TrackingStream("internal secrets".getBytes(StandardCharsets.UTF_8));
+            ScriptedEngine engine = new ScriptedEngine().respond(200, Map.of(), body);
+            int[] lookups = {0};
+
+            OutboundBlockedException e = assertThrows(OutboundBlockedException.class, () -> facade(engine, rebinding("93.184.216.34",
+                    "127.0.0.1", lookups)).send(OutboundRequest.get(Profile.DEFAULT, REBINDING).ssrf(SsrfPolicy.STRICT).build(), text()));
+
+            assertTrue(e.getMessage().startsWith("Response discarded"), e.getMessage());
+            assertEquals(1, engine.hops.size(), "the pre-check passed, so the hop was sent");
+            assertEquals(2, lookups[0], "checked before the hop and again after it");
+            assertTrue(body.closed, "the discarded body releases its connection");
+            assertEquals(0, body.bytesRead, "not a byte of the internal response is read");
+            assertEquals(1.0, meters.get("eddi.http.outbound.blocked").tag("reason", "ssrf").counter().count());
+        }
+
+        @Test
+        @DisplayName("METADATA_ONLY: a name that rebinds onto the metadata service is refused after the exchange too")
+        void metadataOnlyDiscardsResponseOfRebindingTarget() {
+            TrackingStream body = new TrackingStream("{\"AccessKeyId\":\"x\"}".getBytes(StandardCharsets.UTF_8));
+            ScriptedEngine engine = new ScriptedEngine().respond(200, Map.of(), body);
+
+            assertThrows(OutboundBlockedException.class, () -> facade(engine, rebinding("93.184.216.34", "169.254.169.254", new int[]{0}))
+                    .send(OutboundRequest.get(Profile.DEFAULT, REBINDING).ssrf(SsrfPolicy.METADATA_ONLY).build(), text()));
+            assertTrue(body.closed);
+        }
+
+        @Test
+        @DisplayName("a redirect from a target that rebound is not followed")
+        void redirectFromRebindingTargetNotFollowed() {
+            ScriptedEngine engine = new ScriptedEngine().redirect(302, "https://elsewhere.example/");
+
+            assertThrows(OutboundBlockedException.class, () -> facade(engine, rebinding("93.184.216.34", "10.0.0.5", new int[]{0}))
+                    .send(OutboundRequest.get(Profile.DEFAULT, REBINDING).ssrf(SsrfPolicy.STRICT).build(), text()));
+            assertEquals(1, engine.hops.size());
+        }
+
+        @Test
+        @DisplayName("a stable public answer passes both checks")
+        void stableAnswerPasses() throws Exception {
+            ScriptedEngine engine = new ScriptedEngine().respond(200, Map.of(), "ok");
+            int[] lookups = {0};
+
+            OutboundResponse<String> response = facade(engine, rebinding("93.184.216.34", "93.184.216.34", lookups))
+                    .send(OutboundRequest.get(Profile.DEFAULT, REBINDING).ssrf(SsrfPolicy.STRICT).build(), text());
+
+            assertEquals("ok", response.body());
+            assertEquals(2, lookups[0]);
+        }
+
+        @Test
+        @DisplayName("an unchecked hop (NONE, HOPS_ONLY's initial URL) is not looked up afterwards either")
+        void uncheckedHopNotRechecked() throws Exception {
+            ScriptedEngine engine = new ScriptedEngine().respond(200, Map.of(), "ok");
+            int[] lookups = {0};
+
+            facade(engine, rebinding("10.0.0.5", "10.0.0.5", lookups))
+                    .send(OutboundRequest.get(Profile.DEFAULT, REBINDING).ssrf(SsrfPolicy.HOPS_ONLY).build(), text());
+
+            assertEquals(0, lookups[0]);
+        }
+
+        @Test
+        @DisplayName("the startup warning fires only when the JVM's positive DNS cache is off")
+        void dnsCacheDisabledDetection() {
+            assertFalse(OutboundHttp.positiveDnsCacheDisabled(null, null), "unset is the 30s default");
+            assertFalse(OutboundHttp.positiveDnsCacheDisabled("30", null));
+            assertFalse(OutboundHttp.positiveDnsCacheDisabled("-1", null), "negative caches forever");
+            assertTrue(OutboundHttp.positiveDnsCacheDisabled("0", null));
+            assertTrue(OutboundHttp.positiveDnsCacheDisabled(null, "0"), "the system property applies when the security one is unset");
+            assertFalse(OutboundHttp.positiveDnsCacheDisabled("30", "0"), "the security property wins");
+            assertFalse(OutboundHttp.positiveDnsCacheDisabled("x", null));
         }
     }
 

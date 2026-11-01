@@ -9,11 +9,14 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ContinuationPolicy;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 
@@ -135,6 +138,33 @@ public interface IConversationMemory extends Serializable {
     /** Set (or clear, with {@code null}) the per-conversation cost ceiling. */
     default void setConversationCostCeilingUsd(Double maxCostPerConversationUsd) {
         // no-op by default
+    }
+
+    /**
+     * The paid calls of this conversation that are in flight, held against
+     * {@link #getConversationCostCeilingUsd()} so concurrent calls cannot all pass
+     * the same check. Transient and per loaded memory; {@code null} (the default)
+     * when this memory keeps none, in which case the ceiling is checked without
+     * reservations.
+     */
+    default SpendReservations getSpendReservations() {
+        return null;
+    }
+
+    /**
+     * The agent's self-continuation settings ({@code maxContinuations},
+     * {@code continuationInput}); {@link ContinuationPolicy#OFF} when the agent
+     * sets none. Transient like the cost ceiling: carried from the agent onto
+     * memory for every turn, never persisted.
+     */
+    default ContinuationPolicy getContinuationPolicy() {
+        return ContinuationPolicy.OFF;
+    }
+
+    /** Set (or clear, with {@code null}) the self-continuation settings. */
+    default void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
+        // no-op by default
+
     }
 
     /**
@@ -333,6 +363,27 @@ public interface IConversationMemory extends Serializable {
         return null;
     }
     default void setHitlResumeDecision(HitlDecision decision) {
+    }
+
+    /**
+     * The agent's {@code hitlConfig.onRejection} policy for this turn (NOT
+     * persisted); {@code null} = the default SKIP, and nothing is captured.
+     */
+    default HitlRevisionPolicy getHitlRevisionPolicy() {
+        return null;
+    }
+    default void setHitlRevisionPolicy(HitlRevisionPolicy policy) {
+    }
+
+    /**
+     * The latest model answer of this turn that a later RULE pause could have a
+     * human revise (NOT persisted here: the conversation copies it into the paused
+     * step, see {@link HitlRevisionCandidate#STEP_KEY}).
+     */
+    default HitlRevisionCandidate getHitlRevisionCandidate() {
+        return null;
+    }
+    default void setHitlRevisionCandidate(HitlRevisionCandidate candidate) {
     }
 
     // === Deferred user-memory writes ===

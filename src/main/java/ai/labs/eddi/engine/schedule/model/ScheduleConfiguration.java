@@ -102,8 +102,19 @@ public class ScheduleConfiguration {
     private int failCount;
     private Instant nextRetryAt;
 
+    /**
+     * Context key carrying {@link #getMaxCostPerFire()} into the fire's turn, in
+     * USD. Written by the fire executor; read by the LLM spend gate and the tool
+     * loop ({@code LlmSpendGate#effectiveCeiling}), which hold the turn to the
+     * conversation's spend before it plus this allowance — the same priced-spend
+     * ceiling an agent's {@code maxCostPerConversationUsd} sets, and the tighter of
+     * the two wins. A client that sends the key itself can only lower the ceiling
+     * on its own turn, never raise anybody's.
+     */
+    public static final String CONTEXT_MAX_COST_PER_FIRE = "scheduleMaxCostPerFire";
+
     // -- Security --
-    private double maxCostPerFire = -1.0; // -1 = unlimited
+    private double maxCostPerFire = -1.0; // <= 0 = unlimited (Postgres stores 0 as NULL)
     private boolean allowSelfScheduling;
     // Whether a deserialized body carried allowSelfScheduling at all. A primitive
     // cannot say "absent", and a PUT from a client that does not know the field
