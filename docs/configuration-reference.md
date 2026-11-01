@@ -156,6 +156,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
 | `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
 | `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others |
+| `eddi.cluster.erasure-marker-ttl` | `P7D` | How long the cluster-wide GDPR erasure marker of a conversation lives. A node that kept a dead letter of the conversation locally while NATS was down discards it instead of forwarding it for as long as the marker exists; past it, only the check that the conversation still exists applies (see [GDPR](gdpr-compliance.md)) |
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
 | `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
