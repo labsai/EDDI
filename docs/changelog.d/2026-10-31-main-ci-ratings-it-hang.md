@@ -24,6 +24,8 @@ Three CI failures present on `main` (and so on every PR) at 01c3250.
 
 - **The rating card never opened for an agent that sends no greeting** (`ChatWidget.tsx`). With no messages the transcript renders its empty state, and the card was only rendered in the non-empty branch, so "Rate this conversation" set the state and nothing appeared. The Backend E2E agent has an empty workflow, so its ratings test waited for a star that was never rendered. The card now renders in both branches; a ChatWidget test covers the empty transcript.
 
+- **Rating state across the restore read** (`useRatings`, `RatingCard`), from the review of this PR: an edit is now tracked per rating (in flight, confirmed since the read began, revision). A failed write rolls back to the server's value (from the read or the last confirmed write), never to empty, and only when no newer edit has started; a failed write before the read answers lets the read fill the value in. The per-conversation state is no longer cleared when the profile merely reloads for the same conversation, and the protection is retired when the next read begins. A card opened before the read finishes picks up the restored rating until the person has touched it.
+
 ### Design decisions
 
 - No timeout was raised and nothing was skipped; the stall's cause was removed.

@@ -81,6 +81,24 @@ export interface Ratings {
   profile: RatingProfile | null;
 }
 
+/** One rating's in-flight and confirmed edits since the last restore read began. */
+interface Edit {
+  pending: number;
+  confirmed: boolean;
+  rev: number;
+}
+
+const newEdit = (): Edit => ({ pending: 0, confirmed: false, rev: 0 });
+
+function editOf(edits: Map<number, Edit>, index: number): Edit {
+  let edit = edits.get(index);
+  if (!edit) {
+    edit = newEdit();
+    edits.set(index, edit);
+  }
+  return edit;
+}
+
 export function useRatings({ client, conversationId, profile, messages, conversationState }: UseRatingsArgs): Ratings {
   const [conversationRating, setConversationRating] = useState<StoredRating | null>(null);
   const [stepRatings, setStepRatings] = useState<Record<number, StoredRating>>({});
@@ -92,24 +110,29 @@ export function useRatings({ client, conversationId, profile, messages, conversa
 
   const conversationRef = useRef(conversationId);
   const clientRef = useRef(client);
-  const stepRatingsRef = useRef(stepRatings);
-  const conversationRatingRef = useRef(conversationRating);
   // Synced after commit, never during render: a render React discards must
   // not leave its values behind for the handlers and async continuations.
   // Layout effects run before the passive effects that read these refs.
   useLayoutEffect(() => {
     conversationRef.current = conversationId;
     clientRef.current = client;
-    stepRatingsRef.current = stepRatings;
-    conversationRatingRef.current = conversationRating;
-  }, [conversationId, client, stepRatings, conversationRating]);
+  }, [conversationId, client]);
   /**
-   * What the person changed since the restore request left. The restore's answer
-   * describes the server as it was when asked, so it must not overwrite these:
-   * a thumb tapped while the read was in flight would otherwise be undone.
+   * What the person has done to one rating since the last restore read began.
+   * The read answers for the server as it was when asked, so it must not undo
+   * an edit that is still in flight or that the server has confirmed since.
+   * `rev` numbers the edits, so a failure only rolls back when no newer edit has
+   * started; a failed edit alone protects nothing (the read may still apply).
    */
-  const touchedSteps = useRef<Set<number>>(new Set());
-  const touchedConversation = useRef(false);
+  const stepEdits = useRef<Map<number, Edit>>(new Map());
+  const conversationEdit = useRef<Edit>(newEdit());
+  /**
+   * What the server holds, as far as this page knows: what the read returned, or
+   * what the last confirmed write left. `undefined` until known. A failed edit
+   * rolls back to it, never to an empty value.
+   */
+  const serverConversation = useRef<StoredRating | null | undefined>(undefined);
+  const serverSteps = useRef<Map<number, StoredRating | null>>(new Map());
   /** The conversation the restore effect last ran for. */
   const openedFor = useRef<string | null>(null);
   /** Prompted in this page, whatever storage managed to keep. */
@@ -124,34 +147,56 @@ export function useRatings({ client, conversationId, profile, messages, conversa
 
   /* Restore on open / switch. */
   useEffect(() => {
-    setConversationRating(null);
-    setStepRatings({});
-    // Close the card only when the person moved to ANOTHER conversation. This
-    // effect also runs when the profile merely arrives, which is after paint:
-    // a click on the header entry in that gap opened the card, and closing it
-    // here made "Rate this conversation" do nothing.
-    if (openedFor.current !== null && openedFor.current !== conversationId) setCardOpen(false);
+    // Everything per-conversation is dropped only when the person moved to
+    // ANOTHER conversation. This effect also runs when the profile merely
+    // arrives or reloads for the same one: clearing then would throw away an
+    // optimistic rating (or its protection) that is still in flight, and a click
+    // on the header entry in that gap opened the card only for it to be closed.
+    const switched = openedFor.current !== conversationId;
+    if (switched) {
+      if (openedFor.current !== null) setCardOpen(false);
+      setConversationRating(null);
+      setStepRatings({});
+      stepEdits.current = new Map();
+      conversationEdit.current = newEdit();
+      serverConversation.current = undefined;
+      serverSteps.current = new Map();
+    }
     openedFor.current = conversationId;
     setRestoredFor(null);
     setControls(undefined);
-    touchedSteps.current = new Set();
-    touchedConversation.current = false;
     if (!enabled || !conversationId) return;
+    // A new authoritative read begins: edits the server has already confirmed no
+    // longer need protecting from it; edits still in flight keep theirs.
+    if (conversationEdit.current.pending === 0) conversationEdit.current.confirmed = false;
+    for (const edit of stepEdits.current.values()) {
+      if (edit.pending === 0) edit.confirmed = false;
+    }
     let cancelled = false;
     clientRef.current
       .read(conversationId)
       .then((ratings) => {
         if (cancelled) return;
-        if (!touchedConversation.current) setConversationRating(ratings.conversation);
+        const conversationEdited = conversationEdit.current.pending > 0 || conversationEdit.current.confirmed;
+        if (!conversationEdited) setConversationRating(ratings.conversation);
+        if (!conversationEdited || serverConversation.current === undefined) serverConversation.current = ratings.conversation;
         const byStep: Record<number, StoredRating> = {};
-        for (const rating of ratings.steps) {
-          if (!touchedSteps.current.has(rating.stepIndex)) byStep[rating.stepIndex] = rating;
+        for (const rating of ratings.steps) byStep[rating.stepIndex] = rating;
+        for (const index of new Set([...Object.keys(byStep).map(Number), ...serverSteps.current.keys()])) {
+          const edit = stepEdits.current.get(index);
+          if (!edit || (edit.pending === 0 && !edit.confirmed) || !serverSteps.current.has(index)) {
+            serverSteps.current.set(index, byStep[index] ?? null);
+          }
         }
-        // Keep the person's own changes (and their rollbacks) over the server's older view.
+        // Keep the person's own edits (still pending, or confirmed since the read
+        // began) over the server's older view; everything else is the server's.
         setStepRatings((current) => {
           const next = { ...byStep };
-          for (const index of touchedSteps.current) {
-            if (index in current) next[index] = current[index];
+          for (const [index, edit] of stepEdits.current) {
+            if (edit.pending > 0 || edit.confirmed) {
+              if (index in current) next[index] = current[index];
+              else delete next[index];
+            }
           }
           return next;
         });
@@ -181,29 +226,75 @@ export function useRatings({ client, conversationId, profile, messages, conversa
     async (stepIndex: number, input: RatingInput | null): Promise<boolean> => {
       const convId = conversationRef.current;
       if (!convId) return false;
-      const previous = stepRatingsRef.current[stepIndex];
-      touchedSteps.current.add(stepIndex);
+      const edit = editOf(stepEdits.current, stepIndex);
+      const rev = ++edit.rev;
+      edit.pending += 1;
+      const written: StoredRating | null = input
+        ? { stepIndex, score: input.score, tags: input.tags ?? [], comment: input.comment ?? null }
+        : null;
       setStepRatings((current) => {
         const next = { ...current };
-        if (input) {
-          next[stepIndex] = { stepIndex, score: input.score, tags: input.tags ?? [], comment: input.comment ?? null };
-        } else {
-          delete next[stepIndex];
-        }
+        if (written) next[stepIndex] = written;
+        else delete next[stepIndex];
         return next;
       });
       try {
         if (input) await clientRef.current.rateStep(convId, stepIndex, input);
         else await clientRef.current.withdrawStep(convId, stepIndex);
+        if (conversationRef.current === convId) {
+          edit.pending -= 1;
+          edit.confirmed = true;
+          if (edit.rev === rev) serverSteps.current.set(stepIndex, written);
+        }
         return true;
       } catch (err) {
         if (conversationRef.current !== convId) return false;
-        setStepRatings((current) => {
-          const next = { ...current };
-          if (previous) next[stepIndex] = previous;
-          else delete next[stepIndex];
-          return next;
-        });
+        edit.pending -= 1;
+        // A newer edit owns the displayed value; only the newest one rolls back.
+        if (edit.rev === rev) {
+          const baseline = serverSteps.current.get(stepIndex);
+          // Without a known server value (the read has not answered) show nothing
+          // for now and let the read fill it in: a failed edit protects nothing.
+          if (baseline === undefined) edit.confirmed = false;
+          setStepRatings((current) => {
+            const next = { ...current };
+            if (baseline) next[stepIndex] = baseline;
+            else delete next[stepIndex];
+            return next;
+          });
+        }
+        fail(err);
+        return false;
+      }
+    },
+    [fail],
+  );
+
+  /** Shows `value` for the conversation rating and sends it; on failure shows the server's value again. */
+  const writeConversation = useCallback(
+    async (value: StoredRating | null, send: (convId: string) => Promise<unknown>): Promise<boolean> => {
+      const convId = conversationRef.current;
+      if (!convId) return false;
+      const edit = conversationEdit.current;
+      const rev = ++edit.rev;
+      edit.pending += 1;
+      setConversationRating(value);
+      try {
+        await send(convId);
+        if (conversationRef.current === convId) {
+          edit.pending -= 1;
+          edit.confirmed = true;
+          if (edit.rev === rev) serverConversation.current = value;
+        }
+        return true;
+      } catch (err) {
+        if (conversationRef.current !== convId) return false;
+        edit.pending -= 1;
+        if (edit.rev === rev) {
+          const baseline = serverConversation.current;
+          if (baseline === undefined) edit.confirmed = false;
+          setConversationRating(baseline ?? null);
+        }
         fail(err);
         return false;
       }
@@ -212,49 +303,25 @@ export function useRatings({ client, conversationId, profile, messages, conversa
   );
 
   const rateConversation = useCallback(
-    async (input: RatingInput): Promise<boolean> => {
-      const convId = conversationRef.current;
-      if (!convId) return false;
-      const previous = conversationRatingRef.current;
-      touchedConversation.current = true;
-      setConversationRating({
-        stepIndex: CONVERSATION_STEP,
-        score: input.score,
-        tags: input.tags ?? [],
-        comment: input.comment ?? null,
-      });
-      try {
-        await clientRef.current.rateConversation(convId, input);
-        return true;
-      } catch (err) {
-        if (conversationRef.current !== convId) return false;
-        setConversationRating(previous);
-        fail(err);
-        return false;
-      }
-    },
-    [fail],
+    (input: RatingInput): Promise<boolean> =>
+      writeConversation(
+        { stepIndex: CONVERSATION_STEP, score: input.score, tags: input.tags ?? [], comment: input.comment ?? null },
+        (convId) => clientRef.current.rateConversation(convId, input),
+      ),
+    [writeConversation],
   );
 
-  const withdrawConversation = useCallback(async (): Promise<boolean> => {
-    const convId = conversationRef.current;
-    if (!convId) return false;
-    const previous = conversationRatingRef.current;
-    touchedConversation.current = true;
-    setConversationRating(null);
-    try {
-      await clientRef.current.withdrawConversation(convId);
-      return true;
-    } catch (err) {
-      if (conversationRef.current !== convId) return false;
-      setConversationRating(previous);
-      fail(err);
-      return false;
-    }
-  }, [fail]);
+  const withdrawConversation = useCallback(
+    (): Promise<boolean> => writeConversation(null, (convId) => clientRef.current.withdrawConversation(convId)),
+    [writeConversation],
+  );
 
   const clearStep = useCallback((stepIndex: number) => {
-    touchedSteps.current.add(stepIndex);
+    // The step was re-run: its rating no longer applies, whatever the read says.
+    const edit = editOf(stepEdits.current, stepIndex);
+    edit.rev += 1;
+    edit.confirmed = true;
+    serverSteps.current.set(stepIndex, null);
     setStepRatings((current) => {
       if (!(stepIndex in current)) return current;
       const next = { ...current };

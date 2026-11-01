@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { useRatings, RATING_TOAST_MS, type UseRatingsArgs } from "./useRatings";
-import { parseRatingProfile, type RatingClient, type RatingProfile } from "@/api/rating-api";
+import { parseRatingProfile, type RatingClient, type RatingProfile, type StoredRating } from "@/api/rating-api";
 import { ApiError } from "@/api/http";
 import type { ChatMessage, ConversationState } from "@/types";
 
@@ -65,16 +65,127 @@ describe("useRatings", () => {
   it("keeps a thumb tapped while the restore read is still in flight", async () => {
     // The server answers the read as it was before the tap; applying that
     // answer verbatim would silently undo the person's rating.
-    let answer!: (value: { conversation: null; steps: [] }) => void;
+    let answer!: (value: { conversation: null; steps: StoredRating[] }) => void;
     const c = client({ read: vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve))) });
     const { result } = setup({ client: c });
     await act(async () => {
       await result.current.rateStep(0, { score: 1 });
     });
     await act(async () => {
-      answer({ conversation: null, steps: [] });
+      // The older view: step 0 was a 0 before the tap.
+      answer({ conversation: null, steps: [{ stepIndex: 0, score: 0, tags: [], comment: null }] });
     });
     expect(result.current.stepRatings[0]?.score).toBe(1);
+  });
+
+  it("a refused step rating before the read answers shows the server's value once it does", async () => {
+    let answer!: (value: { conversation: null; steps: StoredRating[] }) => void;
+    const c = client({
+      read: vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve))),
+      rateStep: vi.fn().mockRejectedValue(refusal("RATING_WINDOW_CLOSED")),
+    });
+    const { result } = setup({ client: c });
+    await act(async () => {
+      await result.current.rateStep(0, { score: 1 });
+    });
+    await act(async () => {
+      answer({ conversation: null, steps: [{ stepIndex: 0, score: 0, tags: [], comment: null }] });
+    });
+    expect(result.current.stepRatings[0]?.score).toBe(0);
+  });
+
+  it("a refused step rating after the read rolls back to the server's value, not to nothing", async () => {
+    const c = client({
+      read: vi.fn().mockResolvedValue({ conversation: null, steps: [{ stepIndex: 0, score: 0, tags: [], comment: null }] }),
+      rateStep: vi.fn().mockRejectedValue(refusal("RATING_WINDOW_CLOSED")),
+    });
+    const { result } = setup({ client: c });
+    await waitFor(() => expect(result.current.stepRatings[0]?.score).toBe(0));
+    await act(async () => {
+      await result.current.rateStep(0, { score: 1 });
+    });
+    expect(result.current.stepRatings[0]?.score).toBe(0);
+  });
+
+  it("a refused conversation rating before the read answers shows the server's rating once it does", async () => {
+    let answer!: (value: { conversation: StoredRating; steps: [] }) => void;
+    const c = client({
+      read: vi.fn().mockReturnValue(new Promise((resolve) => (answer = resolve))),
+      rateConversation: vi.fn().mockRejectedValue(refusal("RATING_WINDOW_CLOSED")),
+    });
+    const { result } = setup({ client: c });
+    await act(async () => {
+      await result.current.rateConversation({ score: 1 });
+    });
+    await act(async () => {
+      answer({ conversation: { stepIndex: -1, score: 4, tags: [], comment: null }, steps: [] });
+    });
+    expect(result.current.conversationRating?.score).toBe(4);
+  });
+
+  it("an older refusal does not undo a newer successful change", async () => {
+    let refuse!: (error: unknown) => void;
+    const c = client({
+      rateStep: vi
+        .fn()
+        .mockReturnValueOnce(new Promise((_, reject) => (refuse = reject)))
+        .mockResolvedValueOnce(null),
+    });
+    const { result } = setup({ client: c });
+    await waitFor(() => expect(result.current.stepRatings).toEqual({}));
+    let first!: Promise<boolean>;
+    act(() => {
+      first = result.current.rateStep(0, { score: 0 });
+    });
+    await act(async () => {
+      await result.current.rateStep(0, { score: 1 });
+    });
+    await act(async () => {
+      refuse(refusal("RATING_WINDOW_CLOSED"));
+      await first;
+    });
+    expect(result.current.stepRatings[0]?.score).toBe(1);
+  });
+
+  it("keeps an optimistic rating across a profile reload for the same conversation", async () => {
+    let confirm!: (value: null) => void;
+    const c = client({
+      read: vi.fn().mockResolvedValue({ conversation: null, steps: [] }),
+      rateStep: vi.fn().mockReturnValue(new Promise((resolve) => (confirm = resolve))),
+    });
+    const { result, rerender, args } = setup({ client: c });
+    await waitFor(() => expect(c.read).toHaveBeenCalledTimes(1));
+    let write!: Promise<boolean>;
+    act(() => {
+      write = result.current.rateStep(0, { score: 1 });
+    });
+    // The profile drops out and comes back while the write is still in flight: the
+    // effect re-runs for the same conversation and its read answers the older state.
+    rerender({ ...args, profile: null });
+    rerender({ ...args, profile: profile() });
+    await waitFor(() => expect(c.read).toHaveBeenCalledTimes(2));
+    expect(result.current.stepRatings[0]?.score).toBe(1);
+    await act(async () => {
+      confirm(null);
+      await write;
+    });
+    expect(result.current.stepRatings[0]?.score).toBe(1);
+  });
+
+  it("lets a later restore read update a rating the server has confirmed long since", async () => {
+    const c = client({
+      read: vi
+        .fn()
+        .mockResolvedValueOnce({ conversation: null, steps: [] })
+        .mockResolvedValueOnce({ conversation: null, steps: [{ stepIndex: 0, score: 0, tags: [], comment: null }] }),
+    });
+    const { result, rerender, args } = setup({ client: c });
+    await act(async () => {
+      await result.current.rateStep(0, { score: 1 });
+    });
+    rerender({ ...args, profile: null });
+    rerender({ ...args, profile: profile() });
+    await waitFor(() => expect(result.current.stepRatings[0]?.score).toBe(0));
   });
 
   it("does not close the card when the profile arrives after the person opened it", async () => {
