@@ -85,6 +85,11 @@ public class AgentTestRunner {
     /** Task id of the per-run audit ledger entry. */
     public static final String AUDIT_TASK_ID = "ai.labs.agenttest";
     static final String AUDIT_TASK_TYPE = "agent_test_run";
+    /**
+     * Audit action of the entry that records a charge landing after the run ended.
+     */
+    static final String AUDIT_LATE_CHARGE_ACTION = "AGENT_TEST_LATE_CHARGE";
+    static final int LATE_CHARGE_CAS_ATTEMPTS = 5;
     static final int MAX_OUTPUT_CHARS = 2_000;
     static final int STORED_STEP_WAIT_SECONDS = 5;
     /** How often a running run's record is touched as a sign of life. */
@@ -127,7 +132,13 @@ public class AgentTestRunner {
 
     /** Everything one run shares across its parallel attempts. */
     record RunContext(AgentTestRun run, AgentTestSuite suite, AgentTestSuite.Defaults defaults, double maxCost, DoubleAdder cost,
-            AtomicBoolean costCeilingReached, Set<String> models, AtomicReference<String> cancelledBy, AtomicBoolean ownershipLost) {
+            AtomicBoolean costCeilingReached, Set<String> models, AtomicReference<String> cancelledBy, AtomicBoolean ownershipLost,
+            LateChargeLedger lateCharges) {
+
+        RunContext(AgentTestRun run, AgentTestSuite suite, AgentTestSuite.Defaults defaults, double maxCost, DoubleAdder cost,
+                AtomicBoolean costCeilingReached, Set<String> models, AtomicReference<String> cancelledBy, AtomicBoolean ownershipLost) {
+            this(run, suite, defaults, maxCost, cost, costCeilingReached, models, cancelledBy, ownershipLost, new LateChargeLedger());
+        }
 
         boolean overBudget() {
             if (cost.sum() >= maxCost) {
@@ -140,6 +151,62 @@ public class AgentTestRunner {
         /** Stop: cancelled here, or closed by another node (see {@link Heartbeat}). */
         boolean cancelled() {
             return cancelledBy.get() != null || ownershipLost.get();
+        }
+    }
+
+    /** Spend and models a late charge adds to a stored run record. */
+    record LateAdjustment(double costUsd, List<String> models) {
+    }
+
+    /**
+     * Keeps the books between the run's live totals and the terminal record. The
+     * cost the terminal record was built from is {@linkplain #accounted noted} when
+     * it is built; once that record is stored ({@link #markStored}) every further
+     * difference is handed out exactly once as a {@link LateAdjustment} — the
+     * charge of an abandoned turn that completes after the run returned. Before the
+     * record is stored nothing is handed out: the run's final write has not
+     * happened, and {@link #markStored} collects what arrived meanwhile.
+     */
+    static final class LateChargeLedger {
+        private boolean stored;
+        private double accountedCost;
+        private Set<String> accountedModels = Set.of();
+
+        synchronized void accounted(double cost, List<String> models) {
+            accountedCost = cost;
+            accountedModels = new LinkedHashSet<>(models);
+        }
+
+        synchronized LateAdjustment markStored(DoubleAdder cost, Set<String> models) {
+            stored = true;
+            return take(cost, models);
+        }
+
+        synchronized LateAdjustment takeIfStored(DoubleAdder cost, Set<String> models) {
+            return stored ? take(cost, models) : null;
+        }
+
+        /** The adjustment could not be written: hand it out again next time. */
+        synchronized void giveBack(LateAdjustment adjustment) {
+            accountedCost -= adjustment.costUsd();
+            accountedModels.removeAll(adjustment.models());
+        }
+
+        private LateAdjustment take(DoubleAdder cost, Set<String> models) {
+            double sum = cost.sum();
+            List<String> added;
+            synchronized (models) {
+                added = models.stream().filter(m -> !accountedModels.contains(m)).toList();
+            }
+            double delta = sum - accountedCost;
+            if (delta <= 0.0 && added.isEmpty()) {
+                return null;
+            }
+            accountedCost = sum;
+            var union = new LinkedHashSet<>(accountedModels);
+            union.addAll(added);
+            accountedModels = union;
+            return new LateAdjustment(Math.max(delta, 0.0), added);
         }
     }
 
@@ -198,6 +265,7 @@ public class AgentTestRunner {
         // RUNNING record back. The run stays in activeRuns until the record is
         // terminal, so this node's own sweep never mistakes it for an orphan.
         long storedHeartbeat = heartbeat.stop();
+        boolean stored = false;
         try {
             if (ctx.ownershipLost().get() || !storeFinal(finished, storedHeartbeat)) {
                 // Another node closed the run (its heartbeat looked stopped) and deleted
@@ -206,6 +274,7 @@ public class AgentTestRunner {
                 LOGGER.warnf("Agent test run %s was closed by another node while it ran; its result is not stored", sanitize(started.id()));
                 return finished;
             }
+            stored = true;
         } catch (Exception e) {
             LOGGER.errorf(e, "Could not store the result of agent test run %s", sanitize(started.id()));
             // Never leave a polling client waiting on RUNNING: store a terminal record
@@ -213,7 +282,7 @@ public class AgentTestRunner {
             finished = finish(ctx, startNanos, AgentTestRun.Status.ERROR, List.of(), 0,
                     "The run finished but its result could not be stored: " + e.getClass().getSimpleName());
             try {
-                storeFinal(finished, storedHeartbeat);
+                stored = storeFinal(finished, storedHeartbeat);
             } catch (Exception fallback) {
                 LOGGER.errorf(fallback, "Could not store the fallback result of agent test run %s", sanitize(started.id()));
             }
@@ -223,6 +292,11 @@ public class AgentTestRunner {
             }
         }
         audit(finished);
+        if (stored) {
+            // From here on a late charge adjusts the stored record; any that arrived
+            // since the record was built is collected now.
+            settleLateCharges(ctx, true);
+        }
         try {
             runStore.pruneOlderRuns(finished.agentId(), maxRunsPerAgent);
         } catch (Exception e) {
@@ -255,9 +329,12 @@ public class AgentTestRunner {
     private AgentTestRun finish(RunContext ctx, long startNanos, AgentTestRun.Status status, List<CaseResult> cases, int passed, String error) {
         AgentTestRun s = ctx.run();
         long now = System.currentTimeMillis();
+        double cost = ctx.cost().sum();
+        List<String> models = List.copyOf(ctx.models());
+        ctx.lateCharges().accounted(cost, models);
         return new AgentTestRun(s.id(), s.suiteId(), s.suiteVersion(), s.suiteName(), s.agentId(), s.agentVersion(), status, s.startedBy(),
-                s.startedAt(), now, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), round(ctx.cost().sum()), ctx.maxCost(),
-                ctx.costCeilingReached().get(), List.copyOf(ctx.models()), cases.size(), passed, cases.size() - passed, cases,
+                s.startedAt(), now, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), round(cost), ctx.maxCost(),
+                ctx.costCeilingReached().get(), models, cases.size(), passed, cases.size() - passed, cases,
                 s.keepConversations(), error, s.ownerNode(), now);
     }
 
@@ -638,6 +715,7 @@ public class AgentTestRunner {
         outcome.thenAcceptAsync(late -> {
             if (late != null) {
                 charge(ctx, withStoredCost(conversationId, stepIndex, TurnObservation.fromTurnSnapshot(late)));
+                settleLateCharges(ctx, false);
             }
         }, task -> Thread.ofVirtual().name("agent-test-late-charge").start(task));
     }
@@ -698,6 +776,88 @@ public class AgentTestRunner {
                 LOGGER.warnf("Could not delete test conversation %s after its abandoned turn: %s", sanitize(conversationId), e.getMessage());
             }
         });
+    }
+
+    /**
+     * A charge that lands after the run's terminal record was stored — the
+     * abandoned turn completed late — is applied to that record as an adjustment
+     * (cost added, models merged), and written to the audit ledger as an entry of
+     * its own carrying just the added cost, so the ledger's sum stays the run's
+     * true spend. Best effort and retried by the next charge if it fails: it never
+     * disturbs the run's result.
+     *
+     * @param markStored
+     *            true once, right after the terminal record was stored
+     */
+    private void settleLateCharges(RunContext ctx, boolean markStored) {
+        LateAdjustment adjustment = markStored
+                ? ctx.lateCharges().markStored(ctx.cost(), ctx.models())
+                : ctx.lateCharges().takeIfStored(ctx.cost(), ctx.models());
+        if (adjustment == null || ctx.run() == null || ctx.run().id() == null) {
+            return;
+        }
+        try {
+            AgentTestRun adjusted = adjustStoredRun(ctx.run().id(), adjustment);
+            auditLateCharge(adjusted, adjustment);
+        } catch (Exception e) {
+            ctx.lateCharges().giveBack(adjustment);
+            LOGGER.warnf("Could not add the late charge of $%s to agent test run %s: %s", adjustment.costUsd(), sanitize(ctx.run().id()),
+                    e.getMessage());
+        }
+    }
+
+    /**
+     * Compare-and-swap loop on the record's {@code heartbeatAt}: a terminal record
+     * no longer has a heartbeat to keep, so it doubles as the version counter of
+     * these adjustments. Concurrent adjustments therefore never overwrite each
+     * other.
+     */
+    private AgentTestRun adjustStoredRun(String runId, LateAdjustment adjustment) throws Exception {
+        for (int attempt = 0; attempt < LATE_CHARGE_CAS_ATTEMPTS; attempt++) {
+            AgentTestRun current = runStore.read(runId);
+            if (current.status() == AgentTestRun.Status.RUNNING) {
+                throw new IllegalStateException("the run is not finished");
+            }
+            var models = new LinkedHashSet<String>(current.models() != null ? current.models() : List.of());
+            models.addAll(adjustment.models());
+            double total = round((current.totalCostUsd() != null ? current.totalCostUsd() : 0.0) + adjustment.costUsd());
+            Long heartbeat = current.heartbeatAt();
+            AgentTestRun adjusted = new AgentTestRun(current.id(), current.suiteId(), current.suiteVersion(), current.suiteName(),
+                    current.agentId(), current.agentVersion(), current.status(), current.startedBy(), current.startedAt(), current.finishedAt(),
+                    current.durationMs(), total, current.maxCostPerRun(), current.costCeilingReached(), List.copyOf(models), current.casesTotal(),
+                    current.casesPassed(), current.casesFailed(), current.cases(), current.keepConversations(), current.error(),
+                    current.ownerNode(), heartbeat != null ? heartbeat + 1 : null);
+            if (heartbeat == null) {
+                runStore.update(adjusted); // a record without a heartbeat: nothing to compare
+                return adjusted;
+            }
+            try {
+                runStore.updateIfHeartbeat(adjusted, heartbeat);
+                return adjusted;
+            } catch (IResourceStore.ResourceModifiedException e) {
+                // another adjustment landed first: read again and add to that
+            }
+        }
+        throw new IllegalStateException("the record kept changing");
+    }
+
+    private void auditLateCharge(AgentTestRun run, LateAdjustment adjustment) {
+        try {
+            var input = new LinkedHashMap<String, Object>();
+            input.put("runId", run.id());
+            input.put("suiteId", run.suiteId());
+            input.put("suiteVersion", run.suiteVersion());
+            var output = new LinkedHashMap<String, Object>();
+            output.put("status", run.status().name());
+            output.put("lateCostUsd", adjustment.costUsd());
+            output.put("totalCostUsd", run.totalCostUsd());
+            output.put("models", adjustment.models());
+            auditLedgerService.submit(new AuditEntry(UUID.randomUUID().toString(), null, run.agentId(), run.agentVersion(), run.startedBy(),
+                    Environment.test.name(), 0, AUDIT_TASK_ID, AUDIT_TASK_TYPE, 0, 0, input, output, null, null,
+                    List.of(AUDIT_LATE_CHARGE_ACTION), adjustment.costUsd(), Instant.now(), null, null));
+        } catch (Exception e) {
+            LOGGER.warnf("Could not write the audit entry of the late charge of agent test run %s: %s", sanitize(run.id()), e.getMessage());
+        }
     }
 
     private void audit(AgentTestRun run) {

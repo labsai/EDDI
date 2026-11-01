@@ -359,6 +359,15 @@ Metrics: `eddi_agent_tests_runs_total{status}`, `eddi_agent_tests_turns_total`,
   engine after its conversation was ended and deleted. When it completes (or after
   another turn timeout), the conversation is deleted again, in case the turn wrote
   it back.
+- Such a turn is still paid for. Its cost is charged when it completes. If that
+  is after the run returned, the stored run record is adjusted: `totalCostUsd`
+  grows by the late cost and `models` gains any new model (a compare-and-swap on
+  the record, retried if another adjustment lands first), and the audit ledger
+  gets an additional `AGENT_TEST_LATE_CHARGE` entry whose cost is just the added
+  amount, so the ledger's sum for the run stays its real spend. The run's status,
+  its `costCeilingReached` flag and the per-case results are not recomputed: a
+  run that came in under budget and was pushed over it by a late turn keeps its
+  verdict, and shows the true figure.
 - Test conversations count against the tenant's conversation quota and, while a
   run is in progress, appear in conversation listings and conversation metrics —
   and in what is computed from them — like any other conversation of the agent (environment `test`, user id
