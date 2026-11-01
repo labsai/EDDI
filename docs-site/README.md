@@ -29,7 +29,7 @@ copy of each page, the sidebar, and Astro's build output.
 
 ## Commands
 
-Node 24 (`.nvmrc`, the same version the UIs build with; Astro needs at least 22.23.4).
+Node 26 (`.nvmrc`, the same version the UIs build with; Astro needs at least 22.23.4).
 
 ```bash
 npm ci
