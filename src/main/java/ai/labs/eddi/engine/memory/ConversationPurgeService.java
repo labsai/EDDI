@@ -155,13 +155,18 @@ public class ConversationPurgeService {
         // retry finishes an open conversation would still run against vault slots or
         // attachments that are already gone. ENDED is terminal and refuses a turn; the
         // retry,
-        // the retention sweep and an erasure all still find it. Best effort: a store
-        // that
-        // cannot take this write is no reason to skip the delete itself.
+        // the retention sweep and an erasure all still find it. If the write fails
+        // nothing is
+        // deleted: the delete stops here and is retried.
         try {
             conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
         } catch (Exception e) {
-            LOGGER.warnf("Could not end conversation %s before its permanent delete: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            // Not best effort: without the terminal state a delete that then fails part-way
+            // would
+            // leave an open conversation running against slots and attachments already
+            // gone.
+            throw new ResourceStoreException("Could not end conversation " + conversationId
+                    + " before deleting it; nothing was deleted. Retry once the conversation store accepts writes.", e);
         }
 
         // The snapshot holds the only references to the conversation's vault

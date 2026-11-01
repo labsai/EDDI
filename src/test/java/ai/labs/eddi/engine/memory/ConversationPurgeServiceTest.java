@@ -171,6 +171,35 @@ class ConversationPurgeServiceTest {
     }
 
     @Test
+    @DisplayName("when the conversation cannot be ended nothing irreversible runs: no vault, checkpoint or journal delete, and the snapshot stays")
+    @SuppressWarnings("unchecked")
+    void failedEndStopsBeforeAnyCleanup() throws Exception {
+        doThrow(new IllegalStateException("store read-only")).when(memoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
+        IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
+        Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
+        when(checkpointInstance.isResolvable()).thenReturn(true);
+        when(checkpointInstance.get()).thenReturn(checkpoints);
+        IHitlToolJournalStore journal = mock(IHitlToolJournalStore.class);
+        Instance<IHitlToolJournalStore> journalInstance = mock(Instance.class);
+        when(journalInstance.isResolvable()).thenReturn(true);
+        when(journalInstance.get()).thenReturn(journal);
+        AutoVaultedSecrets vaultStore = mock(AutoVaultedSecrets.class);
+        Instance<AutoVaultedSecrets> vault = mock(Instance.class);
+        when(vault.isResolvable()).thenReturn(true);
+        when(vault.get()).thenReturn(vaultStore);
+        var withEverything = new ConversationPurgeService(memoryStore, descriptorStore, conversationService, vault, mock(Instance.class),
+                checkpointInstance, journalInstance);
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> withEverything.purge(CONVERSATION_ID));
+
+        verifyNoInteractions(vaultStore);
+        verify(checkpoints, never()).deleteByConversationId(anyString());
+        verify(journal, never()).deleteByConversationId(anyString());
+        verify(memoryStore, never()).deleteConversationMemorySnapshot(anyString());
+        verify(descriptorStore, never()).deleteAllDescriptor(anyString());
+    }
+
+    @Test
     @DisplayName("a failing checkpoint store keeps the snapshot and descriptors, so a retry can finish the delete")
     @SuppressWarnings("unchecked")
     void checkpointFailureKeepsTheConversation() throws Exception {
