@@ -222,6 +222,7 @@ class GroupConversationServiceHitlCoverageTest {
         assertThrows(GroupDiscussionException.class,
                 () -> service.resumeDiscussion("gc-not-awaiting", approvedRequest(), null));
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -241,6 +242,7 @@ class GroupConversationServiceHitlCoverageTest {
                 () -> service.resumeDiscussion("gc-phase-with-taskapprovals", request, null));
         assertTrue(ex.getMessage().contains("PHASE"), ex.getMessage());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -258,6 +260,7 @@ class GroupConversationServiceHitlCoverageTest {
                 () -> service.resumeDiscussion("gc-no-tasklist", request, null));
         assertTrue(ex.getMessage().contains("task list"), ex.getMessage());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     // =================================================================
@@ -275,6 +278,7 @@ class GroupConversationServiceHitlCoverageTest {
 
         assertFalse(result, "Cancel of a COMPLETED GC must return false");
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
         verify(scheduleStore, never()).deleteSchedulesByName(anyString());
     }
 
@@ -317,7 +321,7 @@ class GroupConversationServiceHitlCoverageTest {
         assertTrue(result);
         assertEquals(GroupConversationState.CANCELLED, gc.getState());
         assertNull(gc.getPausedAt());
-        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), any());
         // wasPaused → schedule deleted
         verify(scheduleStore).deleteSchedulesByName(anyString());
     }
@@ -341,7 +345,7 @@ class GroupConversationServiceHitlCoverageTest {
         var gc = pausedPhaseGc("gc-cas-lost");
         doReturn(gc).when(conversationStore).read("gc-cas-lost");
         doThrow(new IResourceStore.ResourceModifiedException("state changed"))
-                .when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+                .when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
 
         boolean result = service.cancelDiscussion("gc-cas-lost", ControlSignal.CANCEL_GRACEFUL);
 
@@ -495,6 +499,7 @@ class GroupConversationServiceHitlCoverageTest {
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
                 "A null token must leave the pause intact");
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -504,6 +509,7 @@ class GroupConversationServiceHitlCoverageTest {
         invokeConvert(gc, new DiscussionControlToken()); // fresh token, not signalled
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -587,6 +593,7 @@ class GroupConversationServiceHitlCoverageTest {
         invokeRemoveAndConvert(gc);
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -601,6 +608,7 @@ class GroupConversationServiceHitlCoverageTest {
                 "token must be removed");
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -634,6 +642,7 @@ class GroupConversationServiceHitlCoverageTest {
         assertEquals(GroupConversationState.COMPLETED, gc.getState(),
                 "a completed GC is not converted even with a cancelled token");
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     // =================================================================
