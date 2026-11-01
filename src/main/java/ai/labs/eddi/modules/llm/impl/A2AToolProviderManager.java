@@ -364,13 +364,19 @@ public class A2AToolProviderManager {
                         MAX_SKILLS_PER_AGENT);
                 break;
             }
-            String skillId = boundedNamePart((String) skill.getOrDefault("id", "skill"));
+            // The id as the card gave it: what skillsFilter names. Only the TOOL NAME is
+            // bounded, and
+            // an id too long for it keeps a hash of the whole id, so two long ids sharing a
+            // prefix
+            // stay two tools instead of the second being dropped as a duplicate.
+            String rawSkillId = (String) skill.getOrDefault("id", "skill");
+            String skillId = distinctNamePart(rawSkillId);
             String skillName = (String) skill.getOrDefault("name", skillId);
             String skillDesc = (String) skill.getOrDefault("description", "Skill: " + skillName);
 
             // Apply skills filter if configured
             if (config.getSkillsFilter() != null && !config.getSkillsFilter().isEmpty()) {
-                if (!config.getSkillsFilter().contains(skillId) && !config.getSkillsFilter().contains(skillName)) {
+                if (!config.getSkillsFilter().contains(rawSkillId) && !config.getSkillsFilter().contains(skillName)) {
                     continue;
                 }
             }
@@ -438,6 +444,18 @@ public class A2AToolProviderManager {
     private static void warnClaimed(String agentName, int claimed) {
         LOGGER.warnf("A2A agent '%s' would register %d tool name(s) another A2A agent already registered — skipped; "
                 + "give the agents distinct names in the configuration", sanitizeForLog(agentName), claimed);
+    }
+
+    /**
+     * {@code part} as a tool-name part: unchanged when it fits, otherwise cut to
+     * fit with a short hash of the WHOLE value, so distinct long ids stay distinct.
+     */
+    static String distinctNamePart(String part) {
+        if (part == null || part.length() <= MAX_NAME_PART_CHARS) {
+            return part;
+        }
+        String suffix = "_" + Integer.toHexString(part.hashCode());
+        return part.substring(0, MAX_NAME_PART_CHARS - suffix.length()) + suffix;
     }
 
     /** {@code part}, cut to {@link #MAX_NAME_PART_CHARS}; null stays null. */

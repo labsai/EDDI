@@ -193,9 +193,18 @@ public class UserMemoryTool {
             // Check capacity — returns a user-facing message when the write must not
             // proceed, null when there is room (possibly after evicting). An update of an
             // existing entry adds no row and always has room.
-            String capacityRefusal = existing != null ? null : enforceCapacity();
-            if (capacityRefusal != null) {
-                return capacityRefusal;
+            // Eviction only PLANS here: the victims are chosen but nothing is deleted until
+            // the write
+            // has landed, so a turn cancelled on the way never costs the user a memory it
+            // then fails
+            // to replace.
+            List<UserMemoryEntry> evictions = List.of();
+            if (existing == null) {
+                CapacityPlan plan = enforceCapacity();
+                if (plan.refusal() != null) {
+                    return plan.refusal();
+                }
+                evictions = plan.victims();
             }
 
             UserMemoryEntry entry = UserMemoryEntry.fromToolCall(userId, agentId, conversationId, groupIds, trimmedKey, value, normalizedCategory,
@@ -221,13 +230,25 @@ public class UserMemoryTool {
                 // rather than recreating a memory of an erased user. (An update of an
                 // existing entry is left alone: deleting it would destroy the fact it
                 // replaced, and an erasure removes it anyway.)
+                // Only this invocation's own write is taken back: the entry found under the key
+                // may by
+                // now be another turn's (it could have replaced this one), and deleting that
+                // would lose
+                // a fact it saved. The delete is conditional on the entry being unchanged since
+                // it was
+                // read, and is skipped when the entry is not recognisably this write. A
+                // leftover is the
+                // lesser harm: an erasure removes it anyway, and a cancelled turn's fact is not
+                // lost data.
                 UserMemoryEntry written = findUpsertTarget(trimmedKey, vis);
-                if (written != null && written.id() != null) {
-                    store.deleteEntry(written.id());
+                if (written != null && written.id() != null && isThisWrite(written, entry)) {
+                    store.deleteEntryIfUnchanged(written.id(), written.updatedAt());
                 }
                 return TURN_DISCARDED_REFUSAL;
             }
             if (existing == null) {
+                // The write stood: now make the room it needed.
+                evictPlanned(evictions);
                 String overCap = settleCapacityAfterInsert(trimmedKey, vis);
                 if (overCap != null) {
                     return overCap;
@@ -460,42 +481,68 @@ public class UserMemoryTool {
      * @return a user-facing refusal message when the write must not proceed, or
      *         {@code null} when there is room (possibly after evicting)
      */
-    private String enforceCapacity() throws IResourceStore.ResourceStoreException {
+    private CapacityPlan enforceCapacity() throws IResourceStore.ResourceStoreException {
         int cap = config.getMaxEntriesPerUser();
         long count = store.countEntries(userId);
         if (count < cap) {
-            return null;
+            return CapacityPlan.room();
         }
 
         String onCap = config.getOnCapReached();
         if (ON_CAP_REJECT.equals(onCap)) {
-            return ("⚠️ Memory capacity reached (%d/%d). Cannot store NEW facts — existing ones can still be updated, or removed "
-                    + "with forgetFact.").formatted(count, cap);
+            return CapacityPlan.refuse(("⚠️ Memory capacity reached (%d/%d). Cannot store NEW facts — existing ones can still be updated, or removed "
+                    + "with forgetFact.").formatted(count, cap));
         }
         if (!ON_CAP_EVICT_OLDEST.equals(onCap)) {
-            return ("⚠️ Memory capacity reached (%d/%d) and onCapReached='%s' is not a known mode "
-                    + "(expected '%s' or '%s'). Refusing the write.").formatted(count, cap, onCap, ON_CAP_EVICT_OLDEST, ON_CAP_REJECT);
+            return CapacityPlan.refuse(("⚠️ Memory capacity reached (%d/%d) and onCapReached='%s' is not a known mode "
+                    + "(expected '%s' or '%s'). Refusing the write.").formatted(count, cap, onCap, ON_CAP_EVICT_OLDEST, ON_CAP_REJECT));
         }
 
         List<UserMemoryEntry> evictable = evictableEntries();
 
-        long required = count - cap + 1;
-        int evicted = 0;
-        for (UserMemoryEntry entry : evictable) {
-            if (evicted >= required) {
-                break;
-            }
-            store.deleteEntry(entry.id());
-            evicted++;
-            LOGGER.debugf("[MEMORY] Evicted oldest entry to stay within cap: user='%s', key='%s'", userId, entry.key());
+        int required = (int) (count - cap + 1);
+        if (evictable.size() < required) {
+            return CapacityPlan.refuse(("⚠️ Memory capacity reached (%d/%d). Only %d of the %d entries needed could be evicted — the rest "
+                    + "belong to other agents. Ask the user to remove memories, or raise 'maxEntriesPerUser'.").formatted(count, cap,
+                            evictable.size(), required));
+        }
+        return new CapacityPlan(null, List.copyOf(evictable.subList(0, required)));
+    }
+
+    /**
+     * The outcome of the capacity check: a refusal, or the entries to evict once
+     * the write has landed.
+     */
+    private record CapacityPlan(String refusal, List<UserMemoryEntry> victims) {
+        static CapacityPlan room() {
+            return new CapacityPlan(null, List.of());
         }
 
-        if (evicted < required) {
-            return ("⚠️ Memory capacity reached (%d/%d). Only %d of the %d entries needed could be evicted — the rest "
-                    + "belong to other agents. Ask the user to remove memories, or raise 'maxEntriesPerUser'.").formatted(count, cap, evicted,
-                            required);
+        static CapacityPlan refuse(String message) {
+            return new CapacityPlan(message, List.of());
         }
-        return null;
+    }
+
+    /**
+     * Deletes the planned victims after the write that needed the room has landed.
+     * Each is deleted only if it has not been written since it was chosen: a fact
+     * refreshed meanwhile is no longer "oldest".
+     */
+    private void evictPlanned(List<UserMemoryEntry> victims) throws IResourceStore.ResourceStoreException {
+        for (UserMemoryEntry victim : victims) {
+            if (store.deleteEntryIfUnchanged(victim.id(), victim.updatedAt())) {
+                LOGGER.debugf("[MEMORY] Evicted oldest entry to stay within cap: user='%s', key='%s'", userId, victim.key());
+            }
+        }
+    }
+
+    /**
+     * Whether {@code stored} is what {@code written} put there: same value,
+     * category and source conversation.
+     */
+    private static boolean isThisWrite(UserMemoryEntry stored, UserMemoryEntry written) {
+        return Objects.equals(stored.value(), written.value()) && Objects.equals(stored.category(), written.category())
+                && Objects.equals(stored.sourceConversationId(), written.sourceConversationId());
     }
 
     /**

@@ -29,6 +29,8 @@ Fixes from the two external reviews of revision `01c3250` (CodeRabbit security s
 - `ObservableChatModel`/`ObservableStreamingChatModel` log model responses at DEBUG, like requests.
 - The confidence judge's JSON extraction delegates to the new `ModelOutputParser.extractFirstObject`. Removed the unused `CustomToolConfiguration`.
 
+- Second review round: `UserMemoryTool` no longer deletes anything to make room before the write has landed (the eviction victims are planned first, deleted afterwards, each only if unchanged since it was chosen), and a cancelled turn takes back only its own write, conditionally, leaving a different turn's entry under the same key alone; A2A skill filters compare the skill id as the card gave it, and an id too long for a tool name keeps a hash of the whole id so distinct long ids stay distinct tools.
+
 ### Design decisions
 
 - Redaction instead of rejecting vault references in non-credential fields: the leak was the echo, and rejecting would break any config that legitimately keeps e.g. a host in the vault.
