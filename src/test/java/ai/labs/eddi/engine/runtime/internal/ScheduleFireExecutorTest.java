@@ -152,12 +152,12 @@ class ScheduleFireExecutorTest {
         schedule.setName(AlertSchedules.SCHEDULE_NAME);
         schedule.setMetadata(AlertSchedules.maintenanceMetadata());
 
-        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(0, 0, 0));
+        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(0, 0, 0, 0));
         ScheduleFireLog idle = executor.fire(schedule, "node-1", 1);
         assertEquals(FireStatus.COMPLETED.name(), idle.status());
         verify(scheduleStore, never()).logFire(any());
 
-        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(2, 1, 0));
+        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(2, 1, 0, 0));
         executor.fire(schedule, "node-1", 1);
         verify(scheduleStore).logFire(any());
 

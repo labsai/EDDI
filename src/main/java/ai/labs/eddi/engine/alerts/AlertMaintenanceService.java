@@ -32,6 +32,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ol>
  * <li><b>Retries</b>: claim events whose next attempt is due and deliver their
  * pending targets.</li>
+ * <li><b>Reconciliation</b>: events still held for a rule that is now disabled,
+ * deleted or no longer a digest rule are released to the inbox. The release on
+ * save misses what a replica with a stale rule cache creates afterwards.</li>
  * <li><b>Digests</b>: for each enabled rule with a digest, once its oldest held
  * event is older than the interval, one digest event lists the held ones and is
  * delivered.</li>
@@ -48,9 +51,9 @@ public class AlertMaintenanceService {
     static final int DIGEST_BATCH = 500;
 
     /** What one pass did; {@link #isEmpty()} when nothing at all. */
-    public record Result(int retried, int digests, long deleted) {
+    public record Result(int retried, int digests, long deleted, long released) {
         public boolean isEmpty() {
-            return retried == 0 && digests == 0 && deleted == 0;
+            return retried == 0 && digests == 0 && deleted == 0 && released == 0;
         }
     }
 
@@ -80,9 +83,10 @@ public class AlertMaintenanceService {
     public Result run() {
         Instant now = clock.instant();
         int retried = retryDue(now);
+        long released = releaseOrphanedDigestEvents();
         int digests = sendDueDigests(now);
         long deleted = eventStore.deleteFiredBefore(now.minus(settings.eventRetention()));
-        return new Result(retried, digests, deleted);
+        return new Result(retried, digests, deleted, released);
     }
 
     int retryDue(Instant now) {
@@ -99,6 +103,33 @@ public class AlertMaintenanceService {
             }
         }
         return claimed.size();
+    }
+
+    /**
+     * Releases the events held for a rule that no longer digests. Saving or
+     * deleting a rule releases what it holds at that moment, but another replica's
+     * cached copy of the rule stays in force for the cache TTL and can hold more
+     * events afterwards; nothing else would ever send or release them.
+     *
+     * @return how many events were released
+     */
+    long releaseOrphanedDigestEvents() {
+        long released = 0;
+        for (String ruleId : eventStore.findDigestPendingRuleIds(DIGEST_BATCH)) {
+            try {
+                Optional<AlertRule> rule = ruleStore.read(ruleId);
+                if (rule.isEmpty() || !rule.get().enabled() || interval(rule.get().effectiveDigest()) == null) {
+                    long moved = eventStore.releaseDigestPending(ruleId);
+                    if (moved > 0) {
+                        LOGGER.infof("Released %d held alert(s) of rule %s, which no longer digests", moved, sanitize(ruleId));
+                    }
+                    released += moved;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Could not reconcile the held alerts of rule %s", sanitize(ruleId));
+            }
+        }
+        return released;
     }
 
     int sendDueDigests(Instant now) {
