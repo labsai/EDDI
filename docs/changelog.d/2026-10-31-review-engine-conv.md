@@ -47,7 +47,11 @@ Verified findings from the CodeRabbit security review and the full code review a
 - The agent quota fails closed only where a limit applies, so a deployment-store outage never blocks deploys on deployments without an agent quota.
 - Whether an admin's explicit undeploy should block resuming the version's pending approvals is open: it needs an undeploy record that tells an explicit undeploy from the automatic cleanup, which writes the same `undeployed` status today.
 
+- Second review round: a bulk undeploy no longer answers 404 when the deployment records could not be read (500 instead); the log stream stops its initial batch when the token expires mid-batch; `ConversationPurgeService.purge` ends the conversation before the first irreversible cleanup step, so a delete that fails part-way leaves it unable to take a turn until the retry finishes; the stale-turn tests also assert that no compare-and-set to `ERROR` happens.
+
 ### Deferred
+
+- **A persistent pending-deletion state** (a dedicated state that blocks every read path, not only turns) is not added: a partly purged conversation is ENDED, findable for the retry, the retention sweep and erasure, but still readable through the history endpoints.
 
 - API-call quota spent on turns refused after admission (duplicate, skipped, ended): needs a refund operation in both quota stores or moving acquisition into the queued turn — a product decision on whether skipped turns count.
 - `ConversationService`'s thin private delegators kept for reflective tests (§7): reducing them means rewriting the characterization suites that reach them via `getDeclaredMethod`; not done here.

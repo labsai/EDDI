@@ -236,6 +236,7 @@ class ConversationWatchdogAbandonTest {
         assertEquals(0, laterTaskRuns.get(), "no lifecycle task may run after the watchdog gave up on the turn");
         verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
 
         // Once the body has really ended, the registration is released.
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
@@ -288,6 +289,7 @@ class ConversationWatchdogAbandonTest {
         verify(conversationMemoryStore, timeout(5000)).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
                 ConversationState.EXECUTION_INTERRUPTED);
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
         verify(stateCache, atLeastOnce()).put(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
     }
 
@@ -329,6 +331,7 @@ class ConversationWatchdogAbandonTest {
         verify(conversationMemoryStore, atLeastOnce()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
                 ConversationState.EXECUTION_INTERRUPTED);
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
     }
 
     @Test

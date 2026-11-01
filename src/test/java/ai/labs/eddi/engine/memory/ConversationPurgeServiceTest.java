@@ -19,6 +19,7 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -156,6 +157,17 @@ class ConversationPurgeServiceTest {
         verify(checkpoints).deleteByConversationId(CONVERSATION_ID);
         verify(journal).deleteByConversationId(CONVERSATION_ID);
         verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+    }
+
+    @Test
+    @DisplayName("the conversation is ended before the first irreversible cleanup step, so a delete that fails part-way leaves it unusable")
+    void conversationIsEndedBeforeCleanup() throws Exception {
+        InOrder order = inOrder(memoryStore, descriptorStore);
+
+        service.purge(CONVERSATION_ID);
+
+        order.verify(memoryStore).setConversationState(CONVERSATION_ID, ConversationState.ENDED);
+        order.verify(memoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
     }
 
     @Test

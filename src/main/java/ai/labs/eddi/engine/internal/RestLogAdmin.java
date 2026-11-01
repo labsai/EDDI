@@ -95,6 +95,11 @@ public class RestLogAdmin implements IRestLogAdmin {
         // Send initial batch from ring buffer
         List<LogEntry> initial = boundedLogStore.getEntries(agentId, conversationId, level, 50);
         for (int i = initial.size() - 1; i >= 0; i--) {
+            // The token can expire while the batch is read or sent: stop at once rather
+            // than finish sending administrative records to an expired token.
+            if (isExpired(tokenExpiresAt)) {
+                break;
+            }
             sendEvent(eventSink, sse, initial.get(i), lastEventTime);
         }
 

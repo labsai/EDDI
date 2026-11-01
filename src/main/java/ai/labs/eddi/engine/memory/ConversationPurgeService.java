@@ -148,6 +148,22 @@ public class ConversationPurgeService {
             LOGGER.warnf("HITL cleanup before permanent delete failed for conversation %s: %s", sanitize(conversationId), e.getMessage());
         }
 
+        // From the first irreversible cleanup step on, the conversation must not take
+        // another
+        // turn: a delete that fails part-way keeps the snapshot for the retry, and
+        // until the
+        // retry finishes an open conversation would still run against vault slots or
+        // attachments that are already gone. ENDED is terminal and refuses a turn; the
+        // retry,
+        // the retention sweep and an erasure all still find it. Best effort: a store
+        // that
+        // cannot take this write is no reason to skip the delete itself.
+        try {
+            conversationMemoryStore.setConversationState(conversationId, ConversationState.ENDED);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not end conversation %s before its permanent delete: %s", sanitize(conversationId), sanitize(e.getMessage()));
+        }
+
         // The snapshot holds the only references to the conversation's vault
         // slots: if they cannot be deleted, nothing is — a retry can then still
         // find them. Deleting the snapshot anyway would orphan the credentials.

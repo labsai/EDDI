@@ -339,6 +339,43 @@ class RestLogAdminExtendedTest {
         }
     }
 
+    @Nested
+    @DisplayName("Token expiry during the initial batch")
+    class InitialBatchExpiry {
+
+        @Test
+        @DisplayName("stops sending the initial batch as soon as the token has expired")
+        void initialBatchStopsAtExpiry() {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class, RETURNS_DEEP_STUBS);
+            when(eventSink.isClosed()).thenReturn(true); // no cleanup thread
+            var logEvent = mock(OutboundSseEvent.class);
+            when(sse.newEventBuilder().name("log").mediaType(any()).data(any(Class.class), any()).build()).thenReturn(logEvent);
+            when(boundedLogStore.getEntries(any(), any(), any(), anyInt()))
+                    .thenReturn(List.of(logEntry("a", "c", "INFO"), logEntry("a", "c", "INFO"), logEntry("a", "c", "INFO")));
+            when(boundedLogStore.addListener(any())).thenReturn("listener-batch");
+
+            long t0 = System.currentTimeMillis();
+            var time = new AtomicLong(t0);
+            // The first record goes out; sending it takes the clock past the token's
+            // expiry.
+            when(eventSink.send(any())).thenAnswer(invocation -> {
+                time.set(t0 + 61_000L);
+                return CompletableFuture.completedFuture(null);
+            });
+            var admin = new RestLogAdmin(boundedLogStore, databaseLogs, instanceIdProducer, time::get);
+            var identity = mock(SecurityIdentity.class);
+            var jwt = mock(JsonWebToken.class);
+            when(jwt.getExpirationTime()).thenReturn(t0 / 1000L + 60L);
+            when(identity.getPrincipal()).thenReturn(jwt);
+            admin.identity = identity;
+
+            admin.streamLogs(null, null, null, eventSink, sse);
+
+            verify(eventSink, times(1)).send(logEvent);
+        }
+    }
+
     private LogEntry logEntry(String agentId, String conversationId, String level) {
         return new LogEntry(System.currentTimeMillis(), level, "test.Logger", "message",
                 null, agentId, null, conversationId, null, null);

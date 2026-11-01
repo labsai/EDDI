@@ -215,5 +215,6 @@ class ConversationServiceStaleTurnTest {
                         + "that is what overwrites a newer turn");
         // ...and it must not downgrade the watchdog's EXECUTION_INTERRUPTED to ERROR.
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
     }
 }

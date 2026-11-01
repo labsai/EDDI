@@ -291,6 +291,7 @@ class ConversationServiceProcessingGaugeTest {
         runTurnThenFailWith(new ExecutionAbandonedException("Execution completed after cancellation — result discarded"));
 
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
     }
 
     /**

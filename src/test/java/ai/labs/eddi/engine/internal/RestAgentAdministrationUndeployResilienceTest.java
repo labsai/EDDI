@@ -70,6 +70,7 @@ class RestAgentAdministrationUndeployResilienceTest {
     private IConversationService conversationService;
     private RestAgentAdministration admin;
     private IDocumentDescriptorStore agentDescriptors;
+    private IDeploymentStore deploymentStore;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -78,7 +79,7 @@ class RestAgentAdministrationUndeployResilienceTest {
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationService = mock(IConversationService.class);
-        var deploymentStore = mock(IDeploymentStore.class);
+        deploymentStore = mock(IDeploymentStore.class);
         var runtime = mock(IRuntime.class);
         var accessGuard = mock(ConversationAccessGuard.class);
         when(accessGuard.callerActor(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -101,6 +102,20 @@ class RestAgentAdministrationUndeployResilienceTest {
         admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore, conversationMemoryStore,
                 restConversationStore, agentDescriptors, mock(IDeploymentListener.class), mock(IScheduleStore.class),
                 mock(TenantQuotaService.class), mock(ResourceAccessGuard.class));
+    }
+
+    @Test
+    @DisplayName("a bulk undeploy of an agent whose documents are gone is a 404 only when the deployment records were actually read")
+    void unreadableDeploymentRecordsAreNotNotFound() throws Exception {
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        // Records readable and empty: nothing is deployed, so 404.
+        Response none = admin.undeployAgent(ENV, AGENT, 2, false, true);
+        assertEquals(404, none.getStatus());
+
+        // Records unreadable: "none found" is not what the lookup said.
+        when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, true));
     }
 
     private void openConversation(int version, String conversationId) throws Exception {

@@ -555,7 +555,15 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         if (currentVersion == null) {
             // The agent's documents are gone (deleted while still deployed): what is
             // left to undeploy is what is still deployed.
-            var deployed = deployedVersions(environment, agentId);
+            var lookup = lookupDeployedVersions(environment, agentId);
+            var deployed = lookup.versions();
+            if (deployed.isEmpty() && !lookup.complete()) {
+                // "None found" and "could not look" are different answers: a 404 here would
+                // tell
+                // the operator the agent has nothing deployed while versions may still be.
+                throw new InternalServerErrorException("Could not read the deployed versions of Agent " + sanitize(agentId)
+                        + "; retry once the deployment records are readable");
+            }
             if (deployed.isEmpty()) {
                 return Response.status(Response.Status.NOT_FOUND).entity("Agent " + sanitize(agentId) + " has no version to undeploy")
                         .type(MediaType.TEXT_PLAIN).build();
@@ -667,7 +675,19 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      * Every deployed version of the agent in {@code environment}, highest first.
      */
     private SortedSet<Integer> deployedVersions(Deployment.Environment environment, String agentId) {
+        return lookupDeployedVersions(environment, agentId).versions();
+    }
+
+    /**
+     * The deployed versions found, and whether both lookups answered (an empty set
+     * is only "none" when they did).
+     */
+    private record DeployedVersions(SortedSet<Integer> versions, boolean complete) {
+    }
+
+    private DeployedVersions lookupDeployedVersions(Deployment.Environment environment, String agentId) {
         SortedSet<Integer> versions = new TreeSet<>(Comparator.reverseOrder());
+        boolean complete = true;
         try {
             for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
                 if (agentId.equals(info.getAgentId()) && info.getEnvironment() == environment && info.getAgentVersion() != null) {
@@ -675,6 +695,7 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 }
             }
         } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            complete = false;
             log.warnf("Could not read the deployment records of Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
         }
         try {
@@ -684,9 +705,10 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 }
             }
         } catch (ServiceException | RuntimeException e) {
+            complete = false;
             log.warnf("Could not list the running versions of Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
         }
-        return versions;
+        return new DeployedVersions(versions, complete);
     }
 
     /**
