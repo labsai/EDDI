@@ -53,7 +53,7 @@ describe("recordUnhandledApiRequest", () => {
 
   it("ignores static assets the app really does serve", () => {
     // The regression that motivated this file: index.html links this icon, and
-    // MSW's own asset filter is bypassed when onUnhandledRequest is a function.
+    // MSW's own asset filter is bypassed when onUnhandledFrame is a function.
     record(`${ORIGIN}/eddi-icon.svg`);
     record(`${ORIGIN}/eddi-icon.ico`);
     record(`${ORIGIN}/assets/index-a1b2c3.js`);

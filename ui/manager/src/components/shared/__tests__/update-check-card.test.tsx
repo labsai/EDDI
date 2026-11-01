@@ -73,7 +73,7 @@ describe("UpdateCheckCard", () => {
 
   it("contacts GitHub and nothing else, even with hostile release notes", async () => {
     // The guard that keeps a relay from creeping back in. MSW runs with
-    // `onUnhandledRequest: "error"`, so a request to any other host fails the
+    // `onUnhandledFrame: "error"`, so a request to any other host fails the
     // test on its own — this asserts the positive half: one host, one call.
     //
     // The notes carry both flavours of image, because markdown syntax and a raw
@@ -106,20 +106,26 @@ describe("UpdateCheckCard", () => {
   it("sends no referrer, so GitHub never learns this deployment's origin", async () => {
     // `credentials: "omit"` covers cookies and auth but not the referrer, which
     // the browser default would still populate with this deployment's origin.
-    let policy: string | undefined;
-    server.use(
-      http.get(LATEST_URL, ({ request }) => {
-        policy = request.referrerPolicy;
-        return release("9.9.9");
-      }),
-    );
+    // msw 3 hands handlers a reconstructed Request that no longer carries the
+    // referrer policy, so assert on what the app passes to fetch instead.
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
 
-    const user = userEvent.setup();
-    renderWithProviders(<UpdateCheckCard />);
-    await user.click(await screen.findByTestId("update-check-now"));
-    await screen.findByText("EDDI 9.9.9 is available");
+    try {
+      const user = userEvent.setup();
+      renderWithProviders(<UpdateCheckCard />);
+      await user.click(await screen.findByTestId("update-check-now"));
+      await screen.findByText("EDDI 9.9.9 is available");
 
-    expect(policy).toBe("no-referrer");
+      const latestCall = fetchSpy.mock.calls.find(([input]) =>
+        String(input instanceof Request ? input.url : input).startsWith(LATEST_URL),
+      );
+      expect(latestCall).toBeDefined();
+      const [input, init] = latestCall!;
+      const policy = init?.referrerPolicy ?? (input instanceof Request ? input.referrerPolicy : undefined);
+      expect(policy).toBe("no-referrer");
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it("reports an available update and how to get it when the button is pressed", async () => {

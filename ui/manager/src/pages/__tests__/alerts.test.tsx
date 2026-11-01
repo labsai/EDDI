@@ -150,8 +150,10 @@ describe("AlertsPage — inbox", () => {
     fireEvent.click(screen.getByTestId("alert-event-select-gen-25"));
     fireEvent.click(screen.getByTestId("alerts-ack-selected"));
     expect(await screen.findByTestId("alert-event-row-gen-0")).toBeInTheDocument();
+    // Page 1 can be painted from cache before the refetch reports 25 events, so the
+    // missing "next" button is something to wait for, not to assert on the spot.
+    await waitFor(() => expect(screen.queryByTestId("alerts-next")).toBeNull());
     expect(screen.queryByText("No open alerts")).toBeNull();
-    expect(screen.queryByTestId("alerts-next")).toBeNull();
   });
 
   it("clears the selection when the source or the acknowledged filter changes", async () => {

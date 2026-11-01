@@ -1,7 +1,7 @@
 import { setupWorker } from "msw/browser";
 import { browserHandlers } from "./browser-handlers";
 import { UNHANDLED_API_REQUESTS_KEY } from "./unhandled-api";
-import { recordUnhandledApiRequest } from "./unhandled-api-recorder";
+import { recordUnhandledApiFrame, recordUnhandledApiRequest } from "./unhandled-api-recorder";
 
 export const worker = setupWorker(...browserHandlers);
 
@@ -15,4 +15,4 @@ export const worker = setupWorker(...browserHandlers);
  * @see ./unhandled-api-recorder — the callback, and why it filters as it does
  * @see ./unhandled-api — the storage key, shared with `e2e/fixtures.ts`
  */
-export { UNHANDLED_API_REQUESTS_KEY, recordUnhandledApiRequest };
+export { UNHANDLED_API_REQUESTS_KEY, recordUnhandledApiFrame, recordUnhandledApiRequest };

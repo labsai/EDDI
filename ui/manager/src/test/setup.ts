@@ -76,7 +76,7 @@ if (typeof URL.revokeObjectURL !== "function") {
 import "@/i18n/config";
 
 // Start MSW server before all tests
-beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
+beforeAll(() => server.listen({ onUnhandledFrame: "error" }));
 
 // Reset handlers after each test
 afterEach(async () => {

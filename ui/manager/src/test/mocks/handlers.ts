@@ -1996,7 +1996,7 @@ export const handlers = [
   }),
 
   // There is deliberately no second outbound handler here. The update check
-  // contacts exactly one host, and `onUnhandledRequest: "error"` in the test
+  // contacts exactly one host, and `onUnhandledFrame: "error"` in the test
   // setup means reintroducing a relay (shields.io or otherwise) fails the suite
   // rather than passing quietly.
 
@@ -2510,7 +2510,7 @@ export const handlers = [
   // MCP tool discovery endpoint.
   //
   // POST with the probed server's key in `X-Mcp-Authorization`, mirroring EDDI.
-  // No GET handler, deliberately: `onUnhandledRequest: "error"` then turns a
+  // No GET handler, deliberately: `onUnhandledFrame: "error"` then turns a
   // regression back to `?apiKey=` into a failing test rather than a silent pass.
   http.post("*/mcpcallsstore/mcpcalls/discover-tools", async ({ request }) => {
     const body = (await request.json().catch(() => null)) as { url?: string } | null;
