@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -259,7 +260,10 @@ public class ConversationMemoryUtilities {
      * step's value. {@code null} when no step carried a cost, so a consumer can
      * tell "nothing priced ran" apart from a genuine total. Non-finite and negative
      * values are skipped: one NaN would poison the total and silently disable every
-     * ceiling compared against it.
+     * ceiling compared against it. A step's {@code audit:discarded_cost} — the
+     * spend of undone steps a later turn discarded — is spend too and is summed
+     * with it. The steps still in the redo cache are added by
+     * {@link #conversationCost(List, List)}, so the total never drops on an undo.
      */
     static Double conversationCost(List<ConversationStepSnapshot> steps) {
         if (steps == null) {
@@ -281,7 +285,7 @@ public class ConversationMemoryUtilities {
                     continue;
                 }
                 for (var result : workflow.getLifecycleTasks()) {
-                    if (result != null && AUDIT_COST.equals(result.getKey()) && result.getResult() instanceof Number cost
+                    if (result != null && isSpendKey(result.getKey()) && result.getResult() instanceof Number cost
                             && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
                         total += cost.doubleValue();
                         found = true;
@@ -290,6 +294,28 @@ public class ConversationMemoryUtilities {
             }
         }
         return found ? total : null;
+    }
+
+    /**
+     * The conversation's total spend as the snapshot reports it: the steps plus the
+     * steps an undo moved to the redo cache. Without the redo cache the total
+     * dropped between an undo and the next say — and its readers (the group cost
+     * ledger, which overwrites a member's cost with the latest total; schedule and
+     * Slack cost deltas; the Manager) saw spend vanish — while the per-conversation
+     * ceiling, which counts the redo cache, did not. {@code null} only when neither
+     * carried a cost.
+     */
+    static Double conversationCost(List<ConversationStepSnapshot> steps, List<ConversationStepSnapshot> redoCache) {
+        Double live = conversationCost(steps);
+        Double undone = conversationCost(redoCache);
+        if (live == null) {
+            return undone;
+        }
+        return undone == null ? live : live + undone;
+    }
+
+    private static boolean isSpendKey(String key) {
+        return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
     private static boolean isSensitiveDetailedKey(String key) {
@@ -302,7 +328,11 @@ public class ConversationMemoryUtilities {
         if (MemoryKeys.AUDIT_TOKEN_USAGE.equals(key)) {
             return false;
         }
-        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
+        // The kept revision candidate is the frozen request of a model answer (system
+        // prompt, history, tool results) — resume machinery, like a tool pause's
+        // transcript, which never reaches this view either.
+        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error")
+                || key.equals(HitlRevisionCandidate.STEP_KEY);
     }
 
     /**
@@ -457,7 +487,7 @@ public class ConversationMemoryUtilities {
         }
 
         newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
-        newSnapshot.setConversationCost(conversationCost(allSteps));
+        newSnapshot.setConversationCost(conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()));
 
         var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
         int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
@@ -776,23 +806,101 @@ public class ConversationMemoryUtilities {
     }
 
     /**
-     * Fix (security): projects the raw {@link PendingToolCallBatch} on a snapshot
-     * returned by the GENERIC raw-read surface ({@code readRawConversationLog})
-     * down to the same names-only view the Simple projection uses — stripping
+     * Fix (security): the one redaction point of the GENERIC raw-read surface
+     * ({@code readRawConversationLog}), for the two pieces of pause machinery a
+     * paused conversation carries that hold frozen model input:
+     * <ol>
+     * <li>a TOOL_CALL pause's {@link PendingToolCallBatch} is projected down to the
+     * same names-only view the Simple projection uses — stripping
      * {@code argumentsRaw}, {@code argumentsRedacted}, {@code chatTranscriptJson},
-     * {@code traceSoFar}, {@code fingerprint} and {@code effectiveToolApprovals}.
-     * Without this, the raw endpoint leaks unredacted tool arguments and the frozen
-     * LLM transcript of a paused conversation to any authenticated caller,
-     * defeating the approver-only {@code detail=full} gate. The persisted document
-     * is untouched; {@code loadConversationMemorySnapshot} returns a
-     * freshly-deserialized, caller-owned snapshot per call, so mutating its batch
-     * field here is safe.
+     * {@code traceSoFar}, {@code fingerprint} and
+     * {@code effectiveToolApprovals};</li>
+     * <li>a RULE pause's revision candidate
+     * ({@code hitlConfig.onRejection: REVISE}, step data
+     * {@link HitlRevisionCandidate#STEP_KEY}) loses its {@code transcriptJson} —
+     * the frozen request of the answer under review, including the compiled system
+     * prompt and every tool result. The draft and the bookkeeping (ids, position,
+     * output marks, {@code roundsUsed}) stay, so the owner still sees what is under
+     * review.</li>
+     * </ol>
+     * Without this, the raw endpoint leaks unredacted tool arguments, the frozen
+     * LLM transcript of a paused conversation and the system prompt to any caller
+     * that may read the conversation, defeating the approver-only
+     * {@code detail=full} gate (which drops both). The persisted document is
+     * untouched; {@code loadConversationMemorySnapshot} returns a
+     * freshly-deserialized, caller-owned snapshot per call, so mutating it here is
+     * safe — resume reads the store, never this projection.
      */
     public static ConversationMemorySnapshot redactRawPendingToolCallsForRead(ConversationMemorySnapshot snapshot) {
-        if (snapshot != null && snapshot.getHitlPendingToolCalls() != null) {
+        if (snapshot == null) {
+            return null;
+        }
+        if (snapshot.getHitlPendingToolCalls() != null) {
             snapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(snapshot.getHitlPendingToolCalls()));
         }
+        redactRevisionCandidateTranscripts(snapshot.getConversationSteps());
+        redactRevisionCandidateTranscripts(snapshot.getRedoCache());
         return snapshot;
+    }
+
+    /**
+     * Fields of a persisted {@link HitlRevisionCandidate} that carry frozen model
+     * input, withheld by the raw read. Every other field is bookkeeping or the
+     * draft, which the step's output shows anyway.
+     */
+    static final Set<String> REVISION_CANDIDATE_FROZEN_INPUT_FIELDS = Set.of("transcriptJson");
+
+    /**
+     * Second half of {@link #redactRawPendingToolCallsForRead}: replaces each kept
+     * revision candidate — its {@code result} and every copy in
+     * {@code possibleResults}, which {@code Data} fills with the result by default
+     * — with a copy that omits {@link #REVISION_CANDIDATE_FROZEN_INPUT_FIELDS}.
+     */
+    private static void redactRevisionCandidateTranscripts(Collection<ConversationStepSnapshot> steps) {
+        if (steps == null) {
+            return;
+        }
+        for (var step : steps) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var result : workflow.getLifecycleTasks()) {
+                    if (result == null || !HitlRevisionCandidate.STEP_KEY.equals(result.getKey())) {
+                        continue;
+                    }
+                    result.setResult(withoutFrozenInput(result.getResult()));
+                    if (result.getPossibleResults() != null) {
+                        var redacted = new ArrayList<Object>(result.getPossibleResults().size());
+                        for (Object possible : result.getPossibleResults()) {
+                            redacted.add(withoutFrozenInput(possible));
+                        }
+                        result.setPossibleResults(redacted);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * A copy of a stored candidate map without its frozen model input; anything
+     * that is not a map carries no candidate fields and is dropped to null, since a
+     * candidate is only ever stored as a map.
+     */
+    private static Object withoutFrozenInput(Object stored) {
+        if (!(stored instanceof Map<?, ?> map)) {
+            return null;
+        }
+        var copy = new LinkedHashMap<Object, Object>();
+        map.forEach((field, value) -> {
+            if (!REVISION_CANDIDATE_FROZEN_INPUT_FIELDS.contains(String.valueOf(field))) {
+                copy.put(field, value);
+            }
+        });
+        return copy;
     }
 
     /**
@@ -893,6 +1001,7 @@ public class ConversationMemoryUtilities {
      */
     public static ConversationMemorySnapshot sanitizePendingToolCallsForApprover(ConversationMemorySnapshot snapshot) {
         stripRequestFingerprintsForRead(snapshot);
+        stripRevisionCandidates(snapshot);
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
             return snapshot;
         }
@@ -925,6 +1034,30 @@ public class ConversationMemoryUtilities {
             }
         }
         return snapshot;
+    }
+
+    /**
+     * Removes the revision candidate a RULE pause keeps ({@code onRejection:
+     * REVISE}) from every step of a snapshot served to an approver: it is the
+     * frozen request of the answer under review — the compiled system prompt and
+     * every tool result — which is resume machinery like
+     * {@code chatTranscriptJson}. The answer itself stays visible in the step's
+     * output.
+     */
+    private static void stripRevisionCandidates(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        for (var step : snapshot.getConversationSteps()) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow != null && workflow.getLifecycleTasks() != null) {
+                    workflow.getLifecycleTasks().removeIf(result -> result != null && HitlRevisionCandidate.STEP_KEY.equals(result.getKey()));
+                }
+            }
+        }
     }
 
     /**
@@ -995,18 +1128,21 @@ public class ConversationMemoryUtilities {
 
         /**
          * What {@link ConversationMemoryUtilities#conversationCost(List)} returns for
-         * the fully converted steps, read from the live steps' {@code audit:cost}
-         * entries alone — one stack-level read, no step converted. A step holds at most
-         * one value per key, which is all the full conversion sums per step.
+         * the fully converted steps, read from the live steps' {@code audit:cost} and
+         * {@code audit:discarded_cost} entries alone — one stack-level read per key, no
+         * step converted. A step holds at most one value per key, which is all the full
+         * conversion sums per step.
          */
         Double conversationCost() {
             double total = 0.0;
             boolean found = false;
-            for (IData<Object> data : steps.<Object>getExactDataPerStep(AUDIT_COST)) {
-                if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
-                        && cost.doubleValue() >= 0.0) {
-                    total += cost.doubleValue();
-                    found = true;
+            for (String key : List.of(AUDIT_COST, AUDIT_DISCARDED_COST)) {
+                for (IData<Object> data : steps.<Object>getExactDataPerStep(key)) {
+                    if (data != null && data.getResult() instanceof Number cost && Double.isFinite(cost.doubleValue())
+                            && cost.doubleValue() >= 0.0) {
+                        total += cost.doubleValue();
+                        found = true;
+                    }
                 }
             }
             return found ? total : null;

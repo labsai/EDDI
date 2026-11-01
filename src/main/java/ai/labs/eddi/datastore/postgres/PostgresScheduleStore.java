@@ -549,11 +549,46 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT COUNT(*) FROM eddi_schedules WHERE name = ? AND (enabled = true OR disabled_reason = ?)")) {
+            ps.setString(1, name);
+            ps.setString(2, ScheduleConfiguration.DISABLED_BY_UNDEPLOY);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count pending schedules by name: " + name, e);
+        }
+    }
+
+    @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         int count = deleteWithCascade("name", name, null, "Failed to delete schedules by name: " + name);
         if (count > 0) {
-            LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, sanitize(name));
+            LOGGER.infof("Deleted %d schedule(s) with name '%s'", count, sanitize(name));
+        }
+        return count;
+    }
+
+    /**
+     * Exactly what {@link #markCompleted} leaves behind for a one-shot: disabled,
+     * PENDING, no next fire, fired, unclaimed and with no disabled reason. A
+     * pending, claimed, failed, dead-lettered, undeploy-disabled or hand-disabled
+     * row (which keeps its next_fire) does not match.
+     */
+    private static final String USED_UP_ONE_SHOT = " AND enabled = false AND fire_status = 'PENDING' AND next_fire IS NULL"
+            + " AND last_fired IS NOT NULL AND disabled_reason IS NULL AND claimed_by IS NULL";
+
+    @Override
+    public int deleteUsedUpOneShotsByName(String name) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        int count = deleteWithCascade("name", name, USED_UP_ONE_SHOT, null, "Failed to prune used-up schedules by name: " + name);
+        if (count > 0) {
+            LOGGER.infof("Pruned %d used-up one-shot schedule(s) with name '%s'", count, sanitize(name));
         }
         return count;
     }
@@ -599,7 +634,18 @@ public class PostgresScheduleStore implements IScheduleStore {
      */
     private int deleteWithCascade(String column, String value, List<String> knownIds, String failureContext)
             throws IResourceStore.ResourceStoreException {
-        String matching = " FROM eddi_schedules WHERE " + column + " = ?";
+        return deleteWithCascade(column, value, "", knownIds, failureContext);
+    }
+
+    /**
+     * {@link #deleteWithCascade(String, String, List, String)} narrowed by a
+     * further condition. {@code andCondition} is a constant SQL fragment starting
+     * with {@code " AND "} (or empty), never built from input: it binds no
+     * parameters.
+     */
+    private int deleteWithCascade(String column, String value, String andCondition, List<String> knownIds, String failureContext)
+            throws IResourceStore.ResourceStoreException {
+        String matching = " FROM eddi_schedules WHERE " + column + " = ?" + andCondition;
         List<String> ids = knownIds != null ? knownIds : new ArrayList<>();
         int deleted;
         try (Connection conn = dataSourceInstance.get().getConnection()) {

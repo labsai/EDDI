@@ -274,7 +274,39 @@ export interface AgentHitlConfig {
   pauseReason?: string | null;
   /** Tool-level approval gating applied to every LLM task in the agent (surface 3). */
   toolApprovals?: ToolApprovalsConfig | null;
+  /**
+   * What a REJECTED decision on a behavior-rule pause does. `SKIP` (default)
+   * skips the remaining tasks and shows the note; `REVISE` has the model revise
+   * the answer it gave before the pause, with the note as feedback. Tool-call
+   * pauses are unaffected. Backend `HitlRejectionAction`.
+   */
+  onRejection?: HitlRejectionAction | null;
+  /** Under `REVISE`, revisions one turn may take, 1..10 (absent = 3). */
+  maxRevisionsPerTurn?: number | null;
+  /** Who is told when this agent pauses — `notify.email.recipients` today
+   *  (backend `HitlNotifyConfig`). Absent = nobody is notified. */
+  notify?: HitlNotifyConfig | null;
 }
+
+/** Backend `hitlConfig.onRejection`. */
+export type HitlRejectionAction = "SKIP" | "REVISE";
+
+/** Backend `AgentConfiguration.HitlConfig.DEFAULT_MAX_REVISIONS_PER_TURN`. */
+export const DEFAULT_MAX_REVISIONS_PER_TURN = 3;
+/** Save-time bounds of `maxRevisionsPerTurn` (`HitlConfigValidation`). */
+export const MIN_REVISIONS_PER_TURN = 1;
+export const MAX_REVISIONS_PER_TURN = 10;
+
+/** `hitlConfig.notify` — needs the deployment's system mailer (`eddi.mail.smtp.*`). */
+export interface HitlNotifyConfig {
+  email?: {
+    /** 1–20 plain ASCII addresses; the backend refuses an empty list (400). */
+    recipients: string[];
+  } | null;
+}
+
+/** Mirrors `HitlConfigValidation.MAX_NOTIFY_RECIPIENTS`. */
+export const MAX_NOTIFY_RECIPIENTS = 20;
 
 /** Group-level HITL configuration (extends agent-level with granularity). */
 export interface GroupHitlConfig {
