@@ -69,6 +69,25 @@ describe("recordUnhandledApiRequest", () => {
     expect(recorded()).toEqual([]);
   });
 
+  it("ignores a page load or reload, which MSW 3 hands to the handlers", () => {
+    const print = printer();
+    recordUnhandledApiRequest(
+      new Request(`${ORIGIN}/manage/agents`, { headers: { accept: "text/html,application/xhtml+xml,*/*;q=0.8" } }),
+      print,
+    );
+    expect(recorded()).toEqual([]);
+    expect(print.warning).not.toHaveBeenCalled();
+  });
+
+  it("still records a JSON call to the same kind of path", () => {
+    const print = printer();
+    recordUnhandledApiRequest(
+      new Request(`${ORIGIN}/agentstore/agents`, { headers: { accept: "application/json" } }),
+      print,
+    );
+    expect(recorded()).toEqual(["GET /agentstore/agents"]);
+  });
+
   it("ignores off-origin requests", () => {
     record("https://api.github.com/repos/labsai/EDDI/releases/latest");
     expect(recorded()).toEqual([]);

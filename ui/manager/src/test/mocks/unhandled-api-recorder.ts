@@ -65,6 +65,11 @@ export function recordUnhandledApiRequest(
   if (url.origin !== window.location.origin) return;
   if (DEV_ASSET_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) return;
   if (ASSET_EXTENSIONS.test(url.pathname)) return;
+  // A page load or reload is not an API call. MSW 2's worker script skipped
+  // navigations itself; MSW 3's hands them to the handlers, so they arrive here.
+  // Browsers ask for documents with `Accept: text/html`; the app's `fetch` calls
+  // ask for JSON, an event stream or `*/*`.
+  if (request.method === "GET" && request.headers.get("accept")?.includes("text/html")) return;
 
   const record = `${request.method} ${url.pathname}${url.search}`;
 
