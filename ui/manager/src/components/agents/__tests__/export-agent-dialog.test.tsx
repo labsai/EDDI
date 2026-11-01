@@ -150,4 +150,32 @@ describe("ExportAgentDialog", () => {
     // Present-but-empty: "none of the schedules", not "all of them".
     expect(requested!.searchParams.get("selectedSchedules")).toBe("");
   });
+
+  it("sends an empty selection for a type the preview listed no rows of, so rows added later are not exported", async () => {
+    const user = userEvent.setup();
+    let requested: URL | null = null;
+    server.use(
+      http.post("*/backup/export/:agentId/preview", () =>
+        HttpResponse.json({
+          agentId: "agent1",
+          agentName: "Support Agent",
+          agentVersion: 3,
+          resources: [
+            { resourceId: "agent1", resourceVersion: 3, resourceType: "agent", name: "Support Agent", parentWorkflowId: null, workflowIndex: -1, required: true },
+          ],
+        }),
+      ),
+      http.post("*/backup/export/:agentId", ({ request }) => {
+        requested = new URL(request.url);
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderWithProviders(<ExportAgentDialog {...defaultProps} />);
+    await waitFor(() => expect(screen.getByTestId("export-confirm-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("export-confirm-btn"));
+
+    await waitFor(() => expect(requested).not.toBeNull());
+    expect(requested!.searchParams.get("selectedSnippets")).toBe("");
+    expect(requested!.searchParams.get("selectedSchedules")).toBe("");
+  });
 });

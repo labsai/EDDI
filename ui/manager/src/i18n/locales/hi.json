@@ -2674,6 +2674,7 @@
     "statusPollError": "विफल: स्थिति जाँची नहीं जा सकी",
     "statusUploadError": "विफल: अपलोड त्रुटि",
     "statusStopped": "सर्वर पर अभी प्रोसेस हो रहा है — जाँच रोक दी गई",
+    "statusRecheck": "फिर से जाँचें",
     "statusReadError": "विफल: {{name}} पढ़ा नहीं जा सका",
     "statusFailed": "विफल",
     "saveFirstIngestion": "दस्तावेज़ को प्रोसेस करने से पहले इस नॉलेज बेस को सहेजें।",

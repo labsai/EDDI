@@ -1,4 +1,5 @@
 import { isValidIsoDuration, requiresApprovalTimeout } from "./hitl-config";
+import { globMatches } from "./glob";
 import {
   MAX_PAUSE_REASON_LENGTH,
   TOOL_SOURCES,
@@ -43,10 +44,7 @@ function isMethodQualifiedSource(prefix: string): boolean {
  * some `http.<method>`. `mcp*` contains a `*` yet can never match `http.post`.
  */
 function prefixCanMatchAnHttpEndpoint(prefix: string): boolean {
-  const regex = new RegExp(
-    "^" + prefix.split("*").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$",
-  );
-  return KNOWN_METHODS.some((method) => regex.test(`${HTTP_SOURCE}.${method}`));
+  return KNOWN_METHODS.some((method) => globMatches(prefix, `${HTTP_SOURCE}.${method}`));
 }
 
 const ON_NO_PROGRESS_VALUES = ["WAIT_FOR_HUMAN", "AUTO_REJECT", "ABORT"];

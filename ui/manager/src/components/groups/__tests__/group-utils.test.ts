@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey, formatMarkdownText, formatJsonSafely } from "@/components/groups/group-utils";
 
+describe("emoji verification: a long detail is still a verdict", () => {
+  it("parses a header whose detail after the colon is very long", () => {
+    const items = parseEmojiVerification("\u2705 **Write the report**: " + "detail ".repeat(600));
+    expect(items).not.toBeNull();
+    expect(items![0]!.subject).toBe("Write the report");
+    expect(items![0]!.passed).toBe(true);
+  });
+});
+
 describe("group-utils", () => {
   describe("parseTranscriptContent", () => {
     it("returns empty string for null/undefined/empty input", () => {

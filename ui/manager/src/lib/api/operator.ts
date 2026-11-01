@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import { operatorEnvironment } from "@/lib/operator/operator-environment";
+import { globMatches } from "@/lib/glob";
 import { createApiAgent, type SetupResult } from "./agent-setup";
 import {
   getVariable,
@@ -715,18 +716,6 @@ const WRITE_METHODS = ["post", "put", "patch", "delete"] as const;
  */
 function writeAddressPrefix(method: string): string {
   return `http.${method}:/`;
-}
-
-/**
- * Mirrors `ToolApprovalPatterns.compile`: `*` is the only wildcard and matches
- * any run of characters, every other character is a literal.
- */
-function globMatches(glob: string, text: string): boolean {
-  const regex = glob
-    .split("*")
-    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-    .join(".*");
-  return new RegExp(`^${regex}$`, "s").test(text);
 }
 
 /**

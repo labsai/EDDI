@@ -1498,6 +1498,8 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
 
     const controller = new AbortController();
     set({ isResolvingPause: true, resolveError: null, resolveAbortController: controller });
+    // The pause the baseline read found paused NOW, kept for the one case that has to write it to the store.
+    let freshPausedAt: string | null = null;
 
     try {
       // Receipt baseline: which calls the turn had ALREADY executed before this
@@ -1531,6 +1533,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // key and refetch the banner under the approver for nothing — the
           // settle path below writes the store value that actually matters.
           decidedPausedAt = baseline.hitlPausedAt;
+          freshPausedAt = baseline.hitlPausedAt;
         }
       } catch {
         preDecisionCalls = null;
@@ -1781,7 +1784,13 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       });
     } catch (error) {
       if (!controller.signal.aborted) {
-        set({ isResolvingPause: false, resolveError: getErrorMessage(error) });
+        set({
+          isResolvingPause: false,
+          resolveError: getErrorMessage(error),
+          // The card says the pause changed: key the approval status to the pause that is paused NOW, or the
+          // new pause stays hidden behind the stale key. isPaused and the error are kept.
+          ...(error instanceof PauseChangedError && freshPausedAt ? { decidedPausedAt: freshPausedAt } : {}),
+        });
       }
     } finally {
       if (get().resolveAbortController === controller) {

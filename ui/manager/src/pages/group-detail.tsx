@@ -674,6 +674,9 @@ export function GroupDetailPage() {
             userClearedRef.current = true;
             setSelectedConvId(null);
           }
+          // The retained stream of the deleted discussion: its terminal state would keep the page rendering
+          // the deleted transcript once the selection is cleared.
+          if (streamState.conversationId === convId) resetStream();
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }

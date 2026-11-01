@@ -2705,6 +2705,7 @@
     "statusPollError": "Error: no se pudo comprobar el estado",
     "statusUploadError": "Error: fallo de subida",
     "statusStopped": "Sigue procesándose en el servidor — se dejó de comprobar",
+    "statusRecheck": "Comprobar de nuevo",
     "statusReadError": "Error: no se pudo leer {{name}}",
     "statusFailed": "Error",
     "saveFirstIngestion": "Guarde esta base de conocimiento primero para activar la ingesta de documentos.",

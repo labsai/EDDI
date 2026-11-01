@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { renderPage, createTestQueryClient } from "@/test/test-utils";
 import { GroupDetailPage } from "@/pages/group-detail";
+import { useGroupStreamStore } from "@/hooks/use-group-discussion-stream";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
@@ -163,6 +164,26 @@ describe("GroupDetailPage — deleting a discussion", () => {
 
     await new Promise((r) => setTimeout(r, 150));
     expect(screen.getByTestId(`discussion-item-${target}`)).not.toHaveAttribute("aria-current", "true");
+  });
+
+  it("drops the deleted discussion's retained stream, so its transcript does not stay on screen", async () => {
+    server.use(
+      http.delete("*/groups/:groupId/conversations/:conversationId", () => new HttpResponse(null, { status: 204 })),
+    );
+    renderGroupDetail();
+    const ids = await conversationIds();
+    const target = ids[0]!;
+    // The finished stream of that discussion is still held in the store.
+    act(() => {
+      useGroupStreamStore.getState().update("grp1", (s) => ({ ...s, conversationId: target, state: "COMPLETED", isStreaming: false }));
+    });
+    expect(useGroupStreamStore.getState().streams["grp1"]?.conversationId).toBe(target);
+
+    await userEvent.click(screen.getByTestId(`delete-discussion-${target}`));
+    await screen.findByText(/removed permanently|cannot be undone/i);
+    await userEvent.click(screen.getByRole("button", { name: /^delete$/i }));
+
+    await waitFor(() => expect(useGroupStreamStore.getState().streams["grp1"]).toBeUndefined());
   });
 
   it("keeps the delete and cancel controls reachable without a mouse", async () => {

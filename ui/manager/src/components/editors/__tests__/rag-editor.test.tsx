@@ -834,6 +834,33 @@ describe("RagEditor", () => {
     expect(screen.queryByText("completed")).not.toBeInTheDocument();
   });
 
+  it("offers a recheck for an ingestion this tab stopped watching, and picks up the result", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let answers = 0;
+      server.use(
+        http.get("*/ragstore/rags/kb1/ingestion/ing1/status", () => {
+          answers++;
+          // Still processing for every automatic poll, finished by the time the person asks again.
+          return HttpResponse.json({ status: answers > 90 ? "completed" : "processing" });
+        }),
+      );
+      await ingestHello("ing1");
+      // Run the polling out: 30 fast polls (2 s) then slow ones (10 s), up to the attempt cap.
+      for (let i = 0; i < 100; i++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+      }
+      const recheck = await screen.findByTestId("ingestion-recheck-ing1");
+
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(recheck);
+
+      expect(await screen.findByText("Completed")).toBeInTheDocument();
+      expect(screen.queryByTestId("ingestion-recheck-ing1")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refuses to put an unsafe ingestion id into the status path", async () => {
     // A response id with a slash or '..' used to retarget the polling request.
     let polled = false;

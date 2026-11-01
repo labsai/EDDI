@@ -59,7 +59,10 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
   // a run of `](` with no closing paren rescans the whole remaining text from
   // every opener — quadratic (100k chars measured at ~5s). No real destination
   // approaches the bounds; one that does is simply left unprotected.
-  /\]\([^)\s]{0,2048}(?:\s+"[^"]{0,512}")?\)/g,
+  // The destination run is taken ATOMICALLY (a lookahead plus its backreference): a shorter run can never
+  // be followed by the title or the closing paren (the next character would be one the run accepts), so
+  // giving characters back only retried hopeless matches, which cost ~750 ms on 100k characters of "](".
+  /\]\((?=([^)\s]{0,2048}))\1(?:\s+"[^"]{0,512}")?\)/g,
   /<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>/g, // autolink
   /\bhttps?:\/\/[^\s)]+/g, // bare URL
 ];
@@ -745,8 +748,8 @@ export function parseStructuredItems(
 
 // ─── Emoji Verification Parser ───────────────────────────────────
 
-/** Verification lines are short; a longer one is not parsed as a header line. */
-const MAX_VERIFICATION_LINE = 2000;
+/** The header part of a verification line (the mark and subject, up to the colon) is short; the detail after it is not bounded. */
+const MAX_VERIFICATION_HEAD = 2000;
 
 /**
  * `✅|❌ [**]subject[**]: detail` — parsed with plain string steps. The regex
@@ -754,11 +757,11 @@ const MAX_VERIFICATION_LINE = 2000;
  * backtracked super-linearly on a long whitespace-only line with no colon.
  */
 function matchEmojiVerificationLine(line: string): { passed: boolean; subject: string } | null {
-  if (line.length > MAX_VERIFICATION_LINE) return null;
   const mark = line.charAt(0);
   if (mark !== "✅" && mark !== "❌") return null;
   const colon = line.indexOf(":");
-  if (colon < 0 || colon === line.length - 1) return null;
+  // Bound the header, not the line: a long detail after the colon is still a real verdict.
+  if (colon < 0 || colon > MAX_VERIFICATION_HEAD || colon === line.length - 1) return null;
   const head = line.slice(1, colon);
   // At least one whitespace character must separate the mark from the subject.
   if (head.length === head.trimStart().length) return null;

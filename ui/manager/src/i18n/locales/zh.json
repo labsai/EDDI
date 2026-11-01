@@ -2674,6 +2674,7 @@
     "statusPollError": "失败：无法检查状态",
     "statusUploadError": "失败：上传出错",
     "statusStopped": "服务器仍在处理——已停止检查",
+    "statusRecheck": "重新检查",
     "statusReadError": "失败：无法读取 {{name}}",
     "statusFailed": "失败",
     "saveFirstIngestion": "使用前请先保存此知识库。",

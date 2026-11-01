@@ -2798,6 +2798,7 @@
     "statusPollError": "فشل: تعذّر التحقق من الحالة",
     "statusUploadError": "فشل: خطأ في الرفع",
     "statusStopped": "ما زالت المعالجة جارية على الخادم — توقّف التحقق",
+    "statusRecheck": "تحقق مرة أخرى",
     "statusReadError": "فشل: تعذّرت قراءة {{name}}",
     "statusFailed": "فشل",
     "saveFirstIngestion": "احفظ قاعدة المعرفة هذه أولاً لتمكين استيعاب المستندات.",

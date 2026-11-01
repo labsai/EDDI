@@ -2674,6 +2674,7 @@
     "statusPollError": "Fehlgeschlagen: Status konnte nicht abgefragt werden",
     "statusUploadError": "Fehlgeschlagen: Fehler beim Hochladen",
     "statusStopped": "Wird auf dem Server noch verarbeitet — Abfrage beendet",
+    "statusRecheck": "Erneut prüfen",
     "statusReadError": "Fehlgeschlagen: {{name}} konnte nicht gelesen werden",
     "statusFailed": "Fehlgeschlagen",
     "saveFirstIngestion": "Speichern Sie diese Knowledge Base zuerst, um die Dokumenten-Aufnahme zu aktivieren.",

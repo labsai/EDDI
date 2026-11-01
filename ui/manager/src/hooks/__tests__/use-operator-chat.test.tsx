@@ -417,6 +417,23 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     ]);
   });
 
+  it("keys the approval status to the pause that is paused NOW after the card says the pause changed", async () => {
+    // Shown pause: 10:00. By the time of the decision the conversation is paused on a different one (10:05).
+    const { result } = await pausedHook();
+    // The baseline (detailed) read the hook makes right before the resume.
+    h.detailedLogs = [{ conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-01T10:05:00Z" }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(h.resumeCalls).toEqual([]); // nothing was submitted for a pause nobody reviewed
+    expect(result.current.resolveError).toBeTruthy();
+    expect(result.current.isPaused).toBe(true);
+    // Without this the approval page keeps its status keyed to 10:00 and the new pause stays hidden.
+    expect(useOperatorChatStore.getState().decidedPausedAt).toBe("2026-08-01T10:05:00Z");
+  });
+
   it("keeps the ask bubble's message id, so its pipeline trace stays attached", async () => {
     const { result } = await pausedHook();
     const placeholderId = result.current.messages.find((m) => m.role === "agent")?.id;

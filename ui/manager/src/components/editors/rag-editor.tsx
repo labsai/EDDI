@@ -602,7 +602,7 @@ function ingestionStatusLabel(status: string, t: TFunction): string {
     case "completed":
       return t("ragEditor.statusCompleted", "Completed");
     case STATUS_STOPPED_WATCHING:
-      return t("ragEditor.statusStopped", "Still processing on the server — stopped checking");
+      return t("ragEditor.statusStopped", "Last known: still processing on the server — stopped checking");
     case "failed: polling error":
       return t("ragEditor.statusPollError", "Failed: could not check the status");
     case "failed: upload error":
@@ -945,6 +945,21 @@ function IngestionPanel({
               >
                 {ingestionStatusLabel(ing.status, t)}
               </span>
+              {ing.status === STATUS_STOPPED_WATCHING && (
+                <button
+                  type="button"
+                  className="text-[10px] font-medium text-primary hover:underline"
+                  data-testid={`ingestion-recheck-${ing.ingestionId}`}
+                  onClick={() => {
+                    setIngestions((prev) =>
+                      prev.map((x) => (x.ingestionId === ing.ingestionId ? { ...x, status: "processing" } : x)),
+                    );
+                    pollStatus(ing.ingestionId);
+                  }}
+                >
+                  {t("ragEditor.statusRecheck", "Check again")}
+                </button>
+              )}
               {ing.warning && (
                 <span className="basis-full text-[10px] text-warning" role="status">
                   {ing.warning}

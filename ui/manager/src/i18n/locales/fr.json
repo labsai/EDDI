@@ -2705,6 +2705,7 @@
     "statusPollError": "Échec : impossible de vérifier l'état",
     "statusUploadError": "Échec : erreur d'envoi",
     "statusStopped": "Toujours en cours de traitement sur le serveur — vérification arrêtée",
+    "statusRecheck": "Revérifier",
     "statusReadError": "Échec : impossible de lire {{name}}",
     "statusFailed": "Échec",
     "saveFirstIngestion": "Enregistrez d'abord cette base pour autoriser l'ingestion.",

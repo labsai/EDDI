@@ -177,11 +177,30 @@ export function AgentDetailPage() {
    * the version being loaded.
    */
   const configPending = isPlaceholderData;
-  const { data: deployment, isPlaceholderData: deploymentIsPlaceholder } = useDeploymentStatus(id!, resolvedVersion);
-  const { data: envStatuses, isPlaceholderData: envStatusesArePlaceholder } = useDeploymentStatuses(id!, resolvedVersion);
+  const {
+    data: deployment,
+    isPlaceholderData: deploymentIsPlaceholder,
+    isPending: deploymentIsPending,
+    isError: deploymentFailed,
+  } = useDeploymentStatus(id!, resolvedVersion);
+  const {
+    data: envStatuses,
+    isPlaceholderData: envStatusesArePlaceholder,
+    isPending: envStatusesArePending,
+    isError: envStatusesFailed,
+  } = useDeploymentStatuses(id!, resolvedVersion);
   // Until the status of THIS version has arrived, what is on screen belongs to
-  // the one just left — the deploy/undeploy button must not act on it.
-  const statusPending = deploymentIsPlaceholder || envStatusesArePlaceholder;
+  // the one just left (placeholder), or to nothing at all yet (the first fetch),
+  // or the lookup failed: the deploy/undeploy button must not act on any of
+  // those. An unknown status is not "not deployed" - Deploy would be offered for
+  // a version that is already live.
+  const statusPending =
+    deploymentIsPlaceholder ||
+    envStatusesArePlaceholder ||
+    deploymentIsPending ||
+    envStatusesArePending ||
+    (deploymentFailed && !deployment) ||
+    (envStatusesFailed && !envStatuses);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
   // environment a reader assumes), otherwise the first live one — which is what
   // makes a test-only agent reachable at all.

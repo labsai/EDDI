@@ -2674,6 +2674,7 @@
     "statusPollError": "失敗: ステータスを確認できませんでした",
     "statusUploadError": "失敗: アップロードエラー",
     "statusStopped": "サーバーで処理中です — 確認を停止しました",
+    "statusRecheck": "再確認",
     "statusReadError": "失敗: {{name}} を読み取れませんでした",
     "statusFailed": "失敗",
     "saveFirstIngestion": "ドキュメントの取り込みを有効にするには、先にこのナレッジベースを保存してください。",
