@@ -227,7 +227,8 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 |---|---|---|
 | `eddi.schedule.enabled` | `true` | Master switch for the poller |
 | `eddi.schedule.poll-interval` | `15s` | How often due schedules are looked for — the floor on firing punctuality |
-| `eddi.schedule.poll-batch-size` | `100` | Schedules claimed per cycle |
+| `eddi.schedule.poll-batch-size` | `100` | Schedules looked at per cycle |
+| `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll claims no more schedules than there are free slots and never waits for its fires, so a long fire does not delay claiming other due schedules |
 | `eddi.schedule.lease-timeout` | `10m` | Claim lease before another instance may re-claim. Must outlast `fire-timeout` + 30 s, or a running fire becomes reclaimable and executes twice; a shorter value is raised at startup (to `fire-timeout + 30s + 1m`) with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` |

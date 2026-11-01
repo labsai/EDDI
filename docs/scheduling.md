@@ -475,6 +475,14 @@ target must be written:
   (`eddi.schedule.fire-timeout` plus a 30 s grace) instead of without limit, so a
   manual Dream or ingestion run cannot outlast its claim's lease and be started a
   second time by the poller.
+- **Claiming is separate from firing.** A poll only claims due schedules and hands
+  each to a bounded fire executor (`eddi.schedule.max-concurrent-fires`); it never
+  waits for them. A fire that runs for minutes therefore does not delay the next
+  poll, and a schedule that falls due meanwhile (a HITL approval deadline, say) is
+  claimed near its due time. Each fire is bounded on its own by `fire-timeout` plus
+  the grace. On shutdown the instance stops claiming, gives in-flight fires a few
+  seconds to finish and then interrupts them; a fire that never reports is
+  recovered through its lease like any other.
 - Instances identify themselves by `eddi.schedule.instance-id`, which is
   auto-derived from the hostname when left empty. In an environment where
   hostnames are recycled or duplicated (some container schedulers), set it
@@ -491,7 +499,8 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 |---|---|---|
 | `eddi.schedule.enabled` | `true` | Master switch. `false` stops all polling — schedules remain stored and simply never fire |
 | `eddi.schedule.poll-interval` | `15s` | How often each instance looks for due schedules. This is the floor on firing punctuality: a schedule due at `12:00:00` fires somewhere in `[12:00:00, 12:00:15)` |
-| `eddi.schedule.poll-batch-size` | `100` | Max schedules claimed per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
+| `eddi.schedule.poll-batch-size` | `100` | Max due schedules looked at per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
+| `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll takes a free slot before it claims a schedule, so nothing is claimed that cannot start; the rest stay due for the next cycle or another instance |
 | `eddi.schedule.lease-timeout` | `10m` | How long a claimed schedule is considered owned before another instance may re-claim it. It must outlast `fire-timeout` plus a 30 s grace, or a schedule becomes reclaimable while its fire is still running and fires twice; a shorter value is raised at startup to `fire-timeout + 30s + 1m`, with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before a fire is `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` seconds |
