@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
+import type { Translate } from "@/lib/operator/blocked-calls";
 import type { RecentDiscussion } from "@/hooks/use-workforce-analytics";
 import type { GroupConversationState } from "@/lib/api/groups";
 
@@ -36,7 +37,7 @@ const STATE_LABELS: Record<GroupConversationState, string> = {
   CLOSED: "Closed",
 };
 
-function formatRelative(dateStr: string, t: (key: string, fallback: string, opts?: Record<string, unknown>) => string): string {
+function formatRelative(dateStr: string, t: Translate): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
   const diff = now - then;

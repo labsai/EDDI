@@ -47,7 +47,7 @@ export function CascadeIssues({
                   : "text-amber-800 dark:text-amber-300"
               }`}
             >
-              {t(`llmEditor.cascadeIssues.${issue.code}`, issue.message, issue.params)}
+              {t(`llmEditor.cascadeIssues.${issue.code}`, issue.message, issue.params ?? {})}
             </p>
           </div>
         );

@@ -36,8 +36,16 @@ export interface BlockedCall {
 /**
  * Minimal shape of `react-i18next`'s `t`, so this module stays a plain function
  * rather than a hook and can be unit-tested without an i18n provider.
+ *
+ * Declared as two overloads rather than one signature with an optional third
+ * parameter: i18next 26.5 types `TFunction` as a union of argument tuples whose
+ * options-bearing members require the options, so only an overload set (each
+ * member matching one of those tuples) accepts `TFunction` without a cast.
  */
-type Translate = (key: string, defaultValue: string, options?: Record<string, unknown>) => string;
+export interface Translate {
+  (key: string, defaultValue: string): string;
+  (key: string, defaultValue: string, options: Record<string, unknown>): string;
+}
 
 /**
  * @param calls
