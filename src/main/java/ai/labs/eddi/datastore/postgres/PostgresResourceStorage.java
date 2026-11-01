@@ -16,6 +16,7 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -462,7 +463,10 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     private void updateIfMatches(IResource<T> newResource, String fieldName, String expectedValue, String fieldPredicate)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
-        updateIfMatches(newResource, fieldName, expectedValue, fieldPredicate, List.of(expectedValue));
+        updateIfMatches(newResource, fieldName, expectedValue, fieldPredicate,
+                // singletonList, not List.of: a null expected value is bound as SQL NULL, as
+                // before
+                Collections.singletonList(expectedValue));
     }
 
     private void updateIfMatches(IResource<T> newResource, String fieldName, String expectedValue, String fieldPredicate,
