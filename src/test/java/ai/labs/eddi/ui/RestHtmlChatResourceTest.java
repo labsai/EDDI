@@ -24,7 +24,7 @@ class RestHtmlChatResourceTest {
 
     @BeforeEach
     void setUp() {
-        resource = new RestHtmlChatResource();
+        resource = new RestHtmlChatResource(ShellTestSupport.renderer());
     }
 
     // chat.html is on the test classpath via the stand-in under

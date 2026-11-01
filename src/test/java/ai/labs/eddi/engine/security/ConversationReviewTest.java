@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.internal.RestAgentProfile;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.ratings.ConversationRatingPolicy;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -223,8 +224,9 @@ class ConversationReviewTest {
             when(deployed.getAgentVersion()).thenReturn(2);
             when(factory.getLatestReadyAgent(Deployment.Environment.production, AGENT)).thenReturn(deployed);
 
-            IRestAgentProfile.AgentProfile profile = new RestAgentProfile(guard, descriptorStore, factory, policy).readProfile(AGENT,
-                    Deployment.Environment.production);
+            IRestAgentProfile.AgentProfile profile = new RestAgentProfile(guard, descriptorStore, factory, policy,
+                    new ConversationRatingPolicy(agentStore)).readProfile(AGENT,
+                            Deployment.Environment.production);
 
             assertEquals("Support Agent", profile.name());
             assertEquals(ConversationReviewPolicy.DEFAULT_NOTICE, profile.reviewNotice());
@@ -239,7 +241,8 @@ class ConversationReviewTest {
             when(deployed.getAgentVersion()).thenReturn(1);
             when(factory.getLatestReadyAgent(Deployment.Environment.production, AGENT)).thenReturn(deployed);
 
-            var profile = new RestAgentProfile(guard, mock(IDocumentDescriptorStore.class), factory, policy).readProfile(AGENT, null);
+            var profile = new RestAgentProfile(guard, mock(IDocumentDescriptorStore.class), factory, policy, new ConversationRatingPolicy(agentStore))
+                    .readProfile(AGENT, null);
 
             assertNull(profile.reviewNotice());
         }

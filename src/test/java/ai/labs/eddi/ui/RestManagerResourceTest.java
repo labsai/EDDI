@@ -33,7 +33,7 @@ class RestManagerResourceTest {
 
     @BeforeEach
     void setUp() throws Exception {
-        resource = new RestManagerResource();
+        resource = new RestManagerResource(ShellTestSupport.renderer());
         // Set default field values via reflection since CDI fields aren't injected
         setField("keycloakPublicUrl", Optional.empty());
         setField("oidcAuthServerUrl", "");
@@ -294,8 +294,10 @@ class RestManagerResourceTest {
                 var recorder = new RecordingClassLoader(Thread.currentThread().getContextClassLoader());
                 Response response = underClassLoader(recorder, () -> resource.fetchManagerResources(path));
 
-                assertEquals(List.of("META-INF/resources/manage.html"), recorder.requested,
-                        "'" + path + "' normalizes to nothing and must resolve straight to the shell");
+                // The rendered shell is cached per brand revision, so only the first
+                // iteration reads the template; none may ever ask for the base directory.
+                assertTrue(List.of("META-INF/resources/manage.html").containsAll(recorder.requested),
+                        "'" + path + "' normalizes to nothing and must resolve straight to the shell, not " + recorder.requested);
                 assertEquals(200, response.getStatus());
                 assertFalse(readEntity(response).isEmpty(), "'" + path + "' served an empty body");
             }
@@ -332,10 +334,16 @@ class RestManagerResourceTest {
         }
     }
 
-    /** Drain a {@link Response}'s {@code InputStream} entity as UTF-8 text. */
+    /**
+     * The entity as UTF-8 text: an asset is an {@code InputStream}, the shell is
+     * served rendered as a {@code String} (BrandedShellRenderer).
+     */
     private static String readEntity(Response response) throws IOException {
+        assertNotNull(response.getEntity(), "response carried no entity");
+        if (response.getEntity() instanceof String rendered) {
+            return rendered;
+        }
         try (InputStream in = (InputStream) response.getEntity()) {
-            assertNotNull(in, "response carried no entity stream");
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
     }

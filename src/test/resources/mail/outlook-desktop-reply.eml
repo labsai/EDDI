@@ -1,0 +1,58 @@
+Received: from mail.example.com (mail.example.com [192.0.2.10])
+	by mx.example.org; Fri, 23 Oct 2026 09:14:02 +0000
+Return-Path: <bob.builder@example.com>
+From: "Builder, Bob" <Bob.Builder@Example.com>
+To: Support Desk <support@example.org>
+Subject: RE: Order 4711 delivery date
+Date: Fri, 23 Oct 2026 09:13:55 +0000
+Message-ID: <DB9PR01MB1234ABCD@DB9PR01MB1234.eurprd01.prod.outlook.example>
+In-Reply-To: <eddi.4f7c2a10-0000-4000-8000-000000000001@example.org>
+References: <root-1@example.org> <eddi.4f7c2a10-0000-4000-8000-000000000001@example.org>
+Thread-Topic: Order 4711 delivery date
+Content-Language: en-US
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="_000_DB9PR01MB1234_"
+
+--_000_DB9PR01MB1234_
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+Hi,
+
+Thursday works for us. Please deliver to the back entrance.
+
+Thanks,
+Bob
+
+From: Support Desk <support@example.org>
+Sent: Thursday, October 22, 2026 4:02 PM
+To: Builder, Bob <Bob.Builder@example.com>
+Subject: Order 4711 delivery date
+
+Dear Bob,
+
+We can deliver order 4711 on Thursday or Friday. Which day suits you?
+
+Kind regards,
+Support
+
+--_000_DB9PR01MB1234_
+Content-Type: text/html; charset="us-ascii"
+Content-Transfer-Encoding: quoted-printable
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dus-ascii"></head>
+<body lang=3D"EN-US"><div class=3D"WordSection1">
+<p class=3D"MsoNormal">Hi,</p>
+<p class=3D"MsoNormal">Thursday works for us. Please deliver to the back entrance.</p>
+<p class=3D"MsoNormal">Thanks,<br>Bob</p>
+<div style=3D"border:none;border-top:solid #E1E1E1 1.0pt;padding:3.0pt 0in 0in 0in">
+<p class=3D"MsoNormal"><b>From:</b> Support Desk &lt;support@example.org&gt; <br>
+<b>Sent:</b> Thursday, October 22, 2026 4:02 PM<br>
+<b>To:</b> Builder, Bob &lt;Bob.Builder@example.com&gt;<br>
+<b>Subject:</b> Order 4711 delivery date</p>
+</div>
+<p class=3D"MsoNormal">Dear Bob,</p>
+<p class=3D"MsoNormal">We can deliver order 4711 on Thursday or Friday. Which day suits you?</p>
+</div></body></html>
+
+--_000_DB9PR01MB1234_--

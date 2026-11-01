@@ -106,7 +106,11 @@ class DocumentedRestPathsTest {
         return false;
     }
 
-    private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn");
+    /**
+     * Pruned by name; {@code .generated} is docs-site's build output, a transformed
+     * copy of docs/.
+     */
+    private static final Set<String> SKIPPED_DIRS = Set.of("target", ".git", "node_modules", ".claude", ".mvn", ".generated");
 
     /**
      * Payload keys that no longer parse at all, unlike the paths above.

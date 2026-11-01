@@ -201,11 +201,29 @@ public final class MemoryKeys {
      * quota store was unavailable when the step settled, carried forward until a
      * later settle records it ({@code 0.0} afterwards). Written by
      * {@code TurnCostMeter} on the newest step only — say turns are persisted as
-     * appends, so an earlier step would never be rewritten.
+     * appends, so an earlier step would never be rewritten. Undo and redo copy the
+     * value of the step they move aside onto the step that becomes current
+     * ({@code ConversationMemory.carryPendingCost}), so neither can lose it or
+     * revive an older one.
      *
      * @since 6.6.0
      */
     public static final String AUDIT_PENDING_COST = "audit:pending_cost";
+
+    /**
+     * Priced spend ({@code Double}) of steps that an undo moved to the redo cache
+     * and a new turn then discarded, carried onto that new turn's step by
+     * {@code ConversationMemory.startNextStep()}. The money was spent, so the
+     * conversation's total — what {@code maxCostPerConversationUsd} is compared
+     * against — counts it with the steps' {@link #AUDIT_COST}; without it, say →
+     * undo → say reset the conversation's spend.
+     * <p>
+     * Deliberately NOT {@code "audit:cost:..."}: step lookups by key are prefix
+     * matches (see {@link #AUDIT_METERED_COST}).
+     *
+     * @since 6.7.0
+     */
+    public static final String AUDIT_DISCARDED_COST = "audit:discarded_cost";
 
     /**
      * Prefix of the guardrail evidence keys,
@@ -246,6 +264,20 @@ public final class MemoryKeys {
      * step carrying it, so the model never learns from its own apology.
      */
     public static final String LLM_FALLBACK_PREFIX = "llm:fallback:";
+
+    /**
+     * Prefix of the step flag {@code llm:input_withheld:<taskId>} = {@code true},
+     * set when an input guardrail of the LLM task blocked the turn's message, or
+     * redacted it with a guardrail that does not re-screen history (a
+     * {@code classifier}). Every history the engine builds for a model — the
+     * message window, the rolling summary's input and the recall tool — replaces
+     * that turn's user message (text, attachment extracts and input files) with a
+     * placeholder, so a refused message never reaches a model on a later turn.
+     * Conversation memory itself keeps the message as the user sent it.
+     *
+     * @since 6.6.0
+     */
+    public static final String LLM_INPUT_WITHHELD_PREFIX = "llm:input_withheld:";
 
     /**
      * Prefix of {@code llm:spend_refused:<taskId>} = {@code {reason, detail}},

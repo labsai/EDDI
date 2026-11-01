@@ -22,7 +22,7 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
 | **Manager** — [`ui/manager/`](ui/manager/) in this repo | React 19, Vite, Tailwind | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
 | **Chat UI** — [`ui/chat/`](ui/chat/) in this repo | React, TypeScript | Standalone chat widget, served at `/chat` |
-| **eddi-website** | Astro, Starlight | Marketing site at eddi.labs.ai. The documentation is this repo's `docs/`, published at docs.labs.ai |
+| **eddi-website** (`labsai/EDDI-LABS-AI-Website`) | Astro, Tailwind, on Vercel | Marketing site at eddi.technology (eddi.labs.ai redirects there). The documentation is not in it: it is this repo's `docs/`, built by [`docs-site/`](docs-site/README.md) |
 
 > **The Manager and the Chat UI are directories of this repository** (`ui/manager`, `ui/chat`), not separate repos. They were `labsai/EDDI-Manager` and `labsai/EDDI-Chat-UI` until 2026-09-15; both histories were imported with their commits intact (`git log -- ui/manager`). Maven builds both into the jar — see Build & Test Commands.
 
@@ -175,7 +175,7 @@ Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '
 | — | Guardrails | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`) |
 | 11b | Multi-Channel | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`) |
 | 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |
-| 14 | Website | Astro + Starlight documentation site |
+| 14 | Website | Astro + Starlight documentation site — built in [`docs-site/`](docs-site/README.md); the move from GitBook (docs.labs.ai) to docs.eddi.technology is the cutover in [`planning/docs-site-migration-plan.md`](planning/docs-site-migration-plan.md) |
 | — | Native Image | GraalVM native compilation (see `planning/native-image-migration.md`) |
 
 ---
@@ -529,7 +529,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/docker/Dockerfile` | Production JVM container image (digest-pinned base) |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
 | `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
-| `docs/` | Markdown documentation, published at docs.labs.ai |
+| `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
 | `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
@@ -561,7 +561,7 @@ The five mistakes it exists to prevent:
 2. **Every behavior rule needs an `actionmatcher` on `lastStep`.** A rule with only an `inputmatcher` fires on any step of the conversation. And within a group only the **first** matching rule fires by default (`executeUntilFirstSuccess`) — put independent rules in separate groups.
 3. **A comma list in `actionmatcher` means AND** (a contiguous sublist), not OR. Use a shared action or an `OR` connector.
 4. **Any `{…}` placeholder in output or a prompt needs `eddi://ai.labs.templating` as the last workflow step**, or users see the raw template.
-5. **Reserved actions are not quick-reply expressions** — `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION` and `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)).
+5. **Reserved actions are not quick-reply expressions** — `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)) and `CONTINUE_CONVERSATION` (self-continuation; see [`docs/long-jobs.md`](docs/long-jobs.md)).
 
 ---
 

@@ -1,0 +1,46 @@
+From: Billing <billing@supplier.example.com>
+To: invoices@example.org
+Subject: Invoice INV-2026-1024
+Date: Sat, 24 Oct 2026 19:00:00 +0000
+Message-ID: <invoice-1024@supplier.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="mixed"
+
+--mixed
+Content-Type: multipart/related; boundary="related"
+
+--related
+Content-Type: text/plain; charset=utf-8
+
+Please find invoice INV-2026-1024 attached.
+
+--related
+Content-Type: image/png
+Content-Disposition: inline
+Content-ID: <logo@supplier.example.com>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAAAAAAAAAAAAAAAAAAA
+--related--
+
+--mixed
+Content-Type: application/pdf; name="INV-2026-1024.pdf"
+Content-Disposition: attachment; filename="INV-2026-1024.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQKMSAwIG9iaiA8PCAvVHlwZSAvQ2F0YWxvZyA+PiBlbmRvYmoKdHJhaWxlciA8PCAv
+Um9vdCAxIDAgUiA+PgolJUVPRgo=
+--mixed
+Content-Type: application/pdf; name="statement.pdf"
+Content-Disposition: attachment; filename="../../etc/statement.pdf"
+Content-Transfer-Encoding: base64
+
+TVqQAAMAAAAEAAAA//8AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAA==
+--mixed
+Content-Type: application/zip
+Content-Disposition: attachment; filename*=UTF-8''Rechnungen%20Oktober.zip
+Content-Transfer-Encoding: base64
+
+UEsDBAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+--mixed--

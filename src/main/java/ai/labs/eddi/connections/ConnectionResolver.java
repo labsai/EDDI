@@ -159,6 +159,144 @@ public class ConnectionResolver {
     }
 
     /**
+     * Resolves the <em>bare</em> OAuth access token a reference names, for a
+     * protocol that carries the token itself rather than an HTTP header — SASL
+     * {@code XOAUTH2} for IMAP and SMTP, where the client library builds the
+     * authentication string from the token.
+     * <p>
+     * Legal for the two OAuth auth types only. A {@code STATIC} or {@code BASIC}
+     * connection resolves to a header value, and there is no way to tell from that
+     * value whether it is a token, a {@code Basic} blob or an API key, so it is
+     * refused rather than guessed at — the same reason the LLM paths cannot take a
+     * connection (see {@code docs/connections.md}). A {@code CALLER_SUPPLIED}
+     * connection is refused too: its value is a header the calling system sent, not
+     * a token EDDI holds.
+     * <p>
+     * Everything else is exactly {@link #resolve}: the allowlist is checked against
+     * {@code targetUrl}, {@link Binding#PER_USER} still needs a verified principal
+     * bound to the turn, and the token comes from the same
+     * {@link AccessTokenSupplier}, so refresh and caching are shared with the HTTP
+     * paths. The allowlist must name the mail origin itself
+     * ({@code smtps://smtp.office365.com}, {@code imaps://outlook.office365.com}):
+     * an https origin of the same host does not cover it, so a token allowed to
+     * reach an HTTP API is not thereby allowed to log in to a mailbox.
+     *
+     * @param reference
+     *            a value containing {@code ${connection:name}}
+     * @param targetUrl
+     *            where the token is going; checked against the connection's
+     *            {@code baseUrlAllowlist}
+     * @param principalOverride
+     *            as for {@link #resolve}: a cross-check only
+     * @return the live access token, never null or blank
+     * @throws ConnectionException
+     *             on every failure,
+     *             {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT} for a
+     *             connection that has no bare token to give
+     */
+    public String resolveAccessToken(String reference, URI targetUrl, String principalOverride) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            requireBareTokenAvailable(connection);
+            requireTargetAllowed(connection, targetUrl);
+            String accessToken = accessTokenSupplier.accessToken(connection, resolvePrincipal(connection, principalOverride));
+            if (accessToken == null || accessToken.isBlank()) {
+                // The supplier contract says never null — but a blank token handed to
+                // XOAUTH2 fails as an authentication error at the mail server, with
+                // nothing on this side naming the cause.
+                throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
+                        "Connection '" + connection.getName() + "' produced an empty access token.");
+            }
+            record(connection, "success", sample);
+            return accessToken;
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    /**
+     * A username and password for a protocol login — SMTP {@code AUTH PLAIN/LOGIN},
+     * IMAP {@code LOGIN} — where the client library takes the two values, not an
+     * HTTP {@code Basic} header. {@link #toString()} never prints the password.
+     */
+    public record BasicLogin(String username, String password) {
+        @Override
+        public String toString() {
+            return "BasicLogin[username=" + username + "]";
+        }
+    }
+
+    /**
+     * Resolves the username and vault-backed password of a {@code BASIC}
+     * connection, for a mail login (the app-password case of email plan §7.1).
+     * <p>
+     * The same checks as {@link #resolve}: the target must be on the connection's
+     * {@code baseUrlAllowlist} (a mail origin such as
+     * {@code smtp://relay.example.com:587}), and a document that lost its username
+     * or password reference is refused. Any other auth type is
+     * {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT}: an OAuth connection
+     * goes through {@link #resolveAccessToken}, and a STATIC value is a header
+     * whose shape cannot be split into two fields.
+     *
+     * @throws ConnectionException
+     *             on every failure; never returns null
+     */
+    public BasicLogin resolveBasicLogin(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            if (connection.getAuthType() != AuthType.BASIC || connection.getBinding() == Binding.CALLER_SUPPLIED) {
+                throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                        "Connection '" + connection.getName() + "' is " + connection.getAuthType()
+                                + ", which has no username and password to log in with. A mail login needs a BASIC connection, "
+                                + "or an OAuth connection for XOAUTH2.");
+            }
+            requireTargetAllowed(connection, targetUrl);
+            StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
+            if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank() || staticAuth.getPasswordRef() == null
+                    || staticAuth.getPasswordRef().isBlank()) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Connection '" + connection.getName() + "' is BASIC but lacks staticAuth.username or staticAuth.passwordRef. "
+                                + "Re-save the connection to apply the current validation rules.");
+            }
+            String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+            record(connection, "success", sample);
+            return new BasicLogin(staticAuth.getUsername(), password);
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
+        AuthType authType = connection.getAuthType();
+        boolean oauth = authType == AuthType.OAUTH2_CLIENT_CREDENTIALS || authType == AuthType.OAUTH2_AUTHORIZATION_CODE;
+        if (!oauth || connection.getBinding() == Binding.CALLER_SUPPLIED) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is " + authType
+                            + (connection.getBinding() == Binding.CALLER_SUPPLIED ? " / CALLER_SUPPLIED" : "")
+                            + ", which resolves to a header value, not an OAuth access token. A bare token (for example for "
+                            + "IMAP/SMTP XOAUTH2) needs an OAUTH2_CLIENT_CREDENTIALS or OAUTH2_AUTHORIZATION_CODE connection.");
+        }
+    }
+
+    /**
      * Resolves the credential for a <em>discovery</em> request — one whose result
      * is shared, not served to the user who happened to trigger it.
      * <p>
@@ -222,6 +360,23 @@ public class ConnectionResolver {
         ConnectionReference parsed = ConnectionReference.parse(reference);
         try {
             return connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+    }
+
+    /**
+     * The auth type a reference names, without resolving anything — so a mail
+     * client can choose between {@link #resolveBasicLogin} and
+     * {@link #resolveAccessToken} without provoking a refusal first.
+     *
+     * @return the auth type, or empty when no connection of that name exists
+     */
+    public Optional<AuthType> authTypeOf(String reference) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        try {
+            return connectionRegistry.find(parsed).map(ConnectionConfiguration::getAuthType);
         } catch (ConnectionException e) {
             countLookupFailure(e);
             throw e;
@@ -511,7 +666,7 @@ public class ConnectionResolver {
 
     private static String canonicalise(String allowedOrigin, ConnectionConfiguration connection) {
         try {
-            return ConnectionConfiguration.requireCanonicalOrigin(allowedOrigin, "baseUrlAllowlist");
+            return ConnectionConfiguration.requireCanonicalAllowlistOrigin(allowedOrigin, "baseUrlAllowlist");
         } catch (IllegalArgumentException e) {
             // Stored documents predate, or bypass, the write-time validator (import,
             // a direct database write). A malformed entry must not silently match

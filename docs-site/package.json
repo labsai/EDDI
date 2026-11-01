@@ -1,0 +1,38 @@
+{
+  "name": "eddi-docs-site",
+  "private": true,
+  "type": "module",
+  "description": "Builds docs/ into the EDDI documentation site (Astro + Starlight). docs/ stays the source; nothing here is hand-written content.",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "sync": "node scripts/sync-docs.mjs",
+    "predev": "npm run sync",
+    "dev": "astro dev",
+    "prebuild": "npm run sync",
+    "build": "astro build",
+    "preview": "astro preview",
+    "redirects": "node scripts/redirects.mjs",
+    "check-live": "node scripts/check-live.mjs",
+    "test": "node --test \"scripts/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.42.7",
+    "@fontsource-variable/outfit": "5.3.0",
+    "@fontsource/jetbrains-mono": "5.3.0",
+    "astro": "7.4.2",
+    "astro-mermaid": "2.2.0",
+    "github-slugger": "2.0.0",
+    "mermaid": "12.2.0",
+    "starlight-links-validator": "0.27.0",
+    "starlight-llms-txt": "0.12.0",
+    "yaml": "2.9.1"
+  },
+  "overrides": {
+    "sharp": "$sharp"
+  },
+  "devDependencies": {
+    "sharp": "file:./stubs/sharp"
+  }
+}

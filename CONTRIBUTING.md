@@ -230,6 +230,7 @@ Every PR runs through these automated gates:
 
 - Open a [Discussion](https://github.com/labsai/EDDI/discussions) for general questions
 - Check the [documentation](https://docs.labs.ai/) for usage guides
+- **Adding a documentation page?** Write it under `docs/` as plain Markdown and list it in [`docs/SUMMARY.md`](docs/SUMMARY.md) — a page not listed there is not published. Preview the site with `npm ci && npm run dev` in [`docs-site/`](docs-site/README.md); `npm run build` there fails on a broken link or `#anchor`
 - Browse [existing issues](https://github.com/labsai/EDDI/issues) for known topics
 
 ---

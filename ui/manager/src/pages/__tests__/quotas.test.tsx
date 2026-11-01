@@ -566,6 +566,112 @@ describe("QuotasPage", () => {
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/never limited/));
   });
 
+  it("does not claim spend is metered for a disabled tenant with no budget", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: -1,
+          enabled: false,
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent(/neither metered nor limited/));
+    expect(screen.getByTestId("cost-budget-state")).not.toHaveTextContent(/metered but never limited/);
+  });
+
+  it("shows sub-cent spend against a small budget instead of rounding it away", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: 0.01,
+          enabled: true,
+        }),
+      ),
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 1,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 0.006,
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.006 of $0.01 used this month"));
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.004 left");
+    // The usage card agrees with the status line rather than rounding to $0.01.
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("$0.006");
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("/ $0.01");
+  });
+
+  it("never shows a tiny positive budget as $0.00, and still shows zero spend as $0.00", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: 0.00004,
+          enabled: true,
+        }),
+      ),
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 0,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 0,
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.00 of $0.00004 used this month"));
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("$0.00/ $0.00004");
+  });
+
+  it("keeps the decimals that tell spend and budget apart above a dollar", async () => {
+    server.use(
+      http.get("*/administration/quotas/:tenantId", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          maxConversationsPerDay: -1,
+          maxAgentsPerTenant: -1,
+          maxApiCallsPerMinute: -1,
+          maxMonthlyCostUsd: 1.004,
+          enabled: true,
+        }),
+      ),
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 0,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 1.003,
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      ),
+    );
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$1.003 of $1.004 used this month"));
+    expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$0.001 left");
+    expect(screen.getByTestId("usage-cost")).toHaveTextContent("$1.003/ $1.004");
+  });
+
   it("describes the saved quota, not an unsaved edit of the form", async () => {
     renderQuotas();
     await waitFor(() => expect(screen.getByTestId("cost-budget-state")).toHaveTextContent("$2500.00"));

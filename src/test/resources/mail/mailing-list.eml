@@ -1,0 +1,12 @@
+From: Newsletter <news@lists.example.com>
+To: support@example.org
+Subject: [example-users] Weekly digest
+Date: Sat, 24 Oct 2026 16:00:00 +0000
+Message-ID: <digest-42@lists.example.com>
+List-Id: Example users <example-users.lists.example.com>
+List-Unsubscribe: <mailto:example-users-leave@lists.example.com>
+Precedence: list
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+This week on example-users: three new threads.
