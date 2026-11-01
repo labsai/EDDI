@@ -1129,6 +1129,33 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a document too large for the segment budget keeps its old chunks through the sweep")
+        void anOversizedDocumentKeepsItsOldChunks() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/big\">b</a></body></html>")
+                    .page(SITE + "/big", pageWith("Short."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+            assertFalse(embeddingStore.segmentsOf(SITE + "/big").isEmpty(), "precondition: the old version is stored");
+
+            // The page has since grown past what one run may store: it fails, and what it
+            // has is its old chunks.
+            IngestionSource capped = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setMaxSegmentsPerRun(2);
+            capped.setSettings(settings);
+            FakeSite grown = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/big\">b</a></body></html>")
+                    .page(SITE + "/big", pageWith("word ".repeat(400)));
+            for (int i = 0; i < 4; i++) {
+                pipelineFor(grown).run(KB_RESOURCE_ID, knowledgeBase(), capped, Mode.INGEST);
+            }
+
+            assertFalse(embeddingStore.segmentsOf(SITE + "/big").isEmpty(),
+                    "a failed document's old chunks are the ones to keep, not orphans to sweep");
+        }
+
+        @Test
         @DisplayName("a dead link does not hold the sweep back")
         void aDeadLinkStillSweeps() {
             // The sweep waited for a run with no failure at all, and a 404 counts as

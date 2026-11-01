@@ -1379,6 +1379,10 @@ public class IngestionPipeline {
             }
             if (needed > budget) {
                 failed++;
+                // Like every other failed document: its old chunks are all it has, so a sweep
+                // this
+                // run must not treat them as orphans.
+                inconclusive++;
                 meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
                 LOGGER.warnf("Document '%s' of source '%s' was not ingested: it splits into %d segments, more than the "
                         + "source's maxSegmentsPerRun (%d)", LogSanitizer.sanitize(documentId),
