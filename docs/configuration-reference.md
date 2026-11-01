@@ -402,6 +402,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.enabled` | `true` | Per-tool-call approval gating |
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
 | `eddi.hitl.tool.journal-retention` | `30d` | How long tool-approval journal entries are kept |
+| `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
