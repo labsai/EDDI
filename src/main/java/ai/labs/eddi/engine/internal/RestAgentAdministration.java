@@ -543,6 +543,9 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      */
     private Response refuseVersionBeyondCurrent(Deployment.Environment environment, String agentId, int version) {
         Integer currentVersion;
+        // Whether the ceiling below is a version actually read, or only the highest one
+        // a lookup happened to find.
+        boolean ceilingIsAuthoritative = true;
         try {
             var currentId = documentDescriptorStore.getCurrentResourceId(agentId);
             currentVersion = currentId != null ? currentId.getVersion() : null;
@@ -569,6 +572,14 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                         .type(MediaType.TEXT_PLAIN).build();
             }
             currentVersion = deployed.first();
+            ceilingIsAuthoritative = lookup.complete();
+        }
+        if (version > currentVersion && !ceilingIsAuthoritative) {
+            // A partial lookup can only have missed versions: the requested one may exist,
+            // so this is the
+            // lookup's failure to report, not a 400 about the caller's input.
+            throw new InternalServerErrorException("Could not read every deployed version of Agent " + sanitize(agentId)
+                    + "; retry once the deployment records are readable");
         }
         if (version < 1 || version > currentVersion) {
             return Response.status(Response.Status.BAD_REQUEST)

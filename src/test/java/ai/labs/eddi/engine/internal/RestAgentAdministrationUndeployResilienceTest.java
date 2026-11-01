@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.rest.RestConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
@@ -116,6 +117,26 @@ class RestAgentAdministrationUndeployResilienceTest {
         // Records unreadable: "none found" is not what the lookup said.
         when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("db down"));
         assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, true));
+    }
+
+    @Test
+    @DisplayName("a version above the highest one a PARTIAL lookup found is the lookup's failure (500), above a complete one it is a 400")
+    void versionAboveAPartialCeilingIsNotABadRequest() throws Exception {
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        var running = mock(IAgent.class);
+        when(running.getAgentId()).thenReturn(AGENT);
+        when(running.getAgentVersion()).thenReturn(2);
+        when(running.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        when(agentFactory.getAllDeployedAgents(any())).thenReturn(List.of(running));
+
+        // Both lookups answered: the highest deployed version is 2, so 5 does not
+        // exist.
+        assertEquals(400, admin.undeployAgent(ENV, AGENT, 5, false, true).getStatus());
+
+        // The deployment records could not be read: version 5 may exist, so it is not a
+        // 400.
+        when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 5, false, true));
     }
 
     private void openConversation(int version, String conversationId) throws Exception {
