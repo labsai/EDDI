@@ -23,6 +23,8 @@ test-time plugins, and every later job fetched those from Central, concurrently 
   `.interval=10000`, `.intervalMax=300000`, `.serviceUnavailable=429,503`. A 429 or 503 is retried, the server's
   `Retry-After` is obeyed when sent, and a wait above five minutes fails the request instead of stalling the build.
 
+- Review fix: the warm-up checks out before it computes its cache key (the key hashed files that were not on disk yet, so it never matched and every run rebuilt the cache), and it also stores the checksum-verified Node archive in the cache so Build Image downloads nothing.
+
 ### Design decisions
 
 - The warm-up is ungated: CodeQL runs on every PR (Scorecard), so a gated warm-up would leave it uncached. The exact-key

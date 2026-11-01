@@ -1017,6 +1017,13 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
+      # Checkout comes FIRST: both cache steps compute their key with hashFiles over the
+      # poms and the wrapper properties, which hashes nothing (an empty key that never
+      # matches) until the files are on disk. Checked out only on a miss, the lookup
+      # always missed and every run redid the whole warm-up.
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
       # Exact key only, and lookup-only: a hit downloads nothing.
       - name: Look up the cache
         id: lookup
@@ -1036,10 +1043,6 @@ jobs:
           key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
           restore-keys: |
             maven-v1-${{ runner.os }}-
-
-      - name: Checkout
-        if: steps.lookup.outputs.cache-hit != 'true'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Set up JDK ${{ env.JAVA_VERSION }}
         if: steps.lookup.outputs.cache-hit != 'true'
@@ -1077,6 +1080,28 @@ jobs:
         run: |
           ./mvnw -B -ntp -DskipUi=true org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests
           ./mvnw -B -ntp -DskipUi=true -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen process-resources
+
+      # The Node archive the UI build unpacks lives in the same repository
+      # (com.github.eirslett:node), so it is cached with it: Build Image then finds it
+      # and downloads nothing. Placed and checked exactly as Build Image does, against
+      # the pinned hash, so a cached copy that does not match is never trusted.
+      - name: Fetch the checksum-verified Node archive
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          DIR="$HOME/.m2/repository/com/github/eirslett/node/${NODE_VERSION}"
+          ARCHIVE="${DIR}/node-${NODE_VERSION}-linux-x64.tar.gz"
+          mkdir -p "$DIR"
+          if [ -f "$ARCHIVE" ] && ! echo "${NODE_SHA256_LINUX_X64}  ${ARCHIVE}" | sha256sum -c --status -; then
+            rm -f "$ARCHIVE"
+          fi
+          if [ ! -f "$ARCHIVE" ]; then
+            curl -fsSL --retry 3 -o "${ARCHIVE}.part" \
+              "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz"
+            echo "${NODE_SHA256_LINUX_X64}  ${ARCHIVE}.part" | sha256sum -c -
+            mv "${ARCHIVE}.part" "$ARCHIVE"
+          fi
+          echo "Node ${NODE_VERSION} archive verified at ${ARCHIVE}"
 
       - name: Save the Maven repository cache
         if: steps.lookup.outputs.cache-hit != 'true'
