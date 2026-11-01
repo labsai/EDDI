@@ -1216,7 +1216,9 @@ public class GroupHitlCoordinator {
             throw new IllegalArgumentException(
                     "Content exceeds the maximum length of " + MAX_HUMAN_INPUT_LENGTH + " characters");
         }
-        return resolveHumanTurn(gc, pending, content, null, submittedBy, listener, null);
+        // Bound to the pause this submission read: a delayed submit must not land on
+        // a newer human turn that happens to be pending in the same state.
+        return resolveHumanTurn(gc, pending, content, null, submittedBy, listener, gc.getPauseId());
     }
 
     /**

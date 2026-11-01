@@ -553,6 +553,29 @@ class GroupHitlCoordinatorTest {
     }
 
     @Test
+    void submitHumanInput_isBoundToThePauseItRead_andSurfacesAStaleRefusal() throws Exception {
+        var coordinator = coordinator();
+        var gc = humanPausedGc();
+        gc.setPausedAt(Instant.ofEpochMilli(10_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var resId = mock(IResourceStore.IResourceId.class);
+        when(resId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
+        var config = humanGroupConfig("PT4H");
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_HUMAN_INPUT);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.submitHumanInput(GC_ID, "h-1", "A late answer.", "h-1", null));
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(10_000L)), pauseId.getValue(),
+                "a submission must name the pause it answered, or a delayed one can land on a newer turn");
+        verifyNoInteractions(executorService);
+    }
+
+    @Test
     void resumeCaller_isTheApproverOnlyWhenTheyStartedTheDiscussion() {
         // H5: an admin or eddi-approver deciding someone else's discussion saw the
         // pause and nothing after it — the resumed member turns carry no caller.
