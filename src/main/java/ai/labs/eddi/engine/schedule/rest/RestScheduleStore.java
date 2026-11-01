@@ -564,12 +564,22 @@ public class RestScheduleStore implements IRestScheduleStore {
             // fire log read as a fresh first try and hid the failure history.
             int attemptNumber = schedule.getFailCount() + 1;
             ScheduleFireLog fireLog = null;
+            boolean abandoned = false;
             try {
                 // Bounded like a polled fire: unbounded, a long run outlived its claim's
                 // lease and the poller started the same schedule a second time.
                 String instanceId = pollerService.getInstanceId();
                 fireLog = SchedulePollerService.runWithinDeadline(() -> fireExecutor.fire(schedule, instanceId, attemptNumber),
                         pollerService.manualFireDeadline());
+            } catch (SchedulePollerService.FireAbandonedException e) {
+                // Not released: a worker that ignores the interrupt is still acting, and
+                // releasing the
+                // claim would let the poller start another attempt alongside it. The lease
+                // expiry
+                // counts it as a failed attempt.
+                abandoned = true;
+                LOGGER.warnf("Manual fire of schedule %s was abandoned (%s); its claim is left to expire", sanitize(scheduleId),
+                        e.getMessage());
             } finally {
                 // Always release the claim, whatever happened — a manual fire that left
                 // the row CLAIMED would block the poller until the lease expired.
@@ -587,12 +597,20 @@ public class RestScheduleStore implements IRestScheduleStore {
                 // still reaches the caller.
                 boolean wasInterrupted = Thread.interrupted();
                 try {
-                    pollerService.recordManualFireOutcome(schedule, fireLog);
+                    if (!abandoned) {
+                        pollerService.recordManualFireOutcome(schedule, fireLog);
+                    }
                 } finally {
                     if (wasInterrupted) {
                         Thread.currentThread().interrupt();
                     }
                 }
+            }
+            if (abandoned) {
+                return Response.status(Response.Status.GATEWAY_TIMEOUT)
+                        .entity("The fire did not finish within its bound and was interrupted; it may still be running. The schedule stays claimed "
+                                + "until its lease expires, then counts as a failed attempt.")
+                        .build();
             }
             return Response.ok(fireLog).build();
         } catch (IResourceStore.ResourceNotFoundException e) {

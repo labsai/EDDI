@@ -6,6 +6,10 @@ package ai.labs.eddi.engine.cluster;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 
@@ -32,5 +36,22 @@ class HostnameVerifyingSslContextTest {
             assertEquals("HTTPS", socket.getSSLParameters().getEndpointIdentificationAlgorithm());
         }
         assertEquals("HTTPS", verifying.createSSLEngine("nats.example", 4222).getSSLParameters().getEndpointIdentificationAlgorithm());
+    }
+
+    /**
+     * jnats connects a plain TCP socket first and then layers TLS over it, which
+     * goes through the {@code createSocket(Socket, host, port, autoClose)}
+     * overload.
+     */
+    @Test
+    void theLayeredSocketVerifiesTheHostNameToo() throws Exception {
+        SSLContext plain = SSLContext.getInstance("TLS");
+        plain.init(null, null, null);
+        SSLContext verifying = new HostnameVerifyingSslContext(plain);
+        try (ServerSocket server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+                Socket tcp = new Socket(InetAddress.getLoopbackAddress(), server.getLocalPort());
+                SSLSocket layered = (SSLSocket) verifying.getSocketFactory().createSocket(tcp, "nats.example", 4222, true)) {
+            assertEquals("HTTPS", layered.getSSLParameters().getEndpointIdentificationAlgorithm());
+        }
     }
 }

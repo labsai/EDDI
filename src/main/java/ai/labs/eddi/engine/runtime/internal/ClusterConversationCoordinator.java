@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.IDeadLetterStore;
 import ai.labs.eddi.engine.cluster.JetStreamDeadLetterStore;
@@ -302,8 +303,20 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      */
     public synchronized int forwardLocalDeadLetters() {
         int forwarded = 0;
+        boolean deferred = false;
         for (DeadLetterEntry local : super.getDeadLetters()) {
-            if (conversationGone(local.conversationId())) {
+            Existence existence = conversationExistence(local.conversationId());
+            if (existence == Existence.UNKNOWN) {
+                // The store could not be asked: an erasure may have finished while this node
+                // was cut
+                // off, and publishing now would put the erased input back into the shared
+                // stream with no
+                // later purge to remove it. Keep the entry here and try again shortly.
+                LOGGER.debugf("Forwarding local dead letter %s deferred: its conversation could not be checked", sanitize(local.id()));
+                deferred = true;
+                continue;
+            }
+            if (existence == Existence.GONE) {
                 super.discardDeadLetter(local.id());
                 LOGGER.infof("Discarded local dead letter %s instead of forwarding it: its conversation no longer exists "
                         + "(erased or deleted while this node was cut off)", sanitize(local.id()));
@@ -319,6 +332,9 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             super.discardDeadLetter(local.id());
             forwarded++;
         }
+        if (deferred) {
+            scheduleForward();
+        }
         if (forwarded > 0) {
             deadLetterCountAt = 0;
             LOGGER.infof("Forwarded %d dead letter(s) kept on this node while NATS was unreachable to the shared stream", forwarded);
@@ -332,14 +348,40 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      * than forwarding one that a later erasure purges again.
      */
     boolean conversationGone(String conversationId) {
+        return conversationExistence(conversationId) == Existence.GONE;
+    }
+
+    /**
+     * Whether a conversation provably exists, provably does not, or could not be
+     * told.
+     */
+    enum Existence {
+        EXISTS, GONE, UNKNOWN
+    }
+
+    /**
+     * {@code getConversationState} answers {@code null} both for a missing document
+     * and for a legacy document that stores no state, so a {@code null} is only a
+     * candidate: the document itself decides. An unreadable store is
+     * {@link Existence#UNKNOWN}, never "gone" and never "exists".
+     */
+    Existence conversationExistence(String conversationId) {
         if (conversationId == null || memoryStore == null || !memoryStore.isResolvable()) {
-            return false;
+            return Existence.EXISTS; // nothing to check against: keep the previous behaviour, forward
         }
         try {
-            return memoryStore.get().getConversationState(conversationId) == null;
-        } catch (RuntimeException e) {
+            var store = memoryStore.get();
+            if (store.getConversationState(conversationId) != null) {
+                return Existence.EXISTS;
+            }
+            try {
+                return store.loadConversationMemorySnapshot(conversationId) == null ? Existence.GONE : Existence.EXISTS;
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                return Existence.GONE;
+            }
+        } catch (Exception e) {
             LOGGER.debugf("Could not check conversation %s before forwarding its dead letter: %s", sanitize(conversationId), e.getMessage());
-            return false;
+            return Existence.UNKNOWN;
         }
     }
 

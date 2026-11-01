@@ -161,12 +161,12 @@ public final class BoundedFanOut {
                 Callable<T> work = items.get(index);
                 Callable<T> body = () -> {
                     if (closed.get()) {
-                        states.set(index, 2);
+                        states.set(index, STATE_REFUSED);
                         return outcomes.notStarted(index, "the step stopped waiting before this item could start");
                     }
                     String refusal = gate.refuse(index);
                     if (refusal != null) {
-                        states.compareAndSet(index, 0, 2);
+                        states.compareAndSet(index, 0, STATE_REFUSED);
                         return outcomes.notStarted(index, refusal);
                     }
                     if (!states.compareAndSet(index, 0, 1)) {
@@ -228,6 +228,20 @@ public final class BoundedFanOut {
      * it never will — the answer cannot be overtaken by the item starting.
      */
     static boolean startedOrAbandon(AtomicIntegerArray states, int index) {
-        return !states.compareAndSet(index, 0, 3);
+        if (states.compareAndSet(index, 0, 3)) {
+            return false;
+        }
+        // Already past "queued": only a running or finished item has started. One the
+        // gate refused (or
+        // the step closed on) never ran, and reporting it as started told the caller a
+        // request that
+        // was never sent was "still running", so it was not retried.
+        int state = states.get(index);
+        return state == 1 || state == 2;
     }
+
+    /**
+     * An item the gate refused, or that found the step closed: it never started.
+     */
+    private static final int STATE_REFUSED = 4;
 }

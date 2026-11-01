@@ -1242,6 +1242,7 @@ public class McpAdminTools {
                         + "); it may be disabled, firing already, dead-lettered, or still in retry backoff.");
             }
             ScheduleFireLog fireLog = null;
+            boolean abandoned = false;
             try {
                 // The attempt this actually is, not a constant 1 — a manual retry of a
                 // schedule on its third failure logged as "attempt 1" and hid the history.
@@ -1251,6 +1252,12 @@ public class McpAdminTools {
                 int attemptNumber = schedule.getFailCount() + 1;
                 fireLog = SchedulePollerService.runWithinDeadline(() -> scheduleFireExecutor.fire(schedule, instanceId, attemptNumber),
                         schedulePollerService.manualFireDeadline());
+            } catch (SchedulePollerService.FireAbandonedException e) {
+                // Not released: a worker that ignores the interrupt is still acting; the lease
+                // expiry
+                // counts it as a failed attempt.
+                abandoned = true;
+                LOGGER.warn("MCP fire_schedule_now abandoned the fire of " + scheduleId + ": " + e.getMessage());
             } finally {
                 // Always release the claim, whatever happened: a manual fire that left
                 // the row CLAIMED would block the poller until the lease expired. A null
@@ -1269,12 +1276,18 @@ public class McpAdminTools {
                 // afterwards so the cancellation signal still reaches the caller.
                 boolean wasInterrupted = Thread.interrupted();
                 try {
-                    schedulePollerService.recordManualFireOutcome(schedule, fireLog);
+                    if (!abandoned) {
+                        schedulePollerService.recordManualFireOutcome(schedule, fireLog);
+                    }
                 } finally {
                     if (wasInterrupted) {
                         Thread.currentThread().interrupt();
                     }
                 }
+            }
+            if (abandoned) {
+                return errorJson("The fire did not finish within its bound and was interrupted; it may still be running. The schedule stays "
+                        + "claimed until its lease expires, then counts as a failed attempt.");
             }
 
             var result = new LinkedHashMap<String, Object>();

@@ -909,7 +909,10 @@ public class ScheduleFireExecutor {
     /**
      * The priced spend a conversation has recorded — for a conversation this fire
      * just started, what its startup workflow cost. Never throws: unreadable
-     * accounting must not fail the fire, and counts as nothing spent.
+     * accounting must not fail the fire, but it must not hand the turn the full
+     * allowance on top of what startup may already have spent either, so it counts
+     * as everything spent ({@link Double#POSITIVE_INFINITY}): the turn then runs
+     * under the smallest positive allowance and is refused by the cost ceiling.
      */
     double startupSpend(String conversationId) {
         try {
@@ -925,8 +928,9 @@ public class ScheduleFireExecutor {
             }
             return spent;
         } catch (Exception e) {
-            LOGGER.debugf(e, "[SCHEDULE] Could not read the startup spend of conversation %s", sanitize(conversationId));
-            return 0.0;
+            LOGGER.warnf(e, "[SCHEDULE] Could not read the startup spend of conversation %s; the turn gets no allowance rather than "
+                    + "the full maxCostPerFire on top of an unknown startup spend", sanitize(conversationId));
+            return Double.POSITIVE_INFINITY;
         }
     }
 

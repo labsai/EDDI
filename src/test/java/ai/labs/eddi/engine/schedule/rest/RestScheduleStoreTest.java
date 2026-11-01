@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import java.time.Duration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -456,6 +457,25 @@ class RestScheduleStoreTest {
 
         assertEquals(409, response.getStatus());
         verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_afterTheDeadline_answersATimeoutAndLeavesTheClaimToExpire() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var regular = makeCronSchedule("r1");
+        when(scheduleStore.readSchedule("r1")).thenReturn(regular);
+        when(pollerService.manualFireDeadline()).thenReturn(Duration.ofMillis(100));
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.sleep(10_000); // outlives the bound
+            return null;
+        });
+
+        Response response = rest.fireNow("r1");
+
+        assertEquals(504, response.getStatus(), "a timed-out fire is not a 200 with an empty body");
+        // The worker may still be running: the claim is not released, so the poller
+        // cannot start a second attempt.
+        verify(pollerService, never()).recordManualFireOutcome(any(), any());
     }
 
     @Test

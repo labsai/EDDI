@@ -350,19 +350,28 @@ public class BoundedLogStore {
         if (dbQueue.isEmpty())
             return;
 
-        List<LogEntry> batch = new ArrayList<>();
-        LogEntry entry;
-        while ((entry = dbQueue.poll()) != null) {
-            dbQueued.decrementAndGet();
-            batch.add(entry);
-        }
         long dropped = dbDropped.getAndSet(0);
         if (dropped > 0) {
             log.warnv("Dropped {0} log entries before DB persistence: more than {1} were waiting (the database is slow or down)", dropped,
                     maxDbQueue);
         }
-
-        if (!batch.isEmpty()) {
+        // Batches of a fixed size, and no more entries than were queued when this flush
+        // began:
+        // producers refill the slots a drain frees, so draining "until empty" could
+        // build one batch
+        // far beyond the queue cap (or never finish).
+        int remaining = dbQueue.size();
+        while (remaining > 0) {
+            List<LogEntry> batch = new ArrayList<>(Math.min(remaining, FLUSH_BATCH_SIZE));
+            LogEntry entry;
+            while (batch.size() < FLUSH_BATCH_SIZE && remaining > 0 && (entry = dbQueue.poll()) != null) {
+                dbQueued.decrementAndGet();
+                batch.add(entry);
+                remaining--;
+            }
+            if (batch.isEmpty()) {
+                return;
+            }
             try {
                 databaseLogs.addLogsBatch(batch);
             } catch (Exception e) {
@@ -370,6 +379,9 @@ public class BoundedLogStore {
             }
         }
     }
+
+    /** The most entries handed to the database in one batch. */
+    static final int FLUSH_BATCH_SIZE = 5_000;
 
     // ==================== Visible for Testing ====================
 

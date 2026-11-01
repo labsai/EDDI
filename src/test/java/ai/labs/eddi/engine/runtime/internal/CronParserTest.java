@@ -538,6 +538,8 @@ class CronParserTest {
 
     @Test
     void parseField_hugeStep_doesNotWrap() {
-        assertEquals(Set.of(0), CronParser.parseField("0-59/2147483647", 0, 59));
+        // Starting at 1: 1 + Integer.MAX_VALUE wraps negative in an int loop, where a
+        // start of 0 does not.
+        assertEquals(Set.of(1), CronParser.parseField("1-59/2147483647", 0, 59));
     }
 }

@@ -211,8 +211,9 @@ accepted for any host. On upgrade, the broker certificate must name every host i
 `eddi.nats.url` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. With
 the Helm chart's in-cluster NATS those hosts are `<fullname>-nats-<n>.<fullname>-nats` (the chart's full name), so a
 `*.<fullname>-nats` SAN covers them, while a certificate issued only for the fully qualified
-`…svc.cluster.local` names does not. A node whose broker certificate does not match logs a
-TLS handshake failure and stays in degraded mode. Reissue the certificate, or set
+`…svc.cluster.local` names does not. A node whose broker certificate does not match cannot connect
+and stays in degraded mode; the TLS cause itself is logged at DEBUG by the NATS client, so look for
+the node's repeated "could not connect" warnings and raise the `io.nats` logger to DEBUG to see it. Reissue the certificate, or set
 `EDDI_NATS_TLS_VERIFY_HOSTNAME=false` to go back to the old behaviour.
 
 ### Upgrading from the build-profile NATS coordinator

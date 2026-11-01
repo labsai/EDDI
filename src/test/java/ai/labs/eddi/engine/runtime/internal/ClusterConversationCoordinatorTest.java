@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.enterprise.inject.Instance;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
@@ -581,6 +583,8 @@ class ClusterConversationCoordinatorTest {
         when(memory.isResolvable()).thenReturn(true);
         when(memory.get()).thenReturn(memoryStore);
         when(memoryStore.getConversationState("conv-erased")).thenReturn(null);
+        // No document either: this is a missing conversation, not just a missing state.
+        when(memoryStore.loadConversationMemorySnapshot("conv-erased")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
         coordinator.memoryStore = memory;
 
         store.down = false;
@@ -588,6 +592,54 @@ class ClusterConversationCoordinatorTest {
 
         assertTrue(store.entries.isEmpty(), "the erased turn must not reach the shared stream");
         assertTrue(coordinator.getDeadLetters().isEmpty(), "nor stay on this node");
+    }
+
+    @Test
+    @DisplayName("a local dead letter whose conversation cannot be checked stays on this node, not published")
+    @SuppressWarnings("unchecked")
+    void localDeadLetterIsKeptWhenTheStoreCannotBeChecked() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-unknown", failing);
+        await(failing);
+        awaitIdle();
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-unknown")).thenThrow(new IllegalStateException("database not back yet"));
+        coordinator.memoryStore = memory;
+
+        store.down = false;
+        assertEquals(0, coordinator.forwardLocalDeadLetters());
+
+        assertTrue(store.entries.isEmpty(), "an erased turn may be among them: nothing is published while the store cannot say");
+        assertEquals(1, coordinator.getDeadLetters().size(), "and the entry is not lost");
+    }
+
+    @Test
+    @DisplayName("a legacy conversation that stores no state still exists, so its dead letter is forwarded")
+    @SuppressWarnings("unchecked")
+    void stateLessLegacyConversationStillForwards() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-legacy", failing);
+        await(failing);
+        awaitIdle();
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-legacy")).thenReturn(null); // no state stored
+        when(memoryStore.loadConversationMemorySnapshot("conv-legacy")).thenReturn(new ConversationMemorySnapshot());
+        coordinator.memoryStore = memory;
+
+        store.down = false;
+        assertEquals(1, coordinator.forwardLocalDeadLetters());
+
+        assertEquals(1, store.entries.size());
     }
 
     @Test

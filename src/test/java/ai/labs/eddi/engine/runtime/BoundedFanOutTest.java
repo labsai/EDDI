@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import java.util.concurrent.atomic.AtomicIntegerArray;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("BoundedFanOut")
@@ -41,6 +43,21 @@ class BoundedFanOutTest {
     @Nested
     @DisplayName("ordering and concurrency")
     class OrderingAndConcurrency {
+
+        @Test
+        void anItemTheGateRefusedHasNotStarted() {
+            var states = new AtomicIntegerArray(4);
+            states.set(0, 1); // running
+            states.set(1, 2); // finished
+            states.set(2, 4); // refused: never ran
+            // index 3 stays queued: it is abandoned by the question and has not started
+            // either
+
+            assertTrue(BoundedFanOut.startedOrAbandon(states, 0));
+            assertTrue(BoundedFanOut.startedOrAbandon(states, 1));
+            assertFalse(BoundedFanOut.startedOrAbandon(states, 2), "a refused item was never sent");
+            assertFalse(BoundedFanOut.startedOrAbandon(states, 3));
+        }
 
         @Test
         @DisplayName("outcomes come back in item order, whatever order the items finish in")

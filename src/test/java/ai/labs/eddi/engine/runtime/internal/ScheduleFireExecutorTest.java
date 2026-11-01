@@ -198,6 +198,18 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void startupSpend_unreadableAccountingCountsAsEverythingSpent_notAsNothing() throws Exception {
+        when(conversationMemoryStore.loadConversationMemorySnapshot("conv-x")).thenThrow(new IllegalStateException("store down"));
+
+        double spent = executor.startupSpend("conv-x");
+
+        // Counting it as nothing would hand the turn the full allowance on top of
+        // whatever startup spent.
+        assertEquals(Double.POSITIVE_INFINITY, spent);
+        assertEquals(Double.MIN_VALUE, ScheduleFireExecutor.remainingAllowance(0.5, spent), "the turn is left with no usable allowance");
+    }
+
+    @Test
     void remainingAllowance_neverTurnsAnExhaustedCapIntoUnlimited() {
         assertEquals(0.3, ScheduleFireExecutor.remainingAllowance(0.5, 0.2), 1e-9);
         assertEquals(Double.MIN_VALUE, ScheduleFireExecutor.remainingAllowance(0.5, 0.7));

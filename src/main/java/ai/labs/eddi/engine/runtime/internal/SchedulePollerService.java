@@ -690,9 +690,15 @@ public class SchedulePollerService {
      *
      * @param deadline
      *            the bound; {@code null} or not positive means the default
-     * @return the fire log, or {@code null} when the fire was cut off at the
-     *         deadline or the caller was interrupted -
-     *         {@link #recordManualFireOutcome} records that as a failure
+     * @return the fire log
+     * @throws FireAbandonedException
+     *             when the fire was cut off at the deadline or the caller was
+     *             interrupted. The worker was only asked to stop: one that ignores
+     *             the interrupt is still acting, so the caller must NOT release the
+     *             schedule's claim — it stays {@code CLAIMED} until the lease
+     *             expires, and the poller then counts it as the failed attempt it
+     *             was (see {@link #onUnreportedFire}) instead of starting another
+     *             alongside it.
      */
     public static ScheduleFireLog runWithinDeadline(Callable<ScheduleFireLog> fire, Duration deadline) throws Exception {
         Duration bound = deadline != null && deadline.isPositive() ? deadline : Duration.ofMinutes(5).plusSeconds(30);
@@ -714,11 +720,11 @@ public class SchedulePollerService {
                 future.cancel(true);
                 LOGGER.errorf("[SCHEDULE] A manual fire exceeded its %s bound (eddi.schedule.fire-timeout plus grace) and was interrupted",
                         bound);
-                return null;
+                throw new FireAbandonedException("The fire exceeded its " + bound + " bound and was interrupted", true);
             } catch (InterruptedException e) {
                 future.cancel(true);
                 Thread.currentThread().interrupt();
-                return null;
+                throw new FireAbandonedException("The caller stopped waiting for the fire", false);
             } catch (ExecutionException e) {
                 // The worker's finally ran before the future completed exceptionally.
                 restoreInterrupt(endedInterrupted.get());
@@ -730,6 +736,27 @@ public class SchedulePollerService {
         } finally {
             // As in dispatchClaimed: never await a fire wedged in a non-interruptible call.
             executor.shutdownNow();
+        }
+    }
+
+    /**
+     * A manual fire that was cut off (deadline) or whose caller stopped waiting.
+     * The fire may still be running, so its claim is left to expire rather than
+     * released.
+     */
+    public static class FireAbandonedException extends Exception {
+        private final boolean timedOut;
+
+        FireAbandonedException(String message, boolean timedOut) {
+            super(message);
+            this.timedOut = timedOut;
+        }
+
+        /**
+         * True when the deadline passed; false when the waiting caller was interrupted.
+         */
+        public boolean timedOut() {
+            return timedOut;
         }
     }
 

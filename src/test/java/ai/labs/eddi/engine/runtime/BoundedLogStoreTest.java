@@ -288,6 +288,20 @@ class BoundedLogStoreTest {
         }
 
         @Test
+        void aFlushIsHandedToTheDatabaseInBoundedBatches() {
+            int total = BoundedLogStore.FLUSH_BATCH_SIZE * 2 + 17;
+            var dbStore = BoundedLogStore.createForTesting(instanceIdProducer, databaseLogs, 10, true, 5, "WARN", total);
+            for (int i = 0; i < total; i++) {
+                dbStore.publish(createEntry("ERROR", null, null, "e" + i));
+            }
+
+            dbStore.flushToDb();
+
+            verify(databaseLogs, times(3)).addLogsBatch(argThat(list -> list.size() <= BoundedLogStore.FLUSH_BATCH_SIZE));
+            assertEquals(0, dbStore.getDbQueueSize());
+        }
+
+        @Test
         void shouldNotEnqueueWhenDbDisabled() {
             store.publish(createEntry("ERROR", null, null, "severe but db disabled"));
 

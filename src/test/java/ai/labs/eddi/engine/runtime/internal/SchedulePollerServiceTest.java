@@ -173,13 +173,13 @@ class SchedulePollerServiceTest {
     @Test
     void runWithinDeadline_abandonsAFireThatOutlivesItsBound() throws Exception {
         var started = new CountDownLatch(1);
-        ScheduleFireLog result = SchedulePollerService.runWithinDeadline(() -> {
+        var abandoned = assertThrows(SchedulePollerService.FireAbandonedException.class, () -> SchedulePollerService.runWithinDeadline(() -> {
             started.countDown();
             Thread.sleep(10_000);
             return makeFireLog("slow", FireStatus.COMPLETED.name());
-        }, Duration.ofMillis(200));
+        }, Duration.ofMillis(200)), "a fire cut off at its bound is abandoned, not reported as a failed outcome");
+        assertTrue(abandoned.timedOut());
         assertTrue(started.await(1, TimeUnit.SECONDS));
-        assertNull(result, "a fire cut off at its bound reports no outcome, which is recorded as a failure");
         assertFalse(Thread.currentThread().isInterrupted(), "the abandoned worker's cancellation is not the caller's interrupt");
     }
 
