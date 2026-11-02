@@ -214,11 +214,27 @@ class RestWorkflowStoreReferenceAccessTest {
     }
 
     @Test
-    @DisplayName("non-eddi and id-less references are not resources and are skipped")
+    @DisplayName("a reference spelled with another scheme is still checked: the engine resolves it by host and id alone")
+    void nonCanonicalSchemeIsStillChecked() throws Exception {
+        var config = new WorkflowConfiguration();
+        for (String uri : List.of("Eddi://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1",
+                "x://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1")) {
+            var step = new WorkflowStep();
+            step.setConfig(new HashMap<>(Map.of("uri", uri)));
+            config.getWorkflowSteps().clear();
+            config.getWorkflowSteps().add(step);
+
+            assertThrows(ForbiddenException.class, () -> sut.createWorkflow(config), uri);
+        }
+        verify(workflowStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("id-less and host-less references are not resources and are skipped")
     void skipsNonReferences() {
         var config = new WorkflowConfiguration();
         var step = new WorkflowStep();
-        step.setConfig(new HashMap<>(Map.of("uri", "https://example.com/x")));
+        step.setConfig(new HashMap<>(Map.of("uri", "not a uri at all")));
         config.getWorkflowSteps().add(step);
         var bare = new WorkflowStep();
         bare.setConfig(new HashMap<>(Map.of("uri", "eddi://ai.labs.llm")));

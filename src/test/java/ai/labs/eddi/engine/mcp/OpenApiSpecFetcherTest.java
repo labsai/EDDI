@@ -22,11 +22,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * A remote OpenAPI spec is fetched by EDDI, not by swagger-parser: every
@@ -98,6 +104,20 @@ class OpenApiSpecFetcherTest {
     }
 
     @Test
+    @DisplayName("a target that fails the policy after connecting (DNS rebinding) has its response discarded")
+    void responseIsDiscardedWhenTheTargetFailsThePolicyAfterConnecting() {
+        // Passes before the send, fails once the connection has resolved the host
+        // again: the second answer is the rebinding one.
+        OutboundTargetPolicy policy = mock(OutboundTargetPolicy.class);
+        doNothing().doThrow(new IllegalArgumentException("resolves to a private address")).when(policy).validateUrl(anyString());
+
+        var e = assertThrows(IllegalArgumentException.class, () -> fetcher(policy).fetchSpec(origin + "/openapi.json"));
+
+        assertTrue(e.getMessage().contains("discarded"), e.getMessage());
+        verify(policy, times(2)).validateUrl(origin + "/openapi.json");
+    }
+
+    @Test
     @DisplayName("protection off: the document is fetched and parsed, following an absolute and a relative redirect")
     void fetchesThroughRedirects() {
         var fetcher = fetcher(OutboundTargetPolicy.permissive());
@@ -109,6 +129,25 @@ class OpenApiSpecFetcherTest {
         requests.clear();
         assertEquals("Fetched", McpApiToolBuilder.parseSpec(origin + "/relative", fetcher).getInfo().getTitle());
         assertEquals(List.of("/relative", "/openapi.json"), requests);
+    }
+
+    @Test
+    @DisplayName("a target that stops passing the policy once connected (DNS rebinding) is discarded, not read")
+    void targetRecheckedAfterConnecting() {
+        var calls = new AtomicInteger();
+        var rebinding = new OutboundTargetPolicy(false, new SelfUrlResolver(Optional.empty(), 7070), InetAddress::getAllByName) {
+            @Override
+            public void validateUrl(String url) {
+                if (calls.incrementAndGet() > 1) {
+                    throw new IllegalArgumentException("now private");
+                }
+            }
+        };
+
+        var e = assertThrows(IllegalArgumentException.class, () -> fetcher(rebinding).fetchSpec(origin + "/openapi.json"));
+
+        assertTrue(e.getMessage().contains("no longer passes"), e.getMessage());
+        assertEquals(2, calls.get(), "checked before sending and again once the response arrived");
     }
 
     @Test

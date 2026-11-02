@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.time.Duration;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -150,6 +151,35 @@ class TemplateSyntaxMigratorTest {
         String input = "[[${#strings.toLowerCase(#strings.replace(name, ' ', '-'))}]]";
         String expected = "{name.replace(' ', '-').toLowerCase()}";
         assertEquals(expected, migrator.migrate(input));
+    }
+
+    @Test
+    void migrateStrings_whitespaceAroundArguments_isKeptAsBefore() {
+        // Edge cases of the possessive/lookahead rewrite: whitespace after the comma
+        // is dropped, and an argument that is nothing but whitespace survives.
+        assertEquals("{name.replace(' ', '-').toLowerCase()}", migrator.migrate("[[${#strings.toLowerCase(#strings.replace(name,   ' ', '-'))}]]"));
+        assertEquals("{name.trim().toLowerCase()}", migrator.migrate("[[${#strings.toLowerCase(#strings.trim(name))}]]"));
+        assertEquals("{name.pad().toLowerCase()}", migrator.migrate("[[${#strings.toLowerCase(#strings.pad(name,   ))}]]"));
+        assertEquals("x.foo( )", migrator.migrate("#strings.foo(x, )"));
+        assertEquals("x.foo( )", migrator.migrate("#strings.foo(x,  )"));
+        assertEquals("x.foo(a  b)", migrator.migrate("#strings.foo(x,   a  b)"));
+        assertEquals("#strings.foo(x,", migrator.migrate("#strings.foo(x,"));
+    }
+
+    /**
+     * A long whitespace run after the comma and no closing parenthesis: the greedy
+     * forms tried every split of the run between "\s*" and the argument group, for
+     * every candidate. Quadratic, so 200 000 spaces took minutes.
+     */
+    @Test
+    void migrateStrings_unterminatedCallWithLongWhitespace_finishesPromptly() {
+        String spaces = " ".repeat(200_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            String nested = "[[${#strings.a(#strings.b(x," + spaces;
+            assertEquals(nested, migrator.migrate(nested));
+            String flat = "#strings.a(x," + spaces;
+            assertEquals(flat, migrator.migrate(flat));
+        });
     }
 
     // --- Multiple patterns in one string ---
@@ -478,5 +508,49 @@ class TemplateSyntaxMigratorTest {
         assertFalse(migrator.containsThymeleafSyntax("Plain text"));
         assertFalse(migrator.containsThymeleafSyntax("{quteVar}"));
         assertFalse(migrator.containsThymeleafSyntax("{\"json\": \"value\"}"));
+    }
+    @Test
+    void manyUnterminatedOpenersAreRefusedQuicklyInsteadOfScannedQuadratically() {
+        // 100k openers in a 400k-character string: each conversion step used to scan
+        // from every opener to the end of the text.
+        String hostile = "[[${".repeat(100_000);
+
+        long start = System.nanoTime();
+        assertNotNull(migrator.unconvertibleReason(hostile));
+        assertEquals(hostile, migrator.migrate(hostile));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs < 2_000, "took " + elapsedMs + "ms");
+    }
+
+    @Test
+    void nestedOpenersAreScannedOnce() {
+        // N nested openers before one closer, below the work bound: the scan now
+        // continues after the closer instead of re-scanning from each opener.
+        String nested = "[[".repeat(2_000) + " x ]]";
+        assertTrue(TemplateSyntaxMigrator.conversionWork(nested) <= TemplateSyntaxMigrator.MAX_CONVERSION_WORK);
+        assertNull(migrator.unconvertibleReason(nested));
+    }
+
+    @Test
+    void nestedJsonArraysDoNotCountTowardTheWorkBound() {
+        // 20k "[[" from nested JSON arrays in a ~300k-character resource: counted as
+        // openers they put the text far past the bound, and the one real template in
+        // it was left in Thymeleaf syntax although nothing about it was unsafe.
+        StringBuilder json = new StringBuilder("{\"prompt\":\"Hello [[${properties.name}]]\"");
+        for (int i = 0; i < 20_000; i++) {
+            json.append(",\"m").append(i).append("\":[[").append(i).append("]]");
+        }
+        json.append('}');
+        String resource = json.toString();
+
+        assertNull(migrator.unconvertibleReason(resource));
+        assertTrue(migrator.migrate(resource).startsWith("{\"prompt\":\"Hello {properties.name}\""));
+    }
+
+    @Test
+    void ordinaryTemplatesStayWellInsideTheWorkBound() {
+        String template = "Hello [[${properties.name}]], " + "x".repeat(50_000) + " [(${memory.current.input})]";
+        assertNull(migrator.unconvertibleReason(template));
+        assertTrue(migrator.migrate(template).startsWith("Hello {properties.name},"));
     }
 }

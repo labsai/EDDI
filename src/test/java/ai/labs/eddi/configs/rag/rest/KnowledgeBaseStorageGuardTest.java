@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -233,6 +234,50 @@ class KnowledgeBaseStorageGuardTest {
             when(ragStore.read(SELF, 1)).thenReturn(kb("alpha", "id", Map.of("table", "mine")));
 
             assertDoesNotThrow(() -> guard.prepareUpdate(SELF, kb("alpha", "id", null), kb("alpha", "id", Map.of("table", "mine"))));
+        }
+        @Test
+        @DisplayName("a name-layout knowledge base that drops its explicit location moves to a store of its own")
+        void droppingExplicitLocationMigrates() {
+            // rename while keeping the explicit table, then drop the table: the second
+            // step used to land, unchecked, on the default store of the NEW name
+            var renamed = kb("victim", null, Map.of("table", "mine"));
+            guard.prepareUpdate(SELF, kb("alpha", null, Map.of("table", "mine")), renamed);
+            assertNull(renamed.getStoreNamespace());
+
+            var dropped = kb("victim", null, null);
+            guard.prepareUpdate(SELF, renamed, dropped);
+            assertEquals("id", dropped.getStoreNamespace());
+        }
+
+        @Test
+        @DisplayName("an Elasticsearch index expression (wildcard, list, exclusion) is refused")
+        void elasticsearchIndexExpressionRefused() {
+            for (String index : List.of("*", "kb_a,kb_b", "-kb", "kb*", "remote:kb", "Kb", " team-docs", "team-docs ")) {
+                var config = kb("alpha", "id", Map.of("indexName", index));
+                config.setStoreType("elasticsearch");
+                var previous = kb("alpha", "id", Map.of("indexName", "mine"));
+                previous.setStoreType("elasticsearch");
+                assertThrows(BadRequestException.class, () -> guard.prepareUpdate(SELF, previous, config), index);
+            }
+            var plain = kb("alpha", "id", Map.of("indexName", "team-docs_1"));
+            plain.setStoreType("elasticsearch");
+            assertDoesNotThrow(() -> guard.prepareNew(plain, true));
+        }
+
+        @Test
+        @DisplayName("a collision scan that runs out of pages refuses the location rather than passing it")
+        void exhaustedCollisionScanFailsClosed() throws Exception {
+            List<DocumentDescriptor> fullPage = new ArrayList<>();
+            for (int i = 0; i < 500; i++) {
+                var descriptor = new DocumentDescriptor();
+                descriptor.setResource(URI.create("eddi://ai.labs.rag/ragstore/rags/" + OTHER + "?version=2"));
+                fullPage.add(descriptor);
+            }
+            when(descriptorStore.readDescriptors(eq("ai.labs.rag"), isNull(), anyInt(), anyInt(), anyBoolean())).thenReturn(fullPage);
+            when(ragStore.read(OTHER, 2)).thenReturn(kb("other", "id", null));
+
+            assertThrows(BadRequestException.class,
+                    () -> guard.prepareUpdate(SELF, kb("alpha", "id", Map.of("table", "mine")), kb("alpha", "id", Map.of("table", "other_table"))));
         }
     }
 }

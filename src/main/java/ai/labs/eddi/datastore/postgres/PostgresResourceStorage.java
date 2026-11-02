@@ -16,6 +16,7 @@ import javax.sql.DataSource;
 import java.io.IOException;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -426,6 +427,31 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
     }
 
     @Override
+    public void storeIfFieldsEqual(IResource<T> newResource, Map<String, String> expectedFields)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        checkNotNull(expectedFields, "expectedFields");
+        if (expectedFields.isEmpty()) {
+            throw new IllegalArgumentException("expectedFields must name at least one field");
+        }
+        // One conjunctive predicate inside the one UPDATE. A null expected value is
+        // IS NULL (absent key and JSON null alike), parity with {field: null} on
+        // MongoDB; only the non-null values are bound, in predicate order.
+        List<String> predicates = new ArrayList<>();
+        List<String> params = new ArrayList<>();
+        expectedFields.forEach((field, value) -> {
+            String path = toTextPathExpression(field);
+            if (value == null) {
+                predicates.add(path + " IS NULL");
+            } else {
+                predicates.add(path + " = ?");
+                params.add(value);
+            }
+        });
+        updateIfMatches(newResource, String.join("+", expectedFields.keySet()), String.valueOf(expectedFields.values()),
+                String.join(" AND ", predicates), params);
+    }
+
+    @Override
     public void storeIfFieldEqualsOrMissing(IResource<T> newResource, String fieldName, String expectedValue)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         // ->> yields SQL NULL for an absent key and for a JSON null alike — parity
@@ -437,6 +463,15 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     private void updateIfMatches(IResource<T> newResource, String fieldName, String expectedValue, String fieldPredicate)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        updateIfMatches(newResource, fieldName, expectedValue, fieldPredicate,
+                // singletonList, not List.of: a null expected value is bound as SQL NULL, as
+                // before
+                Collections.singletonList(expectedValue));
+    }
+
+    private void updateIfMatches(IResource<T> newResource, String fieldName, String expectedValue, String fieldPredicate,
+                                 List<String> predicateParams)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         Resource pgResource = checkInternalResource(newResource);
         String sql = "UPDATE resources SET version = ?, data = ?::jsonb "
                 + "WHERE id = ?::uuid AND collection_name = ? AND " + fieldPredicate;
@@ -445,7 +480,9 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             ps.setString(2, pgResource.getJson());
             ps.setString(3, pgResource.getId());
             ps.setString(4, collectionName);
-            ps.setString(5, expectedValue);
+            for (int i = 0; i < predicateParams.size(); i++) {
+                ps.setString(5 + i, predicateParams.get(i));
+            }
             if (ps.executeUpdate() == 0) {
                 // Distinguish "deleted" (404) from "field mismatch" (409) — parity
                 // with the Mongo backend.
@@ -1009,7 +1046,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             // MongoDB, whose descending sort orders a missing field lowest. PostgreSQL's
             // own default for DESC is NULLS FIRST. The field indexes are built in this
             // exact order (createFieldIndex), so the page is still read off the index.
-            sql.append(" ORDER BY ").append(toTextPathExpression(sortField)).append(" DESC NULLS LAST");
+            // id breaks ties, so OFFSET paging over rows sharing a sort value is stable:
+            // without it the same row could appear on two pages and another on none.
+            // The index still supplies the leading key; PostgreSQL orders the id
+            // within each run of equal values with an incremental sort.
+            sql.append(" ORDER BY ").append(toTextPathExpression(sortField)).append(" DESC NULLS LAST, id DESC");
         }
 
         int effectiveLimit = IResourceStorage.resolveLimit(limit);

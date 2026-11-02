@@ -59,7 +59,16 @@ buckets of `throttle.windowMinutes` aligned to the epoch.
 - *Digest*: when a rule's oldest `DIGEST_PENDING` event is older than the digest
   interval (`HOURLY` / `DAILY`), one digest event lists them and is delivered like
   any alert; the listed events become `DIGESTED` by a conditional update, so a
-  second runner cannot digest them twice.
+  second runner cannot digest them twice. Held events are digested **per agent they
+  fired for**, and each digest carries that agent — never the rule's current scope,
+  so changing a rule's scope does not show one agent's held summaries to another
+  agent's editors. Deleting a rule, disabling it or setting its digest to `NONE`
+  moves its held events to `INBOX_ONLY` (they used to stay `DIGEST_PENDING` until
+  retention). Another replica can still hold the old rule in its cache (for up to
+  the rule cache TTL, about 60 s) and hold one more event after that release, so the
+  maintenance pass also releases the events of any rule that is now disabled,
+  deleted or no longer a digest rule (`findDigestPendingRuleIds`); a late event is
+  back in the inbox within one maintenance interval.
 
 **Retries and digests run on the schedule machinery.** `ScheduleFireExecutor` /
 `SchedulePollerService` are not only for agent conversations: HITL timeouts, Dream,
@@ -299,10 +308,13 @@ Roles `eddi-admin` and `eddi-editor`, enumerated (REST has no role hierarchy;
 - **Editors** work one agent at a time, holding `EDIT` on it: a rule's scope must be
   exactly that agent (`ADMIN_SCOPE_REQUIRED` otherwise), its targets Slack or the
   inbox (`WEBHOOK_ADMIN_ONLY`), and access is re-checked against the **stored** rule
-  on update and delete. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
+  on update and delete. Webhook targets, their signing-secret references and rules
+  over several or every agent need the `eddi-admin` **role** — also while workspaces
+  are not enforced, when an editor otherwise sees every agent's rules and events. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
   webhook target appears to them by scheme and host only, without the secret
-  reference. A digest of a rule over several agents names no agent and is an
-  administrator's.
+  reference. A rule over several agents produces one digest per originating agent; each
+  digest carries that agent and is readable by editors with access to it, and administrators
+  see all of them.
 
 The author (`createdBy`, `updatedBy`) and the acknowledger are always the caller,
 never taken from the body.

@@ -21,9 +21,12 @@ import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
 import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -124,6 +127,28 @@ class DynamicAgentToolsProviderTest {
 
         assertEquals(1, tools.size());
         assertInstanceOf(FindAgentsByCapabilityTool.class, tools.get(0));
+    }
+
+    @Test
+    void addDynamicAgentTools_findByCapability_filtersDiscoveryByTheCallersUseRule() {
+        // The REST search filters by USE; the tool searched the global registry and
+        // named agents the user may not use.
+        var registry = mock(CapabilityRegistryService.class);
+        BiPredicate<String, String> useCheck = (agentId, principal) -> "user-1".equals(principal) && "usable".equals(agentId);
+        var provider = new DynamicAgentToolsProvider(mock(AgentSetupService.class), registry,
+                mock(IConversationService.class), mock(IAgentFactory.class), mock(IAgentStore.class),
+                mock(IDeploymentStore.class), new LiveDiscussionRegistry(), mock(IAgentGroupStore.class), useCheck);
+        var tools = new ArrayList<>();
+        provider.addDynamicAgentTools(tools, List.of("find_agents_by_capability"), memory());
+
+        ((FindAgentsByCapabilityTool) tools.get(0)).findAgentsByCapability("translation", "all");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Predicate<String>> filter = ArgumentCaptor.forClass(Predicate.class);
+        verify(registry).findBySkill(eq("translation"), eq("all"), filter.capture());
+        verify(registry, never()).findBySkill(anyString(), anyString());
+        assertTrue(filter.getValue().test("usable"));
+        assertFalse(filter.getValue().test("someone-elses"));
     }
 
     @Test

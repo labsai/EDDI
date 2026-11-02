@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
+import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -31,6 +32,7 @@ import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,7 +68,8 @@ public class EmbeddingModelFactory {
      */
     private static final String SUPPORTED_PROVIDERS_HINT = "Supported: openai, azure-openai, ollama, mistral, bedrock, cohere, gemini, vertex";
 
-    private final Cache<String, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30)).build();
+    private final Cache<ModelCacheKey, EmbeddingModel> cache = Caffeine.newBuilder().maximumSize(50).expireAfterAccess(Duration.ofMinutes(30))
+            .build();
     private final GlobalVariableResolver globalVariableResolver;
     private final SecretResolver secretResolver;
     /**
@@ -157,10 +160,12 @@ public class EmbeddingModelFactory {
      * @see InputTypedEmbeddingModel
      */
     public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType) {
-        String paramKey = config.getEmbeddingParameters() != null ? new TreeMap<>(config.getEmbeddingParameters()).toString() : "";
         // The role is part of the key: to an asymmetric provider the two roles are
         // two different models, and sharing one entry is precisely the defect.
-        String cacheKey = config.getEmbeddingProvider() + ":" + paramKey + ":" + inputType;
+        // A structural key, not a concatenated TreeMap.toString(): that rendering has
+        // no unambiguous entry boundaries ({a='x, b=y'} looks like {a='x', b='y'}), so
+        // two configurations could share one client — and its endpoint.
+        var cacheKey = new ModelCacheKey(config.getEmbeddingProvider(), config.getEmbeddingParameters(), inputType);
         return cache.get(cacheKey, k -> build(config, inputType));
     }
 
@@ -181,15 +186,22 @@ public class EmbeddingModelFactory {
         if (provider == null || provider.isEmpty()) {
             throw new IllegalArgumentException("No embedding provider configured for this knowledge base. " + SUPPORTED_PROVIDERS_HINT);
         }
+        // A secret's allowedHosts is judged first, against every endpoint key the
+        // configuration names — an unsupported key included — so a refused
+        // destination is reported as that, not as a parameter problem.
         requireSecretsAllowedAt(provider, params);
-        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         // Checked again here, not only at save time: a knowledge base stored before
         // the save-time check existed must not keep sending its documents to the
         // provider's public endpoint because a baseUrl it carries is ignored.
+        // Checked BEFORE vault references are resolved: the conflict message quotes
+        // the model values, and an editor must not be able to read a secret's
+        // plaintext back by putting its reference into 'model' (RAG search and
+        // ingestion status return this message to the caller).
         String problem = EmbeddingParameters.findProblem(provider, params);
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
+        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
             LOGGER.warnf("Embedding provider %s ignores embeddingParameters %s (supported: %s)", provider,
@@ -318,8 +330,11 @@ public class EmbeddingModelFactory {
      * </ul>
      */
     private EmbeddingModel buildOpenAi(Map<String, String> params) {
+        // The bounded client re-checks the destination on every request: the model is
+        // cached, and a baseUrl validated once at build would otherwise be re-resolved
+        // unchecked on each new connection (DNS rebinding).
         var builder = OpenAiEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "text-embedding-3-small"))
-                .apiKey(params.get("apiKey"));
+                .apiKey(params.get("apiKey")).httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
         String baseUrl = params.get("baseUrl");
         if (!isBlank(baseUrl)) {
             targetPolicy.validateUrl(baseUrl);
@@ -387,7 +402,7 @@ public class EmbeddingModelFactory {
         // eddi.security.ssrf-protection.enabled no private address either.
         targetPolicy.validateUrl(baseUrl);
         var builder = OllamaEmbeddingModel.builder().modelName(EmbeddingParameters.modelName(params, "nomic-embed-text"))
-                .baseUrl(baseUrl);
+                .baseUrl(baseUrl).httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
         applyTimeout(params, builder::timeout);
         applyInt(params, "maxRetries", builder::maxRetries);
         return builder.build();
@@ -563,15 +578,20 @@ public class EmbeddingModelFactory {
         if (isBlank(raw)) {
             return;
         }
+        // The value is never echoed: parameters arrive here with vault references
+        // already resolved, and this message reaches RAG search responses and
+        // ingestion status. Neither is the NumberFormatException kept as the cause —
+        // its own message quotes the input.
+        long millis;
         try {
-            long millis = Long.parseLong(raw.trim());
-            if (millis <= 0) {
-                throw new IllegalArgumentException("embeddingParameters.timeout must be a positive number of milliseconds: " + raw);
-            }
-            setter.accept(Duration.ofMillis(millis));
+            millis = Long.parseLong(raw.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("embeddingParameters.timeout must be a number of milliseconds: " + raw, e);
+            throw new IllegalArgumentException("embeddingParameters.timeout must be a number of milliseconds");
         }
+        if (millis <= 0) {
+            throw new IllegalArgumentException("embeddingParameters.timeout must be a positive number of milliseconds");
+        }
+        setter.accept(Duration.ofMillis(millis));
     }
 
     private static TaskType parseTaskType(String taskTypeStr) {
@@ -581,8 +601,9 @@ public class EmbeddingModelFactory {
                     : TaskType.valueOf(taskTypeStr);
             return taskType;
         } catch (IllegalArgumentException e) {
-            throw new IllegalArgumentException(String.format("Invalid '%s' TaskType. Valid TaskTypes '%s'", taskTypeStr,
-                    Arrays.toString(TaskType.values())), e);
+            // The rejected value is not quoted (vault references are resolved by now).
+            throw new IllegalArgumentException(String.format("Invalid embeddingParameters.taskType. Valid TaskTypes '%s'",
+                    Arrays.toString(TaskType.values())));
         }
     }
 
@@ -597,9 +618,11 @@ public class EmbeddingModelFactory {
         }
 
         try {
-            return Integer.parseInt(raw);
+            return Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
+            // Neither the value nor the cause (whose message quotes it): vault
+            // references are resolved by now and this message reaches the caller.
+            throw new IllegalArgumentException("Invalid integer value for embeddingParameters." + key);
         }
     }
 
@@ -609,5 +632,15 @@ public class EmbeddingModelFactory {
      */
     public void clearCache() {
         cache.invalidateAll();
+    }
+
+    /**
+     * Model cache key: equal only when provider, every parameter and the role
+     * compare equal.
+     */
+    private record ModelCacheKey(String provider, Map<String, String> parameters, EmbeddingInputType inputType) {
+        private ModelCacheKey {
+            parameters = parameters == null ? null : Collections.unmodifiableMap(new TreeMap<>(parameters));
+        }
     }
 }

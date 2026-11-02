@@ -236,14 +236,20 @@ public class GuardrailService {
     /**
      * Whether these output guardrails can change the answer — then the task must
      * buffer it: tokens already streamed to a client cannot be taken back.
-     * {@code warn}-only guardrails do not force buffering.
+     * {@code warn}-only guardrails do not force buffering, unless their
+     * {@code failMode} is {@code closed}: an evaluation that fails then withholds
+     * the answer, exactly as a {@code block} verdict would ({@link #failsClosed}).
      */
     public static boolean requiresBuffering(List<GuardrailConfig> outputGuardrails) {
         if (outputGuardrails == null) {
             return false;
         }
         for (GuardrailConfig config : outputGuardrails) {
-            if (config != null && GuardrailAction.parse(config.getAction()).mayChangeText()) {
+            if (config == null) {
+                continue;
+            }
+            GuardrailAction action = GuardrailAction.parse(config.getAction());
+            if (action.mayChangeText() || failsClosed(config, action)) {
                 return true;
             }
         }
@@ -547,6 +553,30 @@ public class GuardrailService {
     }
 
     private record PartResult(String text, double costUsd) {
+    }
+
+    /**
+     * One stored user text of an earlier turn, as a model may see it: the history
+     * rule ({@link #screenHistory}) applied quietly with the guardrails that
+     * re-screen history — a {@code redact} rewrites it, a {@code block} (or a
+     * guardrail that cannot check it and fails closed) replaces it with
+     * {@link #HISTORY_PLACEHOLDER}. Guardrails that do not re-screen history (a
+     * model-backed classifier or judge) are skipped: a turn they acted on is
+     * withheld outright ({@link ConversationLogGenerator#modelFacingOutputs}).
+     * <p>
+     * For the model-facing renderings that read stored turns outside the history
+     * window: the rolling summary's input and the recall tool's answer. Memory
+     * keeps the user's text as sent, so a {@code pii-redaction} that rewrote a turn
+     * for that turn's request used to reach the summarizer — possibly another
+     * vendor — and the summary placed in every later system prompt verbatim.
+     *
+     * @return the screened text; {@code text} itself when no guardrail changed it
+     */
+    public String screenHistoricInput(List<GuardrailConfig> configs, String text, GuardrailContext context) {
+        if (configs == null || configs.isEmpty() || text == null || text.isBlank()) {
+            return text;
+        }
+        return screenPart(configs, text, List.of(), context, false).text();
     }
 
     /**

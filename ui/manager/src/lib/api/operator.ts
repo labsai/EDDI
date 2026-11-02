@@ -1,5 +1,6 @@
 import { api } from "../api-client";
 import { operatorEnvironment } from "@/lib/operator/operator-environment";
+import { globMatches } from "@/lib/glob";
 import { createApiAgent, type SetupResult } from "./agent-setup";
 import {
   getVariable,
@@ -705,41 +706,66 @@ export function parseVersionFromLocation(location: string): number | null {
 
 /* ─── Gate verification ─── */
 
-/** Write patterns `buildToolApprovals` gates. An `exempt` entry equal to any of
- *  these — or broad enough to subsume one — would exempt a write outright. */
-const GATED_WRITE_PATTERNS = ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"] as const;
-
-/** `exempt` patterns broad enough to swallow a gated write pattern above. */
-const OVERBROAD_EXEMPT_PATTERNS = ["*", "http.*", "http.*:*", ...GATED_WRITE_PATTERNS] as const;
+/** HTTP methods whose calls change state — the ones `buildToolApprovals` gates. */
+const WRITE_METHODS = ["post", "put", "patch", "delete"] as const;
 
 /**
- * The method-qualified prefixes above, with the trailing `*` stripped —
- * `["http.post:", "http.put:", "http.patch:", "http.delete:"]`.
- *
- * The blanket gate patterns already match every call of that method, so any
- * pattern starting with one of these prefixes — narrow
- * (`http.post:/agentstore/agents`) or equally broad (`http.post:*`) — addresses
- * a strict subset of what the blanket pattern gates. No glob-intersection logic
- * is needed: prefix membership alone is sufficient to prove overlap.
+ * The address prefix of every call of `method`: `http.post:/`. An endpoint path
+ * always begins with a slash (`AgentOrchestrator#normalizeEndpointPath`), so
+ * `http.post:/` is a prefix shared by every POST address the gate will ever see.
  */
-const GATED_WRITE_PREFIXES = GATED_WRITE_PATTERNS.map((pattern) => pattern.slice(0, -1));
+function writeAddressPrefix(method: string): string {
+  return `http.${method}:/`;
+}
 
 /**
- * Exempt prefixes that can match a write call.
+ * Whether `pattern` matches EVERY address of a `method` call (`http.<method>:/…`
+ * with any path). Only a pattern shaped `<head>*` can: it matches `P + anything`
+ * for every `P` the head matches, so it suffices that the head matches some
+ * prefix of the method's address prefix. A pattern with no trailing wildcard
+ * pins a suffix and so leaves some paths of that method ungated.
+ */
+function coversEveryCallOf(pattern: string, method: string): boolean {
+  if (!pattern.endsWith("*")) return false;
+  const head = pattern.slice(0, -1);
+  const prefix = writeAddressPrefix(method);
+  for (let end = 0; end <= prefix.length; end++) {
+    if (globMatches(head, prefix.slice(0, end))) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether `pattern` can match the address of some write call, under the
+ * backend's glob semantics (a `*` anywhere is a wildcard — `*:*`, `h*` and
+ * `*post*` all reach `http.post:/…`, and so does `http.*:/agentstore/agents`
+ * because the method segment is itself a wildcard).
  *
- * `http.*:` is included because the method segment is itself a wildcard, and
- * `ToolApprovalPatterns.compile` turns `*` into `.*` — so an exempt of
- * `http.*:/agentstore/agents` matches the address `http.post:/agentstore/agents`
- * exactly as readily as the GET its author had in mind.
+ * Without a wildcard the pattern names exactly one string, so it must itself be
+ * a write address. With one, the text before the first `*` is the only part
+ * that fixes where a match starts: the pattern can match a write address
+ * exactly when that literal prefix is compatible with `http.<method>:/` — the
+ * wildcard absorbs the rest of the prefix and the remaining literals are
+ * satisfiable by choosing the path, which is free.
  *
  * Known limit: a pattern addressing a tool by its bare dispatch name (an exempt
- * of `deployAgent`) also exempts a write, and cannot be recognised from the
- * config alone — `ToolApprovalGate.addressesOf` matches bare names too, but the
- * name-to-method mapping lives in the fetched spec, not here. The method-
- * qualified forms below are what `buildToolApprovals` writes and what a hand
- * edit realistically reaches for.
+ * of `deployAgent`, `deploy*`) also exempts a write, and cannot be recognised
+ * from the config alone — `ToolApprovalGate.addressesOf` matches bare names
+ * too, but the name-to-method mapping lives in the fetched spec, not here.
+ *
+ * Also out of scope here: a per-LLM-task `toolApprovals` override lives in the
+ * llmstore document, not on the agent. The backend default (`strict`,
+ * `TaskToolApprovalsResolver`) lets it only strengthen this gate.
  */
-const WRITE_EXEMPT_PREFIXES = [...GATED_WRITE_PREFIXES, "http.*:"] as const;
+function canMatchAWrite(pattern: string): boolean {
+  const star = pattern.indexOf("*");
+  return WRITE_METHODS.some((method) => {
+    const prefix = writeAddressPrefix(method);
+    if (star < 0) return pattern.startsWith(prefix);
+    const literal = pattern.slice(0, star);
+    return prefix.startsWith(literal) || literal.startsWith(prefix);
+  });
+}
 
 export interface GateVerificationResult {
   verified: boolean;
@@ -769,23 +795,21 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   // while the config reads as gated at a glance — a decoy the length check
   // alone accepts. At least one pattern must actually address a write.
   //
-  // Known limit, the mirror of the one WRITE_EXEMPT_PREFIXES documents: a gate
+  // Known limit, the mirror of the one `canMatchAWrite` documents: a gate
   // written against bare dispatch names (`requireApproval: ["deployAgent"]`)
   // genuinely gates that write but cannot be recognised as such without the
   // spec's name-to-method mapping, so it reports as ungated. That direction is
   // the safe one — it withholds write scope, or raises a warning on a created
   // agent, rather than certifying a gate nobody verified. `buildToolApprovals`
   // writes the method-qualified form.
-  const gatesAWrite = toolApprovals.requireApproval.some(
-    (pattern) =>
-      pattern === "*" ||
-      pattern.startsWith("http.*") ||
-      GATED_WRITE_PREFIXES.some((prefix) => pattern.startsWith(prefix)),
+  const requireApproval = toolApprovals.requireApproval;
+  const ungatedMethod = WRITE_METHODS.find(
+    (method) => !requireApproval.some((pattern) => coversEveryCallOf(pattern, method)),
   );
-  if (!gatesAWrite) {
+  if (ungatedMethod) {
     return {
       ok: false,
-      reason: "toolApprovals.requireApproval gates no write method — reads only, so every write runs unapproved",
+      reason: `toolApprovals.requireApproval does not gate every ${ungatedMethod.toUpperCase()} call, so some writes run unapproved`,
     };
   }
   if (toolApprovals.timeoutPolicy === "AUTO_APPROVE") {
@@ -799,11 +823,7 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   // `http.post:/agentstore/agents` is narrower than `http.post:*` and every bit
   // as effective at un-gating that write.
   const exempt = toolApprovals.exempt ?? [];
-  const overbroadExempt = exempt.find(
-    (pattern) =>
-      (OVERBROAD_EXEMPT_PATTERNS as readonly string[]).includes(pattern) ||
-      WRITE_EXEMPT_PREFIXES.some((prefix) => pattern.startsWith(prefix)),
-  );
+  const overbroadExempt = exempt.find(canMatchAWrite);
   if (overbroadExempt) {
     return { ok: false, reason: `exempt pattern '${overbroadExempt}' would exempt a gated write` };
   }
@@ -816,8 +836,7 @@ export function gateLooksInstalled(agent: Agent): { ok: boolean; reason?: string
   // pass verification while that one endpoint auto-executes unreviewed.
   const autoApproveWriteRule = (toolApprovals.rules ?? []).find(
     (rule) =>
-      rule.timeoutPolicy === "AUTO_APPROVE" &&
-      GATED_WRITE_PREFIXES.some((prefix) => rule.match.startsWith(prefix)),
+      rule.timeoutPolicy === "AUTO_APPROVE" && canMatchAWrite(rule.match),
   );
   if (autoApproveWriteRule) {
     return {

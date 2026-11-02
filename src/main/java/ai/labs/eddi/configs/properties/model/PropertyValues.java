@@ -55,12 +55,10 @@ public final class PropertyValues {
             return new Property(name, b, scope);
         }
         if (value instanceof Map<?, ?> map) {
-            Map<String, Object> copy = new LinkedHashMap<>();
-            map.forEach((key, entry) -> copy.put(String.valueOf(key), entry));
-            return new Property(name, copy, scope);
+            return new Property(name, deepCopyMap(map), scope);
         }
         if (value instanceof List<?> list) {
-            return new Property(name, new ArrayList<Object>(list), scope);
+            return new Property(name, deepCopyList(list), scope);
         }
         if (value instanceof Integer i) {
             return new Property(name, i, scope);
@@ -127,8 +125,8 @@ public final class PropertyValues {
      */
     public static Property copyOf(Property property) {
         var copy = new Property(property.getName(), property.getValueString(),
-                property.getValueObject() != null ? new LinkedHashMap<>(property.getValueObject()) : null,
-                property.getValueList() != null ? new ArrayList<>(property.getValueList()) : null, property.getValueInt(),
+                property.getValueObject() != null ? deepCopyMap(property.getValueObject()) : null,
+                property.getValueList() != null ? deepCopyList(property.getValueList()) : null, property.getValueInt(),
                 property.getValueFloat(), property.getValueBoolean(), property.getScope(), property.getVisibility());
         copy.setValueLong(property.getValueLong());
         copy.setValueDouble(property.getValueDouble());
@@ -141,6 +139,38 @@ public final class PropertyValues {
         return property.getValueObject() != null || property.getValueList() != null || property.getValueInt() != null
                 || property.getValueLong() != null || property.getValueFloat() != null || property.getValueDouble() != null
                 || property.getValueBoolean() != null;
+    }
+
+    /**
+     * Copies nested maps and lists too, not only the outer container. A property
+     * built from a cached configuration value (an instruction's
+     * {@code valueObject}) used to share its nested containers with that singleton
+     * configuration, so a later path assignment into the property
+     * ({@code toObjectPath}) wrote one conversation's data into the configuration
+     * every other conversation reads.
+     */
+    static Map<String, Object> deepCopyMap(Map<?, ?> map) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        map.forEach((key, entry) -> copy.put(String.valueOf(key), deepCopy(entry)));
+        return copy;
+    }
+
+    static List<Object> deepCopyList(List<?> list) {
+        List<Object> copy = new ArrayList<>(list.size());
+        for (Object entry : list) {
+            copy.add(deepCopy(entry));
+        }
+        return copy;
+    }
+
+    private static Object deepCopy(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return deepCopyMap(map);
+        }
+        if (value instanceof List<?> list) {
+            return deepCopyList(list);
+        }
+        return value;
     }
 
     private static boolean fitsInt(long value) {

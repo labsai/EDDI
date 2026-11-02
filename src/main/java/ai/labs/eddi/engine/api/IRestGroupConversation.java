@@ -150,7 +150,8 @@ public interface IRestGroupConversation {
     @APIResponse(responseCode = "200", description = "Updated group conversation with follow-up on transcript.")
     @APIResponse(responseCode = "400", description = "Missing 'question' or 'targetAgentId'.")
     @APIResponse(responseCode = "404", description = "Group conversation not found, or the target agent is not a member.")
-    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, or another operation is in progress.")
+    @APIResponse(responseCode = "409", description = "Conversation not in COMPLETED state, another operation is in progress, "
+            + "or the discussion has already reached its cost ceiling.")
     @APIResponse(responseCode = "502", description = "The member agent could not be reached / the agent call failed.")
     @APIResponse(responseCode = "504", description = "The member agent did not respond within the timeout.")
     Response followUpWithMember(@PathParam("groupId") String groupId,
@@ -219,9 +220,14 @@ public interface IRestGroupConversation {
     @Path("/{groupId}/conversations/{groupConversationId}/cancel")
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
-    @Operation(summary = "Cancel a group discussion", description = "Cancels an in-progress group discussion.")
+    @Operation(summary = "Cancel a group discussion",
+               description = "Cancels an in-progress or paused group discussion. The owner and admins may cancel either; "
+                       + "a caller who is only an approver may cancel only a discussion that is awaiting a decision, and "
+                       + "receives the resulting state rather than the conversation.")
     @APIResponse(responseCode = "200", description = "Discussion cancelled.")
+    @APIResponse(responseCode = "403", description = "Approver-only caller and the discussion is not awaiting a decision.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
+    @APIResponse(responseCode = "409", description = "Already in a terminal state.")
     Response cancelDiscussion(@PathParam("groupId") String groupId,
                               @PathParam("groupConversationId") String gcId);
 
@@ -231,7 +237,8 @@ public interface IRestGroupConversation {
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-user", "eddi-approver"})
     @Operation(summary = "Approve a paused group phase", description = "Resumes a paused group discussion after human approval.")
-    @APIResponse(responseCode = "200", description = "Discussion resumed.")
+    @APIResponse(responseCode = "200", description = "Discussion resumed. The owner or an admin receives the conversation; "
+            + "an approver-only caller only its resulting state.")
     @APIResponse(responseCode = "400", description = "Invalid decision body or taskApprovals.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Not awaiting approval / concurrent modification conflict.")
@@ -263,7 +270,8 @@ public interface IRestGroupConversation {
                        + "AWAITING_HUMAN_INPUT discussion from the next speaker. Only the pending member's own "
                        + "principal (or an admin) may submit — this is a member SPEAKING, not an approval; the "
                        + "approve endpoint never accepts free text and this endpoint never decides approvals.")
-    @APIResponse(responseCode = "200", description = "Input recorded; discussion resumed.")
+    @APIResponse(responseCode = "200", description = "Input recorded; discussion resumed. The body is the group conversation for its "
+            + "owner or an admin, and {groupConversationId, accepted, state} for any other submitter.")
     @APIResponse(responseCode = "400", description = "Blank content, unknown member, or memberId not matching the pending turn.")
     @APIResponse(responseCode = "403", description = "Caller is neither the pending member nor an admin.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")

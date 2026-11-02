@@ -25,6 +25,7 @@ import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
@@ -506,6 +507,16 @@ public class RestScheduleStore implements IRestScheduleStore {
                 }
                 resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
             }
+            if (EmailPollSchedules.isEmailPollSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // Polling now reads the mailbox and starts turns: the authority of
+                // editing the integration.
+                String integrationId = EmailPollSchedules.integrationId(schedule.getMetadata());
+                if (integrationId == null || integrationId.isBlank()) {
+                    return Response.status(Response.Status.BAD_REQUEST)
+                            .entity("This email poll schedule names no integration and cannot be fired.").build();
+                }
+                resourceAccessGuard.requireAccess(integrationId, AccessLevel.EDIT, "channel integration");
+            }
             if (TeamCadenceService.isTeamCadenceSchedule(schedule != null ? schedule.getMetadata() : null)) {
                 // A cadence fire pulls the group's backlog and runs a discussion as the
                 // cadence's creator: the same authority as editing the group's cadences,
@@ -564,8 +575,22 @@ public class RestScheduleStore implements IRestScheduleStore {
             // fire log read as a fresh first try and hid the failure history.
             int attemptNumber = schedule.getFailCount() + 1;
             ScheduleFireLog fireLog = null;
+            boolean abandoned = false;
             try {
-                fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), attemptNumber);
+                // Bounded like a polled fire: unbounded, a long run outlived its claim's
+                // lease and the poller started the same schedule a second time.
+                String instanceId = pollerService.getInstanceId();
+                fireLog = SchedulePollerService.runWithinDeadline(() -> fireExecutor.fire(schedule, instanceId, attemptNumber),
+                        pollerService.manualFireDeadline());
+            } catch (SchedulePollerService.FireAbandonedException e) {
+                // Not released: a worker that ignores the interrupt is still acting, and
+                // releasing the
+                // claim would let the poller start another attempt alongside it. The lease
+                // expiry
+                // counts it as a failed attempt.
+                abandoned = true;
+                LOGGER.warnf("Manual fire of schedule %s was abandoned (%s); its claim is left to expire", sanitize(scheduleId),
+                        e.getMessage());
             } finally {
                 // Always release the claim, whatever happened — a manual fire that left
                 // the row CLAIMED would block the poller until the lease expired.
@@ -583,12 +608,20 @@ public class RestScheduleStore implements IRestScheduleStore {
                 // still reaches the caller.
                 boolean wasInterrupted = Thread.interrupted();
                 try {
-                    pollerService.recordManualFireOutcome(schedule, fireLog);
+                    if (!abandoned) {
+                        pollerService.recordManualFireOutcome(schedule, fireLog);
+                    }
                 } finally {
                     if (wasInterrupted) {
                         Thread.currentThread().interrupt();
                     }
                 }
+            }
+            if (abandoned) {
+                return Response.status(Response.Status.GATEWAY_TIMEOUT)
+                        .entity("The fire did not finish within its bound and was interrupted; it may still be running. The schedule stays claimed "
+                                + "until its lease expires, then counts as a failed attempt.")
+                        .build();
             }
             return Response.ok(fireLog).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -772,6 +805,10 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private static String manualFireRefusalReason(ScheduleConfiguration schedule) {
         FireStatus status = schedule != null ? schedule.getFireStatus() : null;
+        if (schedule != null && !schedule.isEnabled()) {
+            return "This schedule is disabled, and a disabled schedule cannot be claimed or fired. "
+                    + "Use POST /schedulestore/schedules/{id}/enable first.";
+        }
         if (FireStatus.DEAD_LETTERED == status) {
             return "This schedule is dead-lettered after " + schedule.getFailCount()
                     + " failed attempt(s) and will not fire until it is requeued. "
@@ -909,6 +946,12 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private Response guardManagedSchedule(ScheduleConfiguration stored) {
         Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        if (EmailPollSchedules.isEmailPollSchedule(md)) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is managed by email channel integration '" + EmailPollSchedules.integrationId(md)
+                            + "'. Change pollSeconds on the integration instead; it re-creates this schedule when saved.")
+                    .build();
+        }
         // A continuation schedule is the engine's own next turn of a conversation:
         // changing its input or timing, or clearing its marker with an empty metadata
         // object, would let an editor steer or orphan another user's job. Judged on the
@@ -988,6 +1031,16 @@ public class RestScheduleStore implements IRestScheduleStore {
      * they have no access to. The ids needed are readable by anyone with VIEW.
      */
     private Response rejectIngestionBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && EmailPollSchedules.declaresEmailPoll(schedule.getMetadata())) {
+            // A poll fire reads a mailbox with its integration's credentials and starts
+            // turns; a forged body naming someone's integration would do that on demand.
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — email poll schedules are minted internally only",
+                    sanitize(operation), EmailPollSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as email polls (metadata " + EmailPollSchedules.METADATA_TYPE_KEY + ") cannot be created or "
+                            + "updated via this API. They are managed automatically when an email channel integration is saved.")
+                    .build();
+        }
         if (schedule != null && RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())) {
             LOGGER.warnf("Refused %s of a schedule whose body declares %s — ingestion schedules are minted "
                     + "internally only", operation, RagIngestionSchedules.METADATA_TYPE_KEY);
@@ -1247,6 +1300,9 @@ public class RestScheduleStore implements IRestScheduleStore {
         Map<String, Object> metadata = schedule.getMetadata();
         if (RagIngestionSchedules.isIngestionSchedule(metadata)) {
             return RagIngestionSchedules.ragConfigId(metadata);
+        }
+        if (EmailPollSchedules.isEmailPollSchedule(metadata)) {
+            return EmailPollSchedules.integrationId(metadata);
         }
         if (TeamCadenceService.isTeamCadenceSchedule(metadata)) {
             Object groupId = metadata.get(TeamCadenceService.METADATA_GROUP_ID_KEY);

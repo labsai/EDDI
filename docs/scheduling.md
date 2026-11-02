@@ -163,7 +163,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 | `timeZone` | string | `UTC` | IANA timezone (e.g., `Europe/Vienna`). Across a DST change a fixed-time cron (no `*` in the minute or hour field, e.g. `30 2 * * *`) fires once per day: a local time the clocks skip fires at the moment of the transition, a local time they repeat fires only at its first occurrence. Wildcard crons (`*/15 * * * *`, `5 * * * *`) keep their real-time cadence. Two consequences of that (Vixie cron) rule: two fixed times that both land on the transition fire once — `0 2,3 * * *` fires a single time, at 03:00, on the spring-forward day — and a fixed hour *range* such as `0 0-23 * * *` or `0 1-5 * * *` counts as fixed-time, so on the 25-hour fall-back day it fires 24 times and does not repeat the doubled hour. Use `0 * * * *` for a truly hourly cadence |
 | `environment` | string | `production` | Deployment environment |
 | `enabled` | boolean | `true` | Whether the schedule is active. Set on create only: a `PUT` ignores it and keeps the stored value — change it with `/enable` and `/disable` (see [Enabling and disabling](#enabling-and-disabling)) |
-| `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per agent fire. The fire's turn carries it, and the LLM spend gate and tool loop hold the turn to what the conversation had spent before it plus this amount — the priced-spend ceiling `maxCostPerConversationUsd` sets, the tighter of the two winning — so a `persistent` schedule is capped per fire, not over its lifetime. A model call or tool round that would start past it does not run, exactly as with `maxCostPerConversationUsd`. Priced spend needs model prices configured, as for `maxCostPerConversationUsd`. `0` or below means unlimited (PostgreSQL stores `0` as no value). Dream and team-cadence schedules use their own `maxCostPerRun` |
+| `maxCostPerFire` | double | `-1` (unlimited) | Dollar ceiling per agent fire. The fire's turn carries it, and the LLM spend gate and tool loop hold the turn to what the conversation had spent before it plus this amount — the priced-spend ceiling `maxCostPerConversationUsd` sets, the tighter of the two winning — so a `persistent` schedule is capped per fire, not over its lifetime. A model call or tool round that would start past it does not run, exactly as with `maxCostPerConversationUsd`. Priced spend needs model prices configured, as for `maxCostPerConversationUsd`. `0` or below means unlimited (PostgreSQL stores `0` as no value). When the fire starts a new conversation, the agent's startup workflow runs under the same allowance, and the turn gets what is left of it — one budget per fire, not one for startup and another for the turn. Dream and team-cadence schedules use their own `maxCostPerRun` |
 | `oneTimeAt` | string | — | ISO-8601 instant for a single fire. Mutually exclusive with `cronExpression`; exactly one of the two is required for a `CRON` trigger |
 | `metadata` | object | — | Free-form markers read by the fire executor. `{"dreamType": "dream_consolidation"}` dispatches the fire to the Dream service — see [Scheduling a Dream Cycle](user-memory.md#scheduling-a-dream-cycle). A `PUT` that omits `metadata` keeps the stored value (so does one that omits `tenantId` or `allowSelfScheduling`); send `"metadata": null` or `{}` to clear it. A `PUT` to a RAG-ingestion schedule is refused (`409`) — change the source's cron on the knowledge base — and one to a team-cadence schedule needs EDIT on the group |
 
@@ -464,7 +464,25 @@ target must be written:
 - **Claiming is per-lease compare-and-set**, so exactly one instance wins a given
   poll. But **delivery is at-least-once**: if the winner dies mid-fire, the lease
   expires (`eddi.schedule.lease-timeout`) and another instance re-claims the same
-  fire. **Scheduled targets must be idempotent.**
+  fire. **Scheduled targets must be idempotent.** A claim that expired without an
+  outcome counts as a **failed attempt**: the re-claim does not re-fire at once but
+  records the failure, retries with backoff and dead-letters after `max-retries` —
+  so a fire that takes its node down (an out-of-memory kill, say) cannot take every
+  node down in turn, forever.
+- A **disabled** schedule cannot be claimed, by the poller or by `POST /{id}/fire`:
+  one disabled between the poll's read and its claim is no longer fired.
+- `POST /{id}/fire` (and the MCP `fire_schedule_now` tool) runs under the same bound as a polled fire
+  (`eddi.schedule.fire-timeout` plus a 30 s grace) instead of without limit, so a
+  manual Dream or ingestion run cannot outlast its claim's lease and be started a
+  second time by the poller.
+- **Claiming is separate from firing.** A poll only claims due schedules and hands
+  each to a bounded fire executor (`eddi.schedule.max-concurrent-fires`); it never
+  waits for them. A fire that runs for minutes therefore does not delay the next
+  poll, and a schedule that falls due meanwhile (a HITL approval deadline, say) is
+  claimed near its due time. Each fire is bounded on its own by `fire-timeout` plus
+  the grace. On shutdown the instance stops claiming, gives in-flight fires a few
+  seconds to finish and then interrupts them; a fire that never reports is
+  recovered through its lease like any other.
 - Instances identify themselves by `eddi.schedule.instance-id`, which is
   auto-derived from the hostname when left empty. In an environment where
   hostnames are recycled or duplicated (some container schedulers), set it
@@ -481,7 +499,8 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 |---|---|---|
 | `eddi.schedule.enabled` | `true` | Master switch. `false` stops all polling — schedules remain stored and simply never fire |
 | `eddi.schedule.poll-interval` | `15s` | How often each instance looks for due schedules. This is the floor on firing punctuality: a schedule due at `12:00:00` fires somewhere in `[12:00:00, 12:00:15)` |
-| `eddi.schedule.poll-batch-size` | `100` | Max schedules claimed per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
+| `eddi.schedule.poll-batch-size` | `100` | Max due schedules looked at per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
+| `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll takes a free slot before it claims a schedule, so nothing is claimed that cannot start; the rest stay due for the next cycle or another instance |
 | `eddi.schedule.lease-timeout` | `10m` | How long a claimed schedule is considered owned before another instance may re-claim it. It must outlast `fire-timeout` plus a 30 s grace, or a schedule becomes reclaimable while its fire is still running and fires twice; a shorter value is raised at startup to `fire-timeout + 30s + 1m`, with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before a fire is `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` seconds |

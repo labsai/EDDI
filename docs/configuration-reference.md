@@ -107,7 +107,7 @@ two.
 |---|---|---|---|
 | `quarkus.http.port` | `QUARKUS_HTTP_PORT` | `7070` | HTTP port (`quarkus.http.ssl-port` is `7443`, opened only once a TLS certificate is configured — the compose stacks publish it, and it refuses connections until then) |
 | `quarkus.http.host` | `QUARKUS_HTTP_HOST` | Quarkus default: `localhost` in dev and test, `0.0.0.0` otherwise | Bind address. The container image sets `-Dquarkus.http.host=0.0.0.0` in `JAVA_OPTS_APPEND`, and a system property outranks an environment variable, so in the image change it through `JAVA_OPTS_APPEND`, not `QUARKUS_HTTP_HOST` |
-| `quarkus.http.cors.origins` | `QUARKUS_HTTP_CORS_ORIGINS` | `http://localhost:3000,http://localhost:7070,https://localhost:7443` | Origins allowed to call the API from a browser. Add the origin of every page that embeds the Chat UI or calls EDDI from another host. CORS itself is on (`quarkus.http.cors.enabled=true`); the allowed methods and headers are set next to it in `application.properties`, and `Location`, `Mcp-Session-Id` and `Retry-After` are exposed to browser clients. While authentication is off these origins are also the only foreign ones allowed to send state-changing requests (see `eddi.security.unauthenticated.allowed-hosts`) |
+| `quarkus.http.cors.origins` | `QUARKUS_HTTP_CORS_ORIGINS` | `http://localhost:3000,http://localhost:7070,https://localhost:7443` | Origins allowed to call the API from a browser. Add the origin of every page that embeds the Chat UI or calls EDDI from another host. CORS itself is on (`quarkus.http.cors.enabled=true`); the allowed methods and headers are set next to it in `application.properties`, and `Location`, `Mcp-Session-Id`, `Retry-After` and `X-Eddi-Warnings` (a channel save's warning codes) are exposed to browser clients. While authentication is off these origins are also the only foreign ones allowed to send state-changing requests (see `eddi.security.unauthenticated.allowed-hosts`) |
 | `quarkus.http.limits.max-body-size` | `QUARKUS_HTTP_LIMITS_MAX_BODY_SIZE` | `60M` | The absolute ceiling on any request body, enforced before EDDI sees the request. Only a knowledge base's file upload may use all of it; every other endpoint is held to `eddi.http.limits.default-max-body-size` (below) |
 | `eddi.rest.listing.max-limit` | `EDDI_REST_LISTING_MAX_LIMIT` | `1000` | Largest `limit` any paginated listing accepts — the descriptor listings of every config store and the cross-resource `/descriptors`, the conversation listing, `/usermemorystore/memories/{userId}/visible` and both `/administration/logs` listings. A request above it, or with a negative `index`/`skip`, is refused with **400** (`{"error": …}`) rather than silently clamped, so a client that asked for more than a page holds cannot mistake a truncated page for the whole; page through `index` instead. The Manager's largest page is 1000 (agent-name lookups, dashboard counts), so do not set it lower |
 
@@ -146,6 +146,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
 | `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
 | `eddi.nats.tls.enabled` | `false` | TLS to NATS |
+| `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host(s) in `eddi.nats.url` (HTTPS-style endpoint identification; an IP address needs an IP SAN). `false` trusts any certificate the trust store accepts, for any host |
 | `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
 | `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
 | `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
@@ -155,6 +156,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
 | `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
 | `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others |
+| `eddi.cluster.erasure-marker-ttl` | `P7D` | How long the cluster-wide GDPR erasure marker of a conversation lives. A node that kept a dead letter of the conversation locally while NATS was down discards it instead of forwarding it for as long as the marker exists; past it, only the check that the conversation still exists applies (see [GDPR](gdpr-compliance.md)) |
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
 | `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
@@ -212,6 +214,7 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 | Property | Default | Description |
 |---|---|---|
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. `0` turns it off |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream). Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
@@ -226,7 +229,8 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 |---|---|---|
 | `eddi.schedule.enabled` | `true` | Master switch for the poller |
 | `eddi.schedule.poll-interval` | `15s` | How often due schedules are looked for — the floor on firing punctuality |
-| `eddi.schedule.poll-batch-size` | `100` | Schedules claimed per cycle |
+| `eddi.schedule.poll-batch-size` | `100` | Schedules looked at per cycle |
+| `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll claims no more schedules than there are free slots and never waits for its fires, so a long fire does not delay claiming other due schedules |
 | `eddi.schedule.lease-timeout` | `10m` | Claim lease before another instance may re-claim. Must outlast `fire-timeout` + 30 s, or a running fire becomes reclaimable and executes twice; a shorter value is raised at startup (to `fire-timeout + 30s + 1m`) with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` |
@@ -402,7 +406,8 @@ Full guide: [hitl.md](hitl.md).
 |---|---|---|
 | `eddi.hitl.tool.enabled` | `true` | Per-tool-call approval gating |
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
-| `eddi.hitl.tool.journal-retention` | `30d` | How long tool-approval journal entries are kept |
+| `eddi.hitl.tool.journal-retention` | `30d` | How long completed tool-approval journal entries are kept. A claim left `EXECUTING` by a crash inside the tool is kept until its conversation is deleted, so a later approval of the same pause cannot run the call again |
+| `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
@@ -556,10 +561,14 @@ Full guide: [slack-integration.md](slack-integration.md).
 
 ### Email
 
-There is no email channel yet. These settings govern the **system mailer** — the deployment's one SMTP sender, used
-today for [HITL email notifications](hitl.md#email-notifications) — its outbound message ledger, the mail socket
-guard the coming IMAP/SMTP transports will connect through, and the DNS lookups of sender authentication (DKIM and
-DMARC) that the email channel will use. Details:
+These settings govern the **system mailer** — the deployment's one SMTP sender, used for
+[HITL email notifications](hitl.md#email-notifications) and the email channel's owner notices — the email message
+ledger, the mail socket guard every IMAP/SMTP connection goes through, the DNS lookups of sender authentication (DKIM
+and DMARC), and the polling and replies of [email channel integrations](email-integration.md) (trigger and
+conversation mode). An email integration's own settings — its SMTP relay for replies included — are its
+`platformConfig`, listed in [email-integration.md](email-integration.md#every-key); a channel reply never goes through
+the system mailer.
+Details:
 [security.md → Mail Sockets](security.md#mail-sockets--safesocketconnector),
 [security.md → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc).
 
@@ -575,17 +584,22 @@ DMARC) that the email channel will use. Details:
 | `eddi.mail.smtp.username` | *(unset)* | SMTP username, together with `eddi.mail.smtp.password`. Neither this nor a connection means no `AUTH` (an IP-allowlisted relay) |
 | `eddi.mail.smtp.password` | *(unset)* | SMTP password. Supply it through the environment (`EDDI_MAIL_SMTP_PASSWORD`) or a secret-backed config source, not `application.properties` |
 | `eddi.mail.notify.allowed-recipient-domains` | *(unset — the domain of `eddi.mail.smtp.from` and its subdomains)* | Comma-separated domains HITL email notifications may be sent to: an exact domain (`example.com`), `*.domain` for its subdomains (not the domain itself), or `*` for any. Recipients come from agent configs that anyone with EDIT on an agent can change, while the mail leaves through this relay from this sender, so the default keeps it inside the sender's organisation. A recipient outside is refused at agent save time when a mailer is configured (accepted with a WARN when not) and is never mailed (ledger row `SUPPRESSED`, `outcome=not_allowed`). An entry that is not a domain makes notifications go to nobody, with an ERROR at startup |
-| `eddi.mail.notify.max-per-recipient-per-hour` | `30` | Flood brake: at most this many notifications per recipient in any hour, counted across the cluster from the email ledger (suppressed rows do not count). Over it, rows are `SUPPRESSED` (`outcome=rate_limited`) and each instance logs one WARN per recipient per hour, naming the recipient by hash. Concurrent pauses on several instances can overshoot by a few. `0` or less disables the limit |
-| `eddi.email.ledger-retention` | `30d` | How long an email ledger row (one per notification: recipient, state, Message-ID — never a body) is kept. Zero or negative falls back to `30d` |
-| `eddi.email.outbound.max-attempts` | `6` | Send attempts before a notification is marked `FAILED`. A 5xx refusal fails it at once |
+| `eddi.mail.notify.max-per-recipient-per-hour` | `30` | Flood brake: at most this many notifications per recipient in any hour, counted across the cluster from the email ledger (suppressed rows do not count). Over it, rows are `SUPPRESSED` (`outcome=rate_limited`) and each instance logs one WARN per recipient per hour, naming the recipient by its GDPR pseudonym (keyed or salted; see [HITL](hitl.md)). Concurrent pauses on several instances can overshoot by a few. `0` or less disables the limit |
+| `eddi.email.ledger-retention` | `30d` | How long an email ledger row (one per notification, reply or inbound mail: address, state, Message-ID — never a body) is kept. Zero or negative falls back to `30d`. A reply's Message-ID stops threading the conversation once its row expires (the `References` thread key still does) |
+| `eddi.email.outbound.max-attempts` | `6` | Send attempts before a notification or a conversation-mode reply is marked `FAILED`. A 5xx refusal fails it at once |
 | `eddi.email.outbound.retry-backoff` | `1m` | Delay before the first retry; it doubles per attempt, capped at one hour |
-| `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so instances never send the same row twice |
+| `eddi.email.ledger.sweep-interval` | `30s` | How often each instance claims due retries, removes expired rows and refreshes `eddi_email_ledger_pending`. Claims are conditional updates, so two instances never work the same row at once; a node that dies after the relay accepted a message but before its row was completed leaves it to be sent again when the lease runs out |
 | `eddi.email.allowed-hosts` | *(empty — any public host)* | Comma-separated mail servers (IMAP/SMTP) that channel and knowledge-base authors may name: exact host names, or `*.domain` for its subdomains (not the domain itself). Applied on top of the always-on refusal of private, loopback, link-local and metadata addresses, which an entry here does not lift. An entry that is not a host name fails the first mail connection rather than being ignored |
 | `eddi.email.dns.servers` | *(unset — the system's resolvers)* | Comma-separated DNS servers for DKIM key and DMARC record lookups: `host`, `host:port` or `[v6]:port`. Point an air-gapped deployment at its own resolver. DNSSEC is not required; a validating resolver adds it. A value that cannot be used makes every lookup fail temporarily, with one ERROR — no mail is then authenticated |
 | `eddi.email.dns.timeout` | `5s` | Timeout of one DNS query (one retry). A timeout makes that signature or policy check temporary, never a pass |
 | `eddi.email.dns.cache-max-entries` | `10000` | Size of the TXT answer cache shared by all mailboxes |
 | `eddi.email.dns.cache-max-ttl` | `1h` | Longest time an answer is cached; shorter record TTLs (and, for a missing name, the zone's SOA minimum) are honoured. Temporary failures are never cached |
 | `eddi.email.dkim.max-delivery-age` | `7d` | When a transport passes the time the mailbox server accepted a message (IMAP `INTERNALDATE`), DKIM `x=` (expiry) and `t=` (not in the future) are judged at that instant, so a short-lived signature that was valid on delivery still verifies when the mail is processed later. The instant is never taken as later than now nor earlier than now minus this, so a broken or forged value cannot revive an old signature; without one, signatures are judged at the current time |
+| `eddi.email.poll.max-messages-per-poll` | `50` | Mails one poll of one mailbox processes at most; the rest wait for the next poll. Mails that are still deferred (a budget, a temporary authentication result) do not count |
+| `eddi.email.poll.max-duration` | `2m` | Time one poll may spend before it stops starting new mails. Keep it well below `eddi.schedule.fire-timeout` |
+| `eddi.email.inbound.stranded-after` | `30m` | How long a mail's turn may stay submitted without its completion being recorded before the inbound sweep resolves it from the conversation's state (a lost completion, e.g. a node that died). A mail is never run twice |
+| `eddi.email.inbound.sweep-interval` | `5m` | How often each instance runs the inbound sweep: stranded turns (in conversation mode also rebuilding a reply a dead node did not send, and resubmitting a mail whose turn never ran), and re-creating a missing poll schedule |
+| `eddi.email.reply.sweep-interval` | `30s` | Conversation mode: how often each instance claims due reply retries (`eddi.email.outbound.max-attempts`, `eddi.email.outbound.retry-backoff`). Claims are conditional updates, so two instances never work the same reply at once; a node that dies after the relay accepted a reply but before its row was completed leaves it to be sent again (same Message-ID) when the lease runs out |
 | `eddi.email.dns.max-lookups-per-message` | `10` | Network lookups one message may cause (cache hits are free): one per DKIM signature, at most 5 of which are evaluated, plus up to two for DMARC. Past it, the remaining checks are temporary failures |
 
 ### OpenAI-compatible API

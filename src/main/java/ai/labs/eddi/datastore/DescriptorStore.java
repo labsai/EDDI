@@ -349,8 +349,12 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
         queryFilters.add(new IResourceFilter.QueryFilter(FIELD_DELETED, false));
         IResourceFilter.QueryFilters required = new IResourceFilter.QueryFilters(queryFilters);
 
+        // Every match, not the first ten: callers pick the descriptor the caller may
+        // merge into (workspace, EDIT) from this list, so a cap applied before that
+        // filter could drop the caller's own resource behind ten foreign ones and make
+        // an import create a duplicate instead of updating it.
         List<IResourceStore.IResourceId> matchingIds = resourceStorage.findResources(new IResourceFilter.QueryFilters[]{required},
-                FIELD_LAST_MODIFIED, 0, 10);
+                FIELD_LAST_MODIFIED, 0, IResourceStorage.MAX_RESULT_LIMIT);
 
         return readAll(matchingIds);
     }

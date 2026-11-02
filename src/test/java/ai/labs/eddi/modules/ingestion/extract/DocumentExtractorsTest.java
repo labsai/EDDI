@@ -5,15 +5,23 @@
 package ai.labs.eddi.modules.ingestion.extract;
 
 import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.filter.Filter;
+import org.apache.pdfbox.filter.FilterFactory;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.Deflater;
@@ -22,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -370,6 +379,41 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("a page whose only content stream is Flate is counted, though PDFBox inflates it itself")
+        void singleFlateContentStreamIsCounted() {
+            // PDFBox parses a lone /FlateDecode content stream through a decoder it
+            // builds itself, not through the filter factory the budget wraps.
+            byte[] pdf = loadablePdf(zlib(content(8 * 1024 * 1024)), "/FlateDecode", "\n", 0);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdf, oneMegabyte, false));
+            assertTrue(failure.getMessage().contains("while it is read"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("one unfiltered stream referenced many times from a page is counted every time")
+        void repeatedUnfilteredStreamIsCounted() {
+            // No filter decodes it, so nothing counted it: five references to 900 KB
+            // were parsed as 4.5 MB of content against a 2 MB budget.
+            byte[] pdf = loadablePdf(content(900 * 1024), null, "\n", 5);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.extract(pdf, oneMegabyte, false));
+            assertTrue(failure.getMessage().contains("while it is read"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("a page with a single small Flate or unfiltered content stream is still read")
+        void singleContentStreamsUnderTheBudgetAreRead() {
+            byte[] text = "BT /F1 12 Tf 72 700 Td (hello there) Tj ET\n".getBytes(StandardCharsets.US_ASCII);
+
+            assertTrue(extractor.extract(loadablePdf(zlib(text), "/FlateDecode", "\n", 0), oneMegabyte, false)
+                    .contains("hello there"));
+            assertTrue(extractor.extract(loadablePdf(text, null, "\n", 0), oneMegabyte, false)
+                    .contains("hello there"));
+        }
+
+        @Test
         @DisplayName("an ordinary loadable PDF under the budget is read")
         void aSmallLoadablePdfIsRead() {
             byte[] page = zlib("BT /F1 12 Tf 72 700 Td (hello there) Tj ET\n".getBytes(StandardCharsets.US_ASCII));
@@ -405,6 +449,64 @@ class DocumentExtractorsTest {
             PdfStreamBudget.requireWithin(out.toByteArray(), 1024 * 1024, Instant.now().plusSeconds(30));
         }
 
+        @Test
+        @DisplayName("a file of unterminated stream keywords is scanned in linear time")
+        void unterminatedStreamsAreScannedLinearly() {
+            // Each opening keyword searched to the end of the file for its
+            // "endstream", and back up to 64 KB for its "obj": with no terminators
+            // and no headers, the square of the file's size.
+            byte[] withHeaders = "1 0 obj <<>> stream\n".repeat(200_000).getBytes(StandardCharsets.US_ASCII);
+            // Without an object header the scan measures each stream as Flate, so each
+            // one carries a valid, empty deflate payload that decodes to nothing.
+            var bareOut = new ByteArrayOutputStream();
+            byte[] empty = zlib(new byte[0]);
+            for (int i = 0; i < 200_000; i++) {
+                bareOut.writeBytes("stream\n".getBytes(StandardCharsets.US_ASCII));
+                bareOut.writeBytes(empty);
+            }
+            byte[] bare = bareOut.toByteArray();
+
+            assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> PdfStreamBudget.requireWithin(withHeaders, 1024 * 1024, Instant.now().plusSeconds(60)));
+            assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> PdfStreamBudget.requireWithin(bare, 1024 * 1024, Instant.now().plusSeconds(60)));
+        }
+
+        @Test
+        @DisplayName("a predictor asking for enormous rows is refused before PDFBox allocates them")
+        void hugePredictorRowsAreRefused() throws IOException {
+            // PDFBox allocates two row buffers from /Columns x /Colors x /BitsPerComponent
+            // before it decodes anything, so the decode budget never saw them: this
+            // DecodeParms asked for 2 x 256 MB.
+            try (var budget = PdfDecodeBudget.open(1024 * 1024)) {
+                // Fetched after open(): that is what installs the counted filters.
+                Filter flate = FilterFactory.INSTANCE.getFilter(COSName.FLATE_DECODE);
+                COSDictionary hostile = streamWithPredictor(1 << 26);
+                assertThrows(IOException.class, () -> flate.decode(new ByteArrayInputStream(zlib(new byte[16])),
+                        OutputStream.nullOutputStream(), hostile, 0));
+
+                // An ordinary predicted stream still decodes: two rows of four bytes,
+                // each behind its PNG filter-type byte.
+                var decoded = new ByteArrayOutputStream();
+                flate.decode(new ByteArrayInputStream(zlib(new byte[]{0, 1, 2, 3, 4, 0, 5, 6, 7, 8})), decoded,
+                        streamWithPredictor(4), 0);
+                assertEquals(8, decoded.size());
+                assertFalse(budget.exceeded());
+            }
+        }
+
+        private COSDictionary streamWithPredictor(int columns) {
+            var parameters = new COSDictionary();
+            parameters.setInt(COSName.PREDICTOR, 12);
+            parameters.setInt(COSName.COLUMNS, columns);
+            parameters.setInt(COSName.COLORS, 1);
+            parameters.setInt(COSName.BITS_PER_COMPONENT, 8);
+            var stream = new COSDictionary();
+            stream.setItem(COSName.FILTER, COSName.FLATE_DECODE);
+            stream.setItem(COSName.DECODE_PARMS, parameters);
+            return stream;
+        }
+
         private void assertRefusedBoth(byte[] pdf) {
             var withScan = assertThrows(UnreadableDocumentException.class, () -> extractor.extract(pdf, oneMegabyte));
             assertTrue(withScan.getMessage().contains("compressed stream"), withScan.getMessage());
@@ -422,6 +524,13 @@ class DocumentExtractorsTest {
          * A real, loadable one-page PDF whose content stream is {@code data},
          * referenced {@code refs} times.
          */
+        /**
+         * @param filter
+         *            the stream's /Filter, or null for an unfiltered stream
+         * @param refs
+         *            how many times the page's /Contents array names the stream; 0
+         *            names it once, as a single stream rather than an array
+         */
         private byte[] loadablePdf(byte[] data, String filter, String afterKeyword, int refs) {
             var out = new ByteArrayOutputStream();
             List<Integer> offsets = new ArrayList<>();
@@ -431,10 +540,12 @@ class DocumentExtractorsTest {
             offsets.add(out.size());
             out.writeBytes("2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n".getBytes(StandardCharsets.US_ASCII));
             offsets.add(out.size());
-            out.writeBytes(("3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents ["
-                    + "4 0 R ".repeat(refs) + "]>>endobj\n").getBytes(StandardCharsets.US_ASCII));
+            String contents = refs == 0 ? "4 0 R" : "[" + "4 0 R ".repeat(refs) + "]";
+            out.writeBytes(("3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents " + contents
+                    + ">>endobj\n").getBytes(StandardCharsets.US_ASCII));
             offsets.add(out.size());
-            out.writeBytes(("4 0 obj<</Length " + data.length + "/Filter " + filter + ">>stream" + afterKeyword)
+            String filterEntry = filter == null ? "" : "/Filter " + filter;
+            out.writeBytes(("4 0 obj<</Length " + data.length + filterEntry + ">>stream" + afterKeyword)
                     .getBytes(StandardCharsets.US_ASCII));
             out.writeBytes(data);
             out.writeBytes("\nendstream endobj\n".getBytes(StandardCharsets.US_ASCII));
@@ -464,8 +575,16 @@ class DocumentExtractorsTest {
         @Test
         @DisplayName("gives up with a message once the time budget is spent")
         void honoursItsTimeBudget() {
+            // Enough pages that reading them outlasts one tick of the wall clock, which
+            // is coarse on some platforms (a millisecond or more). With one page the
+            // whole read could finish inside the tick its deadline fell in, and the
+            // test then depended on how fast the scan happened to be.
+            String[] pages = new String[500];
+            Arrays.fill(pages, "Some text");
+            byte[] pdf = OfficeFixtures.pdf(pages);
+
             var failure = assertThrows(UnreadableDocumentException.class,
-                    () -> extractor.extract(OfficeFixtures.pdf("Some text"), limits.withMaxDuration(Duration.ofNanos(1))));
+                    () -> extractor.extract(pdf, limits.withMaxDuration(Duration.ofNanos(1))));
 
             assertTrue(failure.getMessage().contains("too long"), failure.getMessage());
         }

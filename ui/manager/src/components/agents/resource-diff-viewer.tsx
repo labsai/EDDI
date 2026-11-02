@@ -43,6 +43,9 @@ const MAX_WORD_DIFF_LENGTH = 10_000;
 const WORD_DIFF_TIMEOUT_MS = 50;
 const WORD_DIFF_BUDGET_MS = 250;
 
+/** Ceiling for the line comparison itself, which has no other bound. */
+const LINE_DIFF_BUDGET_MS = 1500;
+
 type LineKind = "added" | "removed" | "context";
 
 interface Segment {
@@ -108,7 +111,17 @@ export function ResourceDiffViewer({
     // A re-indented broken side nests wrongly from its first stray bracket on,
     // so comparing indentation would report every later line as changed. There
     // it is layout, not content, and is left out of the comparison.
-    const changes = diffLines(targetText, sourceText, { ignoreWhitespace: brokenText !== null });
+    // Bounded: the comparison runs on the render thread, and two large, very
+    // different documents are quadratic. Over budget, diffLines returns
+    // undefined and the two sides are shown as one removal and one addition.
+    const changes =
+      diffLines(targetText, sourceText, {
+        ignoreWhitespace: brokenText !== null,
+        timeout: LINE_DIFF_BUDGET_MS,
+      }) ?? [
+        { value: targetText, removed: true, added: false, count: 1 },
+        { value: sourceText, removed: false, added: true, count: 1 },
+      ];
     const lines = markChangedWords(toDiffLines(changes));
     const counts: Record<LineKind, number> = { added: 0, removed: 0, context: 0 };
     for (const line of lines) counts[line.kind]++;

@@ -35,7 +35,7 @@ const typeColors: Record<string, string> = {
   string: "text-emerald-600 bg-emerald-500/10 dark:text-emerald-400",
   number: "text-sky-600 bg-sky-500/10 dark:text-sky-400",
   boolean: "text-violet-600 bg-violet-500/10 dark:text-violet-400",
-  array: "text-amber-600 bg-amber-500/10 dark:text-amber-400",
+  array: "text-ochre-600 bg-ochre-500/10 dark:text-ochre-400",
   object: "text-rose-600 bg-rose-500/10 dark:text-rose-400",
   null: "text-muted-foreground bg-muted",
 };

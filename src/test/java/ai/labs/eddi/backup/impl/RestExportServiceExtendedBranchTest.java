@@ -108,6 +108,8 @@ class RestExportServiceExtendedBranchTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
+        // Workspaces off: every listed snippet is the caller's to VIEW.
+        lenient().when(resourceAccessGuard.canAccess(any(), any())).thenReturn(true);
         exportService = new RestExportService(
                 documentDescriptorStore, agentStore, workflowStore,
                 mock(IParserStore.class), dictionaryStore, ruleSetStore, apiCallsStore, llmStore,

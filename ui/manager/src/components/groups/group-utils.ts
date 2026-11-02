@@ -55,7 +55,14 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
   // watching from being visibly rewritten is worth more than one comma space.
   /(?<!`)`(?!`)[^`\n]*$/,
 
-  /\]\([^)\s]*(?:\s+"[^"]*")?\)/g, // markdown link / image destination
+  // Markdown link / image destination. Both quantifiers are bounded: unbounded,
+  // a run of `](` with no closing paren rescans the whole remaining text from
+  // every opener — quadratic (100k chars measured at ~5s). No real destination
+  // approaches the bounds; one that does is simply left unprotected.
+  // The destination run is taken ATOMICALLY (a lookahead plus its backreference): a shorter run can never
+  // be followed by the title or the closing paren (the next character would be one the run accepts), so
+  // giving characters back only retried hopeless matches, which cost ~750 ms on 100k characters of "](".
+  /\]\((?=([^)\s]{0,2048}))\1(?:\s+"[^"]{0,512}")?\)/g,
   /<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>/g, // autolink
   /\bhttps?:\/\/[^\s)]+/g, // bare URL
 ];
@@ -106,13 +113,34 @@ function maskIndentedCode(text: string, push: (m: string) => string): string {
   // rewrote real code — "    bar(c,D);" became "    bar(c, D);".
   const codeLines = new Set<number>();
 
+  // Line table built once. Re-splitting `text.slice(0, offset)` for every run
+  // made this quadratic in the number of runs (80k chars of separated runs
+  // measured at ~2s on the main thread).
+  const lines = text.split("\n");
+  const lineStarts: number[] = new Array<number>(lines.length);
+  let position = 0;
+  for (let l = 0; l < lines.length; l++) {
+    lineStarts[l] = position;
+    position += (lines[l] ?? "").length + 1;
+  }
+  const lineAt = (offset: number): number => {
+    // INDENTED_RUN is `^`-anchored, so offset is always a line start.
+    let lo = 0;
+    let hi = lineStarts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if ((lineStarts[mid] ?? 0) <= offset) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+
   return text.replace(INDENTED_RUN, (match: string, offset: number) => {
-    const before = text.slice(0, offset).split("\n");
-    const startLine = before.length - 1;
+    const startLine = lineAt(offset);
 
     let i = startLine - 1;
-    while (i >= 0 && (before[i] ?? "").trim() === "") i--;
-    const prev = i >= 0 ? before[i] : undefined;
+    while (i >= 0 && (lines[i] ?? "").trim() === "") i--;
+    const prev = i >= 0 ? lines[i] : undefined;
 
     const isCode =
       // A run that itself opens with a bullet is a nested list, never code.
@@ -720,6 +748,33 @@ export function parseStructuredItems(
 
 // ─── Emoji Verification Parser ───────────────────────────────────
 
+/** The header part of a verification line (the mark and subject, up to the colon) is short; the detail after it is not bounded. */
+const MAX_VERIFICATION_HEAD = 2000;
+
+/**
+ * `✅|❌ [**]subject[**]: detail` — parsed with plain string steps. The regex
+ * this replaced had overlapping whitespace and subject character classes and
+ * backtracked super-linearly on a long whitespace-only line with no colon.
+ */
+function matchEmojiVerificationLine(line: string): { passed: boolean; subject: string } | null {
+  const mark = line.charAt(0);
+  if (mark !== "✅" && mark !== "❌") return null;
+  const colon = line.indexOf(":");
+  // Bound the header, not the line: a long detail after the colon is still a real verdict.
+  if (colon < 0 || colon > MAX_VERIFICATION_HEAD || colon === line.length - 1) return null;
+  const head = line.slice(1, colon);
+  // At least one whitespace character must separate the mark from the subject.
+  if (head.length === head.trimStart().length) return null;
+  let subject = head.trim();
+  if (subject.startsWith("**")) subject = subject.slice(2);
+  else if (subject.startsWith("*")) subject = subject.slice(1);
+  if (subject.endsWith("**")) subject = subject.slice(0, -2);
+  else if (subject.endsWith("*")) subject = subject.slice(0, -1);
+  subject = subject.trim();
+  if (!subject || subject.includes("*")) return null;
+  return { passed: mark === "✅", subject };
+}
+
 /**
  * Parse human-readable verification text with ✅/❌ emoji into structured items.
  * Returns null if no ✅/❌ lines are found (fallback to markdown rendering).
@@ -742,16 +797,11 @@ export function parseEmojiVerification(content: string): StructuredItem[] | null
     }
   };
 
-  const emojiLineRe = /^([✅❌])\s+\*{0,2}([^*\n:]+?)\*{0,2}\s*:\s*(.+)/;
-
   for (const line of lines) {
-    const match = emojiLineRe.exec(line);
+    const match = matchEmojiVerificationLine(line);
     if (match) {
       flushCurrent();
-      current = {
-        subject: (match[2] ?? "").trim(),
-        passed: match[1] === "✅",
-      };
+      current = { subject: match.subject, passed: match.passed };
     } else if (current) {
       const trimmedLine = line.trim();
       if (trimmedLine || feedbackLines.length > 0) {
@@ -814,5 +864,52 @@ export function safeFormatDate(
     });
   } catch {
     return String(val);
+  }
+}
+
+// ─── Safe JSON pretty-printing ───────────────────────────────────
+
+/** Above this size, or nesting depth, the content is shown as written. */
+const MAX_PRETTY_BYTES = 65_536;
+const MAX_PRETTY_DEPTH = 32;
+
+/**
+ * Greatest bracket nesting depth of `content`, ignoring brackets inside
+ * strings. Indentation costs depth × lines characters, so compact deeply nested
+ * content (256 KiB is allowed) would otherwise expand to hundreds of MB.
+ */
+function jsonNestingDepth(content: string): number {
+  let depth = 0;
+  let max = 0;
+  let inString = false;
+  for (let i = 0; i < content.length; i++) {
+    const ch = content[i];
+    if (inString) {
+      if (ch === "\\") i++;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') {
+      inString = true;
+    } else if (ch === "{" || ch === "[") {
+      if (++depth > max) max = depth;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+    }
+  }
+  return max;
+}
+
+/**
+ * A stale/corrupt artifact must still render — never let a JSON.parse failure
+ * blank the panel. Content too large or too deeply nested to indent cheaply is
+ * returned as written.
+ */
+export function formatJsonSafely(content: string): string {
+  if (content.length > MAX_PRETTY_BYTES || jsonNestingDepth(content) > MAX_PRETTY_DEPTH) {
+    return content;
+  }
+  try {
+    return JSON.stringify(JSON.parse(content), null, 2);
+  } catch {
+    return content;
   }
 }

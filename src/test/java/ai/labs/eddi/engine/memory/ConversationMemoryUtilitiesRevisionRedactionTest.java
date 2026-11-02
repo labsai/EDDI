@@ -82,6 +82,37 @@ class ConversationMemoryUtilitiesRevisionRedactionTest {
                 "the withheld names match the persisted field names");
     }
 
+    @Test
+    @DisplayName("the approver projection drops the revision candidate from the redo cache too")
+    void approverProjectionStripsTheRedoCache() throws Exception {
+        var snapshot = snapshotWith(stepWith(new ResultSnapshot("output:text", "hello", List.of("hello"), new Date(), "wf-1", true)));
+        // After cancel + undo the candidate-bearing step sits in the redo cache.
+        snapshot.getRedoCache().push(stepWith(new ResultSnapshot(HitlRevisionCandidate.STEP_KEY, candidate().toMap(),
+                List.of(candidate().toMap()), new Date(), "wf-1", false)));
+
+        ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot);
+
+        String served = new ObjectMapper().writeValueAsString(snapshot);
+        assertFalse(served.contains("SECRET-SYSTEM-PROMPT"), "the system prompt appears nowhere in the served snapshot: " + served);
+    }
+
+    @Test
+    @DisplayName("stripAuditData removes audit:* (but not the token usage) from steps and the redo cache")
+    void stripAuditDataCoversStepsAndRedoCache() throws Exception {
+        var snapshot = snapshotWith(stepWith(new ResultSnapshot("audit:compiled_prompt", SYSTEM_PROMPT, null, new Date(), "wf-1", false),
+                new ResultSnapshot(MemoryKeys.AUDIT_TOKEN_USAGE, Map.of("input", 3), null, new Date(), "wf-1", false),
+                new ResultSnapshot("output:text", "hello", List.of("hello"), new Date(), "wf-1", true)));
+        snapshot.getRedoCache().push(stepWith(new ResultSnapshot("audit:compiled_prompt", SYSTEM_PROMPT, null, new Date(), "wf-1", false)));
+
+        ConversationMemoryUtilities.stripAuditData(snapshot);
+
+        String served = new ObjectMapper().writeValueAsString(snapshot);
+        assertFalse(served.contains("SECRET-SYSTEM-PROMPT"), served);
+        assertTrue(served.contains(MemoryKeys.AUDIT_TOKEN_USAGE));
+        assertTrue(served.contains("hello"));
+        assertNull(ConversationMemoryUtilities.stripAuditData(null));
+    }
+
     private static HitlRevisionCandidate candidate() {
         var candidate = new HitlRevisionCandidate();
         candidate.setWorkflowId("wf-1");

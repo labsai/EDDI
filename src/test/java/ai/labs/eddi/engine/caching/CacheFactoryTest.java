@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.caching;
 
+import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.cluster.ISharedKv;
 import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
@@ -470,5 +471,19 @@ class CacheFactoryTest {
 
         assertInstanceOf(SharedKvCache.class, cache);
         verify(nats).bucket(new SharedBucket("DEDUP", Duration.ofMinutes(10), -1));
+    }
+
+    @Test
+    void evictLocal_dropsTheKeyNamedByItsHashAndKeepsTheRest() {
+        ICache<String, String> cache = factory.getCache("agentTriggers");
+        cache.put("greeting", "a");
+        cache.put("support", "b");
+
+        factory.evictLocal("agentTriggers", KvKeys.hashed("greeting"));
+        // A second event over the same keys is answered from the remembered hashes.
+        factory.evictLocal("agentTriggers", KvKeys.hashed("nothing-cached"));
+
+        assertNull(cache.get("greeting"));
+        assertEquals("b", cache.get("support"));
     }
 }

@@ -209,12 +209,32 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
+    public List<String> findDigestPendingRuleIds(int limit) {
+        List<String> ruleIds = new ArrayList<>();
+        for (String ruleId : events.distinct("ruleId", eq("state", AlertEvent.State.DIGEST_PENDING.name()), String.class)) {
+            if (ruleId != null) {
+                ruleIds.add(ruleId);
+                if (ruleIds.size() >= limit) {
+                    break;
+                }
+            }
+        }
+        return ruleIds;
+    }
+
+    @Override
     public long markDigested(Collection<String> ids) {
         if (ids.isEmpty()) {
             return 0;
         }
         return events.updateMany(and(in("_id", ids), eq("state", AlertEvent.State.DIGEST_PENDING.name())),
                 combine(set("state", AlertEvent.State.DIGESTED.name()), inc("version", 1L))).getModifiedCount();
+    }
+
+    @Override
+    public long releaseDigestPending(String ruleId) {
+        return events.updateMany(and(eq("ruleId", ruleId), eq("state", AlertEvent.State.DIGEST_PENDING.name())),
+                combine(set("state", AlertEvent.State.INBOX_ONLY.name()), inc("version", 1L))).getModifiedCount();
     }
 
     @Override

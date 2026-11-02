@@ -112,6 +112,8 @@ can reach EDDI.
 |--------|------|-------------|
 | `eddi_tool_execution_failure` | Counter | Failed tool executions (by tool name) |
 | `eddi_tool_execution_ratelimited` | Counter | Rate-limited tool executions |
+| `eddi_tool_quota_decisions` | Counter | `toolQuotas` decisions per call (tags `tool`, `outcome`: `allowed`, `refused`, `precheck_refused`, `unavailable`, `released`) |
+| `eddi_tool_quota_store_failures` | Counter | `toolQuotas` counter-store operations that failed; the call was refused (fail closed). Tag `operation` |
 | `eddi_tool_ratelimit_allowed` | Counter | Allowed rate limit checks (by tool) |
 | `eddi_tool_ratelimit_denied` | Counter | Denied rate limit checks (by tool) |
 | `eddi_tool_ratelimit_remaining` | Gauge | Remaining rate limit budget |

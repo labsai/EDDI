@@ -267,7 +267,7 @@ export function AddExtensionDialog({
                 className="rounded-md p-1 text-muted-foreground hover:bg-secondary transition-colors"
                 data-testid="back-to-types"
               >
-                <ArrowLeft className="h-5 w-5" />
+                <ArrowLeft className="h-5 w-5 rtl:rotate-180" />
               </button>
             ) : (
               <Plus className="h-5 w-5 text-primary" />

@@ -130,4 +130,17 @@ class ToolLoopResumerSelfUngatingTest {
         assertNull(resumer.selfUngating(call("{}"), null,
                 resolving("PUT", "http://eddi/agentstore/agents/" + OTHER_AGENT_ID, "{}"), " "));
     }
+
+    @Test
+    @DisplayName("an approved MCP management call is judged by its arguments too: the URI is the server, not the resource")
+    void mcpEnvelopeArgumentsAreChecked() {
+        Map<String, ToolRequestResolver> mcp = Map.of("write",
+                RemoteToolRequestResolvers.forMcp("https://eddi.example/mcp", "update_resource", true));
+
+        assertEquals(SelfUngatingGuard.GATE_WRITE_REASON, resumer.selfUngating(
+                call("{\"resourceType\":\"langchain\",\"body\":{\"toolApprovals\":{}}}"), null, mcp, AGENT_ID));
+        assertEquals(SelfUngatingGuard.OWN_AGENT_REASON,
+                resumer.selfUngating(call("{\"agentId\":\"" + AGENT_ID + "\"}"), null, mcp, AGENT_ID));
+        assertNull(resumer.selfUngating(call("{\"agentId\":\"" + OTHER_AGENT_ID + "\"}"), null, mcp, AGENT_ID));
+    }
 }

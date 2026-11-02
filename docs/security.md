@@ -155,7 +155,12 @@ filter, so it also covers `/mcp`, `/q/*` and static assets):
   the scheme may differ behind a TLS-terminating proxy) nor in
   `quarkus.http.cors.origins` — `Origin: null` included — or, with no `Origin`,
   `Sec-Fetch-Site: cross-site` or `same-site`. A request with neither header
-  comes from a non-browser client (curl, an SDK) and passes.
+  comes from a non-browser client (curl, an SDK) and passes. The same check
+  covers the `GET` routes that change state despite the method (and `HEAD` on
+  them, which JAX-RS answers by running the `GET`) — today
+  `GET /agents/managed/{intent}/{userId}…`, which creates (or replaces) the
+  managed conversation — so an `<img>` or link on another site cannot start
+  conversations on the instance.
 
 `/q/health` is exempt from both. EDDI logs one `[SECURITY]` WARN at startup
 describing the policy, and a WARN the first time it refuses each host (at most 32
@@ -657,8 +662,9 @@ The checks above resolve the host; the HTTP client then resolves it **again** to
 
 | Path | Guard | What is left |
 | --- | --- | --- |
-| httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. | Nothing for the address check. With protection off, the per-hop "no step into a more private class" rule still compares by name |
+| httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. With protection off, a redirect hop may connect to a private or loopback peer only when the hop before it connected to that same class (or the host is allow-listed) — the "no step into a more private class" rule, applied to the connected peer as well as the name. | Nothing for the address check |
 | `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
+| LLM providers and embedding models (langchain4j JDK client, `BoundedJdkHttpClient`) | Models are cached for as long as they are used, so the endpoint is validated when the model is built **and** again before every request the cached client sends (OpenAI, OpenAI-compatible presets, Ollama, Anthropic, Gemini, Mistral; OpenAI and Ollama embeddings). | The same cache-expiry window as any pre-connect check. Providers built on their own SDK transport (Azure, Bedrock, Vertex, Oracle, Hugging Face; the other embedding providers) and vector stores are checked at build time only. A MongoDB Atlas store's checks cover the hosts its connection string names; replica-set members the driver discovers from those seeds are not re-checked, so list only seeds you trust |
 | MCP servers (langchain4j transport, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again inside the transport's per-request header hook, before each request — handshake, `tools/list`, every tool call — is sent. | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
 
 Keep `networkaddress.cache.ttl` at its default or above 0: with the positive cache off every lookup is fresh and the two answers can differ at will.
@@ -694,6 +700,28 @@ as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` 
 
 The allowlist does **not** exempt private addresses: an on-premises mail server named by a channel or knowledge-base
 author is refused.
+
+The [email channel](email-integration.md) is such an author: its IMAP host — and in conversation mode its SMTP relay
+(`smtpHost`, 587 with STARTTLS required or 465 with TLS) — is checked by this policy when the integration is saved and
+again on every poll and every reply. A channel reply never goes through the operator policy or the system mailer: the
+transport refuses any endpoint that is not an author-policy SMTP endpoint, and refuses outright for an integration
+that is not in conversation mode. Its other guards — sender authentication before identity, the loop guard,
+allow/blocklists, the claim that keeps a mail from running twice, mail rendered as template *data*, executables never
+stored, unauthenticated senders without memory, the sender in the thread key (hijack guard) — are described in
+[email-integration.md → Security](email-integration.md#security).
+
+### Email replies (conversation mode)
+
+| Threat | Guard |
+|---|---|
+| Backscatter to a forged `From` | `requireAuthentication` is forced on: an unauthenticated mail never reaches a turn. The reply decision (`EmailReplyRecipients`) also requires an authenticated email identity (never `email-anon:`) and the `aligned-pass` verdict on the answered mail's step, so a reply cannot be produced even for a turn that should not have run |
+| The model choosing a recipient | No tool or output field names one. The one recipient is the authenticated `From` of the answered mail (from the ledger, cross-checked with the step); never `Cc`; the `Reply-To` only with `honorReplyTo` and exactly one address (warned at save) |
+| Thread hijack with a known Message-ID | A mail continues a conversation through EDDI's own Message-IDs only when its authenticated sender started it, or with `anyAuthenticatedParticipant` received a reply in it; everyone else gets their own conversation |
+| Reply loops | `Auto-Submitted: auto-replied` on every reply, the inbound loop guard, and `maxRepliesPerThreadPerHour` counted from the ledger |
+| Spoofed bounces suppressing someone | A delivery report counts only for a Message-ID this integration minted (random) and only for that reply's recipient |
+| Header injection | Subject, display name and addresses are refused with a line break or control character by the renderer; `fromName` is refused at save |
+| Template injection through the answer | `replyTemplate` is author text; the agent output and the subject are substituted as data by the restricted engine |
+| Duplicate or lost replies | One ledger row per (conversation, step, kind) under a unique key; first attempt inline, retries with backoff, rebuild from the conversation after a crash; no body stored |
 
 ### The operator policy — the system mailer's relay
 

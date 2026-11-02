@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration.RatingConfig.Scale;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.alerts.AlertErasureRedactor;
 import ai.labs.eddi.engine.api.IRestAgentProfile.RatingProfile;
 import ai.labs.eddi.engine.api.IRestConversationRating;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
@@ -48,6 +49,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -84,6 +86,15 @@ public class RestConversationRating implements IRestConversationRating {
      */
     @Inject
     Event<ConversationRatingSaved> ratingSaved;
+
+    /**
+     * Blanks the comment excerpts alerts copied from a rating before the rating is
+     * withdrawn. Alert events carry no user id: erasure finds them only through the
+     * ratings that still exist, so a withdrawn rating's excerpt could never be
+     * erased. Field-injected for the same reason as {@link #ratingSaved}.
+     */
+    @Inject
+    AlertErasureRedactor alertRedactor;
 
     @Inject
     public RestConversationRating(ConversationAccessGuard conversationAccessGuard, OwnershipValidator ownershipValidator,
@@ -181,6 +192,15 @@ public class RestConversationRating implements IRestConversationRating {
         // never blocked by the rating window, a disabled config or a restriction —
         // removing personal data is always allowed.
         conversationAccessGuard.requireConversationOwner(conversationId);
+        if (alertRedactor != null) {
+            List<String> withdrawn = ratingStore.readByConversation(conversationId).stream().filter(r -> r.stepIndex() == stepIndex)
+                    .map(ConversationRating::id).filter(Objects::nonNull).toList();
+            if (!withdrawn.isEmpty()) {
+                // First, while the rating still names them; waits out a delivery that
+                // holds a send claim on one of these alerts.
+                alertRedactor.redactRatingComments(withdrawn);
+            }
+        }
         if (ratingStore.delete(conversationId, stepIndex)) {
             metrics.recordWithdrawal(stepIndex == ConversationRating.CONVERSATION_STEP_INDEX);
         }

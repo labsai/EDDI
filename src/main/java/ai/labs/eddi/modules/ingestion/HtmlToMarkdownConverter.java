@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.ingestion;
 
 import jakarta.enterprise.context.ApplicationScoped;
+import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.List;
 import org.jsoup.Jsoup;
@@ -12,7 +13,6 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.nodes.Node;
 import org.jsoup.nodes.TextNode;
-import org.jsoup.select.Elements;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -66,6 +66,20 @@ public class HtmlToMarkdownConverter {
      * deep.
      */
     private static final int MAX_DEPTH = 200;
+
+    /**
+     * How many elements one conversion visits before it stops. A walk that visits
+     * each element once stays far below this on any real page; it exists so that a
+     * shape nobody anticipated degrades into a truncated document instead of a
+     * stalled worker. See {@link Walk}.
+     */
+    static final int MAX_ELEMENTS = 1_000_000;
+
+    /** Text written, as a multiple of the character cap, before the walk stops. */
+    private static final long TEXT_BUDGET_FACTOR = 2;
+    private static final long TEXT_BUDGET_SLACK = 10_000;
+
+    private static final Logger LOGGER = Logger.getLogger(HtmlToMarkdownConverter.class);
 
     /**
      * Page furniture that never carries retrievable meaning. Deliberately
@@ -206,7 +220,7 @@ public class HtmlToMarkdownConverter {
             markdown.append("# ").append(escapeMarkdown(title)).append("\n\n");
         }
 
-        convertElement(root, markdown, baseUrl, 0);
+        convertElement(root, markdown, new Walk(baseUrl, cap), 0);
 
         String result = collapseBlankLines(markdown.toString()).trim();
         if (result.length() > cap) {
@@ -242,48 +256,51 @@ public class HtmlToMarkdownConverter {
         return false;
     }
 
-    private void convertElement(Element element, StringBuilder output, String baseUrl, int depth) {
+    private void convertElement(Element element, StringBuilder output, Walk walk, int depth) {
+        if (!walk.visit()) {
+            return;
+        }
         if (depth > MAX_DEPTH) {
             // Stop descending rather than overflowing the stack. The text below is
             // still collected, just without further structure.
-            output.append(normalizeWhitespace(element.text()));
+            appendFlattened(output, element, walk);
             return;
         }
         String tagName = element.tagName().toLowerCase();
 
         switch (tagName) {
-            case "h1" -> appendHeading(output, element, 1, baseUrl, depth);
-            case "h2" -> appendHeading(output, element, 2, baseUrl, depth);
-            case "h3" -> appendHeading(output, element, 3, baseUrl, depth);
-            case "h4" -> appendHeading(output, element, 4, baseUrl, depth);
-            case "h5" -> appendHeading(output, element, 5, baseUrl, depth);
-            case "h6" -> appendHeading(output, element, 6, baseUrl, depth);
-            case "p" -> appendParagraph(output, element, baseUrl, depth);
-            case "pre" -> appendPreBlock(output, element);
-            case "blockquote" -> appendBlockquote(output, element, baseUrl, depth);
-            case "ul" -> appendList(output, element, baseUrl, false, depth);
-            case "ol" -> appendList(output, element, baseUrl, true, depth);
-            case "dl" -> appendDefinitionList(output, element, baseUrl, depth);
-            case "table" -> appendTable(output, element, baseUrl);
-            case "details" -> appendDetails(output, element, baseUrl, depth);
-            case "figure" -> appendFigure(output, element, baseUrl, depth);
+            case "h1" -> appendHeading(output, element, 1, walk, depth);
+            case "h2" -> appendHeading(output, element, 2, walk, depth);
+            case "h3" -> appendHeading(output, element, 3, walk, depth);
+            case "h4" -> appendHeading(output, element, 4, walk, depth);
+            case "h5" -> appendHeading(output, element, 5, walk, depth);
+            case "h6" -> appendHeading(output, element, 6, walk, depth);
+            case "p" -> appendParagraph(output, element, walk, depth);
+            case "pre" -> appendPreBlock(output, element, walk);
+            case "blockquote" -> appendBlockquote(output, element, walk, depth);
+            case "ul" -> appendList(output, element, walk, false, depth);
+            case "ol" -> appendList(output, element, walk, true, depth);
+            case "dl" -> appendDefinitionList(output, element, walk, depth);
+            case "table" -> appendTable(output, element, walk, depth);
+            case "details" -> appendDetails(output, element, walk, depth);
+            case "figure" -> appendFigure(output, element, walk, depth);
             case "hr" -> output.append("\n---\n\n");
             case "br" -> output.append("\n");
             // Block containers: a separator is required, otherwise adjacent blocks
             // run together and "<div>Hello</div><div>World</div>" embeds as
             // "HelloWorld" — a real defect for div-soup pages.
             case "div", "section", "article", "main", "body", "li", "dd", "dt", "header" ->
-                appendBlock(output, element, baseUrl, depth);
-            case "span", "label", "small", "time", "cite", "abbr" -> appendInline(output, element, baseUrl, depth);
-            case "a" -> appendLink(output, element, baseUrl);
-            case "img" -> appendImage(output, element, baseUrl);
-            case "strong", "b" -> appendInlineFormatted(output, element, baseUrl, "**", depth);
-            case "em", "i" -> appendInlineFormatted(output, element, baseUrl, "*", depth);
-            case "code" -> appendInlineCode(output, element.text());
-            case "del", "s", "strike" -> appendInlineFormatted(output, element, baseUrl, "~~", depth);
-            case "sub" -> appendInlineFormatted(output, element, baseUrl, "~", depth);
-            case "sup" -> appendInlineFormatted(output, element, baseUrl, "^", depth);
-            default -> appendChildren(output, element, baseUrl, depth);
+                appendBlock(output, element, walk, depth);
+            case "span", "label", "small", "time", "cite", "abbr" -> appendInline(output, element, walk, depth);
+            case "a" -> appendLink(output, element, walk);
+            case "img" -> appendImage(output, element, walk);
+            case "strong", "b" -> appendInlineFormatted(output, element, walk, "**", depth);
+            case "em", "i" -> appendInlineFormatted(output, element, walk, "*", depth);
+            case "code" -> appendInlineCode(output, walk.charge(element.text()));
+            case "del", "s", "strike" -> appendInlineFormatted(output, element, walk, "~~", depth);
+            case "sub" -> appendInlineFormatted(output, element, walk, "~", depth);
+            case "sup" -> appendInlineFormatted(output, element, walk, "^", depth);
+            default -> appendChildren(output, element, walk, depth);
         }
     }
 
@@ -291,10 +308,10 @@ public class HtmlToMarkdownConverter {
      * Appends a block container's children, guaranteeing a line break on each side
      * so neighbouring blocks stay separate words.
      */
-    private void appendBlock(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendBlock(StringBuilder output, Element element, Walk walk, int depth) {
         int before = output.length();
         StringBuilder inner = new StringBuilder();
-        appendChildren(inner, element, baseUrl, depth + 1);
+        appendChildren(inner, element, walk, depth + 1);
 
         String content = inner.toString();
         if (content.isBlank()) {
@@ -313,29 +330,29 @@ public class HtmlToMarkdownConverter {
         return sb.length() == 0 || sb.charAt(sb.length() - 1) == '\n';
     }
 
-    private void appendChildren(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendChildren(StringBuilder output, Element element, Walk walk, int depth) {
         for (Node child : element.childNodes()) {
             if (child instanceof TextNode textNode) {
-                output.append(normalizeWhitespace(textNode.text()));
+                appendText(output, textNode, walk);
             } else if (child instanceof Element childElement) {
-                convertElement(childElement, output, baseUrl, depth + 1);
+                convertElement(childElement, output, walk, depth + 1);
             }
         }
     }
 
-    private void appendHeading(StringBuilder output, Element element, int level, String baseUrl, int depth) {
+    private void appendHeading(StringBuilder output, Element element, int level, Walk walk, int depth) {
         output.append("\n").append("#".repeat(level)).append(" ");
-        appendInline(output, element, baseUrl, depth + 1);
+        appendInline(output, element, walk, depth + 1);
         output.append("\n\n");
     }
 
-    private void appendParagraph(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendParagraph(StringBuilder output, Element element, Walk walk, int depth) {
         output.append("\n");
-        appendInline(output, element, baseUrl, depth + 1);
+        appendInline(output, element, walk, depth + 1);
         output.append("\n\n");
     }
 
-    private void appendPreBlock(StringBuilder output, Element element) {
+    private void appendPreBlock(StringBuilder output, Element element, Walk walk) {
         output.append("\n```");
 
         Element code = element.selectFirst("code");
@@ -348,16 +365,29 @@ public class HtmlToMarkdownConverter {
         }
         // wholeText preserves the newlines inside a code block; text() collapses
         // them, which turned every multi-line sample into one unreadable line.
-        output.append("\n").append(stripTrailingNewline(source.wholeText()));
+        output.append("\n").append(stripTrailingNewline(walk.charge(source.wholeText())));
         output.append("\n```\n\n");
     }
 
-    private static String stripTrailingNewline(String text) {
-        String stripped = text;
-        while (stripped.endsWith("\n") || stripped.endsWith("\r")) {
-            stripped = stripped.substring(0, stripped.length() - 1);
+    /**
+     * The text without its trailing line breaks, copied once.
+     *
+     * <p>
+     * Trimming one character per {@code substring} copied the remaining text for
+     * every break, which is quadratic: a {@code
+     *
+     *
+
+    <pre>
+     * } ending in a few million newlines — a 5 MB page can hold that — spent
+     * minutes copying before the output cap was ever consulted.
+     */
+    static String stripTrailingNewline(String text) {
+        int end = text.length();
+        while (end > 0 && (text.charAt(end - 1) == '\n' || text.charAt(end - 1) == '\r')) {
+            end--;
         }
-        return stripped;
+        return end == text.length() ? text : text.substring(0, end);
     }
 
     private String extractLanguage(String classAttr) {
@@ -376,9 +406,9 @@ public class HtmlToMarkdownConverter {
         return "";
     }
 
-    private void appendBlockquote(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendBlockquote(StringBuilder output, Element element, Walk walk, int depth) {
         StringBuilder inner = new StringBuilder();
-        appendChildren(inner, element, baseUrl, depth + 1);
+        appendChildren(inner, element, walk, depth + 1);
 
         output.append("\n");
         for (String line : inner.toString().split("\\r?\\n")) {
@@ -389,8 +419,8 @@ public class HtmlToMarkdownConverter {
         output.append("\n");
     }
 
-    private void appendList(StringBuilder output, Element element, String baseUrl, boolean ordered, int depth) {
-        appendList(output, element, baseUrl, ordered, depth, 0);
+    private void appendList(StringBuilder output, Element element, Walk walk, boolean ordered, int depth) {
+        appendList(output, element, walk, ordered, depth, 0);
     }
 
     /**
@@ -408,13 +438,18 @@ public class HtmlToMarkdownConverter {
      *            how deep this list is nested, in list levels rather than in
      *            elements
      */
-    private void appendList(StringBuilder output, Element element, String baseUrl, boolean ordered, int depth,
+    private void appendList(StringBuilder output, Element element, Walk walk, boolean ordered, int depth,
                             int indentLevel) {
 
+        if (indentLevel > 0 && !walk.visit()) {
+            // A nested list arrives here directly rather than through
+            // convertElement, so it is charged to the budget here.
+            return;
+        }
         if (depth > MAX_DEPTH) {
             // A nested list recurses here directly, never through convertElement, so
             // it needs the same bound or a page of nested lists overflows the stack.
-            output.append(normalizeWhitespace(element.text()));
+            appendFlattened(output, element, walk);
             return;
         }
         if (indentLevel == 0) {
@@ -433,13 +468,13 @@ public class HtmlToMarkdownConverter {
             List<Element> nestedLists = new ArrayList<>();
             for (Node child : item.childNodes()) {
                 if (child instanceof TextNode textNode) {
-                    itemContent.append(normalizeWhitespace(textNode.text()));
+                    appendText(itemContent, textNode, walk);
                 } else if (child instanceof Element childElement) {
                     String childTag = childElement.tagName().toLowerCase();
                     if (childTag.equals("ul") || childTag.equals("ol")) {
                         nestedLists.add(childElement);
                     } else {
-                        convertElement(childElement, itemContent, baseUrl, depth + 1);
+                        convertElement(childElement, itemContent, walk, depth + 1);
                     }
                 }
             }
@@ -448,7 +483,7 @@ public class HtmlToMarkdownConverter {
             output.append(itemContent.toString().trim().replace("\n", "\n" + indent + "    ")).append("\n");
 
             for (Element nested : nestedLists) {
-                appendList(output, nested, baseUrl, nested.tagName().equalsIgnoreCase("ol"), depth + 1,
+                appendList(output, nested, walk, nested.tagName().equalsIgnoreCase("ol"), depth + 1,
                         indentLevel + 1);
             }
             number++;
@@ -462,12 +497,12 @@ public class HtmlToMarkdownConverter {
      * {@code &lt;dl&gt;} as a term/definition list. Without this the terms and
      * their definitions ran together into one unreadable line.
      */
-    private void appendDefinitionList(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendDefinitionList(StringBuilder output, Element element, Walk walk, int depth) {
         output.append("\n");
         for (Element child : element.children()) {
             String tag = child.tagName().toLowerCase();
             StringBuilder inner = new StringBuilder();
-            appendInline(inner, child, baseUrl, depth + 1);
+            appendInline(inner, child, walk, depth + 1);
             String text = inner.toString().trim();
             if (text.isEmpty()) {
                 continue;
@@ -482,12 +517,15 @@ public class HtmlToMarkdownConverter {
     }
 
     /** {@code &lt;details&gt;}: the summary is the label, the rest the content. */
-    private void appendDetails(StringBuilder output, Element element, String baseUrl, int depth) {
-        Element summary = element.selectFirst("summary");
+    private void appendDetails(StringBuilder output, Element element, Walk walk, int depth) {
+        // A direct child only. A descendant search found a nested <details>' summary
+        // too, rendered it here and again where it sits — and a summary holding
+        // another such structure doubled the work at every level.
+        Element summary = firstChild(element, "summary");
         output.append("\n");
         if (summary != null) {
             StringBuilder label = new StringBuilder();
-            appendInline(label, summary, baseUrl, depth + 1);
+            appendInline(label, summary, walk, depth + 1);
             String labelText = label.toString().trim();
             if (!labelText.isEmpty()) {
                 output.append("**").append(labelText).append("**\n\n");
@@ -495,26 +533,28 @@ public class HtmlToMarkdownConverter {
         }
         for (Node child : element.childNodes()) {
             if (child instanceof Element childElement && !childElement.tagName().equalsIgnoreCase("summary")) {
-                convertElement(childElement, output, baseUrl, depth + 1);
+                convertElement(childElement, output, walk, depth + 1);
             } else if (child instanceof TextNode textNode) {
-                output.append(normalizeWhitespace(textNode.text()));
+                appendText(output, textNode, walk);
             }
         }
         output.append("\n");
     }
 
     /** {@code &lt;figure&gt;}: content followed by its caption in italics. */
-    private void appendFigure(StringBuilder output, Element element, String baseUrl, int depth) {
-        Element caption = element.selectFirst("figcaption");
+    private void appendFigure(StringBuilder output, Element element, Walk walk, int depth) {
+        // A direct child only, for the same reason as appendDetails' summary: a
+        // nested caption was rendered both as this caption and in place.
+        Element caption = firstChild(element, "figcaption");
         output.append("\n");
         for (Node child : element.childNodes()) {
             if (child instanceof Element childElement && !childElement.tagName().equalsIgnoreCase("figcaption")) {
-                convertElement(childElement, output, baseUrl, depth + 1);
+                convertElement(childElement, output, walk, depth + 1);
             }
         }
         if (caption != null) {
             StringBuilder captionText = new StringBuilder();
-            appendInline(captionText, caption, baseUrl, depth + 1);
+            appendInline(captionText, caption, walk, depth + 1);
             String text = captionText.toString().trim();
             if (!text.isEmpty()) {
                 if (!endsWithNewline(output)) {
@@ -526,17 +566,47 @@ public class HtmlToMarkdownConverter {
         output.append("\n");
     }
 
-    private void appendTable(StringBuilder output, Element element, String baseUrl) {
+    /**
+     * A table, reading only the rows and cells that belong to it.
+     *
+     * <p>
+     * {@code select("tr")} and {@code select("td, th")} are descendant searches:
+     * they also returned the rows and cells of every table nested inside a cell,
+     * each of which was then rendered again as part of the cell that holds it.
+     * Every level of nesting doubled the work, and the cells restarted the depth
+     * count at zero, so {@link #MAX_DEPTH} never stopped it — twenty nested tables,
+     * a few hundred bytes, kept a worker busy for minutes. A table owns the
+     * {@code tr}s that are its children or children of its own {@code thead},
+     * {@code tbody} and {@code tfoot}, and a row owns its child cells.
+     */
+    private void appendTable(StringBuilder output, Element element, Walk walk, int depth) {
         output.append("\n");
 
-        Element thead = element.selectFirst("thead");
-        Element tbody = element.selectFirst("tbody");
+        List<Element> rows = new ArrayList<>();
+        Element headerRow = null;
+        for (Element child : element.children()) {
+            String tag = child.tagName().toLowerCase();
+            if (tag.equals("tr")) {
+                rows.add(child);
+            } else if (tag.equals("thead") || tag.equals("tbody") || tag.equals("tfoot")) {
+                for (Element row : child.children()) {
+                    if (row.tagName().equalsIgnoreCase("tr")) {
+                        if (headerRow == null && tag.equals("thead")) {
+                            headerRow = row;
+                        }
+                        rows.add(row);
+                    }
+                }
+            }
+        }
+        if (headerRow == null && !rows.isEmpty()) {
+            headerRow = rows.get(0);
+        }
 
-        Element headerRow = thead != null ? thead.selectFirst("tr") : element.selectFirst("tr");
         if (headerRow != null) {
-            Elements headers = headerRow.select("th, td");
+            List<Element> headers = cellsOf(headerRow);
             if (!headers.isEmpty()) {
-                appendRow(output, headers, baseUrl);
+                appendRow(output, headers, walk, depth);
                 output.append("| ");
                 for (int i = 0; i < headers.size(); i++) {
                     output.append("--- | ");
@@ -545,20 +615,31 @@ public class HtmlToMarkdownConverter {
             }
         }
 
-        Elements rows = tbody != null ? tbody.select("tr") : element.select("tr");
-        boolean skipHeaderRow = headerRow != null;
         for (Element row : rows) {
-            if (skipHeaderRow && row.equals(headerRow)) {
-                skipHeaderRow = false;
+            if (row == headerRow) {
                 continue;
             }
-            Elements cells = row.select("td, th");
+            if (walk.exhausted()) {
+                break;
+            }
+            List<Element> cells = cellsOf(row);
             if (!cells.isEmpty()) {
-                appendRow(output, cells, baseUrl);
+                appendRow(output, cells, walk, depth);
             }
         }
 
         output.append("\n");
+    }
+
+    private static List<Element> cellsOf(Element row) {
+        List<Element> cells = new ArrayList<>();
+        for (Element child : row.children()) {
+            String tag = child.tagName().toLowerCase();
+            if (tag.equals("td") || tag.equals("th")) {
+                cells.add(child);
+            }
+        }
+        return cells;
     }
 
     /**
@@ -571,12 +652,16 @@ public class HtmlToMarkdownConverter {
      * and the line breaks a {@code <br>
      * } stands for. A table is where a page puts its most structured facts, so it
      * was the worst place to flatten.
+     *
+     * <p>
+     * The cells continue the depth of the table they sit in. Starting them at zero
+     * let nested tables escape {@link #MAX_DEPTH}.
      */
-    private void appendRow(StringBuilder output, Elements cells, String baseUrl) {
+    private void appendRow(StringBuilder output, List<Element> cells, Walk walk, int depth) {
         output.append("| ");
         for (Element cell : cells) {
             StringBuilder rendered = new StringBuilder();
-            appendInline(rendered, cell, baseUrl, 0);
+            appendInline(rendered, cell, walk, depth + 2);
             // escapeTableCell still runs over the result: it collapses the newlines
             // a <br> produced and escapes any pipe, whether it came from the text
             // or from a rendered link.
@@ -597,16 +682,16 @@ public class HtmlToMarkdownConverter {
         return normalizeWhitespace(text).trim().replace("|", "\\|");
     }
 
-    private void appendLink(StringBuilder output, Element element, String baseUrl) {
+    private void appendLink(StringBuilder output, Element element, Walk walk) {
         String href = element.attr("href");
-        String text = element.text().trim();
+        String text = walk.charge(element.text().trim());
 
         if (href.isBlank()) {
             output.append(text);
             return;
         }
 
-        href = resolveUrl(href, baseUrl);
+        href = resolveUrl(href, walk.baseUrl);
         if (text.equals(href)) {
             output.append("<").append(href).append(">");
         } else {
@@ -653,30 +738,30 @@ public class HtmlToMarkdownConverter {
      * with no alt is dropped entirely rather than left as a bare {@code ![](url)}
      * that costs tokens and says nothing.
      */
-    private void appendImage(StringBuilder output, Element element, String baseUrl) {
+    private void appendImage(StringBuilder output, Element element, Walk walk) {
         String src = element.attr("src");
         String alt = element.attr("alt");
 
         if (src.isBlank() || alt.isBlank()) {
             return;
         }
-        output.append("![").append(escapeMarkdown(alt.trim())).append("](").append(resolveUrl(src, baseUrl)).append(")");
+        output.append("![").append(escapeMarkdown(alt.trim())).append("](").append(resolveUrl(src, walk.baseUrl)).append(")");
     }
 
-    private void appendInline(StringBuilder output, Element element, String baseUrl, int depth) {
+    private void appendInline(StringBuilder output, Element element, Walk walk, int depth) {
         for (Node child : element.childNodes()) {
             if (child instanceof TextNode textNode) {
-                output.append(normalizeWhitespace(textNode.text()));
+                appendText(output, textNode, walk);
             } else if (child instanceof Element childElement) {
-                convertElement(childElement, output, baseUrl, depth + 1);
+                convertElement(childElement, output, walk, depth + 1);
             }
         }
     }
 
-    private void appendInlineFormatted(StringBuilder output, Element element, String baseUrl, String wrapper,
+    private void appendInlineFormatted(StringBuilder output, Element element, Walk walk, String wrapper,
                                        int depth) {
         StringBuilder inner = new StringBuilder();
-        appendInline(inner, element, baseUrl, depth + 1);
+        appendInline(inner, element, walk, depth + 1);
         String text = inner.toString();
         if (text.isBlank()) {
             return;
@@ -758,6 +843,94 @@ public class HtmlToMarkdownConverter {
             longest = Math.max(longest, current);
         }
         return longest;
+    }
+
+    private void appendText(StringBuilder output, TextNode textNode, Walk walk) {
+        output.append(walk.charge(normalizeWhitespace(textNode.text())));
+    }
+
+    /** An element's text without structure, for when the walk stops descending. */
+    private void appendFlattened(StringBuilder output, Element element, Walk walk) {
+        output.append(walk.charge(normalizeWhitespace(element.text())));
+    }
+
+    /** The first child element with the given tag, ignoring case, or null. */
+    private static Element firstChild(Element parent, String tag) {
+        for (Element child : parent.children()) {
+            if (child.tagName().equalsIgnoreCase(tag)) {
+                return child;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The state of one conversion: the base URL and the work budget.
+     *
+     * <p>
+     * The structural fixes make the walk linear, and this is the backstop that
+     * keeps it so whatever shape the next unforeseen input takes. Two allowances,
+     * both checked while the walk is still running rather than after it has built
+     * its output:
+     * <ul>
+     * <li>{@link #MAX_ELEMENTS} elements visited, however they are reached;</li>
+     * <li>text written, bounded by a multiple of the caller's character cap. Once
+     * the output is certain to be truncated anyway, rendering the rest of a 5 MB
+     * page only to discard it is wasted work. The margin covers whitespace and
+     * markup the final pass trims away.</li>
+     * </ul>
+     * When either runs out, the walk stops adding to the output and unwinds; what
+     * has been written so far is kept and truncated as usual.
+     */
+    private static final class Walk {
+        final String baseUrl;
+        private final long maxTextChars;
+        private int elements;
+        private long textChars;
+        private boolean exhausted;
+
+        Walk(String baseUrl, int cap) {
+            this.baseUrl = baseUrl;
+            this.maxTextChars = TEXT_BUDGET_FACTOR * cap + TEXT_BUDGET_SLACK;
+        }
+
+        /** Counts one element; false once the budget is spent. */
+        boolean visit() {
+            if (exhausted) {
+                return false;
+            }
+            if (++elements > MAX_ELEMENTS) {
+                exhausted = true;
+                LOGGER.debugf("HTML conversion stopped after %d elements", MAX_ELEMENTS);
+                return false;
+            }
+            return true;
+        }
+
+        /** Charges text about to be written; empty once the budget is spent. */
+        String charge(String text) {
+            if (exhausted) {
+                return "";
+            }
+            // Whitespace-only text is not charged. An indented page has a whitespace
+            // node between every pair of tags and most never reach the output — a
+            // blank block or an empty inline is dropped — so charging them stopped a
+            // long page with a small cap before its first paragraph. How many there
+            // can be is bounded by MAX_ELEMENTS anyway.
+            if (!text.isBlank()) {
+                textChars += text.length();
+            }
+            if (textChars > maxTextChars) {
+                // This text still goes out: it is what pushed the output past the
+                // point where it will be truncated. Nothing after it does.
+                exhausted = true;
+            }
+            return text;
+        }
+
+        boolean exhausted() {
+            return exhausted;
+        }
     }
 
     /** The first of {@link #MAIN_CONTENT_SELECTORS} that matches, in that order. */

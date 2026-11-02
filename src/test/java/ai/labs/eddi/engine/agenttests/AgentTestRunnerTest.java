@@ -4,6 +4,14 @@
  */
 package ai.labs.eddi.engine.agenttests;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import java.util.LinkedHashMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.DoubleAdder;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Defaults;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Expectation;
@@ -30,6 +38,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
@@ -219,6 +228,39 @@ class AgentTestRunnerTest {
         assertFalse(turn.passed());
         assertEquals("timed out", turn.failures().getFirst().actual());
         verify(engine.service).endConversation(anyString(), eq(AgentTestConversations.SYSTEM_ACTOR));
+    }
+
+    /**
+     * The engine keeps running a turn the runner gave up on; its spend is charged
+     * when it lands, so turns that keep timing out still reach the run's ceiling.
+     */
+    @Test
+    @DisplayName("an abandoned turn's cost is charged to the run when the turn finally completes")
+    void abandonedTurnIsChargedWhenItLands() throws Exception {
+        var engine = engine();
+        var ctx = new AgentTestRunner.RunContext(null, null, null, 1.0, new DoubleAdder(), new AtomicBoolean(), ConcurrentHashMap.newKeySet(),
+                new AtomicReference<>(), new AtomicBoolean());
+        var outcome = new CompletableFuture<SimpleConversationMemorySnapshot>();
+        List<CompletableFuture<?>> abandoned = new ArrayList<>();
+        var stored = new ConversationMemorySnapshot();
+        stored.setConversationId("c1");
+        stored.setConversationState(ConversationState.READY);
+        stored.setConversationProperties(new LinkedHashMap<>());
+        ScriptedEngine.apply(stored, ScriptedEngine.Step.of(List.of("start"), "hi"));
+        ScriptedEngine.apply(stored, ScriptedEngine.Step.of(List.of("think"), "late").costing(0.4));
+        engine.conversations.put("c1", stored);
+
+        runner(engine, 4).abandon(ctx, "c1", 1, outcome, abandoned);
+        assertEquals(0.0, ctx.cost().sum());
+
+        outcome.complete(ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(stored, true, true, null));
+
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (ctx.cost().sum() == 0.0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals(0.4, ctx.cost().sum(), 1e-9);
+        assertEquals(List.of(outcome), abandoned);
     }
 
     @Test
@@ -436,5 +478,116 @@ class AgentTestRunnerTest {
         assertEquals(AgentTestRun.Status.ERROR, fallback.status());
         assertTrue(fallback.cases().isEmpty(), "the per-case detail is dropped");
         assertTrue(fallback.error().contains("could not be stored"), fallback.error());
+    }
+
+    /**
+     * The terminal record is written when the run returns, but an abandoned turn
+     * can complete after that. Its spend is added to the stored record and written
+     * to the audit ledger, so the reported cost is not too low.
+     */
+    @Test
+    @DisplayName("a turn that completes after the run returned adds its cost to the stored record and the audit ledger")
+    void lateChargeAdjustsTheStoredRecord() throws Exception {
+        var stored = storeBackedRunStore();
+        var engine = engine();
+        engine.neverAnswer = true;
+        var testCase = new TestCase("slow", null, null, null, List.of(new Turn("hello", null, null)));
+        var runner = runner(engine, 4);
+
+        AgentTestRun run = runner.run(started(false), suite(new Defaults(null, null, null, null, 1), null, testCase));
+
+        assertEquals(0.0, stored.get().totalCostUsd(), "nothing was paid for as far as the run knew");
+        String conversationId = engine.conversations.keySet().iterator().next();
+        var conversation = engine.conversations.get(conversationId);
+        ScriptedEngine.apply(conversation, Step.of(List.of("think"), "late").costing(0.4));
+        engine.unanswered.getFirst()
+                .onComplete(ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(conversation, true, true, null));
+
+        verify(auditLedger, timeout(10_000).times(2)).submit(any());
+        assertEquals(0.4, stored.get().totalCostUsd(), 1e-9);
+        assertEquals(List.of("scripted-model"), stored.get().models());
+        assertEquals(run.status(), stored.get().status(), "the verdict is not touched");
+        assertEquals(run.cases(), stored.get().cases());
+        var entries = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditLedger, times(2)).submit(entries.capture());
+        AuditEntry late = entries.getAllValues().stream().filter(e -> e.actions().contains(AgentTestRunner.AUDIT_LATE_CHARGE_ACTION))
+                .findFirst().orElseThrow();
+        assertEquals(0.4, late.cost(), 1e-9, "the ledger entry carries only the added cost");
+    }
+
+    @Test
+    @DisplayName("two late charges both land, even when another adjustment wins the compare-and-swap first")
+    void lateChargesAreNotLostToTheCompareAndSwap() throws Exception {
+        var stored = storeBackedRunStore();
+        var raced = new AtomicBoolean();
+        doAnswer(inv -> {
+            if (raced.compareAndSet(false, true)) {
+                // someone else adjusted the record between our read and our write
+                var current = stored.get();
+                stored.set(new AgentTestRun(current.id(), current.suiteId(), current.suiteVersion(), current.suiteName(), current.agentId(),
+                        current.agentVersion(), current.status(), current.startedBy(), current.startedAt(), current.finishedAt(),
+                        current.durationMs(), current.totalCostUsd() + 1.0, current.maxCostPerRun(), current.costCeilingReached(),
+                        current.models(), current.casesTotal(), current.casesPassed(), current.casesFailed(), current.cases(),
+                        current.keepConversations(), current.error(), current.ownerNode(), current.heartbeatAt() + 1));
+                throw new IResourceStore.ResourceModifiedException("raced");
+            }
+            stored.set(inv.getArgument(0));
+            return null;
+        }).when(runStore).updateIfHeartbeat(any(AgentTestRun.class), anyLong());
+        var engine = engine();
+        engine.neverAnswer = true;
+        var testCase = new TestCase("slow", null, null, null, List.of(new Turn("hello", null, null)));
+        var runner = runner(engine, 4);
+        runner.run(started(false), suite(new Defaults(null, null, null, null, 1), null, testCase));
+        String conversationId = engine.conversations.keySet().iterator().next();
+        var conversation = engine.conversations.get(conversationId);
+        ScriptedEngine.apply(conversation, Step.of(List.of("think"), "late").costing(0.4));
+
+        engine.unanswered.getFirst()
+                .onComplete(ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(conversation, true, true, null));
+
+        verify(auditLedger, timeout(10_000).times(2)).submit(any());
+        assertEquals(1.4, stored.get().totalCostUsd(), 1e-9, "the other adjustment and ours");
+    }
+
+    @Test
+    @DisplayName("the ledger hands out nothing before the record is stored, then each charge exactly once")
+    void ledgerHandsOutEachChargeOnce() {
+        var ledger = new AgentTestRunner.LateChargeLedger();
+        var cost = new DoubleAdder();
+        Set<String> models = ConcurrentHashMap.newKeySet();
+        cost.add(1.0);
+        models.add("m1");
+        ledger.accounted(1.0, List.of("m1"));
+        cost.add(0.5);
+        models.add("m2");
+
+        assertNull(ledger.takeIfStored(cost, models), "the final write has not happened");
+        var collected = ledger.markStored(cost, models);
+        assertEquals(0.5, collected.costUsd(), 1e-9, "what arrived before the write is collected");
+        assertEquals(List.of("m2"), collected.models());
+        assertNull(ledger.takeIfStored(cost, models), "nothing new");
+
+        cost.add(0.25);
+        var next = ledger.takeIfStored(cost, models);
+        assertEquals(0.25, next.costUsd(), 1e-9);
+        assertTrue(next.models().isEmpty());
+        ledger.giveBack(next);
+        assertEquals(0.25, ledger.takeIfStored(cost, models).costUsd(), 1e-9, "a failed write is offered again");
+    }
+
+    /** A run store that keeps the last record written, for read-modify-write. */
+    private AtomicReference<AgentTestRun> storeBackedRunStore() throws Exception {
+        var stored = new AtomicReference<AgentTestRun>();
+        doAnswer(inv -> {
+            stored.set(inv.getArgument(0));
+            return null;
+        }).when(runStore).update(any(AgentTestRun.class));
+        doAnswer(inv -> {
+            stored.set(inv.getArgument(0));
+            return null;
+        }).when(runStore).updateIfHeartbeat(any(AgentTestRun.class), anyLong());
+        when(runStore.read(anyString())).thenAnswer(inv -> stored.get());
+        return stored;
     }
 }

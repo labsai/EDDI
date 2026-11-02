@@ -220,4 +220,113 @@ class SelfUngatingGuardProtectionTest {
                 SelfUngatingGuard.refusal("PUT", "https://eddi/llmstore/llms/" + UNRELATED, "{\"tasks\":[" + GATE + "]}", p));
         assertNull(SelfUngatingGuard.refusal("PUT", "https://eddi/llmstore/llms/" + UNRELATED, MAPPER.valueToTree(Map.of("tasks", 1)).toString(), p));
     }
+
+    @Nested
+    @DisplayName("another LLM configuration's stored task gate")
+    class StoredLlmGates {
+
+        private final String storedWithGate = "{\"tasks\":[{\"id\":\"t\",\"toolApprovals\":{\"requireApproval\":[\"http:*\"]}}]}";
+        private final String url = "https://eddi/llmstore/llms/" + UNRELATED + "?version=3";
+
+        private Protection withStoredLlm(String json) {
+            return new Protection(AGENT, Set.of(WORKFLOW, LLM), false, null, (id, version) -> {
+                assertEquals(UNRELATED, id);
+                assertEquals(3, version);
+                return json == null ? null : MAPPER.readTree(json);
+            });
+        }
+
+        @Test
+        @DisplayName("a whole-document PUT that simply omits the stored gate is refused")
+        void omissionIsRefused() {
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[{\"id\":\"t\"}]}", withStoredLlm(storedWithGate)));
+        }
+
+        @Test
+        @DisplayName("a patch replacing the gated task (an ancestor of the gate) is refused; one beside it passes")
+        void ancestorPatch() {
+            Protection p = withStoredLlm(storedWithGate);
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0\",\"value\":{\"id\":\"t\"}}]", p));
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"remove\",\"path\":\"/tasks\"}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0/description\",\"value\":\"x\"}]", p));
+        }
+
+        @Test
+        @DisplayName("a version too long for an int is unverifiable (refused), not an exception")
+        void oversizedVersionIsUnverifiable() {
+            String huge = "https://eddi/llmstore/llms/" + UNRELATED + "?version=99999999999999999999";
+            Protection p = new Protection(AGENT, Set.of(WORKFLOW, LLM), false, null, (id, version) -> MAPPER.readTree(storedWithGate));
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON, SelfUngatingGuard.refusal("PUT", huge, "{\"tasks\":[]}", p));
+        }
+
+        @Test
+        @DisplayName("a stored document without a gate may be replaced; an unreadable one may not")
+        void noGateOrUnreadable() {
+            assertNull(SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[]}", withStoredLlm("{\"tasks\":[{\"id\":\"t\"}]}")));
+            Protection unreadable = new Protection(AGENT, Set.of(), false, null, (id, version) -> {
+                throw new IllegalStateException("store down");
+            });
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON, SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[]}", unreadable));
+        }
+    }
+
+    /**
+     * The argument test used to search the raw text only, percent-decoded. A JSON
+     * unicode escape survives that, and every JSON parser downstream — the MCP
+     * server an envelope is sent to, EDDI's own stores — reads it as the plain
+     * character, so an escaped key or id walked past the guard.
+     */
+    @Nested
+    @DisplayName("JSON-escaped arguments")
+    class JsonEscapedArguments {
+
+        /** The JSON escape for {@code c}, as it appears in JSON text. */
+        private static String escaped(char c) {
+            return String.format("\\u%04x", (int) c);
+        }
+
+        @Test
+        @DisplayName("an escaped toolApprovals key is refused like the plain one")
+        void escapedGateKeyIsRefused() {
+            String args = "{\"uri\":\"eddi://ai.labs.llm/llmstore/llms/" + UNRELATED + "\",\"body\":{\"" + escaped('t')
+                    + "oolApprovals\":{\"requireApproval\":[]}}}";
+            assertEquals(SelfUngatingGuard.GATE_WRITE_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)));
+        }
+
+        @Test
+        @DisplayName("an escaped hitlConfig key is refused like the plain one")
+        void escapedHitlConfigKeyIsRefused() {
+            String args = "{\"agentId\":\"" + OTHER + "\",\"body\":{\"" + escaped('h') + "itlConfig\":null}}";
+            assertEquals(SelfUngatingGuard.GATE_REMOVAL_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)));
+        }
+
+        @Test
+        @DisplayName("the acting agent's id and its own resource ids are recognised when escaped")
+        void escapedIdsAreRefused() {
+            String agent = "{\"agentId\":\"" + escaped(AGENT.charAt(0)) + AGENT.substring(1) + "\",\"action\":\"deploy\"}";
+            assertEquals(SelfUngatingGuard.OWN_AGENT_REASON, SelfUngatingGuard.refusalFromArguments(agent, resolved(null)));
+            String llm = "{\"resourceId\":\"" + LLM.substring(0, 5) + escaped(LLM.charAt(5)) + LLM.substring(6) + "\"}";
+            assertEquals(SelfUngatingGuard.OWN_RESOURCE_REASON, SelfUngatingGuard.refusalFromArguments(llm, resolved(null)));
+        }
+
+        @Test
+        @DisplayName("a document carried as a JSON string is unescaped once per level, and checked at each")
+        void escapedKeyInsideNestedDocumentIsRefused() throws Exception {
+            String document = "{\"tasks\":[{\"" + escaped('t') + "oolApprovals\":{}}]}";
+            String args = MAPPER.writeValueAsString(Map.of("resource", document));
+            assertEquals(SelfUngatingGuard.GATE_WRITE_REASON, SelfUngatingGuard.refusalFromArguments(args, resolved(null)));
+        }
+
+        @Test
+        @DisplayName("ordinary escaped text is not a refusal")
+        void benignEscapesStillRun() {
+            assertNull(SelfUngatingGuard.refusalFromArguments("{\"q\":\"caf" + escaped('é') + " near " + escaped('t') + "own\"}",
+                    resolved(null)));
+            assertNull(SelfUngatingGuard.refusalFromArguments("not json at all", resolved(null)));
+        }
+    }
 }

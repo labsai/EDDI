@@ -423,6 +423,22 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     }
 
     @Override
+    public void storeIfFieldsEqual(IResource<T> newResource, Map<String, String> expectedFields)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        checkNotNull(expectedFields, "expectedFields");
+        if (expectedFields.isEmpty()) {
+            throw new IllegalArgumentException("expectedFields must name at least one field");
+        }
+        // Every field in the one replaceOne filter: the conjunction is evaluated by
+        // the database against the same document version the write replaces. A null
+        // expected value becomes {field: null}, which matches absent and null alike.
+        List<Bson> clauses = new ArrayList<>();
+        expectedFields.forEach((field, value) -> clauses.add(Filters.eq(field, value)));
+        replaceIfMatches(newResource, String.join("+", expectedFields.keySet()), String.valueOf(expectedFields.values()),
+                Filters.and(clauses));
+    }
+
+    @Override
     public void storeIfFieldEqualsOrMissing(IResource<T> newResource, String fieldName, String expectedValue)
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         // {field: null} matches both an absent field and an explicit null — one
@@ -880,6 +896,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         // is
         // a server-side error ("$and/$or/$nor must be a nonempty array").
         Bson query = connectedFilters.isEmpty() ? new Document() : Filters.and(connectedFilters);
+        // Deliberately no _id tiebreaker (unlike PostgreSQL's ORDER BY ..., id): the
+        // field indexes are single-field ({field: 1}), which can serve {field: -1} but
+        // not {field: -1, _id: -1}. The compound sort would turn every sorted page -
+        // descriptor listings included, one descriptor per conversation - into a
+        // blocking in-memory sort over all matching documents.
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = IResourceStorage.resolveLimit(limit);
 

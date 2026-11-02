@@ -2,7 +2,13 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { renderWithProviders } from "@/test/test-utils";
 import { api, SPACE_HEADER } from "@/lib/api-client";
-import { importSpaceHeader, previewImport } from "@/lib/api/backup";
+import {
+  executeSync,
+  importSpaceHeader,
+  previewImport,
+  previewSync,
+  previewUpgrade,
+} from "@/lib/api/backup";
 import { MergeScopeNotice } from "@/components/agents/import-steps/preview-step";
 import { server } from "@/test/mocks/server";
 import { http, HttpResponse } from "msw";
@@ -35,6 +41,31 @@ describe("import space header (EDDI 6.6 merge scope)", () => {
     api.setCreateSpace("team:ops");
     await previewImport(new File(["zip"], "a.zip"));
     expect(seen).toBe("team:ops");
+  });
+
+  it("is sent on the upgrade preview and on the live-sync preview and execute", async () => {
+    // These addressed the caller's default space whatever the switcher said, so
+    // the preview could show a merge into a copy the import would not touch.
+    const seen: Record<string, string | null> = {};
+    server.use(
+      http.post("*/backup/import/preview", ({ request }) => {
+        seen.upgrade = request.headers.get(SPACE_HEADER);
+        return HttpResponse.json({ resources: [] });
+      }),
+      http.post("*/backup/import/sync/preview", ({ request }) => {
+        seen.syncPreview = request.headers.get(SPACE_HEADER);
+        return HttpResponse.json({ resources: [] });
+      }),
+      http.post("*/backup/import/sync", ({ request }) => {
+        seen.syncExecute = request.headers.get(SPACE_HEADER);
+        return HttpResponse.json({}, { status: 200 });
+      }),
+    );
+    api.setCreateSpace("team:ops");
+    await previewUpgrade(new File(["zip"], "a.zip"), "agent1");
+    await previewSync("https://remote", "src1", null, "agent1", "");
+    await executeSync("https://remote", "src1", null, "agent1", [], null, "").catch(() => undefined);
+    expect(seen).toEqual({ upgrade: "team:ops", syncPreview: "team:ops", syncExecute: "team:ops" });
   });
 
   it("surfaces the server's 400 reason for a malformed archive", async () => {

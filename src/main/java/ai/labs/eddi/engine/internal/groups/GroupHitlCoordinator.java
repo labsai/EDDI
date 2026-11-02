@@ -441,6 +441,45 @@ public class GroupHitlCoordinator {
         // Not actively running — update DB with a state-CAS (#9): a plain
         // read-modify-write would race a concurrent approve/resume and could
         // resurrect a terminal state.
+        return cancelStored(conversationId, mode, false, null);
+    }
+
+    /**
+     * Cancel a discussion only if it is <em>paused</em> — awaiting an approval or a
+     * HUMAN member's turn. This is the cancel an {@code eddi-approver} who neither
+     * owns the discussion nor is an admin may make (the same rule as the 1:1
+     * surface's paused-only cancel): the role exists to decide pauses, and stopping
+     * another user's running discussion is the owner's or an admin's call.
+     * <p>
+     * The entitlement check and the cancel are one compare-and-set on the paused
+     * state, so a resume that lands in between cannot turn this into a stop of a
+     * running discussion. A local control token means a leg is running (or still
+     * committing its pause) — refused rather than signalled.
+     *
+     * @return {@code true} if the paused discussion was cancelled; {@code false} if
+     *         it was not paused (running, terminal, or a concurrent change won)
+     */
+    public boolean cancelPausedDiscussion(String conversationId, ControlSignal mode)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        return cancelPausedDiscussion(conversationId, mode, null);
+    }
+
+    /**
+     * {@link #cancelPausedDiscussion(String, ControlSignal)} bound to one pause: a
+     * non-null {@code expectedPauseId} must equal the stored pause's id
+     * ({@link HitlDecision#pauseIdOf}), or nothing is cancelled. A timeout armed
+     * for a pause that has since been resolved must not cancel a later one.
+     */
+    public boolean cancelPausedDiscussion(String conversationId, ControlSignal mode, String expectedPauseId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        if (discussionControls.containsKey(conversationId)) {
+            return false;
+        }
+        return cancelStored(conversationId, mode, true, expectedPauseId);
+    }
+
+    private boolean cancelStored(String conversationId, ControlSignal mode, boolean pausedOnly, String expectedPauseId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         var gc = conversationStore.read(conversationId);
         var state = gc.getState();
         // Only cancel from non-terminal states — guard against overwriting COMPLETED,
@@ -458,12 +497,25 @@ public class GroupHitlCoordinator {
         }
         boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL
                 || state == GroupConversationState.AWAITING_HUMAN_INPUT;
+        if (pausedOnly && !wasPaused) {
+            LOGGER.infof("Paused-only cancel skipped: GC %s is %s, not awaiting a decision",
+                    LogSanitizer.sanitize(conversationId), state);
+            return false;
+        }
+        if (expectedPauseId != null && !expectedPauseId.equals(HitlDecision.pauseIdOf(gc.getPausedAt()))) {
+            LOGGER.infof("Paused-only cancel skipped: GC %s has paused again since (pause %s is no longer current)",
+                    LogSanitizer.sanitize(conversationId), LogSanitizer.sanitize(expectedPauseId));
+            return false;
+        }
+        // Bind the write to the pause this cancel was decided against (null when the
+        // conversation is not paused): captured before setPausedAt(null) clears it.
+        final String readPauseId = gc.getPauseId();
         gc.setState(GroupConversationState.CANCELLED);
         gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
         gc.setPendingHumanInput(null); // I6: a cancelled turn is no longer owed
         gc.setLastModified(Instant.now());
         try {
-            conversationStore.updateIfState(gc, state);
+            conversationStore.updateIfStateAndPause(gc, state, readPauseId);
         } catch (IResourceStore.ResourceModifiedException e) {
             // CAS lost — leave the schedule alone: whoever won the race (a fresh
             // pause / approve / timeout) owns the schedule now. Report 409.
@@ -508,6 +560,10 @@ public class GroupHitlCoordinator {
         // A decision made for an earlier pause (HitlDecision.pauseId) must not
         // approve this one — the discussion was resumed and has paused again on
         // something the reviewer never saw.
+        // The pause every check below was made against; the CASes at the end bind to
+        // it, so a resume + re-pause landing between this read and those writes
+        // conflicts instead of acting on the newer pause (ABA).
+        final String readPauseId = gc.getPauseId();
         if (request.getDecision() != null && !request.getDecision().appliesToPause(gc.getPausedAt())) {
             throw new GroupPauseMismatchException("The pending approval changed since this decision was made — "
                     + "review the current pause and decide again");
@@ -631,7 +687,7 @@ public class GroupHitlCoordinator {
             gc.setState(GroupConversationState.REJECTED);
             gc.setPausedAt(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
-            conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            conversationStore.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, readPauseId);
             // Delete timeout schedule only after CAS succeeds (Phase 5e)
             deleteGroupHitlTimeoutSchedule(groupConversationId);
             auditHitlDecision(gc, decision);
@@ -675,7 +731,7 @@ public class GroupHitlCoordinator {
         // Zero-match outcomes are distinguished by the store: a concurrent DELETE
         // surfaces as (unchecked) GroupConversationGoneException → REST 404, a
         // genuine state race as ResourceModifiedException → REST 409.
-        conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        conversationStore.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, readPauseId);
         // O2: register the control token IMMEDIATELY after the resume CAS — before
         // deleting the schedule and notifying listeners. Otherwise a concurrent
         // cancelDiscussion landing between the CAS and a later put finds no token,
@@ -1160,7 +1216,9 @@ public class GroupHitlCoordinator {
             throw new IllegalArgumentException(
                     "Content exceeds the maximum length of " + MAX_HUMAN_INPUT_LENGTH + " characters");
         }
-        return resolveHumanTurn(gc, pending, content, null, submittedBy, listener);
+        // Bound to the pause this submission read: a delayed submit must not land on
+        // a newer human turn that happens to be pending in the same state.
+        return resolveHumanTurn(gc, pending, content, null, submittedBy, listener, gc.getPauseId());
     }
 
     /**
@@ -1169,16 +1227,35 @@ public class GroupHitlCoordinator {
      * same resume path a submission takes, with a different entry.
      */
     public void skipHumanTurnOnTimeout(String groupConversationId) {
+        skipHumanTurnOnTimeout(groupConversationId, null);
+    }
+
+    /**
+     * @param expectedPauseId
+     *            the pause the timeout was armed for
+     *            ({@link HitlDecision#pauseIdOf}), or {@code null} for any. A
+     *            timeout whose pause was answered — and whose discussion has since
+     *            paused on a NEW human turn — must not skip that later turn.
+     */
+    public void skipHumanTurnOnTimeout(String groupConversationId, String expectedPauseId) {
         try {
             var gc = GroupConversationSchemaMigrations.prepareForResume(conversationStore.read(groupConversationId));
             if (gc.getState() != GroupConversationState.AWAITING_HUMAN_INPUT || gc.getPendingHumanInput() == null) {
                 LOGGER.infof("Human-turn timeout for %s skipped — no longer awaiting human input", groupConversationId);
                 return;
             }
+            if (expectedPauseId != null && !expectedPauseId.equals(HitlDecision.pauseIdOf(gc.getPausedAt()))) {
+                LOGGER.infof("Human-turn timeout for %s skipped — the turn it was armed for was already resolved",
+                        LogSanitizer.sanitize(groupConversationId));
+                return;
+            }
             var pending = gc.getPendingHumanInput();
             String reason = "No response from " + pending.displayName()
                     + (gc.getHitlApprovalTimeout() != null ? " within " + gc.getHitlApprovalTimeout() : "");
-            resolveHumanTurn(gc, pending, null, reason, "system:timeout", null);
+            // Bound to the pause the timeout read (and just checked against
+            // expectedPauseId): the write conflicts if the turn was answered and the
+            // discussion paused on a new one in between.
+            resolveHumanTurn(gc, pending, null, reason, "system:timeout", null, gc.getPauseId());
             LOGGER.infof("Human turn for %s timed out (SKIP_TURN) — member '%s' skipped",
                     groupConversationId, pending.memberId());
         } catch (Exception e) {
@@ -1197,7 +1274,7 @@ public class GroupHitlCoordinator {
      */
     private GroupConversation resolveHumanTurn(GroupConversation gc, GroupConversation.PendingHumanInput pending,
                                                String content, String skipReason, String resolvedBy,
-                                               GroupDiscussionEventListener listener)
+                                               GroupDiscussionEventListener listener, String boundPauseId)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException,
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         String groupConversationId = gc.getId();
@@ -1265,7 +1342,7 @@ public class GroupHitlCoordinator {
         gc.setState(GroupConversationState.IN_PROGRESS);
         gc.setLastModified(Instant.now());
         // Double-submit / concurrent-cancel race → ResourceModifiedException → 409.
-        conversationStore.updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
+        conversationStore.updateIfStateAndPause(gc, GroupConversationState.AWAITING_HUMAN_INPUT, boundPauseId);
 
         // Same post-CAS order as resumeDiscussion: token first (a racing cancel
         // must find a signalable token), then the schedule. The metric, the audit
@@ -1287,7 +1364,11 @@ public class GroupHitlCoordinator {
             }
         };
         try {
-            executorService.submit(callerIdentityContext.withIdentity(callerIdentityContext.captureOrCurrent(), resumeWork));
+            // The submitter is often not the owner (a HUMAN member answering a turn,
+            // or an admin). Their bearer token must not ride along into the rest of
+            // the owner's discussion — the same rule as the approval resume.
+            executorService.submit(callerIdentityContext.withIdentity(
+                    resumeCallerFor(callerIdentityContext.captureOrCurrent(), gc), resumeWork));
         } catch (RuntimeException e) {
             // No thread will run the resume — roll the append back and restore the
             // pause, so the member's turn is not silently swallowed.
