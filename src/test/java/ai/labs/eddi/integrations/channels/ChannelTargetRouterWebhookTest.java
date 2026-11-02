@@ -14,13 +14,16 @@ import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -78,12 +81,12 @@ class ChannelTargetRouterWebhookTest {
         when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
                 .thenReturn(List.of(descriptor));
         when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
-        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret");
+        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret-0123456789");
 
         var found = router.getWebhookIntegration(WEBHOOK_ID);
 
         assertTrue(found.isPresent());
-        assertEquals("plain-secret", found.get().getPlatformConfig().get("signingSecret"));
+        assertEquals("plain-secret-0123456789", found.get().getPlatformConfig().get("signingSecret"));
         // The store's own instance keeps the reference.
         assertEquals("${vault:hook-secret}", config.getPlatformConfig().get("signingSecret"));
         assertTrue(router.getWebhookIntegration("ffffffffffffffffffffffff").isEmpty());
@@ -128,5 +131,89 @@ class ChannelTargetRouterWebhookTest {
         config.setDefaultTargetName("missing");
         assertNull(router.resolveEventTarget(config, "other"));
         assertNull(router.resolveEventTarget(null, "push"));
+    }
+
+    private String signingSecretOf(String stored, String resolved) throws Exception {
+        var config = webhook(target("default"));
+        config.setPlatformConfig(Map.of("signingSecret", stored));
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/" + WEBHOOK_ID + "?version=2"));
+        when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(descriptor));
+        when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
+        when(secretResolver.resolveValue(anyString())).thenReturn(resolved);
+        var found = router.getWebhookIntegration(WEBHOOK_ID);
+        assertTrue(found.isPresent());
+        return found.get().getPlatformConfig().get("signingSecret");
+    }
+
+    @Test
+    void plaintextSigningSecretIsNeverHandedToTheVerifier() throws Exception {
+        // Reachable through a ZIP import or a direct store write; save-time
+        // validation refuses it, so the runtime must too.
+        assertNull(signingSecretOf("a-plaintext-secret-long-enough", "a-plaintext-secret-long-enough"));
+    }
+
+    @Test
+    void tooShortResolvedSigningSecretIsNeverHandedToTheVerifier() throws Exception {
+        assertNull(signingSecretOf("${vault:hook}", "short"));
+    }
+
+    @Test
+    void sufficientlyLongVaultSecretIsKept() throws Exception {
+        assertEquals("0123456789abcdef", signingSecretOf("${vault:hook}", "0123456789abcdef"));
+    }
+
+    @Test
+    void fifteenCharacterSecretIsStripped() throws Exception {
+        assertNull(signingSecretOf("${vault:hook}", "a".repeat(15)));
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+    }
+
+    @Test
+    void sixteenCharacterSecretIsKept() throws Exception {
+        assertEquals("a".repeat(16), signingSecretOf("${vault:hook}", "a".repeat(16)));
+        assertEquals(0, router.weakWebhookSecretWarningsLogged());
+    }
+
+    @Test
+    void weakSecretWarnsOncePerRefreshCycleAndAgainAfterAVaultChange() throws Exception {
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Consumer<SecretReference>> listener = ArgumentCaptor.forClass(Consumer.class);
+        router.registerSecretInvalidation();
+        verify(secretResolver).registerInvalidationListener(listener.capture());
+
+        assertNull(signingSecretOf("${vault:hook}", "a".repeat(15)));
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+
+        // A second refresh with nothing changed is silent.
+        forceRefresh();
+        router.getWebhookIntegration(WEBHOOK_ID);
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+
+        // A vault change re-arms the warning: the secret may still be wrong.
+        listener.getValue().accept(new SecretReference("default", "hook"));
+        router.getWebhookIntegration(WEBHOOK_ID);
+        assertEquals(2, router.weakWebhookSecretWarningsLogged());
+    }
+
+    private void forceRefresh() throws Exception {
+        var field = ChannelTargetRouter.class.getDeclaredField("lastRefreshTime");
+        field.setAccessible(true);
+        field.setLong(router, 0L);
+    }
+
+    @Test
+    void unresolvedLongReferenceIsStrippedWithOneWarning() throws Exception {
+        String reference = "${vault:a-reference-that-is-long-enough}";
+        assertNull(signingSecretOf(reference, reference), "an unresolved reference is left unchanged by resolution");
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
+    }
+
+    @Test
+    void unresolvedLongReferenceWithLeadingWhitespaceIsStripped() throws Exception {
+        String reference = " ${vault:a-reference-that-is-long-enough}";
+        assertNull(signingSecretOf(reference, reference));
+        assertEquals(1, router.weakWebhookSecretWarningsLogged());
     }
 }

@@ -208,6 +208,19 @@ class TenantQuotaServiceTest {
     }
 
     @Test
+    @DisplayName("unsettled spend counts toward the cost budget; a negative or non-finite amount counts as none")
+    void unsettledSpendCounts() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true));
+        quotaService.recordCost(TENANT_ID, 99.0);
+
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, 0.5).allowed());
+        assertFalse(quotaService.checkCostBudget(TENANT_ID, 1.0).allowed(), "99 recorded + 1 unsettled reaches the 100 budget");
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, -5.0).allowed());
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, Double.NaN).allowed());
+        assertTrue(quotaService.checkCostBudget(TENANT_ID).allowed(), "the one-argument form is unchanged");
+    }
+
+    @Test
     @DisplayName("should return denied from recordCost when budget exceeded")
     void shouldReturnDeniedFromRecordCost() {
         quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true));

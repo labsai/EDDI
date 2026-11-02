@@ -78,6 +78,28 @@ public class AgentTestSuiteIT extends BaseIntegrationIT {
         assertEquals("actionsContain", run.jsonPath().getString("cases[0].attempts[0].turns[0].failures[0].expectation"));
     }
 
+    /**
+     * Two turns of one conversation: the second is judged on its own step, and the
+     * agent's state carries over — the output set answers a repeated greeting
+     * differently ({@code timesOccurred: 1}).
+     */
+    @Test
+    @DisplayName("a two-turn case is judged turn by turn on one conversation")
+    void twoTurnCase() throws Exception {
+        String body = """
+                {"name":"greeting twice","cases":[{"name":"hello twice","turns":[
+                  {"input":"hello","expect":{"actionsContain":["greet"],"outputMatches":"(?i)nice to meet"}},
+                  {"input":"hello","expect":{"actionsContain":["greet"],"outputMatches":"(?i)already say hi"}}
+                ]}]}""";
+        String suiteId = extractResourceId(createResource(body, "testsuitestore/testsuites")).id();
+
+        Response run = runToCompletion(suiteId);
+
+        assertEquals("PASSED", run.jsonPath().getString("status"), run.asString());
+        assertEquals(2, run.jsonPath().getList("cases[0].attempts[0].turns").size(), run.asString());
+        assertEquals(2, run.jsonPath().getInt("cases[0].attempts[0].turns[1].index"));
+    }
+
     @Test
     @DisplayName("an invalid suite is refused with 400")
     void invalidSuiteIsRefused() {
