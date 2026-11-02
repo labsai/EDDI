@@ -135,6 +135,80 @@ class SchedulePollerServiceTest {
         verify(scheduleStore).markCompleted(eq("sched-1"), any(), any()); // nextFire recomputed
     }
 
+    /**
+     * A due row still CLAIMED is a fire that never reported (its node died, or it
+     * wedged past the interrupt). Re-firing it at once with failCount untouched
+     * made a node-killing fire kill every node in turn, forever.
+     */
+    @Test
+    void poll_staleClaim_countsAsAFailedAttemptInsteadOfRefiringAtOnce() throws Exception {
+        var schedule = makeCronSchedule("sched-stale", "0 9 * * *", "Hello");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setFailCount(1);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-stale"), eq("test-instance"), any(), any())).thenReturn(true);
+
+        poller.pollDueSchedules();
+
+        verifyNoInteractions(fireExecutor);
+        verify(scheduleStore).markFailed(eq("sched-stale"), any(), any());
+        // One failed attempt, counted once.
+        assertEquals(1.0, meterRegistry.counter("eddi.schedule.fire.failed").count());
+    }
+
+    @Test
+    void poll_staleClaimAtTheRetryLimit_isDeadLettered() throws Exception {
+        var schedule = makeCronSchedule("sched-poison", "0 9 * * *", "Hello");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setFailCount(4);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-poison"), eq("test-instance"), any(), any())).thenReturn(true);
+
+        poller.pollDueSchedules();
+
+        verifyNoInteractions(fireExecutor);
+        verify(scheduleStore).markDeadLettered(eq("sched-poison"), any());
+    }
+
+    @Test
+    void runWithinDeadline_abandonsAFireThatOutlivesItsBound() throws Exception {
+        var started = new CountDownLatch(1);
+        var abandoned = assertThrows(SchedulePollerService.FireAbandonedException.class, () -> SchedulePollerService.runWithinDeadline(() -> {
+            started.countDown();
+            Thread.sleep(10_000);
+            return makeFireLog("slow", FireStatus.COMPLETED.name());
+        }, Duration.ofMillis(200)), "a fire cut off at its bound is abandoned, not reported as a failed outcome");
+        assertTrue(abandoned.timedOut());
+        assertTrue(started.await(1, TimeUnit.SECONDS));
+        assertFalse(Thread.currentThread().isInterrupted(), "the abandoned worker's cancellation is not the caller's interrupt");
+    }
+
+    /**
+     * A zero bound (what a mocked {@code manualFireDeadline()} returns) used to
+     * mean "wait 1 ms", abandoning a fire that had not even been scheduled yet.
+     */
+    @Test
+    void runWithinDeadline_nonPositiveBoundMeansTheDefault() throws Exception {
+        ScheduleFireLog result = SchedulePollerService.runWithinDeadline(() -> {
+            Thread.sleep(50);
+            return makeFireLog("quick", FireStatus.COMPLETED.name());
+        }, Duration.ZERO);
+        assertNotNull(result);
+    }
+
+    @Test
+    void runWithinDeadline_reassertsAnInterruptTheFireEndedWith() throws Exception {
+        try {
+            SchedulePollerService.runWithinDeadline(() -> {
+                Thread.currentThread().interrupt();
+                return makeFireLog("int", FireStatus.FAILED.name());
+            }, Duration.ofSeconds(5));
+            assertTrue(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     @Test
     void poll_claimSuccess_populatesFireIdOnInMemorySchedule() throws Exception {
         // tryClaim() only returns a boolean; it does not hand back the fireId it
