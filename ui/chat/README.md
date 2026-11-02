@@ -90,14 +90,14 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 | Parameter             | Example                     | Effect                             |
 | --------------------- | --------------------------- | ---------------------------------- |
 | `theme`               | `?theme=light`              | Set the theme (`dark`/`light`/`system`). The URL wins over a theme the visitor chose earlier; the header toggle cycles dark, light, system |
-| `title`               | `?title=My%20Agent`         | Header title text and browser tab title (replaces the agent name in the header) |
+| `title`               | `?title=My%20Agent`         | Header title text and browser tab title (replaces the agent name in the header). Beats the deployment brand's product name |
 | `lang`                | `?lang=de`                  | Widget language (`en`, `de`, `fr`, `es`); default: the browser language. Also sets `<html lang>` |
-| `accentColor`         | `?accentColor=%23cc3366`    | Accent colour — any CSS colour works (`%23hex`, `rgb(...)`, a name); the tints are derived with `color-mix()` |
+| `accentColor`         | `?accentColor=%23cc3366`    | Accent colour — any CSS colour works (`%23hex`, `rgb(...)`, a name); the tints are derived with `color-mix()`. Beats `ChatConfig.accentColor` and the deployment brand's accent |
 | `tokenOrigin`         | `?tokenOrigin=https://app.example.com` | Allow that origin to send the bearer token by `postMessage` (comma-separated list); see [Embedding the Chat UI](../../docs/chat-ui-embedding.md#2-hand-the-widget-a-token-authentication-on) |
 | `hideUndo`            | `?hideUndo=true`            | Hide undo button                   |
 | `hideRedo`            | `?hideRedo=true`            | Hide redo button                   |
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
-| `hideLogo`            | `?hideLogo=true`            | Show the text title (default "EDDI") instead of the logo |
+| `hideLogo`            | `?hideLogo=true`            | Show the text title (default: the brand's product name, else "EDDI") instead of the logo |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
 
 <details>
@@ -109,10 +109,10 @@ When integrating directly (not via iframe), you can pass a typed `ChatConfig` ob
 interface ChatConfig {
   apiBaseUrl?: string;          // Default: window.location.origin
   theme?: "dark" | "light" | "system";
-  accentColor?: string;        // CSS value, default: "#113B92"
+  accentColor?: string;        // CSS value; default: the brand's chat accent, else "#113B92"
   showLogo?: boolean;          // Default: true
-  logoUrl?: string;            // Default: /img/logo_eddi.png
-  title?: string;              // Default: "EDDI"
+  logoUrl?: string;            // Default: the brand's logo (or its name as text), else /img/logo_eddi.png; "" = text
+  title?: string;              // Default: the brand's product name, else "EDDI"
   placeholder?: string;        // Default: "Type a message..."
   enableStreaming?: boolean;    // Default: true
   enableQuickReplies?: boolean; // Default: true
@@ -127,6 +127,10 @@ interface ChatConfig {
 ```
 
 </details>
+
+### Deployment brand
+
+When an admin has set a brand on the EDDI server ([White-Labeling](../../docs/white-labeling.md#the-chat-ui)), the widget's defaults follow it: the header title and tab title use the product name, the header shows the uploaded logo (or the product name as text when none is uploaded, never EDDI's logo), and the accent is the brand's chat accent. Precedence, highest first: URL parameters, then `ChatConfig`, then the brand, then the built-in defaults — so an existing embed that sets `?title=` or `?accentColor=` looks exactly as before. Under a brand the demo route `/chat/demo/showcase` shows a "not available" notice instead of EDDI's showcase. `npm run dev` always shows the unbranded EDDI brand.
 
 ---
 

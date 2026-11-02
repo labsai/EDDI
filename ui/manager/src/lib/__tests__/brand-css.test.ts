@@ -9,6 +9,7 @@ import {
   renderBrandStylesheet,
   resolveBrandColors,
   EMPTY_COLORS,
+  UNBRANDED_COLORS,
 } from "@/lib/brand-css";
 
 /**
@@ -86,5 +87,20 @@ describe("brandPreviewStyle", () => {
       "--color-primary-foreground",
       "--color-sidebar-accent-foreground",
     ]);
+  });
+});
+
+describe("UNBRANDED_COLORS", () => {
+  it("is what the stylesheets paint when nothing is branded", () => {
+    // The Branding page shows these in an empty field's colour picker; they must
+    // be the bundles' real defaults, not a guess.
+    const root = join(__dirname, "../../..");
+    const manager = readFileSync(join(root, "src/index.css"), "utf8");
+    const chat = readFileSync(join(root, "../chat/src/styles/variables.css"), "utf8");
+    const declared = (css: string, name: string) =>
+      new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`).exec(css)?.[1]?.toLowerCase();
+    expect(declared(manager, "--color-primary")).toBe(UNBRANDED_COLORS.primary);
+    expect(declared(manager, "--color-primary-foreground")).toBe(UNBRANDED_COLORS.primaryForeground);
+    expect(declared(chat, "--chat-accent")).toBe(UNBRANDED_COLORS.chatAccent);
   });
 });
