@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -40,6 +41,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -259,7 +261,9 @@ class McpHitlToolsTest {
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
         snapshot.setHitlPauseType("TOOL_CALL");
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         when(json.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
 
         String out = tools.getApprovalStatus("c1", "summary");
@@ -377,7 +381,9 @@ class McpHitlToolsTest {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.READY); // not paused
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         // caller is neither admin nor owner (ownershipValidator mock defaults to false)
         String out = tools.getApprovalStatus("c1", "full");
         assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
@@ -388,7 +394,9 @@ class McpHitlToolsTest {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.AWAITING_HUMAN); // paused
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         when(json.serialize(any())).thenReturn("{\"full\":true}");
         // paused => the gate passes even for a non-owner approver
         String out = tools.getApprovalStatus("c1", "full");
@@ -420,7 +428,9 @@ class McpHitlToolsTest {
         snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
         snapshot.setHitlPendingToolCalls(batch);
         when(guard.requireConversationHitlAccess("c1")).thenReturn("someone-else");
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         json = new JsonSerialization(new ObjectMapper());
         tools = build(true, true);
 
