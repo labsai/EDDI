@@ -581,6 +581,7 @@ Approve/reject/cancel/status require, in order: the **conversation owner**, the 
 ## Auditing
 
 Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note, and `onRejection: REVISE` for a rule-pause rejection under that policy), and the resumed pipeline leg records its task entries like any other turn — a revision included. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED`, the cancel mode, and the **cancelling actor** (`decidedBy`: the authenticated principal, or a `system:*` identifier such as `system:timeout` for ABORT policies and `system:group` for auto-cancelled member pauses). This is the EU AI Act human-oversight trail. Since 6.7 every entry also carries the typed decision contract — outcome per unit, approval category, reason code, channel, latency and edit metrics — see [HITL Review & Audit](hitl-review-and-audit.md#the-audit-contract).
+Analytics, a sampled audit of the calls nobody approved, and earned autonomy over these records: see [HITL Oversight](hitl-oversight.md).
 
 ## Crash Recovery
 

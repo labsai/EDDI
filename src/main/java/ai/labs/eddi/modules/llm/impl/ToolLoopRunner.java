@@ -14,6 +14,7 @@ import ai.labs.eddi.modules.llm.tools.ToolInvocation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.TokenCountEstimator;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -107,6 +108,11 @@ class ToolLoopRunner {
     private final ToolApprovalGateSupport gateSupport;
     private final ToolContextBudget toolContextBudgetGuard;
     private final ToolResultGuardrail toolResultGuardrail;
+    /**
+     * Told about every allowed call after it ran (the sampled audit); set by the
+     * owner.
+     */
+    private volatile AllowedToolCallObserver allowedCallObserver = AllowedToolCallObserver.NONE;
 
     ToolLoopRunner(ToolExecutionService toolExecutionService, ToolResponseTruncator toolResponseTruncator,
             TenantQuotaService tenantQuotaService, MemorySnapshotService memorySnapshotService,
@@ -120,6 +126,10 @@ class ToolLoopRunner {
         this.gateSupport = gateSupport;
         this.toolContextBudgetGuard = toolContextBudgetGuard;
         this.toolResultGuardrail = toolResultGuardrail;
+    }
+
+    void setAllowedCallObserver(AllowedToolCallObserver observer) {
+        this.allowedCallObserver = observer != null ? observer : AllowedToolCallObserver.NONE;
     }
 
     /**
@@ -607,6 +617,8 @@ class ToolLoopRunner {
                                         () -> executeToolCall(allowedReq, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                                 toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                                                 enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
+                                allowedCallObserver.afterAllowed(memory, allowedReq, toolSources, setup.toolEndpoints(), effectiveToolApprovals,
+                                        trace);
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -686,6 +698,7 @@ class ToolLoopRunner {
                                 () -> executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                         toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
                                         enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
+                        allowedCallObserver.afterAllowed(memory, toolRequest, toolSources, setup.toolEndpoints(), effectiveToolApprovals, trace);
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
 

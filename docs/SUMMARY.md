@@ -47,6 +47,7 @@
 - [Human-in-the-Loop (HITL)](hitl.md)
   - [HITL Review & Audit](hitl-review-and-audit.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
+  - [HITL Oversight — Analytics, Sampled Audit, Earned Autonomy](hitl-oversight.md)
 - [Conversation Ratings](conversation-ratings.md)
 - [Alerts](alerts.md)
 - [Managed Agents](managed-agents.md)

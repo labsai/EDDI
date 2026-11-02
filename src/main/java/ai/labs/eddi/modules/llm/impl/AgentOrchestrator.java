@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
@@ -297,6 +299,14 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile ISharedArtifactStore sharedArtifactStore;
 
     /**
+     * The sampled audit, told about every allowed tool call. Field-injected for the
+     * same reason as the stores above; null under direct construction, where no
+     * call is sampled.
+     */
+    @Inject
+    volatile SampledAuditRecorder sampledAuditRecorder;
+
+    /**
      * M-A1: the USE check {@code recruit_agent} applies on behalf of the
      * discussion's owner. Field-injected for the same reason as the stores above;
      * null under direct construction, where recruitment is unchecked as before.
@@ -455,6 +465,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.mcpToolsProvider = new McpToolsProvider(agentStore, workflowStore, resourceClientLibrary, mcpToolProviderManager);
         this.toolLoopRunner = new ToolLoopRunner(toolExecutionService, toolResponseTruncator, tenantQuotaService,
                 memorySnapshotService, toolApprovalGate, gateSupport, toolContextBudgetGuard, toolResultGuardrail);
+        this.toolLoopRunner.setAllowedCallObserver(AllowedToolCallObserver.deferred(() -> sampledAuditRecorder));
         this.toolLoopResumer = new ToolLoopResumer(this, toolLoopRunner, gateSupport, chatTranscriptCodec, journalStore);
         this.builtinToolsProvider = new BuiltinToolsProvider(calculatorTool, dateTimeTool, webSearchTool,
                 dataFormatterTool, webScraperTool, textSummarizerTool, pdfReaderTool, weatherTool,

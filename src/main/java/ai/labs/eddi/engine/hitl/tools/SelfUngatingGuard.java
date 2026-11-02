@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.hitl.tools;
 
+import ai.labs.eddi.engine.hitl.oversight.OversightWriteGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -205,6 +206,11 @@ public final class SelfUngatingGuard {
         }
         if (p.resourcesUnresolved() && CONFIG_STORE_PATH.matcher(decodedUri).find()) {
             return UNRESOLVED_RESOURCES_REASON;
+        }
+        String oversightRefusal = OversightWriteGuard.refusal(decodedUri, body, AGENT_STORE_TARGET,
+                p.storedGates() != null ? p.storedGates()::hitlConfigOf : null);
+        if (oversightRefusal != null) {
+            return oversightRefusal;
         }
         if (LLM_STORE_PATHS.stream().anyMatch(decodedUri::contains)) {
             String refusal = llmStoreRefusal(method, body);

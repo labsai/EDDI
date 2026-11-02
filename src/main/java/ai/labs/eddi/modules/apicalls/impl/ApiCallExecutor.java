@@ -16,6 +16,7 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
@@ -1703,6 +1704,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             rejectExpiredSecretContext(headerValue, "header '" + headerName + "'");
             request.setHttpHeader(headerName, headerValue);
         }
+        // Engine-owned, set after the configured headers so no config can drop it.
+        AgentCallMarker.apply(request);
 
         // A resolved credential in any header must never be replayed to another
         // origin by a redirect. When ssrf-protection is on, redirects are already

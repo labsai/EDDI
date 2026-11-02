@@ -55,6 +55,8 @@ public final class HitlConfigValidation {
                             + " characters — it is approver-facing summary text, not documentation");
         }
         validateToolApprovals(hitlConfig.getToolApprovals(), "hitlConfig.toolApprovals");
+        OversightConfigValidation.validate(hitlConfig.getOversight(),
+                hitlConfig.getReview() != null ? hitlConfig.getReview().getReasonCodes() : null, "hitlConfig.oversight");
         validateRange(hitlConfig.getMaxRevisionsPerTurn(), 1, 10, "hitlConfig.maxRevisionsPerTurn");
         warnIfToolApprovalsInheritsAutoApprove(hitlConfig);
         validateNotify(hitlConfig.getNotify(), "hitlConfig.notify");

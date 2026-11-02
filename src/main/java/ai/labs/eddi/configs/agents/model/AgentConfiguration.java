@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.hitl.HitlRejectionAction;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
 import ai.labs.eddi.configs.hitl.model.HitlReviewConfig;
+import ai.labs.eddi.configs.hitl.model.OversightConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -1723,6 +1724,23 @@ public class AgentConfiguration {
 
         public void setToolApprovals(ToolApprovalsConfig toolApprovals) {
             this.toolApprovals = toolApprovals;
+        }
+
+        /**
+         * Sampled audit of ungated tool calls and the earned-autonomy policy — see
+         * {@link OversightConfig}. Absent = nothing sampled, nothing recommended or
+         * suspended.
+         *
+         * @since 6.7.0
+         */
+        private OversightConfig oversight;
+
+        public OversightConfig getOversight() {
+            return oversight;
+        }
+
+        public void setOversight(OversightConfig oversight) {
+            this.oversight = oversight;
         }
 
         /** Default for {@link #maxRevisionsPerTurn} when the field is absent. */
