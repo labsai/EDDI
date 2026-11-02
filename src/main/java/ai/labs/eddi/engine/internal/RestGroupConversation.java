@@ -370,6 +370,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // is to continue, close or delete — a transcript is not less private than
             // the right to append to it.
             ownershipValidator.requireOwnerOrAdminStrict(identity, gc.getUserId(), "group conversation");
+            // The pause's approvalContext rides on this document: served through the
+            // current filter.
+            gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
             return gc;
         } catch (ForbiddenException e) {
             throw e;

@@ -115,6 +115,19 @@ class RestGroupConversationApprovalContextTest {
     }
 
     @Test
+    @DisplayName("the raw group read (owner/admin) serves the field re-redacted too")
+    void rawReadRedacted() throws Exception {
+        String key = "sk-ant-" + "fixture".repeat(5);
+        gc(GroupConversationState.AWAITING_APPROVAL, "the draft " + key);
+        as("owner", false, false);
+
+        GroupConversation body = rest.readGroupConversation(GROUP_ID, GC_ID);
+
+        assertFalse(body.getHitlApprovalContext().getItems().get(0).getText().contains(key));
+        assertTrue(body.getHitlApprovalContext().getItems().get(0).getText().contains("the draft"));
+    }
+
+    @Test
     @DisplayName("detail=full serves the field re-redacted")
     void fullViewRedacted() throws Exception {
         String key = "sk-ant-" + "fixture".repeat(5);
