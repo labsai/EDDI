@@ -46,7 +46,7 @@ export function AgentFeedbackStrip({ agentId, ratingsEnabled }: { agentId: strin
         {t("feedback.kpiSatisfied", "Satisfied")}: <span className="font-semibold text-foreground tabular-nums">{percent(satisfaction)}</span>
       </span>
       {!!attention.data && (
-        <span className="text-amber-600 dark:text-amber-400" data-testid="strip-attention">
+        <span className="text-warn-600 dark:text-warn-400" data-testid="strip-attention">
           {t("feedback.attentionCount", { n: attention.data, defaultValue: "Ratings needing attention: {{n}}" })}
         </span>
       )}
