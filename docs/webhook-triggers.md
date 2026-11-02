@@ -17,6 +17,11 @@ the signature *is* the credential.
 Events can be [CloudEvents 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/bindings/http-protocol-binding.md)
 (structured or binary mode) or plain JSON.
 
+When a helpdesk (Zendesk, Freshdesk, Front, Help Scout, ServiceNow) owns a support mailbox, this channel — not the
+[email channel](email-integration.md) — is the way in: the helpdesk's trigger posts the ticket here and the agent
+answers through `httpcalls` against the helpdesk API. See the
+[helpdesk recipe](email-integration.md#helpdesk-recipe-webhook--httpcalls).
+
 ## Setup
 
 ### 1. Store a signing secret in the vault
