@@ -18,6 +18,7 @@ import ai.labs.eddi.modules.nlp.IRestSemanticParser;
 import ai.labs.eddi.modules.nlp.Solution;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
+import ai.labs.eddi.utils.RestUtilities;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.Ticker;
@@ -111,6 +112,14 @@ public class RestSemanticParser implements IRestSemanticParser {
     @Override
     public void parse(String configId, Integer version, String sentence, AsyncResponse asyncResponse) {
         asyncResponse.setTimeout(30, TimeUnit.SECONDS);
+
+        // The id is authorized as written and then spliced into a resource URI that
+        // is parsed again (RestUtilities.extractResourceId cuts at the first '?'), so
+        // an id such as "<other>?version=3&x=" would be authorized as one resource
+        // and loaded as another. Only a real store id may pass.
+        if (!RestUtilities.isValidId(configId)) {
+            throw new BadRequestException("Invalid parser id.");
+        }
 
         // Enforce VIEW on the specific parser configuration on the REQUEST thread —
         // ResourceAccessGuard reads the request-scoped SecurityIdentity, which is not

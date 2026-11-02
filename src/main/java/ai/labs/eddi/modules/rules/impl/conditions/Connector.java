@@ -23,7 +23,17 @@ public class Connector implements IRuleCondition {
         OR, AND
     }
 
-    private Operator operator;
+    /**
+     * Absent an {@code operator} the connector is an AND, as the documentation and
+     * {@link #execute} have always had it. Never null, so {@link #getConfigs()} and
+     * {@link #clone()} cannot fail on a connector that was not given one.
+     */
+    private Operator operator = Operator.AND;
+
+    /**
+     * An {@code operator} value that is neither AND nor OR; refused by validation.
+     */
+    private String unrecognizedOperator;
 
     private final List<IRuleCondition> conditions = new LinkedList<>();
 
@@ -47,14 +57,30 @@ public class Connector implements IRuleCondition {
     public void setConfigs(Map<String, String> configs) {
         if (configs != null && !configs.isEmpty()) {
             if (configs.containsKey(operatorQualifier)) {
-                String operator = configs.get(operatorQualifier);
-                if (operator.equals(Operator.AND.name())) {
-                    this.operator = Operator.AND;
+                String value = configs.get(operatorQualifier);
+                Operator parsed = parseOperator(value);
+                if (parsed != null) {
+                    this.operator = parsed;
+                    this.unrecognizedOperator = null;
                 } else {
-                    this.operator = Operator.OR;
+                    // Kept for validateConfiguration(): silently reading an unknown value as
+                    // OR (the old behaviour) turned a typo into a different rule.
+                    this.unrecognizedOperator = String.valueOf(value);
                 }
             }
         }
+    }
+
+    private static Operator parseOperator(String value) {
+        if (value != null) {
+            String trimmed = value.trim();
+            for (Operator candidate : Operator.values()) {
+                if (candidate.name().equalsIgnoreCase(trimmed)) {
+                    return candidate;
+                }
+            }
+        }
+        return null;
     }
 
     public ExecutionState execute(IConversationMemory memory, List<Rule> trace) throws Rule.InfiniteLoopException, Rule.RuntimeException {
@@ -102,6 +128,9 @@ public class Connector implements IRuleCondition {
 
     @Override
     public void validateConfiguration() {
+        if (unrecognizedOperator != null) {
+            throw new IllegalArgumentException(String.format("'%s' has the unknown operator '%s' — use AND or OR.", ID, unrecognizedOperator));
+        }
         if (isEmpty()) {
             throw new IllegalArgumentException(String.format("'%s' requires at least one nested condition"
                     + " — an empty connector would match every conversation.", ID));

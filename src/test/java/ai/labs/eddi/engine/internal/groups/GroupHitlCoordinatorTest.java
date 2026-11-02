@@ -407,7 +407,7 @@ class GroupHitlCoordinatorTest {
         assertEquals("My considered answer.", entry.content());
         assertEquals(TranscriptEntryType.OPINION, entry.type(), "the phase's NATURAL type, captured at pause time");
         assertEquals(2, result.getResumePoint().speakerIdx(), "advanced past the answered speaker");
-        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
+        verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_HUMAN_INPUT), any());
         verify(scheduleStore).deleteSchedulesByName(anyString());
         // The resume runs on the executor — capture and run it, then verify the
         // discussion re-entered at the paused phase.
@@ -436,6 +436,143 @@ class GroupHitlCoordinatorTest {
 
         assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
+    }
+
+    // =================================================================
+    // Pause-bound CAS: a transition acts only on the pause it was issued for
+    // =================================================================
+
+    /**
+     * The store's multi-field CAS is what rejects a stale writer; these tests pin
+     * that every transition hands it the id of the pause it READ (not null, not the
+     * state alone). The store is stubbed to refuse the write — as it does when the
+     * stored pauseId has moved on (resume + re-pause = ABA) — and the coordinator
+     * must surface that refusal.
+     */
+    private void refuseAndCapturePauseId(ArgumentCaptor<String> pauseId, GroupConversationState expectedState)
+            throws Exception {
+        doThrow(new IResourceStore.ResourceModifiedException("newer pause"))
+                .when(conversationStore).updateIfStateAndPause(any(), eq(expectedState), pauseId.capture());
+    }
+
+    private GroupConversation approvalPausedGc(long pausedAtMillis) {
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
+        gc.setPausedAt(Instant.ofEpochMilli(pausedAtMillis));
+        return gc;
+    }
+
+    @Test
+    void approve_isBoundToThePauseItRead_andSurfacesAStaleRefusal() throws Exception {
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(5_000L);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_APPROVAL);
+        var request = new GroupApprovalRequest();
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(5_000L)), pauseId.getValue(),
+                "the approve CAS must name the pause that was read, not just the state");
+        verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void reject_isBoundToThePauseItRead_andSurfacesAStaleRefusal() throws Exception {
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(6_000L);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_APPROVAL);
+        var decision = new HitlDecision();
+        decision.setVerdict(HitlDecision.HitlVerdict.REJECTED);
+        var request = new GroupApprovalRequest();
+        request.setDecision(decision);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.resumeDiscussion(GC_ID, request, null));
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(6_000L)), pauseId.getValue(),
+                "the reject CAS must name the pause that was read, not just the state");
+        verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void cancelPausedDiscussion_isBoundToThePauseItRead_andReportsAStaleRefusal() throws Exception {
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(7_000L);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_APPROVAL);
+
+        assertFalse(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL,
+                HitlDecision.pauseIdOf(Instant.ofEpochMilli(7_000L))));
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(7_000L)), pauseId.getValue());
+        verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void cancelDiscussion_ofAPausedConversation_isBoundToThePauseItRead() throws Exception {
+        var coordinator = coordinator();
+        var gc = approvalPausedGc(8_000L);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_APPROVAL);
+
+        assertFalse(coordinator.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL),
+                "a cancel that lost to a newer pause must not report success");
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(8_000L)), pauseId.getValue());
+    }
+
+    @Test
+    void humanTurnTimeoutSkip_isBoundToThePauseItRead_andIsRefusedWhenANewTurnIsPending() throws Exception {
+        var coordinator = coordinator();
+        var gc = humanPausedGc();
+        gc.setPausedAt(Instant.ofEpochMilli(9_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var resId = mock(IResourceStore.IResourceId.class);
+        when(resId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
+        var config = humanGroupConfig("PT1H");
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_HUMAN_INPUT);
+
+        assertThrows(IllegalStateException.class,
+                () -> coordinator.skipHumanTurnOnTimeout(GC_ID, HitlDecision.pauseIdOf(Instant.ofEpochMilli(9_000L))));
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(9_000L)), pauseId.getValue(),
+                "the timeout skip CAS must name the pause the timeout read");
+        verifyNoInteractions(executorService);
+    }
+
+    @Test
+    void submitHumanInput_isBoundToThePauseItRead_andSurfacesAStaleRefusal() throws Exception {
+        var coordinator = coordinator();
+        var gc = humanPausedGc();
+        gc.setPausedAt(Instant.ofEpochMilli(10_000L));
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var resId = mock(IResourceStore.IResourceId.class);
+        when(resId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
+        var config = humanGroupConfig("PT4H");
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
+        var pauseId = ArgumentCaptor.forClass(String.class);
+        refuseAndCapturePauseId(pauseId, GroupConversationState.AWAITING_HUMAN_INPUT);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> coordinator.submitHumanInput(GC_ID, "h-1", "A late answer.", "h-1", null));
+
+        assertEquals(HitlDecision.pauseIdOf(Instant.ofEpochMilli(10_000L)), pauseId.getValue(),
+                "a submission must name the pause it answered, or a delayed one can land on a newer turn");
+        verifyNoInteractions(executorService);
     }
 
     @Test
@@ -501,6 +638,7 @@ class GroupHitlCoordinatorTest {
         assertTrue(gc.getTranscript().isEmpty());
         assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -657,6 +795,7 @@ class GroupHitlCoordinatorTest {
         assertDoesNotThrow(() -> coordinator.skipHumanTurnOnTimeout(GC_ID));
 
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -671,6 +810,7 @@ class GroupHitlCoordinatorTest {
         assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
         assertTrue(gc.getTranscript().isEmpty());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -706,7 +846,7 @@ class GroupHitlCoordinatorTest {
 
         assertEquals(GroupConversationState.CANCELLED, gc.getState());
         assertNull(gc.getPendingHumanInput(), "a cancelled turn is no longer owed");
-        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
+        verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_HUMAN_INPUT), any());
         verify(scheduleStore).deleteSchedulesByName(anyString());
     }
 
@@ -719,7 +859,7 @@ class GroupHitlCoordinatorTest {
         assertTrue(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
 
         assertEquals(GroupConversationState.CANCELLED, gc.getState());
-        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
+        verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_HUMAN_INPUT), any());
     }
 
     @Test
@@ -732,6 +872,7 @@ class GroupHitlCoordinatorTest {
 
         assertEquals(GroupConversationState.IN_PROGRESS, gc.getState());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test

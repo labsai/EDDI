@@ -8,6 +8,7 @@ import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -46,6 +47,19 @@ import java.util.regex.Pattern;
  * {@code example.com.attacker.net}. A secret without a list may go anywhere,
  * which is what every secret stored before the list existed does.
  * <p>
+ * <b>Encrypted transport.</b> An entry names a host, not a scheme, so on its
+ * own it would admit {@code http://api.openai.com} as readily as
+ * {@code https://api.openai.com} — and an editor who may change the URL can
+ * pick the plaintext one, sending the key across the network in the clear to
+ * the right host. A restricted secret is therefore refused for {@code http} or
+ * {@code ws} to a host other than loopback ({@code localhost},
+ * {@code 127.0.0.1}, {@code [::1]}), unless the deployment says otherwise with
+ * {@value #ALLOW_PLAINTEXT_PROPERTY} — the same rule, and the same loopback
+ * exemption, as a connection's {@code allowPlaintextRemoteOrigins}. A
+ * destination without an http-family scheme (a bare {@code host:port}, a
+ * {@code mongodb://} string) is not judged here: its transport security is the
+ * client's configuration, not something the scheme reveals.
+ * <p>
  * <b>Failure is closed.</b> A reference whose metadata cannot be read is
  * refused: a key that cannot be checked is not a key that may go anywhere. A
  * reference that does not exist is left to the resolver, which already refuses
@@ -71,11 +85,25 @@ public class VaultHostAllowlist {
      */
     public static final int MAX_ALLOWED_HOSTS = 100;
 
+    /**
+     * Deployment opt-out for the encrypted-transport rule in
+     * {@link #requireAllowed(Iterable, String, String)}.
+     */
+    public static final String ALLOW_PLAINTEXT_PROPERTY = "eddi.vault.allow-plaintext-remote-hosts";
+
     private final ISecretProvider secretProvider;
+    private final boolean allowPlaintextRemoteHosts;
 
     @Inject
-    public VaultHostAllowlist(ISecretProvider secretProvider) {
+    public VaultHostAllowlist(ISecretProvider secretProvider,
+            @ConfigProperty(name = ALLOW_PLAINTEXT_PROPERTY, defaultValue = "false") boolean allowPlaintextRemoteHosts) {
         this.secretProvider = secretProvider;
+        this.allowPlaintextRemoteHosts = allowPlaintextRemoteHosts;
+    }
+
+    /** With the shipped default: plaintext to a remote host is refused. */
+    public VaultHostAllowlist(ISecretProvider secretProvider) {
+        this(secretProvider, false);
     }
 
     /**
@@ -199,7 +227,21 @@ public class VaultHostAllowlist {
                         + "/grant {\"allowedHosts\": [...]} (an eddi-admin call that needs no secret value), or point the configuration at an "
                         + "allowed host.");
             }
+            if (target.plaintext() && !allowPlaintextRemoteHosts && !isLoopback(target.host())) {
+                throw new HostNotAllowedException(usedFor + " sends " + reference + " to " + target + " over unencrypted "
+                        + target.scheme() + ". The host is on that secret's allowedHosts, but allowedHosts names a host, not a "
+                        + "transport, and the secret would cross the network in the clear. Use https (or wss), or set "
+                        + ALLOW_PLAINTEXT_PROPERTY + "=true to accept an unencrypted secret to a remote host deliberately.");
+            }
         }
+    }
+
+    /**
+     * {@code localhost}, {@code 127.0.0.1} or {@code ::1} — the set a connection's
+     * plaintext rule exempts, for the same reason: it never leaves the machine.
+     */
+    static boolean isLoopback(String host) {
+        return "localhost".equals(host) || "127.0.0.1".equals(host) || "[::1]".equals(host) || "::1".equals(host);
     }
 
     /**
@@ -244,9 +286,16 @@ public class VaultHostAllowlist {
 
     /**
      * A destination reduced to what the list is compared against. {@code port} is
-     * the explicit or scheme-default port, or -1 when neither is known.
+     * the explicit or scheme-default port, or -1 when neither is known;
+     * {@code scheme} is the URL's, lower-cased, or {@code null} for a bare
+     * {@code host[:port]}.
      */
-    record HostPort(String host, int port) {
+    record HostPort(String host, int port, String scheme) {
+
+        /** Whether the scheme says the request goes out unencrypted. */
+        boolean plaintext() {
+            return "http".equals(scheme) || "ws".equals(scheme);
+        }
 
         static HostPort of(String destination) {
             if (destination == null || destination.isBlank()) {
@@ -254,19 +303,21 @@ public class VaultHostAllowlist {
             }
             String value = destination.trim();
             try {
-                URI uri = value.contains("://") ? new URI(value) : new URI("placeholder://" + value);
+                boolean hasScheme = value.contains("://");
+                URI uri = hasScheme ? new URI(value) : new URI("placeholder://" + value);
                 if (uri.getHost() == null) {
                     return null;
                 }
+                String scheme = hasScheme && uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.ROOT) : null;
                 int port = uri.getPort();
-                if (port < 0 && uri.getScheme() != null) {
-                    port = switch (uri.getScheme().toLowerCase(Locale.ROOT)) {
+                if (port < 0 && scheme != null) {
+                    port = switch (scheme) {
                         case "https", "wss" -> 443;
                         case "http", "ws" -> 80;
                         default -> -1;
                     };
                 }
-                return new HostPort(uri.getHost().toLowerCase(Locale.ROOT), port);
+                return new HostPort(uri.getHost().toLowerCase(Locale.ROOT), port, scheme);
             } catch (URISyntaxException e) {
                 return null;
             }
