@@ -164,8 +164,9 @@ principal, not a user: erasing or exporting it is refused with 400.
     identifier and a count, no content, and expires on its own an hour after its window ends. When an
     agent's `toolQuotas.subject` template derives an identifier other than the conversation's user id,
     the counters sit under that identifier and are deleted when *that* identifier is erased. The export
-    carries the user's counters (tool or pool, window start, count) in the `toolQuotas` section
-    of `additionalData`
+    carries the user's counters (tool or pool, window start, count) under `counters` in the
+    `toolQuotas` section of `additionalData`, at most 1,000; past that the section says
+    `"truncated": true` and the bundle reports `complete: false`
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 

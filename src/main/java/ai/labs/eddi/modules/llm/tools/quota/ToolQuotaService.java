@@ -168,12 +168,24 @@ public class ToolQuotaService {
             subject = rendered == null ? null : rendered.strip();
         }
         if (subject == null || subject.isEmpty()) {
-            subject = memory.getUserId() == null ? null : memory.getUserId().strip();
+            subject = userSubject(memory.getUserId());
         }
         if (subject == null || subject.isEmpty()) {
             subject = "conversation:" + memory.getConversationId();
         }
         return capSubject(subject);
+    }
+
+    /**
+     * A user id in the form counters store it as a subject — stripped and capped —
+     * so GDPR erasure and export find the same rows; {@code null} for a blank id.
+     */
+    public static String userSubject(String userId) {
+        if (userId == null) {
+            return null;
+        }
+        String subject = userId.strip();
+        return subject.isEmpty() ? null : capSubject(subject);
     }
 
     /**
