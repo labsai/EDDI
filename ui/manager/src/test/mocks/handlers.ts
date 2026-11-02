@@ -4,6 +4,10 @@ import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
+// Stateful, in its own module; re-exported so the OpenAPI contract test, which
+// discovers every handler array this module exports, checks it too.
+export { brandingHandlers, resetBrandingMockState } from "./branding-handlers";
+
 const AGENTS_MOCK = [
   {
     resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
