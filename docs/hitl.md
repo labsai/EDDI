@@ -646,7 +646,7 @@ Manager's **Approvals** page; it decides nothing. Two settings, one per audience
 | Field | Default | Description |
 |-------|---------|-------------|
 | `notify` | absent — nobody is notified | Who is told when this agent pauses. A config without it behaves exactly as before |
-| `notify.email.recipients` | — (required when `email` is present) | 1–20 plain `local@domain` addresses, ASCII, no display names, no duplicates (compared case-insensitively), each in a domain the operator allows (below). Refused at save time (400) otherwise, naming the position, never the address. For more people, use a distribution list |
+| `notify.email.recipients` | — (required when `email` is present) | 1–20 plain `local@domain` addresses (an ASCII local part; the domain may be written in Unicode and is converted to ASCII before it is checked, so the Unicode and punycode spellings of one domain count as duplicates; a domain with ß, ς or a zero-width joiner is refused: write it in punycode), no display names, no duplicates (compared case-insensitively), each in a domain the operator allows (below). Refused at save time (400) otherwise, naming the position, never the address. For more people, use a distribution list |
 
 **Which addresses — the operator decides.** Anyone who may edit an agent can set its recipients, but the mail goes out through the operator's relay, from the operator's sender address, carrying text an author (agent name, pause reason) and an end user (tool arguments) can influence. So the operator bounds it with `eddi.mail.notify.allowed-recipient-domains` (exact domains, `*.domain` for subdomains, `*` for any); **unset, only the domain of `eddi.mail.smtp.from` and its subdomains are allowed.** With a mailer configured, a recipient outside is refused at save time; without one it is accepted with a WARN, since the operator may configure the mailer later. Either way it is checked again at every send and never mailed: its ledger row ends `SUPPRESSED`.
 
@@ -689,8 +689,8 @@ would keep mailing a revoked approver forever. Name the approvers' shared mailbo
 **Observability and audit.** `eddi_email_outbound_total{kind="notify",outcome="sent|retry|failed|suppressed|not_allowed|rate_limited"}` and
 the `eddi_email_ledger_pending` gauge ([metrics.md](metrics.md#hitl-metrics)). Every sent or failed notification
 writes an `email.notify` audit-ledger entry with the conversation, the outcome, the Message-ID, the relay's reply and
-the recipient as a SHA-256 hash plus its domain — the audit ledger is write-once, so the address itself is not
-written there. Ledger rows (which do hold the address) are erased and exported with the person's other data by
+the recipient as `recipientPseudonym` (the GDPR pseudonym token: keyed with the audit ledger's key, or salted per deployment when the ledger has none, so it cannot be confirmed by hashing candidate addresses; only a deployment with neither a key nor a salt falls back to an unsalted hash) plus `recipientDomain` —
+the audit ledger is write-once, so the address itself is not written there. Ledger rows (which do hold the address) are erased and exported with the person's other data by
 `DELETE /admin/gdpr/{userId}` and the export, matched through the user id when it is an address and the email the
 user directory recorded for that principal.
 
