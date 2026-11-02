@@ -25,6 +25,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.UsageMaps;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
@@ -1734,11 +1735,7 @@ class CascadingModelExecutor {
         if (stepTokenUsage == null || stepTokenUsage.isEmpty()) {
             return;
         }
-        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
-            if (stepTokenUsage.containsKey(field) || runTokenUsage.containsKey(field)) {
-                runTokenUsage.put(field, asLong(runTokenUsage.get(field)) + asLong(stepTokenUsage.get(field)));
-            }
-        }
+        UsageMaps.merge(runTokenUsage, stepTokenUsage, AgentOrchestrator.TOKEN_USAGE_FIELDS);
     }
 
     /**

@@ -7,6 +7,10 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ModelCascadeConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
+import ai.labs.eddi.modules.llm.model.ModelPricing;
+import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
+import ai.labs.eddi.modules.llm.pricing.PricedSpend;
 
 import java.util.List;
 import java.util.Map;
@@ -28,20 +32,28 @@ import java.util.Map;
  * <li>a cascade step: the step's prices, else the cascade's defaults — never
  * the task's (docs/model-cascade.md).</li>
  * </ul>
+ * Whatever the configuration leaves null — a cache price, or every price — is
+ * resolved from the deployment price catalog by {@link ModelPriceResolver}.
  *
  * @param inputPer1M
  *            USD per 1M input tokens, or null when unpriced
  * @param outputPer1M
  *            USD per 1M output tokens, or null when unpriced
+ * @param pricing
+ *            the config's cache and long-context prices, or null
  */
-record ModelPrices(Double inputPer1M, Double outputPer1M) {
+record ModelPrices(Double inputPer1M, Double outputPer1M, ModelPricing pricing) {
 
-    /** No prices: every phase is free. */
-    static final ModelPrices UNPRICED = new ModelPrices(null, null);
+    /** No prices of its own: the catalog decides. */
+    static final ModelPrices UNPRICED = new ModelPrices(null, null, null);
+
+    ModelPrices(Double inputPer1M, Double outputPer1M) {
+        this(inputPer1M, outputPer1M, null);
+    }
 
     /** The task's own model. */
     static ModelPrices ofTask(Task task) {
-        return task == null ? UNPRICED : new ModelPrices(task.getInputPricePer1M(), task.getOutputPricePer1M());
+        return task == null ? UNPRICED : new ModelPrices(task.getInputPricePer1M(), task.getOutputPricePer1M(), task.getPricing());
     }
 
     /** A cascade step: its own prices, else the cascade's defaults. */
@@ -51,7 +63,7 @@ record ModelPrices(Double inputPer1M, Double outputPer1M) {
         }
         Double in = step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade != null ? cascade.getInputPricePer1M() : null;
         Double out = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade != null ? cascade.getOutputPricePer1M() : null;
-        return new ModelPrices(in, out);
+        return new ModelPrices(in, out, step.getPricing());
     }
 
     /**
@@ -73,10 +85,20 @@ record ModelPrices(Double inputPer1M, Double outputPer1M) {
     }
 
     /**
-     * {@code tokenUsage} ({@code inputTokens}/{@code outputTokens}) at these
-     * prices.
+     * {@code tokenUsage} at these prices, completed from the catalog
+     * ({@link ModelPriceResolver}).
      */
     double cost(Map<?, ?> tokenUsage) {
-        return TokenPricing.cost(inputPer1M, outputPer1M, tokenUsage);
+        return price(tokenUsage).usd();
+    }
+
+    /** As {@link #cost}, with the unpriced count and the price source. */
+    PricedSpend price(Map<?, ?> tokenUsage) {
+        return ModelPriceResolver.price(override(), tokenUsage);
+    }
+
+    /** These prices as the resolver's override. */
+    PriceOverride override() {
+        return new PriceOverride(inputPer1M, outputPer1M, pricing);
     }
 }
