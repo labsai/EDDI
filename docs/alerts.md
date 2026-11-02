@@ -386,7 +386,7 @@ most 10,000 of each, without naming anybody else.
 | `eddi.alerts.retry-base` | `30s` | Backoff: base × 4ⁿ⁻¹, at most six hours |
 | `eddi.alerts.claim-lease` | `2m` | How long a node owns a delivery before another may retry it |
 | `eddi.alerts.event-retention` | `90d` | Events older than this are deleted |
-| `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of a webhook call |
+| `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of a webhook call (kept between 1 s and 60 s) |
 | `eddi.alerts.manager-url` | — | The Manager's base URL, for links in delivered alerts |
 
 - The `alerts-maintenance` schedule appears in the schedule list as system-managed.

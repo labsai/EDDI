@@ -271,7 +271,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, null,
-                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE);
+                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, null);
     }
 
     /**
@@ -318,7 +318,59 @@ class CascadingModelExecutor {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
                 turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED,
-                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE);
+                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, null);
+    }
+
+    /**
+     * What the prompt looks like for ONE step's endpoint. The attachments a prompt
+     * carries are decided by the model that receives them (an
+     * {@code openai-compatible} endpoint declares vision itself), so a step on a
+     * different endpoint than the task's may need a prompt other than the one built
+     * for the task.
+     */
+    @FunctionalInterface
+    interface StepMessages {
+        /**
+         * @return the prompt for a step running on {@code modelType} with
+         *         {@code stepParams}, or null to use the task's prompt unchanged
+         */
+        List<ChatMessage> forStep(String modelType, Map<String, String> stepParams);
+    }
+
+    /**
+     * As above, additionally letting each step have its own attachment content.
+     *
+     * @param stepMessages
+     *            per-step prompt; null (or a null answer) keeps {@code messages}
+     */
+    CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                          Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                          ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                          FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
+                          StepMessages stepMessages)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
+                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, stepMessages);
+    }
+
+    /**
+     * As above, with both the spend check and a per-step prompt: the spend check is
+     * asked before every escalation and re-ask, and each step's attachments are
+     * decided for that step's own endpoint.
+     */
+    CascadeResult execute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
+                          LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
+                          Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
+                          ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
+                          FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
+                          FormatRetryRunner.ReaskSpend spend, StepMessages stepMessages)
+            throws LifecycleException {
+        return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
+                convertToObject, allowLiveStreaming, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, contextShrinker,
+                turnBudget != null ? turnBudget : FormatRetryRunner.RemainingBudget.UNBOUNDED,
+                spend != null ? spend : FormatRetryRunner.ReaskSpend.NONE, stepMessages);
     }
 
     /**
@@ -332,7 +384,7 @@ class CascadingModelExecutor {
             throws LifecycleException {
         return doExecute(cascade, messages, systemMessage, baseParams, task, memory, agentOrchestrator, templateDataObjects, jsonMode,
                 convertToObject, allowLiveStreaming, null, -1, PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT, null,
-                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE);
+                FormatRetryRunner.RemainingBudget.UNBOUNDED, FormatRetryRunner.ReaskSpend.NONE, null);
     }
 
     private CascadeResult doExecute(ModelCascadeConfig cascade, List<ChatMessage> messages, String systemMessage, Map<String, String> baseParams,
@@ -340,7 +392,7 @@ class CascadingModelExecutor {
                                     Map<String, Object> templateDataObjects, boolean jsonMode, boolean convertToObject, boolean allowLiveStreaming,
                                     ToolApprovalsConfig effectiveToolApprovals, int llmTaskIndex, int transcriptMaxBytes,
                                     FormatRetryRunner.ContextShrinker contextShrinker, FormatRetryRunner.RemainingBudget turnBudget,
-                                    FormatRetryRunner.ReaskSpend spend)
+                                    FormatRetryRunner.ReaskSpend spend, StepMessages stepMessages)
             throws LifecycleException {
 
         List<CascadeStep> steps = cascade.getSteps();
@@ -592,9 +644,15 @@ class CascadingModelExecutor {
                                     }
                                 }), trigger -> reaskGate.allowReask(trigger) && ticket.reaskAllowed(trigger));
 
+                // The prompt for THIS step's endpoint (attachments are gated per endpoint).
+                List<ChatMessage> stepPrompt = stepMessages != null ? stepMessages.forStep(modelType, mergedParams) : null;
+                if (stepPrompt == null) {
+                    stepPrompt = messages;
+                }
+
                 StepResult stepResult;
                 try {
-                    stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
+                    stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, stepPrompt, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
                             effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange, stepRecovery);
                 } catch (Exception carriedRejected) {
@@ -616,7 +674,7 @@ class CascadingModelExecutor {
                     toolCostBeforeStep = conversationToolCost(agentOrchestrator, memory);
                     carried = List.of();
                     stepExchange = new ToolExchangeRecorder();
-                    stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, messages, systemMessage, effectiveStrategy, task,
+                    stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, stepPrompt, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
                             effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange, stepRecovery);
                 }

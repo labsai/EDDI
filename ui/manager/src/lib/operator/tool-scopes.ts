@@ -303,6 +303,28 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /ratings",
   "GET /ratings/summary",
   "GET /ratings/attention-count",
+  // Alerts (EDDI 6.6.0+): the inbox of fired alerts (low ratings, failed turns)
+  // with each delivery's status, the open count, and the rules that fire them.
+  // "Are we getting alerts about agent X, and did Slack get them?" is answered
+  // from these. Scoped by the backend as /ratings is.
+  //
+  // Deliberately NOT granted:
+  // - Acknowledging (`POST /alerts/events/{eventId}/acknowledge`,
+  //   `POST /alerts/events/acknowledge`): it records the caller as the person who
+  //   handled the alert — a human's statement, and a bulk acknowledgement empties
+  //   the inbox in one call.
+  // - `POST /alerts/events/{eventId}/retry` and `POST /alerts/rules/test`: both
+  //   send real messages to Slack or a webhook.
+  // - Rule writes (`POST /alerts/rules`, `PUT`/`DELETE /alerts/rules/{ruleId}`): a
+  //   rule decides where alert content goes; that stays the admin's, on the
+  //   Alerts page.
+  // A rule read never returns a webhook URL (it is often a bearer credential):
+  // the backend masks it to scheme + host for every caller, administrators and
+  // so this operator included. Signing secrets are vault references, never values.
+  "GET /alerts/events",
+  "GET /alerts/events/unacknowledged-count",
+  "GET /alerts/rules",
+  "GET /alerts/rules/{ruleId}",
 ] as const;
 
 /**
@@ -782,6 +804,20 @@ export function grantsKnowledgeBaseBinding(endpoints: readonly string[]): boolea
 export function grantsRatingReads(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);
   return set.has("GET /ratings") && set.has("GET /ratings/summary") && set.has("GET /ratings/attention-count");
+}
+
+/**
+ * Whether the alert reads are granted — the inbox, its open count and the
+ * rules. One predicate for all of them: the prompt's alerts section uses each.
+ */
+export function grantsAlertReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return (
+    set.has("GET /alerts/events") &&
+    set.has("GET /alerts/events/unacknowledged-count") &&
+    set.has("GET /alerts/rules") &&
+    set.has("GET /alerts/rules/{ruleId}")
+  );
 }
 
 /** Whether an upload source's stored files can be listed. */

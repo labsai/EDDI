@@ -1021,7 +1021,7 @@ class LlmTaskGuardrailsTest {
             contents.add(TextContent.from("[doc.txt] holiday list"));
             messages.set(last, UserMessage.from(contents));
             return null;
-        }).when(forwarder).forward(any(), any(), any(), any(), any(), any(), any());
+        }).when(forwarder).forward(any(), any(), any(), any(), any(), any(), any(), anyBoolean());
         llmTask.attachmentForwarder = forwarder;
         var classified = new ArrayList<String>();
         ChatModel classifier = new ChatModel() {

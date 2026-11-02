@@ -45,8 +45,20 @@ public class AlertSettings {
         this.retryBase = retryBase;
         this.claimLease = claimLease;
         this.eventRetention = eventRetention;
-        this.webhookTimeout = webhookTimeout;
+        this.webhookTimeout = clampTimeout(webhookTimeout);
         this.managerUrl = managerUrl.map(String::strip).filter(url -> !url.isEmpty()).map(url -> url.replaceAll("/+$", ""));
+    }
+
+    /**
+     * A webhook timeout of 1 to 60 seconds: the send claim lease is derived from it
+     * (three times), and the erasure's wait for claims is bounded at ten base
+     * leases.
+     */
+    private static Duration clampTimeout(Duration timeout) {
+        if (timeout == null || timeout.compareTo(Duration.ofSeconds(1)) < 0) {
+            return Duration.ofSeconds(1);
+        }
+        return timeout.compareTo(Duration.ofSeconds(60)) > 0 ? Duration.ofSeconds(60) : timeout;
     }
 
     /** Defaults, for tests. */

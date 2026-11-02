@@ -166,6 +166,8 @@ export function ChatRatingCard({
               onClick={async () => {
                 if (await onRate(null)) {
                   setScore(null);
+                  setTags([]);
+                  setComment("");
                   setPhase("rate");
                 }
               }}
