@@ -102,7 +102,13 @@ services:
         case "$$EDDI_BIND" in
           ""|127.0.0.1|localhost|::1|"[::1]") exit 0 ;;
         esac
-        if [ "$$EDDI_SECURITY_ALLOW_UNAUTHENTICATED" != "true" ] || [ "$$EDDI_I_UNDERSTAND_PUBLIC" = "true" ]; then
+        # Fail closed: only an explicit false spelling counts as "authentication on" -
+        # the app also reads TRUE/1/yes/on as true, so a case-sensitive "= true" test
+        # let those spellings past the refusal.
+        case "$$(printf '%s' "$$EDDI_SECURITY_ALLOW_UNAUTHENTICATED" | tr '[:upper:]' '[:lower:]')" in
+          false|0|no|off) exit 0 ;;
+        esac
+        if [ "$$EDDI_I_UNDERSTAND_PUBLIC" = "true" ]; then
           exit 0
         fi
         echo "" >&2

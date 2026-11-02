@@ -906,6 +906,12 @@ jobs:
             --set autoscaling.enabled=true --set podDisruptionBudget.enabled=true)
           grep -qF 'minAvailable: 1' <<<"$rendered" \
             || { echo "::error::an HPA with minReplicas 2 must keep one pod available"; exit 1; }
+          echo "--- external NATS credentials over TLS go to the Secret"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.messagingType=nats --set nats.externalUrl=tls://nats.example.com:4222 \
+            --set nats.externalUsername=eddi --set nats.externalPassword=ci-placeholder-nats)
+          grep -qF 'eddi.nats.password=ci-placeholder-nats' <<<"$rendered" \
+            || { echo "::error::external NATS credentials did not reach the Secret"; exit 1; }
           echo "--- in-memory keeps Recreate"
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             "${optin[@]}")
@@ -970,6 +976,17 @@ jobs:
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
             --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \
             --set nats.externalUrl=nats://nats.example.com:4222
+          expect_failure "external NATS credentials over a plain nats:// URL" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.externalUrl=nats://nats.example.com:4222 \
+            --set nats.externalUsername=eddi --set nats.externalPassword=ci-placeholder-nats
+          expect_failure "an external NATS password without a username" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.externalUrl=tls://nats.example.com:4222 --set nats.externalPassword=ci-placeholder-nats
+          expect_failure "external NATS credentials that eddi.existingSecret would make inert" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set eddi.existingSecret=ci-operator-secrets --set nats.externalUrl=tls://nats.example.com:4222 \
+            --set nats.externalUsername=eddi --set nats.externalPassword=ci-placeholder-nats
           expect_failure "a drain longer than the termination grace" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
             --set nats.externalUrl=nats://nats.example.com:4222 --set eddi.terminationGracePeriodSeconds=30

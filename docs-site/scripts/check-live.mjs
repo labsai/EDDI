@@ -27,6 +27,12 @@ if (errors.length) {
   process.exit(1);
 }
 
+// Compared by parsed origin, not string prefix: "https://docs.eddi.technology.evil.example"
+// starts with the base but is a different host.
+const allowedOrigins = new Set([new URL(base).origin]);
+const legacyOrigin = legacyBase ? new URL(legacyBase).origin : null;
+if (legacyOrigin) allowedOrigins.add(legacyOrigin);
+
 /**
  * Follows redirects by hand, so each hop's status is visible. leftLegacyWith is the status
  * of the hop that took the request off the legacy host — the one that must be a 301.
@@ -41,9 +47,9 @@ async function land(url) {
     const location = res.headers.get('location');
     if (res.status >= 300 && res.status < 400 && location) {
       const next = new URL(location, current).href;
-      if (legacyBase && current.startsWith(legacyBase) && !next.startsWith(legacyBase)) leftLegacyWith = res.status;
+      if (legacyOrigin && new URL(current).origin === legacyOrigin && new URL(next).origin !== legacyOrigin) leftLegacyWith = res.status;
       current = next;
-      if (!current.startsWith(base) && !(legacyBase && current.startsWith(legacyBase))) {
+      if (!allowedOrigins.has(new URL(current).origin)) {
         return { url: current, status: res.status, hops, leftLegacyWith, external: true };
       }
       continue;
