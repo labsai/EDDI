@@ -101,7 +101,7 @@ endpoint path as `webhookEndpoint`.
 | `eventTypeHeader` | `X-GitHub-Event` for `github`, else none | plain JSON: header naming the event type |
 | `eventTypePath` | none | plain JSON: JSON pointer to the event type in the body, e.g. `/action` |
 | `eventIdHeader` | `X-GitHub-Delivery` for `github`, else `X-Event-Id` | plain JSON: header with the delivery id used for deduplication |
-| `inputTemplate` | `event:<type>` | Qute template for the turn's input text, rendered with `event` as its data |
+| `inputTemplate` | `event:<type>` | Qute template for the turn's input text, rendered with `event` as its data. A `${vault:...}` reference in it is **not** resolved — only the signing secret is |
 | `conversationStrategy` | `new` | `new` (a conversation per event) or `correlate` |
 | `correlationKeyPath` | — | `correlate` only (required there): JSON pointer into the event, e.g. `/data/pull_request/number` |
 | `maxDeliveriesPerWindow` | `3000` | Most deliveries this integration may have remembered in one 10-minute window, per node (1 to 100000; a delivery stores up to two replay-protection keys, so the default is 6,000 keys). Over it, new deliveries get a retryable `503` while every other integration is unaffected. Raise it for a genuinely busy sender; see "Where the keys live" |

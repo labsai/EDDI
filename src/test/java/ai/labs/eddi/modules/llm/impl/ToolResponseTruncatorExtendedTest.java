@@ -10,6 +10,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -549,6 +550,66 @@ class ToolResponseTruncatorExtendedTest {
         @DisplayName("System prompt should contain maxChars placeholder")
         void testSystemPromptPlaceholder() {
             assertTrue(ToolResponseTruncator.SUMMARIZER_SYSTEM_PROMPT.contains("%d"));
+        }
+    }
+
+    @Nested
+    @DisplayName("Summarize strategy — spend")
+    class SummarizeSpendTests {
+
+        private ToolResponseLimits summarizeLimits() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(200);
+            limits.setTruncationStrategy("summarize");
+            limits.setSummarizerModel("gpt-4o-mini");
+            return limits;
+        }
+
+        private static final class RecordingSpend implements ToolResponseTruncator.SummarizerSpend {
+            final boolean allow;
+            Map<String, Object> charged;
+
+            RecordingSpend(boolean allow) {
+                this.allow = allow;
+            }
+
+            @Override
+            public boolean admit() {
+                return allow;
+            }
+
+            @Override
+            public void charge(Map<String, Object> tokenUsage) {
+                charged = tokenUsage;
+            }
+        }
+
+        @Test
+        @DisplayName("a refused spend check truncates instead and never calls the summarizer")
+        void refusedSpendTruncates() {
+            var spend = new RecordingSpend(false);
+
+            String result = truncator.truncateIfNeeded(null, "testTool", "A".repeat(1000), summarizeLimits(), TASK_TYPE, new HashMap<>(TASK_PARAMS),
+                    spend);
+
+            assertTrue(result.contains("[TRUNCATED:"), result);
+            verifyNoInteractions(chatModelRegistry);
+            assertNull(spend.charged);
+        }
+
+        @Test
+        @DisplayName("an admitted summarizer call is charged its token usage")
+        void admittedCallIsCharged() throws Exception {
+            ChatModel model = mock(ChatModel.class);
+            when(chatModelRegistry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+            when(model.chat(any(ChatRequest.class))).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("short summary"))
+                    .tokenUsage(new TokenUsage(4000, 50)).build());
+            var spend = new RecordingSpend(true);
+
+            truncator.truncateIfNeeded(null, "testTool", "A".repeat(1000), summarizeLimits(), TASK_TYPE, new HashMap<>(TASK_PARAMS), spend);
+
+            assertEquals(4000, spend.charged.get("inputTokens"));
+            assertEquals(50, spend.charged.get("outputTokens"));
         }
     }
 }

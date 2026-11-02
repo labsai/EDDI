@@ -13,7 +13,6 @@ import { seg } from "./path-segment";
 
 export type AlertSource = "RATING" | "CONVERSATION_ERROR" | "OUTPUT_MATCH";
 export type MatchOp = "exists" | "eq" | "neq" | "in" | "gt" | "gte" | "lt" | "lte" | "contains";
-export const MATCH_OPS: MatchOp[] = ["exists", "eq", "neq", "in", "gt", "gte", "lt", "lte", "contains"];
 export type ErrorKind = "TURN_ERROR" | "TURN_INTERRUPTED" | "TURN_DEADLINE" | "COST_CEILING" | "TENANT_BUDGET";
 export type DigestMode = "NONE" | "HOURLY" | "DAILY";
 export type DeliveryType = "SLACK" | "WEBHOOK";
@@ -21,7 +20,6 @@ export type EventState = "PENDING" | "DELIVERED" | "FAILED" | "INBOX_ONLY" | "DI
 export type DeliveryStatus = "PENDING" | "DELIVERED" | "FAILED";
 
 export const ERROR_KINDS: ErrorKind[] = ["TURN_ERROR", "TURN_INTERRUPTED", "TURN_DEADLINE", "COST_CEILING", "TENANT_BUDGET"];
-export const EVENT_STATES: EventState[] = ["PENDING", "DELIVERED", "FAILED", "INBOX_ONLY", "DIGEST_PENDING", "DIGESTED"];
 
 /** Mirrors AlertRuleValidator. */
 export const ALERT_LIMITS = {

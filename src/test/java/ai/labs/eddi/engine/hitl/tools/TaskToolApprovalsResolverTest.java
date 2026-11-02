@@ -202,6 +202,41 @@ class TaskToolApprovalsResolverTest {
     }
 
     @Test
+    void strictPinsAPolicylessTaskRuleThatWouldInheritAutoApprove() {
+        // The agent auto-approves on timeout in general but wants a human for posts.
+        var agentRule = new ApprovalRule();
+        agentRule.setMatch("http.post:*");
+        agentRule.setTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
+        var agent = agentGate();
+        agent.setTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+        agent.setRules(List.of(agentRule));
+        // A task rule for the same calls with only a cosmetic change sorts first and
+        // would inherit the scalar AUTO_APPROVE, hiding the agent's rule.
+        var taskRule = new ApprovalRule();
+        taskRule.setMatch("http.post:*");
+        taskRule.setPauseReason("posting");
+        var task = new ToolApprovalsConfig();
+        task.setRules(List.of(taskRule));
+
+        var merged = TaskToolApprovalsResolver.resolve(agent, task, Mode.STRICT);
+
+        assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, merged.getRules().get(0).getTimeoutPolicy());
+        assertEquals("posting", merged.getRules().get(0).getPauseReason());
+    }
+
+    @Test
+    void strictLeavesAPolicylessTaskRuleAloneWhenNothingIsAutoApproved() {
+        var taskRule = new ApprovalRule();
+        taskRule.setMatch("http.post:*");
+        var task = new ToolApprovalsConfig();
+        task.setRules(List.of(taskRule));
+
+        var merged = TaskToolApprovalsResolver.resolve(agentGate(), task, Mode.STRICT);
+
+        assertNull(merged.getRules().get(0).getTimeoutPolicy());
+    }
+
+    @Test
     void strictKeepsAgentRulesBehindTaskRules() {
         var agentRule = new ApprovalRule();
         agentRule.setMatch("http.delete:*");

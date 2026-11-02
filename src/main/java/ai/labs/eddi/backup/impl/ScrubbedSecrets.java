@@ -7,9 +7,12 @@ package ai.labs.eddi.backup.impl;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -108,44 +111,148 @@ final class ScrubbedSecrets {
             throws Exception {
         Object sourceTree = jsonSerialization.deserialize(sourceJson);
         Object targetTree = jsonSerialization.deserialize(targetJson);
-        return jsonSerialization.serialize(merge(sourceTree, targetTree));
+        return jsonSerialization.serialize(merge(sourceTree, targetTree, false));
     }
 
     /**
      * Walks two parsed configs in parallel and returns the source with every
      * scrubbed leaf replaced by the target's value for the same leaf.
+     *
+     * @param destinationChanged
+     *            an enclosing object of the source sends its requests somewhere
+     *            other than the target's — see {@link #changesDestination}
      */
-    private static Object merge(Object sourceNode, Object targetNode) {
+    private static Object merge(Object sourceNode, Object targetNode, boolean destinationChanged) {
         if (sourceNode instanceof String text) {
-            if (isTargetBound(text) && targetNode instanceof String targetText && keepsTarget(text, targetText)) {
+            if (isTargetBound(text) && targetNode instanceof String targetText && keepsTarget(text, targetText)
+                    && (!destinationChanged || isVaultReference(targetText))) {
                 return targetText;
             }
             return text;
         }
         if (sourceNode instanceof Map<?, ?> sourceMap) {
             Map<?, ?> targetMap = targetNode instanceof Map<?, ?> map ? map : Map.of();
+            boolean changed = destinationChanged || changesDestination(sourceMap, targetMap);
             Map<String, Object> merged = new LinkedHashMap<>();
             for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
                 String key = String.valueOf(entry.getKey());
-                merged.put(key, merge(entry.getValue(), targetMap.get(key)));
+                merged.put(key, merge(entry.getValue(), targetMap.get(key), changed));
             }
             return merged;
         }
         if (sourceNode instanceof List<?> sourceList) {
             List<?> targetList = targetNode instanceof List<?> list ? list : List.of();
             List<Object> merged = new ArrayList<>(sourceList.size());
+            Map<String, Map<Object, Object>> targetIndex = new HashMap<>();
             for (int i = 0; i < sourceList.size(); i++) {
                 Object sourceElement = sourceList.get(i);
                 // An element with nothing scrubbed in it needs no counterpart at all,
                 // so it never risks being paired with the wrong one.
                 Object counterpart = containsTargetBound(sourceElement)
-                        ? counterpartOf(sourceElement, i, sourceList, targetList)
+                        ? counterpartOf(sourceElement, i, sourceList, targetList, targetIndex)
                         : null;
-                merged.add(merge(sourceElement, counterpart));
+                merged.add(merge(sourceElement, counterpart, destinationChanged));
             }
             return merged;
         }
         return sourceNode;
+    }
+
+    /**
+     * Whether this source object sends its requests to a different place than its
+     * target counterpart: a field naming a destination ({@code targetServerUrl},
+     * {@code baseUrl}, {@code url}, {@code endpoint}, {@code host}, or a
+     * {@code path} that is an absolute URL on either side) whose origin differs.
+     * <p>
+     * A literal credential the target holds was authorised for the target's
+     * destination; editors cannot read it back, which is the whole point of hiding
+     * it. Restoring it by name into a call that keeps the name and changes the host
+     * bound that hidden credential to a destination the editor chose, and the next
+     * turn sent it there. So under a changed destination a placeholder stays a
+     * placeholder and the operator supplies the value. A vault reference still
+     * travels: it is a pointer, and a vault key's {@code allowedHosts} is what
+     * decides where its secret may go.
+     * <p>
+     * A destination the source itself carries as a target-bound value is taken from
+     * the target by the same merge, so it does not count as a change.
+     */
+    static boolean changesDestination(Map<?, ?> sourceMap, Map<?, ?> targetMap) {
+        for (Map.Entry<?, ?> entry : sourceMap.entrySet()) {
+            if (!(entry.getValue() instanceof String sourceValue) || isTargetBound(sourceValue)) {
+                continue;
+            }
+            String key = String.valueOf(entry.getKey());
+            Object targetValue = targetMap.get(key);
+            String targetText = targetValue instanceof String text ? text : null;
+            if (!isDestinationField(key, sourceValue, targetText)) {
+                continue;
+            }
+            if (!Objects.equals(destinationOf(sourceValue), targetText == null ? null : destinationOf(targetText))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean isDestinationField(String key, String sourceValue, String targetValue) {
+        String normalized = key.toLowerCase(Locale.ROOT);
+        if (normalized.endsWith("url") || normalized.equals("uri") || normalized.equals("endpoint")
+                || normalized.equals("host") || normalized.equals("hostname")) {
+            return true;
+        }
+        // A relative path stays on the host its targetServerUrl names, which is
+        // compared on its own; an absolute one is a destination in itself.
+        return normalized.equals("path") && (isAbsolute(sourceValue) || isAbsolute(targetValue));
+    }
+
+    /**
+     * Where a value sends a request: the origin ({@code scheme://host:port}) of an
+     * absolute URL — a different path on the same origin is the same destination —
+     * and otherwise the value itself.
+     */
+    private static String destinationOf(String value) {
+        String trimmed = value.trim();
+        if (isAbsolute(trimmed)) {
+            try {
+                URI uri = URI.create(trimmed);
+                if (uri.getHost() != null) {
+                    String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT);
+                    return scheme + "://" + uri.getHost().toLowerCase(Locale.ROOT) + ":" + effectivePort(scheme, uri.getPort());
+                }
+            } catch (IllegalArgumentException unparseable) {
+                // a template or otherwise not a URI: compared as written
+            }
+        }
+        return trimmed;
+    }
+
+    /**
+     * The port a request actually uses: an explicit default ({@code :443} on https)
+     * and an omitted one are the same destination, and treating them as different
+     * would replace a working credential with a placeholder.
+     */
+    private static int effectivePort(String scheme, int port) {
+        if (port != -1) {
+            return port;
+        }
+        return switch (scheme) {
+            case "http", "ws" -> 80;
+            case "https", "wss" -> 443;
+            default -> -1;
+        };
+    }
+
+    private static boolean isAbsolute(String value) {
+        return value != null && value.contains("://");
+    }
+
+    private static boolean isVaultReference(String text) {
+        for (String prefix : VAULT_REFERENCE_PREFIXES) {
+            if (text.trim().startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -170,22 +277,15 @@ final class ScrubbedSecrets {
      * replace. That is what makes them demonstrably the same entry.</li>
      * </ul>
      */
-    private static Object counterpartOf(Object sourceElement, int index,
-                                        List<?> sourceList, List<?> targetList) {
+    private static Object counterpartOf(Object sourceElement, int index, List<?> sourceList, List<?> targetList,
+                                        Map<String, Map<Object, Object>> targetIndex) {
         String identityField = identityFieldOf(sourceElement);
         if (identityField != null) {
             Object identity = ((Map<?, ?>) sourceElement).get(identityField);
-            Object match = null;
-            for (Object candidate : targetList) {
-                if (candidate instanceof Map<?, ?> candidateMap
-                        && Objects.equals(identity, candidateMap.get(identityField))) {
-                    if (match != null) {
-                        return null;
-                    }
-                    match = candidate;
-                }
-            }
-            return match;
+            // Indexed once per list and field: scanning the whole target list for every
+            // scrubbed source element made a long array quadratic.
+            Object match = targetIndex.computeIfAbsent(identityField, field -> indexBy(field, targetList)).get(identity);
+            return match == AMBIGUOUS ? null : match;
         }
 
         if (sourceList.size() != targetList.size() || index >= targetList.size()) {
@@ -193,6 +293,20 @@ final class ScrubbedSecrets {
         }
         Object targetElement = targetList.get(index);
         return equalApartFromPlaceholders(sourceElement, targetElement) ? targetElement : null;
+    }
+
+    /** Marks an identity two target elements share, which binds neither. */
+    private static final Object AMBIGUOUS = new Object();
+
+    private static Map<Object, Object> indexBy(String identityField, List<?> targetList) {
+        Map<Object, Object> index = new HashMap<>();
+        for (Object candidate : targetList) {
+            if (candidate instanceof Map<?, ?> candidateMap && candidateMap.containsKey(identityField)) {
+                Object identity = candidateMap.get(identityField);
+                index.merge(identity, candidate, (first, second) -> AMBIGUOUS);
+            }
+        }
+        return index;
     }
 
     /**

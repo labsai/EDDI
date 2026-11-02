@@ -149,6 +149,17 @@ suite is saved) and one match may take at most 250 ms; a match that runs out of
 time fails its expectation with `<regex timed out>`. A suite therefore cannot hang
 the runner with a catastrophically backtracking pattern.
 
+The time limit only sees work that reads the text, and a counted repetition of
+something that can match empty reads nothing: `(?:(?:){99999}){99999}` spins
+ten billion times against any output. So counted minimums (`{n}`, `{n,}`,
+`{n,m}`) applied to a group, an anchor or a back-reference may force at most
+1,000 iterations in total — nested counts multiply, and the counts across the
+pattern add up. Counts on a single character, class or escape (`\d{4}`,
+`[a-z]{2,8}`) are not limited, since each iteration reads the text. The
+comments flag `(?x)` is not supported. Such a pattern is rejected when the suite
+is saved, and one saved before the check existed fails its expectation with
+`<regex timed out>` without being run.
+
 ### Limits
 
 Checked when a suite is saved (400 naming the field): at most 200 cases, 50 turns

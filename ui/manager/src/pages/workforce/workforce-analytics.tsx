@@ -78,7 +78,7 @@ function AnalyticsHeader() {
         className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         aria-label={t("Workforce.back", "Back")}
       >
-        <ChevronLeft className="h-5 w-5" />
+        <ChevronLeft className="h-5 w-5 rtl:rotate-180" />
       </Link>
       <h1 className="text-xl font-semibold text-foreground">
         {t("analyticsPage.title", "Insights")}

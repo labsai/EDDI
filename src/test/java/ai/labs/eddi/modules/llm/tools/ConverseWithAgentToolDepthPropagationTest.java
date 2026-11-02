@@ -145,4 +145,35 @@ class ConverseWithAgentToolDepthPropagationTest {
         assertTrue(result.contains("Maximum delegation depth"), result);
         verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
     }
+
+    @Test
+    @DisplayName("an inherited chain ceiling below the delegate's own limit applies, and is passed on")
+    void inheritedCeilingIsEnforcedAndPropagated() throws Exception {
+        var generous = permissive();
+        generous.setMaxDelegationDepth(5);
+
+        // The originator capped the chain at 1; one hop has happened.
+        String refused = new ConverseWithAgentTool(conversationService, "user-1", generous, 1, null, 1)
+                .converseWithAgent("agent-b", "hello", null);
+        assertTrue(refused.contains("Maximum delegation depth (1)"), refused);
+        verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+
+        // Under the ceiling: the strictest limit rides on to the next hop.
+        new ConverseWithAgentTool(conversationService, "user-1", generous, 0, null, 2).converseWithAgent("agent-b", "hi", null);
+        Context ceiling = capturedInputData().getContext().get(ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH_MAX);
+        assertNotNull(ceiling);
+        assertEquals("2", String.valueOf(ceiling.getValue()));
+    }
+
+    @Test
+    @DisplayName("an inherited ceiling cannot raise the delegate's own limit")
+    void inheritedCeilingNeverRaisesTheLimit() throws Exception {
+        var strict = permissive();
+        strict.setMaxDelegationDepth(1);
+
+        String refused = new ConverseWithAgentTool(conversationService, "user-1", strict, 1, null, 10)
+                .converseWithAgent("agent-b", "hello", null);
+
+        assertTrue(refused.contains("Maximum delegation depth (1)"), refused);
+    }
 }

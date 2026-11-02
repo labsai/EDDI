@@ -165,7 +165,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
     }
 
     public ChatModel build(Map<String, String> parameters, Map<String, Object> customParameters) {
-        return build(parameters, customParameters, BoundedJdkHttpClient.builder());
+        return build(parameters, customParameters, BoundedJdkHttpClient.builder(targetPolicy));
     }
 
     /**
@@ -250,7 +250,7 @@ public class OpenAILanguageModelBuilder implements ILanguageModelBuilder {
 
     public StreamingChatModel buildStreaming(Map<String, String> parameters, Map<String, Object> customParameters) {
         Settings s = read(parameters, customParameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder());
+        var b = OpenAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)

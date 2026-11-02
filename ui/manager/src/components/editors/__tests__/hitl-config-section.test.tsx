@@ -297,6 +297,31 @@ describe("HitlConfigSection", () => {
       expect(hint).not.toContain("carries no conversation content");
     });
 
+    it("switching it off and on again (unsaved) keeps the typed recipients", () => {
+      function Host() {
+        const [agent, setAgent] = useState<Agent>({
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com", "lead@example.com"] } } },
+        });
+        return <HitlConfigSection agent={agent} onChange={setAgent} />;
+      }
+      renderWithProviders(<Host />);
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(screen.queryByTestId("hitl-notify-email-recipients")).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      expect(screen.getByTestId("hitl-notify-email-recipients")).toHaveValue("ops@example.com, lead@example.com");
+    });
+
+    it("an IDN domain is a valid recipient and is written as typed", () => {
+      renderWithProviders(<HitlConfigSection agent={{ hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY" } }} onChange={mockOnChange} />);
+      fireEvent.click(screen.getByTestId("hitl-notify-email-enabled"));
+      fireEvent.change(screen.getByTestId("hitl-notify-email-recipients"), { target: { value: "ops@bücher.example" } });
+      expect(screen.getByTestId("hitl-notify-email-hint")).not.toHaveClass("text-destructive");
+      expect(mockOnChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        hitlConfig: expect.objectContaining({ notify: { email: { recipients: ["ops@bücher.example"] } } }),
+      }));
+    });
+
     it("switching it off removes notify", () => {
       const agent: Agent = {
         hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },

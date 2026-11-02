@@ -133,7 +133,7 @@ export function QuotasPage() {
         </div>
         <div className="flex items-center gap-2">
           {dirty && (
-            <span className="text-xs font-medium text-amber-500" data-testid="quotas-dirty-indicator">
+            <span className="text-xs font-medium text-warn-500" data-testid="quotas-dirty-indicator">
               {t("editor.dirty", "Unsaved changes")}
             </span>
           )}
@@ -161,12 +161,12 @@ export function QuotasPage() {
           {/* Enforcement disabled banner */}
           {form && !form.enabled && (
             <div
-              className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3"
+              className="flex items-start gap-3 rounded-lg border border-warn-500/30 bg-warn-500/5 px-4 py-3"
               data-testid="quotas-disabled-banner"
             >
-              <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-warn-500" />
               <div className="text-sm text-muted-foreground">
-                <span className="font-medium text-amber-500">
+                <span className="font-medium text-warn-500">
                   {t("quotas.enforcementOff", "Enforcement is off.")}
                 </span>{" "}
                 {t("quotas.enforcementOffHint", "Quotas are not being enforced. Enable enforcement and save to start applying limits.")}
@@ -573,7 +573,7 @@ function UsageCard({
   const isUnlimited = limit < 0;
   const ratio = !isUnlimited && limit > 0 ? value / limit : 0;
   const barColor =
-    ratio >= 0.9 ? "bg-red-500" : ratio >= 0.7 ? "bg-amber-500" : "bg-emerald-500";
+    ratio >= 0.9 ? "bg-red-500" : ratio >= 0.7 ? "bg-warn-500" : "bg-emerald-500";
 
   return (
     <div className="rounded-lg border border-border/50 bg-muted/30 p-3" data-testid={testId}>

@@ -184,7 +184,7 @@ class OutputMatchHookTest {
         when(store.incrementWindow(any(), any(), any())).thenReturn(1L);
         ConversationReviewPolicy review = mock(ConversationReviewPolicy.class);
         AlertEngine real = new AlertEngine(cache, store, mock(AlertDeliveryService.class), AlertSettings.defaults(),
-                new AlertMetrics(new SimpleMeterRegistry()), review, Clock.fixed(NOW, ZoneOffset.UTC));
+                new AlertMetrics(new SimpleMeterRegistry()), review, null, null, Clock.fixed(NOW, ZoneOffset.UTC));
         String longValue = "z".repeat(400);
         TurnSnapshot snapshot = new TurnSnapshot(CONVERSATION, AGENT, 2, Map.of("note", longValue), null, null);
         ArgumentCaptor<AlertEvent> inserted = ArgumentCaptor.forClass(AlertEvent.class);
@@ -213,7 +213,7 @@ class OutputMatchHookTest {
     void noMatch() {
         IAlertEventStore store = mock(IAlertEventStore.class);
         AlertEngine real = new AlertEngine(cache, store, mock(AlertDeliveryService.class), AlertSettings.defaults(),
-                new AlertMetrics(new SimpleMeterRegistry()), null, Clock.fixed(NOW, ZoneOffset.UTC));
+                new AlertMetrics(new SimpleMeterRegistry()), null, null, null, Clock.fixed(NOW, ZoneOffset.UTC));
         when(cache.rulesFor(AGENT)).thenReturn(List.of(outputRule("properties.escalate", MatchOp.EQ, true, null)));
         real.evaluateOutput(new TurnSnapshot(CONVERSATION, AGENT, 2, Map.of("escalate", false), null, null));
         verify(store, never()).insert(any());

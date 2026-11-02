@@ -34,6 +34,14 @@ describe("VariablesPage", () => {
     ).toBeInTheDocument();
   });
 
+  it("documents the Qute reference syntax with single braces", () => {
+    // Qute resolves {vars.key}; the {{vars.key}} the page used to show renders
+    // as literal text in a prompt.
+    renderVariables();
+    expect(screen.getByText(/Use {vars.<key>} in system prompts/)).toBeInTheDocument();
+    expect(screen.queryByText(/{{vars/)).not.toBeInTheDocument();
+  });
+
   it("renders the variables-page container", () => {
     renderVariables();
     expect(screen.getByTestId("variables-page")).toBeInTheDocument();

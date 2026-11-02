@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.alerts.AlertMaintenanceSchedule;
 import ai.labs.eddi.engine.alerts.AlertRuleCache;
 import ai.labs.eddi.engine.alerts.AlertSenders;
 import ai.labs.eddi.engine.alerts.AlertSenders.AlertDeliveryException;
+import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.model.AlertRule;
 import ai.labs.eddi.engine.alerts.model.AlertScope;
@@ -63,6 +64,7 @@ class RestAlertRulesTest {
 
     private ResourceAccessGuard guard;
     private IAlertRuleStore store;
+    private IAlertEventStore eventStore;
     private AlertRuleCache cache;
     private AlertSenders senders;
     private AlertMaintenanceSchedule schedule;
@@ -74,12 +76,14 @@ class RestAlertRulesTest {
         ConversationAccessGuard conversationGuard = mock(ConversationAccessGuard.class);
         when(conversationGuard.callerActor(anyString())).thenReturn("erin");
         store = mock(IAlertRuleStore.class);
+        eventStore = mock(IAlertEventStore.class);
         cache = mock(AlertRuleCache.class);
         senders = mock(AlertSenders.class);
         schedule = mock(AlertMaintenanceSchedule.class);
         when(store.create(any())).thenAnswer(inv -> ((AlertRule) inv.getArgument(0)).withId(RULE_ID));
         when(store.update(any())).thenReturn(true);
-        rest = new RestAlertRules(store, cache, new AlertAccess(guard, conversationGuard), senders, schedule, Clock.fixed(NOW, ZoneOffset.UTC));
+        rest = new RestAlertRules(store, eventStore, cache, new AlertAccess(guard, conversationGuard), senders, schedule,
+                Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     private void asEditor() {
@@ -88,6 +92,16 @@ class RestAlertRulesTest {
 
     private void asAdmin() {
         when(guard.seesEverything()).thenReturn(true);
+        when(guard.isAdmin()).thenReturn(true);
+    }
+
+    /**
+     * Workspaces not enforced: an editor sees every agent but does not hold the
+     * administrator role.
+     */
+    private void asEditorWithoutWorkspaces() {
+        when(guard.seesEverything()).thenReturn(true);
+        when(guard.isAdmin()).thenReturn(false);
     }
 
     private static AlertRule scoped(AlertScope scope, DeliveryTarget... targets) {
@@ -249,6 +263,52 @@ class RestAlertRulesTest {
             assertEquals("admin", updated.createdBy());
             assertEquals("erin", updated.updatedBy());
             assertError(404, AlertErrors.RULE_NOT_FOUND, () -> rest.updateRule("6aba70011a25f8be7920e0ff", updated));
+        }
+    }
+
+    @Nested
+    @DisplayName("unrestricted visibility is not the administrator role")
+    class VisibilityIsNotAdmin {
+
+        @Test
+        @DisplayName("with workspaces off an editor still cannot add a webhook target (and its signing secret) or an every-agent scope")
+        void editorWithoutWorkspaces() {
+            asEditorWithoutWorkspaces();
+            assertError(403, AlertErrors.WEBHOOK_ADMIN_ONLY, () -> rest.createRule(scoped(AlertScope.agent(AGENT), HOOK)));
+            assertError(403, AlertErrors.ADMIN_SCOPE_REQUIRED, () -> rest.createRule(scoped(new AlertScope(true, List.of()), SLACK)));
+            verify(store, never()).create(any());
+            // The agent-scoped Slack rule is fine.
+            rest.createRule(scoped(AlertScope.agent(AGENT), SLACK));
+            verify(store).create(any());
+        }
+    }
+
+    @Nested
+    @DisplayName("events a rule held for its digest are released when the rule can no longer digest them")
+    class DigestRelease {
+
+        @Test
+        @DisplayName("delete releases the rule's DIGEST_PENDING events")
+        void deleteReleases() {
+            asAdmin();
+            when(store.read(RULE_ID)).thenReturn(Optional.of(scoped(AlertScope.agent(AGENT), SLACK)));
+            rest.deleteRule(RULE_ID);
+            verify(eventStore).releaseDigestPending(RULE_ID);
+        }
+
+        @Test
+        @DisplayName("disabling a rule releases them; an enabled digest rule keeps them")
+        void disableReleases() {
+            asAdmin();
+            AlertRule enabled = scoped(AlertScope.agent(AGENT), SLACK);
+            when(store.read(RULE_ID)).thenReturn(Optional.of(enabled));
+            rest.updateRule(RULE_ID, enabled);
+            verify(eventStore, never()).releaseDigestPending(any());
+
+            AlertRule disabled = new AlertRule(enabled.id(), enabled.name(), false, enabled.scope(), enabled.source(), enabled.condition(),
+                    enabled.delivery(), null, null, "admin", NOW, "admin", NOW);
+            rest.updateRule(RULE_ID, disabled);
+            verify(eventStore).releaseDigestPending(RULE_ID);
         }
     }
 

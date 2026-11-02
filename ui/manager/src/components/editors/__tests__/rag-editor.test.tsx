@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useLayoutEffect, useState } from "react";
 import { act, fireEvent, screen } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
 import {
   RagEditor,
   type RagConfig,
@@ -244,6 +246,18 @@ describe("RagEditor", () => {
     );
     await openSection(user, "Document Chunking");
     expect(screen.getByTestId("chunk-overlap")).toHaveValue("64");
+  });
+
+  it("pulls the overlap down to half a smaller chunk size, which the backend requires", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} />
+    );
+    await openSection(user, "Document Chunking");
+    fireEvent.change(screen.getByTestId("chunk-size"), { target: { value: "64" } });
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ chunkSize: 64, chunkOverlap: 32 })
+    );
   });
 
   it("shows chunk preview visualization after opening chunking section", async () => {
@@ -806,6 +820,71 @@ describe("RagEditor", () => {
     expect(screen.getByTestId("ingestion-file-input")).not.toBeDisabled();
     await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
     expect(screen.getByTestId("ingest-text-btn")).not.toBeDisabled();
+  });
+
+  // ── Ingestion status ────────────────────────────────────────────────────────
+
+  async function ingestHello(ingestionId: string) {
+    server.use(
+      http.post("*/ragstore/rags/kb1/ingest", () => HttpResponse.json({ ingestionId })),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RagEditor data={populatedConfig} onChange={onChange} resourceId="kb1" isDirty={false} />
+    );
+    await openSection(user, "Document Ingestion");
+    await user.type(screen.getByPlaceholderText("Paste document text here..."), "hello");
+    await user.click(screen.getByTestId("ingest-text-btn"));
+  }
+
+  it("shows a translated label for the ingestion status, not the raw server value", async () => {
+    server.use(
+      http.get("*/ragstore/rags/kb1/ingestion/ing1/status", () => HttpResponse.json({ status: "completed" })),
+    );
+    await ingestHello("ing1");
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
+    expect(screen.queryByText("completed")).not.toBeInTheDocument();
+  });
+
+  it("offers a recheck for an ingestion this tab stopped watching, and picks up the result", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let answers = 0;
+      server.use(
+        http.get("*/ragstore/rags/kb1/ingestion/ing1/status", () => {
+          answers++;
+          // Still processing for every automatic poll, finished by the time the person asks again.
+          return HttpResponse.json({ status: answers > 90 ? "completed" : "processing" });
+        }),
+      );
+      await ingestHello("ing1");
+      // Run the polling out: 30 fast polls (2 s) then slow ones (10 s), up to the attempt cap.
+      for (let i = 0; i < 100; i++) {
+        await vi.advanceTimersByTimeAsync(10_000);
+      }
+      const recheck = await screen.findByTestId("ingestion-recheck-ing1");
+
+      await userEvent.setup({ advanceTimers: vi.advanceTimersByTime }).click(recheck);
+
+      expect(await screen.findByText("Completed")).toBeInTheDocument();
+      expect(screen.queryByTestId("ingestion-recheck-ing1")).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses to put an unsafe ingestion id into the status path", async () => {
+    // A response id with a slash or '..' used to retarget the polling request.
+    let polled = false;
+    server.use(
+      http.get("*/ragstore/rags/*", () => {
+        polled = true;
+        return HttpResponse.json({ status: "completed" });
+      }),
+    );
+    await ingestHello("../../other");
+    expect(await screen.findByText("Failed: could not check the status")).toBeInTheDocument();
+    expect(polled).toBe(false);
   });
 
   // ── Empty name clears to undefined ──────────────────────────────────────────

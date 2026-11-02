@@ -119,6 +119,32 @@ class SitemapParsingTest {
         }
 
         @Test
+        @DisplayName("a <loc> holding nested markup is not read as one URL per level")
+        void nestedLocsAreNotCopiedPerLevel() throws IOException {
+            // text() is all descendant text: <loc><url><loc>... copied the whole
+            // subtree once per level and kept every copy. Only a <loc> that holds
+            // nothing but its URL is one.
+            int levels = 50;
+            var nested = new StringBuilder();
+            for (int i = 0; i < levels; i++) {
+                nested.append("<url><loc>").append(BASE).append("/level").append(i).append(' ');
+            }
+            nested.append("<url><loc>").append(BASE).append("/deepest</loc></url>").append("</loc></url>".repeat(levels));
+            Sitemap sitemap = parse("<urlset xmlns=\"" + NS + "\">" + nested + "</urlset>");
+
+            assertEquals(List.of(BASE + "/deepest"), sitemap.pageUrls());
+        }
+
+        @Test
+        @DisplayName("entries longer than the protocol's 2,048 characters are dropped")
+        void overlongLocsAreDropped() throws IOException {
+            String overlong = BASE + "/" + "a".repeat(WebCrawler.MAX_SITEMAP_URL_LENGTH);
+            Sitemap sitemap = parse(urlset(overlong, BASE + "/ok"));
+
+            assertEquals(List.of(BASE + "/ok"), sitemap.pageUrls());
+        }
+
+        @Test
         @DisplayName("a namespace prefix on the sitemap elements is ignored")
         void prefixedElements() throws IOException {
             Sitemap sitemap = parse("<sm:urlset xmlns:sm=\"" + NS + "\">"

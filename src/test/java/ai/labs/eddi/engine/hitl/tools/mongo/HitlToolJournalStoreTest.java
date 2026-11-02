@@ -31,6 +31,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.Optional;
 
 import com.mongodb.MongoClientSettings;
@@ -108,6 +109,21 @@ class HitlToolJournalStoreTest {
         assertEquals(List.of("conversationId", "pauseEpoch", "callId"),
                 List.copyOf(renderedKey.keySet()),
                 "unique index must compose exactly (conversationId, pauseEpoch, callId) in order");
+    }
+
+    @Test
+    @DisplayName("the retention TTL expires EXECUTED entries only — an orphaned EXECUTING claim must outlive a still-pending approval")
+    void ttlCoversExecutedEntriesOnly() {
+        var optionsCaptor = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(collection, atLeastOnce()).createIndex(any(Bson.class), optionsCaptor.capture());
+        IndexOptions ttl = optionsCaptor.getAllValues().stream().filter(o -> o.getExpireAfter(TimeUnit.SECONDS) != null)
+                .findFirst().orElseThrow();
+        assertEquals(Duration.ofDays(30).toSeconds(), ttl.getExpireAfter(TimeUnit.SECONDS));
+        assertNotNull(ttl.getPartialFilterExpression(), "an unfiltered TTL also expires EXECUTING claims");
+        BsonDocument filter = ttl.getPartialFilterExpression().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals("EXECUTED", filter.getString("status").getValue());
+        // The previous, unfiltered TTL is dropped so it cannot keep expiring claims.
+        verify(collection).dropIndex("idx_journal_ttl_claimed");
     }
 
     @Nested

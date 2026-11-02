@@ -52,6 +52,13 @@ public final class PdfDecodeBudget {
 
     private static final ThreadLocal<Budget> CURRENT = new ThreadLocal<>();
 
+    /**
+     * Longest predictor row a stream may declare. A real image row is tens or
+     * hundreds of kilobytes — 30,000 pixels of 16-bit CMYK is 240 KB — and the row
+     * of a cross-reference stream a few bytes.
+     */
+    static final long MAX_PREDICTOR_ROW_BYTES = 4L * 1024 * 1024;
+
     private static volatile boolean installed;
 
     private PdfDecodeBudget() {
@@ -69,6 +76,20 @@ public final class PdfDecodeBudget {
         var budget = new Budget(maxDecodedBytes);
         CURRENT.set(budget);
         return budget;
+    }
+
+    /**
+     * Charges bytes PDFBox reads without one of the counted filters producing them
+     * — unfiltered page content — to this thread's budget, if one is open.
+     *
+     * @throws BudgetExceeded
+     *             once the budget is spent
+     */
+    static void charge(long bytes) {
+        Budget budget = CURRENT.get();
+        if (budget != null && bytes > 0) {
+            budget.spend(bytes);
+        }
     }
 
     private static synchronized void install() {
@@ -108,7 +129,7 @@ public final class PdfDecodeBudget {
             return max;
         }
 
-        private void spend(int bytes) {
+        private void spend(long bytes) {
             used += bytes;
             if (used > max) {
                 exceeded = true;
@@ -147,6 +168,7 @@ public final class PdfDecodeBudget {
         @Override
         public DecodeResult decode(InputStream encoded, OutputStream decoded, COSDictionary parameters, int index)
                 throws IOException {
+            requireSensiblePredictor(parameters, index);
             return delegate.decode(encoded, counting(decoded), parameters, index);
         }
 
@@ -154,7 +176,38 @@ public final class PdfDecodeBudget {
         public DecodeResult decode(InputStream encoded, OutputStream decoded, COSDictionary parameters, int index,
                                    DecodeOptions options)
                 throws IOException {
+            requireSensiblePredictor(parameters, index);
             return delegate.decode(encoded, counting(decoded), parameters, index, options);
+        }
+
+        /**
+         * Refuses a predictor whose row would not fit in
+         * {@link #MAX_PREDICTOR_ROW_BYTES}.
+         *
+         * <p>
+         * The counter sees only what a filter writes. A PNG or TIFF predictor first
+         * allocates two row buffers sized from the stream's own {@code /Columns},
+         * {@code /Colors} and {@code /BitsPerComponent} — before a byte is decoded — so
+         * a few bytes of {@code DecodeParms} asked for hundreds of megabytes that no
+         * budget ever saw. The row length is computed here the way PDFBox computes it,
+         * in {@code long} so it cannot wrap.
+         */
+        private void requireSensiblePredictor(COSDictionary parameters, int index) throws IOException {
+            if (parameters == null) {
+                return;
+            }
+            COSDictionary decodeParams = getDecodeParams(parameters, index);
+            if (decodeParams == null || decodeParams.getInt(COSName.PREDICTOR) <= 1) {
+                return;
+            }
+            long colors = Math.min(decodeParams.getInt(COSName.COLORS, 1), 32);
+            long bitsPerComponent = decodeParams.getInt(COSName.BITS_PER_COMPONENT, 8);
+            long columns = decodeParams.getInt(COSName.COLUMNS, 1);
+            long rowBytes = (columns * colors * bitsPerComponent + 7) / 8;
+            if (rowBytes > MAX_PREDICTOR_ROW_BYTES) {
+                throw new IOException("Predictor rows of " + rowBytes + " bytes exceed the limit of "
+                        + MAX_PREDICTOR_ROW_BYTES);
+            }
         }
 
         @Override

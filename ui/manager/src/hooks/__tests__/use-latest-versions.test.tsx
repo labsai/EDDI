@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { http, HttpResponse } from "msw";
+import { server } from "@/test/mocks/server";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
@@ -51,6 +53,25 @@ describe("useLatestVersions", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     // Should only have one entry since both URIs have the same ID
     expect(Object.keys(result.current.data!).length).toBe(1);
+  });
+
+  it("ignores versions of other resources that only mention this id in their text", async () => {
+    // `filter` is a substring search: an unrelated descriptor whose name holds
+    // the id used to inflate the "latest" version suggested for this resource.
+    server.use(
+      http.get("*/rulestore/rulesets/descriptors", () =>
+        HttpResponse.json([
+          { resource: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2", name: "res1" },
+          { resource: "eddi://ai.labs.rules/rulestore/rulesets/other999?version=40", name: "copy of res1" },
+        ]),
+      ),
+    );
+    const { result } = renderHook(
+      () => useLatestVersions(["eddi://ai.labs.rules/rulestore/rulesets/res1?version=1"]),
+      { wrapper: createWrapper() },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual({ res1: 2 });
   });
 
   it("skips invalid URIs gracefully", async () => {

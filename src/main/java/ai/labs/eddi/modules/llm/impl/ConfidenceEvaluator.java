@@ -395,43 +395,11 @@ class ConfidenceEvaluator {
 
     /**
      * Extract the first balanced {@code {...}} JSON object from a string, honoring
-     * string literals and escapes. Returns null if none is found.
+     * string literals and escapes. Returns null if none is found. Delegates to
+     * {@link ModelOutputParser#extractFirstObject}, the module's one scanner.
      */
     static String extractFirstBalancedObject(String text) {
-        if (text == null) {
-            return null;
-        }
-        int start = text.indexOf('{');
-        if (start < 0) {
-            return null;
-        }
-        int depth = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = start; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (inString) {
-                if (escaped) {
-                    escaped = false;
-                } else if (c == '\\') {
-                    escaped = true;
-                } else if (c == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-            if (c == '"') {
-                inString = true;
-            } else if (c == '{') {
-                depth++;
-            } else if (c == '}') {
-                depth--;
-                if (depth == 0) {
-                    return text.substring(start, i + 1);
-                }
-            }
-        }
-        return null;
+        return ModelOutputParser.extractFirstObject(text);
     }
 
     private static double clamp(double v) {

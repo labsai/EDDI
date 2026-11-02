@@ -52,6 +52,7 @@ import {
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
+import { chatKeys } from "@/lib/query-keys";
 
 /**
  * What a secret turn shows in place of its text, live and on every rebuild from
@@ -377,12 +378,11 @@ export const useChatStore = create<ChatState>((set) => ({
 
 // --- TanStack Query Hooks ---
 
-const CHAT_KEY = ["chat"] as const;
 
 /** Fetch agent descriptors and filter to only those that are deployed. */
 export function useDeployedAgents() {
   return useQuery({
-    queryKey: [...CHAT_KEY, "deployedAgents"],
+    queryKey: chatKeys.deployedAgents,
     queryFn: async () => {
       const descriptors = await getAgentDescriptors(500, 0, "");
       // One entry per agent ID, keeping its latest version. This used to key
@@ -1525,7 +1525,7 @@ export function undoRedoFlags(
 /** Fetch conversation history for the selected agent. */
 export function useConversationHistory(agentId: string | null) {
   return useQuery({
-    queryKey: [...CHAT_KEY, "history", agentId],
+    queryKey: chatKeys.history(agentId),
     queryFn: () => getConversationDescriptors(50, 0, "", agentId ?? ""),
     enabled: !!agentId,
     staleTime: 30_000,
@@ -1543,6 +1543,14 @@ export function useConversationHistory(agentId: string | null) {
  * started, and installed A's conversation under B's name, so every send then
  * went to agent A.
  */
+/** The conversation to load belongs to a different agent than the one requested. */
+export class ConversationAgentMismatchError extends Error {
+  constructor() {
+    super("This conversation belongs to a different agent than the one selected.");
+    this.name = "ConversationAgentMismatchError";
+  }
+}
+
 async function loadConversationIntoStore(
   agentId: string,
   conversationId: string,
@@ -1574,6 +1582,14 @@ async function loadConversationIntoStore(
   // the transcript (see the epoch note above).
   if (request !== latestLoadRequest || store.getState().conversationEpoch !== epoch) {
     return snapshot;
+  }
+
+  // The read is by conversation id alone, so a link that pairs one agent's
+  // name (and its review notice) with another agent's conversation would show
+  // the first while every send went to the second. The conversation's own
+  // agent is authoritative: refuse the mismatch rather than install it.
+  if (snapshot.agentId && snapshot.agentId !== agentId) {
+    throw new ConversationAgentMismatchError();
   }
 
   store.getState().clearMessages();
@@ -1739,7 +1755,7 @@ export function useResumeOrStartConversation() {
       let resumable: ConversationDescriptor | null = null;
       try {
         const descriptors = await queryClient.fetchQuery({
-          queryKey: [...CHAT_KEY, "history", agentId],
+          queryKey: chatKeys.history(agentId),
           queryFn: () => getConversationDescriptors(50, 0, "", agentId),
           staleTime: 30_000,
         });
@@ -1866,7 +1882,7 @@ export function useEndConversation() {
       return conversationId;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [...CHAT_KEY, "history"] });
+      queryClient.invalidateQueries({ queryKey: chatKeys.history() });
     },
   });
 }

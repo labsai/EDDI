@@ -25,6 +25,58 @@ import static jakarta.ws.rs.core.Response.Status.BAD_REQUEST;
 public class ResourceUtilities {
     private static final String COPY_APPENDIX = " - Copy";
 
+    /**
+     * Ceiling on how many integer versions a reverse-reference lookup may walk when
+     * the referenced resource's live version cannot be established (it was deleted,
+     * or its type has no store to ask). A walk that would have to start above it is
+     * refused rather than cut short — see {@link #clampToLiveVersion}.
+     */
+    public static final int MAX_REVERSE_LOOKUP_VERSIONS = 1000;
+
+    /**
+     * The highest version a reverse-reference walk (one that also visits previous
+     * versions) should start from.
+     * <p>
+     * The lookups in {@code AgentStore} and {@code WorkflowStore} issue several
+     * queries per integer version, walking down to 1. The starting version comes
+     * from a caller-supplied {@code ?version=} parameter, so without a clamp a
+     * single request asking for version 2,000,000,000 kept a worker issuing
+     * billions of queries. No reference can point at a version that never existed,
+     * so the walk starts at the resource's LIVE version.
+     * <p>
+     * {@code liveVersion} must come from the resource's own store, never from its
+     * descriptor: descriptors advance only on an HTTP PUT/PATCH, so every
+     * in-process update (MCP, ZIP import, the upgrade executor) leaves the
+     * descriptor at v1 while the resource is at v2. Clamping to that stale version
+     * made the walk skip a referrer of v2 — and the cascade delete and the orphan
+     * purge ask exactly this question, at the live version, before deleting.
+     * <p>
+     * When the live version is unknown the requested version is kept as long as it
+     * is within {@link #MAX_REVERSE_LOOKUP_VERSIONS}; above it the lookup is
+     * refused, because a walk cut short at the ceiling would report "no referrer"
+     * for versions it never looked at, and callers deciding a delete treat that
+     * answer as proof the delete is safe. Both of them treat a failed lookup as
+     * "still referenced".
+     *
+     * @param liveVersion
+     *            the resource's current version from its own store, or {@code null}
+     *            when it cannot be established
+     * @throws IResourceStore.ResourceStoreException
+     *             when the live version is unknown and {@code requestedVersion}
+     *             exceeds {@link #MAX_REVERSE_LOOKUP_VERSIONS}
+     */
+    public static int clampToLiveVersion(Integer liveVersion, int requestedVersion) throws IResourceStore.ResourceStoreException {
+        if (liveVersion != null && liveVersion > 0) {
+            return Math.min(requestedVersion, liveVersion);
+        }
+        if (requestedVersion > MAX_REVERSE_LOOKUP_VERSIONS) {
+            throw new IResourceStore.ResourceStoreException("Cannot establish the current version of the referenced resource, and version "
+                    + requestedVersion + " exceeds the " + MAX_REVERSE_LOOKUP_VERSIONS
+                    + "-version ceiling a reverse-reference lookup walks without it");
+        }
+        return requestedVersion;
+    }
+
     public static IResourceStore.IResourceId validateUri(String resourceUriString) {
         if (resourceUriString.startsWith("eddi://")) {
             URI resourceUri = URI.create(resourceUriString);

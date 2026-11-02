@@ -68,6 +68,9 @@ import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
+import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
+import ai.labs.eddi.modules.llm.tools.quota.MongoToolQuotaStore;
+import ai.labs.eddi.modules.llm.tools.quota.PostgresToolQuotaStore;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
@@ -238,6 +241,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public ISlackApprovalRecordStore slackApprovalRecordStore(Instance<MongoSlackApprovalRecordStore> mongo,
                                                               Instance<PostgresSlackApprovalRecordStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IToolQuotaStore toolQuotaStore(Instance<MongoToolQuotaStore> mongo, Instance<PostgresToolQuotaStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

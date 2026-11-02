@@ -356,6 +356,10 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             setQuotaInternal(conn, quota);
         } catch (SQLException e) {
             LOGGER.errorf("Failed to set quota for tenant '%s': %s", sanitize(quota.tenantId()), sanitize(e.getMessage()));
+            // Propagated, as the MongoDB store does: swallowing it answered the admin's
+            // PUT with 200 and the quota they asked for, while the previous — possibly
+            // laxer — policy stayed in force.
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
         }
     }
 

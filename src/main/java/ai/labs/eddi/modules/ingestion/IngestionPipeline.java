@@ -1329,7 +1329,20 @@ public class IngestionPipeline {
                 return;
             }
 
-            int stored = embed(documentId, url, title, markdown);
+            List<TextSegment> textSegments = split(documentId, url, title, markdown);
+            int budget = source.settings().maxSegmentsPerRunOrDefault();
+            if (textSegments.size() > budget - segments) {
+                // Checked before the provider is paid, not after: the budget is
+                // documented as a hard ceiling, and a check after embedding let the
+                // document that crossed it through whole.
+                deferOverBudget(documentId, existing.isPresent(), textSegments.size(), budget);
+                return;
+            }
+
+            int stored = embed(documentId, textSegments);
+            if (stored < 0) {
+                return;
+            }
             segments += stored;
             ingested++;
             meterRegistry.counter("eddi.ingestion.segments.stored", metricTags).increment(stored);
@@ -1347,13 +1360,44 @@ public class IngestionPipeline {
         }
 
         /**
-         * Replaces a document's chunks, and returns how many were actually written —
-         * not an estimate. The draft reported {@code markdown.length() / chunkSize},
-         * which its own integration test then asserted on.
+         * A document that does not fit in what is left of the segment budget.
+         *
+         * <p>
+         * When it would fit in a fresh run it waits for the next one: the run stops
+         * here, and the document is neither embedded nor recorded, so the next run
+         * finds it new or changed and takes it first. A document larger than the whole
+         * budget never fits; it is reported as failed with the number it needs, rather
+         * than ingested in part and then recorded as done.
+         *
+         * <p>
+         * Either way a document that already has a state row is stamped as looked at,
+         * so leaving it for later does not count as a miss towards deleting it.
          */
-        private int embed(String documentId, String url, String title, String markdown) {
-            EmbeddingStore<TextSegment> embeddingStore = store();
+        private void deferOverBudget(String documentId, boolean known, int needed, int budget) {
+            if (known) {
+                stateStore.recordUnreachable(sourceKey, documentId, runId);
+            }
+            if (needed > budget) {
+                failed++;
+                // Like every other failed document: its old chunks are all it has, so a sweep
+                // this
+                // run must not treat them as orphans.
+                inconclusive++;
+                meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
+                LOGGER.warnf("Document '%s' of source '%s' was not ingested: it splits into %d segments, more than the "
+                        + "source's maxSegmentsPerRun (%d)", LogSanitizer.sanitize(documentId),
+                        LogSanitizer.sanitize(source.getName()), needed, budget);
+                return;
+            }
+            budgetExhausted = true;
+            LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d); the remaining documents wait "
+                    + "for the next run", LogSanitizer.sanitize(source.getName()), budget);
+        }
 
+        /**
+         * A document's chunks, carrying the metadata every one of them is stored with.
+         */
+        private List<TextSegment> split(String documentId, String url, String title, String markdown) {
             Metadata metadata = Metadata.from(METADATA_DOCUMENT_ID, documentId)
                     .put(METADATA_URL, url)
                     // Capped: the title comes from a third-party page and is copied onto
@@ -1368,13 +1412,24 @@ public class IngestionPipeline {
                     .put(KnowledgeBaseStorage.METADATA_KB_ID, chunkKbId);
 
             var splitter = DocumentSplitters.recursive(
-                    knowledgeBase.getChunkSize() == null ? 1000 : knowledgeBase.getChunkSize(),
-                    knowledgeBase.getChunkOverlap() == null ? 100 : knowledgeBase.getChunkOverlap());
+                    knowledgeBase.chunkSizeOrDefault(), knowledgeBase.chunkOverlapOrDefault());
 
-            List<TextSegment> textSegments = splitter.split(Document.from(markdown, metadata));
+            return splitter.split(Document.from(markdown, metadata));
+        }
+
+        /**
+         * Replaces a document's chunks, and returns how many were actually written —
+         * not an estimate. The draft reported {@code markdown.length() / chunkSize},
+         * which its own integration test then asserted on.
+         *
+         * @return the number of segments stored, or -1 when the run lost its source
+         *         while the embeddings were being computed and nothing was written
+         */
+        private int embed(String documentId, List<TextSegment> textSegments) {
             if (textSegments.isEmpty()) {
                 return 0;
             }
+            EmbeddingStore<TextSegment> embeddingStore = store();
 
             // Add first, then drop what this run superseded.
             //
@@ -1385,6 +1440,13 @@ public class IngestionPipeline {
             // crash in that window did the same with no exception. This order costs a
             // moment of duplication instead, which the runId filter then removes.
             var embeddings = model().embedAll(textSegments).content();
+            // Ownership is asked again after the provider answers. An embedding call
+            // can stall past the claim's deadline; meanwhile the run is reaped and
+            // the file deleted, vectors and all. Publishing now would make that
+            // deleted text retrievable again, with nothing left to remove it.
+            if (!stillOwnsRun(true)) {
+                return -1;
+            }
             embeddingStore.addAll(embeddings, textSegments);
 
             try {

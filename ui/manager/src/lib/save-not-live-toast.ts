@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { runDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import { reportDeployOutcome } from "@/lib/deploy-outcome";
+import { chatKeys } from "@/lib/query-keys";
 
 /**
  * One id for every "saved — not yet live" toast, so only the most recent save's
@@ -55,7 +56,7 @@ export function showSavedNotLiveToast(opts: {
                 const options = { agentId, version, environment: "production" };
                 const refresh = () => {
                   void queryClient.invalidateQueries({ queryKey: ["agents"] });
-                  void queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                  void queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
                 };
                 runDeployWithGrants(options)
                   .then((outcome) => {

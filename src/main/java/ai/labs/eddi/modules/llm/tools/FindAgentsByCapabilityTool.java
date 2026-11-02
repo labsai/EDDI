@@ -13,6 +13,7 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -33,8 +34,21 @@ public class FindAgentsByCapabilityTool {
 
     private final CapabilityRegistryService registryService;
 
+    /**
+     * Which agents the conversation's user may use, or {@code null} for no filter.
+     * Applied before the strategy, as the REST search does, so agents the caller
+     * cannot use are not even named to the model: delegation re-checks USE, but
+     * discovery alone used to disclose every agent's id and capability metadata.
+     */
+    private final Predicate<String> agentFilter;
+
     public FindAgentsByCapabilityTool(CapabilityRegistryService registryService) {
+        this(registryService, null);
+    }
+
+    public FindAgentsByCapabilityTool(CapabilityRegistryService registryService, Predicate<String> agentFilter) {
         this.registryService = registryService;
+        this.agentFilter = agentFilter;
     }
 
     @Tool("Find deployed agents that have a specific capability or skill. "
@@ -54,7 +68,9 @@ public class FindAgentsByCapabilityTool {
 
             LOGGER.debugf("[CAPABILITY] Searching for skill='%s' with strategy='%s'", skill, effectiveStrategy);
 
-            List<CapabilityMatch> matches = registryService.findBySkill(skill, effectiveStrategy);
+            List<CapabilityMatch> matches = agentFilter == null
+                    ? registryService.findBySkill(skill, effectiveStrategy)
+                    : registryService.findBySkill(skill, effectiveStrategy, agentFilter);
 
             if (matches == null || matches.isEmpty()) {
                 return "No agents found with skill '%s'.".formatted(skill);

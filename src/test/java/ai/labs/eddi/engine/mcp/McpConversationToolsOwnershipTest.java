@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
+import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -566,6 +567,26 @@ class McpConversationToolsOwnershipTest {
             assertDenied(result);
             verify(userConversationStore, never()).readUserConversation(anyString(), anyString());
             verify(conversationService, never()).startConversation(any(), anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a retained conversation is re-checked for USE on its own agent before a turn is sent")
+        void retainedConversationIsReCheckedForUseOnItsAgent() throws Exception {
+            // The trigger now routes elsewhere (its current targets pass), but the
+            // mapped conversation still runs on the old agent, which the caller may
+            // no longer use.
+            var guard = mock(ConversationAccessGuard.class);
+            when(guard.resolveOwnerUserId(OWNER)).thenReturn(OWNER);
+            doThrow(new ForbiddenException("Access denied: no USE on the agent")).when(guard).requireConversationTurnAccess(CONV_ID);
+            when(userConversationStore.readUserConversation("customer_support", OWNER))
+                    .thenReturn(new UserConversation("customer_support", OWNER, Environment.production, AGENT_ID, CONV_ID));
+
+            String result = toolsWith(identityOf(OWNER, "eddi-viewer"), guard).chatManaged("customer_support", OWNER, "hello", null);
+
+            assertDenied(result);
+            assertTrue(result.contains("you may not continue this conversation"), result);
+            assertFalse(result.contains("do not own"), "the owner does own it — the refusal must not say otherwise: " + result);
+            verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
         }
     }
 }

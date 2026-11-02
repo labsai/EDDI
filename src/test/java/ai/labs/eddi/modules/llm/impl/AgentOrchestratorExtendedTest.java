@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -1136,14 +1137,14 @@ class AgentOrchestratorExtendedTest {
         @Test
         @DisplayName("sumTokens sums field-by-field and tolerates nulls; tokenUsageMap maps null fields to 0")
         void sumTokens_and_tokenUsageMap_units() {
-            var summed = AgentOrchestrator.sumTokens(new TokenUsage(10, 20, 30), new TokenUsage(5, 7, 12));
+            var summed = ToolContextBudget.sumTokens(new TokenUsage(10, 20, 30), new TokenUsage(5, 7, 12));
             assertEquals(15, summed.inputTokenCount());
             assertEquals(27, summed.outputTokenCount());
             assertEquals(42, summed.totalTokenCount());
 
             var b = new TokenUsage(1, 2, 3);
-            assertSame(b, AgentOrchestrator.sumTokens(null, b), "null first operand returns the second unchanged");
-            assertSame(b, AgentOrchestrator.sumTokens(b, null), "null second operand returns the first unchanged");
+            assertSame(b, ToolContextBudget.sumTokens(null, b), "null first operand returns the second unchanged");
+            assertSame(b, ToolContextBudget.sumTokens(b, null), "null second operand returns the first unchanged");
 
             var zeroMap = AgentOrchestrator.tokenUsageMap(new TokenUsage(null, null, null));
             assertEquals(0, zeroMap.get("inputTokens"));

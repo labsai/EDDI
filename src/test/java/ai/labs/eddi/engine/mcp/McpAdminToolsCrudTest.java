@@ -286,6 +286,20 @@ class McpAdminToolsCrudTest {
     }
 
     @Test
+    void deleteResource_internalFailure_isNotEchoedToTheCaller() throws IOException {
+        // A store's raw message can name hosts and collections: an AUTHOR caller gets
+        // a reference to quote, not the text.
+        when(httpCallsStore.deleteApiCalls(RESOURCE_ID, 1, false))
+                .thenThrow(new IllegalStateException("mongodb://db-internal:27017 replica set rs0 unreachable"));
+
+        String result = tools.deleteResource("httpcalls", RESOURCE_ID, 1, false);
+
+        assertTrue(result.contains("Failed to delete resource"), result);
+        assertTrue(result.contains("INTERNAL"), result);
+        assertFalse(result.contains("db-internal"), result);
+    }
+
+    @Test
     void deleteResource_missingType_returnsError() {
         String result = tools.deleteResource(null, RESOURCE_ID, 1, false);
         assertTrue(result.contains("error"));
@@ -494,6 +508,22 @@ class McpAdminToolsCrudTest {
     }
 
     @Test
+    void listAgentResources_readsEachDistinctWorkflowOnce() throws IOException {
+        var agentConfig = new AgentConfiguration();
+        URI wf = URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + PKG_ID + "?version=1");
+        agentConfig.setWorkflows(List.of(wf, wf, wf, wf));
+        when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(agentConfig);
+        var pkgConfig = new WorkflowConfiguration();
+        pkgConfig.setWorkflowSteps(List.of());
+        when(WorkflowStore.readWorkflow(PKG_ID, 1)).thenReturn(pkgConfig);
+        when(jsonSerialization.serialize(any())).thenReturn("{}");
+
+        tools.listAgentResources(AGENT_ID, 1);
+
+        verify(WorkflowStore, times(1)).readWorkflow(PKG_ID, 1);
+    }
+
+    @Test
     void listAgentResources_agentNotFound_returnsError() {
         when(AgentStore.readAgent(AGENT_ID, 1)).thenReturn(null);
 
@@ -658,5 +688,59 @@ class McpAdminToolsCrudTest {
         assertTrue(result.contains("setProperties"), "the offending field must be named: " + result);
         assertTrue(result.contains("setOnActions"), "the legal fields must be listed: " + result);
         assertFalse(result.contains("HTTP 400"), "the status line is not a diagnosis: " + result);
+    }
+
+    // ==================== malformed JSON is the caller's error
+    // ====================
+
+    private McpAdminTools toolsWithTheRealParser() {
+        return new McpAdminTools(mock(IRestInterfaceFactory.class), agentAdmin, jsonSerialization,
+                new StrictConfigurationParser(new ObjectMapper()), scheduleStore,
+                scheduleFireExecutor, schedulePollerService,
+                mock(SecurityIdentity.class), false, mock(AgentCascadeService.class));
+    }
+
+    private static void assertMalformedJsonIsACallerError(String result, String prefix) {
+        assertTrue(result.contains(prefix), result);
+        assertTrue(result.contains("config is not valid JSON (line 1, column"), "the caller is told what to fix: " + result);
+        assertFalse(result.contains("INTERNAL"), "a malformed argument is not a server failure: " + result);
+    }
+
+    @Test
+    void createResource_malformedJson_isReportedAsInvalidJson() {
+        String result = toolsWithTheRealParser().createResource("propertysetter", "{\"setOnActions\": [");
+
+        assertMalformedJsonIsACallerError(result, "Failed to create resource");
+    }
+
+    @Test
+    void updateResource_malformedJson_isReportedAsInvalidJson() {
+        String result = toolsWithTheRealParser().updateResource("behavior", RESOURCE_ID, 1, "{not json}");
+
+        assertMalformedJsonIsACallerError(result, "Failed to update resource");
+    }
+
+    @Test
+    void createChannelIntegration_malformedJson_isReportedAsInvalidJson() {
+        String result = toolsWithTheRealParser().createChannelIntegration("{\"name\": ");
+
+        assertMalformedJsonIsACallerError(result, "Failed to create channel integration");
+    }
+
+    @Test
+    void updateChannelIntegration_malformedJson_isReportedAsInvalidJson() {
+        String result = toolsWithTheRealParser().updateChannelIntegration(RESOURCE_ID, 1, "{'name': 'x'}");
+
+        assertMalformedJsonIsACallerError(result, "Failed to update channel integration");
+    }
+
+    @Test
+    void createAgentTrigger_malformedJson_isReportedAsInvalidJson() throws IOException {
+        when(jsonSerialization.deserialize(anyString(), eq(AgentTriggerConfiguration.class)))
+                .thenAnswer(invocation -> new ObjectMapper().readValue((String) invocation.getArgument(0), AgentTriggerConfiguration.class));
+
+        String result = tools.createAgentTrigger("{\"intent\": \"x\",");
+
+        assertMalformedJsonIsACallerError(result, "Failed to create Agent trigger");
     }
 }

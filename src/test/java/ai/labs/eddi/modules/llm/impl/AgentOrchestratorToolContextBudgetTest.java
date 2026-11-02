@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
@@ -151,7 +152,7 @@ class AgentOrchestratorToolContextBudgetTest {
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
         // Truncation stays OFF (no toolResponseLimits) on purpose: per-result
         // truncation is opt-in, so the aggregate guard has to hold without it.
-        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
     }
 
@@ -378,7 +379,7 @@ class AgentOrchestratorToolContextBudgetTest {
     /** Runs the guard and returns how many messages it removed. */
     private static int evict(List<ChatMessage> messages, int budget, List<Map<String, Object>> trace) {
         int before = messages.size();
-        AgentOrchestrator.enforceToolContextBudget(messages, budget, ESTIMATOR, new IdentityHashMap<>(), trace,
+        ToolContextBudget.enforceToolContextBudget(messages, budget, ESTIMATOR, new IdentityHashMap<>(), trace,
                 CONVERSATION_ID);
         return before - messages.size();
     }

@@ -126,14 +126,16 @@ public class RestAttachmentUpload {
      * gate: it keeps the fail-closed behaviour anchored in this endpoint rather
      * than depending on which guard method a future edit happens to call.
      */
-    private ConversationDescriptor requireExistingConversationOwner(String conversationId) {
-        conversationAccessGuard.requireExistingConversationOwner(conversationId);
+    private String requireExistingConversationOwner(String conversationId) {
+        String owner = conversationAccessGuard.requireExistingConversationOwner(conversationId);
         try {
             ConversationDescriptor descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
             if (descriptor == null) {
                 throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");
             }
-            return descriptor;
+            // The guard's owner is the authoritative one: for a pre-v5.1.6 conversation
+            // the descriptor records none and the guard resolves it from the memory.
+            return owner != null ? owner : descriptor.getUserId();
         } catch (IResourceStore.ResourceNotFoundException e) {
             throw new NotFoundException("Conversation '" + sanitize(conversationId) + "' not found");
         } catch (IResourceStore.ResourceStoreException e) {
@@ -171,10 +173,12 @@ public class RestAttachmentUpload {
 
         // On the request thread, before the async hop: the guard reads the caller's
         // SecurityIdentity, which is request-scoped.
-        ConversationDescriptor descriptor = requireExistingConversationOwner(conversationId);
         // The per-user quota counts against the conversation's OWNER — an admin
         // uploading into a user's conversation fills that user's quota, not their own.
-        String ownerUserId = descriptor.getUserId();
+        // The owner the guard resolved, not the descriptor's userId: a legacy
+        // descriptor records none, and a null owner exempted the upload from the
+        // per-user quota altogether.
+        String ownerUserId = requireExistingConversationOwner(conversationId);
 
         CompletableFuture.runAsync(() -> {
             try {

@@ -203,7 +203,7 @@ public class ChatModelRegistry {
      * endpoint, which an editor cannot choose, so there is nothing to check — the
      * list exists to stop an editor-chosen destination, not a vendor's.
      */
-    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint", "url", "serverUrl", "host");
+    static final List<String> ENDPOINT_KEYS = List.of("baseUrl", "endpoint", "url", "serverUrl", "host", "apiEndpoint");
 
     /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
@@ -217,11 +217,25 @@ public class ChatModelRegistry {
      *            references still in place
      */
     private void requireSecretsAllowedAt(String type, Map<String, String> params) {
+        boolean explicitEndpoint = false;
         for (String key : ENDPOINT_KEYS) {
             String endpoint = params.get(key);
             if (endpoint != null && !endpoint.isBlank()) {
+                explicitEndpoint = true;
                 vaultHostAllowlist.requireAllowed(params, endpoint, "LLM provider '" + type + "'");
             }
+        }
+        if (explicitEndpoint) {
+            return;
+        }
+        // No endpoint key: the builder's own default applies. For most providers that
+        // is one fixed vendor host (nothing for an editor to choose), but a builder
+        // whose default an editor can steer — an OpenAI-compatible preset's region —
+        // names it, and it is held to the same check before anything is resolved.
+        var builderProvider = languageModelApiConnectorBuilders.get(type);
+        String defaultEndpoint = builderProvider == null ? null : builderProvider.get().defaultEndpoint(params);
+        if (defaultEndpoint != null && !defaultEndpoint.isBlank()) {
+            vaultHostAllowlist.requireAllowed(params, defaultEndpoint, "LLM provider '" + type + "'");
         }
     }
 
@@ -647,7 +661,15 @@ public class ChatModelRegistry {
 
     /**
      * Scan a cache and remove entries whose parameter values contain any of the
-     * given vault reference forms (new and legacy prefixes).
+     * given vault reference forms (new and legacy prefixes) — or any
+     * {@code ${vars:...}} reference.
+     * <p>
+     * The cache key holds the parameters before global variables are expanded, so a
+     * vault reference reached through a variable is invisible here. A cache hit
+     * does not re-check {@code allowedHosts} either, so a model built that way
+     * would otherwise keep sending the secret to a host its new list excludes. Not
+     * knowing which secret a variable expands to, every variable-bearing model is
+     * evicted: a rebuild is cheap, a stale credentialed client is not.
      */
     private <T> int evictMatching(Map<ModelCacheKey, T> cache, String... refs) {
         int count = 0;
@@ -666,6 +688,9 @@ public class ChatModelRegistry {
         for (String value : params.values()) {
             if (value == null)
                 continue;
+            if (GlobalVariableResolver.containsReference(value)) {
+                return true;
+            }
             for (String ref : refs) {
                 if (ref != null && value.contains(ref)) {
                     return true;

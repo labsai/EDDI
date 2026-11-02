@@ -140,7 +140,14 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
             if (protocol.maxTurns() < 0) {
                 problems.add("protocol.maxTurns must not be negative (0 selects the engine default)");
+            } else if (protocol.maxTurns() > AgentGroupConfiguration.MAX_TURNS_LIMIT) {
+                problems.add("protocol.maxTurns must be at most " + AgentGroupConfiguration.MAX_TURNS_LIMIT + ", got " + protocol.maxTurns());
             }
+        }
+        var artifactConfig = config.getArtifactConfig();
+        if (artifactConfig != null && artifactConfig.maxArtifactsPerDiscussion() > AgentGroupConfiguration.ArtifactConfig.MAX_ARTIFACTS_LIMIT) {
+            problems.add("artifactConfig.maxArtifactsPerDiscussion must be at most " + AgentGroupConfiguration.ArtifactConfig.MAX_ARTIFACTS_LIMIT
+                    + ", got " + artifactConfig.maxArtifactsPerDiscussion());
         }
         var dynamic = config.getDynamicAgents();
         if (dynamic != null) {
@@ -161,6 +168,9 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         for (int i = 0; i < phases.size(); i++) {
             if (phases.get(i) != null && phases.get(i).repeats() < 0) {
                 problems.add("phases[" + i + "].repeats must not be negative");
+            } else if (phases.get(i) != null && phases.get(i).repeats() > AgentGroupConfiguration.MAX_TURNS_LIMIT) {
+                problems.add("phases[" + i + "].repeats must be at most " + AgentGroupConfiguration.MAX_TURNS_LIMIT + ", got "
+                        + phases.get(i).repeats());
             }
             var convergence = phases.get(i) != null ? phases.get(i).convergence() : null;
             if (convergence != null && !AgentGroupConfiguration.ConvergenceConfig.MODE_SIMILARITY.equals(convergence.mode())
@@ -726,8 +736,10 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             }
             for (Map.Entry<String, Double> weight : voteConfig.weights().entrySet()) {
                 // isFinite: NaN passes every < comparison and would poison the
-                // weighted totals; infinity would decide every vote alone.
-                if (weight.getValue() == null || !Double.isFinite(weight.getValue()) || weight.getValue() < 0) {
+                // weighted totals; infinity would decide every vote alone. No null
+                // check: VoteConfig copies the map with Map.copyOf, which refuses a null
+                // value, so one never reaches here.
+                if (!Double.isFinite(weight.getValue()) || weight.getValue() < 0) {
                     throw new IllegalArgumentException(path + ".weights['" + weight.getKey() + "'] must be finite and >= 0");
                 }
             }
