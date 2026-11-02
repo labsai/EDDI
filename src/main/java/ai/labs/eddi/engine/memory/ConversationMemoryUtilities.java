@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
@@ -1072,6 +1073,10 @@ public class ConversationMemoryUtilities {
     public static ConversationMemorySnapshot sanitizePendingToolCallsForApprover(ConversationMemorySnapshot snapshot) {
         stripRequestFingerprintsForRead(snapshot);
         stripRevisionCandidates(snapshot);
+        if (snapshot != null) {
+            // Served to the approver, but through the current filter like the arguments.
+            snapshot.setHitlApprovalContext(ApprovalContextViews.reRedacted(snapshot.getHitlApprovalContext()));
+        }
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
             return snapshot;
         }
