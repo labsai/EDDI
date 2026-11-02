@@ -113,7 +113,7 @@ class ToolLoopRunnerQuotaTest {
         service.init();
 
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
         task = new LlmConfiguration.Task();
@@ -151,7 +151,7 @@ class ToolLoopRunnerQuotaTest {
         Map<String, ToolExecutor> executors = new HashMap<>();
         executors.put(tool, executor);
         return runner.executeToolCall(request(tool, args), memory, new ArrayList<>(), executors, Map.of(), Map.of(), Map.of(tool, source),
-                rateLimit, null, "conv-1", true, caching, false, task, false, List.of(), new ArrayList<>());
+                rateLimit, null, "conv-1", true, caching, false, task, false, List.of(), new ArrayList<>(), ToolLoopRunner.NO_RUN_SPEND);
     }
 
     private ToolLoopRunner.ToolCallResult call(String tool, String source, String args, ToolExecutor executor) {
@@ -308,7 +308,7 @@ class ToolLoopRunnerQuotaTest {
         for (int i = 0; i < 2; i++) {
             runner.executeToolCall(request("searchWeb", "{\"q\":\"" + i + "\"}"), memory, new ArrayList<>(), executors, Map.of(),
                     Map.of("searchWeb", "websearch"), Map.of("searchWeb", "builtin"), 100, null, "conv-1", true, false, false, task, false,
-                    List.of(), new ArrayList<>());
+                    List.of(), new ArrayList<>(), ToolLoopRunner.NO_RUN_SPEND);
         }
         assertEquals(1, ran.get());
         assertEquals(1, store.peek(key("tool:websearch")));
