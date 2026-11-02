@@ -1308,8 +1308,8 @@ public class McpAdminTools {
 
     // ==================== Channel Integration Tools ====================
 
-    @Tool(name = "list_channel_integrations", description = "List all channel integration configurations (Slack and signed "
-            + "inbound webhooks). Returns descriptors with name, channelType, and target count.")
+    @Tool(name = "list_channel_integrations", description = "List all channel integration configurations (Slack, signed "
+            + "inbound webhooks and email mailboxes). Returns descriptors with name, channelType, and target count.")
     public String listChannelIntegrations(
                                           @ToolArg(description = "Filter string (optional)", required = false) String filter,
                                           @ToolArg(description = "Maximum number of results (default: 20)", required = false,
@@ -1360,7 +1360,23 @@ public class McpAdminTools {
             + "optional keys: signatureScheme (eddi-v1 default | github | generic-hmac), signatureHeader, signatureEncoding, "
             + "signaturePrefix, eventTypeHeader, eventTypePath, eventIdHeader, inputTemplate, conversationStrategy (new | correlate), "
             + "correlationKeyPath. For webhook, targets[].triggers are event types (exact, or a 'prefix*'). "
-            + "Returns the new resource ID and URI, and for a webhook its endpoint path POST /integrations/webhook/{resourceId}.")
+            + "Or 'email': EDDI polls an IMAP mailbox and every new mail starts an agent turn. mode 'trigger' sends nothing back, "
+            + "ever; mode 'conversation' replies in the thread over SMTP, to the DKIM/DMARC-authenticated From, or with honorReplyTo "
+            + "true to the mail's single Reply-To instead (never Cc, never an unauthenticated sender). platformConfig: mode (required: trigger | conversation), transport 'imap' "
+            + "(required), connection (required: name of a BASIC app-password or OAUTH2_CLIENT_CREDENTIALS/XOAUTH2 connection whose "
+            + "baseUrlAllowlist contains imaps://<host>, and in conversation mode also smtp://<smtpHost>:587 or smtps://<smtpHost>), "
+            + "host (required), port (993 | 143), address (required, unique per deployment; the From of replies), "
+            + "folder (INBOX), processedAction (flag | move:<folder>), pollSeconds (60), requireAuthentication (true: only "
+            + "DKIM/DMARC-aligned senders run turns; always true in conversation mode), senderAllowlist / senderBlocklist (user@domain, "
+            + "*@domain, *@*.domain), identityMode (perSender | integration), attachments (drop | metadata | store), "
+            + "attachmentMimeTypes (required for store), maxMessageBytes, stripQuotedHistory (true), inputTemplate, "
+            + "maxTurnsPerSenderPerDay (50), dailyCostBudgetUsd, ownerNotifyAddresses. Trigger mode only: correlateThreads (false). "
+            + "Conversation mode only: smtpHost (required), smtpPort (587 STARTTLS | 465 TLS), fromName, replyTemplate ('{output}'), "
+            + "aiDisclosure (a default sentence; empty switches it off and warns), threadParticipants (originalSenderOnly | "
+            + "anyAuthenticatedParticipant), maxRepliesPerThreadPerHour (5), honorReplyTo (false; warns). For email, "
+            + "targets[].triggers match the address plus-tag or a subject word. Returns the new resource ID and URI, for a webhook "
+            + "its endpoint path POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
+            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to) when there are any.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
@@ -1388,6 +1404,7 @@ public class McpAdminTools {
             if (newId != null && "webhook".equalsIgnoreCase(channelConfig.getChannelType())) {
                 created.put("webhookEndpoint", "/integrations/webhook/" + newId);
             }
+            putWarnings(created, response);
             return resultJson("created", created);
         } catch (Exception e) {
             LOGGER.error("MCP create_channel_integration failed", e);
@@ -1395,7 +1412,9 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration.")
+    @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration. The body has "
+            + "the same shape as create_channel_integration's; for email, switching mode between 'trigger' and 'conversation' keeps the "
+            + "mailbox and its cursor, and the other mode's keys must be removed. Returns save-time warnings when there are any.")
     public String updateChannelIntegration(
                                            @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
                                            @ToolArg(description = "Current version number (required)") Integer version,
@@ -1418,14 +1437,48 @@ public class McpAdminTools {
             String location = response.getHeaderString("Location");
             int newVersion = extractVersionFromLocation(location);
 
-            return resultJson("updated", Map.of(
-                    "resourceId", resourceId,
-                    "previousVersion", ver,
-                    "newVersion", newVersion,
-                    "status", response.getStatus()));
+            var updated = new LinkedHashMap<String, Object>();
+            updated.put("resourceId", resourceId);
+            updated.put("previousVersion", ver);
+            updated.put("newVersion", newVersion);
+            updated.put("status", response.getStatus());
+            putWarnings(updated, response);
+            return resultJson("updated", updated);
         } catch (Exception e) {
             LOGGER.error("MCP update_channel_integration failed for " + resourceId, e);
             return errorJson("Failed to update channel integration", e);
+        }
+    }
+
+    /**
+     * Copies the channel store's save-time warning codes ({@code X-Eddi-Warnings})
+     * into a tool result, with their meaning, so an assistant can relay them.
+     */
+    private static void putWarnings(Map<String, Object> result, Response response) {
+        String header = response.getHeaderString("X-Eddi-Warnings");
+        if (header == null || header.isBlank()) {
+            return;
+        }
+        List<String> warnings = new ArrayList<>();
+        for (String code : header.split(",")) {
+            String trimmed = code.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            warnings.add(switch (trimmed) {
+                case "email.open-trigger" -> trimmed + ": no senderAllowlist and requireAuthentication is false, so anyone on the internet "
+                        + "can make this agent run";
+                case "email.tools-without-approvals" -> trimmed + ": a targeted agent has tools but no hitlConfig.toolApprovals, and mail "
+                        + "is untrusted input";
+                case "email.ai-disclosure-disabled" -> trimmed + ": aiDisclosure is empty, so replies no longer say an AI wrote them "
+                        + "(EU AI Act Art. 50 transparency)";
+                case "email.honor-reply-to" -> trimmed + ": replies go to the Reply-To, which DMARC does not authenticate — anyone who can "
+                        + "send authenticated mail from an allowed domain chooses where the reply goes";
+                default -> trimmed;
+            });
+        }
+        if (!warnings.isEmpty()) {
+            result.put("warnings", warnings);
         }
     }
 
