@@ -91,6 +91,22 @@ export interface LlmPostResponse {
   qrBuildInstructions?: QuickRepliesBuildingInstruction[];
 }
 
+/**
+ * Cache and long-context prices for a task's model (docs/model-pricing.md).
+ * Absent fields come from the deployment price catalog; a blank cache price is
+ * charged at the input price. The long-context threshold comes from the catalog.
+ */
+export interface TaskModelPricing {
+  cacheReadPricePer1M?: number | null;
+  cacheWritePricePer1M?: number | null;
+  longContext?: {
+    inputPricePer1M?: number | null;
+    outputPricePer1M?: number | null;
+    cacheReadPricePer1M?: number | null;
+    cacheWritePricePer1M?: number | null;
+  } | null;
+}
+
 export interface LlmTask {
   actions?: string[];
   id?: string;
@@ -226,6 +242,8 @@ export interface LlmTask {
    */
   inputPricePer1M?: number | null;
   outputPricePer1M?: number | null;
+  /** Cache and long-context prices; see {@link TaskModelPricing}. */
+  pricing?: TaskModelPricing | null;
 
   /**
    * Guardrails that screen the user's message before the model is called

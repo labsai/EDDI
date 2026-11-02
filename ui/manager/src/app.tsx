@@ -58,6 +58,7 @@ const SecretsPage = lazyPage(() => import("@/pages/secrets"), "SecretsPage");
 const VariablesPage = lazyPage(() => import("@/pages/variables"), "VariablesPage");
 const AuditPage = lazyPage(() => import("@/pages/audit"), "AuditPage");
 const QuotasPage = lazyPage(() => import("@/pages/quotas"), "QuotasPage");
+const ModelPricesPage = lazyPage(() => import("@/pages/model-prices"), "ModelPricesPage");
 const WorkspacesPage = lazyPage(() => import("@/pages/workspaces"), "WorkspacesPage");
 const GdprPage = lazyPage(() => import("@/pages/gdpr"), "GdprPage");
 const UserDataPage = lazyPage(() => import("@/pages/user-data"), "UserDataPage");
@@ -180,6 +181,7 @@ export function App() {
             <Route path="/manage/variables" element={<VariablesPage />} />
             <Route path="/manage/audit" element={<AuditPage />} />
             <Route path="/manage/quotas" element={<QuotasPage />} />
+            <Route path="/manage/model-prices" element={<ModelPricesPage />} />
             <Route path="/manage/workspaces" element={<WorkspacesPage />} />
             <Route path="/manage/gdpr" element={<GdprPage />} />
             <Route path="/manage/groups" element={<GroupsPage />} />
