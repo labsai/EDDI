@@ -1,34 +1,48 @@
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, X } from "lucide-react";
+import { AlertTriangle, Plus, Trash2, X } from "lucide-react";
 import { ProviderSelect } from "@/components/shared/provider-select";
 import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { NumberInput } from "../number-input";
 import { modelParamSpec } from "./model-params";
 import {
   DEFAULT_REPROMPT_RETRIES,
+  EXPRESSION_FIX_MAX_CHARS,
+  EXPRESSION_MAX_CHARS,
+  JUDGE_DEFAULT_TIMEOUT_MS,
+  JUDGE_MAX_FIX_CHARS,
+  JUDGE_MAX_ISSUES,
   MAX_REPROMPT_RETRIES,
+  ON_EXHAUSTED,
   PII_KINDS,
   actionsForPhase,
   classifierNeedsSafeLabel,
   effectiveAction,
   enabledPiiKinds,
+  expressionProblems,
   isKnownGuardrailType,
+  judgeIssuesProblem,
+  parseJudgeIssues,
+  serializeJudgeIssues,
   typeHasRewrite,
   ACTION_TEXT,
   TYPE_TEXT,
   typesForPhase,
   withAction,
   withMaxRetries,
+  withOnExhausted,
   withParameter,
   withPiiKinds,
   withText,
   withType,
+  type ExpressionProblem,
   type GuardrailPhaseName,
   type GuardrailTypeName,
+  type JudgeIssue,
+  type JudgeIssuesProblem,
 } from "./guardrails";
-import type { GuardrailActionName, GuardrailConfig } from "./types";
+import type { GuardrailActionName, GuardrailConfig, GuardrailOnExhausted } from "./types";
 
 const FIELD =
   "h-8 w-full rounded-md border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60";
@@ -299,6 +313,42 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
             </Field>
           )}
 
+          {action === "reprompt" && phase === "output" && (
+            <Field
+              label={t("llmEditor.grOnExhausted", "When the retries run out")}
+              htmlFor={id("exhausted")}
+              hint={t(
+                "llmEditor.grOnExhaustedHint",
+                "Block replaces the answer with the block message. Deliver best sends the attempt this guardrail rated best, recorded as a warning; every other guardrail still screens it first.",
+              )}
+            >
+              <select
+                id={id("exhausted")}
+                value={value.onExhausted === "deliver-best" ? "deliver-best" : "block"}
+                onChange={(e) => onChange(withOnExhausted(value, e.target.value as GuardrailOnExhausted))}
+                disabled={readOnly}
+                className={FIELD}
+                data-testid="guardrail-on-exhausted"
+              >
+                {ON_EXHAUSTED.map((o) => (
+                  <option key={o} value={o}>
+                    {o === "block"
+                      ? t("llmEditor.grOnExhaustedBlock", "Block (default)")
+                      : t("llmEditor.grOnExhaustedDeliverBest", "Deliver the best attempt")}
+                  </option>
+                ))}
+              </select>
+              {value.onExhausted === "deliver-best" && value.type === "classifier" && (
+                <Warning testId="guardrail-deliver-best-classifier">
+                  {t(
+                    "llmEditor.grDeliverBestClassifier",
+                    "A safety classifier that delivers what it flagged defeats its purpose. Use deliver best for quality checks such as the judge.",
+                  )}
+                </Warning>
+              )}
+            </Field>
+          )}
+
           {/* Block message */}
           <Field
             label={t("llmEditor.grBlockMessage", "Block message")}
@@ -489,6 +539,10 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
             </p>
           )}
 
+          {value.type === "expression" && (
+            <ExpressionFields value={value} readOnly={readOnly} idOf={id} setParam={setParam} />
+          )}
+
           {value.type === "classifier" && (
             <ClassifierFields
               value={value}
@@ -498,6 +552,10 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
               setParam={setParam}
               onReplace={onChange}
             />
+          )}
+
+          {value.type === "judge" && (
+            <JudgeFields value={value} readOnly={readOnly} idOf={id} setParam={setParam} onReplace={onChange} />
           )}
 
           {/* Common */}
@@ -561,6 +619,134 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
   return createPortal(body, document.body);
 }
 
+function ExpressionFields({
+  value,
+  readOnly,
+  idOf,
+  setParam,
+}: {
+  value: GuardrailConfig;
+  readOnly?: boolean;
+  idOf: (name: string) => string;
+  setParam: (key: string, v: string) => void;
+}) {
+  const { t } = useTranslation();
+  const p = value.parameters ?? {};
+  const problems = expressionProblems(value);
+  const has = (problem: ExpressionProblem) => problems.includes(problem);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3" data-testid="guardrail-expression">
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        {t(
+          "llmEditor.grExprNote",
+          "The answer is parsed as JSON and the expression evaluated over it; only true passes. An answer that is not JSON, or an expression that cannot be evaluated (a missing value in arithmetic, a number compared with text, division by zero), counts as undecided and follows the fail mode below.",
+        )}
+      </p>
+
+      <Field
+        label={t("llmEditor.grExprExpr", "Expression")}
+        htmlFor={idOf("expr")}
+        hint={t(
+          "llmEditor.grExprExprHint",
+          "Paths (total, invoice.total, lines[0].amount, lines[*].amount), decimal arithmetic, == != < <= > >=, && || !, and sum, count, min, max, len, abs, round, exists, approx. A missing path is null; comparing null with < or > is false. The syntax is checked when the agent is deployed.",
+        )}
+      >
+        <textarea
+          id={idOf("expr")}
+          rows={3}
+          value={p.expr ?? ""}
+          onChange={(e) => setParam("expr", e.target.value)}
+          readOnly={readOnly}
+          placeholder="sum(lines[*].amount) == total"
+          aria-invalid={has("exprRequired") || has("exprTooLong")}
+          className={AREA}
+          data-testid="guardrail-expr"
+        />
+      </Field>
+      {has("exprRequired") && (
+        <Warning testId="guardrail-expr-required">
+          {t("llmEditor.grExprRequired", "An expression is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+      {has("exprTooLong") && (
+        <Warning testId="guardrail-expr-too-long">
+          {t("llmEditor.grExprTooLong", "The expression is longer than {{max}} characters: the deploy is refused.", {
+            max: EXPRESSION_MAX_CHARS,
+          })}
+        </Warning>
+      )}
+
+      <Field
+        label={t("llmEditor.grExprIssue", "Issue code")}
+        htmlFor={idOf("issue")}
+        hint={t(
+          "llmEditor.grExprIssueHint",
+          "Reported in the audit record as expression_failed:<code>. Upper-case letters, digits and underscores, starting with a letter, at most 40 characters.",
+        )}
+      >
+        <input
+          id={idOf("issue")}
+          type="text"
+          value={p.issue ?? ""}
+          onChange={(e) => setParam("issue", e.target.value)}
+          readOnly={readOnly}
+          placeholder="LINE_SUM"
+          aria-invalid={has("issueRequired") || has("issueInvalid")}
+          className={`${FIELD} font-mono`}
+          data-testid="guardrail-expr-issue"
+        />
+      </Field>
+      {has("issueRequired") && (
+        <Warning testId="guardrail-expr-issue-required">
+          {t("llmEditor.grExprIssueRequired", "An issue code is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+      {has("issueInvalid") && (
+        <Warning testId="guardrail-expr-issue-invalid">
+          {t(
+            "llmEditor.grExprIssueInvalid",
+            "Use upper-case letters, digits and underscores, starting with a letter, at most 40 characters: the deploy is refused otherwise.",
+          )}
+        </Warning>
+      )}
+
+      <Field
+        label={t("llmEditor.grExprFix", "Fix text")}
+        htmlFor={idOf("fix")}
+        hint={t(
+          "llmEditor.grExprFixHint",
+          "What a reprompt tells the model when the expression is false. It is the only text from this check the model sees: no value from the answer is ever added.",
+        )}
+      >
+        <textarea
+          id={idOf("fix")}
+          rows={2}
+          value={p.fix ?? ""}
+          onChange={(e) => setParam("fix", e.target.value)}
+          readOnly={readOnly}
+          placeholder={t("llmEditor.grExprFixPlaceholder", "Make total equal the sum of the line amounts.")}
+          aria-invalid={has("fixRequired") || has("fixTooLong")}
+          className={AREA}
+          data-testid="guardrail-expr-fix"
+        />
+      </Field>
+      {has("fixRequired") && (
+        <Warning testId="guardrail-expr-fix-required">
+          {t("llmEditor.grExprFixRequired", "A fix text is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+      {has("fixTooLong") && (
+        <Warning testId="guardrail-expr-fix-too-long">
+          {t("llmEditor.grExprFixTooLong", "The fix text is longer than {{max}} characters: the deploy is refused.", {
+            max: EXPRESSION_FIX_MAX_CHARS,
+          })}
+        </Warning>
+      )}
+    </div>
+  );
+}
+
 function ClassifierFields({
   value,
   phase,
@@ -579,9 +765,6 @@ function ClassifierFields({
 }) {
   const { t } = useTranslation();
   const p = value.parameters ?? {};
-  const provider = p.provider ?? "";
-  const spec = modelParamSpec(provider);
-  const credentialKey = spec.credentialKey;
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3" data-testid="guardrail-classifier">
@@ -592,77 +775,15 @@ function ClassifierFields({
         )}
       </p>
 
-      <Field label={t("llmEditor.grClfProvider", "Provider")} htmlFor={idOf("provider")}>
-        <ProviderSelect
-          id={idOf("provider")}
-          value={provider}
-          // Switching provider changes which key names the model and the credential.
-          onChange={(next) => {
-            const from = modelParamSpec(provider);
-            const to = modelParamSpec(next);
-            let updated = withParameter(value, "provider", next);
-            const model = p[from.modelKey];
-            if (from.modelKey !== to.modelKey && model) {
-              updated = withParameter(withParameter(updated, from.modelKey, ""), to.modelKey, model);
-            }
-            if (from.credentialKey !== to.credentialKey && from.credentialKey && p[from.credentialKey]) {
-              const cred = p[from.credentialKey]!;
-              updated = withParameter(updated, from.credentialKey, "");
-              if (to.credentialKey) updated = withParameter(updated, to.credentialKey, cred);
-            }
-            onReplace(updated);
-          }}
-          disabled={readOnly}
-          className={FIELD}
-          testId="guardrail-clf-provider"
-        />
-      </Field>
-      {!provider && (
-        <Warning testId="guardrail-clf-provider-required">
-          {t("llmEditor.grClfProviderRequired", "A provider is required: without one the classifier cannot decide.")}
-        </Warning>
-      )}
-
-      <Field label={t("llmEditor.grClfBaseUrl", "Base URL")} htmlFor={idOf("baseurl")}>
-        <input
-          id={idOf("baseurl")}
-          type="text"
-          value={p.baseUrl ?? ""}
-          onChange={(e) => setParam("baseUrl", e.target.value)}
-          readOnly={readOnly}
-          placeholder="http://vllm.guardrails.svc:8000/v1"
-          className={FIELD}
-          data-testid="guardrail-clf-base-url"
-        />
-      </Field>
-
-      <Field label={t("llmEditor.grClfModel", "Model")} htmlFor={idOf("model")}>
-        <input
-          id={idOf("model")}
-          type="text"
-          value={p[spec.modelKey] ?? ""}
-          onChange={(e) => setParam(spec.modelKey, e.target.value)}
-          readOnly={readOnly}
-          className={FIELD}
-          data-testid="guardrail-clf-model"
-        />
-      </Field>
-
-      {credentialKey && (
-        <Field
-          label={t("llmEditor.grClfApiKey", "API key")}
-          htmlFor={idOf("apikey")}
-          hint={t("llmEditor.grClfApiKeyHint", "Store the key in the vault and reference it as ${vault:name}.")}
-        >
-          <SecretKeyPicker
-            id={idOf("apikey")}
-            value={p[credentialKey] ?? ""}
-            onChange={(v) => setParam(credentialKey, v)}
-            readOnly={readOnly}
-            testId="guardrail-clf-api-key"
-          />
-        </Field>
-      )}
+      <ModelCallFields
+        value={value}
+        readOnly={readOnly}
+        idOf={idOf}
+        setParam={setParam}
+        onReplace={onReplace}
+        prefix="clf"
+        providerRequired={t("llmEditor.grClfProviderRequired", "A provider is required: without one the classifier cannot decide.")}
+      />
 
       <div className="grid grid-cols-2 gap-3">
         <Field
@@ -766,52 +887,10 @@ function ClassifierFields({
         />
       </Field>
 
-      <div className="grid grid-cols-3 gap-3">
-        <Field
-          label={t("llmEditor.grClfTimeout", "Timeout (ms)")}
-          htmlFor={idOf("timeout")}
-          hint={t("llmEditor.grClfTimeoutHint", "Default 3000, at most 60000.")}
-        >
-          <input
-            id={idOf("timeout")}
-            type="number"
-            min={1}
-            max={60000}
-            value={p.timeoutMs ?? ""}
-            onChange={(e) => setParam("timeoutMs", e.target.value)}
-            readOnly={readOnly}
-            placeholder="3000"
-            className={FIELD}
-            data-testid="guardrail-clf-timeout"
-          />
-        </Field>
-        <Field label={t("llmEditor.grClfInputPrice", "Input $/1M tokens")} htmlFor={idOf("inprice")}>
-          <input
-            id={idOf("inprice")}
-            type="number"
-            min={0}
-            step="any"
-            value={p.inputPricePer1M ?? ""}
-            onChange={(e) => setParam("inputPricePer1M", e.target.value)}
-            readOnly={readOnly}
-            className={FIELD}
-            data-testid="guardrail-clf-input-price"
-          />
-        </Field>
-        <Field label={t("llmEditor.grClfOutputPrice", "Output $/1M tokens")} htmlFor={idOf("outprice")}>
-          <input
-            id={idOf("outprice")}
-            type="number"
-            min={0}
-            step="any"
-            value={p.outputPricePer1M ?? ""}
-            onChange={(e) => setParam("outputPricePer1M", e.target.value)}
-            readOnly={readOnly}
-            className={FIELD}
-            data-testid="guardrail-clf-output-price"
-          />
-        </Field>
-      </div>
+      <CallLimitFields value={value} readOnly={readOnly} idOf={idOf} setParam={setParam} prefix="clf"
+        defaultTimeoutMs={3000}
+        timeoutHint={t("llmEditor.grClfTimeoutHint", "Default 3000, at most 60000.")}
+      />
 
       {phase === "output" && (
         <label className="flex items-start gap-2 text-xs text-foreground">
@@ -834,4 +913,423 @@ function ClassifierFields({
     </div>
   );
 
+}
+
+/**
+ * Provider, base URL, model and API key of a model-backed guardrail
+ * (`classifier`, `judge`): the same provider vocabulary as an LLM task, and the
+ * same backend machinery behind both types.
+ */
+function ModelCallFields({
+  value,
+  readOnly,
+  idOf,
+  setParam,
+  onReplace,
+  prefix,
+  providerRequired,
+  baseUrlPlaceholder = "http://vllm.guardrails.svc:8000/v1",
+}: {
+  value: GuardrailConfig;
+  readOnly?: boolean;
+  idOf: (name: string) => string;
+  setParam: (key: string, v: string) => void;
+  onReplace: (g: GuardrailConfig) => void;
+  /** The test-id prefix: `guardrail-<prefix>-provider`, … */
+  prefix: string;
+  providerRequired: string;
+  baseUrlPlaceholder?: string;
+}) {
+  const { t } = useTranslation();
+  const p = value.parameters ?? {};
+  const provider = p.provider ?? "";
+  const spec = modelParamSpec(provider);
+  const credentialKey = spec.credentialKey;
+
+  return (
+    <>
+      <Field label={t("llmEditor.grClfProvider", "Provider")} htmlFor={idOf("provider")}>
+        <ProviderSelect
+          id={idOf("provider")}
+          value={provider}
+          // Switching provider changes which key names the model and the credential.
+          onChange={(next) => {
+            const from = modelParamSpec(provider);
+            const to = modelParamSpec(next);
+            let updated = withParameter(value, "provider", next);
+            const model = p[from.modelKey];
+            if (from.modelKey !== to.modelKey && model) {
+              updated = withParameter(withParameter(updated, from.modelKey, ""), to.modelKey, model);
+            }
+            if (from.credentialKey !== to.credentialKey && from.credentialKey && p[from.credentialKey]) {
+              const cred = p[from.credentialKey]!;
+              updated = withParameter(updated, from.credentialKey, "");
+              if (to.credentialKey) updated = withParameter(updated, to.credentialKey, cred);
+            }
+            onReplace(updated);
+          }}
+          disabled={readOnly}
+          className={FIELD}
+          testId={`guardrail-${prefix}-provider`}
+        />
+      </Field>
+      {!provider && <Warning testId={`guardrail-${prefix}-provider-required`}>{providerRequired}</Warning>}
+
+      <Field label={t("llmEditor.grClfBaseUrl", "Base URL")} htmlFor={idOf("baseurl")}>
+        <input
+          id={idOf("baseurl")}
+          type="text"
+          value={p.baseUrl ?? ""}
+          onChange={(e) => setParam("baseUrl", e.target.value)}
+          readOnly={readOnly}
+          placeholder={baseUrlPlaceholder}
+          className={FIELD}
+          data-testid={`guardrail-${prefix}-base-url`}
+        />
+      </Field>
+
+      <Field label={t("llmEditor.grClfModel", "Model")} htmlFor={idOf("model")}>
+        <input
+          id={idOf("model")}
+          type="text"
+          value={p[spec.modelKey] ?? ""}
+          onChange={(e) => setParam(spec.modelKey, e.target.value)}
+          readOnly={readOnly}
+          className={FIELD}
+          data-testid={`guardrail-${prefix}-model`}
+        />
+      </Field>
+
+      {credentialKey && (
+        <Field
+          label={t("llmEditor.grClfApiKey", "API key")}
+          htmlFor={idOf("apikey")}
+          hint={t("llmEditor.grClfApiKeyHint", "Store the key in the vault and reference it as ${vault:name}.")}
+        >
+          <SecretKeyPicker
+            id={idOf("apikey")}
+            value={p[credentialKey] ?? ""}
+            onChange={(v) => setParam(credentialKey, v)}
+            readOnly={readOnly}
+            testId={`guardrail-${prefix}-api-key`}
+          />
+        </Field>
+      )}
+    </>
+  );
+}
+
+/** Timeout and token prices of a model-backed guardrail. */
+function CallLimitFields({
+  value,
+  readOnly,
+  idOf,
+  setParam,
+  prefix,
+  defaultTimeoutMs,
+  timeoutHint,
+}: {
+  value: GuardrailConfig;
+  readOnly?: boolean;
+  idOf: (name: string) => string;
+  setParam: (key: string, v: string) => void;
+  prefix: string;
+  defaultTimeoutMs: number;
+  timeoutHint: string;
+}) {
+  const { t } = useTranslation();
+  const p = value.parameters ?? {};
+  return (
+    <div className="grid grid-cols-3 gap-3">
+      <Field
+        label={t("llmEditor.grClfTimeout", "Timeout (ms)")}
+        htmlFor={idOf("timeout")}
+        hint={timeoutHint}
+      >
+        <input
+          id={idOf("timeout")}
+          type="number"
+          min={1}
+          max={60000}
+          value={p.timeoutMs ?? ""}
+          onChange={(e) => setParam("timeoutMs", e.target.value)}
+          readOnly={readOnly}
+          placeholder={String(defaultTimeoutMs)}
+          className={FIELD}
+          data-testid={`guardrail-${prefix}-timeout`}
+        />
+      </Field>
+      <Field label={t("llmEditor.grClfInputPrice", "Input $/1M tokens")} htmlFor={idOf("inprice")}>
+        <input
+          id={idOf("inprice")}
+          type="number"
+          min={0}
+          step="any"
+          value={p.inputPricePer1M ?? ""}
+          onChange={(e) => setParam("inputPricePer1M", e.target.value)}
+          readOnly={readOnly}
+          className={FIELD}
+          data-testid={`guardrail-${prefix}-input-price`}
+        />
+      </Field>
+      <Field label={t("llmEditor.grClfOutputPrice", "Output $/1M tokens")} htmlFor={idOf("outprice")}>
+        <input
+          id={idOf("outprice")}
+          type="number"
+          min={0}
+          step="any"
+          value={p.outputPricePer1M ?? ""}
+          onChange={(e) => setParam("outputPricePer1M", e.target.value)}
+          readOnly={readOnly}
+          className={FIELD}
+          data-testid={`guardrail-${prefix}-output-price`}
+        />
+      </Field>
+    </div>
+  );
+}
+
+function JudgeFields({
+  value,
+  readOnly,
+  idOf,
+  setParam,
+  onReplace,
+}: {
+  value: GuardrailConfig;
+  readOnly?: boolean;
+  idOf: (name: string) => string;
+  setParam: (key: string, v: string) => void;
+  onReplace: (g: GuardrailConfig) => void;
+}) {
+  const { t } = useTranslation();
+  const p = value.parameters ?? {};
+  const priced = !!(p.inputPricePer1M?.trim() || p.outputPricePer1M?.trim());
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3" data-testid="guardrail-judge">
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        {t(
+          "llmEditor.grJudgeNote",
+          "Asks a model to grade the answer after it is written: one extra model call per answer, and one more per reprompt. EDDI adds the reply format itself; the judge may only name the issue codes below, and a reprompt tells the model only your fix texts. Any other model parameter your provider takes can be added in the JSON view.",
+        )}
+      </p>
+
+      <ModelCallFields
+        value={value}
+        readOnly={readOnly}
+        idOf={idOf}
+        setParam={setParam}
+        onReplace={onReplace}
+        prefix="judge"
+        baseUrlPlaceholder=""
+        providerRequired={t("llmEditor.grJudgeProviderRequired", "A provider is required: the deploy is refused without one.")}
+      />
+
+      <Field
+        label={t("llmEditor.grClfPromptTemplate", "Prompt template")}
+        htmlFor={idOf("prompt")}
+        hint={t(
+          "llmEditor.grJudgePromptTemplateHint",
+          "Required. What the judge should check. {input} (the question), {output} (the answer) and {context} (with the option below) are filled in as data.",
+        )}
+      >
+        <textarea
+          id={idOf("prompt")}
+          rows={4}
+          value={p.promptTemplate ?? ""}
+          onChange={(e) => setParam("promptTemplate", e.target.value)}
+          readOnly={readOnly}
+          aria-invalid={!p.promptTemplate?.trim()}
+          className={AREA}
+          data-testid="guardrail-judge-prompt-template"
+        />
+      </Field>
+      {!p.promptTemplate?.trim() && (
+        <Warning testId="guardrail-judge-prompt-required">
+          {t("llmEditor.grJudgePromptRequired", "A prompt template is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+
+      <JudgeIssuesEditor raw={p.issues} readOnly={readOnly} onChange={(raw) => setParam("issues", raw)} />
+
+      <CallLimitFields
+        value={value}
+        readOnly={readOnly}
+        idOf={idOf}
+        setParam={setParam}
+        prefix="judge"
+        defaultTimeoutMs={JUDGE_DEFAULT_TIMEOUT_MS}
+        timeoutHint={t("llmEditor.grJudgeTimeoutHint", "Default 5000, at most 60000. Keep it short: the judge runs after every answer.")}
+      />
+      {!priced && (
+        <Warning testId="guardrail-judge-unpriced">
+          {t(
+            "llmEditor.grJudgeUnpriced",
+            "Without prices the judge's calls are not counted in the turn's cost or its cost ceilings.",
+          )}
+        </Warning>
+      )}
+
+      <label className="flex items-start gap-2 text-xs text-foreground">
+        <input
+          type="checkbox"
+          checked={p.includeRetrievedContext === "true"}
+          onChange={(e) => setParam("includeRetrievedContext", e.target.checked ? "true" : "")}
+          disabled={readOnly}
+          className="mt-0.5 h-3.5 w-3.5 rounded border-input accent-primary"
+          data-testid="guardrail-judge-context"
+        />
+        <span>
+          {t(
+            "llmEditor.grJudgeContext",
+            "Give the template this turn's retrieved RAG context as {context}, for a groundedness check.",
+          )}
+        </span>
+      </label>
+    </div>
+  );
+}
+
+/**
+ * The judge's issue codes as rows of code + fix text. Rows live in local state
+ * so a half-typed row (a duplicate code, a blank fix) is not collapsed by a
+ * JSON round-trip; every edit writes the serialized object back.
+ */
+function JudgeIssuesEditor({
+  raw,
+  readOnly,
+  onChange,
+}: {
+  raw: string | undefined;
+  readOnly?: boolean;
+  onChange: (raw: string) => void;
+}) {
+  const { t } = useTranslation();
+  const parsed = parseJudgeIssues(raw);
+  const [rows, setRows] = useState<JudgeIssue[]>(() => parsed ?? []);
+  const uid = useId();
+
+  if (parsed === null) {
+    // Not an object of strings: keep the author's text visible and editable.
+    return (
+      <Field label={t("llmEditor.grJudgeIssues", "Issue codes")} htmlFor={`${uid}-raw`}>
+        <textarea
+          id={`${uid}-raw`}
+          rows={4}
+          value={raw ?? ""}
+          onChange={(e) => {
+            // Once the text parses, the row editor takes over — seed its rows from it,
+            // or they stay [] and the first "Add" overwrites the author's fixed JSON.
+            const next = e.target.value;
+            const nextRows = parseJudgeIssues(next);
+            if (nextRows) setRows(nextRows);
+            onChange(next);
+          }}
+          readOnly={readOnly}
+          aria-invalid
+          className={AREA}
+          data-testid="guardrail-judge-issues-raw"
+        />
+        <Warning testId="guardrail-judge-issues-invalid">
+          {t(
+            "llmEditor.grJudgeIssuesInvalid",
+            "Not a JSON object of issue code to fix text; the deploy is refused until it is.",
+          )}
+        </Warning>
+      </Field>
+    );
+  }
+
+  const update = (next: JudgeIssue[]) => {
+    setRows(next);
+    onChange(serializeJudgeIssues(next));
+  };
+  const problem = judgeIssuesProblem(rows);
+  const problemText = (kind: JudgeIssuesProblem): string => {
+    switch (kind) {
+      case "none":
+        return t("llmEditor.grJudgeIssuesNone", "Declare at least one issue code: the deploy is refused without one.");
+      case "tooMany":
+        return t("llmEditor.grJudgeIssuesTooMany", "At most {{max}} issue codes.", { max: JUDGE_MAX_ISSUES });
+      case "badCode":
+        return t(
+          "llmEditor.grJudgeIssuesBadCode",
+          "A code is upper-case letters, digits and underscores, starts with a letter and has at most 40 characters.",
+        );
+      case "duplicate":
+        return t("llmEditor.grJudgeIssuesDuplicate", "Each issue code may be declared only once.");
+      case "blankFix":
+        return t("llmEditor.grJudgeIssuesBlankFix", "Every issue code needs a fix text.");
+      case "longFix":
+        return t("llmEditor.grJudgeIssuesLongFix", "A fix text has at most {{max}} characters.", { max: JUDGE_MAX_FIX_CHARS });
+    }
+  };
+
+  return (
+    <fieldset data-testid="guardrail-judge-issues">
+      <legend className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {t("llmEditor.grJudgeIssues", "Issue codes")}
+      </legend>
+      <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
+        {t(
+          "llmEditor.grJudgeIssuesHint",
+          "Each code is a finding the judge may report, with the fix text a reprompt tells the model. The audit reason lists the codes found.",
+        )}
+      </p>
+      <div className="space-y-2">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <input
+              type="text"
+              value={row.code}
+              onChange={(e) => update(rows.map((r, j) => (j === i ? { ...r, code: e.target.value.toUpperCase() } : r)))}
+              readOnly={readOnly}
+              placeholder="UNSUPPORTED_CLAIM"
+              aria-label={t("llmEditor.grJudgeIssueCode", "Issue code")}
+              className={`${FIELD} w-40 shrink-0 font-mono`}
+              data-testid={`guardrail-judge-issue-code-${i}`}
+            />
+            <input
+              type="text"
+              value={row.fix}
+              onChange={(e) => update(rows.map((r, j) => (j === i ? { ...r, fix: e.target.value } : r)))}
+              readOnly={readOnly}
+              placeholder={t("llmEditor.grJudgeIssueFixPlaceholder", "Remove every claim the sources do not state.")}
+              aria-label={t("llmEditor.grJudgeIssueFix", "Fix text")}
+              className={FIELD}
+              data-testid={`guardrail-judge-issue-fix-${i}`}
+            />
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => update(rows.filter((_, j) => j !== i))}
+                aria-label={t("llmEditor.grJudgeIssueRemove", "Remove issue code")}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                data-testid={`guardrail-judge-issue-remove-${i}`}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {!readOnly && rows.length < JUDGE_MAX_ISSUES && (
+        <button
+          type="button"
+          onClick={() => update([...rows, { code: "", fix: "" }])}
+          className="mt-2 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs text-primary hover:bg-secondary"
+          data-testid="guardrail-judge-issue-add"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          {t("llmEditor.grJudgeIssueAdd", "Add issue code")}
+        </button>
+      )}
+      {problem && (
+        <div className="mt-2">
+          <Warning testId="guardrail-judge-issues-problem">{problemText(problem)}</Warning>
+        </div>
+      )}
+    </fieldset>
+  );
 }

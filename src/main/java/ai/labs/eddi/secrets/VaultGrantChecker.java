@@ -19,6 +19,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.RestUtilities;
@@ -34,8 +35,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Checks, at deployment time, that every vault reference an agent's
@@ -68,7 +67,12 @@ import java.util.regex.Pattern;
  * <p>
  * <b>What it cannot do.</b> An agent already deployed before its grant was
  * narrowed keeps resolving until it is redeployed. This is a deploy-time gate,
- * not a revocation mechanism.
+ * not a revocation mechanism. A reference to a secret that does not exist yet
+ * is let through — promoting a workflow to an instance that does not hold the
+ * source's secret, then creating it, is a supported flow — so the grant such a
+ * secret is later created with is checked at <em>creation</em> instead: the
+ * create endpoints refuse a new secret whose grant leaves out a deployed agent
+ * that already references it (see {@link VaultGrantImpactAnalyzer}).
  */
 @ApplicationScoped
 public class VaultGrantChecker {
@@ -84,11 +88,9 @@ public class VaultGrantChecker {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
-    /**
-     * Finds a ${connection:…} so the connection's own vault reference can be
-     * followed.
-     */
-    private static final Pattern CONNECTION_PATTERN = Pattern.compile(ConnectionReference.CONNECTION_PATTERN);
+    // Every finder below is a ReferenceScanner, not a regex: find() over these
+    // patterns rescans the rest of the text at each unterminated opener, and the
+    // scanned text includes editor-written variable values appended verbatim.
 
     /**
      * Finds a {@code ${vars:…}} so it can be expanded before the vault scan.
@@ -97,12 +99,10 @@ public class VaultGrantChecker {
      * {@code ${vars:x}} was invisible to grant enforcement — one indirection
      * defeating the check the reference-only rule exists to feed.
      */
-    private static final Pattern VARS_PATTERN = Pattern.compile("\\$\\{vars:[^}]+\\}");
+    private static final ReferenceScanner VARS_REFERENCES = ReferenceScanner.of("vars");
 
-    /**
-     * An explicit tenant in a vault or variable reference; group 1 is the tenant.
-     */
-    private static final Pattern TENANT_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|vars):([^/}]+)/[^}]+\\}");
+    /** A vault or variable reference that names its tenant explicitly. */
+    private static final ReferenceScanner TENANT_REFERENCES = ReferenceScanner.withTenant("vault", "eddivault", "vars");
 
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
@@ -158,6 +158,13 @@ public class VaultGrantChecker {
      * skipped: "could not determine the grant" is not "the grant is missing", and a
      * deployment gate that fires on a transient store failure is worse than the
      * hole it closes.
+     * <p>
+     * An absent secret has no grant to check yet, and deploying before it exists is
+     * a supported flow (agent sync promotes a workflow to an instance that does not
+     * hold the source's secrets). The resolver does not check grants, so the grant
+     * such a secret is later created with is checked when it is created: the create
+     * endpoints ask {@link VaultGrantImpactAnalyzer} which deployed agents already
+     * reference it, and refuse a grant that leaves one out.
      * <p>
      * A <em>connection</em> that cannot be read is the opposite case and fails
      * closed. The hop exists because a connection is an indirect vault reference;
@@ -360,14 +367,13 @@ public class VaultGrantChecker {
             // A variable that could not be read may hold a reference to any tenant.
             throw new UnverifiableReferencesException("variable " + unresolved.get(0));
         }
-        Matcher matcher = TENANT_REFERENCE.matcher(scanned);
-        while (matcher.find()) {
-            sink.add(matcher.group(1));
+        for (ReferenceScanner.Match match : TENANT_REFERENCES.findAll(scanned)) {
+            sink.add(match.tenant());
         }
-        Matcher connections = CONNECTION_PATTERN.matcher(scanned);
-        while (connections.find()) {
-            String connectionTenant = connections.group(1) != null ? connections.group(1) : ConnectionReference.DEFAULT_TENANT;
-            String name = connections.group(2);
+        for (ReferenceScanner.Match connections : ConnectionReference.findAll(scanned)) {
+            ConnectionReference reference = ConnectionReference.of(connections);
+            String connectionTenant = reference.tenantId();
+            String name = reference.name();
             if (!visitedConnections.add(connectionTenant + "/" + name)) {
                 continue;
             }
@@ -406,7 +412,9 @@ public class VaultGrantChecker {
     /**
      * Whether {@code agentId} may use {@code reference}. Absent, empty and wildcard
      * grant lists all allow — those are the shapes that mean "not restricted", and
-     * the wizard writes the wildcard for every key it vaults.
+     * the wizard writes the wildcard for every key it vaults. A secret that does
+     * not exist, or whose grant cannot be read, is not a violation (see
+     * {@link #findUngrantedReferences(AgentConfiguration, String)}).
      */
     private boolean isGranted(String reference, String agentId) {
         SecretMetadata metadata;
@@ -566,11 +574,12 @@ public class VaultGrantChecker {
         // Variables expanded first, as for the vault scan: a ${vars:x} whose value is
         // ${connection:jira} otherwise hides the whole hop, and with it every secret
         // the connection holds.
-        Matcher matcher = CONNECTION_PATTERN.matcher(withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT, unreadableResources));
+        String scanned = withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT, unreadableResources);
         Set<String> alreadyScanned = new LinkedHashSet<>();
-        while (matcher.find()) {
-            String tenantId = matcher.group(1) != null ? matcher.group(1) : ConnectionReference.DEFAULT_TENANT;
-            String name = matcher.group(2);
+        for (ReferenceScanner.Match match : ConnectionReference.findAll(scanned)) {
+            ConnectionReference reference = ConnectionReference.of(match);
+            String tenantId = reference.tenantId();
+            String name = reference.name();
             if (!alreadyScanned.add(tenantId + "/" + name)) {
                 continue;
             }
@@ -593,7 +602,7 @@ public class VaultGrantChecker {
                 // above DEBUG.
                 LOGGER.warnf("Could not read connection '%s' while checking vault grants (%s); its vault references cannot be verified, "
                         + "so the deployment is refused", sanitize(name), e.getClass().getSimpleName());
-                unreadableConnections.add(matcher.group(0) + " (connection '" + name + "' could not be read: " + e.getClass().getSimpleName()
+                unreadableConnections.add(match.text() + " (connection '" + name + "' could not be read: " + e.getClass().getSimpleName()
                         + ", so its vault references cannot be verified)");
             }
         }
@@ -619,9 +628,8 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             return;
         }
-        Matcher matcher = SecretReference.compiledPattern().matcher(withVariablesExpanded(serialized, tenantId, unresolved));
-        while (matcher.find()) {
-            sink.add(matcher.group(0));
+        for (ReferenceScanner.Match match : SecretReference.scanner().findAll(withVariablesExpanded(serialized, tenantId, unresolved))) {
+            sink.add(match.text());
         }
     }
 
@@ -654,17 +662,17 @@ public class VaultGrantChecker {
         if (inPlace != null && !inPlace.equals(serialized)) {
             scanned.append('\n').append(inPlace);
         }
-        Matcher vars = VARS_PATTERN.matcher(serialized);
-        while (vars.find()) {
+        for (ReferenceScanner.Match vars : VARS_REFERENCES.findAll(serialized)) {
+            String variable = vars.text();
             String expanded;
             try {
-                expanded = globalVariableResolver.resolveValue(vars.group(0), tenantId);
+                expanded = globalVariableResolver.resolveValue(variable, tenantId);
             } catch (Exception e) {
-                LOGGER.debugf("Could not expand %s while checking vault grants: %s", sanitize(vars.group(0)), sanitize(e.getMessage()));
-                unresolved.add(vars.group(0));
+                LOGGER.debugf("Could not expand %s while checking vault grants: %s", sanitize(variable), sanitize(e.getMessage()));
+                unresolved.add(variable);
                 continue;
             }
-            if (expanded != null && !expanded.equals(vars.group(0))) {
+            if (expanded != null && !expanded.equals(variable)) {
                 scanned.append('\n').append(expanded);
             }
         }

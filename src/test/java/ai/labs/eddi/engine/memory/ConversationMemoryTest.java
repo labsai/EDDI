@@ -190,4 +190,61 @@ public class ConversationMemoryTest {
         IData<String> mostRecent = allSteps.get(0).getData("input");
         Assertions.assertEquals("second", mostRecent.getResult());
     }
+
+    @Test
+    @DisplayName("startNextStep after undos: the new step inherits the whole redo cache's spend, its own and inherited")
+    public void startNextStepCarriesTheDiscardedSpend() {
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.10));
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.20));
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_DISCARDED_COST, 0.05));
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.30));
+        memory.undoLastStep();
+        memory.undoLastStep();
+
+        memory.startNextStep();
+
+        Assertions.assertTrue(memory.getRedoCache().isEmpty());
+        Assertions.assertEquals(0.55, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_DISCARDED_COST).getResult(), 1e-12);
+        Assertions.assertNull(memory.getCurrentStep().getData(MemoryKeys.AUDIT_COST), "the new turn's own cost starts empty");
+    }
+
+    @Test
+    @DisplayName("startNextStep with an empty redo cache writes no spend record")
+    public void startNextStepWithoutRedoWritesNothing() {
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.10));
+        memory.startNextStep();
+        Assertions.assertNull(memory.getCurrentStep().getData(MemoryKeys.AUDIT_DISCARDED_COST));
+    }
+
+    @Test
+    @DisplayName("undo and redo move the pending tenant charge onto the step that becomes current — 0.0 included")
+    public void undoAndRedoCarryThePendingCharge() {
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.50));
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.0)); // recovered
+
+        memory.undoLastStep();
+        Assertions.assertEquals(0.0, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(),
+                "the recovery must shadow the older 0.50, or a rerun charges it twice");
+
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.40)); // a rerun's outage
+        memory.redoLastStep();
+        Assertions.assertEquals(0.40, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(),
+                "the redone step owes the newer charge, not its own older 0.0");
+    }
+
+    @Test
+    @DisplayName("undo of a step with no pending charge leaves the restored step's own value alone")
+    public void undoWithoutPendingChangesNothing() {
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.0));
+        memory.startNextStep();
+        memory.undoLastStep();
+        Assertions.assertEquals(0.0, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult());
+
+        memory.startNextStep();
+        memory.undoLastStep();
+        Assertions.assertEquals(0.0, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult());
+    }
 }

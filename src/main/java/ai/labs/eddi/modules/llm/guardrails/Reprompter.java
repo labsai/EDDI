@@ -31,8 +31,15 @@ public interface Reprompter {
     Attempt reprompt(String rejectedReply, String correctiveMessage) throws LifecycleException;
 
     /**
-     * A reprompt's answer and its response metadata ({@code tokenUsage}).
+     * A reprompt's answer, its response metadata ({@code tokenUsage}) and what the
+     * call cost at the model's configured prices (0 when unpriced) — reported to
+     * the spend checks, so the next paid call of the task is checked with it.
      */
-    record Attempt(String text, Map<String, Object> metadata) {
+    record Attempt(String text, Map<String, Object> metadata, double costUsd) {
+
+        /** An answer whose cost is unknown (0). */
+        public Attempt(String text, Map<String, Object> metadata) {
+            this(text, metadata, 0.0);
+        }
     }
 }

@@ -19,3 +19,7 @@ Next step of the [white-labeling plan](../../planning/white-label-ui-plan.md) af
 - **Full scales rather than the plan's single `warning` token.** The existing utilities need 50…950 with opacity modifiers; a one-for-one swap keeps the classification reviewable and the output identical.
 - **The loader uses its own variable.** The bundle CSS in `<head>` already defines `--color-primary` as `#f59e0b`, so `var(--color-primary, #d4a843)` would have changed the unbranded spinner.
 - **Mix ratios** put each brand step near the OKLCH lightness of the amber step it replaces.
+
+### Fixed on the way
+
+`docs/mcp-server.md` linked to an anchor `docs/conversation-ratings.md` does not have, which failed the docs-site build on `main` and on every PR. It now points at the page's "Analyzing and triaging" section, where the rating tools are described.

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.workflows.rest.RestWorkflowStepStore;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.modules.rag.RagTask;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -41,8 +42,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * chooser — so it fails if {@link RagModule} is removed. The mechanics of the
  * deploy-time rejection are covered separately by
  * {@code RagWorkflowDeploymentTest}.
+ *
+ * <p>
+ * It carries {@link IntegrationTestProfile} like every other Mongo-backed
+ * {@code @QuarkusTest} IT. Without a profile Quarkus stops the shared
+ * application and boots another one that never gets the Mongo dev-service
+ * connection string, so it points at the unresolvable production host
+ * {@code mongodb:27017} and every Mongo-touching bean waits out the driver's 30
+ * s server selection. That cost this four-method class 250 s, then 580 s as
+ * stores were added, and the failsafe fork (900 s for the whole run) was killed
+ * partway through the Postgres tests.
  */
 @QuarkusTest
+@TestProfile(IntegrationTestProfile.class)
 class RagWorkflowExtensionIT {
 
     /**

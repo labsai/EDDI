@@ -297,6 +297,8 @@ Vault values belong to the administrator, so a configuration store does not hand
 
 A reference — `${vault:…}`, `${vars:…}`, `${connection:…}`, `${caller:…}` — or a template (`{properties.apiKey}`) is a pointer and is returned unchanged, also as `Bearer ${vault:k}`.
 
+**An administrator's read does not carry its credentials to a model.** Every LLM tool result passes through the same `SecretRedactionFilter` scan as the tool trace before it enters the model's context (and before the `summarize` truncation strategy hands it to a second model): credential-shaped values (`sk-…`, `Bearer …`, JWTs, provider keys, connection-string passwords) and values under credential-named keys (`apiKey`, `token`, `secret`, `password`, `authorization`) arrive as `<REDACTED>`. So an agent acting with an administrator's authority — the Platform Operator reading a configuration — sees what its trace shows, and the model provider never receives the key. The name rule matches the key's ending, so a field such as `nextPageToken` is redacted too; a model cannot page an API by a token it is never shown.
+
 **A document carrying the marker is never stored.** Every write to these five stores — create, update, JSON Patch, duplicate — and every import or upgrade that creates one directly answers `400` with `{"error": "bad_request", "message": …, "fields": [<paths>]}` when any string in the document contains `<redacted: ` (the whole-value marker and the in-string `<redacted: credential>` both begin with it), for administrators too. Re-enter the credential or replace it with a `${vault:…}` reference. Without this, an editor who opened a configuration in the Manager and saved it would silently replace the stored key with the marker. The store deliberately does not merge the stored literal back in either, because that would let an editor move the marker next to a host of their choosing. Move such literals into the vault.
 
 Server-side work started by an editor reads the unredacted document, with the same access check: RAG ingestion (so a knowledge base whose key is a literal still ingests) and agent upgrade and sync (`StructuralMatcher` compares against, and `UpgradeExecutor` writes back, the target's stored values — an export's `${vault:REDACTED}` placeholder is replaced by the target's own key, never by the marker). A sync **source** read from a peer through a non-admin credential does carry the marker, so its affected resources are refused rather than stored. The upgrade and sync **previews** those reads feed are redacted again at the REST boundary for anyone who is not `eddi-admin` (`PreviewRedaction`), so an editor's preview shows the marker where the stored document holds a literal.
@@ -448,13 +450,15 @@ When an LLM is given access to tools, every argument it supplies must be treated
 
 ### Input and output screening
 
-Tool *arguments* are governed at the tool-execution layer, tool *results* by the tool-result guardrail. The user's message and the model's final answer are screened by **input and output guardrails** — opt-in per LLM task (`inputGuardrails`, `outputGuardrails`), see [Input and Output Guardrails](langchain.md#input-and-output-guardrails). The built-ins are deterministic and cheap: `prompt-injection` (instruction-override phrasings), `pii-redaction` (e-mail, SSN, payment card, phone), `regex-filter` (author patterns), `max-length` and `json-object`. Design points that matter for a security review:
+Tool *arguments* are governed at the tool-execution layer, tool *results* by the tool-result guardrail. The user's message and the model's final answer are screened by **input and output guardrails** — opt-in per LLM task (`inputGuardrails`, `outputGuardrails`), see [Input and Output Guardrails](langchain.md#input-and-output-guardrails). The built-ins are deterministic and cheap: `prompt-injection` (instruction-override phrasings), `pii-redaction` (e-mail, SSN, payment card, phone), `regex-filter` (author patterns), `max-length`, `json-object` and `expression` (an author-written check over a JSON answer). Design points that matter for a security review:
 
 - **A blocked input never reaches the model** — and no `preRequest` property mutation runs for it. Earlier messages of the history window are screened again on every turn, so a message blocked or redacted on its own turn is not replayed to the model later.
 - **Redaction changes what the model sees and what is delivered, not what is stored as the user's message.** Conversation memory keeps the user's input verbatim (it is the record); the ledger records the guardrail outcome and the delivered answer, never the guardrail's view of the screened text.
 - **Fail-safe vocabulary.** An unknown action is `block`; an unknown type is skipped with a WARN (configuration must keep loading on older versions). A guardrail that throws or returns no verdict **fails closed** when its action is `block` or `reprompt` (the turn is blocked, reason `guardrail_error`) and open when it is `redact` or `warn`; the per-guardrail `failMode` parameter overrides either way.
-- **No template injection.** Guardrail parameters, block messages and reprompt messages are author text used verbatim; the screened text is only ever data. The one guardrail that renders a template, `classifier`'s `promptTemplate`, receives the screened text as template *variables* (`{input}`, `{output}`, `{context}`), never as template source.
+- **No template injection.** Guardrail parameters, block messages and reprompt messages are author text used verbatim; the screened text is only ever data. The guardrails that render a template, `classifier` and `judge` (their `promptTemplate`), receive the screened text as template *variables* (`{input}`, `{output}`, `{context}`), never as template source. A `judge` reprompt is **closed-vocabulary**: the judge may only name issue codes the author declared (any other answer is undecided), and the corrective message is built from the author's fix texts for those codes alone. The corrective message therefore carries nothing the judge, the user or the model wrote, and nothing the judge wrote reaches the producing model except the codes it chose, as the author's text. Like every reprompt, the re-ask still sends the original request and the rejected answer (as the assistant's turn), so this narrows what the *judge* can inject; it does not isolate the producer from the conversation it is answering.
 - **Streaming.** An output guardrail that can change the answer forces the task to buffer it — streamed tokens cannot be retracted.
+- **A sandboxed evaluator, and a closed vocabulary.** The `expression` type runs an author's expression over the model's JSON answer with `SafeJsonExpression`, a small recursive-descent language of its own (paths, decimal arithmetic, comparisons, logic, nine fixed functions) — no script engine, no SpEL/OGNL-style language, no reflection, no method calls, no template engine; an unknown function is a deploy-time syntax error, so no name is ever looked up at run time. The expression is author configuration, but the data is model output, so evaluation is bounded on both sides: an expression of at most 2000 characters, 32 levels of nesting and 500 parts (refused at deploy, never a `StackOverflowError`); at most 10,000 values per path and 200,000 steps per evaluation; numbers beyond 1000 digits or a ±1000 scale are refused rather than materialised; an answer over 262,144 characters, or with a repeated key, is not evaluated. Anything it cannot evaluate is *could not decide* and `failMode` applies — never a pass. A failed check reprompts with EDDI's fixed frame around the author's `fix` text only: no value read or computed from the answer reaches the corrective message, so a model cannot steer its own next prompt through the check. The evaluator is fuzzed (`SafeJsonExpressionFuzzTest`, and a ClusterFuzzLite target).
+- **A quality check does not override the safety checks around it.** `onExhausted: "deliver-best"` lets a `reprompt` guardrail whose retries are spent deliver its best attempt instead of blocking. That attempt is first re-screened by every output guardrail **after** it in the list (the ones before it already screened it: redactions applied, a blocking finding blocks). The exhausted guardrail itself does not re-screen what it delivers, so on a `classifier` it delivers the very attempt it flagged: the deploy warns, and a safety classifier should keep `onExhausted: "block"`.
 - **Model-backed screening, and its availability trade-off.** The `classifier` type asks a safety-classifier model the agent designer configures (EDDI ships and endorses none). It reaches the model through the LLM provider client, not `SafeHttpClient`: classifier endpoints are typically in-cluster, and a configured classifier `baseUrl` is the same trust class as a task's own model `baseUrl` — only configuration authors can set either. A classifier that is unreachable, times out (`timeoutMs`, default 3 s, bounded by the turn deadline) or answers something that is not a label has not checked the text, and `failMode` decides: **`closed`** (the default for `block`/`reprompt`) refuses the turn, so a classifier outage becomes an outage of every guarded agent — the safe choice where letting unscreened text through is the worse failure; **`open`** records a `warn` (reason `classifier_unavailable` / `classifier_unparseable`) and lets the text through, keeping the agent available while the screen is down. Pick per guardrail, watch `eddi.guardrail.classifier.duration{outcome}` and the `classifier_unavailable` audit reasons, and size the classifier for the input path: it runs before the main model on every turn.
 - **Limits.** Pattern guardrails catch verbatim attacks and well-formed identifiers, not paraphrase, encoding or semantics. Input guardrails screen the user's message before retrieval, so a blocked message issues no RAG query and the query is the redacted text; an `httpCallRag` template that reads `memory.current.input` directly still sees the stored, unredacted text.
 
@@ -647,6 +651,18 @@ Hostnames that indicate internal services are rejected:
 - Any hostname ending in `.local`
 - Any hostname ending in `.internal`
 
+### DNS rebinding
+
+The checks above resolve the host; the HTTP client then resolves it **again** to connect, and none of the clients EDDI uses can be handed the validated addresses (the JDK `HttpClient` has no resolver hook, and an IP-literal URL would break TLS SNI and certificate checks). Both lookups normally read the JVM's positive DNS cache — 30 seconds by default, and Vert.x resolves through the JDK because `quarkus.vertx.use-async-dns` is off — so they agree. A rebinding name aims for the instant that cache entry expires between the two, answering with a public address for the check and a private one for the connection. What each path does about it:
+
+| Path | Guard | What is left |
+| --- | --- | --- |
+| httpcalls (Vert.x client, `HttpClientModule`) | Before a byte of the request is written, the address the connection **actually reached** is checked — first request, pooled connection and every redirect hop alike. A metadata or link-local peer is refused always; with `eddi.security.ssrf-protection.enabled=true`, a loopback, private or internal peer is refused unless the request's host is on `eddi.security.ssrf-protection.allowed-hosts`. | Nothing for the address check. With protection off, the per-hop "no step into a more private class" rule still compares by name |
+| `OutboundHttp` (LLM tools, crawler, attachments, A2A, OpenAPI specs) | The hop's check runs a second time once the response headers are in. The connection's own lookup is the one the cache now holds, so a target that has turned private, or into the metadata service, is refused and its response discarded before it reaches the caller or a redirect. | The request itself was sent (a blind request, no response). An exchange slower than the cache lifetime, or `networkaddress.cache.ttl=0`, defeats the second look; EDDI logs a warning at startup when the cache is disabled. A pooled connection opened under a laxer policy for the same host is not re-checked |
+| MCP servers (langchain4j transport, `McpToolProviderManager`) | The server URL is validated on every discovery, a cache hit included, and again inside the transport's per-request header hook, before each request — handshake, `tools/list`, every tool call — is sent. | The same cache-expiry window as any pre-connect check; the transport exposes no connected address to check after the fact |
+
+Keep `networkaddress.cache.ttl` at its default or above 0: with the positive cache off every lookup is fresh and the two answers can differ at will.
+
 ### Usage
 
 ```java
@@ -676,8 +692,52 @@ as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` 
 | TLS always verified | Certificate chain against the JVM trust store and host name against the certificate. There is no setting that turns either off |
 | Timeouts | 10 s connect, 60 s per read |
 
-The allowlist does **not** exempt private addresses: an on-premises mail server on a private network is refused
-today. Allowing one would be its own, explicit deployment setting.
+The allowlist does **not** exempt private addresses: an on-premises mail server named by a channel or knowledge-base
+author is refused.
+
+The [email channel](email-integration.md) is such an author: its IMAP host — and in conversation mode its SMTP relay
+(`smtpHost`, 587 with STARTTLS required or 465 with TLS) — is checked by this policy when the integration is saved and
+again on every poll and every reply. A channel reply never goes through the operator policy or the system mailer: the
+transport refuses any endpoint that is not an author-policy SMTP endpoint, and refuses outright for an integration
+that is not in conversation mode. Its other guards — sender authentication before identity, the loop guard,
+allow/blocklists, the claim that keeps a mail from running twice, mail rendered as template *data*, executables never
+stored, unauthenticated senders without memory, the sender in the thread key (hijack guard) — are described in
+[email-integration.md → Security](email-integration.md#security).
+
+### Email replies (conversation mode)
+
+| Threat | Guard |
+|---|---|
+| Backscatter to a forged `From` | `requireAuthentication` is forced on: an unauthenticated mail never reaches a turn. The reply decision (`EmailReplyRecipients`) also requires an authenticated email identity (never `email-anon:`) and the `aligned-pass` verdict on the answered mail's step, so a reply cannot be produced even for a turn that should not have run |
+| The model choosing a recipient | No tool or output field names one. The one recipient is the authenticated `From` of the answered mail (from the ledger, cross-checked with the step); never `Cc`; the `Reply-To` only with `honorReplyTo` and exactly one address (warned at save) |
+| Thread hijack with a known Message-ID | A mail continues a conversation through EDDI's own Message-IDs only when its authenticated sender started it, or with `anyAuthenticatedParticipant` received a reply in it; everyone else gets their own conversation |
+| Reply loops | `Auto-Submitted: auto-replied` on every reply, the inbound loop guard, and `maxRepliesPerThreadPerHour` counted from the ledger |
+| Spoofed bounces suppressing someone | A delivery report counts only for a Message-ID this integration minted (random) and only for that reply's recipient |
+| Header injection | Subject, display name and addresses are refused with a line break or control character by the renderer; `fromName` is refused at save |
+| Template injection through the answer | `replyTemplate` is author text; the agent output and the subject are substituted as data by the restricted engine |
+| Duplicate or lost replies | One ledger row per (conversation, step, kind) under a unique key; first attempt inline, retries with backoff, rebuild from the conversation after a crash; no body stored |
+
+### The operator policy — the system mailer's relay
+
+The rules above are the **author** policy (`resolve`). A host the deployment's **operator** set in
+`application.properties` — today only the [system mailer](configuration-reference.md#email)'s
+`eddi.mail.smtp.host` — goes through `resolveOperator` instead. The operator already controls the network the process
+runs in, so the rules that stop an author probing it are lifted, and nothing an author or an agent writes can reach
+this path:
+
+| Rule | Author (`resolve`) | Operator (`resolveOperator`) |
+|---|---|---|
+| Private, loopback, CGNAT, ULA addresses | refused | allowed (an on-premises relay, a Postfix sidecar) |
+| IP literals, single-label names (`localhost`, `relay`) | refused | allowed |
+| Ports | 993/143, 465/587 | any (25 included) |
+| `eddi.email.allowed-hosts` | applied | not consulted — it confines authors |
+| Link-local and cloud-metadata addresses | refused | **refused** |
+| Resolved once and pinned | yes | **yes** |
+| TLS certificate and host name verified | always | **always**, when TLS is used |
+| Plaintext session | never | only `eddi.mail.smtp.tls=none` with `eddi.mail.smtp.allow-plaintext=true`, and never with a credential |
+
+`TlsMode.PLAINTEXT` cannot exist on an author endpoint: the `Endpoint` constructor refuses it. STARTTLS on the system
+mailer is required, not opportunistic — a relay that does not offer it gets no message and no credential.
 
 For Angus Mail, `angusProperties(endpoint)` installs the pinned factory for both plain and TLS connections, turns
 `socketFactory.fallback` off (otherwise a refusal inside the factory makes Angus retry with an unguarded socket of
@@ -693,6 +753,55 @@ script-revealed content and drops only comments, 1px text, transparent text and 
 a `multipart/alternative` whose plain and HTML parts say different things is flagged `ALTERNATIVES_DIVERGE`, and
 the plain-text renderer refuses any header value containing a line break. Every one of these passes is linear in
 the input — style blocks are read by a single forward scan, never by a backtracking regular expression.
+
+---
+
+## Mail Sender Authentication — DKIM and DMARC
+
+A `From:` header is a string the sender types. Before the email channel (plan Phase 2) lets a mail reach an agent
+under its sender's identity, EDDI checks the DKIM signatures on the **raw bytes** itself and then DMARC alignment —
+provider verdicts are inconsistent, mostly unsigned, and absent for IMAP. One call, `SenderAuthenticator.authenticate`
+(`engine/mail`), returns `MailAuthentication`: `ALIGNED_PASS`, `PASS_UNALIGNED`, `FAIL` or `NONE`, the signing domain,
+a reason, a `temporary` flag and the outcome of every evaluated signature. **Only `ALIGNED_PASS` counts as
+authenticated.**
+
+| Rule | Detail |
+|---|---|
+| Algorithms | `rsa-sha256` (keys of 1024–8192 bits, public exponent at most 64 bits) and `ed25519-sha256` (RFC 8463, the JDK's EdDSA). `rsa-sha1` fails (RFC 8301), as does any other algorithm |
+| Canonicalisation | `simple` and `relaxed` for header and body, in every combination (RFC 6376 §3.4). Bare-LF input (a message stored on Unix) is converted to CRLF first |
+| `l=` refused | A body-length limit lets anyone append unsigned text to a signed mail and keep the signature valid; a signature carrying `l=` fails |
+| Header selection | Bottom-up per RFC 6376 §5.4.2; a name listed in `h=` more often than the header occurs binds its absence (over-signing), so a header added later breaks the signature. A signature must cover `From` |
+| One `From`, one mailbox | Exactly one `From` field with one mailbox, counted on the raw bytes as well as by the parser. A second `From` added above a once-signed one is not hashed — the signature still verifies — and many clients display it, so such a message is `FAIL` whatever its signatures say. The same holds for a duplicated `Subject`, `Date`, `Message-ID`, `In-Reply-To` or `References` |
+| Key record | `v=DKIM1` (first, if present), `k=` matching the algorithm, `h=` allowing sha256, `s=` allowing email, one record per selector. Empty `p=` = revoked = `FAIL`. `t=y` (testing) is not a pass: a message with only such signatures is `NONE`. `t=s` requires `i=` to equal `d=` |
+| Identity and time | `i=` must lie within `d=`. An expired `x=`, an `x=` before `t=`, or a `t=` more than 5 minutes in the future fails. Both are judged at the delivery instant when the transport passes the receiving server's own timestamp (IMAP `INTERNALDATE`, never a sender header), clamped to `[now − eddi.email.dkim.max-delivery-age, now]` (default 7 days); otherwise at the current time |
+| DMARC alignment | The `From` domain and a passing signature's `d=` must share an organisational domain (relaxed), or be equal when the `_dmarc` record says `adkim=s` (strict). The record is read from the `From` domain, else from its organisational domain (RFC 7489 §6.6.3); none = relaxed. A DMARC lookup that fails temporarily assumes strict and sets `temporary` |
+| Public Suffix List | Organisational domains come from the bundled Public Suffix List (ICANN and private sections, wildcard and exception rules), never fetched at runtime — see below |
+| DNS | TXT lookups through dnsjava (`MailDnsResolver`): `eddi.email.dns.servers` or the system's resolvers, a timeout, a cache that honours each record's TTL capped at `eddi.email.dns.cache-max-ttl` and bounded in size, at most `eddi.email.dns.max-lookups-per-message` network lookups per message, records over 4096 characters or answers of more than 10 records refused. DNSSEC is not required: run a validating resolver to add it |
+| Bounds | At most 5 signatures evaluated (the rest are counted), a 256 KB header block, 100 names per `h=`, one body hash per canonicalisation however many signatures there are, and the body is checked before the key is fetched so a tampered mail spends no lookup. Never throws: broken or hostile input is `FAIL` or `NONE` with a reason |
+| Provider fallback | `SignedProviderVerdict`, for a transport that receives a provider verdict under a signature it verified (Amazon SES over SNS). Used only when the local check could not run (no raw bytes, or every key lookup failed temporarily); never in place of a local `FAIL`, `NONE` or pass, and alignment is still EDDI's own. No provider implements it yet |
+
+**What an aligned pass proves, and what it does not.**
+
+- It authenticates the **domain**, not the person: anyone who can send through `example.com`'s signing servers can
+  write as `ceo@example.com`. Treat it as "this came from that organisation's mail system".
+- **SPF is not evaluated.** EDDI never sees the IP address that delivered the mail, so DMARC can only be satisfied by
+  aligned DKIM here. A domain that publishes SPF but does not sign with DKIM is never authenticated (most large
+  senders sign).
+- **Forwarded and mailing-list mail** usually breaks or replaces the original signature: a list that rewrites the
+  subject or adds a footer gives `FAIL`, one that re-signs as itself gives `PASS_UNALIGNED`. **ARC is not
+  evaluated**, so such mail is not authenticated.
+- `temporary=true` means a DNS failure or the lookup budget prevented a check; trying the same message again later
+  may authenticate it.
+
+**The Public Suffix List** is `src/main/resources/mail/public_suffix_list.dat`, the Public Suffix List project's file
+taken unmodified (MPL-2.0, `licenses/MPL-2.0.txt`). `public_suffix_list.properties` next to it records the upstream
+commit (currently `8437e526`, 2026-10-22) and the file's SHA-256; `PublicSuffixListTest` fails if the two disagree or
+the file is missing. Refresh both with `python scripts/update-public-suffix-list.py` (latest upstream commit, or one
+given as an argument) and review the diff: a newly listed suffix changes which domains align.
+
+**dnsjava and the JVM resolver.** The dnsjava jar registers a `java.net.spi.InetAddressResolverProvider`, which the
+JDK would use for *all* host-name resolution — including `SafeSocketConnector`'s and the SSRF checks'. Its provider
+returns the JDK's own resolver unless the system property `org.dnsjava.spi.enable=true` is set. Never set it.
 
 ---
 
@@ -937,7 +1046,7 @@ EDDI's CI/CD pipeline enforces multiple automated security gates before any code
 | **Trivy** | CVE scanning | Filesystem deps + Docker image | Blocking (CRITICAL/HIGH) | `.trivyignore` |
 | **Gitleaks** | Secret scanning | Full git history | Blocking | `.gitleaksignore` |
 | **CycloneDX** | SBOM | Maven dependency tree + both UIs’ npm production dependencies | Artifact generation | N/A |
-| **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities | JUnit integration | N/A |
+| **Jazzer** | Fuzz testing | PathNavigator, MatchingUtilities, SafeJsonExpression | JUnit integration | N/A |
 
 > **DAST is intentionally absent.** A ZAP API scan used to live in `ci.yml` and was removed rather than kept as decorative coverage: it ran *after* the image was pushed, it scanned an instance started with `EDDI_SECURITY_ALLOW_UNAUTHENTICATED` (so the authorization layer under test was switched off), and it ran passive-only with `fail_action: false`. Re-adding it means fixing all three at once — build the image in a job that does not push, stand up Keycloak, drive an authenticated OpenAPI scan against it, and gate the publish job on the result.
 
@@ -997,6 +1106,7 @@ Security-critical input parsers are tested with [Jazzer](https://github.com/Code
 
 - **`PathNavigator`** — Safe path navigation (replaced OGNL). Fuzz targets: `getValue`, `setValue`, arithmetic paths
 - **`MatchingUtilities`** — Condition evaluation for DynamicValueMatcher
+- **`SafeJsonExpression`** — The evaluator of the `expression` output guardrail. Fuzz targets: random expressions, and fixed expressions over random JSON
 
 In CI, fuzz tests run as standard JUnit regression tests. For deep coverage-guided fuzzing locally:
 

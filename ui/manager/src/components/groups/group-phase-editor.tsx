@@ -9,6 +9,7 @@ import type {
   AgentGroupConfiguration,
   ConvergenceConfig,
   ConvergenceJudge,
+  ConvergenceMode,
   DiscussionPhase,
   VoteConfig,
   VoteMethod,
@@ -21,6 +22,7 @@ import {
   CONVERGENCE_MIN_REPEATS_FLOOR,
   DEFAULT_CONVERGENCE_THRESHOLD,
   convergenceApplies,
+  convergenceMinRepeatsFloor,
   normalizeConvergence,
 } from "@/lib/group-config";
 
@@ -241,8 +243,11 @@ export function GroupPhaseEditor({
         const repeats = phase.repeats ?? 1;
         const canConverge = convergenceApplies(phase);
         const convergence = phase.convergence;
-        // Comparing more repeats than the phase has would never converge.
-        const maxMinRepeats = Math.max(repeats, CONVERGENCE_MIN_REPEATS_FLOOR);
+        // Comparing more repeats than the phase has would never converge. VERDICT
+        // compares nothing, so its floor is one repeat (E2).
+        const verdictMode = convergence?.mode === "VERDICT";
+        const minRepeatsFloor = convergenceMinRepeatsFloor(convergence?.mode);
+        const maxMinRepeats = Math.max(repeats, minRepeatsFloor);
         // Convergence is switched on for a phase that runs once — legal to store
         // via the API, impossible to act on. Distinct from simply unavailable.
         const convergenceInert = !canConverge && !!convergence?.enabled;
@@ -297,6 +302,7 @@ export function GroupPhaseEditor({
                     minRepeats: convergence?.minRepeats ?? CONVERGENCE_MIN_REPEATS_FLOOR,
                     threshold: convergence?.threshold ?? DEFAULT_CONVERGENCE_THRESHOLD,
                     judge: convergence?.judge ?? "MODERATOR",
+                    mode: convergence?.mode ?? "SIMILARITY",
                   })
                 }
                 className="mt-0.5 h-3 w-3 rounded border-input accent-primary disabled:opacity-40"
@@ -322,7 +328,40 @@ export function GroupPhaseEditor({
             </label>
 
             {canConverge && convergence?.enabled && (
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3 *:min-w-0">
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-4 *:min-w-0">
+                <div>
+                  <label
+                    htmlFor={`phase-convergence-mode-${idx}`}
+                    className="mb-0.5 block text-[10px] text-muted-foreground"
+                  >
+                    {t("groups.convergenceMode", "Stop when")}
+                  </label>
+                  <select
+                    id={`phase-convergence-mode-${idx}`}
+                    value={convergence.mode ?? "SIMILARITY"}
+                    onChange={(e) => {
+                      const mode = e.target.value as ConvergenceMode;
+                      // Switching back to SIMILARITY raises a VERDICT minRepeats of 1
+                      // to that mode's floor — normalizeConvergence applies it.
+                      // Switching to VERDICT lowers a minRepeats still at the
+                      // SIMILARITY default to VERDICT's floor, so the moderator reviews
+                      // the first repeat as the mode's note says; a larger value the
+                      // admin chose is kept.
+                      const lowerDefault =
+                        mode === "VERDICT" &&
+                        (convergence.minRepeats ?? CONVERGENCE_MIN_REPEATS_FLOOR) === CONVERGENCE_MIN_REPEATS_FLOOR;
+                      patchConvergence(
+                        idx,
+                        lowerDefault ? { mode, minRepeats: convergenceMinRepeatsFloor("VERDICT") } : { mode },
+                      );
+                    }}
+                    className={inputCls}
+                    data-testid={`phase-convergence-mode-${idx}`}
+                  >
+                    <option value="SIMILARITY">{t("groups.convergenceModeSimilarity", "Members agree")}</option>
+                    <option value="VERDICT">{t("groups.convergenceModeVerdict", "The moderator's review passes")}</option>
+                  </select>
+                </div>
                 <div>
                   <label
                     htmlFor={`phase-convergence-min-${idx}`}
@@ -333,7 +372,7 @@ export function GroupPhaseEditor({
                   <input
                     id={`phase-convergence-min-${idx}`}
                     type="number"
-                    min={CONVERGENCE_MIN_REPEATS_FLOOR}
+                    min={minRepeatsFloor}
                     max={maxMinRepeats}
                     step={1}
                     value={convergence.minRepeats}
@@ -349,7 +388,7 @@ export function GroupPhaseEditor({
                       patchConvergence(idx, {
                         minRepeats: Math.min(
                           maxMinRepeats,
-                          Math.max(CONVERGENCE_MIN_REPEATS_FLOOR, Math.trunc(v)),
+                          Math.max(minRepeatsFloor, Math.trunc(v)),
                         ),
                       });
                     }}
@@ -357,6 +396,7 @@ export function GroupPhaseEditor({
                     data-testid={`phase-convergence-min-${idx}`}
                   />
                 </div>
+                {!verdictMode && (
                 <div>
                   <label
                     htmlFor={`phase-convergence-threshold-${idx}`}
@@ -383,6 +423,7 @@ export function GroupPhaseEditor({
                     data-testid={`phase-convergence-threshold-${idx}`}
                   />
                 </div>
+                )}
                 <div>
                   <label
                     htmlFor={`phase-convergence-judge-${idx}`}
@@ -402,6 +443,19 @@ export function GroupPhaseEditor({
                   </select>
                 </div>
               </div>
+            )}
+
+            {canConverge && verdictMode && convergence?.enabled && (
+              <p
+                className="mt-1.5 flex items-start gap-1 text-[10px] text-muted-foreground"
+                data-testid={`phase-convergence-verdict-note-${idx}`}
+              >
+                <Info className="mt-0.5 h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                {t(
+                  "groups.convergenceVerdictNote",
+                  "After each repeat the moderator reviews the result against the question; the phase ends once it passes. A reply that is not a clear pass keeps the phase going.",
+                )}
+              </p>
             )}
 
             {canConverge && convergence?.enabled && convergence.judge === "SERVICE" && (
