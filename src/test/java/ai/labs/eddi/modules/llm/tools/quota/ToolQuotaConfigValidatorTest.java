@@ -26,6 +26,9 @@ public class ToolQuotaConfigValidatorTest {
     }
 
     public static ToolQuotaConfig config(Object... nameAndRule) {
+        if (nameAndRule.length % 2 != 0) {
+            throw new IllegalArgumentException("config() takes name/rule pairs");
+        }
         var config = new ToolQuotaConfig();
         var tools = new LinkedHashMap<String, ToolQuotaConfig.Rule>();
         for (int i = 0; i < nameAndRule.length; i += 2) {
