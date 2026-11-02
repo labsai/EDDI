@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.TeamBudgetConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
@@ -24,6 +25,7 @@ import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -52,6 +54,10 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     private final IGroupWorkspaceStore workspaceStore;
     private final IScheduleStore scheduleStore;
     private final RestVersionInfo<AgentGroupConfiguration> restVersionInfo;
+
+    /** Field-injected so direct construction in tests keeps the secure default. */
+    @ConfigProperty(name = "eddi.groups.team-budget.admin-only-edits", defaultValue = "true")
+    boolean teamBudgetAdminOnlyEdits = true;
 
     @Inject
     public RestAgentGroupStore(IAgentGroupStore groupStore, IDocumentDescriptorStore documentDescriptorStore, IJsonSchemaCreator jsonSchemaCreator,
@@ -143,6 +149,23 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         }
     }
 
+    /**
+     * F6: a change to {@code teamBudget} needs the admin role while
+     * {@code eddi.groups.team-budget.admin-only-edits} is on (the default). The
+     * stored block is read so an editor can neither raise nor remove a cap; an
+     * unreadable one counts as "had none", the stricter reading.
+     */
+    private void requireTeamBudgetChangeAllowed(String id, Integer version, AgentGroupConfiguration neu) {
+        TeamBudgetConfig before = null;
+        try {
+            AgentGroupConfiguration old = groupStore.read(id, version);
+            before = old != null ? old.getTeamBudget() : null;
+        } catch (Exception e) {
+            LOG.debugf("Could not read group %s v%s for the teamBudget edit check: %s", sanitize(id), version, e.getMessage());
+        }
+        TeamBudgetEditPolicy.check(before, neu == null ? null : neu.getTeamBudget(), teamBudgetAdminOnlyEdits, resourceAccessGuard);
+    }
+
     private void requireUse(String agentId) {
         if (agentId != null && !agentId.isBlank()) {
             resourceAccessGuard.requireAgentUseAccess(agentId.trim());
@@ -151,6 +174,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     @Override
     public Response updateGroup(String id, Integer version, AgentGroupConfiguration groupConfiguration) {
         requireUseOnMembers(groupConfiguration);
+        requireTeamBudgetChangeAllowed(id, version, groupConfiguration);
         Response response = restVersionInfo.update(id, version, groupConfiguration);
         syncDescriptor(id, groupConfiguration);
         return response;
@@ -159,6 +183,8 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
     @Override
     public Response createGroup(AgentGroupConfiguration groupConfiguration) {
         requireUseOnMembers(groupConfiguration);
+        TeamBudgetEditPolicy.check(null, groupConfiguration == null ? null : groupConfiguration.getTeamBudget(), teamBudgetAdminOnlyEdits,
+                resourceAccessGuard);
         Response response = restVersionInfo.create(groupConfiguration);
         // Sync name/description from config onto the descriptor
         URI location = response.getLocation();
@@ -180,6 +206,7 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
         // The copy is the caller's group: VIEW on the source is not USE on the agents
         // it runs, so the copy is held to the same check a create is.
         requireUseOnMembers(config);
+        TeamBudgetEditPolicy.check(null, config == null ? null : config.getTeamBudget(), teamBudgetAdminOnlyEdits, resourceAccessGuard);
         Response response = restVersionInfo.create(config);
         // Sync descriptor for the duplicate too
         URI location = response.getLocation();

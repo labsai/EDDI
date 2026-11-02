@@ -63,6 +63,10 @@ public class AgentGroupConfiguration {
     private int maxRounds = 2;
     private List<DiscussionPhase> phases;
     private ProtocolConfig protocol;
+    /**
+     * Monthly dollar budget for this team (F6). {@code null} = no team cap.
+     */
+    private TeamBudgetConfig teamBudget;
     /** Pre-configured task list. If non-empty, skips the PLAN phase. */
     private List<TaskDefinition> tasks;
     /** Dynamic agent creation and recruitment configuration. */
@@ -1349,6 +1353,14 @@ public class AgentGroupConfiguration {
 
     public void setProtocol(ProtocolConfig protocol) {
         this.protocol = protocol;
+    }
+
+    public TeamBudgetConfig getTeamBudget() {
+        return teamBudget;
+    }
+
+    public void setTeamBudget(TeamBudgetConfig teamBudget) {
+        this.teamBudget = teamBudget;
     }
 
     public List<TaskDefinition> getTasks() {

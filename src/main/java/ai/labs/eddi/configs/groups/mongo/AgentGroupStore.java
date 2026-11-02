@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.groups.mongo;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
+import ai.labs.eddi.configs.groups.TeamBudgetConfigValidator;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -67,6 +68,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnOnHalfConfiguredStanceSummarizer(groupConfiguration);
         noteDebateVerdictSynthesis(groupConfiguration);
         noteBuiltInToolPrerequisite(groupConfiguration);
+        TeamBudgetConfigValidator.validate(null, groupConfiguration);
         return super.create(groupConfiguration);
     }
 
@@ -90,6 +92,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         warnOnHalfConfiguredStanceSummarizer(groupConfiguration);
         noteDebateVerdictSynthesis(groupConfiguration);
         noteBuiltInToolPrerequisite(groupConfiguration);
+        TeamBudgetConfigValidator.validate(id, groupConfiguration);
         return super.update(id, version, groupConfiguration);
     }
 
