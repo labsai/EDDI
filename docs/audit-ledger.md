@@ -109,6 +109,8 @@ GET /auditstore/verify/{conversationId}?skip=0&limit=1000
 
 Recomputes every entry's HMAC and checks the per-conversation `sequence` for gaps. `limit` defaults to `1000` with a hard ceiling of `10000`; a non-positive value falls back to the default rather than meaning "unbounded". A non-zero `skip` makes the chain check report the range's own continuity only — the run can then not be anchored at sequence 0, so a deleted *first* entry is invisible on a paginated sweep.
 
+A window that also holds unsequenced rows is no longer simply `UNAVAILABLE`: a hole between its sequenced rows still proves a deletion and is reported `BROKEN`; only a window without such a hole is `UNAVAILABLE`, since its start cannot be anchored. With signing on, a position counts as present only when its row is signed by a form that covers the sequence (v3 and later) — a v1/v2 row's sequence is not signed and could be rewritten to close a hole. What the chain still cannot show is the deletion of the **newest** entries of a conversation, or of its whole trail: nothing outside the trail records where it ended.
+
 ### Verify an Agent's Integrity
 
 ```

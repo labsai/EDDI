@@ -21,8 +21,15 @@ import java.util.List;
  * REST resources (and through them by the MCP tools), evaluated against the
  * request's identity.
  * <ul>
- * <li>An administrator ({@link ResourceAccessGuard#seesEverything()}) may do
- * anything.</li>
+ * <li>Anyone who sees every agent
+ * ({@link ResourceAccessGuard#seesEverything()}: an administrator, or anyone
+ * while workspaces are not enforced) may read and act on every agent's rules
+ * and events.</li>
+ * <li>What the API reserves for administrators — webhook targets, their signing
+ * secret references, and rules over several or every agent — needs the
+ * administrator <em>role</em> ({@link ResourceAccessGuard#isAdmin()}).
+ * Unrestricted visibility is not that role: with workspaces off it is every
+ * editor's.</li>
  * <li>Anyone else works on one agent at a time, holding {@code EDIT} on it: a
  * rule's scope must be exactly that agent and its targets Slack or the inbox;
  * an event must name that agent.</li>
@@ -42,8 +49,19 @@ public class AlertAccess {
         this.conversationAccessGuard = conversationAccessGuard;
     }
 
+    /** Unrestricted visibility: every agent's rules and events. */
     public boolean isAdmin() {
         return accessGuard.seesEverything();
+    }
+
+    /**
+     * The administrator role, for what the alert API reserves to administrators.
+     * Not {@link #isAdmin()}: that is also true for every editor while workspaces
+     * are not enforced, which let an editor add webhook targets signed with any
+     * vault key.
+     */
+    public boolean hasAdminRole() {
+        return accessGuard.isAdmin();
     }
 
     /** The caller's name, for {@code createdBy} / {@code acknowledgedBy}. */
@@ -100,7 +118,7 @@ public class AlertAccess {
      * one agent they hold EDIT on, no webhook targets.
      */
     public void requireWritable(AlertRule rule) {
-        if (isAdmin()) {
+        if (hasAdminRole()) {
             return;
         }
         AlertScope scope = rule.scope();
@@ -127,7 +145,7 @@ public class AlertAccess {
      * does not get the signing secret's vault reference.
      */
     public AlertRule redact(AlertRule rule) {
-        boolean admin = isAdmin();
+        boolean admin = hasAdminRole();
         // Every read shows each target's id; a rule stored before ids existed gets
         // the derived ones, the same on every read until its next save stores them.
         List<DeliveryTarget> targets = rule.withTargetIds().delivery().stream().map(t -> {

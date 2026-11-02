@@ -23,6 +23,14 @@ class QuoteStripperTest {
     class Text {
 
         @Test
+        @DisplayName("a label word followed by a long run of blanks and no colon is rejected in linear time")
+        void longBlankRunAfterALabelWord() {
+            String hostile = "Hello\n\nfrom" + " ".repeat(50_000) + "x\nsent" + " ".repeat(50_000) + "y";
+            var result = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> QuoteStripper.stripText(hostile));
+            assertFalse(result.removed());
+        }
+
+        @Test
         @DisplayName("a trailing > block and its attribution are removed")
         void trailingQuote() {
             var result = QuoteStripper.stripText("""

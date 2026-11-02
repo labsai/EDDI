@@ -218,6 +218,12 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
+    public long releaseDigestPending(String ruleId) {
+        return events.updateMany(and(eq("ruleId", ruleId), eq("state", AlertEvent.State.DIGEST_PENDING.name())),
+                combine(set("state", AlertEvent.State.INBOX_ONLY.name()), inc("version", 1L))).getModifiedCount();
+    }
+
+    @Override
     public long deleteFiredBefore(Instant cutoff) {
         return events.deleteMany(lt("firedAt", Date.from(cutoff))).getDeletedCount();
     }

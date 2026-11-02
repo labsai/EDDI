@@ -61,7 +61,9 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
 
     private static final String KEY_INDEX_NAME = "idx_journal_key";
     private static final String LEGACY_TTL_INDEX_NAME = "idx_journal_ttl";
-    private static final String TTL_INDEX_NAME = "idx_journal_ttl_claimed";
+    /** The previous TTL, which also expired crash-orphaned EXECUTING claims. */
+    private static final String UNFILTERED_TTL_INDEX_NAME = "idx_journal_ttl_claimed";
+    private static final String TTL_INDEX_NAME = "idx_journal_ttl_completed";
 
     private static final String CONVERSATION_ID = "conversationId";
     private static final String PAUSE_EPOCH = "pauseEpoch";
@@ -92,10 +94,15 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
         // which the TTL monitor ignores, and which crash-orphaned EXECUTING claims
         // never even got). Absent on fresh deployments, so ignore a missing index.
         dropIndexIfPresent(LEGACY_TTL_INDEX_NAME);
+        // And the claimedAt TTL that expired EXECUTING claims as well (see below).
+        dropIndexIfPresent(UNFILTERED_TTL_INDEX_NAME);
 
         // Anchor the retention TTL on claimedAt (a BSON Date set on every entry in
-        // tryClaim), so BOTH completed entries and crash-orphaned EXECUTING claims
-        // expire after the retention window.
+        // tryClaim), for EXECUTED entries only. A crash-orphaned EXECUTING claim is
+        // the one record that the tool may already have run while its approval is
+        // still pending (a WAIT_INDEFINITELY pause outlives any retention): expiring
+        // it let a later approval claim the call afresh and run it a second time. It
+        // is kept until the conversation is deleted (deleteByConversationId).
         createTtlIndexWithConflictRetry(retentionSeconds);
     }
 
@@ -108,7 +115,8 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
      */
     private void createTtlIndexWithConflictRetry(long retentionSeconds) {
         Bson ttlKey = Indexes.ascending(CLAIMED_AT);
-        IndexOptions ttlOptions = new IndexOptions().name(TTL_INDEX_NAME).expireAfter(retentionSeconds, TimeUnit.SECONDS);
+        IndexOptions ttlOptions = new IndexOptions().name(TTL_INDEX_NAME).expireAfter(retentionSeconds, TimeUnit.SECONDS)
+                .partialFilterExpression(eq(STATUS, Status.EXECUTED.name()));
         try {
             collection.createIndex(ttlKey, ttlOptions);
         } catch (MongoCommandException e) {
@@ -140,8 +148,8 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
                 .append(CALL_ID, callId)
                 .append(TOOL_NAME, toolName)
                 .append(STATUS, Status.EXECUTING.name())
-                // BSON Date so the TTL monitor honors it. Set on EVERY entry (not
-                // just executed ones) so crash-orphaned EXECUTING claims also expire.
+                // BSON Date so the TTL monitor honors it; the TTL index covers
+                // EXECUTED entries only, so an orphaned EXECUTING claim is kept.
                 .append(CLAIMED_AT, Date.from(Instant.now()))
                 .append(DECIDED_BY, decidedBy);
 

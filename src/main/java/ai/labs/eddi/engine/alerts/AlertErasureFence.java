@@ -89,4 +89,15 @@ public class AlertErasureFence implements UserErasureParticipant {
         }
         return capturedAt == null || !capturedAt.isAfter(start);
     }
+
+    /**
+     * Whether a fence would still be in force for an erasure that started after
+     * {@code capturedAt} — i.e. whether {@link #covers} can be trusted to have
+     * caught one. Content older than {@link #FENCE_TTL} (queued through an extreme
+     * backlog) may predate an erasure whose fence has already expired, so it must
+     * not be stored either.
+     */
+    public boolean vouchesFor(Instant capturedAt) {
+        return capturedAt != null && capturedAt.plus(FENCE_TTL).isAfter(clock.instant());
+    }
 }
