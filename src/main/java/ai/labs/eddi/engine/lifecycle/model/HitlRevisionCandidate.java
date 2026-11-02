@@ -57,6 +57,24 @@ public class HitlRevisionCandidate {
     private int roundsUsed;
     /** {@code TEXT} or {@code JSON} ({@code convertToObject}); since 6.7. */
     private String answerFormat = FORMAT_TEXT;
+    /**
+     * Whether an approver may edit this draft ({@code review.allowAnswerEdits});
+     * since 6.7.
+     */
+    private boolean editable;
+
+    /**
+     * Whether the agent allowed approvers to edit this draft when it was captured
+     * ({@code hitlConfig.review.allowAnswerEdits}) — read by surfaces that cannot
+     * read the agent's configuration (the Slack card).
+     */
+    public boolean isEditable() {
+        return editable;
+    }
+
+    public void setEditable(boolean editable) {
+        this.editable = editable;
+    }
 
     /** {@link #getAnswerFormat()} of a plain-text answer. */
     public static final String FORMAT_TEXT = "TEXT";
@@ -204,6 +222,7 @@ public class HitlRevisionCandidate {
         map.put("quickRepliesMark", quickRepliesMark);
         map.put("roundsUsed", roundsUsed);
         map.put("answerFormat", answerFormat);
+        map.put("editable", editable);
         return map;
     }
 
@@ -231,6 +250,7 @@ public class HitlRevisionCandidate {
         candidate.setQuickRepliesMark(asInt(map.get("quickRepliesMark"), -1));
         candidate.setRoundsUsed(asInt(map.get("roundsUsed"), 0));
         candidate.setAnswerFormat(asString(map.get("answerFormat")));
+        candidate.setEditable(Boolean.TRUE.equals(map.get("editable")));
         return candidate;
     }
 

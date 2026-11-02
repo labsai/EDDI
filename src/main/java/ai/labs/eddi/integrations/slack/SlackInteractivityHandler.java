@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.integrations.slack;
 
+import ai.labs.eddi.configs.agents.AgentConfigurationCache;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -28,7 +30,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -94,6 +98,13 @@ public class SlackInteractivityHandler {
     private final ObjectMapper objectMapper;
     private final ISlackApprovalRecordStore approvalRecords;
     private final ExecutorService executorService;
+
+    /**
+     * The pinned agent config, for the reason-code vocabulary of the modals;
+     * nullable in unit tests (the built-in vocabulary applies then).
+     */
+    @Inject
+    AgentConfigurationCache agentConfigurationCache;
 
     @Inject
     public SlackInteractivityHandler(ChannelTargetRouter channelTargetRouter,
@@ -173,6 +184,41 @@ public class SlackInteractivityHandler {
         if (parsed == null) {
             return;
         }
+        Authorized authorized = authorize(parsed, true);
+        if (authorized == null) {
+            return;
+        }
+        String pauseId = authorized.pauseId();
+        String auth = authorized.auth();
+        if (parsed.interaction() != Interaction.BUTTON) {
+            // Edit / reject-with-reason modals: regular conversations only.
+            if (!parsed.value().isGroup()) {
+                handleModalInteraction(parsed, authorized);
+            }
+            return;
+        }
+        if (parsed.value().isGroup()) {
+            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(), pauseId,
+                    auth, parsed.approvalChannelId(), parsed.messageTs());
+        } else {
+            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(), pauseId,
+                    auth, parsed.approvalChannelId(), parsed.messageTs());
+        }
+    }
+
+    /**
+     * An interaction that passed every check: who may act, on which card and pause.
+     */
+    private record Authorized(ChannelIntegrationConfiguration integration, String auth, String pauseId) {
+    }
+
+    /**
+     * The checks every interaction passes, in this order: owning integration,
+     * approver (fail-closed, foreign workspace refused), card record, current
+     * pause. Returns null when the interaction must not be acted on; with
+     * {@code react}, refusals are also reflected (authz notice, resolved card).
+     */
+    private Authorized authorize(ParsedAction parsed, boolean react) throws Exception {
 
         // Resolve the OWNING integration (by name from the button value) — it
         // governs the approver list and bot token. This is the same integration
@@ -183,7 +229,7 @@ public class SlackInteractivityHandler {
         if (integrationOpt.isEmpty()) {
             LOGGER.warnf("No integration owns Slack HITL decision (channel %s) — ignoring",
                     sanitize(parsed.approvalChannelId()));
-            return;
+            return null;
         }
         ChannelIntegrationConfiguration integration = integrationOpt.get();
         var platformConfig = integration.getPlatformConfig();
@@ -203,8 +249,10 @@ public class SlackInteractivityHandler {
         if (foreignTeamUser || !SlackHitlSupport.isAuthorizedApprover(parsed.slackUserId(), approverIds)) {
             LOGGER.warnf("Unauthorized Slack HITL decision attempt by user %s on channel %s",
                     sanitize(parsed.slackUserId()), sanitize(parsed.approvalChannelId()));
-            postAuthzDenied(botToken, parsed.approvalChannelId(), parsed.slackUserId());
-            return;
+            if (react) {
+                postAuthzDenied(botToken, parsed.approvalChannelId(), parsed.slackUserId());
+            }
+            return null;
         }
 
         String auth = botToken != null && !botToken.isBlank() ? "Bearer " + botToken : null;
@@ -219,7 +267,7 @@ public class SlackInteractivityHandler {
             LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=button is not "
                     + "bound to an approval card",
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
-            return;
+            return null;
         }
         List<SlackApprovalRecord> records;
         try {
@@ -228,20 +276,20 @@ public class SlackInteractivityHandler {
             // Fail closed, and leave the card intact so the approver can retry.
             LOGGER.warnf("Could not read Slack HITL approval records for %s — decision refused: %s",
                     sanitize(subject), e.getMessage());
-            return;
+            return null;
         }
         if (records.isEmpty()) {
             LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=no approval card "
                     + "was posted for this subject by this integration",
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
-            return;
+            return null;
         }
         SlackApprovalRecord card = records.stream().filter(r -> r.matchesCard(cardId)).findFirst().orElse(null);
         if (card == null) {
             LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=button does not "
                     + "belong to an approval card this integration posted for this subject",
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
-            return;
+            return null;
         }
         // Reading the pause and resuming are two steps. The decision therefore names
         // the pause the card was matched against (HitlDecision.pauseId), and the
@@ -251,11 +299,13 @@ public class SlackInteractivityHandler {
         // handled as "already resolved") instead of approving the newer request.
         PauseState pause = currentPause(parsed.value());
         if (pause == PauseState.UNKNOWN) {
-            return; // could not read the subject — leave the card so it can be retried
+            return null; // could not read the subject — leave the card so it can be retried
         }
         if (!pause.paused()) {
-            finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
-            return;
+            if (react) {
+                finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
+            }
+            return null;
         }
         if (!card.matchesPause(pause.pausedAt())) {
             // A card from an EARLIER pause of this subject: that pause was resolved,
@@ -264,17 +314,132 @@ public class SlackInteractivityHandler {
             LOGGER.warnf("SLACK_HITL_DECISION_REFUSED | integration=%s | subject=%s | user=%s | reason=card was posted "
                     + "for an earlier pause",
                     sanitize(integration.getName()), sanitize(subject), sanitize(parsed.slackUserId()));
-            finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
+            if (react) {
+                finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
+            }
+            return null;
+        }
+        String pauseId = HitlDecision.pauseIdOf(pause.pausedAt());
+        // A modal is bound to the pause it was opened for: a submission for an earlier
+        // pause must not decide the current one.
+        if (parsed.metadata() != null && parsed.metadata().pauseId() != null && !parsed.metadata().pauseId().equals(pauseId)) {
+            if (react) {
+                finalizeAlreadyResolved(auth, parsed.approvalChannelId(), parsed.messageTs());
+            }
+            return null;
+        }
+        return new Authorized(integration, auth, pauseId);
+    }
+
+    // === 6.7 — edit and reject-with-reason modals (SlackHitlEditModal) ===
+
+    private void handleModalInteraction(ParsedAction parsed, Authorized authorized) throws Exception {
+        String conversationId = parsed.value().subject();
+        if (parsed.interaction() == Interaction.SUBMIT) {
+            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            HitlDecision decision;
+            try {
+                decision = SlackHitlEditModal.decisionOf(parsed.callbackId(), parsed.state(), parsed.metadata(), snapshot,
+                        parsed.slackUserId());
+            } catch (SlackHitlEditModal.SubmissionException e) {
+                LOGGER.infof("Slack HITL modal submission for %s not applied: %s", sanitize(conversationId), e.getMessage());
+                return;
+            }
+            decision.setPauseId(authorized.pauseId());
+            resolveConversationDecision(conversationId, decision, parsed.slackUserId(), authorized.auth(), parsed.approvalChannelId(),
+                    parsed.messageTs());
             return;
         }
+        if (authorized.auth() == null || parsed.triggerId() == null) {
+            return;
+        }
+        var metadata = new SlackHitlEditModal.Metadata(authorized.integration().getName(), conversationId, parsed.value().cardId(),
+                authorized.pauseId(), parsed.approvalChannelId(), parsed.messageTs(), null);
+        ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+        Map<String, String> vocabulary = reasonCodesOf(snapshot);
+        Map<String, Object> view = parsed.interaction() == Interaction.OPEN_EDIT
+                ? SlackHitlEditModal.editView(metadata, snapshot, vocabulary, authorized.integration().getPlatformConfig())
+                : SlackHitlEditModal.rejectView(metadata, vocabulary);
+        if (view == null) {
+            LOGGER.infof("Slack HITL modal for %s not available — the request must be decided in the Manager", sanitize(conversationId));
+            return;
+        }
+        try {
+            slackApi.openView(authorized.auth(), parsed.triggerId(), view);
+        } catch (SlackDeliveryException e) {
+            LOGGER.warnf("Could not open the Slack HITL modal for %s: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
 
-        String pauseId = HitlDecision.pauseIdOf(pause.pausedAt());
-        if (parsed.value().isGroup()) {
-            resolveGroup(parsed.value().groupConversationId(), parsed.verdict(), parsed.slackUserId(), pauseId,
-                    auth, parsed.approvalChannelId(), parsed.messageTs());
-        } else {
-            resolveConversation(parsed.value().subject(), parsed.verdict(), parsed.slackUserId(), pauseId,
-                    auth, parsed.approvalChannelId(), parsed.messageTs());
+    /**
+     * Synchronous check of a modal submission, for Slack's {@code view_submission}
+     * protocol: the same authorization as every interaction, then the decision the
+     * resume would take, dry-run through {@code validateHitlDecision}. Nothing is
+     * consumed.
+     *
+     * @return {@code null} when the payload is not a submission or the submission
+     *         is valid; otherwise block id → message for {@code response_action:
+     *         errors}
+     */
+    public Map<String, String> validateSubmission(String payloadJson) {
+        try {
+            ParsedAction parsed = parseAction(payloadJson);
+            if (parsed == null || parsed.interaction() != Interaction.SUBMIT) {
+                return null;
+            }
+            String block = SlackHitlEditModal.CALLBACK_EDIT.equals(parsed.callbackId())
+                    ? SlackHitlEditModal.BLOCK_EDIT
+                    : SlackHitlEditModal.BLOCK_REASON;
+            if (parsed.value().isGroup()) {
+                return Map.of(block, "Group approvals are decided with the card's buttons or in the Manager");
+            }
+            Authorized authorized = authorize(parsed, false);
+            if (authorized == null) {
+                return Map.of(block, "This request can no longer be decided here — it was resolved, or you are not an approver");
+            }
+            String conversationId = parsed.value().subject();
+            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            HitlDecision decision;
+            try {
+                decision = SlackHitlEditModal.decisionOf(parsed.callbackId(), parsed.state(), parsed.metadata(), snapshot,
+                        parsed.slackUserId());
+            } catch (SlackHitlEditModal.SubmissionException e) {
+                return Map.of(e.blockId(), e.getMessage());
+            }
+            decision.setPauseId(authorized.pauseId());
+            try {
+                conversationService.validateHitlDecision(conversationId, decision);
+            } catch (IllegalArgumentException e) {
+                var errors = new LinkedHashMap<String, String>();
+                errors.put(SlackHitlEditModal.CALLBACK_EDIT.equals(parsed.callbackId())
+                        ? SlackHitlEditModal.blockFor(e.getMessage())
+                        : SlackHitlEditModal.BLOCK_REASON, e.getMessage());
+                return errors;
+            } catch (IllegalStateException e) {
+                return Map.of(block, "This request was already decided");
+            }
+            return null;
+        } catch (Exception e) {
+            LOGGER.warnf("Could not validate a Slack HITL modal submission: %s", e.getMessage());
+            return Map.of(SlackHitlEditModal.BLOCK_REASON, "The decision could not be checked — try again");
+        }
+    }
+
+    /**
+     * The agent's reason-code vocabulary, or null (built-in) when it cannot be
+     * read.
+     */
+    private Map<String, String> reasonCodesOf(ConversationMemorySnapshot snapshot) {
+        if (agentConfigurationCache == null || snapshot == null || snapshot.getAgentId() == null || snapshot.getAgentVersion() == null) {
+            return null;
+        }
+        try {
+            AgentConfiguration config = agentConfigurationCache.read(snapshot.getAgentId(), snapshot.getAgentVersion());
+            return config != null && config.getHitlConfig() != null && config.getHitlConfig().getReview() != null
+                    ? config.getHitlConfig().getReview().getReasonCodes()
+                    : null;
+        } catch (Exception e) {
+            return null;
         }
     }
 
@@ -286,6 +451,9 @@ public class SlackInteractivityHandler {
     private ParsedAction parseAction(String payloadJson) throws Exception {
         JsonNode payload = objectMapper.readTree(payloadJson);
         String type = payload.path("type").asText("");
+        if ("view_submission".equals(type)) {
+            return parseSubmission(payload);
+        }
         if (!"block_actions".equals(type)) {
             LOGGER.debugf("Ignoring Slack interactivity payload of type %s", sanitize(type));
             return null;
@@ -304,7 +472,10 @@ public class SlackInteractivityHandler {
         String messageTs = payload.path("message").path("ts").asText(null);
 
         HitlVerdict verdict = verdictFor(actionId);
-        if (verdict == null) {
+        Interaction interaction = SlackHitlEditModal.ACTION_EDIT.equals(actionId)
+                ? Interaction.OPEN_EDIT
+                : SlackHitlEditModal.ACTION_REJECT_REASON.equals(actionId) ? Interaction.OPEN_REJECT : Interaction.BUTTON;
+        if (verdict == null && interaction == Interaction.BUTTON) {
             LOGGER.debugf("Ignoring unknown Slack action_id %s", sanitize(actionId));
             return null;
         }
@@ -313,8 +484,30 @@ public class SlackInteractivityHandler {
             LOGGER.warn("Slack HITL action missing value — ignoring");
             return null;
         }
+        String triggerId = payload.path("trigger_id").asText(null);
         return new ParsedAction(verdict, value, slackUserId, slackUserTeamId.isBlank() ? null : slackUserTeamId,
-                approvalChannelId, messageTs);
+                approvalChannelId, messageTs, interaction, triggerId, null, null, null);
+    }
+
+    /**
+     * A modal's {@code view_submission}: bound to its card, pause and integration
+     * by the {@code private_metadata} the modal was opened with.
+     */
+    private ParsedAction parseSubmission(JsonNode payload) {
+        JsonNode view = payload.path("view");
+        String callbackId = view.path("callback_id").asText("");
+        if (!SlackHitlEditModal.CALLBACK_EDIT.equals(callbackId) && !SlackHitlEditModal.CALLBACK_REJECT.equals(callbackId)) {
+            return null;
+        }
+        var metadata = SlackHitlEditModal.Metadata.decode(view.path("private_metadata").asText(null));
+        if (metadata == null || metadata.subject() == null || metadata.integration() == null) {
+            return null;
+        }
+        String slackUserTeamId = payload.path("user").path("team_id").asText("");
+        HitlVerdict verdict = SlackHitlEditModal.CALLBACK_EDIT.equals(callbackId) ? HitlVerdict.APPROVED : HitlVerdict.REJECTED;
+        return new ParsedAction(verdict, new SlackHitlSupport.ActionValue(metadata.integration(), metadata.subject(), metadata.cardId()),
+                payload.path("user").path("id").asText(""), slackUserTeamId.isBlank() ? null : slackUserTeamId, metadata.channel(),
+                metadata.ts(), Interaction.SUBMIT, null, callbackId, view.path("state").path("values"), metadata);
     }
 
     /**
@@ -338,10 +531,16 @@ public class SlackInteractivityHandler {
 
     private void resolveConversation(String conversationId, HitlVerdict verdict, String slackUserId, String pauseId,
                                      String auth, String approvalChannelId, String messageTs) {
-        HitlDecision decision = buildDecision(verdict, slackUserId, pauseId);
+        resolveConversationDecision(conversationId, buildDecision(verdict, slackUserId, pauseId), slackUserId, auth, approvalChannelId,
+                messageTs);
+    }
+
+    private void resolveConversationDecision(String conversationId, HitlDecision decision, String slackUserId, String auth,
+                                             String approvalChannelId, String messageTs) {
+        HitlVerdict verdict = decision.getVerdict();
         try {
             conversationService.resumeConversation(conversationId, decision, null);
-            finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId);
+            finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId, resolutionDetail(decision));
         } catch (IllegalStateException e) {
             // Already decided / timed out / not paused, or the pause changed after
             // the check above (PauseMismatchException) — idempotent. Do NOT
@@ -349,6 +548,10 @@ public class SlackInteractivityHandler {
             LOGGER.debugf("HITL conversation %s already resolved: %s",
                     sanitize(conversationId), e.getMessage());
             finalizeAlreadyResolved(auth, approvalChannelId, messageTs);
+        } catch (IllegalArgumentException e) {
+            // A modal decision the engine refused before consuming the pause (checked
+            // synchronously at submission; this is the rare race after it).
+            LOGGER.infof("Slack HITL decision for %s refused: %s", sanitize(conversationId), e.getMessage());
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Conversation gone — nothing to resume; treat as resolved (idempotent).
             LOGGER.debugf("HITL conversation %s not found on resume: %s",
@@ -367,7 +570,7 @@ public class SlackInteractivityHandler {
         request.setDecision(buildDecision(verdict, slackUserId, pauseId));
         try {
             groupConversationService.resumeDiscussion(groupConversationId, request, null);
-            finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId);
+            finalizeMessage(auth, approvalChannelId, messageTs, verdict, slackUserId, null);
         } catch (IllegalStateException
                 | GroupDiscussionException
                 | IResourceStore.ResourceModifiedException
@@ -440,7 +643,20 @@ public class SlackInteractivityHandler {
      * A parsed, actionable HITL decision from a block_actions payload.
      */
     private record ParsedAction(HitlVerdict verdict, SlackHitlSupport.ActionValue value,
-            String slackUserId, String slackUserTeamId, String approvalChannelId, String messageTs) {
+            String slackUserId, String slackUserTeamId, String approvalChannelId, String messageTs, Interaction interaction,
+            String triggerId, String callbackId, JsonNode state, SlackHitlEditModal.Metadata metadata) {
+    }
+
+    /** What an interaction asks for. */
+    private enum Interaction {
+        /** Approve / Reject button. */
+        BUTTON,
+        /** "Edit & approve" button: open the edit modal. */
+        OPEN_EDIT,
+        /** "Reject with reason…" button: open the reject modal. */
+        OPEN_REJECT,
+        /** A modal was submitted. */
+        SUBMIT
     }
 
     /**
@@ -467,14 +683,29 @@ public class SlackInteractivityHandler {
         return null;
     }
 
+    /**
+     * " with edits" or " (TONE)" for the resolved card — never the edited text,
+     * which is not echoed into the channel.
+     */
+    private static String resolutionDetail(HitlDecision decision) {
+        boolean edited = decision.getEditedAnswer() != null
+                || decision.getToolDecisions() != null && decision.getToolDecisions().values().stream()
+                        .anyMatch(d -> d != null && d.getAmendedArguments() != null);
+        if (decision.getVerdict() == HitlVerdict.APPROVED) {
+            return edited ? " with edits" : null;
+        }
+        return decision.getReasonCode() != null ? " (" + decision.getReasonCode() + ")" : null;
+    }
+
     private void finalizeMessage(String auth, String channelId, String messageTs,
-                                 HitlVerdict verdict, String slackUserId) {
+                                 HitlVerdict verdict, String slackUserId, String detail) {
         if (auth == null || messageTs == null) {
             return; // cannot update without a token/message ts
         }
+        String suffix = detail != null ? detail : "";
         String text = verdict == HitlVerdict.APPROVED
-                ? "✅ Approved by <@" + slackUserId + ">"
-                : "⛔ Rejected by <@" + slackUserId + ">";
+                ? "✅ Approved" + suffix + " by <@" + slackUserId + ">"
+                : "⛔ Rejected" + suffix + " by <@" + slackUserId + ">";
         try {
             slackApi.updateMessage(auth, channelId, messageTs, text,
                     SlackHitlSupport.buildResolvedBlocks(text));

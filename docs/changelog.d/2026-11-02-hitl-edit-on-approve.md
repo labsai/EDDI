@@ -41,3 +41,14 @@ shape that analytics can rely on.
   `SharedTaskList.reviewerEdits`; a synthesis edit is appended as an unsigned `SYNTHESIS` entry (speaker
   `hitl:<decidedBy>`, `errorReason: "reviewer-edit"`) — signed entries are never rewritten, and the signing guard skips
   reviewer entries.
+- **Slack** — approval cards of regular conversations gain "✏️ Edit & approve" and "Reject with reason…"
+  ([`SlackHitlEditModal`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackHitlEditModal.java)), opened as
+  modals with `views.open`. A TOOL_CALL card offers Edit for a single call whose redacted arguments fit Slack's 3000
+  characters; edited arguments are merged server-side against the raw ones
+  ([`SlackRedactedArgumentsMerge`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackRedactedArgumentsMerge.java)),
+  so redacted secrets never travel through Slack and cannot be edited there. A RULE card offers Edit only with the new
+  integration setting `platformConfig.hitlShareRuleDrafts=true`, for agents that allow edits and drafts without
+  secrets. `view_submission` re-runs every check (approver, workspace, card, pause) and is validated synchronously
+  through `IConversationService.validateHitlDecision`, so errors show in the modal. Group cards keep Approve/Reject.
+  `SlackHitlSupport.buildApprovalBlocks` keeps its signature; the new overload takes the card's edit controls and keeps
+  the `actions` block last.

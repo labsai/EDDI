@@ -2496,6 +2496,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             return;
         }
         var candidate = new HitlRevisionCandidate();
+        candidate.setEditable(policy.captureDraft());
         // An approver's edit must keep the answer's shape: JSON for a convertToObject
         // task.
         candidate.setAnswerFormat(task.getParameters() != null && Boolean.parseBoolean(String.valueOf(task.getParameters().get(

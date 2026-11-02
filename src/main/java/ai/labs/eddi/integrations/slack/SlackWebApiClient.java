@@ -163,6 +163,22 @@ public class SlackWebApiClient {
     }
 
     /**
+     * Open a modal via {@code views.open} for the interaction that carried
+     * {@code triggerId} (Slack expires it after three seconds).
+     *
+     * @return {@code true} if Slack opened the view
+     * @throws SlackDeliveryException
+     *             on retryable failures (network, HTTP 429/500/503)
+     * @since 6.7.0
+     */
+    public boolean openView(String authToken, String triggerId, Map<String, Object> view) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("trigger_id", triggerId);
+        body.put("view", view);
+        return callSlackApi("views.open", authToken, body) != null;
+    }
+
+    /**
      * Send a JSON POST to a Slack Web API method and parse the response.
      * Centralizes retry classification and {@code ok:false} handling shared by
      * {@code chat.postMessage} and {@code chat.update}.
