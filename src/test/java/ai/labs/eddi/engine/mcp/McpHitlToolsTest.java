@@ -495,4 +495,45 @@ class McpHitlToolsTest {
         assertTrue(out.contains("FORBIDDEN"),
                 "the pending member reads their prompt from the SUMMARY, never the transcript: " + out);
     }
+
+    private GroupConversation ownedBy(String owner) {
+        var gc = new GroupConversation();
+        gc.setUserId(owner);
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        gc.setTranscript(List.of());
+        return gc;
+    }
+
+    /**
+     * The pending HUMAN member may submit their turn but may not read the
+     * discussion (get_group_approval_status refuses them the full view), so the
+     * submission's response is an acknowledgement, not the conversation.
+     */
+    @Test
+    void submitGroupHumanInput_memberWithoutReadAccess_getsAnAcknowledgementOnly() throws Exception {
+        var gc = ownedBy("owner");
+        when(groupConversationService.submitHumanInput(eq("gc1"), eq("m1"), eq("hello"), any())).thenReturn(gc);
+        when(guard.mayReadResumedDiscussion("owner")).thenReturn(false);
+        when(json.serialize(any())).thenAnswer(inv -> new ObjectMapper().writeValueAsString(inv.getArgument(0)));
+
+        String out = tools.submitGroupHumanInput("g1", "gc1", "m1", "hello");
+
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(json).serialize(captor.capture());
+        assertTrue(captor.getValue() instanceof Map, "expected an acknowledgement map, got " + captor.getValue());
+        assertTrue(out.contains("\"accepted\":true"), out);
+        assertFalse(out.contains("transcript"), out);
+    }
+
+    @Test
+    void submitGroupHumanInput_ownerStillGetsTheConversation() throws Exception {
+        var gc = ownedBy("owner");
+        when(groupConversationService.submitHumanInput(eq("gc1"), eq("m1"), eq("hello"), any())).thenReturn(gc);
+        when(guard.mayReadResumedDiscussion("owner")).thenReturn(true);
+        when(json.serialize(any())).thenReturn("{}");
+
+        tools.submitGroupHumanInput("g1", "gc1", "m1", "hello");
+
+        verify(json).serialize(gc);
+    }
 }

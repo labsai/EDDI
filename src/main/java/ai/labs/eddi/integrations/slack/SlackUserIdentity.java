@@ -62,6 +62,13 @@ public final class SlackUserIdentity {
      *         a team
      */
     public static String eddiUserId(String teamId, String slackUserId) {
+        if (!isValidSlackUserId(slackUserId)) {
+            // The user component comes from a signed event, but "signed" only means
+            // some configured app sent it. Without this check a teamless signer could
+            // send user "T1:U2" and be named slack:T1:U2 - a workspace-qualified
+            // victim - because the components are joined with ':'.
+            throw new IllegalArgumentException("Not a Slack user id");
+        }
         if (teamId == null || teamId.isBlank()) {
             return PREFIX + slackUserId;
         }
@@ -74,5 +81,37 @@ public final class SlackUserIdentity {
      */
     public static boolean isLegacySlackUserId(String userId) {
         return userId != null && RAW_SLACK_USER_ID.matcher(userId).matches();
+    }
+
+    /**
+     * Whether {@code slackUserId} has the shape of a Slack user id ({@code U…} or
+     * {@code W…}, upper-case alphanumerics). Anything else - in particular a value
+     * containing {@code ':'} - must not become part of an EDDI user id.
+     */
+    public static boolean isValidSlackUserId(String slackUserId) {
+        return slackUserId != null && SLACK_USER_ID.matcher(slackUserId).matches();
+    }
+
+    /**
+     * A Slack user id as an event carries it: {@code U…}/{@code W…}, no separator.
+     */
+    private static final Pattern SLACK_USER_ID = Pattern.compile("^[UW][A-Z0-9]{1,63}$");
+
+    /**
+     * Whether {@code userId} is a principal only Slack can have produced: the
+     * namespaced {@code slack:} form. No other identity source can carry the prefix
+     * — {@code ReservedPrincipals} refuses it at authentication, and a non-admin
+     * cannot name another user id.
+     * <p>
+     * A raw, pre-namespacing id ({@link #isLegacySlackUserId}) does <b>not</b>
+     * count: it is only a shape, and an OIDC principal named {@code U123ABC} has
+     * the same shape. Treating it as Slack would let such a user own a conversation
+     * behind a hand-made {@code channel:slack:...} trigger intent and have its HITL
+     * outcome posted with that channel's bot token. A legacy thread mapping is
+     * re-keyed to the namespaced id on the thread's next message
+     * ({@link SlackEventHandler}), after which it qualifies.
+     */
+    public static boolean isSlackPrincipal(String userId) {
+        return userId != null && userId.startsWith(PREFIX);
     }
 }

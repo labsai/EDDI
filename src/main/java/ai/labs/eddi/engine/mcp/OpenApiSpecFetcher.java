@@ -160,7 +160,8 @@ public class OpenApiSpecFetcher {
             targetPolicy.validateUrl(uri.toString());
             // This hop passed targetPolicy.validateUrl above, which is the gate (it
             // carries the deployment's SSRF flag and allowed hosts), so the facade adds
-            // no check of its own; redirects are this loop's, never the facade's.
+            // no check of its own - the after-exchange recheck below repeats it;
+            // redirects are this loop's, never the facade's.
             OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, uri)
                     .ssrf(SsrfPolicy.NONE)
                     .redirects(RedirectPolicy.NEVER)
@@ -179,6 +180,19 @@ public class OpenApiSpecFetcher {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IllegalArgumentException("Interrupted while fetching the OpenAPI spec from " + forMessage(uri), e);
+            }
+            // The facade's own after-exchange recheck is off (NONE above), so it is done
+            // here with the same policy: the check before the send resolved the host
+            // once, the connection resolved it again, and a rebinding name aims for the
+            // instant between. The connection's answer is the one now cached, so a
+            // target that has turned forbidden fails this second check and its
+            // response is discarded unread.
+            try {
+                targetPolicy.validateUrl(uri.toString());
+            } catch (RuntimeException e) {
+                closeQuietly(response.body());
+                throw new IllegalArgumentException("OpenAPI spec response from " + forMessage(uri)
+                        + " discarded: the target no longer passes the outbound policy after connecting", e);
             }
             int status = response.status();
             if (REDIRECT_CODES.contains(status)) {
