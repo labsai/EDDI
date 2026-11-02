@@ -10,6 +10,8 @@ import ai.labs.eddi.datastore.mongo.codec.JacksonProvider;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext.Item;
 import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
 import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
@@ -747,11 +749,14 @@ class MongoConversationMemoryStoreTest {
             snapshot.setHitlPauseReason("needs review");
             snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             snapshot.setHitlApprovalTimeout("PT30M");
+            snapshot.setHitlApprovalContext(RenderedApprovalContext.of(List.of(new Item("Draft", "text", false, "agent", null, null)), false));
             String id = store.storeConversationMemorySnapshot(snapshot);
+            assertNotNull(store.loadConversationMemorySnapshot(id).getHitlApprovalContext(), "the context is persisted with the pause");
 
             store.clearHitlBookmark(id);
 
             var loaded = store.loadConversationMemorySnapshot(id);
+            assertNull(loaded.getHitlApprovalContext(), "the context goes with the bookmark");
             assertNotNull(loaded, "the conversation itself must survive");
             assertNull(loaded.getHitlPausedAt());
             assertNull(loaded.getHitlPauseReason());

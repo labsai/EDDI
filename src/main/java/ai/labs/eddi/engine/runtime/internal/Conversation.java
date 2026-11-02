@@ -2069,6 +2069,7 @@ public class Conversation implements IConversation {
         conversationMemory.setHitlPauseReason(null);
         conversationMemory.setHitlTimeoutPolicy(null);
         conversationMemory.setHitlApprovalTimeout(null);
+        conversationMemory.setHitlApprovalContext(null);
     }
 
     /**

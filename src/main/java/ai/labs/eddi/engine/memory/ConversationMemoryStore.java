@@ -1247,7 +1247,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // tool-level HITL fields — otherwise a stale hitlPauseType / pending batch
         // would linger on an ended or cancelled conversation document.
         for (String field : List.of("hitlPausedWorkflowId", "hitlPausedAbsoluteTaskIndex", "hitlPausedAt",
-                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
+                "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout", "hitlApprovalContext",
                 "hitlPauseType", "hitlPendingToolCalls")) {
             unset.append(field, "");
         }
