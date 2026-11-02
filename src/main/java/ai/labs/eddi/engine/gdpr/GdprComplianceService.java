@@ -879,10 +879,21 @@ public class GdprComplianceService {
         }
 
         // 8. Self-contained stores that registered themselves — the user directory,
-        // workspace notifications. Each owns its own records outright, so it needs no
-        // ordering against the steps above.
+        // workspace notifications, the email ledger. They need no ordering against the
+        // steps above, but one among themselves: a participant that finds rows by the
+        // person's email address reads it from the user directory, which erases that
+        // address and so runs LAST. When an earlier participant failed, the LAST ones
+        // are kept and reported as failed: erasing the directory entry now would leave
+        // the re-run nothing to find those rows by (the same reason step 4c keeps the
+        // snapshots until a retry).
         Map<String, Long> additionalDeleted = new LinkedHashMap<>();
+        List<String> participantsFailed = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
+            if (participant.order() >= IGdprParticipant.LAST && !participantsFailed.isEmpty()) {
+                recordFailure(failedSteps, participant.name(),
+                        new IllegalStateException("kept until " + participantsFailed + " are erased; retry the erasure"), pseudonym);
+                continue;
+            }
             try {
                 long removed = participant.erase(userId);
                 additionalDeleted.put(participant.name(), removed);
@@ -890,6 +901,7 @@ public class GdprComplianceService {
                     LOGGER.infof("[GDPR] Deleted %d %s records [%s]", removed, participant.name(), pseudonym);
                 }
             } catch (Exception e) {
+                participantsFailed.add(participant.name());
                 recordFailure(failedSteps, participant.name(), e, pseudonym);
             }
         }
@@ -948,6 +960,7 @@ public class GdprComplianceService {
         }
         List<IGdprParticipant> found = new ArrayList<>();
         participantInstances.forEach(found::add);
+        found.sort(Comparator.comparingInt(IGdprParticipant::order));
         return found;
     }
 

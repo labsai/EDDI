@@ -44,7 +44,7 @@ class AgentTestRunStoreTest {
 
     private static AgentTestRun run(String id) {
         return new AgentTestRun(id, "bbbbbbbbbbbbbbbbbbbbbbbb", 1, "suite", AGENT_ID, 2, AgentTestRun.Status.RUNNING, "alice", 1000L, null, null,
-                null, 1.0, null, null, null, null, null, null, false, null);
+                null, 1.0, null, null, null, null, null, null, false, null, null, null);
     }
 
     @SuppressWarnings("unchecked")
@@ -71,6 +71,20 @@ class AgentTestRunStoreTest {
         order.verify(storage).store(generated);
         order.verify(generated).getId();
         verify(storage).store(stored);
+    }
+
+    /**
+     * The heartbeat chain and the orphan abort rely on this being one atomic CAS.
+     */
+    @Test
+    void updateIfHeartbeatIsACompareAndSwapOnHeartbeatAt() throws Exception {
+        var stored = resource(RUN_ID, null);
+        when(storage.newResource(eq(RUN_ID), eq(1), any(AgentTestRun.class))).thenReturn(stored);
+
+        store.updateIfHeartbeat(run(RUN_ID), 42L);
+
+        verify(storage).storeIfFieldEquals(stored, "heartbeatAt", 42L);
+        verify(storage, never()).store(any(IResourceStorage.IResource.class));
     }
 
     @Test

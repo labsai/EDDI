@@ -1,6 +1,7 @@
 # ClusterFuzzLite — coverage-guided fuzzing for EDDI
 # Detected by OpenSSF Scorecard as the "Fuzzing" check
-# Fuzz targets: PathNavigator (OGNL replacement), MatchingUtilities (behavior rule conditions)
+# Fuzz targets: PathNavigator (OGNL replacement), MatchingUtilities (behavior rule conditions),
+# SafeJsonExpression (the evaluator of the expression output guardrail)
 #
 # Modes:
 #   - PR: code-change fuzzing (5 min) — catches regressions in changed code
@@ -25,7 +26,7 @@ jobs:
   # ─── Guard: vendored fuzz sources must match the real ones ─────
   #
   # The fuzz targets do NOT compile src/main/java. .clusterfuzzlite/build.sh
-  # compiles VENDORED COPIES of the three security-critical utilities, because
+  # compiles VENDORED COPIES of the four security-critical utilities, because
   # the CFL builder image has no Maven and no JDK 25. That copy is only useful
   # while it is byte-identical to what ships: without this check, a PR that
   # changes PathNavigator.java triggers a fuzz run that exercises the stale
@@ -57,7 +58,7 @@ jobs:
                  { print }' "$1"
           }
 
-          EXPECTED="MatchingUtilities PathNavigator RuntimeUtilities"
+          EXPECTED="MatchingUtilities PathNavigator RuntimeUtilities SafeJsonExpression"
 
           # Fail if someone vendors a fourth file without extending this guard.
           ACTUAL=$(find .clusterfuzzlite -maxdepth 1 -name '*.java' -printf '%f\n' \

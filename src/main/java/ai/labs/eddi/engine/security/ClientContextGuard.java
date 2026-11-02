@@ -57,6 +57,11 @@ public class ClientContextGuard {
     public static final String KEY_DYNAMIC_CREATED_AGENT_IDS = "dynamicCreatedAgentIds";
     /** Written by the delegation tool; hop count of the delegation chain. */
     public static final String KEY_DELEGATION_DEPTH = "delegationDepth";
+    /**
+     * Written by the continuation delivery; marks a turn the agent started itself
+     * ({@code CONTINUE_CONVERSATION}) and carries its number.
+     */
+    public static final String KEY_SELF_CONTINUATION = "selfContinuation";
 
     /**
      * Every context key only EDDI itself may set. Case-sensitive names; every
@@ -66,7 +71,7 @@ public class ClientContextGuard {
      * {@link #shadowsReserved(String)}.
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
-            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH);
+            KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION);
 
     private final Set<String> permittedReservedKeys;
 
