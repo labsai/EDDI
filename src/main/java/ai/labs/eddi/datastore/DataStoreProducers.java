@@ -72,8 +72,11 @@ import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.UserConversationStore;
+import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
+import ai.labs.eddi.integrations.email.ledger.MongoEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.MongoEmailMessageLedger;
+import ai.labs.eddi.integrations.email.ledger.PostgresEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.PostgresEmailMessageLedger;
 import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import ai.labs.eddi.integrations.slack.hitl.MongoSlackApprovalRecordStore;
@@ -337,6 +340,13 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IEmailMessageLedger emailMessageLedger(Instance<MongoEmailMessageLedger> mongo, Instance<PostgresEmailMessageLedger> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IEmailMailboxStateStore emailMailboxStateStore(Instance<MongoEmailMailboxStateStore> mongo,
+                                                          Instance<PostgresEmailMailboxStateStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

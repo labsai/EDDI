@@ -71,7 +71,9 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     private static final String[] INDEXES = {"CREATE INDEX IF NOT EXISTS idx_email_ledger_due ON email_message_ledger (state, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_recipient ON email_message_ledger (recipient)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_rate ON email_message_ledger (recipient, kind, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -248,6 +250,84 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             return statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to delete expired email ledger rows", e);
+        }
+    }
+
+    @Override
+    public Optional<LedgerEntry> findByMessage(String integrationId, Direction direction, String messageId) {
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE integration_id = ? AND direction = ? AND message_id = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setString(2, direction.name());
+            statement.setString(3, messageId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? Optional.of(toEntry(rows)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the email ledger", e);
+        }
+    }
+
+    @Override
+    public Optional<LedgerEntry> findOutboundByMessageId(String messageId) {
+        List<LedgerEntry> found = query("SELECT " + COLUMNS + " FROM " + TABLE + " WHERE message_id = ? AND direction = 'OUT' LIMIT 1", messageId);
+        return found.isEmpty() ? Optional.empty() : Optional.of(found.get(0));
+    }
+
+    @Override
+    public boolean transition(String id, State from, State to, String conversationId, Instant nextAttemptAt, String lastError, boolean countAttempt,
+                              Instant now) {
+        String sql = "UPDATE " + TABLE + " SET state = ?, next_attempt_at = ?, last_error = ?, updated_at = ?, "
+                + "conversation_id = COALESCE(?, conversation_id), attempts = attempts + ? WHERE id = ? AND state = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, to.name());
+            statement.setTimestamp(2, timestamp(nextAttemptAt));
+            statement.setString(3, lastError);
+            statement.setTimestamp(4, timestamp(now));
+            statement.setString(5, conversationId);
+            statement.setInt(6, countAttempt ? 1 : 0);
+            statement.setString(7, id);
+            statement.setString(8, from.name());
+            return statement.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to change an email ledger row", e);
+        }
+    }
+
+    @Override
+    public List<LedgerEntry> findDue(Kind kind, State state, Instant now, int limit) {
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE
+                + " WHERE state = ? AND kind = ? AND next_attempt_at <= ? ORDER BY next_attempt_at LIMIT ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, state.name());
+            statement.setString(2, kind.name());
+            statement.setTimestamp(3, timestamp(now));
+            statement.setInt(4, limit);
+            List<LedgerEntry> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(toEntry(rows));
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read due email ledger rows", e);
+        }
+    }
+
+    @Override
+    public long countInboundTurns(String integrationId, String sender, Instant since) {
+        String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND recipient = ? AND kind = 'TRIGGER' AND created_at >= ? "
+                + "AND state IN ('TURN_SUBMITTED', 'DONE')";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setString(2, sender);
+            statement.setTimestamp(3, timestamp(since));
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count inbound email ledger rows", e);
         }
     }
 

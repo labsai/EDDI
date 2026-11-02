@@ -10,7 +10,7 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
-  ExternalLink, Star, AlertTriangle,
+  ExternalLink, Star, AlertTriangle, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +23,10 @@ import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
+import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
+import { emailConfigProblems, withEmailFixedKeys } from "@/lib/email-channel";
+import { platformConfigForType } from "@/lib/channel-platform-config";
+import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
   CHANNEL_TYPES,
   type ChannelIntegrationConfiguration, type ChannelTarget,
@@ -42,12 +46,14 @@ function nextTargetKey(): string {
 }
 
 function TargetCard({
-  target, index, isDefault, onUpdate, onRemove, onSetDefault, eventTriggers = false,
+  target, index, isDefault, onUpdate, onRemove, onSetDefault, eventTriggers = false, mailTriggers = false,
 }: {
   target: ChannelTarget; index: number; isDefault: boolean;
   onUpdate: (t: ChannelTarget) => void; onRemove: () => void; onSetDefault: () => void;
   /** Webhook integrations route by event type: triggers are event types, not "keyword:" prefixes. */
   eventTriggers?: boolean;
+  /** Email integrations route by the recipient's plus-tag or a word of the subject. */
+  mailTriggers?: boolean;
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -143,11 +149,11 @@ function TargetCard({
           </div>
 
           <div className="space-y-1">
-            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{eventTriggers ? t("webhook.triggerLabel", "Event types") : t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
-            <p className="text-xs text-muted-foreground">{eventTriggers ? t("webhook.triggerHint", 'Event types routed to this target — exact, or a prefix ending in "*" (e.g. com.github.*)') : t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
+            <label htmlFor={`${uid}-trigger`} className="text-xs font-medium">{mailTriggers ? t("emailChannel.triggerLabel", "Plus-tags or subject words") : eventTriggers ? t("webhook.triggerLabel", "Event types") : t("channelDetail.triggerKeywords", "Trigger Keywords")}</label>
+            <p className="text-xs text-muted-foreground" data-testid={`target-trigger-hint-${index}`}>{mailTriggers ? t("emailChannel.triggerHint", "Mail sent to invoices+urgent@… matches the trigger urgent; so does a subject containing the word. No match goes to the default target.") : eventTriggers ? t("webhook.triggerHint", 'Event types routed to this target — exact, or a prefix ending in "*" (e.g. com.github.*)') : t("channelDetail.triggerHint", 'Users type "keyword: message" to route to this target')}</p>
             <div className="flex gap-1.5 flex-wrap">
               {target.triggers.map((tr) => (
-                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}{eventTriggers ? "" : ":"}<button aria-label={t("common.removeItem", { item: tr, defaultValue: "Remove {{item}}" })} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
+                <Badge key={tr} variant="secondary" className="text-xs gap-1 font-mono">{tr}{eventTriggers || mailTriggers ? "" : ":"}<button aria-label={t("common.removeItem", { item: tr, defaultValue: "Remove {{item}}" })} onClick={() => onUpdate({ ...target, triggers: target.triggers.filter((x) => x !== tr) })} className="hover:text-destructive"><X className="h-3 w-3" /></button></Badge>
               ))}
             </div>
             <div className="flex gap-1">
@@ -278,6 +284,7 @@ export function ChannelDetailPage() {
   }, [config, id, version]);
 
   const isWebhook = draft?.channelType === "webhook";
+  const isEmail = draft?.channelType === "email";
   const webhookUrl = isWebhook && id
     ? webhookEndpointUrl(window.location.origin, id)
     : `${window.location.origin}/integrations/slack/events`;
@@ -298,16 +305,29 @@ export function ChannelDetailPage() {
       );
       return;
     }
+    // An email integration's rules are checked again by the backend; this only
+    // spares the round trip. Its fixed keys are written whatever was loaded.
+    let toSave = draft;
+    if (isEmail) {
+      const problems = emailConfigProblems(draft.platformConfig);
+      if (problems.length > 0) {
+        toast.error(emailProblemMessage(problems[0]!, t));
+        return;
+      }
+      toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
+    }
     try {
-      const result = await updateMutation.mutateAsync({ id, version, config: draft });
+      const result = await updateMutation.mutateAsync({ id, version, config: toSave });
       // Update URL to new version so subsequent saves don't conflict
       const location = (result as { location?: string })?.location;
       if (location) {
         const { version: newVersion } = parseChannelResourceUri(location);
         setSearchParams({ version: String(newVersion) }, { replace: true });
       }
-      setBaseline(JSON.stringify(draft));
+      if (toSave !== draft) setDraft(toSave);
+      setBaseline(JSON.stringify(toSave));
       toast.success(t("channelDetail.saveSuccess", "Channel saved"));
+      toastChannelWarnings(result?.warnings ?? [], t);
     } catch (err) {
       // Backend rejects duplicate/reserved triggers, missing targetId, a
       // defaultTargetName mismatch, channelId conflicts, etc. with a 400 — surface
@@ -477,7 +497,13 @@ export function ChannelDetailPage() {
           </div>
           <div className="space-y-1">
             <label htmlFor={`${uid}-type`} className="text-xs font-medium">{t("channelDetail.type", "Channel Type")}</label>
-            <select id={`${uid}-type`} data-testid="channel-type-select" className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" value={draft.channelType} onChange={(e) => setDraft({ ...draft, channelType: e.target.value })}>
+            <select id={`${uid}-type`} data-testid="channel-type-select" className="flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" value={draft.channelType} onChange={(e) => {
+              const channelType = e.target.value;
+              if (channelType === draft.channelType) return;
+              // Keys of the old type must not reach the new type's save: the
+              // email backend refuses unknown keys outright.
+              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
+            }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
           </div>
@@ -487,7 +513,9 @@ export function ChannelDetailPage() {
       {/* Platform Config */}
       <section className="rounded-xl border border-border/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2"><Hash className="h-4 w-4 text-primary" />{t("channelDetail.platformConfig", "Platform Configuration")}</h2>
-        {isWebhook ? (
+        {isEmail ? (
+          <EmailPlatformFields advancedOpen platformConfig={draft.platformConfig} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
+        ) : isWebhook ? (
           <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : (
         <div className="space-y-3">
@@ -535,7 +563,16 @@ export function ChannelDetailPage() {
         )}
       </section>
 
+      {/* Email: no endpoint to show — EDDI polls the mailbox. */}
+      {isEmail && (
+        <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3" data-testid="email-setup-section">
+          <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.setupTitle", "Setup and security")}</h2>
+          <EmailSecurityNotes />
+        </section>
+      )}
+
       {/* Webhook URL */}
+      {!isEmail && (
       <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3">
         <h2 className="text-sm font-semibold flex items-center gap-2"><ExternalLink className="h-4 w-4 text-primary" />{t("channelDetail.webhookUrl", "Webhook URL")}</h2>
         <p className="text-xs text-muted-foreground">{isWebhook ? t("webhook.endpointHint", "Send signed events to this URL with POST.") : t("channelDetail.webhookHint", "Paste this URL into your Slack App's Event Subscriptions → Request URL field.")}</p>
@@ -565,6 +602,7 @@ export function ChannelDetailPage() {
         </div>
         )}
       </section>
+      )}
 
       {/* Targets */}
       <section className="space-y-4">
@@ -577,7 +615,7 @@ export function ChannelDetailPage() {
         <div className="space-y-3">
           {draft.targets.map((target, i) => (
             <TargetCard key={targetKeys[i] ?? `index-${i}`} target={target} index={i} isDefault={draft.defaultTargetName === target.name}
-              onUpdate={(t) => updateTarget(i, t)} onRemove={() => removeTarget(i)} onSetDefault={() => { if (target.name) setDefaultTarget(target.name); }} eventTriggers={isWebhook} />
+              onUpdate={(t) => updateTarget(i, t)} onRemove={() => removeTarget(i)} onSetDefault={() => { if (target.name) setDefaultTarget(target.name); }} eventTriggers={isWebhook} mailTriggers={isEmail} />
           ))}
         </div>
       </section>

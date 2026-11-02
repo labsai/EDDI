@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.audit.AuditHmac;
+import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.openai.OpenAiUserIdentity;
 import ai.labs.eddi.integrations.slack.SlackUserIdentity;
 
@@ -51,6 +52,10 @@ public final class ReservedPrincipals {
             SlackUserIdentity.PREFIX,
             // Signed inbound webhook channel events (PR #1059): webhook:<integrationId>
             "webhook:",
+            // Email channel senders: email:<integrationId>[:<address>]
+            EmailUserIdentity.PREFIX,
+            // Unauthenticated email senders, one-off and memory-less: email-anon:<random>
+            EmailUserIdentity.ANONYMOUS_PREFIX,
             // Agent test-harness conversations (PR #1065), which switch tool mocking on
             "agent-test:",
             // A group's shared (team) memory owner: group:<groupId>
@@ -96,6 +101,17 @@ public final class ReservedPrincipals {
             }
         }
         return null;
+    }
+
+    /**
+     * Whether conversations of {@code userId} must neither read nor write long-term
+     * user memory: the one-off identity of an unauthenticated email sender. Its
+     * {@code From} is a claim anyone can make, so whatever such a turn remembered
+     * would be readable by the next forger — and nothing it could recall belongs to
+     * it.
+     */
+    public static boolean hasNoPersistentMemory(String userId) {
+        return userId != null && userId.startsWith(EmailUserIdentity.ANONYMOUS_PREFIX);
     }
 
     /** Whether {@code principal} is in a namespace EDDI reserves for itself. */

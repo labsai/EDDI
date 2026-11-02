@@ -695,6 +695,12 @@ as `UrlValidationUtils` — it calls `isPrivateAddress` and `isBlockedHostname` 
 The allowlist does **not** exempt private addresses: an on-premises mail server named by a channel or knowledge-base
 author is refused.
 
+The [email channel](email-integration.md) (trigger mode) is such an author: its IMAP host is checked by this policy when
+the integration is saved and again on every poll. Its other guards — sender authentication before identity, the loop
+guard, allow/blocklists, the claim that keeps a mail from running twice, mail rendered as template *data*, executables
+never stored, unauthenticated senders without memory, the sender in the thread key (hijack guard), and no outbound
+mail at all — are described in [email-integration.md → Security](email-integration.md#security).
+
 ### The operator policy — the system mailer's relay
 
 The rules above are the **author** policy (`resolve`). A host the deployment's **operator** set in
