@@ -355,6 +355,12 @@ public class MemberTurnExecutor {
         context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
+        // F6: the team's budget (and, for a board, the budgets it oversees) as template
+        // values.
+        if (groupConversationService != null) {
+            groupConversationService.teamBudgetTemplateValues(gc)
+                    .forEach((key, value) -> context.put(key, new Context(Context.ContextType.object, value)));
+        }
 
         // Pass group-level dynamic agent guardrails to member agents so that
         // AgentOrchestrator can enforce caps, allowed providers/models, etc.

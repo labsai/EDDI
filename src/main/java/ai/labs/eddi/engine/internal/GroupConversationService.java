@@ -45,6 +45,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetContext;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.groups.budget.TeamSpendMeter;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
@@ -254,6 +255,9 @@ public class GroupConversationService implements IGroupConversationService, User
 
     @Inject
     TeamSpendMeter teamSpendMeter;
+
+    @Inject
+    TeamBudgetContext teamBudgetContext;
 
     /**
      * I8's lesson store. Same field-injection pattern and null-safety as
@@ -1994,6 +1998,27 @@ public class GroupConversationService implements IGroupConversationService, User
         if (existing != null && existing.getDepth() == 0 && existing.getGroupId() != null) {
             teamBudgetService.admit(existing.getGroupId(), TeamBudgetService.Surface.FOLLOWUP);
         }
+    }
+
+    /**
+     * F6: {@code context.teamBudget} / {@code context.teamBudgets} for a member
+     * turn of {@code gc}; empty for a group without a {@code teamBudget}. Each
+     * oversight team is shown only if the discussion's owner may view that group.
+     */
+    public Map<String, Object> teamBudgetTemplateValues(GroupConversation gc) {
+        if (teamBudgetContext == null || gc == null) {
+            return Map.of();
+        }
+        return teamBudgetContext.values(gc, groupId -> discussionOwnerMayView(groupId, gc.getUserId()));
+    }
+
+    boolean discussionOwnerMayView(String groupId, String principal) {
+        ResourceAccessGuard guard = resourceAccessGuard;
+        if (guard == null) {
+            return true;
+        }
+        CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.current() : null;
+        return guard.principalMayView(groupId, principal, caller != null && caller.isAdminActingAs(principal));
     }
 
     /** F6: charges the increase of {@code gc}'s total cost to its root team. */
