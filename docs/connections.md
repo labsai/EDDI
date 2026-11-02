@@ -647,7 +647,7 @@ So a conversation records **how** its user id came to be, once, at creation:
 | Provenance | Means |
 | --- | --- |
 | `VERIFIED` | The id matched the principal of the authenticated request that created the conversation. |
-| `SELF_ASSERTED` | Nobody authenticated it — the caller asserted it, a trusted-proxy header supplied it, it was generated for an anonymous session, or the conversation predates provenance being recorded. |
+| `SELF_ASSERTED` | Nobody authenticated it — the caller asserted it, a trusted-proxy header supplied it, it was generated for an anonymous session, it came from an inbound mail (`email:` and `email-anon:` identities of an [email integration](email-integration.md#identity), even with an aligned DKIM pass), or the conversation predates provenance being recorded. |
 
 `PER_USER` resolution requires `VERIFIED`. Anything else is refused, by name, with
 the advice that applies: enable OIDC, make the connection `SERVICE`-bound, or opt
