@@ -48,6 +48,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -158,10 +159,10 @@ class AgentOrchestratorCoverage2Test {
         lenient().when(memory.getAgentId()).thenReturn(null);
         lenient().when(memory.getAgentVersion()).thenReturn(null);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
-        lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
+        lenient().when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
                         any(Supplier.class),

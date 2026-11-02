@@ -819,6 +819,8 @@ class ConversationServiceToolTimeoutTest {
         call.setArgumentsRedacted("{\"amount\":50}");
         call.setArgsTruncated(truncated);
         call.setGateReason("mcp:*");
+        // As the gate records it: a call the governing rule matched names that rule.
+        call.setMatchedRule(batchEffectiveRule != null ? batchEffectiveRule.getMatch() : null);
         return call;
     }
 

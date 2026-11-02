@@ -5,12 +5,16 @@
 package ai.labs.eddi.engine.runtime.client.workflows;
 
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.properties.model.Property;
+import ai.labs.eddi.configs.properties.model.PropertyInstruction;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.runtime.service.IWorkflowStoreService;
+import ai.labs.eddi.modules.properties.impl.PropertySetter;
+import ai.labs.eddi.modules.properties.model.SetOnActions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -24,6 +28,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -200,5 +206,24 @@ class WorkflowStoreClientLibraryTest {
             keysInPutOrder.add(key);
             getComponentMap(type).put(key, component);
         }
+    }
+
+    @Test
+    @DisplayName("the executable PropertySetter a workflow step configures to flags secret instructions")
+    void hasSecretInstructions_readsTheExecutablePropertySetter() {
+        var secret = new PropertyInstruction();
+        secret.setScope(Property.Scope.secret);
+        var plain = new PropertyInstruction();
+        plain.setScope(Property.Scope.conversation);
+
+        assertTrue(WorkflowStoreClientLibrary.hasSecretInstructions(new PropertySetter(List.of(onActions(plain), onActions(secret)))));
+        assertFalse(WorkflowStoreClientLibrary.hasSecretInstructions(new PropertySetter(List.of(onActions(plain)))));
+        assertFalse(WorkflowStoreClientLibrary.hasSecretInstructions(new Object()));
+    }
+
+    private static SetOnActions onActions(PropertyInstruction instruction) {
+        var setOnActions = new SetOnActions();
+        setOnActions.setSetProperties(List.of(instruction));
+        return setOnActions;
     }
 }

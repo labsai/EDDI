@@ -102,7 +102,13 @@ public class ExpressionGuardrail implements ContentGuardrail {
     record Compiled(SafeJsonExpression expression, String problem) {
     }
 
-    private final ModelOutputParser parser = new ModelOutputParser(new ExactJson());
+    private final ModelOutputParser parser = new ModelOutputParser(new ExactJson(true));
+
+    /**
+     * The same reading without duplicate-key detection — what the rest of the task
+     * reads the answer with. See {@link #parseAnswer}.
+     */
+    private final ModelOutputParser lenientParser = new ModelOutputParser(new ExactJson(false));
     /**
      * Bounded, keyed by the expression text: configuration-derived data only, so
      * the bean stays stateless with respect to conversations.
@@ -208,6 +214,17 @@ public class ExpressionGuardrail implements ContentGuardrail {
         if (outcome.kind() != ModelOutputParser.Kind.VALID || !(outcome.value() instanceof Map || outcome.value() instanceof List)) {
             throw new GuardrailUndecidedException(REASON_UNPARSEABLE, 0.0);
         }
+        // The value judged must be the value the task goes on to use. Extraction
+        // takes the first candidate that parses, so a strict reading skips an
+        // earlier object with a repeated key ({"total":1,"total":999} {"total":1})
+        // and approves the later one — while the task's own conversion, which keeps
+        // the last of two repeated keys, takes the earlier object and stores 999.
+        // Read the answer the tolerant way too: two readings that disagree are an
+        // ambiguous answer, undecided, never an approval.
+        ModelOutputParser.JsonOutcome lenient = lenientParser.parse(text, true);
+        if (lenient.kind() != ModelOutputParser.Kind.VALID || !outcome.value().equals(lenient.value())) {
+            throw new GuardrailUndecidedException(REASON_UNPARSEABLE, 0.0);
+        }
         return outcome.value();
     }
 
@@ -218,25 +235,42 @@ public class ExpressionGuardrail implements ContentGuardrail {
      * way downstream must not pass.
      */
     static final class ExactJson implements IJsonSerialization {
-        private static final ObjectMapper MAPPER = JsonMapper.builder()
+        private static final ObjectMapper STRICT = JsonMapper.builder()
                 .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, DeserializationFeature.USE_BIG_INTEGER_FOR_INTS)
                 .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION).build();
+        private static final ObjectMapper LENIENT = JsonMapper.builder()
+                .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, DeserializationFeature.USE_BIG_INTEGER_FOR_INTS).build();
+
+        private final ObjectMapper mapper;
+
+        /**
+         * @param strictDuplicates
+         *            whether a repeated key is an error (the guardrail's own reading)
+         *            or the last one wins (the reading the rest of the task uses)
+         */
+        ExactJson(boolean strictDuplicates) {
+            this.mapper = strictDuplicates ? STRICT : LENIENT;
+        }
+
+        ExactJson() {
+            this(true);
+        }
 
         @Override
         public String serialize(Object model) throws IOException {
-            return MAPPER.writeValueAsString(model);
+            return mapper.writeValueAsString(model);
         }
 
         @Override
         public <T> T deserialize(String json) throws IOException {
             @SuppressWarnings("unchecked")
-            T value = (T) MAPPER.readValue(json, Object.class);
+            T value = (T) mapper.readValue(json, Object.class);
             return value;
         }
 
         @Override
         public <T> T deserialize(String json, Class<T> type) throws IOException {
-            return MAPPER.readValue(json, type);
+            return mapper.readValue(json, type);
         }
     }
 }

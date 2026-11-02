@@ -56,71 +56,6 @@ class AgentOrchestratorToolGovernanceTest {
     @DisplayName("F15 — tool name collisions")
     class ToolCollisions {
 
-        @Test
-        @DisplayName("a remote MCP tool named 'calculator' does not displace the built-in one")
-        void remoteToolCannotShadowBuiltIn() {
-            List<ToolSpecification> specs = new ArrayList<>(List.of(
-                    ToolSpecification.builder().name("calculator").description("built-in").build()));
-            Map<String, ToolExecutor> executors = new HashMap<>(Map.of("calculator", executor("builtin")));
-            Map<String, String> sources = new HashMap<>(Map.of("calculator", "builtin"));
-
-            AgentOrchestrator.mergeExternalTools(
-                    List.of(ToolSpecification.builder().name("calculator").description("remote").build()),
-                    Map.of("calculator", executor("remote")), "mcp", specs, executors, sources);
-
-            assertEquals("builtin", executors.get("calculator").execute(null, null),
-                    "the built-in executor must survive the collision");
-            assertEquals("builtin", sources.get("calculator"));
-            assertEquals(1, specs.size(), "the model must not be shown two tools with the same name");
-        }
-
-        @Test
-        @DisplayName("a non-colliding remote tool is merged normally")
-        void mergesDistinctNames() {
-            List<ToolSpecification> specs = new ArrayList<>();
-            Map<String, ToolExecutor> executors = new HashMap<>();
-            Map<String, String> sources = new HashMap<>();
-
-            AgentOrchestrator.mergeExternalTools(
-                    List.of(ToolSpecification.builder().name("crm_lookup").build()),
-                    Map.of("crm_lookup", executor("mcp")), "mcp", specs, executors, sources);
-
-            assertEquals(1, specs.size());
-            assertEquals("mcp", sources.get("crm_lookup"));
-            assertEquals("mcp", executors.get("crm_lookup").execute(null, null));
-        }
-
-        @Test
-        @DisplayName("precedence follows merge order: http beats a later mcp of the same name")
-        void earlierSourceWins() {
-            List<ToolSpecification> specs = new ArrayList<>();
-            Map<String, ToolExecutor> executors = new HashMap<>();
-            Map<String, String> sources = new HashMap<>();
-
-            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("lookup").build()),
-                    Map.of("lookup", executor("http")), "http", specs, executors, sources);
-            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("lookup").build()),
-                    Map.of("lookup", executor("mcp")), "mcp", specs, executors, sources);
-
-            assertEquals("http", sources.get("lookup"));
-            assertEquals("http", executors.get("lookup").execute(null, null));
-            assertEquals(1, specs.size());
-        }
-
-        @Test
-        @DisplayName("a spec with no executor is skipped rather than registered half-wired")
-        void skipsSpecWithoutExecutor() {
-            List<ToolSpecification> specs = new ArrayList<>();
-            Map<String, ToolExecutor> executors = new HashMap<>();
-            Map<String, String> sources = new HashMap<>();
-
-            AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("orphan").build()),
-                    Map.of(), "a2a", specs, executors, sources);
-
-            assertTrue(specs.isEmpty());
-            assertFalse(executors.containsKey("orphan"));
-        }
-
         /**
          * One source's contribution of a single named tool, optionally with a resolver.
          */
@@ -315,18 +250,5 @@ class AgentOrchestratorToolGovernanceTest {
                 null,
                 null, null, conversationService, null, null,
                 null, null, null);
-    }
-
-    @Test
-    @DisplayName("the shared collision helper never substitutes an executor silently")
-    void collisionHelperIsDeterministic() {
-        Map<String, ToolExecutor> executors = new HashMap<>();
-        ToolExecutor incumbent = executor("first");
-        executors.put("dup", incumbent);
-
-        AgentOrchestrator.mergeExternalTools(List.of(ToolSpecification.builder().name("dup").build()),
-                Map.of("dup", executor("second")), "a2a", new ArrayList<>(), executors, new HashMap<>());
-
-        assertSame(incumbent, executors.get("dup"));
     }
 }

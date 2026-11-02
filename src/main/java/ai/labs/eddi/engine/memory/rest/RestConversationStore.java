@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationPurgeService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -339,7 +340,7 @@ public class RestConversationStore implements IRestConversationStore {
             do {
                 conversationDescriptors = readConversationDescriptors(descriptorPage, scanSize, textFilter, restrictions);
                 if (conversationDescriptors.isEmpty() && descriptorPage == 0 && !isNullOrEmpty(textFilter)
-                        && searchMatchesNothing(textFilter, restrictions)) {
+                        && searchMatchesNothing(textFilter, restrictions, seesAllConversations)) {
                     // A search that matches no conversation at all lists everything
                     // instead — decided once, on the first descriptor page, so every
                     // result page of the listing agrees on which rows it is paging through.
@@ -619,13 +620,8 @@ public class RestConversationStore implements IRestConversationStore {
             restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
                     new QueryFilter(FIELD_AGENT_RESOURCE, "/" + escapeRegex(agentId) + "(\\?|$)"),
                     new QueryFilter(FIELD_AGENT_RESOURCE, new NotMatching(NOT_BLANK)))));
-        } else if (!seesAllConversations) {
-            String caller = conversationAccessGuard.callerActor(null);
-            if (caller != null) {
-                restrictions.add(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
-                        QueryFilter.exact(FIELD_USER_ID, caller),
-                        new QueryFilter(FIELD_USER_ID, new NotMatching(NOT_BLANK)))));
-            }
+        } else {
+            restrictions.addAll(ownerScope(seesAllConversations));
         }
         if (viewState != null) {
             restrictions.add(new QueryFilters(List.of(QueryFilter.exact(FIELD_VIEW_STATE, viewState.name()))));
@@ -634,15 +630,44 @@ public class RestConversationStore implements IRestConversationStore {
     }
 
     /**
-     * Whether the search finds no conversation at all — the only case in which the
-     * listing drops it and lists everything. The listing's own filters are pushed
-     * into its query, so its first page also comes back empty when the search does
-     * match, only outside them ("Billing" within another agent's conversations);
-     * that listing is empty, as it was before the filters moved into the query.
+     * Whether the search finds no conversation the caller may list — the only case
+     * in which the listing drops it and lists everything. The listing's own filters
+     * are pushed into its query, so its first page also comes back empty when the
+     * search does match, only outside them ("Billing" within another agent's
+     * conversations); that listing is empty, as it was before the filters moved
+     * into the query.
+     * <p>
+     * The existence check is confined to the caller's own conversations (for a
+     * caller who does not see all of them). It used to search the whole store, so
+     * whether the listing came back empty or unfiltered told the caller whether
+     * <em>anybody's</em> conversation matched — an existence oracle over other
+     * users' ids, names and agent names. A conversation the caller may not list
+     * must not change what the caller is shown.
      */
-    private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions)
+    private boolean searchMatchesNothing(String textFilter, List<QueryFilters> restrictions, boolean seesAllConversations)
             throws ResourceStoreException, ResourceNotFoundException {
-        return restrictions.isEmpty() || readConversationDescriptors(0, 1, textFilter, List.of()).isEmpty();
+        if (restrictions.isEmpty()) {
+            return true;
+        }
+        return readConversationDescriptors(0, 1, textFilter, ownerScope(seesAllConversations)).isEmpty();
+    }
+
+    /**
+     * The conversations a caller may list regardless of any listing filter: their
+     * own, plus the legacy ones that record no owner (their owner is decided per
+     * row from memory). Empty — everything — for a caller who sees all.
+     */
+    private List<QueryFilters> ownerScope(boolean seesAllConversations) {
+        if (seesAllConversations) {
+            return List.of();
+        }
+        String caller = conversationAccessGuard.callerActor(null);
+        if (caller == null) {
+            return List.of();
+        }
+        return List.of(new QueryFilters(QueryFilters.ConnectingType.OR, List.of(
+                QueryFilter.exact(FIELD_USER_ID, caller),
+                new QueryFilter(FIELD_USER_ID, new NotMatching(NOT_BLANK)))));
     }
 
     private List<ConversationDescriptor> readConversationDescriptors(Integer index, Integer limit, String filter,
@@ -691,9 +716,34 @@ public class RestConversationStore implements IRestConversationStore {
             // requireSnapshot, not the raw load: a missing conversation returned null
             // here, which JAX-RS renders as 204 No Content — indistinguishable from a
             // conversation that exists and happens to be empty.
-            return redactRawPendingToolCallsForRead(requireSnapshot(conversationId));
+            var snapshot = redactRawPendingToolCallsForRead(requireSnapshot(conversationId));
+            // The compiled system prompt (audit:compiled_prompt) is the agent's
+            // configuration, which a caller who may only USE the agent must not read —
+            // the detailed view and MCP read_audit_trail withhold it on the same terms.
+            // An admin, or anyone with workspaces off, has VIEW and sees it.
+            if (!mayViewAgentOf(snapshot)) {
+                ConversationMemoryUtilities.stripAuditData(snapshot);
+            }
+            return snapshot;
         } catch (ResourceStoreException | ResourceNotFoundException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    /**
+     * Whether the caller has VIEW on the agent the conversation runs on. A snapshot
+     * that names no agent, or a guard that cannot answer, is treated as no.
+     */
+    private boolean mayViewAgentOf(ConversationMemorySnapshot snapshot) {
+        String agentId = snapshot.getAgentId();
+        if (agentId == null || resourceAccessGuard == null) {
+            return resourceAccessGuard == null;
+        }
+        try {
+            return resourceAccessGuard.hasAccess(agentId, AccessLevel.VIEW);
+        } catch (RuntimeException e) {
+            log.debugf("Could not decide VIEW on agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
+            return false;
         }
     }
 
@@ -976,10 +1026,15 @@ public class RestConversationStore implements IRestConversationStore {
                     if (!deleteAutoVaultedSecretsForConversation(endedConversationId)) {
                         continue; // kept, with its secret references, for the next run
                     }
+                    // The dependent data before anything that makes the conversation
+                    // findable: the descriptors and the snapshot are what the next run
+                    // (and a user erasure) find it by, so a failed delete keeps them.
+                    if (!deleteDependentDataForConversation(endedConversationId)) {
+                        continue;
+                    }
                     deleteChannelMappingsForConversation(endedConversationId);
                     documentDescriptorStore.deleteAllDescriptor(endedConversationId);
                     conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
-                    deleteAttachmentsForConversation(endedConversationId);
                     conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                     amountOfEndedConversations++;
                 }
@@ -993,11 +1048,11 @@ public class RestConversationStore implements IRestConversationStore {
                 var archive = archiveRetention(endedConversationId, deleteOlderThanThisDate);
                 // The vault slots go first: the snapshot about to be deleted holds the
                 // only references to them.
-                if (archive == ArchiveRetention.WITHIN_RETENTION || !deleteAutoVaultedSecretsForConversation(endedConversationId)) {
+                if (archive == ArchiveRetention.WITHIN_RETENTION || !deleteAutoVaultedSecretsForConversation(endedConversationId)
+                        || !deleteDependentDataForConversation(endedConversationId)) {
                     continue;
                 }
                 conversationDescriptorStore.deleteAllDescriptor(endedConversationId);
-                deleteAttachmentsForConversation(endedConversationId);
                 conversationMemoryStore.deleteConversationMemorySnapshot(endedConversationId);
                 if (archive == ArchiveRetention.EXPIRED) {
                     // A soft-deleted conversation that aged out: an ordinary retention
@@ -1377,7 +1432,16 @@ public class RestConversationStore implements IRestConversationStore {
         }
     }
 
-    private void deleteAttachmentsForConversation(String conversationId) {
-        purgeService().deleteAttachments(conversationId);
+    /**
+     * Attachments, memory checkpoints and HITL tool-journal entries - the same
+     * cascade a permanent delete runs. Checkpoints hold copies of the
+     * conversation's properties; the sweep used to delete the snapshot without
+     * them, which also removed the only record a later user erasure could find them
+     * by.
+     *
+     * @return false when any of them could not be deleted
+     */
+    private boolean deleteDependentDataForConversation(String conversationId) {
+        return purgeService().deleteDependentData(conversationId);
     }
 }

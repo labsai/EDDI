@@ -53,8 +53,9 @@ public class RestResourceSharing implements IRestResourceSharing {
         if (notifications == null) {
             throw new ServiceUnavailableException("Access requests are not available");
         }
-        // Only configuration is shared, so only configuration can be asked for.
-        sharingService.requireShareable(id);
+        // Only configuration is shared, so only configuration can be asked for —
+        // decided inside requestAccess, after the attempt is counted, and answered
+        // like a missing id so the endpoint is no oracle for which ids exist.
         var outcome = notifications.requestAccess(id, requested, message);
         if (outcome == WorkspaceNotifications.RequestOutcome.RATE_LIMITED) {
             return Response.status(429).entity(Map.of("outcome", outcome.name(), "error",

@@ -182,10 +182,10 @@ class AgentOrchestratorCoverageTest {
         lenient().when(memory.getAgentId()).thenReturn(null);
         lenient().when(memory.getAgentVersion()).thenReturn(null);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
-        lenient().when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
+        lenient().when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);
         lenient()
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class), any(),
                         any(Supplier.class),
@@ -413,7 +413,7 @@ class AgentOrchestratorCoverageTest {
     @Test
     void toolCall_tenantCostBudgetDenied_returnsQuotaError() throws Exception {
         var task = calcOnlyTask();
-        when(tenantQuotaService.checkCostBudget(any()))
+        when(tenantQuotaService.checkCostBudget(any(), anyDouble()))
                 .thenReturn(new QuotaCheckResult(false, "monthly cap reached"));
 
         ChatModel chatModel = mock(ChatModel.class);

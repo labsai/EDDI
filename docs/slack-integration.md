@@ -195,6 +195,17 @@ ChannelTargetRouter (60s cache refresh)
         └──→ SlackEventHandler: postMessage(resolvedBotToken, ...)
 ```
 
+Only `botToken` and `signingSecret` are resolved; a `${vault:...}` reference in any
+other `platformConfig` value stays literal text. A credential whose reference does
+not resolve (vault disabled, key missing) is **dropped**, never used as its own
+text: an integration without a usable signing secret answers every request with
+401, and the verifier refuses an unresolved reference as a key in any case. A bot
+token whose secret has `allowedHosts` that do not include `slack.com` is dropped
+the same way. The HITL approval card and resume messages are posted only with the
+originating integration's own bot token — never with the token of whatever
+integration serves the approval channel — and resume messages go only to
+conversations Slack itself started (owned by a `slack:` user).
+
 **Signatures are bound to the channel's owner.** The pooled check only proves that
 *some* configured Slack app signed the request. Once the body is parsed, an event
 for a configured channel must also verify against the signing secret of the

@@ -105,6 +105,14 @@ describe("ChatWidget ratings", () => {
     expect(calls.some((c) => c.url.includes("/rating"))).toBe(false);
   });
 
+  it("opens the card from the header for an agent that sent no greeting (empty transcript)", async () => {
+    // No outputs: the transcript shows its empty state, and the card must still open.
+    mockBackend({ snapshot: { conversationId: "conv-1", conversationState: "READY", conversationOutputs: [] } });
+    renderWidget();
+    fireEvent.click(await screen.findByTestId("rate-conversation"));
+    expect(await screen.findByTestId("rating-star-1")).toBeInTheDocument();
+  });
+
   it("shows only the header entry when the agent asks for a conversation rating but no reply ratings", async () => {
     mockBackend({ rating: { ...RATING, messageRating: false } });
     renderWidget();

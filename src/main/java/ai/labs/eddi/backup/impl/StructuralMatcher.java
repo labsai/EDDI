@@ -383,6 +383,11 @@ public class StructuralMatcher {
             }
         }
 
+        // Each extension row carries its workflow's position. Two workflows that share
+        // a resource on the source each have their own copy on the target, so the
+        // same source id yields one row per workflow, with different targets — and
+        // the executor has to pick the row of the workflow it is processing, not
+        // whichever came first.
         List<ResourceDiff> extensionDiffs = new ArrayList<>();
         Set<String> changing = new HashSet<>();
         for (Map.Entry<String, ExtensionSourceData> entry : sourceExtensions.entrySet()) {
@@ -414,7 +419,7 @@ public class StructuralMatcher {
                         sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                         extAction, targetExt.id, targetExt.version, "type",
                         includeContent ? comparable : null,
-                        includeContent ? tgtContent : null, -1));
+                        includeContent ? tgtContent : null, sourceWf.positionIndex()));
                 if (extAction == DiffAction.UPDATE) {
                     changing.add(sourceExt.sourceId());
                 }
@@ -424,7 +429,7 @@ public class StructuralMatcher {
                         sourceExt.sourceId(), sourceExt.type(), sourceExt.name(),
                         DiffAction.CREATE, null, null, null,
                         includeContent ? sourceExt.contentJson() : null,
-                        null, -1));
+                        null, sourceWf.positionIndex()));
                 changing.add(sourceExt.sourceId());
             }
         }
@@ -471,7 +476,7 @@ public class StructuralMatcher {
             diffs.add(new ResourceDiff(
                     ext.sourceId(), ext.type(), ext.name(),
                     DiffAction.CREATE, null, null, null,
-                    null, null, -1));
+                    null, null, sourceWf.positionIndex()));
         }
 
         return diffs;
@@ -858,21 +863,6 @@ public class StructuralMatcher {
     }
 
     /**
-     * The version the target resource is actually at, or null when it cannot be
-     * established.
-     * <p>
-     * Must go through {@link IDocumentDescriptorStore#readCurrentDescriptor}, which
-     * resolves the current version first. The obvious-looking
-     * {@code readDescriptor(resourceId, null)} cannot work: the descriptor store is
-     * historized and its read does {@code checkNotNull(version)}, so a null version
-     * <em>always</em> threw and the swallowed exception left every caller with
-     * {@link #readLatestVersionOrDefault}'s fallback of 1. That is what made a sync
-     * work exactly once per target: the second run still diffed against version 1,
-     * showed the operator the pre-sync content as "target", and then wrote against
-     * version 1 — which the store rejects once the first sync has moved the
-     * resource to version 2 ("the store did not accept the update").
-     */
-    /**
      * The version the target agent is actually at.
      * <p>
      * The store is asked first and the descriptor only as a fallback, because the
@@ -909,6 +899,21 @@ public class StructuralMatcher {
         }
     }
 
+    /**
+     * The version the target resource is actually at, or null when it cannot be
+     * established.
+     * <p>
+     * Must go through {@link IDocumentDescriptorStore#readCurrentDescriptor}, which
+     * resolves the current version first. The obvious-looking
+     * {@code readDescriptor(resourceId, null)} cannot work: the descriptor store is
+     * historized and its read does {@code checkNotNull(version)}, so a null version
+     * <em>always</em> threw and the swallowed exception left every caller with a
+     * fallback of 1. That is what made a sync work exactly once per target: the
+     * second run still diffed against version 1, showed the operator the pre-sync
+     * content as "target", and then wrote against version 1 — which the store
+     * rejects once the first sync has moved the resource to version 2 ("the store
+     * did not accept the update").
+     */
     private Integer readLatestVersion(String resourceId) {
         try {
             DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
@@ -921,11 +926,6 @@ public class StructuralMatcher {
                     LogSanitizer.sanitize(resourceId), LogSanitizer.sanitize(e.getMessage()));
         }
         return null;
-    }
-
-    private int readLatestVersionOrDefault(String resourceId, int defaultVersion) {
-        Integer version = readLatestVersion(resourceId);
-        return version != null ? version : defaultVersion;
     }
 
     // ==================== Utilities ====================

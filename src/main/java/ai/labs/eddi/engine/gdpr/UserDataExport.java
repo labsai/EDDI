@@ -201,6 +201,13 @@ public record UserDataExport(
      */
     public static final Map<String, Object> EXPORT_FAILED = Map.of("exportFailed", true);
 
+    /**
+     * The key a participant's section sets to {@code true} when it holds more than
+     * it exported — the section is then a capped extract, and counted by
+     * {@link #complete()}.
+     */
+    public static final String SECTION_TRUNCATED = "truncated";
+
     public static final List<String> OMITTED_CATEGORIES = List.of("schedules", "journalEntries");
 
     /**
@@ -240,7 +247,15 @@ public record UserDataExport(
     public boolean complete() {
         return !conversationsTruncated && failedConversationIds.isEmpty() && omittedCategories().isEmpty()
                 && !additionalData.containsValue(EXPORT_FAILED) && !groupConversationsTruncated && !sharedArtifactsTruncated
-                && failedCategories.isEmpty();
+                && failedCategories.isEmpty() && additionalData.values().stream().noneMatch(UserDataExport::isSectionTruncated);
+    }
+
+    /**
+     * Whether a participant's section is a capped extract (see
+     * {@link #SECTION_TRUNCATED}).
+     */
+    public static boolean isSectionTruncated(Object section) {
+        return section instanceof Map<?, ?> map && Boolean.TRUE.equals(map.get(SECTION_TRUNCATED));
     }
 
     /**

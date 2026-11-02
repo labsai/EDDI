@@ -219,8 +219,14 @@ async function getWithoutCredentials(url: string, accept: string): Promise<Respo
       credentials: "omit",
       // `credentials: "omit"` drops cookies and auth, but not the referrer: the
       // browser default (`strict-origin-when-cross-origin`) would still hand
-      // GitHub this deployment's origin. For a self-hosted instance that
-      // hostname *is* deployment data, and the card promises none is sent.
+      // GitHub this deployment's origin in `Referer`. For a self-hosted
+      // instance that hostname *is* deployment data.
+      //
+      // Known residual, and why the card says so: a cross-origin CORS fetch
+      // still carries an `Origin` header, which no fetch option suppresses.
+      // GitHub therefore sees the Manager's origin. Closing that needs a
+      // same-origin backend proxy for the release lookup; the card's wording
+      // (`updates.privacyNote`) states the origin is attached.
       referrerPolicy: "no-referrer",
     });
   } catch {

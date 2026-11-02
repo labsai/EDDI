@@ -205,11 +205,14 @@ public class HitlCrashRecoveryObserver {
                 }
                 String conversationId = summary.getConversationId();
                 try {
-                    // cancelConversation is CAS-guarded: it no-ops if the pause was
-                    // resumed/cancelled between the scan and here. G6: attribute the
-                    // retention-driven cancellation with a system actor so the audit
-                    // records decidedBy=system:retention (automated), not "unknown".
-                    var outcome = conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL, "system:retention");
+                    // The paused-only cancel, bound to the pause the scan saw: if it was
+                    // resumed between the scan and here, the resumed turn must not be
+                    // signalled to stop (the full cancel would), and a newer pause is not
+                    // the expired one. G6: attribute the retention-driven cancellation
+                    // with a system actor so the audit records decidedBy=system:retention
+                    // (automated), not "unknown".
+                    var outcome = conversationService.cancelPausedConversation(conversationId, "system:retention",
+                            HitlDecision.pauseIdOf(pausedAt));
                     if (outcome == IConversationService.CancelOutcome.CANCELLED) {
                         cancelled++;
                     }

@@ -13,6 +13,9 @@ import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationPurgeService;
+import ai.labs.eddi.engine.memory.IConversationCheckpointStore;
+import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
@@ -143,6 +146,49 @@ class RestConversationStoreTest {
         void throwsForNull() {
             assertThrows(IllegalArgumentException.class,
                     () -> restConversationStore.readRawConversationLog(null));
+        }
+
+        private ConversationMemorySnapshot snapshotWithCompiledPrompt() {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setAgentId("agent-1");
+            snapshot.setConversationState(ConversationState.READY);
+            var step = new ConversationMemorySnapshot.ConversationStepSnapshot();
+            var workflow = new ConversationMemorySnapshot.WorkflowRunSnapshot();
+            workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot("audit:compiled_prompt", "SYSTEM PROMPT", null,
+                    new Date(), null, false));
+            workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot("audit:token_usage", Map.of("input", 3), null,
+                    new Date(), null, false));
+            workflow.getLifecycleTasks().add(new ConversationMemorySnapshot.ResultSnapshot("output:text", "hi", null, new Date(), null, true));
+            step.getWorkflows().add(workflow);
+            snapshot.getConversationSteps().add(step);
+            return snapshot;
+        }
+
+        private List<String> stepKeys(ConversationMemorySnapshot snapshot) {
+            return snapshot.getConversationSteps().getFirst().getWorkflows().getFirst().getLifecycleTasks().stream()
+                    .map(ConversationMemorySnapshot.ResultSnapshot::getKey).toList();
+        }
+
+        @Test
+        @DisplayName("withholds the compiled system prompt from a caller without VIEW on the agent")
+        void withholdsCompiledPromptWithoutView() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshotWithCompiledPrompt());
+            when(resourceAccessGuard.hasAccess("agent-1", AccessLevel.VIEW)).thenReturn(false);
+
+            var keys = stepKeys(restConversationStore.readRawConversationLog("conv-1"));
+
+            assertFalse(keys.contains("audit:compiled_prompt"));
+            assertTrue(keys.contains("audit:token_usage"));
+            assertTrue(keys.contains("output:text"));
+        }
+
+        @Test
+        @DisplayName("keeps the compiled system prompt for a caller with VIEW on the agent")
+        void keepsCompiledPromptWithView() throws Exception {
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshotWithCompiledPrompt());
+            when(resourceAccessGuard.hasAccess("agent-1", AccessLevel.VIEW)).thenReturn(true);
+
+            assertTrue(stepKeys(restConversationStore.readRawConversationLog("conv-1")).contains("audit:compiled_prompt"));
         }
     }
 
@@ -490,10 +536,11 @@ class RestConversationStoreTest {
                     conversationMemoryStore, conversationService, userMemoryStore, runtime, conversationAccessGuard, resourceAccessGuard,
                     30, 90, attachmentStorageInstance);
 
-            // Should not throw — logs warning and continues
-            assertDoesNotThrow(() -> store.deleteConversationLog("conv-1", true));
-            verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-1");
-            verify(conversationDescriptorStore).deleteAllDescriptor("conv-1");
+            // The delete fails and keeps the conversation findable, so it can be retried —
+            // it used to delete the memory anyway and leave the attachments orphaned.
+            assertThrows(ResourceStoreException.class, () -> store.deleteConversationLog("conv-1", true));
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-1");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor("conv-1");
         }
     }
 
@@ -776,6 +823,54 @@ class RestConversationStoreTest {
             verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
             verify(documentDescriptorStore).deleteAllDescriptor("conv-old");
             verify(conversationDescriptorStore).deleteAllDescriptor("conv-old");
+        }
+
+        @SuppressWarnings("unchecked")
+        private IConversationCheckpointStore givenCheckpointStore() {
+            IConversationCheckpointStore checkpoints = mock(IConversationCheckpointStore.class);
+            Instance<IConversationCheckpointStore> checkpointInstance = mock(Instance.class);
+            when(checkpointInstance.isResolvable()).thenReturn(true);
+            when(checkpointInstance.get()).thenReturn(checkpoints);
+            Instance<IHitlToolJournalStore> journalInstance = mock(Instance.class);
+            when(journalInstance.isResolvable()).thenReturn(false);
+            Instance<AutoVaultedSecrets> vault = mock(Instance.class);
+            when(vault.isResolvable()).thenReturn(false);
+            restConversationStore.conversationPurgeService = new ConversationPurgeService(conversationMemoryStore, conversationDescriptorStore,
+                    conversationService, vault, attachmentStorageInstance, checkpointInstance, journalInstance);
+            return checkpoints;
+        }
+
+        @Test
+        @DisplayName("the sweep deletes a swept conversation's memory checkpoints before its snapshot")
+        void deletesCheckpointsOfSweptConversation() throws Exception {
+            IConversationCheckpointStore checkpoints = givenCheckpointStore();
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-old"));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 24 * 60 * 60 * 1000));
+            when(documentDescriptorStore.readDescriptor("conv-old", 0)).thenReturn(descriptor);
+
+            assertEquals(1, restConversationStore.permanentlyDeleteEndedConversationLogs(30));
+
+            var order = inOrder(checkpoints, conversationMemoryStore);
+            order.verify(checkpoints).deleteByConversationId("conv-old");
+            order.verify(conversationMemoryStore).deleteConversationMemorySnapshot("conv-old");
+        }
+
+        @Test
+        @DisplayName("a checkpoint delete that fails keeps the conversation — snapshot and descriptors — for the next run")
+        void failedCheckpointDeleteKeepsTheConversation() throws Exception {
+            IConversationCheckpointStore checkpoints = givenCheckpointStore();
+            when(checkpoints.deleteByConversationId("conv-old")).thenThrow(new IllegalStateException("store down"));
+            when(conversationMemoryStore.getEndedConversationIds()).thenReturn(List.of("conv-old"));
+            var descriptor = new DocumentDescriptor();
+            descriptor.setLastModifiedOn(new Date(System.currentTimeMillis() - 100L * 24 * 60 * 60 * 1000));
+            when(documentDescriptorStore.readDescriptor("conv-old", 0)).thenReturn(descriptor);
+
+            assertEquals(0, restConversationStore.permanentlyDeleteEndedConversationLogs(30));
+
+            verify(conversationMemoryStore, never()).deleteConversationMemorySnapshot("conv-old");
+            verify(documentDescriptorStore, never()).deleteAllDescriptor("conv-old");
+            verify(conversationDescriptorStore, never()).deleteAllDescriptor("conv-old");
         }
 
         @SuppressWarnings("unchecked")

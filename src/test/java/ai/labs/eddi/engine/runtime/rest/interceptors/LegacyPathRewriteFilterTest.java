@@ -91,44 +91,46 @@ class LegacyPathRewriteFilterTest {
     class EnvironmentTests {
 
         @Test
-        @DisplayName("/unrestricted/ → /production/")
+        @DisplayName("/administration/unrestricted/… → /administration/production/…")
         void unrestrictedSegmentBecomesProduction() {
-            assertEquals("/agentstore/agents/abc/production/whatever",
-                    LegacyPathRewriteFilter.rewritePath("/botstore/bots/abc/unrestricted/whatever"));
+            assertEquals("/administration/production/deploy/abc",
+                    LegacyPathRewriteFilter.rewritePath("/administration/unrestricted/deploy/abc"));
         }
 
         @Test
-        @DisplayName("/restricted/ → /production/")
+        @DisplayName("/administration/restricted/… → /administration/production/…")
         void restrictedSegmentBecomesProduction() {
-            assertEquals("/agents/abc/production/status",
-                    LegacyPathRewriteFilter.rewritePath("/agents/abc/restricted/status"));
+            assertEquals("/administration/production/deploymentstatus",
+                    LegacyPathRewriteFilter.rewritePath("/administration/restricted/deploymentstatus"));
+        }
+
+        /**
+         * An id, key or user literally named restricted/unrestricted is not an
+         * environment: rewriting it misdirected destructive operations (an erasure of
+         * user "production", a secret key "production").
+         */
+        @Test
+        @DisplayName("restricted/unrestricted outside the environment position are left alone")
+        void unrelatedSegmentsAreNotRewritten() {
+            for (String path : new String[]{"/admin/gdpr/restricted", "/secretstore/secrets/default/unrestricted",
+                    "/agents/managed/restricted/user-1", "/agents/abc/restricted/status", "/administration/x/restricted"}) {
+                assertEquals(path, LegacyPathRewriteFilter.rewritePath(path), path);
+            }
         }
 
         @Test
-        @DisplayName("trailing /unrestricted → /production")
-        void trailingUnrestrictedBecomesProduction() {
-            assertEquals("/agents/abc/production",
-                    LegacyPathRewriteFilter.rewritePath("/agents/abc/unrestricted"));
-        }
-
-        @Test
-        @DisplayName("trailing /restricted → /production")
-        void trailingRestrictedBecomesProduction() {
-            assertEquals("/agents/abc/production",
-                    LegacyPathRewriteFilter.rewritePath("/agents/abc/restricted"));
-        }
-
-        @Test
-        @DisplayName("store rewrite and environment rewrite apply together")
-        void storeAndEnvironmentRewriteCombine() {
-            assertEquals("/agentstore/agents/abc/production",
-                    LegacyPathRewriteFilter.rewritePath("/botstore/bots/abc/unrestricted"));
+        @DisplayName("a store prefix is rewritten only where the path starts with it")
+        void storePrefixOnlyAtTheStart() {
+            assertEquals("/agentstore/agents/abc/unrestricted", LegacyPathRewriteFilter.rewritePath("/botstore/bots/abc/unrestricted"));
+            String nested = "/secretstore/secrets/default/botstore/bots";
+            assertEquals(nested, LegacyPathRewriteFilter.rewritePath(nested));
+            assertEquals("/botstore/botsx", LegacyPathRewriteFilter.rewritePath("/botstore/botsx"));
         }
 
         @Test
         @DisplayName("a v6 /production path is left untouched")
         void productionPathUnchanged() {
-            String path = "/agentstore/agents/abc/production";
+            String path = "/administration/production/deploy/abc";
             assertEquals(path, LegacyPathRewriteFilter.rewritePath(path));
         }
     }
