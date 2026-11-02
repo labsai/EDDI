@@ -523,6 +523,8 @@ Approved tool executions are protected by a write-ahead journal (`IHitlToolJourn
 3. On resume, an `EXECUTED` entry **replays its stored result** — the tool is never re-run.
 4. An `EXECUTING` entry (a crash *inside* the tool) yields an honest `EXECUTION_OUTCOME_UNKNOWN` result fed to the LLM: *"a previous execution attempt was interrupted; it may or may not have taken effect — verify externally before retrying."* This is logged with an alertable marker (`WARN hitl.tool.outcome_unknown`, not an audit-ledger entry — the orchestrator has no audit collector in scope here) and surfaced in `pauseDetails.outcomeUnknown`.
 
+**Retention (MongoDB).** `eddi.hitl.tool.journal-retention` is a TTL index on `claimedAt` that covers `EXECUTED` entries only (`idx_journal_ttl_completed`, a partial index), so a crash-orphaned `EXECUTING` claim is kept until its conversation is deleted. An older pod that is still running during a rolling update recreates the previous unfiltered index (`idx_journal_ttl_claimed`), which would expire those claims again. The store therefore reconciles at startup and every `eddi.hitl.tool.journal-reconcile-interval` (default `15m`): any unfiltered TTL index on `claimedAt` is dropped (one `WARN` per occurrence) and the partial index is re-created if missing. PostgreSQL keeps no such index.
+
 > **Outcome-unknown contract:** the framework **never silently re-executes** a tool that may have already run. A crash between "claimed" and "executed" is reported as genuinely unknown, not retried — the human (or a downstream check) decides what to do.
 
 ### Slack

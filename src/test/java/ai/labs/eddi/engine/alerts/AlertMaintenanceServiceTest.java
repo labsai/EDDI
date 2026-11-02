@@ -154,6 +154,55 @@ class AlertMaintenanceServiceTest {
         verify(events, never()).insert(any());
     }
 
+    private AlertRule disabled(AlertRule rule) {
+        return new AlertRule(rule.id(), rule.name(), false, rule.scope(), rule.source(), rule.condition(), rule.delivery(), rule.throttle(),
+                rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
+    }
+
+    @Test
+    @DisplayName("events held for a deleted rule are released — a stale cache on another replica created them after the delete")
+    void releasesEventsOfADeletedRule() {
+        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of(RULE_ID));
+        doReturn(Optional.empty()).when(rules).read(RULE_ID);
+        doReturn(3L).when(events).releaseDigestPending(RULE_ID);
+
+        AlertMaintenanceService.Result result = service.run();
+
+        assertEquals(3, result.released());
+        assertFalse(result.isEmpty(), "a pass that released events is worth a fire log");
+        verify(events).releaseDigestPending(RULE_ID);
+    }
+
+    @Test
+    @DisplayName("events held for a disabled rule, or one whose digest is NONE, are released; an enabled digest rule keeps its held events")
+    void releasesOnlyWhatNoLongerDigests() {
+        AlertRule digesting = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.HOURLY);
+        AlertRule off = withThrottle(digesting, null, AlertRule.DigestMode.NONE);
+        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("disabled-rule", "none-rule", "live-rule"));
+        doReturn(Optional.of(disabled(digesting).withId("disabled-rule"))).when(rules).read("disabled-rule");
+        doReturn(Optional.of(off.withId("none-rule"))).when(rules).read("none-rule");
+        doReturn(Optional.of(digesting.withId("live-rule"))).when(rules).read("live-rule");
+        doReturn(1L).when(events).releaseDigestPending(any());
+
+        assertEquals(2, service.run().released());
+
+        verify(events).releaseDigestPending("disabled-rule");
+        verify(events).releaseDigestPending("none-rule");
+        verify(events, never()).releaseDigestPending("live-rule");
+    }
+
+    @Test
+    @DisplayName("a rule that cannot be read does not stop the reconciliation of the others")
+    void reconciliationSurvivesOneFailingRule() {
+        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("broken", "gone"));
+        doThrow(new IllegalStateException("db down")).when(rules).read("broken");
+        doReturn(Optional.empty()).when(rules).read("gone");
+        doReturn(2L).when(events).releaseDigestPending("gone");
+
+        assertEquals(2, service.run().released());
+    }
+
     @Test
     @DisplayName("a rule disabled after the pass began sends no digest of what it held")
     void digestSkippedWhenTheRuleWasDisabledMeanwhile() {

@@ -64,7 +64,11 @@ buckets of `throttle.windowMinutes` aligned to the epoch.
   so changing a rule's scope does not show one agent's held summaries to another
   agent's editors. Deleting a rule, disabling it or setting its digest to `NONE`
   moves its held events to `INBOX_ONLY` (they used to stay `DIGEST_PENDING` until
-  retention).
+  retention). Another replica can still hold the old rule in its cache (for up to
+  the rule cache TTL, about 60 s) and hold one more event after that release, so the
+  maintenance pass also releases the events of any rule that is now disabled,
+  deleted or no longer a digest rule (`findDigestPendingRuleIds`); a late event is
+  back in the inbox within one maintenance interval.
 
 **Retries and digests run on the schedule machinery.** `ScheduleFireExecutor` /
 `SchedulePollerService` are not only for agent conversations: HITL timeouts, Dream,

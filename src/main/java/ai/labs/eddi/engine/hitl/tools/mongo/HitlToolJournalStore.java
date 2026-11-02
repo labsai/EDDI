@@ -76,6 +76,7 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
     private static final String DECIDED_BY = "decidedBy";
 
     private final MongoCollection<Document> collection;
+    private final long retentionSeconds;
 
     @Inject
     public HitlToolJournalStore(MongoDatabase database,
@@ -86,7 +87,7 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
                 Indexes.compoundIndex(Indexes.ascending(CONVERSATION_ID), Indexes.ascending(PAUSE_EPOCH), Indexes.ascending(CALL_ID)),
                 new IndexOptions().name(KEY_INDEX_NAME).unique(true));
 
-        long retentionSeconds = journalRetention == null || journalRetention.isNegative() || journalRetention.isZero()
+        this.retentionSeconds = journalRetention == null || journalRetention.isNegative() || journalRetention.isZero()
                 ? Duration.ofDays(30).toSeconds()
                 : journalRetention.toSeconds();
 
@@ -129,6 +130,40 @@ public class HitlToolJournalStore implements IHitlToolJournalStore {
                 throw e;
             }
         }
+    }
+
+    /**
+     * Finds and drops any TTL index on {@code claimedAt} that is not the partial
+     * one — the legacy names, and any other unfiltered TTL an old pod may have
+     * created during a rolling update — then makes sure the partial index exists.
+     * An unfiltered TTL silently re-enables expiry of EXECUTING claims, so each one
+     * found is logged at WARN.
+     */
+    @Override
+    public int reconcileRetention() {
+        int dropped = 0;
+        for (Document index : collection.listIndexes()) {
+            String name = index.getString("name");
+            if (name != null && isStaleRetentionIndex(name, index)) {
+                LOGGER.warnf("HITL tool journal: dropping stale TTL index %s — it expires EXECUTING claims and was recreated by an older "
+                        + "pod during a rolling update; finish the upgrade so no old pod is left", name);
+                dropIndexIfPresent(name);
+                dropped++;
+            }
+        }
+        createTtlIndexWithConflictRetry(retentionSeconds);
+        return dropped;
+    }
+
+    private static boolean isStaleRetentionIndex(String name, Document index) {
+        if (LEGACY_TTL_INDEX_NAME.equals(name) || UNFILTERED_TTL_INDEX_NAME.equals(name)) {
+            return true;
+        }
+        if (TTL_INDEX_NAME.equals(name) || !index.containsKey("expireAfterSeconds") || index.containsKey("partialFilterExpression")) {
+            return false;
+        }
+        Object key = index.get("key");
+        return key instanceof Document keyDoc && keyDoc.containsKey(CLAIMED_AT);
     }
 
     private void dropIndexIfPresent(String indexName) {

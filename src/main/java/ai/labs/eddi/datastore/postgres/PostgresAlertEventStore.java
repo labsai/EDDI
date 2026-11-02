@@ -298,6 +298,26 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
+    public List<String> findDigestPendingRuleIds(int limit) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn
+                        .prepareStatement(
+                                "SELECT DISTINCT rule_id FROM alert_events WHERE state = 'DIGEST_PENDING' AND rule_id IS NOT NULL LIMIT ?")) {
+            ps.setInt(1, limit);
+            List<String> ruleIds = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ruleIds.add(rs.getString(1));
+                }
+            }
+            return ruleIds;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read the rules holding digest events", e);
+        }
+    }
+
+    @Override
     public long markDigested(Collection<String> ids) {
         ensureSchema();
         if (ids.isEmpty()) {

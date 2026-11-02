@@ -79,6 +79,14 @@ public interface IAlertEventStore {
     /** Acknowledges the listed events that are not yet acknowledged. */
     long acknowledgeIds(Collection<String> ids, String by, Instant at);
 
+    /**
+     * The ids of the rules that still have a {@code DIGEST_PENDING} event, at most
+     * {@code limit}: the maintenance pass checks each against the rule store, so
+     * events held by a rule that has meanwhile been disabled or deleted (a replica
+     * with a stale rule cache can create one after the release) are let go.
+     */
+    List<String> findDigestPendingRuleIds(int limit);
+
     /** The rule's events held for its digest, oldest first. */
     List<AlertEvent> findDigestPending(String ruleId, int limit);
 
