@@ -645,7 +645,7 @@ content. The failure mode is a retry, never a silent bad merge.
 contain a match), `MAX_LENGTH` (characters) — never code. Specs are checked at
 config save time; at write time a failing validator refuses the write with its
 message and stores nothing. Content is additionally capped at 256 KB per
-artifact. A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
+artifact, and `maxArtifactsPerDiscussion` at 1000 (a larger value is refused on save). A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
 the schema (`#/$defs/...`) or at a bundled JSON Schema meta-schema, never at an
 `http(s):`, `file:` or other external location — such a spec is refused at save
 time, and nothing is fetched or read.
@@ -1192,7 +1192,7 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `onAgentFailure` | `SKIP`, `RETRY`, `ABORT` | `SKIP` |
 | `maxRetries` | 0+ | 2 |
 | `onMemberUnavailable` | `SKIP`, `FAIL` | `SKIP` |
-| `maxTurns` | Any positive integer (0 or negative → default) | 50 |
+| `maxTurns` | A positive integer up to 1000 (0 → default; negative or above 1000 is refused on save). A phase's `repeats` is capped at 1000 too | 50 |
 | `maxCostPerDiscussion` | Dollars, or `null` for unlimited | `null` |
 | `onCostExceeded` | `SYNTHESIZE_NOW`, `ABORT` | `SYNTHESIZE_NOW` |
 

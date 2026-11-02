@@ -3369,9 +3369,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // rather than rewritten wrongly; say so, since it renders as literal text.
             // Judged on the decoded values, not the JSON text: escaped quotes hide where
             // a double-quoted literal ends.
-            String unconvertible = templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)
-                    ? templateSyntaxMigrator.unconvertibleReasonIn(jsonSerialization.deserialize(resourceContent, Map.class))
-                    : null;
+            String unconvertible = null;
+            if (templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)) {
+                unconvertible = templateSyntaxMigrator.unconvertibleReasonIn(jsonSerialization.deserialize(resourceContent, Map.class));
+                if (unconvertible == null) {
+                    // Every decoded value passed, but migrate() judges the resource as ONE
+                    // text and leaves all of it unchanged when that text is refused (the
+                    // work bound counts expressions across the whole resource). Report that
+                    // too, rather than import the templates unconverted without a word.
+                    unconvertible = templateSyntaxMigrator.unconvertibleReason(resourceContent);
+                }
+            }
             if (unconvertible != null) {
                 LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: %s. Convert them to Qute by hand.",
                         resourcePath.getFileName(), unconvertible);
