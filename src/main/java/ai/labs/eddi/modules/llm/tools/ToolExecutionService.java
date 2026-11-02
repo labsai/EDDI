@@ -369,14 +369,7 @@ public class ToolExecutionService {
             // a tracking failure must not replace the result with an error — that
             // discarded real work and, since the result was already cached, a retry
             // was served from the cache without ever being charged.
-            if (enableCostTracking && conversationId != null) {
-                try {
-                    costTracker.trackToolCall(invocation, conversationId);
-                } catch (RuntimeException trackingFailure) {
-                    LOGGER.errorf("Cost tracking failed for tool '%s'; the tool result is returned unchanged: %s", toolName,
-                            trackingFailure.getMessage());
-                }
-            }
+            chargeQuietly(invocation, conversationId, enableCostTracking);
 
             long executionTime = System.currentTimeMillis() - startTime;
             meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
@@ -395,8 +388,12 @@ public class ToolExecutionService {
             // above, and gets to recover: apologise, try a different tool, or answer
             // without one.
             //
-            // Nothing is cached and nothing is charged: both of those steps sit after
-            // the execution step we just left.
+            // Nothing is cached. The call IS charged: an abandoned tool keeps running
+            // on its worker and its upstream request (the paid search, the scrape)
+            // is normally already under way, so leaving it unpriced made a timeout a
+            // way around maxBudgetPerConversation. A failure that came back from the
+            // tool (below) is not charged — the tool reported that it did no work.
+            chargeQuietly(invocation, conversationId, enableCostTracking);
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
             meterRegistry.counter("eddi.tool.execution.timeout", "tool", toolName).increment();
             LOGGER.warnf("Tool '%s' exceeded its %dms execution timeout and was abandoned; the model was told so.",
@@ -404,6 +401,24 @@ public class ToolExecutionService {
             markFailed(span, "timeout");
             return "Error: Execution timed out after " + timedOut.timeoutMs + "ms for tool: " + toolName;
 
+        } catch (InterruptedException interrupted) {
+            // The pipeline thread was cancelled while it waited on the tool — a cascade
+            // step timeout, the agent watchdog. Charged for the reason a timeout is:
+            // the tool was already handed to its worker, executeBounded has just
+            // cancelled that worker, and its upstream request (the paid search, the
+            // scrape) is normally under way. This branch used to fall through to the
+            // uncharged one below, so a cascade step abandoned mid-tool lost the tool's
+            // price from its failed-phase spend and from maxCostPerRun.
+            //
+            // The charge lands on this thread before the method returns, so a caller
+            // that waits for the cancelled step to unwind (CascadingModelExecutor does,
+            // briefly) sees it in the conversation's tool cost. The interrupt flag stays
+            // set — executeBounded re-armed it — so the dispatch loop still stops.
+            chargeQuietly(invocation, conversationId, enableCostTracking);
+            long executionTime = System.currentTimeMillis() - startTime;
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            markFailed(span, interrupted.getClass().getName());
+            return describeFailure(toolName, executionTime, interrupted);
         } catch (Exception e) {
             // Nothing below the execution step ran: a failure is neither cached nor
             // charged, whatever kind it is.
@@ -451,6 +466,22 @@ public class ToolExecutionService {
             }
         }
         return builder.startSpan();
+    }
+
+    /**
+     * Charges one call, never letting a tracking failure replace the tool's result:
+     * by the time this runs the tool has already done its work.
+     */
+    private void chargeQuietly(ToolInvocation invocation, String conversationId, boolean enableCostTracking) {
+        if (!enableCostTracking || conversationId == null) {
+            return;
+        }
+        try {
+            costTracker.trackToolCall(invocation, conversationId);
+        } catch (RuntimeException trackingFailure) {
+            LOGGER.errorf("Cost tracking failed for tool '%s'; the tool result is returned unchanged: %s", invocation.dispatchName(),
+                    trackingFailure.getMessage());
+        }
     }
 
     private static void markFailed(Span span, String errorType) {

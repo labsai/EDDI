@@ -116,14 +116,14 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        when(summarizationService.summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"), any()))
-                .thenReturn("Summary of turns 1-2");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary of turns 1-2", 0, 0));
 
         // When
         summarizer.updateIfNeeded(memory, config, null);
 
         // Then
-        verify(summarizationService).summarize(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"), any());
+        verify(summarizationService).summarizeWithUsage(anyString(), anyString(), eq("anthropic"), eq("claude-sonnet-4-6"), any());
         assertEquals("Summary of turns 1-2", ConversationSummarizer.readSummary(memory));
         assertEquals(2, ConversationSummarizer.readSummaryThroughStep(memory));
     }
@@ -141,14 +141,14 @@ class ConversationSummarizerTest {
         props.put(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP,
                 new Property(ConversationSummarizer.PROP_SUMMARY_THROUGH_STEP, 2, Scope.conversation));
 
-        when(summarizationService.summarize(contains("Previous summary"), anyString(), anyString(), anyString(), any()))
-                .thenReturn("Updated summary of turns 1-3");
+        when(summarizationService.summarizeWithUsage(contains("Previous summary"), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Updated summary of turns 1-3", 0, 0));
 
         // When: 8 turns - 5 recent = summarize through step 3
         summarizer.updateIfNeeded(memory, config, null);
 
         // Then
-        verify(summarizationService).summarize(contains("Previous summary"), anyString(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(contains("Previous summary"), anyString(), anyString(), anyString(), any());
         assertEquals("Updated summary of turns 1-3", ConversationSummarizer.readSummary(memory));
         assertEquals(3, ConversationSummarizer.readSummaryThroughStep(memory));
     }
@@ -170,13 +170,13 @@ class ConversationSummarizerTest {
         var config = createConfig(5);
         var inherited = Map.of("apiKey", "parent-key", "baseUrl", "https://parent.example/v1");
 
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any()))
-                .thenReturn("Summary of turns 1-2");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary of turns 1-2", 0, 0));
 
         summarizer.updateIfNeeded(memory, config, null, inherited);
 
         var captured = ArgumentCaptor.forClass(Map.class);
-        verify(summarizationService).summarize(anyString(), anyString(), anyString(), anyString(), captured.capture());
+        verify(summarizationService).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), captured.capture());
         assertNotNull(captured.getValue(), "inherited parameters must not be dropped on the way to the service");
         assertEquals("parent-key", captured.getValue().get("apiKey"));
         assertEquals("https://parent.example/v1", captured.getValue().get("baseUrl"));
@@ -207,7 +207,8 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("", 0, 0));
 
         // When
         summarizer.updateIfNeeded(memory, config, null);
@@ -223,14 +224,14 @@ class ConversationSummarizerTest {
         var config = createConfig(5);
         config.setExcludePropertiesFromSummary(true);
 
-        when(summarizationService.summarize(anyString(), contains("ALREADY stored"), anyString(), anyString(), any()))
-                .thenReturn("Summary without properties");
+        when(summarizationService.summarizeWithUsage(anyString(), contains("ALREADY stored"), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary without properties", 0, 0));
 
         // When
         summarizer.updateIfNeeded(memory, config, "name = John\nlanguage = English");
 
         // Then
-        verify(summarizationService).summarize(anyString(), contains("ALREADY stored"), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(anyString(), contains("ALREADY stored"), anyString(), anyString(), any());
     }
 
     @Test
@@ -301,7 +302,8 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(7);
         var config = createConfig(5);
 
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Summary text");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary text", 0, 0));
 
         // When: call twice
         summarizer.updateIfNeeded(memory, config, null);
@@ -309,7 +311,7 @@ class ConversationSummarizerTest {
 
         // Then: summarization service called only once (second call skips because
         // already summarized)
-        verify(summarizationService, times(1)).summarize(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
     }
     /**
      * M-L3: a backlog is caught up in bounded batches. Sending all of it at once
@@ -321,12 +323,13 @@ class ConversationSummarizerTest {
         var memory = createMockMemory(105);
         var config = createConfig(5);
         config.setMaxTurnsPerUpdate(20);
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Batch summary");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Batch summary", 0, 0));
 
         summarizer.updateIfNeeded(memory, config, null);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarize(content.capture(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
         assertTrue(content.getValue().contains("User message 20"));
         assertFalse(content.getValue().contains("User message 21"), "turn 21 belongs to the next batch");
         assertEquals(20, ConversationSummarizer.readSummaryThroughStep(memory),
@@ -343,12 +346,13 @@ class ConversationSummarizerTest {
         var config = createConfig(2);
         config.setMaxCharsPerUpdate(1000);
         memory.getConversationOutputs().get(1).put("input", "x".repeat(880));
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Batch summary");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Batch summary", 0, 0));
 
         summarizer.updateIfNeeded(memory, config, null);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarize(content.capture(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
         assertTrue(content.getValue().length() <= 1000, "batch of " + content.getValue().length() + " chars");
         assertEquals(2, ConversationSummarizer.readSummaryThroughStep(memory),
                 "turns 1-2 render to ~990 chars; adding turn 3 would pass 1000, so it waits for the next update");
@@ -362,7 +366,7 @@ class ConversationSummarizerTest {
 
         // ...and the cut-notice fits inside the budget as well.
         var inputs = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService, times(2)).summarize(inputs.capture(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(inputs.capture(), anyString(), anyString(), anyString(), any());
         String cut = inputs.getAllValues().get(1);
         assertTrue(cut.length() <= 1000, "oversized first-turn input was " + cut.length() + " chars");
         assertTrue(cut.endsWith("input budget ...]"), "the cut is announced to the summarizer");
@@ -408,12 +412,13 @@ class ConversationSummarizerTest {
         presetSummary(memory, previous, 2);
         var config = createConfig(2);
         config.setMaxCharsPerUpdate(1000);
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("Batch summary");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Batch summary", 0, 0));
 
         summarizer.updateIfNeeded(memory, config, null);
 
         var content = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarize(content.capture(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
         assertTrue(content.getValue().length() <= 1000, "request of " + content.getValue().length() + " chars");
         assertTrue(content.getValue().contains(previous), "the previous summary is sent whole, never cut");
         assertTrue(ConversationSummarizer.readSummaryThroughStep(memory) > 2, "the update still makes progress");
@@ -425,7 +430,7 @@ class ConversationSummarizerTest {
         summarizer.updateIfNeeded(hugeTurn, config, null);
 
         var inputs = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService, times(2)).summarize(inputs.capture(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(inputs.capture(), anyString(), anyString(), anyString(), any());
         String cut = inputs.getAllValues().get(1);
         assertTrue(cut.length() <= 1000, "request with a cut turn was " + cut.length() + " chars");
         assertTrue(cut.contains(previous));
@@ -448,7 +453,8 @@ class ConversationSummarizerTest {
         config.setMaxCharsPerUpdate(1000);
         // An empty reply is the failure mode that made the retry loop: stub it so a
         // call, if one is made, is caught by the interaction check below.
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("", 0, 0));
 
         summarizer.updateIfNeeded(memory, config, null);
 
@@ -474,12 +480,53 @@ class ConversationSummarizerTest {
         var config = createConfig(5);
         // An empty reply is the failure mode that made the retry loop: stub it so a
         // call, if one is made, is caught by the interaction check below.
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any())).thenReturn("");
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("", 0, 0));
 
         summarizer.updateIfNeeded(memory, config, null);
 
         verifyNoInteractions(summarizationService);
         assertEquals(5, ConversationSummarizer.readSummaryThroughStep(memory));
         assertEquals("Previous summary", ConversationSummarizer.readSummary(memory));
+    }
+
+    // === Review finding #3: what the summarizer sees, and what it costs ===
+
+    @Test
+    void updateIfNeeded_inputScreen_rewritesTheTurnsSentToTheSummarizer() {
+        var memory = createMockMemory(7);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary", 0, 0));
+
+        summarizer.updateIfNeeded(memory, createConfig(5), null, null, text -> text.replace("User message 1", "[REDACTED:pii]"), null);
+
+        var content = ArgumentCaptor.forClass(String.class);
+        verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), anyString(), anyString(), any());
+        assertTrue(content.getValue().contains("[REDACTED:pii]"), content.getValue());
+        assertFalse(content.getValue().contains("User message 1"), "a redacted turn must not reach the summarizer verbatim");
+        assertEquals("User message 1", memory.getConversationOutputs().getFirst().get("input"), "the stored turn is never rewritten");
+    }
+
+    @Test
+    void updateIfNeeded_refusedSpendCheck_makesNoCall() {
+        var memory = createMockMemory(7);
+
+        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, () -> false);
+
+        verifyNoInteractions(summarizationService);
+        assertTrue(usage.isEmpty());
+        assertEquals(0, ConversationSummarizer.readSummaryThroughStep(memory), "the boundary stays, the next turn tries again");
+    }
+
+    @Test
+    void updateIfNeeded_returnsTheCallsTokenUsage() {
+        var memory = createMockMemory(7);
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary", 1200, 300));
+
+        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, () -> true);
+
+        assertEquals(1200, usage.get("inputTokens"));
+        assertEquals(300, usage.get("outputTokens"));
     }
 }

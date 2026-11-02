@@ -86,10 +86,49 @@ class BuiltInGuardrailsTest {
                     guardrail.evaluate("order 4111 1111 1111 1112", context(GuardrailPhase.INPUT, Map.of("patterns", "creditcard"))).kind());
         }
 
+        @ParameterizedTest
+        @DisplayName("a card followed by its CVV or expiry is still redacted — the greedy run fails Luhn as a whole")
+        @ValueSource(strings = {"card 4111 1111 1111 1111 123", "card 4111111111111111 123", "card 4111111111111111 12 27",
+                "card 4111-1111-1111-1111 12/27", "ref 12 4111 1111 1111 1111", "ref 1234 4111 1111 1111 1111"})
+        void creditCard_followedByCvvOrExpiry(String text) {
+            var v = guardrail.evaluate(text, context(GuardrailPhase.INPUT, Map.of("patterns", "creditcard")));
+            assertEquals(GuardrailVerdict.Kind.REWRITE, v.kind(), text);
+            assertFalse(v.text().contains("4111"), v.text());
+        }
+
+        @Test
+        @DisplayName("the trailing group survives — only the card window is replaced")
+        void creditCard_trailingGroupKept() {
+            assertEquals("card [REDACTED:creditcard] 123",
+                    guardrail.evaluate("card 4111 1111 1111 1111 123", context(GuardrailPhase.INPUT, Map.of("patterns", "creditcard"))).text());
+        }
+
+        @Test
+        @DisplayName("an unseparated long number that fails Luhn is not split into a chance card")
+        void creditCard_unseparatedNumberNotSplit() {
+            assertSame(GuardrailVerdict.Kind.ALLOW, guardrail
+                    .evaluate("order 4111111111111111123", context(GuardrailPhase.INPUT, Map.of("patterns", "creditcard"))).kind());
+        }
+
         @Test
         void phone() {
             assertEquals("call [REDACTED:phone] now", guardrail.evaluate("call +1 555-123-4567 now", input()).text());
             assertEquals("call [REDACTED:phone]", guardrail.evaluate("call (555) 123-4567", input()).text());
+        }
+
+        @Test
+        @DisplayName("the unspaced international form is a phone number")
+        void phone_e164() {
+            assertEquals("call [REDACTED:phone] now", guardrail.evaluate("call +15551234567 now", input()).text());
+        }
+
+        @Test
+        @DisplayName("a long run of local-part characters without '@' is scanned in linear time")
+        void email_noQuadraticScan() {
+            String text = "a".repeat(200_000) + " x";
+            var v = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> guardrail.evaluate(text, context(GuardrailPhase.INPUT, Map.of("patterns", "email"))));
+            assertSame(GuardrailVerdict.Kind.ALLOW, v.kind());
         }
 
         @Test
