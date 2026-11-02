@@ -85,6 +85,14 @@ public class AgentGroupConfiguration {
     public static final int MAX_REWORKS_LIMIT = 5;
 
     /**
+     * Save-time ceiling on {@code protocol.maxTurns} and on a phase's
+     * {@code repeats}. {@code maxTurns} is the safety cap every phase loop checks,
+     * so an unbounded value made it no cap at all: one compact configuration could
+     * dispatch millions of member turns from a single discussion request.
+     */
+    public static final int MAX_TURNS_LIMIT = 1000;
+
+    /**
      * How many times a task that fails VERIFY goes back to its member within the
      * same run (E2): the task returns to {@code ASSIGNED} with the verifier's
      * feedback, the preceding EXECUTE phase runs it again and VERIFY checks it
@@ -554,6 +562,13 @@ public class AgentGroupConfiguration {
     public record ArtifactConfig(boolean allowArtifactTools, int maxArtifactsPerDiscussion, List<ArtifactValidator> validators) {
 
         public static final int DEFAULT_MAX_ARTIFACTS = 5;
+
+        /**
+         * Save-time ceiling on {@code maxArtifactsPerDiscussion}. The quota is enforced
+         * by counting a listing that is itself bounded, so a ceiling above what the
+         * listing can return would stop being enforced once it filled.
+         */
+        public static final int MAX_ARTIFACTS_LIMIT = 1000;
 
         /** Same normalization choke point as {@link GroupTaskConfig}. */
         public ArtifactConfig {

@@ -29,6 +29,50 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class RagConfigurationValidationTest {
 
     @Test
+    @DisplayName("a chunk overlap above half the chunk size, or a chunk size out of range, is refused at save time")
+    void chunkSettingsAreBounded() {
+        // Overlap close to the chunk size re-stores almost a whole chunk for every
+        // few characters of new text, multiplying memory and embedding cost.
+        var nearTotalOverlap = new RagConfiguration();
+        nearTotalOverlap.setChunkSize(1000);
+        nearTotalOverlap.setChunkOverlap(999);
+        assertThrows(IllegalArgumentException.class, nearTotalOverlap::validate);
+
+        var halfOverlap = new RagConfiguration();
+        halfOverlap.setChunkSize(1000);
+        halfOverlap.setChunkOverlap(500);
+        halfOverlap.validate();
+
+        var negativeOverlap = new RagConfiguration();
+        negativeOverlap.setChunkOverlap(-1);
+        assertThrows(IllegalArgumentException.class, negativeOverlap::validate);
+
+        var zeroSize = new RagConfiguration();
+        zeroSize.setChunkSize(0);
+        assertThrows(IllegalArgumentException.class, zeroSize::validate);
+
+        var hugeSize = new RagConfiguration();
+        hugeSize.setChunkSize(RagConfiguration.MAX_CHUNK_SIZE + 1);
+        assertThrows(IllegalArgumentException.class, hugeSize::validate);
+    }
+
+    @Test
+    @DisplayName("a stored configuration that predates the bounds is clamped where ingestion reads it")
+    void storedChunkSettingsAreClamped() {
+        var stored = new RagConfiguration();
+        stored.setChunkSize(1000);
+        stored.setChunkOverlap(999);
+        assertEquals(1000, stored.chunkSizeOrDefault());
+        assertEquals(500, stored.chunkOverlapOrDefault());
+
+        var unset = new RagConfiguration();
+        unset.setChunkSize(null);
+        unset.setChunkOverlap(null);
+        assertEquals(512, unset.chunkSizeOrDefault());
+        assertEquals(64, unset.chunkOverlapOrDefault());
+    }
+
+    @Test
     @DisplayName("the default configuration is implementable as written")
     void defaultConfigurationIsSupported() {
         var config = new RagConfiguration();

@@ -1907,7 +1907,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // Visible for testing
     /** Assigns source ids and validates, exactly as the REST create does. */
     void prepareImportedRag(RagConfiguration config) {
-        if (config == null || config.getSources() == null) {
+        if (config == null) {
+            return;
+        }
+        clampImportedChunking(config);
+        if (config.getSources() == null) {
             return;
         }
         for (var source : config.getSources()) {
@@ -1925,6 +1929,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // it either cannot be armed at all or is armed and never matches, while
         // every screen shows the source as scheduled.
         RagIngestionSchedules.requireValidCrons(config);
+    }
+
+    /**
+     * Chunk settings an archive from an earlier release may carry out of the range
+     * {@link RagConfiguration#validate()} now enforces are brought into it — the
+     * values its ingestion already ran with — rather than failing the import: the
+     * archive cannot be edited first.
+     */
+    private static void clampImportedChunking(RagConfiguration config) {
+        Integer size = config.getChunkSize();
+        Integer overlap = config.getChunkOverlap();
+        if (config.clampChunkSettings()) {
+            LOGGER.warnf("Imported knowledge base '%s': chunkSize %s / chunkOverlap %s are outside the accepted range "
+                    + "and were adjusted to %d / %d", LogSanitizer.sanitize(config.getName()), size, overlap,
+                    config.chunkSizeOrDefault(), config.chunkOverlapOrDefault());
+        }
     }
 
     private void syncImportedRagSchedules(URI created, RagConfiguration config) {
@@ -1950,6 +1970,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // refused switch back to "name"). Absent, the update keeps the stored value.
         if (config != null) {
             config.setStoreNamespace(null);
+            // Before the REST update, whose validate() would refuse them.
+            clampImportedChunking(config);
         }
         URI updated = updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
         if (updated != null) {
@@ -3347,9 +3369,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // rather than rewritten wrongly; say so, since it renders as literal text.
             // Judged on the decoded values, not the JSON text: escaped quotes hide where
             // a double-quoted literal ends.
-            String unconvertible = templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)
-                    ? templateSyntaxMigrator.unconvertibleReasonIn(jsonSerialization.deserialize(resourceContent, Map.class))
-                    : null;
+            String unconvertible = null;
+            if (templateSyntaxMigrator.containsThymeleafSyntax(resourceContent)) {
+                unconvertible = templateSyntaxMigrator.unconvertibleReasonIn(jsonSerialization.deserialize(resourceContent, Map.class));
+                if (unconvertible == null) {
+                    // Every decoded value passed, but migrate() judges the resource as ONE
+                    // text and leaves all of it unchanged when that text is refused (the
+                    // work bound counts expressions across the whole resource). Report that
+                    // too, rather than import the templates unconverted without a word.
+                    unconvertible = templateSyntaxMigrator.unconvertibleReason(resourceContent);
+                }
+            }
             if (unconvertible != null) {
                 LOGGER.warnf("Importing %s with its Thymeleaf templates unconverted: %s. Convert them to Qute by hand.",
                         resourcePath.getFileName(), unconvertible);

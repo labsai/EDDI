@@ -5,8 +5,8 @@
 package ai.labs.eddi.modules.ingestion.crawl;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Arrays;
 import java.util.Optional;
 
 /**
@@ -21,14 +21,21 @@ import java.util.Optional;
  * nothing is worse than none: the operator believes the PDFs are skipped.
  *
  * <p>
- * Patterns come from agent configuration, so every character other than the
- * three wildcards is a literal — matching no longer goes through a regex at all
- * (see {@link #matches} for why). The draft built its regex with chained
+ * Patterns come from agent configuration, and every character other than the
+ * three wildcards is literal. The draft built a regex with chained
  * {@code String.replace} calls that escaped only {@code .}, so an exclude
  * pattern containing {@code +} or {@code (} threw
  * {@code PatternSyntaxException} from inside the crawl loop, where a blanket
  * {@code catch} logged it as a *fetch* error for the current page and dropped
  * all of that page's links — one bad pattern reduced a crawl to its seed URL.
+ *
+ * <p>
+ * Matching does not use a regex at all. A glob translated to one gets a
+ * backtracking repetition per wildcard, and a pattern with several of them —
+ * ordinary in exclusion lists — can take combinatorial time on a path from a
+ * crawled page that almost matches. The path is matched instead by stepping the
+ * set of reachable pattern positions forward one character at a time: work is
+ * bounded by pattern length times path length, whatever the input.
  *
  * <h2>Syntax</h2>
  * <ul>
@@ -44,27 +51,27 @@ import java.util.Optional;
 public final class UrlPattern {
 
     /**
-     * Ceiling on pattern length. Matching costs pattern length times path length
-     * (see {@link #matches}), so this bounds the per-URL work together with the
-     * path the crawler hands in.
+     * Ceiling on pattern length, which bounds the work per matched character.
      */
     private static final int MAX_PATTERN_LENGTH = 512;
 
-    /** A literal character; any other value is one of the wildcard tokens. */
-    private static final int ONE_SEGMENT_CHAR = -1;
-    private static final int SEGMENT_RUN = -2;
-    private static final int ANY_RUN = -3;
+    private static final byte LITERAL = 0;
+    /** {@code *}: any run of characters other than {@code /}. */
+    private static final byte SEGMENT = 1;
+    /** {@code **}: any run of characters. */
+    private static final byte ANYTHING = 2;
+    /** {@code ?}: one character other than {@code /}. */
+    private static final byte ONE = 3;
 
     private final String source;
-    /**
-     * The glob as tokens: a character code for a literal, or one of the negative
-     * wildcard constants.
-     */
-    private final int[] tokens;
+    private final byte[] kinds;
+    /** Code points, so that {@code ?} consumes a whole supplementary character. */
+    private final int[] literals;
 
-    private UrlPattern(String source, int[] tokens) {
+    private UrlPattern(String source, byte[] kinds, int[] literals) {
         this.source = source;
-        this.tokens = tokens;
+        this.kinds = kinds;
+        this.literals = literals;
     }
 
     /**
@@ -75,7 +82,32 @@ public final class UrlPattern {
         if (glob == null || glob.isBlank() || glob.length() > MAX_PATTERN_LENGTH) {
             return Optional.empty();
         }
-        return Optional.of(new UrlPattern(glob, tokenize(glob.trim())));
+        String pattern = glob.trim();
+        // "*.pdf" should match "/docs/report.pdf". Without this an operator has to
+        // know to write "**/*.pdf", and gets silence when they do not.
+        if (!pattern.startsWith("/") && !pattern.startsWith("**")) {
+            pattern = "**/" + pattern;
+        }
+        byte[] kinds = new byte[pattern.length()];
+        int[] literals = new int[pattern.length()];
+        int count = 0;
+        for (int index = 0; index < pattern.length(); index += Character.charCount(pattern.codePointAt(index))) {
+            int character = pattern.codePointAt(index);
+            if (character == '*') {
+                boolean doubled = index + 1 < pattern.length() && pattern.charAt(index + 1) == '*';
+                if (doubled) {
+                    index++;
+                }
+                kinds[count] = doubled ? ANYTHING : SEGMENT;
+            } else if (character == '?') {
+                kinds[count] = ONE;
+            } else {
+                kinds[count] = LITERAL;
+                literals[count] = character;
+            }
+            count++;
+        }
+        return Optional.of(new UrlPattern(glob, Arrays.copyOf(kinds, count), Arrays.copyOf(literals, count)));
     }
 
     /** Compiles many globs, skipping the unusable ones. */
@@ -101,59 +133,58 @@ public final class UrlPattern {
     }
 
     /**
-     * Whether the glob matches the whole path.
-     * <p>
-     * A dynamic-programming pass over the tokens, not a regex. This class used to
-     * translate the glob into a regex of {@code [^/]*} and {@code .*} runs, and a
-     * short pattern such as {@code *a*a*a*a*b} then backtracked through every way
-     * of splitting a long path between its stars — work exponential in the number
-     * of stars, on a path taken from a fetched page. Here {@code reachable[j]} says
-     * whether the tokens consumed so far can match the first {@code j} characters
-     * of the path, and each token updates the row once, so the cost is pattern
-     * length times path length whatever the input.
+     * Whether the whole path matches, in time proportional to pattern length times
+     * path length.
      */
     public boolean matches(String path) {
         if (path == null) {
             return false;
         }
-        int length = path.length();
+        int length = kinds.length;
+        // reachable[i]: the path read so far can end with the pattern at position i.
         boolean[] reachable = new boolean[length + 1];
         boolean[] next = new boolean[length + 1];
         reachable[0] = true;
-        for (int token : tokens) {
+        skipEmptyWildcards(reachable);
+        // By code point, as the regex this replaced did: "?" is one character of the
+        // path, and a supplementary character is one character, not two.
+        for (int at = 0; at < path.length(); at += Character.charCount(path.codePointAt(at))) {
+            int character = path.codePointAt(at);
+            Arrays.fill(next, false);
             boolean any = false;
-            switch (token) {
-                case SEGMENT_RUN, ANY_RUN -> {
-                    next[0] = reachable[0];
-                    for (int j = 1; j <= length; j++) {
-                        boolean extend = next[j - 1] && (token == ANY_RUN || path.charAt(j - 1) != '/');
-                        next[j] = reachable[j] || extend;
-                    }
+            for (int i = 0; i < length; i++) {
+                if (reachable[i] && accepts(i, character)) {
+                    // A wildcard run stays where it is; anything else moves on.
+                    next[kinds[i] == SEGMENT || kinds[i] == ANYTHING ? i : i + 1] = true;
+                    any = true;
                 }
-                case ONE_SEGMENT_CHAR -> {
-                    next[0] = false;
-                    for (int j = 1; j <= length; j++) {
-                        next[j] = reachable[j - 1] && path.charAt(j - 1) != '/';
-                    }
-                }
-                default -> {
-                    next[0] = false;
-                    for (int j = 1; j <= length; j++) {
-                        next[j] = reachable[j - 1] && path.charAt(j - 1) == token;
-                    }
-                }
-            }
-            for (int j = 0; j <= length; j++) {
-                any |= next[j];
             }
             if (!any) {
                 return false;
             }
+            skipEmptyWildcards(next);
             boolean[] swap = reachable;
             reachable = next;
             next = swap;
         }
         return reachable[length];
+    }
+
+    private boolean accepts(int position, int character) {
+        return switch (kinds[position]) {
+            case LITERAL -> literals[position] == character;
+            case ANYTHING -> true;
+            default -> character != '/';
+        };
+    }
+
+    /** A wildcard run may be empty, so reaching it also reaches what follows it. */
+    private void skipEmptyWildcards(boolean[] reachable) {
+        for (int i = 0; i < kinds.length; i++) {
+            if (reachable[i] && (kinds[i] == SEGMENT || kinds[i] == ANYTHING)) {
+                reachable[i + 1] = true;
+            }
+        }
     }
 
     public String source() {
@@ -165,36 +196,4 @@ public final class UrlPattern {
         return source;
     }
 
-    private static int[] tokenize(String glob) {
-        String pattern = glob;
-        // "*.pdf" should match "/docs/report.pdf". Without this an operator has to
-        // know to write "**/*.pdf", and gets silence when they do not.
-        if (!pattern.startsWith("/") && !pattern.startsWith("**")) {
-            pattern = "**/" + pattern;
-        }
-
-        int[] tokens = new int[pattern.length()];
-        int count = 0;
-        int index = 0;
-        while (index < pattern.length()) {
-            char character = pattern.charAt(index);
-            switch (character) {
-                case '*' -> {
-                    boolean doubled = index + 1 < pattern.length() && pattern.charAt(index + 1) == '*';
-                    if (doubled) {
-                        tokens[count++] = ANY_RUN;
-                        index++;
-                    } else {
-                        tokens[count++] = SEGMENT_RUN;
-                    }
-                }
-                case '?' -> tokens[count++] = ONE_SEGMENT_CHAR;
-                // Every other character is a literal, regex metacharacters included —
-                // there is no regex any more for them to break. See the class comment.
-                default -> tokens[count++] = character;
-            }
-            index++;
-        }
-        return Arrays.copyOf(tokens, count);
-    }
 }

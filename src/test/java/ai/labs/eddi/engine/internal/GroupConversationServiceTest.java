@@ -887,8 +887,20 @@ class GroupConversationServiceTest {
             return gc;
         }
 
+        /**
+         * The follow-up ceiling lookup reads the group config; these tests are about
+         * the turn.
+         */
+        private void givenGroupConfigReadable() throws Exception {
+            var resourceId = mock(IResourceStore.IResourceId.class);
+            doReturn(1).when(resourceId).getVersion();
+            doReturn(resourceId).when(groupStore).getCurrentResourceId(any());
+            doReturn(new AgentGroupConfiguration()).when(groupStore).read(any(), any());
+        }
+
         @Test
         void followUp_resolvesDisplayName_callsCorrectAgentAndRecordsTranscript() throws Exception {
+            givenGroupConfigReadable();
             var gc = completedGc();
             when(conversationStore.read("gc-1")).thenReturn(gc);
             when(conversationStore.compareAndSetState("gc-1",
@@ -941,6 +953,7 @@ class GroupConversationServiceTest {
 
         @Test
         void followUp_agentCallFails_throwsGroupExecutionException() throws Exception {
+            givenGroupConfigReadable();
             var gc = completedGc();
             when(conversationStore.read("gc-1")).thenReturn(gc);
             when(conversationStore.compareAndSetState("gc-1",
@@ -979,6 +992,7 @@ class GroupConversationServiceTest {
 
         @Test
         void followUp_agentCallFails_restoresCompletedState() throws Exception {
+            givenGroupConfigReadable();
             var gc = completedGc();
             when(conversationStore.read("gc-1")).thenReturn(gc);
             when(conversationStore.compareAndSetState("gc-1",

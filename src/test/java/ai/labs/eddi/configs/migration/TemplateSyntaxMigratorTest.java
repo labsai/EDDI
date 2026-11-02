@@ -509,4 +509,48 @@ class TemplateSyntaxMigratorTest {
         assertFalse(migrator.containsThymeleafSyntax("{quteVar}"));
         assertFalse(migrator.containsThymeleafSyntax("{\"json\": \"value\"}"));
     }
+    @Test
+    void manyUnterminatedOpenersAreRefusedQuicklyInsteadOfScannedQuadratically() {
+        // 100k openers in a 400k-character string: each conversion step used to scan
+        // from every opener to the end of the text.
+        String hostile = "[[${".repeat(100_000);
+
+        long start = System.nanoTime();
+        assertNotNull(migrator.unconvertibleReason(hostile));
+        assertEquals(hostile, migrator.migrate(hostile));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        assertTrue(elapsedMs < 2_000, "took " + elapsedMs + "ms");
+    }
+
+    @Test
+    void nestedOpenersAreScannedOnce() {
+        // N nested openers before one closer, below the work bound: the scan now
+        // continues after the closer instead of re-scanning from each opener.
+        String nested = "[[".repeat(2_000) + " x ]]";
+        assertTrue(TemplateSyntaxMigrator.conversionWork(nested) <= TemplateSyntaxMigrator.MAX_CONVERSION_WORK);
+        assertNull(migrator.unconvertibleReason(nested));
+    }
+
+    @Test
+    void nestedJsonArraysDoNotCountTowardTheWorkBound() {
+        // 20k "[[" from nested JSON arrays in a ~300k-character resource: counted as
+        // openers they put the text far past the bound, and the one real template in
+        // it was left in Thymeleaf syntax although nothing about it was unsafe.
+        StringBuilder json = new StringBuilder("{\"prompt\":\"Hello [[${properties.name}]]\"");
+        for (int i = 0; i < 20_000; i++) {
+            json.append(",\"m").append(i).append("\":[[").append(i).append("]]");
+        }
+        json.append('}');
+        String resource = json.toString();
+
+        assertNull(migrator.unconvertibleReason(resource));
+        assertTrue(migrator.migrate(resource).startsWith("{\"prompt\":\"Hello {properties.name}\""));
+    }
+
+    @Test
+    void ordinaryTemplatesStayWellInsideTheWorkBound() {
+        String template = "Hello [[${properties.name}]], " + "x".repeat(50_000) + " [(${memory.current.input})]";
+        assertNull(migrator.unconvertibleReason(template));
+        assertTrue(migrator.migrate(template).startsWith("Hello {properties.name},"));
+    }
 }

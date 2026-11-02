@@ -35,10 +35,6 @@ public record PhaseOutcome(PhaseExitSignal signal, String reason) {
         return new PhaseOutcome(PhaseExitSignal.END_REPEATS, reason);
     }
 
-    public static PhaseOutcome endDiscussion(String reason) {
-        return new PhaseOutcome(PhaseExitSignal.END_DISCUSSION, reason);
-    }
-
     public boolean isContinue() {
         return signal == PhaseExitSignal.CONTINUE;
     }
@@ -53,11 +49,6 @@ public record PhaseOutcome(PhaseExitSignal signal, String reason) {
          * Stop repeating this phase; carry on with the phases that follow. What
          * convergence produces — the phase is done, the discussion is not.
          */
-        END_REPEATS,
-        /**
-         * Stop the whole discussion after this phase. Reserved for I12's facilitator;
-         * nothing produces it yet.
-         */
-        END_DISCUSSION
+        END_REPEATS
     }
 }

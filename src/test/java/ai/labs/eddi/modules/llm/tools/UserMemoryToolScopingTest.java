@@ -137,8 +137,8 @@ class UserMemoryToolScopingTest {
         String result = toolFor(AGENT_B, List.of()).rememberFact("fresh_fact", "value", "fact", "self");
 
         assertTrue(result.contains("✅ Remembered"), result);
-        verify(store).deleteEntry("old-1");
-        verify(store, never()).deleteEntry("new-1");
+        verify(store).deleteEntryIfUnchanged(eq("old-1"), any());
+        verify(store, never()).deleteEntryIfUnchanged(eq("new-1"), any());
         verify(store).upsert(any(UserMemoryEntry.class));
     }
 
@@ -157,6 +157,7 @@ class UserMemoryToolScopingTest {
         assertTrue(result.contains("Memory capacity reached"), result);
         assertTrue(result.contains("maxEntriesPerUser"), "the error must tell the caller what to do; got: " + result);
         verify(store, never()).deleteEntry(any());
+        verify(store, never()).deleteEntryIfUnchanged(any(), any());
         verify(store, never()).upsert(any());
     }
 
@@ -183,8 +184,8 @@ class UserMemoryToolScopingTest {
         String result = toolFor(AGENT_B, List.of("g1")).rememberFact("fresh_fact", "value", "fact", "self");
 
         assertTrue(result.contains("✅ Remembered"), result);
-        verify(store, never()).deleteEntry("lesson-1");
-        verify(store).deleteEntry("own-1");
+        verify(store, never()).deleteEntryIfUnchanged(eq("lesson-1"), any());
+        verify(store).deleteEntryIfUnchanged(eq("own-1"), any());
     }
 
     @Test

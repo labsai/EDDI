@@ -146,7 +146,7 @@ public final class VoteTallyEngine {
 
         JsonNode node = readJson(content);
         if (node == null) {
-            node = readJson(embeddedJson(content));
+            node = EmbeddedJson.soleObjectWithAnyField(content, VoteTallyEngine::readJson, "vote", "votes", "statement");
         }
         if (node != null && node.isObject()) {
             List<String> votes = new ArrayList<>();
@@ -463,10 +463,4 @@ public final class VoteTallyEngine {
         }
     }
 
-    /** The first balanced-looking JSON object embedded in prose or a fence. */
-    private static String embeddedJson(String content) {
-        int start = content.indexOf('{');
-        int end = content.lastIndexOf('}');
-        return start >= 0 && end > start ? content.substring(start, end + 1) : null;
-    }
 }

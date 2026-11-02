@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -86,6 +87,91 @@ class UserMemoryToolTest {
 
         assertTrue(result.contains("cancelled"), result);
         verifyNoInteractions(store);
+    }
+
+    /**
+     * An erasure that signals the turn while the insert is in flight: the insert
+     * that lands anyway is taken back instead of outliving the erasure's sweep.
+     */
+    @Test
+    void rememberFact_insertLandingAfterCancellationIsTakenBack() throws Exception {
+        var cancelled = new AtomicBoolean();
+        var racingTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, cancelled::get);
+        var written = new ArrayList<UserMemoryEntry>();
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.getAllEntries("user-1")).thenAnswer(inv -> List.copyOf(written));
+        when(store.upsert(any())).thenAnswer(inv -> {
+            written.add(storedBy("conv-1", "favorite_color", "blue"));
+            cancelled.set(true); // the erasure signals while the write is in flight
+            return "id-favorite_color";
+        });
+
+        String result = racingTool.rememberFact("favorite_color", "blue", "preference", "self");
+
+        assertTrue(result.contains("cancelled"), result);
+        // Conditional on the entry being unchanged since it was read, never a plain
+        // delete by id.
+        verify(store).deleteEntryIfUnchanged(eq("id-favorite_color"), eq(written.get(0).updatedAt()));
+        verify(store, never()).deleteEntry(anyString());
+    }
+
+    /**
+     * Another turn replaced the entry between this turn's write and its cleanup:
+     * what is found under the key is that turn's fact, not this write, and deleting
+     * it would lose it.
+     */
+    @Test
+    void rememberFact_cancelledCleanupLeavesAnotherTurnsEntryAlone() throws Exception {
+        var cancelled = new AtomicBoolean();
+        var racingTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, cancelled::get);
+        var written = new ArrayList<UserMemoryEntry>();
+        when(store.countEntries("user-1")).thenReturn(0L);
+        when(store.getAllEntries("user-1")).thenAnswer(inv -> List.copyOf(written));
+        when(store.upsert(any())).thenAnswer(inv -> {
+            // The other conversation's later write of the same key is what is stored by
+            // now.
+            written.add(storedBy("conv-OTHER", "favorite_color", "green"));
+            cancelled.set(true);
+            return "id-favorite_color";
+        });
+
+        String result = racingTool.rememberFact("favorite_color", "blue", "preference", "self");
+
+        assertTrue(result.contains("cancelled"), result);
+        verify(store, never()).deleteEntry(anyString());
+        verify(store, never()).deleteEntryIfUnchanged(anyString(), any());
+    }
+
+    /**
+     * A turn cancelled while the capacity check runs must not have evicted
+     * anything: the eviction used to run before the cancellation check, so the user
+     * lost a memory and the new one was never stored.
+     */
+    @Test
+    void rememberFact_cancelledDuringCapacityCheckEvictsNothing() throws Exception {
+        config.setMaxEntriesPerUser(1);
+        config.setOnCapReached("evict_oldest");
+        var cancelled = new AtomicBoolean();
+        var racingTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, cancelled::get);
+        var oldest = new UserMemoryEntry("id-old", "user-1", "old", "v", "fact", Visibility.self, "agent-1", List.of(), "conv-0", false, 0,
+                Instant.parse("2020-01-01T00:00:00Z"), Instant.parse("2020-01-01T00:00:00Z"));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(oldest));
+        when(store.countEntries("user-1")).thenAnswer(inv -> {
+            cancelled.set(true); // the erasure or user cancel lands while the capacity is being checked
+            return 1L;
+        });
+
+        String result = racingTool.rememberFact("fresh", "value", "fact", "self");
+
+        assertTrue(result.contains("cancelled"), result);
+        verify(store, never()).deleteEntry(anyString());
+        verify(store, never()).deleteEntryIfUnchanged(anyString(), any());
+        verify(store, never()).upsert(any());
+    }
+
+    private static UserMemoryEntry storedBy(String conversationId, String key, String value) {
+        return new UserMemoryEntry("id-" + key, "user-1", key, value, "preference", Visibility.self, "agent-1", List.of(), conversationId,
+                false, 0, Instant.now(), Instant.now());
     }
 
     /** H9c: nor may a model lift a restriction by forgetting the row. */
