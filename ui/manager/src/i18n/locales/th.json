@@ -1,11 +1,30 @@
 {
   "approvalContext": {
+    "addBlock": "เพิ่มบล็อก",
+    "blockLabel": "ป้ายชื่อ",
+    "blockLabelPlaceholder": "เช่น ร่าง",
+    "blockMaxChars": "จำนวนอักขระสูงสุด",
+    "blockTemplate": "เทมเพลต",
     "cutShort": "ถูกตัดให้สั้นลง",
+    "editorCount": "{{used}} จาก {{max}}",
+    "editorDescription": "แสดงให้ผู้อนุมัติเห็นว่ากำลังตัดสินใจเรื่องอะไร เช่น ร่างข้อความ แหล่งที่มา และข้อความอ้างอิงในนั้น แต่ละบล็อกคือเทมเพลตที่ใช้กับข้อมูลของการสนทนานี้ และสร้างขึ้นหนึ่งครั้งเมื่อเริ่มหยุดชั่วคราว",
+    "editorTitle": "บริบทการอนุมัติ",
+    "errorCallOutsideRule": "call.* ใช้ได้เฉพาะในบล็อกบริบทของกฎการอนุมัติเครื่องมือเท่านั้น",
+    "errorLabel": "ตั้งป้ายชื่อให้บล็อก",
+    "errorMaxChars": "จำนวนอักขระสูงสุดต้องอยู่ระหว่าง {{min}} ถึง {{max}}",
     "errorRenderFailed": "ไม่สามารถสร้างบล็อกนี้ได้",
+    "errorSecretNamespace": "เทมเพลตใช้การอ้างอิง vault:, eddivault:, connection: หรือ caller: ไม่ได้",
+    "errorTemplate": "เขียนเทมเพลต",
     "errorTooLarge": "บล็อกนี้ใหญ่เกินกว่าจะสร้างได้",
     "heading": "บริบทสำหรับการตัดสินใจนี้",
+    "hintAgent": "ใช้ได้: properties.*, context.*, memory.*, hitl.reason และ hitl.toolCalls (อาร์กิวเมนต์ที่ปกปิดแล้ว)",
+    "hintGroup": "ใช้ได้: group.lastByRole.ROLE.content, group.artifacts.NAME.content, group.tasksAwaitingApproval, group.transcript, group.question",
+    "hintOnce": "สร้างหนึ่งครั้งเมื่อเริ่มหยุดชั่วคราว การแก้ไขจึงไม่กระทบการอนุมัติที่รออยู่แล้ว Slack จะแสดงเฉพาะเมื่อการเชื่อมต่อตั้งค่า hitlApprovalContext เป็น true",
+    "hintRule": "ใช้ได้: call.args.NAME (อาร์กิวเมนต์ที่ปกปิดแล้วของการเรียกนี้), call.name รวมถึง properties.*, context.* และ memory.*",
     "leftOut": "ข้ามบริบทบางส่วนเพื่อให้การ์ดสั้นลง",
-    "notVerified": "สร้างจากข้อมูลการสนทนา ณ เวลาที่หยุดชั่วคราว และ EDDI ไม่ได้ตรวจสอบ"
+    "limitReached": "มีได้สูงสุด {{max}} บล็อก",
+    "notVerified": "สร้างจากข้อมูลการสนทนา ณ เวลาที่หยุดชั่วคราว และ EDDI ไม่ได้ตรวจสอบ",
+    "removeBlock": "ลบบล็อก"
   },
   "attachments": {
     "title": "ไฟล์แนบ",

@@ -1,11 +1,30 @@
 {
   "approvalContext": {
+    "addBlock": "إضافة كتلة",
+    "blockLabel": "التسمية",
+    "blockLabelPlaceholder": "مثال: مسودة",
+    "blockMaxChars": "الحد الأقصى للأحرف",
+    "blockTemplate": "القالب",
     "cutShort": "تم اقتطاعه.",
+    "editorCount": "{{used}} من {{max}}",
+    "editorDescription": "يعرض للمُوافِق ما الذي يقرره: المسودة ومصادرها والادعاءات التي تتضمنها. كل كتلة هي قالب على بيانات هذه المحادثة، ويتم إنشاؤها مرة واحدة عند بدء الإيقاف المؤقت.",
+    "editorTitle": "سياق الموافقة",
+    "errorCallOutsideRule": "call.* متاح فقط في كتل السياق الخاصة بقاعدة موافقة على الأداة.",
+    "errorLabel": "أعطِ الكتلة تسمية.",
+    "errorMaxChars": "يجب أن يكون الحد الأقصى للأحرف بين {{min}} و{{max}}.",
     "errorRenderFailed": "تعذّر إنشاء هذه الكتلة.",
+    "errorSecretNamespace": "لا يمكن للقالب استخدام مراجع vault: أو eddivault: أو connection: أو caller:.",
+    "errorTemplate": "اكتب قالبًا.",
     "errorTooLarge": "كانت هذه الكتلة أكبر من أن يتم إنشاؤها.",
     "heading": "السياق الخاص بهذا القرار",
+    "hintAgent": "المتاح: properties.* وcontext.* وmemory.* وhitl.reason وhitl.toolCalls (معاملات محجوبة).",
+    "hintGroup": "المتاح: group.lastByRole.ROLE.content وgroup.artifacts.NAME.content وgroup.tasksAwaitingApproval وgroup.transcript وgroup.question.",
+    "hintOnce": "يتم إنشاؤه مرة واحدة عند بدء الإيقاف المؤقت، ولا يؤثر تغييره على الموافقات التي تنتظر بالفعل. لا يعرضه Slack إلا إذا ضبط التكامل hitlApprovalContext على true.",
+    "hintRule": "المتاح: call.args.NAME (معاملات هذا الاستدعاء بعد حجب المعلومات الحساسة) وcall.name بالإضافة إلى properties.* وcontext.* وmemory.*.",
     "leftOut": "تم حذف جزء من السياق للحفاظ على قصر البطاقة.",
-    "notVerified": "تم إنشاؤه من بيانات المحادثة عند الإيقاف المؤقت ولم يتحقق منه EDDI."
+    "limitReached": "الحد الأقصى {{max}} كتل.",
+    "notVerified": "تم إنشاؤه من بيانات المحادثة عند الإيقاف المؤقت ولم يتحقق منه EDDI.",
+    "removeBlock": "إزالة الكتلة"
   },
   "attachments": {
     "title": "المرفقات",

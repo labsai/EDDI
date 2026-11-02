@@ -1,11 +1,30 @@
 {
   "approvalContext": {
+    "addBlock": "ブロックを追加",
+    "blockLabel": "ラベル",
+    "blockLabelPlaceholder": "例: 下書き",
+    "blockMaxChars": "最大文字数",
+    "blockTemplate": "テンプレート",
     "cutShort": "途中で切り詰められました。",
+    "editorCount": "{{used}} / {{max}}",
+    "editorDescription": "承認者が何を判断するのか(下書き、その出典、含まれる主張)を表示します。各ブロックはこの会話のデータに対するテンプレートで、一時停止の開始時に一度だけ生成されます。",
+    "editorTitle": "承認コンテキスト",
+    "errorCallOutsideRule": "call.* はツール承認ルールのコンテキストブロックでのみ使用できます。",
+    "errorLabel": "ブロックにラベルを付けてください。",
+    "errorMaxChars": "最大文字数は {{min}} から {{max}} の間で指定してください。",
     "errorRenderFailed": "このブロックを生成できませんでした。",
+    "errorSecretNamespace": "テンプレートでは vault:、eddivault:、connection:、caller: の参照を使用できません。",
+    "errorTemplate": "テンプレートを入力してください。",
     "errorTooLarge": "このブロックは大きすぎて生成できませんでした。",
     "heading": "この判断のための文脈",
+    "hintAgent": "利用可能: properties.*、context.*、memory.*、hitl.reason、hitl.toolCalls(マスク済み引数)。",
+    "hintGroup": "利用可能: group.lastByRole.ROLE.content、group.artifacts.NAME.content、group.tasksAwaitingApproval、group.transcript、group.question。",
+    "hintOnce": "一時停止の開始時に一度だけ生成されるため、変更しても待機中の承認には反映されません。Slack には、連携で hitlApprovalContext が true に設定されている場合のみ表示されます。",
+    "hintRule": "利用可能: call.args.NAME(この呼び出しのマスク済み引数)、call.name、および properties.*、context.*、memory.*。",
     "leftOut": "カードを短く保つため、一部の文脈を省略しました。",
-    "notVerified": "一時停止時に会話データから生成されたもので、EDDI は内容を検証していません。"
+    "limitReached": "ブロックは最大 {{max}} 個までです。",
+    "notVerified": "一時停止時に会話データから生成されたもので、EDDI は内容を検証していません。",
+    "removeBlock": "ブロックを削除"
   },
   "attachments": {
     "title": "添付ファイル",

@@ -1,11 +1,30 @@
 {
   "approvalContext": {
+    "addBlock": "Add block",
+    "blockLabel": "Label",
+    "blockLabelPlaceholder": "e.g. Draft",
+    "blockMaxChars": "Max characters",
+    "blockTemplate": "Template",
     "cutShort": "Cut short.",
+    "editorCount": "{{used}} of {{max}}",
+    "editorDescription": "Show the approver what they are deciding on — the draft, its sources, the claims it makes. Each block is a template over this conversation's data, rendered once when the pause starts.",
+    "editorTitle": "Approval context",
+    "errorCallOutsideRule": "call.* is only available in a tool-approval rule's context blocks.",
+    "errorLabel": "Give the block a label.",
+    "errorMaxChars": "Max characters must be between {{min}} and {{max}}.",
     "errorRenderFailed": "This block could not be rendered.",
+    "errorSecretNamespace": "A template cannot use vault:, eddivault:, connection: or caller: references.",
+    "errorTemplate": "Write a template.",
     "errorTooLarge": "This block was too large to render.",
     "heading": "Context for this decision",
+    "hintAgent": "Available: properties.*, context.*, memory.*, hitl.reason and hitl.toolCalls (redacted arguments).",
+    "hintGroup": "Available: group.lastByRole.ROLE.content, group.artifacts.NAME.content, group.tasksAwaitingApproval, group.transcript, group.question.",
+    "hintOnce": "Rendered once when the pause starts — changing this does not change approvals already waiting. Slack shows it only when the integration sets hitlApprovalContext to true.",
+    "hintRule": "Available: call.args.NAME (this call's redacted arguments), call.name, plus properties.*, context.* and memory.*.",
     "leftOut": "Some context was left out to keep this card short.",
-    "notVerified": "Rendered from conversation data at pause time — not verified by EDDI."
+    "limitReached": "At most {{max}} blocks.",
+    "notVerified": "Rendered from conversation data at pause time — not verified by EDDI.",
+    "removeBlock": "Remove block"
   },
   "attachments": {
     "title": "Attachments",

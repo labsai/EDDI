@@ -1,11 +1,30 @@
 {
   "approvalContext": {
+    "addBlock": "ब्लॉक जोड़ें",
+    "blockLabel": "लेबल",
+    "blockLabelPlaceholder": "उदा. मसौदा",
+    "blockMaxChars": "अधिकतम अक्षर",
+    "blockTemplate": "टेम्पलेट",
     "cutShort": "छोटा किया गया।",
+    "editorCount": "{{max}} में से {{used}}",
+    "editorDescription": "अनुमोदक को दिखाता है कि वह किस पर निर्णय ले रहा है — मसौदा, उसके स्रोत और उसमें किए गए दावे। हर ब्लॉक इस बातचीत के डेटा पर आधारित एक टेम्पलेट है, जो रोक शुरू होने पर एक बार तैयार किया जाता है।",
+    "editorTitle": "अनुमोदन संदर्भ",
+    "errorCallOutsideRule": "call.* केवल टूल-अनुमोदन नियम के संदर्भ ब्लॉकों में उपलब्ध है।",
+    "errorLabel": "ब्लॉक को एक लेबल दें।",
+    "errorMaxChars": "अधिकतम अक्षर {{min}} और {{max}} के बीच होने चाहिए।",
     "errorRenderFailed": "यह ब्लॉक तैयार नहीं किया जा सका।",
+    "errorSecretNamespace": "टेम्पलेट vault:, eddivault:, connection: या caller: संदर्भों का उपयोग नहीं कर सकता।",
+    "errorTemplate": "एक टेम्पलेट लिखें।",
     "errorTooLarge": "यह ब्लॉक तैयार करने के लिए बहुत बड़ा था।",
     "heading": "इस निर्णय का संदर्भ",
+    "hintAgent": "उपलब्ध: properties.*, context.*, memory.*, hitl.reason और hitl.toolCalls (छिपाए गए आर्गुमेंट)।",
+    "hintGroup": "उपलब्ध: group.lastByRole.ROLE.content, group.artifacts.NAME.content, group.tasksAwaitingApproval, group.transcript, group.question।",
+    "hintOnce": "रोक शुरू होने पर एक बार तैयार होता है — इसे बदलने से पहले से प्रतीक्षारत अनुमोदनों पर असर नहीं पड़ता। Slack इसे तभी दिखाता है जब इंटीग्रेशन hitlApprovalContext को true पर सेट करता है।",
+    "hintRule": "उपलब्ध: call.args.NAME (इस कॉल के छिपाए गए आर्गुमेंट), call.name, साथ ही properties.*, context.* और memory.*।",
     "leftOut": "कार्ड को छोटा रखने के लिए कुछ संदर्भ छोड़ दिया गया।",
-    "notVerified": "रोक के समय बातचीत के डेटा से तैयार किया गया — EDDI द्वारा सत्यापित नहीं।"
+    "limitReached": "अधिकतम {{max}} ब्लॉक।",
+    "notVerified": "रोक के समय बातचीत के डेटा से तैयार किया गया — EDDI द्वारा सत्यापित नहीं।",
+    "removeBlock": "ब्लॉक हटाएँ"
   },
   "attachments": {
     "title": "अनुलग्नक",

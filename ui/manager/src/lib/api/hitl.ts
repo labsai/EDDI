@@ -248,6 +248,19 @@ export interface RulePauseDetails {
 
 export type PauseDetails = ToolCallPauseDetails | RulePauseDetails;
 
+/**
+ * One authored block of `hitlConfig.approvalContext` (agent or group) or of a
+ * tool-approval rule's `context`. `template` is a runtime template over the
+ * conversation's data, rendered ONCE when the pause starts. Mirrors the backend
+ * `ApprovalContextBlock`; limits in `lib/hitl-approval-context.ts`.
+ */
+export interface ApprovalContextBlock {
+  label: string;
+  template: string;
+  /** 50..2900; absent = 1000. */
+  maxChars?: number | null;
+}
+
 /** One block of the designer's `approvalContext`, as rendered when the pause was committed. */
 export interface ApprovalContextItem {
   label: string;
@@ -352,6 +365,8 @@ export interface ApprovalRule {
   approvalTimeout?: string | null;
   pauseReason?: string | null;
   pendingMessage?: string | null;
+  /** Context blocks for the calls this rule governs; `call.*` is available. At most 4. */
+  context?: ApprovalContextBlock[] | null;
 }
 
 /** Agent-level HITL configuration. */
@@ -376,6 +391,8 @@ export interface AgentHitlConfig {
   /** Who is told when this agent pauses — `notify.email.recipients` today
    *  (backend `HitlNotifyConfig`). Absent = nobody is notified. */
   notify?: HitlNotifyConfig | null;
+  /** What the approver sees next to the decision — draft, sources, claims. At most 8 blocks. */
+  approvalContext?: ApprovalContextBlock[] | null;
 }
 
 /** Backend `hitlConfig.onRejection`. */
@@ -404,6 +421,8 @@ export interface GroupHitlConfig {
   timeoutPolicy?: HitlTimeoutPolicy;
   granularity?: HitlGranularity;
   onTaskRejection?: HitlRejectionPolicy;
+  /** What the approver sees next to the decision; `group.*` is available. At most 8 blocks. */
+  approvalContext?: ApprovalContextBlock[] | null;
 }
 
 // ── SSE payload types (group surface) ─────────────────────────────

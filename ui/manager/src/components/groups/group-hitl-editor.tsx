@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { Save, X, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { ApprovalContextEditor } from "@/components/editors/approval-context-editor";
+import { approvalContextHasErrors } from "@/lib/hitl-approval-context";
 import { useUpdateGroup } from "@/hooks/use-groups";
 import { getErrorMessage } from "@/lib/api-client";
 import type { AgentGroupConfiguration } from "@/lib/api/groups";
@@ -64,6 +66,7 @@ export function GroupHitlEditor({
   // pause trigger), so block save until at least one phase is selected.
   const noPhaseSelected =
     enabled && basePhases.length > 0 && approvalPhases.size === 0;
+  const contextInvalid = enabled && approvalContextHasErrors(hitl.approvalContext, "group");
 
   const togglePhase = (name: string) =>
     setApprovalPhases((prev) => {
@@ -76,7 +79,7 @@ export function GroupHitlEditor({
   const patchHitl = (u: Partial<GroupHitlConfig>) => setHitl((h) => ({ ...h, ...u }));
 
   const save = () => {
-    if (timeoutInvalid || noPhaseSelected) return;
+    if (timeoutInvalid || noPhaseSelected || contextInvalid) return;
     let phases: AgentGroupConfiguration["phases"];
     let hitlConfig: GroupHitlConfig | undefined;
     if (enabled) {
@@ -90,6 +93,7 @@ export function GroupHitlEditor({
         // TASK granularity only applies to TASK_FORCE (the only EXECUTE style).
         granularity: isTaskForce ? hitl.granularity : "PHASE",
         onTaskRejection: hitl.onTaskRejection,
+        approvalContext: hitl.approvalContext ?? null,
       };
     } else {
       // Disable: clear every approval gate and drop the hitl block.
@@ -204,6 +208,13 @@ export function GroupHitlEditor({
             </div>
           )}
 
+          <ApprovalContextEditor
+            value={hitl.approvalContext}
+            scope="group"
+            onChange={(approvalContext) => patchHitl({ approvalContext })}
+            idPrefix="group-approval-context"
+          />
+
           {/* Granularity + on-rejection (TASK_FORCE only) */}
           {isTaskForce && (
             <>
@@ -243,7 +254,7 @@ export function GroupHitlEditor({
           size="sm"
           className="h-7 flex-1 text-xs"
           onClick={save}
-          disabled={update.isPending || timeoutInvalid || noPhaseSelected}
+          disabled={update.isPending || timeoutInvalid || noPhaseSelected || contextInvalid}
           data-testid="group-hitl-save"
         >
           {update.isPending ? <RefreshCw className="h-3 w-3 animate-spin me-1" /> : <Save className="h-3 w-3 me-1" />}
