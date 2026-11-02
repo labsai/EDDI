@@ -132,7 +132,7 @@ This is the standard way to use the Langchain task - just connect to an LLM and 
 
 > **These three settings are part of a model's identity.** Two tasks that differ only in `timeout`, `logRequests` or `logResponses` get two separate cached model instances, so a task always runs with the settings it declares regardless of which task was constructed first.
 >
-> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters and run both through the secret redaction filter. The request line — the last message, which is the user's own text — is written at **DEBUG**, so `logRequests: true` shows nothing until the logger `ai.labs.eddi.modules.llm.impl` is at DEBUG; the response line stays at INFO. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
+> **Logging is EDDI's, not the provider's.** `logRequests`/`logResponses` are honoured by EDDI's own model decorators, which truncate the logged request to 200 and the logged response to 500 characters and run both through the secret redaction filter. The request line — the last message, which is the user's own text — and the response line are both written at **DEBUG**, so `logRequests: true` / `logResponses: true` show nothing until the logger `ai.labs.eddi.modules.llm.impl` is at DEBUG. They are deliberately **not** forwarded to the provider builders: langchain4j's client-level logging writes whole request and response bodies at INFO with no truncation, so switching it on would put full prompts, full conversation history and full model output into the application log. (`logRequestsAndResponses`, which only the Azure OpenAI and Gemini builders accept, is a provider-level escape hatch and *is* still forwarded — use it only where that exposure is acceptable.)
 >
 > **An unusable `timeout` is ignored, not fatal.** The value is normalised once before it reaches a provider builder: it is trimmed, and dropped entirely when it is blank, non-numeric (`"30s"`) or non-positive (`"0"`, historically "no timeout"), with a WARN naming the model type. Provider builders parse the value with an unguarded `Long.parseLong`, so without this a stored config carrying one of those values would fail on every turn. `" 5000 "` and `"5000"` are the same timeout and share one cached model.
 
@@ -928,6 +928,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
+| `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
@@ -1096,7 +1097,7 @@ A `block` is a returned value, never an exception, so a block message can never 
 | Type | Phases | Finds | Parameters |
 |---|---|---|---|
 | `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
-| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked; a card followed by its CVV or expiry, `4111 1111 1111 1111 123`, is found by checking the digit groups of the run, never by splitting an unseparated number), phone numbers (grouped, or unspaced with a leading `+`, e.g. `+15551234567`; an unspaced number without `+` is not treated as a phone number); rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
 | `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
@@ -1330,7 +1331,7 @@ All three are checked at deploy time: a missing parameter, a bad issue code or a
 
 **Could not decide.** Safe is a positive finding: only an expression that evaluates to `true` passes. These are *could not decide*, and `failMode` applies (closed — the answer is withheld without a reprompt — by default for `block` and `reprompt`):
 
-- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals);
+- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals) — also in an earlier object of the reply that extraction would otherwise skip for a later one;
 - `expression_undecided:<cause>` — evaluation failed: `null_operand`, `type_mismatch` (a number compared with a string, `sum` over text), `division_by_zero`, `empty_aggregate` (`min`/`max` of nothing), `bad_argument`, `number_out_of_range` (more than 1000 digits or a scale beyond ±1000), `fan_out`, `step_budget`, or `not_boolean` (the expression produced a number, a string or a list).
 
 **Bounds.** An expression has at most 2000 characters, 32 levels of nesting, 500 parts and 32 segments per path. Evaluating it reads at most 10,000 values per path and takes at most 200,000 steps; past either, it cannot decide. Each distinct expression is compiled once and kept in a bounded cache (512 entries).
@@ -1339,13 +1340,13 @@ All three are checked at deploy time: a missing parameter, a bad issue code or a
 
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer, and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks the spend gate and that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; a reached spend limit or an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.) A reprompted answer is screened by the output guardrails again from the first one, but it is **not** run through `responseValidation` a second time — a guardrail that must enforce the answer's shape belongs in `outputGuardrails` (`json-object`) itself.
 - An `onError` fallback is the author's own text and is not screened.
 
 ### Streaming
 
-Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
+Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming — unless their `failMode` is `closed`: a `warn` guardrail that fails closed withholds the answer when it cannot check it, so it buffers too. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
 
 ### Audit, events and metrics
 
@@ -1426,6 +1427,13 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
   `:matchText`, `:matchesWholeText`, `:matchesWholeOwnText` and the `[attr~=regex]` operator. jsoup
   evaluates them as Java regular expressions, and a catastrophic pattern there never finishes.
   Selectors are also capped at 256 characters. Use `:contains(text)` / `:containsOwn(text)`.
+  A selector containing a backslash is refused too: jsoup decodes CSS escapes before it picks the
+  pseudo-selector, so `:\6d atches(...)` would otherwise slip past the name check.
+- **Sibling combinators are refused** (`~` and `+` used as combinators, including inside `:has()` or
+  `:not()`): jsoup evaluates them by walking every preceding sibling of every candidate, which is
+  quadratic in a page's width and cannot be interrupted. Select through the parent instead
+  (`ul > li`, `li:eq(2)`). The same characters inside a quoted string, an attribute selector, a text
+  argument (`:contains(C++)`) or an index formula (`:nth-child(2n+1)`) are not combinators and pass. A selector with an unterminated quote, bracket or argument is refused.
 - **Parsing is contained.** Parsing the page and evaluating the selector run on a small pool of
   platform threads with a hard deadline, instead of on the virtual thread the tool call arrived
   on (where CPU-bound work holds a carrier thread, and there are only as many carriers as cores).
@@ -1866,7 +1874,7 @@ back into the full text through the `conversationRecall` built-in tool.
 | Parameter                      | Type    | Description                                                                                     | Default |
 | ------------------------------ | ------- | ----------------------------------------------------------------------------------------------- | ------- |
 | `enabled`                      | boolean | Master switch. Nothing is summarized while this is false                                         | false   |
-| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset              | (inherit) |
+| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset. When it names a different provider, the task's credentials, endpoint and account settings, model keys, `customHeaders`, `customQueryParams` and `customParameters` are not inherited; only vendor-neutral tuning (temperature, maxTokens, timeout, ...) carries over | (inherit) |
 | `llmModel`                     | string  | Model for the summarization call. Inherits the parent task's model when unset                    | (inherit) |
 | `maxSummaryTokens`             | int     | Token ceiling on the generated summary                                                           | 800     |
 | `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
@@ -1985,14 +1993,15 @@ The Langchain task configurations can be managed via REST API endpoints.
 All tool invocations—both built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
 
 ```
-Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Quota (toolQuotas) ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
 ```
 
 ### Controls
 
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
-| **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Rate Limiting** | Token-bucket per tool, configurable limits (calls per minute; `0` blocks the tool, a negative limit is refused at save time — switch limiting off with `enableRateLimiting: false`) | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Per-subject quotas** | Caps per user (or other subject) per time window, across conversations and nodes; counts real executions only; fails closed | `toolQuotas` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 | **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |
@@ -2015,6 +2024,7 @@ difference between a rule that binds and one that is silently ignored:
 | `toolPricing`                | slug **or** dispatch name — dispatch name wins       |
 | `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
 | `toolTimeoutsMs`             | slug **or** dispatch name — dispatch name wins       |
+| `toolQuotas.tools`           | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -2046,6 +2056,87 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Per-subject tool quotas (`toolQuotas`)
+
+`toolRateLimits` is a per-minute allowance **per conversation**, `maxBudgetPerConversation` is reset by
+starting a new conversation, and a [tenant quota](tenant-quotas.md) is shared by everyone. None of them
+says "this *user* may make at most 100 content improvements a day". `toolQuotas` does: it caps how often
+one **subject** (normally the end user) may make a tool run within a fixed time window, counted **across
+conversations and across EDDI nodes**.
+
+```json
+"toolQuotas": {
+  "subject": "{context.personId}",
+  "tools": {
+    "updateAction":        { "limit": 100, "window": "P1D", "pool": "improvements" },
+    "updateSession":       { "limit": 100, "window": "P1D", "pool": "improvements" },
+    "generateActionImage": { "limit": 30,  "window": "P1D" }
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `tools` | Rules keyed by tool name, **exactly like `toolRateLimits`**: the dispatch name the model invoked, or the built-in slug; the dispatch name wins. Works for every tool source, **HTTP-call tools** (`httpcalls` exposed as tools) included. A rule keyed by a slug is one counter for all of that tool's operations |
+| `limit` | Calls permitted per window; a positive integer |
+| `window` | ISO-8601 duration, from `PT1M` to `P31D` (`P1D`, `PT12H`, `PT90M`). Windows are **fixed and aligned to the UTC epoch**: `P1D` resets at 00:00 UTC, `PT1H` on the hour. Weeks and months (`P1W`, `P1M`) are not accepted |
+| `pool` | Optional. Rules naming the same pool **share one counter** (above, 100 improvements per day across `updateAction` and `updateSession` together). All rules of a pool must state the same `limit` and `window` — anything else is a `400` at save time |
+| `subject` | Optional template, rendered with the turn's template data (the same syntax as a system prompt). Default: the conversation's user id. A template that renders blank falls back to the user id; a rendered subject longer than 256 characters is shortened to a prefix plus a digest. Without any user id (an unauthenticated caller) the conversation id is used, so an anonymous caller is capped per conversation |
+
+**Choosing the subject.** A [managed conversation](mcp-server.md) uses a composite user id
+(`<user>-<company>-<program>`), so the default counts **per program**. To count **per person**, render a
+subject that is the same across their programs, as above. Counters are keyed by (agent, tool or pool,
+subject, window), so two agents never share a count and a new agent *version* continues the old one.
+
+With `{context.personId}` the value is a per-turn context variable of type `string` named `personId`
+(stored in the step as `context:personId`).
+
+> **Security: the subject must be a value the end user cannot choose**, for example context set by a
+> trusted backend. A value a browser client sends directly is not enough: a user who changes it gets a
+> fresh quota. The anonymous fallback (`conversation:<id>`, used when there is no user id) is reset by
+> starting a new conversation, so it does **not** give fair use for unauthenticated users.
+
+**What counts.** A call is counted only when its tool **really runs**. The reservation is made at one
+point in the pipeline — after the rate limit and the cache, immediately before the tool executes — so a
+cache hit, a rate-limited call, a call refused by the conversation budget or the tenant cost budget, a
+call a human rejected, and a call that never ran are **never counted**. If the execution then fails, the
+reservation is **given back**: an exception, a tool-reported error, and for an HTTP tool a non-2xx
+status or a transport failure. A call that **times out** keeps its count: the abandoned worker cannot be
+stopped and may still complete the tool's side effect. The reservation is an atomic
+increment-if-below-limit in the datastore (MongoDB and PostgreSQL), so with three calls left a batch of
+five parallel calls runs exactly three, from one node or from several.
+
+**The refusal.** An exhausted call is not run and the model is handed a final result, not an error to
+retry; the turn does not fail:
+
+```json
+{"status":"NOT_EXECUTED","reason":"Not run: the daily limit for this tool (100) is reached; it resets at 2026-11-03T00:00:00Z. This is final: do not call this tool again in this conversation until then, and tell the user the limit is reached."}
+```
+
+**Human approval ([`toolApprovals`](hitl.md#tool-level-approval-gating)).** Approved calls run later, on
+the resume path, through the *same* execution pipeline — so the quota is applied there, at execution
+time, and a call approved while the allowance was spent elsewhere is refused. And a gated call proposed
+while its quota is **already exhausted** is refused straight away, instead of pausing the conversation
+for an approval that would then be refused. That pre-check is a read: nothing is counted while a call
+waits for approval. With one slot left and two gated calls proposed, both go to the human (the first may
+be rejected), and the second is refused at execution if the first took the slot.
+
+**Fails closed.** If the counter store cannot answer — or a stored rule cannot be applied, or the subject
+template fails to render — the call is **not run** and the model is told the limit could not be checked
+(`Not run: the usage limit for this tool could not be checked right now…`). A failure is logged at WARN
+with the agent, conversation and a short digest of the user id (never the raw subject), at most once a
+minute, and always counted in `eddi_tool_quota_store_failures_total`. Decisions are counted in
+`eddi_tool_quota_decisions_total{tool, outcome}` (see [metrics](metrics.md)).
+
+**Absent means unchanged.** A task without `toolQuotas`, or a tool no rule names, reads no store and takes
+exactly the path it always took.
+
+**Data protection.** Counters hold a subject identifier and a count, never content. They are removed by
+the [GDPR erasure cascade](gdpr-compliance.md) (deleted by subject), are part of the data export, and
+expire on their own an hour after their window ends. If your `subject` template derives an identifier
+that differs from the conversation's user id, erasure deletes the counters whose subject equals the
+**erased user id**; erase by the derived identifier too, or let them expire.
 
 #### Repeated failing tool calls
 
@@ -2151,6 +2242,17 @@ prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
 
+A call that **times out** is charged like one that returned: the abandoned tool
+keeps running and its upstream request is normally already under way. A call the
+tool itself reports as failed is not charged, nor is a rate-limited or cached one.
+A `toolPricing` value that is not a finite number is ignored for the default price.
+The running total is held in memory per process (shared across a NATS cluster);
+when the tracker trims its oldest entries, a conversation already found over its
+budget is kept until every under-budget one has gone. It does not survive a
+restart — for a durable per-conversation bound use the agent-level
+`maxCostPerConversationUsd`, which is computed from the conversation's stored
+`audit:cost` and includes tool cost.
+
 Enforcement is the **default** (since 6.6.0): a configured ceiling refuses the
 tool call after the one that crosses it. To keep a ceiling advisory, opt out with
 `enforceBudget: false` on the task, or `eddi.tools.budget.enforce-by-default=false`
@@ -2208,18 +2310,22 @@ tool cost. It is checked
   records `llm:spend_refused:<taskId>` with `reason: conversation_ceiling`, and
   `eddi_llm_spend_refused_total{reason="conversation_ceiling"}` counts it;
 - **between the rounds of a tool loop**: the loop adds what it has spent so far (its tokens at the
-  task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
-  answers that the conversation reached its cost limit — the tool calls already made have taken
-  effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
-  cascade's own step prices apply at the next task-level check;
+  prices of the model it runs on — a cascade step's own prices, else the cascade's defaults, when a
+  cascade runs it — and its tool cost) and, once that reaches the ceiling, stops issuing model calls
+  and answers that the conversation reached its cost limit — the tool calls already made have taken
+  effect;
 - **when a tool-call approval resumes the turn**: the same check runs before the approved calls
   execute, so a conversation spent while it waited serves the fallback answer and the approved
   calls do not run; and the resumed loop checks again before its first model request, counting
   what the approved calls charged. What the turn spent *before* the pause counts too: when a tool
-  loop pauses, its model rounds so far (at the task's prices, as in the loop check above, and any
-  earlier cascade steps at theirs) and its tool cost are added to the step's `audit:cost` and
-  `audit:token_usage` right away, so the resume's checks and its final total include them exactly
-  once.
+  loop pauses, its model rounds so far (priced as in the loop check above, and any earlier cascade
+  steps at theirs) and its tool cost are added to the step's `audit:cost` and `audit:token_usage`
+  right away, so the resume's checks and its final total include them exactly once. A model phase
+  that **fails** is treated the same way: the rounds the model answered, the tools that ran and the
+  cascade steps that were tried before the failure (a provider error after retries, a context-length
+  rejection, a cascade step timeout, every step of a cascade failing) are added to the step's
+  `audit:cost` and `audit:token_usage` whether the failure ends the turn or `onError: fallback`
+  absorbs it — so the tenant budget is charged for them and the next turn's checks count them.
 - **before every further paid call of the task** — a same-model re-ask (`responseValidation`
   `retry`), a cascade's escalation to its next step and that step's re-asks, an output guardrail's
   `reprompt`, and a [`classifier`](#the-classifier-type-a-safety-classifier-model) or
@@ -2238,6 +2344,17 @@ tool cost. It is checked
   Each refusal is also counted by `eddi_llm_spend_refused_total{reason}` with the same reasons as the
   primary call (`conversation_ceiling`, `tenant_budget`, `tenant_accounting_unavailable`): the
   tenant's monthly budget is checked before these calls too.
+- **before a rolling-summary call and a tool result's `summarize` truncation**: both are paid model
+  calls. A refused summary is skipped (the turns keep reaching the model verbatim and the next turn
+  tries again); a refused tool-result summary falls back to plain truncation. Both are priced at the
+  task's own `inputPricePer1M` / `outputPricePer1M` (no separate price is configured for the
+  summarizer) and recorded: the summary on the step's `audit:cost`, the tool-result summary as a
+  priced tool call (`summarizeToolResponse`).
+
+The tenant's monthly budget checked before each **tool call** counts the turn's unsettled spend as
+well — the step's not-yet-metered `audit:cost` and what the running tool loop has spent — exactly as
+the checks before a model call do; it used to compare against the counter as it stood before the
+turn.
 
   A refusal is a safety stop: a refused guardrail reprompt blocks the answer even when that
   guardrail's `onExhausted` is `deliver-best`, because delivering a "best" attempt after the spend

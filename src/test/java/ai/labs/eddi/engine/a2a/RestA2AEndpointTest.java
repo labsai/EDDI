@@ -360,6 +360,33 @@ class RestA2AEndpointTest {
     }
 
     @Test
+    void handleJsonRpc_overlongRequestId_isRefusedBeforeAnyTaskStarts() throws Exception {
+        endpoint = createEndpoint(true, false);
+        var request = new JsonRpcRequest("2.0", "message/stream",
+                Map.of("message", Map.of("role", "user", "parts", List.of(Map.of("kind", "text", "text", "hi")))),
+                "x".repeat(A2AWireFormat.MAX_ID_LENGTH + 1));
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, request);
+
+        var rpc = (JsonRpcResponse) response.getEntity();
+        assertEquals(A2AModels.ERROR_INVALID_REQUEST, rpc.error().code());
+        assertNull(rpc.id(), "the oversized id is not echoed");
+        verifyNoInteractions(taskHandler);
+    }
+
+    @Test
+    void handleJsonRpc_invalidRequest_serializesANullIdMember() throws Exception {
+        endpoint = createEndpoint(true, false);
+
+        Response response = endpoint.handleJsonRpc(AGENT_ID, null, null);
+
+        var tree = new ObjectMapper().readTree(new ObjectMapper().writeValueAsString(response.getEntity()));
+        assertTrue(tree.has("id"), "JSON-RPC 2.0 requires the id member on every response");
+        assertTrue(tree.get("id").isNull(), "an unreadable request is answered with id null");
+        assertFalse(tree.has("result"), "an error response carries no result member");
+    }
+
+    @Test
     void handleJsonRpc_disabled_doesNotConsultTheUseGate() {
         endpoint = createEndpoint(false, false);
 

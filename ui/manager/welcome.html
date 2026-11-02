@@ -30,7 +30,10 @@
         width: 32px;
         height: 32px;
         border: 3px solid #27272a;
-        border-top-color: #d4a843;
+        /* The default gold unless a brand is set: --brand-loader-accent is defined only
+           by a branded /branding/brand.css (BrandDelivery). Not --color-primary,
+           which the bundle CSS in <head> already defines as a different gold. */
+        border-top-color: var(--brand-loader-accent, #d4a843);
         border-radius: 50%;
         animation: spin 0.8s linear infinite;
       }

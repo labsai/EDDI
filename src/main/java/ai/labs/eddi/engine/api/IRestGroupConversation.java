@@ -270,8 +270,8 @@ public interface IRestGroupConversation {
                        + "AWAITING_HUMAN_INPUT discussion from the next speaker. Only the pending member's own "
                        + "principal (or an admin) may submit — this is a member SPEAKING, not an approval; the "
                        + "approve endpoint never accepts free text and this endpoint never decides approvals.")
-    @APIResponse(responseCode = "200", description = "Input recorded; discussion resumed. The owner or an admin receives the "
-            + "conversation; any other submitter only its resulting state.")
+    @APIResponse(responseCode = "200", description = "Input recorded; discussion resumed. The body is the group conversation for its "
+            + "owner or an admin, and {groupConversationId, accepted, state} for any other submitter.")
     @APIResponse(responseCode = "400", description = "Blank content, unknown member, or memberId not matching the pending turn.")
     @APIResponse(responseCode = "403", description = "Caller is neither the pending member nor an admin.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")

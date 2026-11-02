@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,6 +42,7 @@ class ChannelTargetRouterWebhookTest {
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
     private SecretResolver secretResolver;
+    private VaultHostAllowlist vaultHostAllowlist;
     private ChannelTargetRouter router;
 
     @BeforeEach
@@ -48,11 +51,13 @@ class ChannelTargetRouterWebhookTest {
         channelStore = mock(IChannelIntegrationStore.class);
         descriptorStore = mock(IDocumentDescriptorStore.class);
         secretResolver = mock(SecretResolver.class);
+        vaultHostAllowlist = mock(VaultHostAllowlist.class);
         IDeploymentStatusReader agentAdmin = mock(IDeploymentStatusReader.class);
         when(agentAdmin.readAllDeploymentStatuses(any())).thenReturn(List.of());
         ICacheFactory cacheFactory = mock(ICacheFactory.class);
         when(cacheFactory.getCache(anyString(), any(Duration.class))).thenReturn(mock(ICache.class));
-        router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, mock(IAgentStore.class), secretResolver, cacheFactory);
+        router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, mock(IAgentStore.class), secretResolver, vaultHostAllowlist,
+                cacheFactory);
     }
 
     private static ChannelTarget target(String name, String... triggers) {
@@ -215,5 +220,77 @@ class ChannelTargetRouterWebhookTest {
         String reference = " ${vault:a-reference-that-is-long-enough}";
         assertNull(signingSecretOf(reference, reference));
         assertEquals(1, router.weakWebhookSecretWarningsLogged());
+    }
+
+    private void storeIntegration(ChannelIntegrationConfiguration config) throws Exception {
+        var descriptor = new DocumentDescriptor();
+        descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/" + WEBHOOK_ID + "?version=2"));
+        when(descriptorStore.readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(descriptor));
+        when(channelStore.read(WEBHOOK_ID, 2)).thenReturn(config);
+    }
+
+    private static ChannelIntegrationConfiguration slack(Map<String, String> platformConfig) {
+        var config = new ChannelIntegrationConfiguration();
+        config.setName("team-slack");
+        config.setChannelType("slack");
+        config.setTargets(List.of(target("default")));
+        config.setDefaultTargetName("default");
+        config.setPlatformConfig(platformConfig);
+        return config;
+    }
+
+    @Test
+    void vaultReferenceInInputTemplateIsNeverResolved() throws Exception {
+        // inputTemplate becomes conversation input: expanding a reference there
+        // would put the secret's plaintext into a conversation its editor can read.
+        var config = webhook(target("default"));
+        config.setPlatformConfig(Map.of("signingSecret", "${vault:hook-secret}", "inputTemplate", "leak ${vault:restricted}"));
+        storeIntegration(config);
+        when(secretResolver.resolveValue("${vault:hook-secret}")).thenReturn("plain-secret-0123456789");
+        when(secretResolver.resolveValue("leak ${vault:restricted}")).thenReturn("leak PLAINTEXT");
+
+        var found = router.getWebhookIntegration(WEBHOOK_ID).orElseThrow();
+
+        assertEquals("leak ${vault:restricted}", found.getPlatformConfig().get("inputTemplate"));
+        verify(secretResolver, never()).resolveValue("leak ${vault:restricted}");
+    }
+
+    @Test
+    void unresolvedSlackSigningSecretIsNeverUsedAsAKey() throws Exception {
+        var config = slack(Map.of("channelId", "C1", "signingSecret", "${vault:slack-signing}", "botToken", "${vault:slack-bot}"));
+        storeIntegration(config);
+        // Vault unavailable or key missing: the resolver passes the reference through.
+        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+
+        assertTrue(router.getSigningSecrets("slack").isEmpty());
+        var found = router.getIntegration("slack", "C1").orElseThrow();
+        assertNull(found.getPlatformConfig().get("signingSecret"));
+        assertNull(router.getBotToken("slack", "C1"));
+        assertTrue(router.getSigningSecretForChannel("slack", "C1").isEmpty());
+    }
+
+    @Test
+    void slackBotTokenWhoseSecretMayNotGoToSlackIsDropped() throws Exception {
+        var config = slack(Map.of("channelId", "C1", "signingSecret", "${vault:slack-signing}", "botToken", "${vault:restricted-token}"));
+        storeIntegration(config);
+        when(secretResolver.resolveValue("${vault:slack-signing}")).thenReturn("signing-plain");
+        when(secretResolver.resolveValue("${vault:restricted-token}")).thenReturn("xoxb-plain");
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not allowed")).when(vaultHostAllowlist)
+                .requireAllowed(eq(List.of("${vault:restricted-token}")), eq("https://slack.com/api/"), anyString());
+
+        assertNull(router.getBotToken("slack", "C1"));
+        verify(secretResolver, never()).resolveValue("${vault:restricted-token}");
+        assertEquals(Set.of("signing-plain"), router.getSigningSecrets("slack"));
+    }
+
+    @Test
+    void slackBotTokenAllowedToGoToSlackIsResolved() throws Exception {
+        var config = slack(Map.of("channelId", "C1", "botToken", "${vault:token}"));
+        storeIntegration(config);
+        when(secretResolver.resolveValue("${vault:token}")).thenReturn("xoxb-plain");
+
+        assertEquals("xoxb-plain", router.getBotToken("slack", "C1"));
+        verify(vaultHostAllowlist).requireAllowed(eq(List.of("${vault:token}")), eq("https://slack.com/api/"), anyString());
     }
 }

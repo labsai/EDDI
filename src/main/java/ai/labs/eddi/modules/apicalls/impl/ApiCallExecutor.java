@@ -1756,6 +1756,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private String resolveGuardedVariables(String template, String rendered, String location, Map<String, Object> templateData,
                                            Map<String, Property> conversationProperties) {
         ConfigReferenceGuard.requireConfiguredReferences(template, rendered, location, templateData, conversationProperties);
+        // A full-form ${vars:tenant/key} names its own workspace; one that only
+        // conversation data supplied would read another workspace's variable.
+        Set<String> configuredTenantReferences = GlobalVariableResolver.explicitTenantReferences(template);
+        for (String reference : GlobalVariableResolver.explicitTenantReferences(rendered)) {
+            if (!configuredTenantReferences.contains(reference)) {
+                throw new ConfigReferenceRefusedException(ConfigReferenceGuard.refusal(location, reference));
+            }
+        }
         String resolved = globalVariableResolver.resolveValue(rendered);
         if (resolved != null && !resolved.equals(rendered)) {
             ConfigReferenceGuard.requireConfiguredReferences(globalVariableResolver.resolveValue(template), resolved, location, templateData,

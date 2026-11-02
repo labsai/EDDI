@@ -102,7 +102,7 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, BoundedJdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder(targetPolicy));
     }
 
     /**
@@ -158,7 +158,7 @@ public class MistralAiLanguageModelBuilder implements ILanguageModelBuilder {
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
         Settings s = read(parameters, OutboundTargetPolicy.orPermissive(targetPolicy));
-        var b = MistralAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder());
+        var b = MistralAiStreamingChatModel.builder().httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy));
         if (s.baseUrl() != null)
             b.baseUrl(s.baseUrl());
         if (s.apiKey() != null)

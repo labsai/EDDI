@@ -85,8 +85,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * meanwhile is not mailed — the row ends {@code SUPPRESSED}.
  * <p>
  * Every terminal outcome is counted ({@code eddi.email.outbound}) and every
- * sent or failed notification audited (kind, conversation, a hash and the
- * domain of the recipient, Message-ID — never the body).
+ * sent or failed notification audited (kind, conversation, the
+ * {@link GdprPseudonymizer} pseudonym and the domain of the recipient,
+ * Message-ID — never the body).
  */
 @ApplicationScoped
 public class HitlEmailNotifier {
@@ -566,13 +567,17 @@ public class HitlEmailNotifier {
     }
 
     /**
-     * The keyed pseudonym of the normalised address ({@link GdprPseudonymizer}).
-     * The audit ledger is write-once and GDPR erasure cannot reach it, so it names
-     * the recipient in a form an operator holding the deployment's key can match
-     * ("was alice@… notified?"), but that a reader of the ledger or the logs cannot
-     * confirm by hashing a list of candidate addresses — which an unkeyed hash
-     * beside the recipient's domain would allow. It is the same token GDPR erasure
-     * writes for that identifier, so both name one person alike.
+     * The pseudonym of the normalised address ({@link GdprPseudonymizer}): keyed
+     * with the audit ledger's key or, when the ledger has none, salted per
+     * deployment. The audit ledger is write-once and GDPR erasure cannot reach it,
+     * so it names the recipient in a form an operator holding the deployment's key
+     * can match ("was alice@… notified?"), but that a reader of the ledger or the
+     * logs cannot confirm by hashing a list of candidate addresses — which an
+     * unkeyed hash beside the recipient's domain would allow. Only when a
+     * deployment has neither a key nor a salt does the pseudonymizer fall back to
+     * an unsalted SHA-256 (see its class comment), and then that guarantee does not
+     * hold. It is the same token GDPR erasure writes for that identifier, so both
+     * name one person alike.
      */
     String recipientPseudonym(String recipient) {
         return pseudonymizer.pseudonymFor(recipient.toLowerCase(Locale.ROOT));

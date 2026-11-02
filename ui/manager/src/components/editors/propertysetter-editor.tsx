@@ -288,7 +288,7 @@ function SetterEditor({
           className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors"
           aria-expanded={expanded}
           aria-label={t("propertySetterEditor.toggleGroup", "Toggle property group")}>
-          {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
+          {expanded ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4 rtl:rotate-180" aria-hidden="true" />}
         </button>
         <span className="text-sm font-medium text-foreground">
           {(setter.actions ?? []).length > 0 ? (setter.actions ?? []).join(", ") : t("propertySetterEditor.untitled", "(no actions)")}

@@ -287,4 +287,46 @@ class DataFormatterToolTest {
         String result = dataFormatterTool.extractJsonValue(json, "count");
         assertEquals("42", result);
     }
+
+    @Test
+    void extractJsonValue_missingArrayField_namesTheField() {
+        // Used to dereference null: "Could not extract value - null".
+        String result = dataFormatterTool.extractJsonValue("{\"other\":[1]}", "items[0]");
+
+        assertTrue(result.startsWith("Error: Path not found"), result);
+        assertTrue(result.contains("no field 'items'"), result);
+    }
+
+    @Test
+    void extractJsonValue_nonArrayOrBadIndex_isReportedClearly() {
+        assertTrue(dataFormatterTool.extractJsonValue("{\"items\":{\"a\":1}}", "items[0]").contains("is not an array"));
+        assertTrue(dataFormatterTool.extractJsonValue("{\"items\":[1]}", "items[x]").contains("is not a number"));
+        assertTrue(dataFormatterTool.extractJsonValue("{\"items\":[1]}", "items[0").contains("Malformed array index"));
+        assertTrue(dataFormatterTool.extractJsonValue("{\"items\":[1]}", "items[5]").startsWith("Error: Path not found"));
+    }
+
+    @Test
+    void csvToJson_expansionPastTheBudget_isRefused() {
+        // A long header repeated in every row multiplies the input into the output.
+        String header = "h".repeat(2_000);
+        var csv = new StringBuilder(header).append('\n');
+        for (int i = 0; i < 1_000; i++) {
+            csv.append(i).append('\n');
+        }
+
+        String result = dataFormatterTool.csvToJson(csv.toString());
+
+        assertTrue(result.startsWith("Error: Could not convert CSV to JSON"), result.substring(0, Math.min(200, result.length())));
+        assertTrue(result.length() < 1_000, "the refusal must not carry the expanded output");
+    }
+
+    @Test
+    void csvToJson_tooManyRows_isRefused() {
+        var csv = new StringBuilder("a\n");
+        for (int i = 0; i <= DataFormatterTool.MAX_CSV_ROWS; i++) {
+            csv.append(i).append('\n');
+        }
+
+        assertTrue(dataFormatterTool.csvToJson(csv.toString()).contains("more than " + DataFormatterTool.MAX_CSV_ROWS + " rows"));
+    }
 }

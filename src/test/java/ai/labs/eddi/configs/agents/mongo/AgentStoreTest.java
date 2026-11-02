@@ -4,8 +4,10 @@
 package ai.labs.eddi.configs.agents.mongo;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
+import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
@@ -41,6 +43,9 @@ class AgentStoreTest {
     private DocumentDescriptorStore documentDescriptorStore;
 
     @Mock
+    private IWorkflowStore workflowStore;
+
+    @Mock
     @SuppressWarnings("rawtypes")
     private IResourceStorage resourceStorage;
 
@@ -52,7 +57,7 @@ class AgentStoreTest {
         openMocks(this);
         doReturn(resourceStorage).when(storageFactory)
                 .create(anyString(), any(IDocumentBuilder.class), any(Class.class), any(String[].class));
-        agentStore = new AgentStore(storageFactory, documentBuilder, documentDescriptorStore);
+        agentStore = new AgentStore(storageFactory, documentBuilder, documentDescriptorStore, () -> workflowStore);
     }
 
     @Nested
@@ -266,6 +271,84 @@ class AgentStoreTest {
             var result = agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, 1, false);
 
             assertTrue(result.isEmpty());
+        }
+
+        @Test
+        @DisplayName("a caller-supplied version far above the workflow's current one walks only the versions that exist")
+        void clampsVersionWalkToCurrentWorkflowVersion() throws Exception {
+            var current = createResourceId(WORKFLOW_ID, 3);
+            when(workflowStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(current);
+
+            agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, 2_000_000_000, true);
+
+            verify(resourceStorage, times(3)).findResourceIdsContaining(eq("workflows"), anyString());
+            verify(resourceStorage).findResourceIdsContaining("workflows",
+                    "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=3");
+        }
+
+        /**
+         * Descriptors advance only on an HTTP PUT/PATCH, so an in-process update leaves
+         * the workflow's descriptor at v1 while the workflow is at v2. The orphan purge
+         * and the agent cascade ask at the live version; clamping to the descriptor's
+         * v1 never queried v2 and missed every agent pinning it.
+         */
+        @Test
+        @DisplayName("the walk starts at the workflow's live version, not at a stale descriptor's")
+        @SuppressWarnings("unchecked")
+        void clampUsesLiveWorkflowVersionNotStaleDescriptor() throws Exception {
+            var staleDescriptor = createResourceId(WORKFLOW_ID, 1);
+            var live = createResourceId(WORKFLOW_ID, 2);
+            lenient().when(documentDescriptorStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(staleDescriptor);
+            when(workflowStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(live);
+            String v2 = "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=2";
+            doReturn(Collections.emptyList()).when(resourceStorage).findResourceIdsContaining(eq("workflows"), anyString());
+            doReturn(Collections.emptyList()).when(resourceStorage).findHistoryResourceIdsContaining(eq("workflows"), anyString());
+            doReturn(List.of(createResourceId(AGENT_ID_1, 1))).when(resourceStorage).findResourceIdsContaining("workflows", v2);
+            doReturn(1).when(resourceStorage).getCurrentVersion(AGENT_ID_1);
+            var descriptor = new DocumentDescriptor();
+            descriptor.setResource(URI.create("eddi://ai.labs.agent/agentstore/agents/" + AGENT_ID_1 + "?version=1"));
+            when(documentDescriptorStore.readDescriptor(AGENT_ID_1, 1)).thenReturn(descriptor);
+
+            var result = agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, 2, true);
+
+            assertEquals(1, result.size(), "the agent pinning the live workflow version must be found");
+        }
+
+        @Test
+        @DisplayName("an exact lookup queries the requested version, even above the workflow's current one")
+        void exactLookupIsNotClamped() throws Exception {
+            var current = createResourceId(WORKFLOW_ID, 2);
+            lenient().when(workflowStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(current);
+            lenient().when(documentDescriptorStore.getCurrentResourceId(WORKFLOW_ID)).thenReturn(current);
+
+            agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, 5, false);
+
+            verify(resourceStorage).findResourceIdsContaining("workflows",
+                    "eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=5");
+            verify(resourceStorage, times(1)).findResourceIdsContaining(eq("workflows"), anyString());
+        }
+
+        @Test
+        @DisplayName("an unknown workflow refuses a walk above the ceiling rather than truncating it")
+        void refusesWalkAboveCeilingWhenWorkflowUnknown() throws Exception {
+            when(workflowStore.getCurrentResourceId(WORKFLOW_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, Integer.MAX_VALUE, true));
+            verify(resourceStorage, never()).findResourceIdsContaining(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("an unknown workflow still walks a version within the ceiling in full")
+        void walksWithinCeilingWhenWorkflowUnknown() throws Exception {
+            when(workflowStore.getCurrentResourceId(WORKFLOW_ID))
+                    .thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+            agentStore.getAgentDescriptorsContainingWorkflow(WORKFLOW_ID, ResourceUtilities.MAX_REVERSE_LOOKUP_VERSIONS, true);
+
+            verify(resourceStorage, times(ResourceUtilities.MAX_REVERSE_LOOKUP_VERSIONS))
+                    .findResourceIdsContaining(eq("workflows"), anyString());
         }
 
         @Test

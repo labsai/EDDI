@@ -72,7 +72,7 @@ class RestAgentAdministrationQuotaTest {
         tenantQuotaService = mock(TenantQuotaService.class);
 
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn(TENANT);
-        lenient().when(agentFactory.getAllLatestAgents(any())).thenReturn(List.of());
+        lenient().when(agentFactory.getAllDeployedAgents(any())).thenReturn(List.of());
         lenient().when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
         lenient().when(tenantQuotaService.checkAgentQuota(anyString(), anyInt())).thenReturn(QuotaCheckResult.OK);
 
@@ -183,7 +183,7 @@ class RestAgentAdministrationQuotaTest {
             // runs inside it and Mockito reports UnfinishedStubbing.
             List<IAgent> ghosts = List.of(liveAgent("ghost-a"), liveAgent("ghost-b"));
             when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of());
-            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenReturn(ghosts);
+            when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(ghosts);
 
             admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, false, false);
 
@@ -195,7 +195,7 @@ class RestAgentAdministrationQuotaTest {
         void noDoubleCount() throws Exception {
             List<IAgent> live = List.of(liveAgent("agent-a"));
             when(deploymentStore.readDeploymentInfos(any())).thenReturn(List.of(deployed("agent-a", 1)));
-            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenReturn(live);
+            when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(live);
 
             admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, true, false);
 
@@ -209,7 +209,7 @@ class RestAgentAdministrationQuotaTest {
             lenient().when(inProgress.getAgentId()).thenReturn("pending-a");
             when(inProgress.getDeploymentStatus()).thenReturn(Deployment.Status.IN_PROGRESS);
             List<IAgent> pending = List.of(inProgress);
-            when(agentFactory.getAllLatestAgents(Deployment.Environment.production)).thenReturn(pending);
+            when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(pending);
 
             admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, true, false);
 
@@ -232,14 +232,42 @@ class RestAgentAdministrationQuotaTest {
     class FailureIsolation {
 
         @Test
-        @DisplayName("fails open when the deployment store errors")
-        void failsOpenOnStoreError() throws Exception {
+        @DisplayName("a deployment-store error allows the deploy when no agent quota applies")
+        void storeErrorWithoutQuotaAllows() throws Exception {
             when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
+            when(tenantQuotaService.agentCountUnavailable(TENANT)).thenReturn(QuotaCheckResult.OK);
 
             admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, true, false);
 
             verify(tenantQuotaService, never()).checkAgentQuota(anyString(), anyInt());
             verify(runtime).submitCallable(any(Callable.class), any());
         }
+
+        @Test
+        @DisplayName("a deployment-store error refuses the deploy (503) when an agent quota is in force")
+        void storeErrorWithQuotaFailsClosed() throws Exception {
+            when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
+            when(tenantQuotaService.agentCountUnavailable(TENANT))
+                    .thenReturn(QuotaCheckResult.unavailable("Quota accounting unavailable - denying request for safety"));
+
+            assertThrows(QuotaAccountingUnavailableException.class,
+                    () -> admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, true, false));
+
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
+    }
+
+    @Test
+    @DisplayName("an older READY version is counted although a newer version of the same agent failed")
+    void olderReadyVersionBehindFailedNewerOneIsCounted() throws Exception {
+        IAgent olderReady = liveAgent("agent-transient");
+        IAgent newerFailed = mock(IAgent.class);
+        lenient().when(newerFailed.getAgentId()).thenReturn("agent-transient");
+        lenient().when(newerFailed.getDeploymentStatus()).thenReturn(Deployment.Status.ERROR);
+        when(agentFactory.getAllDeployedAgents(Deployment.Environment.production)).thenReturn(List.of(newerFailed, olderReady));
+        denyAt(1);
+
+        assertThrows(QuotaExceededException.class, () -> admin.deployAgent(Deployment.Environment.production, NEW_AGENT, 1, true, false));
+        verify(runtime, never()).submitCallable(any(Callable.class), any());
     }
 }

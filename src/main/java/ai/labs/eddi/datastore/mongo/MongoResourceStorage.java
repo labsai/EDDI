@@ -896,6 +896,11 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
         // is
         // a server-side error ("$and/$or/$nor must be a nonempty array").
         Bson query = connectedFilters.isEmpty() ? new Document() : Filters.and(connectedFilters);
+        // Deliberately no _id tiebreaker (unlike PostgreSQL's ORDER BY ..., id): the
+        // field indexes are single-field ({field: 1}), which can serve {field: -1} but
+        // not {field: -1, _id: -1}. The compound sort would turn every sorted page -
+        // descriptor listings included, one descriptor per conversation - into a
+        // blocking in-memory sort over all matching documents.
         Document sort = sortField != null ? new Document(sortField, -1) : new Document();
         int effectiveLimit = IResourceStorage.resolveLimit(limit);
 

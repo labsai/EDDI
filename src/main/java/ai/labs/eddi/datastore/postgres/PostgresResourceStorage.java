@@ -1046,7 +1046,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             // MongoDB, whose descending sort orders a missing field lowest. PostgreSQL's
             // own default for DESC is NULLS FIRST. The field indexes are built in this
             // exact order (createFieldIndex), so the page is still read off the index.
-            sql.append(" ORDER BY ").append(toTextPathExpression(sortField)).append(" DESC NULLS LAST");
+            // id breaks ties, so OFFSET paging over rows sharing a sort value is stable:
+            // without it the same row could appear on two pages and another on none.
+            // The index still supplies the leading key; PostgreSQL orders the id
+            // within each run of equal values with an incremental sort.
+            sql.append(" ORDER BY ").append(toTextPathExpression(sortField)).append(" DESC NULLS LAST, id DESC");
         }
 
         int effectiveLimit = IResourceStorage.resolveLimit(limit);

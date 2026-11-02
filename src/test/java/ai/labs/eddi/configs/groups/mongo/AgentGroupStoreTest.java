@@ -103,6 +103,30 @@ class AgentGroupStoreTest {
     }
 
     @Test
+    void maxTurnsAboveTheCeiling_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, null)));
+        c.setProtocol(new ProtocolConfig(30, null, 0, null, AgentGroupConfiguration.MAX_TURNS_LIMIT + 1));
+
+        String problems = String.join("; ", AgentGroupStore.memberAndLimitProblems(c));
+
+        assertTrue(problems.contains("protocol.maxTurns must be at most"), problems);
+        c.setProtocol(new ProtocolConfig(30, null, 0, null, AgentGroupConfiguration.MAX_TURNS_LIMIT));
+        assertTrue(AgentGroupStore.memberAndLimitProblems(c).isEmpty());
+    }
+
+    @Test
+    void artifactCeilingAboveWhatTheQuotaCanCount_isRejectedAtSaveTime() {
+        var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
+        c.setMembers(List.of(new GroupMember("a", "A", 1, null)));
+        c.setArtifactConfig(new AgentGroupConfiguration.ArtifactConfig(true, 20_000, List.of()));
+
+        String problems = String.join("; ", AgentGroupStore.memberAndLimitProblems(c));
+
+        assertTrue(problems.contains("artifactConfig.maxArtifactsPerDiscussion must be at most"), problems);
+    }
+
+    @Test
     void duplicateMember_isRejectedAtSaveTime() {
         var c = config(DiscussionStyle.ROUND_TABLE, null, "mod");
         c.setMembers(List.of(new GroupMember("a", "Panelist 1", 1, null), new GroupMember("b", "B", 2, null),

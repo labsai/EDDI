@@ -158,6 +158,13 @@ class PostgresUserConversationStoreUnitTest {
     // ─── deleteUserConversationIfMatches ───
 
     @Test
+    void deleteAllForUser_sqlError_throwsSoErasureIsNotReportedComplete() throws Exception {
+        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("connection reset", "08006"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.deleteAllForUser("user-1"));
+    }
+
+    @Test
     void deleteUserConversationIfMatches_conditionsOnTheConversationId() throws Exception {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
@@ -209,13 +216,6 @@ class PostgresUserConversationStoreUnitTest {
         when(preparedStatement.executeUpdate()).thenReturn(3);
 
         assertEquals(3, store.deleteAllForUser("user-1"));
-    }
-
-    @Test
-    void deleteAllForUser_sqlException_returnsZero() throws Exception {
-        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("error"));
-
-        assertEquals(0, store.deleteAllForUser("user-1"));
     }
 
     // ─── getAllForUser ───

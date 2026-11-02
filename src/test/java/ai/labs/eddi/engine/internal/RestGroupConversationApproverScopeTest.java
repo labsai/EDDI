@@ -352,6 +352,7 @@ class RestGroupConversationApproverScopeTest {
             gc.setPendingHumanInput(new PendingHumanInput(MEMBER_ID, "Member One", 0, 0, 0, "OPINION", PROMPT, "SKIP", Instant.now()));
             as(MEMBER_ID);
             var resumed = new GroupConversation();
+            resumed.setId(GC_ID);
             resumed.setUserId(OWNER_ID);
             resumed.setState(GroupConversationState.IN_PROGRESS);
             when(groupService.submitHumanInput(eq(GC_ID), eq(MEMBER_ID), anyString(), anyString())).thenReturn(resumed);
@@ -360,7 +361,7 @@ class RestGroupConversationApproverScopeTest {
                     new IRestGroupConversation.HumanInputRequest(MEMBER_ID, "my answer"));
 
             assertEquals(200, response.getStatus());
-            assertEquals(Map.of("state", "IN_PROGRESS"), response.getEntity());
+            assertEquals(Map.of("groupConversationId", GC_ID, "accepted", true, "state", "IN_PROGRESS"), response.getEntity());
         }
 
         @Test

@@ -541,4 +541,35 @@ class RestConversationStoreOwnershipTest {
         verify(conversationDescriptorStore).readDescriptors(anyString(), any(), eq(0), eq(20), anyBoolean(), captor.capture());
         assertTrue(captor.getValue().isEmpty());
     }
+
+    @Test
+    @DisplayName("the 'search matches nothing' fallback looks only at the caller's own conversations, never the whole store")
+    @SuppressWarnings("unchecked")
+    void searchFallbackIsDecidedWithinTheCallersScope() throws Exception {
+        firstPage();
+
+        // An agent listing: the owner filter is not in the listing query, so the
+        // existence check must add it itself.
+        asOwner().readConversationDescriptors(0, 20, "someone-elses-id", null, "0000000000000000000000a1", null, null, null);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), eq("someone-elses-id"), eq(0), eq(1), anyBoolean(), captor.capture());
+        assertEquals(1, captor.getValue().size(), "the existence query must be confined to the caller's records");
+        var mine = captor.getValue().getFirst().getQueryFilters().get(0);
+        assertEquals("userId", mine.getField());
+        assertEquals(OWNER, mine.getFilter());
+    }
+
+    @Test
+    @DisplayName("an admin's 'search matches nothing' fallback still searches every conversation")
+    @SuppressWarnings("unchecked")
+    void adminSearchFallbackIsUnrestricted() throws Exception {
+        firstPage();
+
+        asAdmin().readConversationDescriptors(0, 20, "term", null, "0000000000000000000000a1", null, null, null);
+
+        ArgumentCaptor<List<IResourceFilter.QueryFilters>> captor = ArgumentCaptor.forClass(List.class);
+        verify(conversationDescriptorStore).readDescriptors(anyString(), eq("term"), eq(0), eq(1), anyBoolean(), captor.capture());
+        assertTrue(captor.getValue().isEmpty());
+    }
 }

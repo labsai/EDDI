@@ -8,6 +8,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
@@ -501,8 +502,107 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // A read can be the first statement against a fresh database (GET of an
         // unknown conversation before any was created): without the table it failed
         // with "relation does not exist" — a 500 for what is a plain 404.
+        return loadSnapshot(conversationId, "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid");
+    }
+
+    /**
+     * JSONB expression: {@code document} minus the pending batch's resume-only
+     * fields (the frozen transcript, the gating assistant message, the running
+     * trace and the batch fingerprint) — see
+     * {@link IConversationMemoryStore#loadConversationMemorySnapshotForApprover}.
+     * Each call's {@code argumentsRaw} sits inside an array, which {@code #-}
+     * cannot address with a wildcard; it is small, capped, and nulled by the
+     * approver projection, so it is transferred rather than rewritten here.
+     */
+    private static String withoutResumeOnlyFields(String document) {
+        return "(" + document + " #- '{hitlPendingToolCalls,chatTranscriptJson}' #- '{hitlPendingToolCalls,gatingAssistantMessageJson}' "
+                + "#- '{hitlPendingToolCalls,traceSoFar}' #- '{hitlPendingToolCalls,fingerprint}')";
+    }
+
+    /**
+     * jsonpath selecting the {@code result} of every spend entry of the steps under
+     * {@code %s}, in document order (step, workflow, entry) — the order
+     * {@code ConversationMemoryUtilities#conversationCost} sums them in.
+     */
+    private static final String SPEND_VALUES_PATH = "'$.%s[*].workflows[*].lifecycleTasks[*] "
+            + "? (@.key == \"audit:cost\" || @.key == \"audit:discarded_cost\").result'";
+
+    /**
+     * The tail read — see {@link ConversationMemoryTail}. Cuts the two history
+     * arrays down to their last element (only when they are arrays, so any other
+     * stored shape deserializes exactly as the full load would), drops the redo
+     * cache and the resume-only batch fields, and computes the totals in the
+     * database.
+     */
+    private static final String TAIL_SQL = "SELECT conversation_state, "
+            + "(" + withoutResumeOnlyFields("(data - 'redoCache')") + " || " + lastElementOnly("conversationSteps")
+            + " || " + lastElementOnly("conversationOutputs") + ") AS data, "
+            + arrayLength("conversationSteps") + " AS step_count, "
+            + arrayLength("conversationOutputs") + " AS output_count, "
+            + arrayLength("redoCache") + " AS redo_count, "
+            + "jsonb_path_query_array(data, " + SPEND_VALUES_PATH.formatted("conversationSteps") + ") AS live_spend, "
+            + "jsonb_path_query_array(data, " + SPEND_VALUES_PATH.formatted("redoCache") + ") AS redo_spend, "
+            + "(jsonb_path_exists(data, '$.conversationSteps[*].packages') OR jsonb_path_exists(data, '$.redoCache[*].packages')) AS legacy_steps "
+            + "FROM conversation_memories WHERE id = ?::uuid";
+
+    private static String arrayLength(String key) {
+        return "(CASE WHEN jsonb_typeof(data->'" + key + "') = 'array' THEN jsonb_array_length(data->'" + key + "') ELSE 0 END)";
+    }
+
+    private static String lastElementOnly(String key) {
+        return "(CASE WHEN jsonb_typeof(data->'" + key + "') <> 'array' THEN '{}'::jsonb "
+                + "WHEN jsonb_array_length(data->'" + key + "') = 0 THEN jsonb_build_object('" + key + "', '[]'::jsonb) "
+                + "ELSE jsonb_build_object('" + key + "', jsonb_build_array(data->'" + key + "'->-1)) END)";
+    }
+
+    @Override
+    public ConversationMemorySnapshot loadConversationMemorySnapshotForApprover(String conversationId) {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return null;
+        }
         ensureSchema();
-        String sql = "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid";
+        return loadSnapshot(conversationId,
+                "SELECT conversation_state, " + withoutResumeOnlyFields("data") + " AS data FROM conversation_memories WHERE id = ?::uuid");
+    }
+
+    /**
+     * One row: the document without its history plus the totals the current-step
+     * projection needs. A document that still stores a step under EDDI 5's
+     * {@code packages} key (read by the load's {@code @JsonAlias}, but not by the
+     * jsonpath above) is loaded in full instead, so its cost is never
+     * under-counted.
+     */
+    @Override
+    public ConversationMemoryTail loadConversationMemoryTail(String conversationId) throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return null;
+        }
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(TAIL_SQL)) {
+            ps.setString(1, conversationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                if (rs.getBoolean("legacy_steps")) {
+                    var full = loadConversationMemorySnapshot(conversationId);
+                    return full == null ? null : ConversationMemoryTail.ofFullSnapshot(full);
+                }
+                ConversationMemorySnapshot snapshot = jsonSerialization.deserialize(rs.getString("data"), ConversationMemorySnapshot.class);
+                fixContextTypes(snapshot);
+                snapshot.setConversationId(conversationId);
+                applyStateColumn(snapshot, rs.getString("conversation_state"));
+                List<?> liveSpend = jsonSerialization.deserialize(rs.getString("live_spend"), List.class);
+                List<?> redoSpend = jsonSerialization.deserialize(rs.getString("redo_spend"), List.class);
+                return ConversationMemoryTail.ofProjection(snapshot, rs.getInt("step_count"), rs.getInt("output_count"), rs.getInt("redo_count"),
+                        liveSpend, redoSpend);
+            }
+        } catch (IOException | SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to load conversation memory", e);
+        }
+    }
+
+    private ConversationMemorySnapshot loadSnapshot(String conversationId, String sql) {
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             try (ResultSet rs = ps.executeQuery()) {

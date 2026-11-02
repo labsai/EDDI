@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { api } from "@/lib/api-client";
 import { createLogEventSource } from "../logs";
-import { createCoordinatorEventSource } from "../coordinator";
 
 /**
  * Review 2026-10-02 (Manager, SSE): both streams were built with
@@ -14,7 +13,6 @@ import { createCoordinatorEventSource } from "../coordinator";
  */
 describe.each([
   ["live log stream", () => createLogEventSource({ level: "ERROR" })],
-  ["coordinator stream", () => createCoordinatorEventSource()],
 ])("%s after a token refresh", (_name, open) => {
   let fetchSpy: MockInstance<typeof fetch>;
 

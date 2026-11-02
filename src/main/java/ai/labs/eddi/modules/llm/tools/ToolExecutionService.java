@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.llm.impl.LlmTelemetryListener;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
 import dev.langchain4j.exception.ToolArgumentsException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.opentelemetry.api.GlobalOpenTelemetry;
@@ -22,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -192,6 +195,14 @@ public class ToolExecutionService {
     MeterRegistry meterRegistry;
 
     /**
+     * Per-subject tool quotas ({@code toolQuotas}). Null-tolerant: unit tests build
+     * this service by hand, and a task without {@code toolQuotas} never asks for
+     * it.
+     */
+    @Inject
+    ToolQuotaService quotaService;
+
+    /**
      * Carries the turn's caller (and resolution principal) onto the timeout worker.
      * <p>
      * Without it a time-bounded tool call would lose both bindings the moment it
@@ -202,6 +213,13 @@ public class ToolExecutionService {
      */
     @Inject
     CallerIdentityContext callerIdentityContext;
+
+    /**
+     * The per-subject quota service, for building a call's {@link ToolQuotaGate}.
+     */
+    public ToolQuotaService getQuotaService() {
+        return quotaService;
+    }
 
     /**
      * Returns the cost tracker for budget checking.
@@ -308,6 +326,30 @@ public class ToolExecutionService {
     public String executeToolWrapped(ToolInvocation invocation, String arguments, String cacheScopeTag, String conversationId,
                                      Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
                                      boolean enableCostTracking, int rateLimit, int timeoutMs) {
+        return executeToolWrapped(invocation, arguments, cacheScopeTag, conversationId, toolExecution, enableRateLimiting, enableCaching,
+                enableCostTracking, rateLimit, timeoutMs, null);
+    }
+
+    /**
+     * As above, additionally subject to a per-subject {@code toolQuotas} rule.
+     *
+     * <p>
+     * The quota is reserved at exactly one point: after the rate limit and the
+     * cache have been consulted, immediately before the tool runs. That is what
+     * makes "count real executions only" true by construction — a rate-limited
+     * call, a cache hit and a call refused by an earlier gate never reach it. A
+     * refused reservation returns the gate's refusal as the result, uncached and
+     * uncharged. After the run the reservation is settled: a failed call gives it
+     * back. A timed-out call keeps its count, because the abandoned worker may
+     * still complete the tool's side effect.
+     * </p>
+     *
+     * @param quotaGate
+     *            the call's quota gate, or {@code null} when no quota applies
+     */
+    public String executeToolWrapped(ToolInvocation invocation, String arguments, String cacheScopeTag, String conversationId,
+                                     Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
+                                     boolean enableCostTracking, int rateLimit, int timeoutMs, ToolQuotaGate quotaGate) {
 
         String toolName = invocation.dispatchName();
         long startTime = System.currentTimeMillis();
@@ -357,7 +399,29 @@ public class ToolExecutionService {
             // is bounded here rather than in each of the seven tool sources because
             // this is the one place all of them pass through.
             span.setAttribute(ATTR_CACHE_HIT, false);
-            String result = executeBounded(toolExecution, timeoutMs);
+            if (quotaGate != null) {
+                Optional<String> refusal = quotaGate.reserve();
+                if (refusal.isPresent()) {
+                    markFailed(span, "quota_exceeded");
+                    return refusal.get();
+                }
+            }
+            String result;
+            try {
+                result = executeBounded(toolExecution, timeoutMs);
+            } catch (ToolTimedOut | InterruptedException unknownOutcome) {
+                // Outcome unknown: the worker may still finish the side effect (an interrupt
+                // abandons it exactly as a timeout does). Keep the count.
+                throw unknownOutcome;
+            } catch (Exception | Error failed) {
+                if (quotaGate != null) {
+                    quotaGate.settle(null, failed);
+                }
+                throw failed;
+            }
+            if (quotaGate != null) {
+                quotaGate.settle(result, null);
+            }
 
             // 4. Cache result (TTL from the canonical slug, key from the dispatch name)
             if (cacheable) {
@@ -369,14 +433,7 @@ public class ToolExecutionService {
             // a tracking failure must not replace the result with an error — that
             // discarded real work and, since the result was already cached, a retry
             // was served from the cache without ever being charged.
-            if (enableCostTracking && conversationId != null) {
-                try {
-                    costTracker.trackToolCall(invocation, conversationId);
-                } catch (RuntimeException trackingFailure) {
-                    LOGGER.errorf("Cost tracking failed for tool '%s'; the tool result is returned unchanged: %s", toolName,
-                            trackingFailure.getMessage());
-                }
-            }
+            chargeQuietly(invocation, conversationId, enableCostTracking);
 
             long executionTime = System.currentTimeMillis() - startTime;
             meterRegistry.counter("eddi.tool.execution.success", "tool", toolName).increment();
@@ -395,8 +452,12 @@ public class ToolExecutionService {
             // above, and gets to recover: apologise, try a different tool, or answer
             // without one.
             //
-            // Nothing is cached and nothing is charged: both of those steps sit after
-            // the execution step we just left.
+            // Nothing is cached. The call IS charged: an abandoned tool keeps running
+            // on its worker and its upstream request (the paid search, the scrape)
+            // is normally already under way, so leaving it unpriced made a timeout a
+            // way around maxBudgetPerConversation. A failure that came back from the
+            // tool (below) is not charged — the tool reported that it did no work.
+            chargeQuietly(invocation, conversationId, enableCostTracking);
             meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
             meterRegistry.counter("eddi.tool.execution.timeout", "tool", toolName).increment();
             LOGGER.warnf("Tool '%s' exceeded its %dms execution timeout and was abandoned; the model was told so.",
@@ -404,6 +465,24 @@ public class ToolExecutionService {
             markFailed(span, "timeout");
             return "Error: Execution timed out after " + timedOut.timeoutMs + "ms for tool: " + toolName;
 
+        } catch (InterruptedException interrupted) {
+            // The pipeline thread was cancelled while it waited on the tool — a cascade
+            // step timeout, the agent watchdog. Charged for the reason a timeout is:
+            // the tool was already handed to its worker, executeBounded has just
+            // cancelled that worker, and its upstream request (the paid search, the
+            // scrape) is normally under way. This branch used to fall through to the
+            // uncharged one below, so a cascade step abandoned mid-tool lost the tool's
+            // price from its failed-phase spend and from maxCostPerRun.
+            //
+            // The charge lands on this thread before the method returns, so a caller
+            // that waits for the cancelled step to unwind (CascadingModelExecutor does,
+            // briefly) sees it in the conversation's tool cost. The interrupt flag stays
+            // set — executeBounded re-armed it — so the dispatch loop still stops.
+            chargeQuietly(invocation, conversationId, enableCostTracking);
+            long executionTime = System.currentTimeMillis() - startTime;
+            meterRegistry.counter("eddi.tool.execution.failure", "tool", toolName).increment();
+            markFailed(span, interrupted.getClass().getName());
+            return describeFailure(toolName, executionTime, interrupted);
         } catch (Exception e) {
             // Nothing below the execution step ran: a failure is neither cached nor
             // charged, whatever kind it is.
@@ -451,6 +530,22 @@ public class ToolExecutionService {
             }
         }
         return builder.startSpan();
+    }
+
+    /**
+     * Charges one call, never letting a tracking failure replace the tool's result:
+     * by the time this runs the tool has already done its work.
+     */
+    private void chargeQuietly(ToolInvocation invocation, String conversationId, boolean enableCostTracking) {
+        if (!enableCostTracking || conversationId == null) {
+            return;
+        }
+        try {
+            costTracker.trackToolCall(invocation, conversationId);
+        } catch (RuntimeException trackingFailure) {
+            LOGGER.errorf("Cost tracking failed for tool '%s'; the tool result is returned unchanged: %s", invocation.dispatchName(),
+                    trackingFailure.getMessage());
+        }
     }
 
     private static void markFailed(Span span, String errorType) {

@@ -422,8 +422,8 @@ class ConversationServiceHitlCoverage2Test {
 
             queued.call();
 
-            verify(conversationMemoryStore).setConversationState(
-                    CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+            verify(conversationMemoryStore, atLeastOnce()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                    ConversationState.EXECUTION_INTERRUPTED);
         }
 
         @Test
@@ -464,8 +464,8 @@ class ConversationServiceHitlCoverage2Test {
                 // ...and it must be restored only AFTER the store round trips: a set flag
                 // aborts the sync Mongo driver, which would skip the very
                 // EXECUTION_INTERRUPTED write this branch exists to perform.
-                verify(conversationMemoryStore).setConversationState(
-                        CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+                verify(conversationMemoryStore, atLeastOnce()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                        ConversationState.EXECUTION_INTERRUPTED);
             } finally {
                 // Never let the flag leak into the next test on this thread.
                 Thread.interrupted();

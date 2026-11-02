@@ -169,4 +169,13 @@ class ModelOutputParserTest {
         when(nulling.deserialize(anyString(), any(Class.class))).thenReturn(null);
         assertEquals(Kind.INVALID, new ModelOutputParser(nulling).parse("{\"a\":1}", true).kind());
     }
+
+    @Test
+    void extractFirstObject_findsTheFirstBalancedObjectIgnoringBracesInStringsAndTrailingProse() {
+        assertEquals("{\"a\":\"}\",\"b\":[1,{\"c\":2}]}",
+                ModelOutputParser.extractFirstObject("Verdict: {\"a\":\"}\",\"b\":[1,{\"c\":2}]} and {more} later"));
+        assertNull(ModelOutputParser.extractFirstObject("no object"));
+        assertNull(ModelOutputParser.extractFirstObject("cut short {\"a\": 1"));
+        assertNull(ModelOutputParser.extractFirstObject(null));
+    }
 }

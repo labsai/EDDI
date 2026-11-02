@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import com.sun.net.httpserver.HttpServer;
 import dev.langchain4j.http.client.HttpMethod;
 import dev.langchain4j.http.client.HttpRequest;
@@ -22,6 +23,7 @@ import java.util.List;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Flow;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -85,6 +87,37 @@ class BoundedJdkHttpClientTest {
             named |= t.getMessage() != null && t.getMessage().contains("larger than 1048576 bytes");
         }
         assertTrue(named, String.valueOf(e));
+    }
+
+    @Test
+    @DisplayName("the request guard runs before every send, so a cached client re-checks its destination")
+    void requestGuardRunsBeforeEverySend() {
+        var guarded = new AtomicInteger();
+        var client = BoundedJdkHttpClient.builder(1024 * 1024, uri -> {
+            guarded.incrementAndGet();
+            if (uri.getPath().startsWith("/blocked")) {
+                throw new IllegalArgumentException("refused by policy");
+            }
+        }).build();
+
+        assertEquals("{\"ok\":true}", client.execute(HttpRequest.builder().method(HttpMethod.GET).url(url("/small")).build()).body());
+        var e = assertThrows(RuntimeException.class,
+                () -> client.execute(HttpRequest.builder().method(HttpMethod.GET).url(url("/blocked")).build()));
+        boolean named = false;
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            named |= t.getMessage() != null && t.getMessage().contains("refused by policy");
+        }
+        assertTrue(named, String.valueOf(e));
+        assertEquals(2, guarded.get());
+    }
+
+    @Test
+    @DisplayName("built with a target policy, a request to the metadata service is refused at send time")
+    void targetPolicyRefusesMetadataAtSendTime() {
+        var client = BoundedJdkHttpClient.builder(OutboundTargetPolicy.permissive()).build();
+        var request = HttpRequest.builder().method(HttpMethod.GET).url("http://169.254.169.254/latest/meta-data/").build();
+
+        assertThrows(RuntimeException.class, () -> client.execute(request));
     }
 
     @Test

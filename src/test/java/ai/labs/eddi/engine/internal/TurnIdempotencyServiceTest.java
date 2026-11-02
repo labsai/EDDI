@@ -70,6 +70,20 @@ class TurnIdempotencyServiceTest {
     }
 
     @Test
+    @DisplayName("a turn whose persist failed is not replayed: the retry runs it again")
+    void unpersistedTurnIsNotReplayed() throws Exception {
+        service.admit("c1", "k", () -> null);
+        service.complete("c1", "k", new Outcome(snapshot(ConversationState.READY), false));
+        service.admit("c2", "k", () -> null);
+        service.complete("c2", "k", new Outcome(snapshot(ConversationState.READY), false));
+
+        service.forgetUnpersisted("c1");
+
+        assertEquals(Kind.OWNER, service.admit("c1", "k", () -> null).kind(), "the lost answer must not be served");
+        assertEquals(Kind.REPLAY, service.admit("c2", "k", () -> null).kind(), "another conversation's answer is kept");
+    }
+
+    @Test
     @DisplayName("a failed turn wakes its waiters but is not replayable")
     void failedTurnNotReplayable() throws Exception {
         service.admit("c1", "k", () -> null);

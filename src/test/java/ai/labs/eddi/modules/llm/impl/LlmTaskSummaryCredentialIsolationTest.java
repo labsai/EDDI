@@ -166,7 +166,7 @@ class LlmTaskSummaryCredentialIsolationTest {
 
     private Map<String, String> capturedSummaryParameters() {
         ArgumentCaptor<Map> captor = ArgumentCaptor.forClass(Map.class);
-        verify(conversationSummarizer).updateIfNeeded(eq(memory), any(), any(), captor.capture());
+        verify(conversationSummarizer).updateIfNeeded(eq(memory), any(), any(), captor.capture(), any(), any());
         return captor.getValue();
     }
 
@@ -254,6 +254,24 @@ class LlmTaskSummaryCredentialIsolationTest {
         assertEquals("512", resolved.get("maxTokens"));
         assertEquals(2, resolved.size());
         assertTrue(parentParams.containsKey("apiKey"), "the parent task's own parameter map must not be mutated");
+    }
+
+    @Test
+    @DisplayName("mismatched providers → custom headers and other request-override containers are dropped")
+    void mismatchedProviders_stripCustomHeadersAndAccountKeys() {
+        Map<String, String> parentParams = new HashMap<>();
+        parentParams.put("customHeaders", "{\"X-Api-Key\":\"parent-secret\"}");
+        parentParams.put("customParameters", "{\"vendor_field\":1}");
+        parentParams.put("organizationId", "org-parent");
+        parentParams.put("serviceVersion", "2024-10-21");
+        parentParams.put("apiEndpoint", "https://parent.example");
+        parentParams.put("temperature", "0.3");
+
+        var resolved = LlmTask.resolveInheritedSummaryParameters(parentParams, "anthropic", "openai");
+
+        assertEquals(Map.of("temperature", "0.3"), resolved);
+        assertEquals(parentParams, LlmTask.resolveInheritedSummaryParameters(parentParams, "openai", "openai"),
+                "on the same provider everything is inherited");
     }
 
     @Test

@@ -67,6 +67,36 @@ describe("parseCascadePreview", () => {
     expect(parsed.compatible).toBe(false);
   });
 
+  it("reads a quoted \"true\" as the backend does — Jackson coerces it", () => {
+    const parsed = parseCascadePreview(
+      preview({ resourceMappings: [{ oldUri: llm(1), newUri: llm(2) }], redeploy: "true", compatible: "true" }),
+    )!;
+    expect(parsed.redeploy).toBe(true);
+    expect(parsed.compatible).toBe(true);
+    const falsy = parseCascadePreview(
+      preview({ resourceMappings: [{ oldUri: llm(1), newUri: llm(2) }], redeploy: "false", compatible: "no" }),
+    )!;
+    expect(falsy.redeploy).toBe(false);
+    expect(falsy.compatible).toBe(false);
+  });
+
+  it.each([["TRUE"], [" true "], ["  True"], [1], [-1], [2]])(
+    "reads %j as true, like Jackson's boolean coercion",
+    (value) => {
+      const parsed = parseCascadePreview(
+        preview({ resourceMappings: [{ oldUri: llm(1), newUri: llm(2) }], redeploy: value }),
+      )!;
+      expect(parsed.redeploy).toBe(true);
+    },
+  );
+
+  it.each([[0], [1.5], ["tRUE"], ["1"], [null]])("does not read %j as true", (value) => {
+    const parsed = parseCascadePreview(
+      preview({ resourceMappings: [{ oldUri: llm(1), newUri: llm(2) }], redeploy: value }),
+    )!;
+    expect(parsed.redeploy).toBe(false);
+  });
+
   it("flags a mapping that swaps to a different resource rather than a newer version", () => {
     const other = "99887766554433221100aabb";
     const parsed = parseCascadePreview(

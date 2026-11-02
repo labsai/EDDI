@@ -101,7 +101,7 @@ class RestExportServicePreviewResilienceTest {
                 mock(IParserStore.class), mock(IDictionaryStore.class), mock(IRuleSetStore.class), mock(IApiCallsStore.class), llmStore,
                 mock(IPropertySetterStore.class), mock(IOutputStore.class), mock(IMcpCallsStore.class),
                 mock(IRagStore.class), snippetStore, jsonSerialization, mock(IZipArchive.class),
-                mock(SecretScrubber.class), mock(IScheduleStore.class), mock(ResourceAccessGuard.class),
+                mock(SecretScrubber.class), mock(IScheduleStore.class), viewingGuard(),
                 mock(BackupMetrics.class), mock(IConnectionStore.class));
 
         var agentConfig = new AgentConfiguration();
@@ -324,5 +324,15 @@ class RestExportServicePreviewResilienceTest {
                 .filter(resource -> type.equals(resource.resourceType()))
                 .findFirst()
                 .orElseThrow(() -> new AssertionError("no '" + type + "' row in " + preview.resources()));
+    }
+
+    /**
+     * A guard under which the caller may VIEW every listed snippet — what
+     * workspaces-off answers.
+     */
+    private static ResourceAccessGuard viewingGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        when(guard.canAccess(any(), any())).thenReturn(true);
+        return guard;
     }
 }

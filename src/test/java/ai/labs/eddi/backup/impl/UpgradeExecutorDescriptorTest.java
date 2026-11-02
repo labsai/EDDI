@@ -157,60 +157,25 @@ class UpgradeExecutorDescriptorTest {
     }
 
     @Test
-    @DisplayName("a target ahead of its descriptor heals instead of wedging")
-    void healsWhenTheStoreIsAheadOfTheDescriptor() throws Exception {
-        // The state a failed descriptor write leaves behind: the resource is at v3,
-        // its descriptor still names v2. Version resolution reads the descriptor, so
-        // the sync plans a write against v2 — which the store refuses with a 409
-        // naming the real current version. Without acting on that, every later sync
-        // reports "the store did not accept the update" for ever.
+    @DisplayName("a target ahead of its descriptor is reported, never written over")
+    void reportsWhenTheStoreIsAheadOfTheDescriptor() throws Exception {
+        // The resource is at v3 but its descriptor names v2: either a descriptor write
+        // that was lost, or a save whose descriptor has not moved yet. Nothing the
+        // executor can read tells the two apart, so it fails safe - the write is
+        // refused with a reason the operator can act on, not retried over the newer
+        // version.
         givenTargetAt(3);
         when(llmStore.updateLlm(eq(LLM_ID), eq(2), any()))
-                .thenThrow(RestUtilities.createConflictException(
-                        "eddi://ai.labs.llm/llmstore/llms/",
-                        new IResourceId() {
-                            @Override
-                            public String getId() {
-                                return LLM_ID;
-                            }
-
-                            @Override
-                            public Integer getVersion() {
-                                return 3;
-                            }
-                        }));
-        when(llmStore.updateLlm(eq(LLM_ID), eq(3), any())).thenReturn(Response.ok().build());
-        // The descriptor really does lag (G1): it exists at v2 and NOT at v3. The
-        // fixture used to answer a descriptor at any version, which made this test
-        // pass while the real store failed the bump on every sync.
+                .thenThrow(RestUtilities.createConflictException("eddi://ai.labs.llm/llmstore/llms/", resourceIdAt(LLM_ID, 3)));
         givenLlmDescriptorOnlyAt(2);
         List<String> moves = recordDescriptorMoves(LLM_ID);
 
         UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
 
-        assertTrue(result.failures().isEmpty(),
-                "the retry should have carried the write, got: " + result.failures());
-        verify(llmStore).updateLlm(eq(LLM_ID), eq(3), any());
-        // The descriptor is walked forward from where it actually is: v2 -> names v3,
-        // then v3 -> names v4 (the version this run wrote).
-        assertEquals(List.of("2->3", "3->4"), moves);
-        assertEquals(2, result.updated(), "the LLM and the workflow both landed");
-    }
-
-    @Test
-    @DisplayName("a descriptor lagging by more than one version is caught up, not left wedged")
-    void descriptorLaggingSeveralVersionsCatchesUp() throws Exception {
-        givenTargetAt(3);
-        when(llmStore.updateLlm(eq(LLM_ID), eq(2), any()))
-                .thenThrow(RestUtilities.createConflictException("eddi://ai.labs.llm/llmstore/llms/", resourceIdAt(LLM_ID, 5)));
-        when(llmStore.updateLlm(eq(LLM_ID), eq(5), any())).thenReturn(Response.ok().build());
-        givenLlmDescriptorOnlyAt(2);
-        List<String> moves = recordDescriptorMoves(LLM_ID);
-
-        UpgradeResult result = withLlmStoreInCdi(() -> executor.executeUpgrade(sourceWithOneLlm(), AGENT_ID, null, null));
-
-        assertTrue(result.failures().isEmpty(), "got: " + result.failures());
-        assertEquals(List.of("2->3", "3->4", "4->5", "5->6"), moves);
+        verify(llmStore, never()).updateLlm(eq(LLM_ID), eq(3), any());
+        assertTrue(result.failures().stream().anyMatch(f -> f.reason().contains("changed on this instance")),
+                "got: " + result.failures());
+        assertEquals(List.of(), moves, "a refused write leaves the descriptor alone");
     }
 
     @Test

@@ -314,6 +314,24 @@ public class TurnIdempotencyService {
     }
 
     /**
+     * The conversation's last turn was answered but could not be persisted (a store
+     * failure, a lost revision race, a fenced write): drop the answers kept for the
+     * grace window, so a retry with the same key runs the turn again instead of
+     * being handed a reply the conversation does not contain. The answer is kept
+     * before the persist on purpose — the client gets it first — so this is the
+     * other half of that order.
+     */
+    public void forgetUnpersisted(String conversationId) {
+        if (conversationId == null) {
+            return;
+        }
+        String prefix = scoped(conversationId, "");
+        if (recent.asMap().keySet().removeIf(id -> id.startsWith(prefix))) {
+            count("forgotten_unpersisted");
+        }
+    }
+
+    /**
      * The owner's turn never produced a result (it was refused before running):
      * release the key so the next request can run it, and tell the waiters.
      */

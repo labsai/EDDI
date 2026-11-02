@@ -19,6 +19,7 @@ import {
 import { buildAttachmentContext } from "@/lib/api/attachments";
 import { revokeMessagePreviews, type SentAttachment } from "@/hooks/use-chat";
 import { resumeConversation, type HitlVerdict, type ToolCallDecision } from "@/lib/api/hitl";
+import { PauseChangedError, type ShownPause } from "@/lib/hitl-pause-binding";
 import type { PipelineEvent } from "@/hooks/use-debug-events";
 import { OPERATOR_PROBE_USER_ID, type OperatorConfig } from "@/lib/api/operator";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
@@ -159,6 +160,13 @@ interface OperatorChatActions {
     verdict: HitlVerdict,
     note?: string,
     toolDecisions?: Record<string, ToolCallDecision>,
+    /**
+     * The pause the reviewer was shown (`shownPauseOf(approval-status)`). Its
+     * `pauseId` is sent with the decision so the backend refuses it if the
+     * conversation has since moved on to a different pause. Omitted, the pause
+     * the store displays is used.
+     */
+    shown?: ShownPause,
   ) => Promise<void>;
   /** Drops a stale `error` without touching anything else — see the drawer,
    *  which calls this on open so an hour-old failure from a different surface
@@ -720,6 +728,32 @@ async function followExecutingTurn(
     // Only OUR flag: a reset() clears its own; a newer pick owns its own.
     if (!superseded()) set({ isResolvingPause: false });
   }
+}
+
+/**
+ * The `pauseId` to send with a decision — the pause start in epoch
+ * milliseconds, the form `approval-status` reports and the backend compares.
+ *
+ * Preference order: the id the reviewer was shown; else the displayed pause's
+ * start; else the pause read just before the resume. If both a displayed start
+ * and a fresh one exist and name different instants, the reviewer decided about
+ * a pause that is gone: that is reported as `null` rather than silently
+ * choosing one. `undefined` means no identity is known at all.
+ */
+function pauseIdFrom(
+  shownId: string | null | undefined,
+  displayedPausedAt: string | null,
+  freshPausedAt: string | null,
+): string | null | undefined {
+  const shown = shownId?.trim();
+  if (shown) return shown;
+  const displayedMs = displayedPausedAt ? Date.parse(displayedPausedAt) : NaN;
+  const freshMs = freshPausedAt ? Date.parse(freshPausedAt) : NaN;
+  if (Number.isFinite(displayedMs) && Number.isFinite(freshMs) && displayedMs !== freshMs) {
+    return null;
+  }
+  const ms = Number.isFinite(displayedMs) ? displayedMs : freshMs;
+  return Number.isFinite(ms) ? String(ms) : undefined;
 }
 
 export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
@@ -1455,12 +1489,17 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
    * it; when we do not (a 409 pause, whose optimistic bubbles were dropped)
    * decision and answer are appended.
    */
-  resolveApproval: async (verdict, note, toolDecisions) => {
+  resolveApproval: async (verdict, note, toolDecisions, shown) => {
     const conversationId = get().conversationId;
     if (!conversationId) return;
+    // The pause the reviewer is looking at, captured BEFORE the baseline read
+    // below overwrites the local identity with whatever is paused right now.
+    const displayedPausedAt = get().decidedPausedAt;
 
     const controller = new AbortController();
     set({ isResolvingPause: true, resolveError: null, resolveAbortController: controller });
+    // The pause the baseline read found paused NOW, kept for the one case that has to write it to the store.
+    let freshPausedAt: string | null = null;
 
     try {
       // Receipt baseline: which calls the turn had ALREADY executed before this
@@ -1494,6 +1533,7 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
           // key and refetch the banner under the approver for nothing — the
           // settle path below writes the store value that actually matters.
           decidedPausedAt = baseline.hitlPausedAt;
+          freshPausedAt = baseline.hitlPausedAt;
         }
       } catch {
         preDecisionCalls = null;
@@ -1532,7 +1572,20 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
         set({ isResolvingPause: false });
         return;
       }
-      await resumeConversation(conversationId, { verdict, note, toolDecisions });
+      // Bind the decision to the pause that was reviewed. Without a pauseId the
+      // backend applies the verdict to whatever the conversation is paused on
+      // NOW: another window can have resolved the displayed pause and the turn
+      // paused again, and a top-level REJECTED/APPROVED would land on a batch
+      // nobody looked at. Same helper, same wire field as the approvals inbox
+      // (`use-hitl.ts`).
+      const reviewedPauseId = pauseIdFrom(shown?.pauseId, displayedPausedAt, decidedPausedAt);
+      if (reviewedPauseId === null) throw new PauseChangedError();
+      await resumeConversation(conversationId, {
+        verdict,
+        note,
+        toolDecisions,
+        ...(reviewedPauseId ? { pauseId: reviewedPauseId } : {}),
+      });
       const snapshot = await pollUntilSettled(conversationId, controller.signal, decidedPausedAt);
       // `pollUntilSettled` can only observe an abort between polls — the reads
       // themselves take no signal. So a `reset()` during the wait (the chat's
@@ -1731,7 +1784,13 @@ export const useOperatorChatStore = create<OperatorChatStore>((set, get) => ({
       });
     } catch (error) {
       if (!controller.signal.aborted) {
-        set({ isResolvingPause: false, resolveError: getErrorMessage(error) });
+        set({
+          isResolvingPause: false,
+          resolveError: getErrorMessage(error),
+          // The card says the pause changed: key the approval status to the pause that is paused NOW, or the
+          // new pause stays hidden behind the stale key. isPaused and the error are kept.
+          ...(error instanceof PauseChangedError && freshPausedAt ? { decidedPausedAt: freshPausedAt } : {}),
+        });
       }
     } finally {
       if (get().resolveAbortController === controller) {
