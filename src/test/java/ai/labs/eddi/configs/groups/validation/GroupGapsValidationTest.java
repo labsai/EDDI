@@ -101,6 +101,50 @@ class GroupGapsValidationTest {
         assertTrue(problems(vote(new HumanTieBreakConfig("x", "PT-1H", null)), group()).getFirst().contains("positive"));
     }
 
+    @Nested
+    @DisplayName("humans in task forces")
+    class TaskForce {
+
+        private final List<AgentGroupConfiguration.DiscussionPhase> planAndVerify = List.of(
+                new AgentGroupConfiguration.DiscussionPhase("Plan", AgentGroupConfiguration.PhaseType.PLAN),
+                new AgentGroupConfiguration.DiscussionPhase("Execute", AgentGroupConfiguration.PhaseType.EXECUTE),
+                new AgentGroupConfiguration.DiscussionPhase("Verify", AgentGroupConfiguration.PhaseType.VERIFY));
+
+        @Test
+        @DisplayName("a human executor with an agent moderator is fine")
+        void humanExecutor() {
+            var config = group(agent("lead"), human("h1"));
+            config.setModeratorAgentId("lead");
+            assertTrue(GroupGapsValidation.humanTaskForceProblems(config, planAndVerify).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a human moderator would plan and verify — refused")
+        void humanModerator() {
+            var config = group(agent("a1"), human("h1"));
+            config.setModeratorAgentId("h1");
+            assertTrue(GroupGapsValidation.humanTaskForceProblems(config, planAndVerify).getFirst().contains("plan or verify"));
+        }
+
+        @Test
+        @DisplayName("without a moderator, the first member by speaking order stands in — a human there is refused")
+        void firstBySpeakingOrder() {
+            var humanFirst = group(new GroupMember("h1", "H", 0, null, MemberType.HUMAN), new GroupMember("a1", "A", 1, null));
+            var agentFirst = group(new GroupMember("a1", "A", 0, null), new GroupMember("h1", "H", 1, null, MemberType.HUMAN));
+            assertTrue(!GroupGapsValidation.humanTaskForceProblems(humanFirst, planAndVerify).isEmpty());
+            assertTrue(GroupGapsValidation.humanTaskForceProblems(agentFirst, planAndVerify).isEmpty());
+        }
+
+        @Test
+        @DisplayName("EXECUTE alone has no planner or verifier to worry about")
+        void executeOnly() {
+            var config = group(human("h1"));
+            config.setModeratorAgentId("h1");
+            assertTrue(GroupGapsValidation.humanTaskForceProblems(config,
+                    List.of(new AgentGroupConfiguration.DiscussionPhase("Execute", AgentGroupConfiguration.PhaseType.EXECUTE))).isEmpty());
+        }
+    }
+
     @Test
     @DisplayName("a MODERATOR_DECIDES timeout fallback needs a moderator")
     void moderatorFallback() {

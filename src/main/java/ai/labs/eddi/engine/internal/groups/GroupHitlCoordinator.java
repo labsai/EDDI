@@ -1081,7 +1081,7 @@ public class GroupHitlCoordinator {
                         : GroupConversation.RESUME_KIND_HUMAN_TURN));
         gc.setPendingHumanInput(new GroupConversation.PendingHumanInput(
                 member.agentId(), member.displayName(), phaseIdx, repeatIdx, turn.speakerIdx(),
-                entryTypeName, turn.renderedPrompt(), humanConfig.onTimeout().name(), Instant.now()));
+                entryTypeName, turn.renderedPrompt(), humanConfig.onTimeout().name(), Instant.now(), turn.detail()));
         gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);
         gc.setPausedAt(Instant.now());
         gc.setPausedAtPhaseIndex(phaseIdx);
@@ -1102,7 +1102,7 @@ public class GroupHitlCoordinator {
 
         if (listener != null) {
             listener.onHumanInputRequested(new GroupConversationEventSink.HumanInputRequestedEvent(
-                    member.agentId(), member.displayName(), phaseIdx, phase.name()));
+                    member.agentId(), member.displayName(), phaseIdx, phase.name(), turn.detail()));
         }
         LOGGER.infof("Group discussion %s paused for human input from member '%s' at phase %d",
                 LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(member.agentId()), phaseIdx);
@@ -1369,6 +1369,8 @@ public class GroupHitlCoordinator {
         final String savedPauseReason = gc.getHitlPauseReason();
 
         gc.getTranscript().add(entry);
+        // A human task-force task: complete, gate or fail it with this answer.
+        final var taskBefore = GroupHumanTasks.applyResult(gc, groupConfig, phases.get(pending.phaseIdx()), pending, content, skipReason);
         // Advance past the answered speaker; RESUME_KIND is preserved so a
         // parallel tail resumes as a parallel tail.
         gc.setResumePoint(new GroupConversation.ResumePoint(pending.phaseIdx(), pending.repeatIdx(),
@@ -1419,6 +1421,7 @@ public class GroupHitlCoordinator {
             synchronized (gc.getTranscript()) {
                 gc.getTranscript().remove(entry);
             }
+            GroupHumanTasks.restore(gc, taskBefore);
             gc.setResumePoint(bookmark);
             gc.setPendingHumanInput(pending);
             gc.setState(GroupConversationState.AWAITING_HUMAN_INPUT);

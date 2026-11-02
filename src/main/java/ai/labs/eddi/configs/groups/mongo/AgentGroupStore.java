@@ -458,14 +458,9 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                 DiscussionStyle style = config.getStyle() != null ? config.getStyle() : DiscussionStyle.ROUND_TABLE;
                 phases = DiscussionStylePresets.expand(style, config.getMaxRounds());
             }
-            boolean taskPhases = phases.stream().filter(Objects::nonNull).anyMatch(
-                    p -> p.type() == PhaseType.PLAN
-                            || p.type() == PhaseType.EXECUTE
-                            || p.type() == PhaseType.VERIFY);
-            if (taskPhases) {
-                problems.add("HUMAN members cannot join task-force groups (PLAN/EXECUTE/VERIFY phases) — "
-                        + "task waves assign and time work on agent latencies (I6 v1)");
-            }
+            // Humans may execute task-force tasks; only a human planner/verifier is
+            // refused.
+            problems.addAll(GroupGapsValidation.humanTaskForceProblems(config, phases));
             boolean peerPhases = phases.stream().filter(Objects::nonNull).anyMatch(DiscussionPhase::targetEachPeer);
             if (peerPhases) {
                 problems.add("HUMAN members cannot join groups with targetEachPeer phases — a human would owe one "
