@@ -281,9 +281,26 @@ public class RemoteApiResourceSource implements IResourceSource {
      * Everything this class hands out goes through here, not {@link #httpGet}.
      */
     private String readDocument(String path) throws IOException {
+        String cached = documentsByPath.get(path);
+        if (cached != null) {
+            return cached;
+        }
         String json = httpGet(path);
-        return json == null ? null : secretScrubber.apply(json);
+        String scrubbed = json == null ? null : secretScrubber.apply(json);
+        if (scrubbed != null) {
+            documentsByPath.put(path, scrubbed);
+        }
+        return scrubbed;
     }
+
+    /**
+     * Every document this source has read, by path — and every path carries its
+     * version, so an entry never goes stale. A workflow or a resource the source
+     * agent names more than once used to be fetched again for every occurrence,
+     * which let a small remote document multiply one preview into thousands of
+     * sequential requests.
+     */
+    private final Map<String, String> documentsByPath = new HashMap<>();
 
     @Override
     public List<String> warnings() {
@@ -321,6 +338,7 @@ public class RemoteApiResourceSource implements IResourceSource {
         workflowDataList = new ArrayList<>();
 
         List<URI> workflowUris = agent.config().getWorkflows();
+        IResourceSource.requireWorkflowCountWithinLimit(workflowUris);
         for (int i = 0; i < workflowUris.size(); i++) {
             if (Thread.currentThread().isInterrupted()) {
                 // Per-workflow failures are tolerated, a cancellation is not: carrying on

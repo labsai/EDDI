@@ -452,7 +452,7 @@ class LlmTaskCoverage2Test {
      */
     private ConversationSummaryConfig capturedSummaryConfig() {
         var captor = ArgumentCaptor.forClass(ConversationSummaryConfig.class);
-        verify(conversationSummarizer).updateIfNeeded(eq(memory), captor.capture(), any(), any());
+        verify(conversationSummarizer).updateIfNeeded(eq(memory), captor.capture(), any(), any(), any(), any());
         return captor.getValue();
     }
 
@@ -465,7 +465,7 @@ class LlmTaskCoverage2Test {
     @SuppressWarnings("unchecked")
     private Map<String, String> capturedSummaryParameters() {
         var captor = ArgumentCaptor.forClass(Map.class);
-        verify(conversationSummarizer).updateIfNeeded(eq(memory), any(), any(), captor.capture());
+        verify(conversationSummarizer).updateIfNeeded(eq(memory), any(), any(), captor.capture(), any(), any());
         return captor.getValue();
     }
 
@@ -590,7 +590,7 @@ class LlmTaskCoverage2Test {
         lenient().when(props.isEmpty()).thenReturn(true);
         lenient().when(memory.getConversationProperties()).thenReturn(props);
         doThrow(new RuntimeException("summarizer LLM down"))
-                .when(conversationSummarizer).updateIfNeeded(any(), any(), any(), any());
+                .when(conversationSummarizer).updateIfNeeded(any(), any(), any(), any(), any(), any());
 
         var summaryConfig = new ConversationSummaryConfig();
         summaryConfig.setEnabled(true);

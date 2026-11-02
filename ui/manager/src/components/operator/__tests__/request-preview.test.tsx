@@ -127,7 +127,29 @@ describe("RequestPreview", () => {
         />,
       );
       const warning = screen.getByTestId("request-preview-escalations-call-1");
-      expect(warning).toHaveTextContent(/no approval gate/i);
+      expect(warning).toHaveTextContent(/without an approval gate on every write method/i);
+    });
+
+    it("calls out an agent whose gate covers only some write methods, without calling it ungated", () => {
+      // A POST-only gate does gate something, so "no approval gate" would be
+      // false — but its PUT/PATCH/DELETE calls run unreviewed, which is what
+      // gateLooksInstalled refuses and what the warning has to say.
+      renderWithProviders(
+        <RequestPreview
+          preview={preview({
+            body: JSON.stringify({
+              agentName: "Refund helper",
+              systemPrompt: "You help with refunds.",
+              hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["http.get:*"] } },
+            }),
+          })}
+          pinned
+          callId="call-1"
+        />,
+      );
+      const warning = screen.getByTestId("request-preview-escalations-call-1");
+      expect(warning).toHaveTextContent(/does not gate will execute unsupervised/i);
+      expect(warning).not.toHaveTextContent(/no approval gate/i);
     });
 
     it("calls out a create_api_agent with write access to its own API", () => {

@@ -156,6 +156,14 @@ class ExpressionGuardrailTest {
         }
 
         @Test
+        @DisplayName("an earlier repeated-key object is not skipped for a later one the expression accepts")
+        void duplicateKeyCandidateIsNotSkipped() {
+            // Strict extraction skips the first object and would approve the second;
+            // the task's own conversion takes the first and keeps total=999.
+            assertEquals(ExpressionGuardrail.REASON_UNPARSEABLE, undecided("total == 1", "{\"total\":1,\"total\":999} {\"total\":1}"));
+        }
+
+        @Test
         @DisplayName("an answer over the size cap is not parsed")
         void tooLarge() {
             String big = "{\"total\": 1, \"pad\": \"" + "x".repeat(ExpressionGuardrail.MAX_ANSWER_CHARS) + "\"}";

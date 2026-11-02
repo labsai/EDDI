@@ -17,6 +17,7 @@ import {
 import type {
   ImportPreview,
   ExportPreview,
+  ExportSelection,
   SyncMapping,
   SyncRequest,
   DocumentDescriptor,
@@ -77,11 +78,14 @@ export function useExportSelective() {
       agentId,
       version,
       selectedResourceIds,
+      selection,
     }: {
       agentId: string;
       version: number;
       selectedResourceIds: string[];
-    }) => exportAgentSelective(agentId, version, selectedResourceIds),
+      /** Snippet / schedule selections; an empty array means "none of them". */
+      selection?: Omit<ExportSelection, "resources">;
+    }) => exportAgentSelective(agentId, version, selectedResourceIds, selection),
   });
 }
 

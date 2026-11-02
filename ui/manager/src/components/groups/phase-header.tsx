@@ -74,7 +74,7 @@ export function PhaseHeader({
         {expanded ? (
           <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground rtl:rotate-180" />
         )}
 
         <span className="text-base">{icon}</span>

@@ -57,6 +57,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -86,7 +87,7 @@ class ToolLoopResumerNoteTest {
                 new ChatTranscriptCodec(), mock(IHitlToolJournalStore.class));
         var tenantQuotaService = mock(TenantQuotaService.class);
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
-        when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);
         orchestrator = new AgentOrchestrator(mock(CalculatorTool.class), mock(DateTimeTool.class), mock(WebSearchTool.class),
                 mock(DataFormatterTool.class), mock(WebScraperTool.class), mock(TextSummarizerTool.class), mock(PdfReaderTool.class),
                 mock(WeatherTool.class), mock(FetchToolResponsePageTool.class), mock(ToolExecutionService.class),

@@ -40,7 +40,9 @@ import java.util.Optional;
  * <h2>Syntax</h2>
  * <ul>
  * <li>{@code *} — any characters except {@code /} (one path segment)</li>
- * <li>{@code **} — any characters including {@code /}</li>
+ * <li>{@code **} — any characters including {@code /} (and including a line
+ * terminator a decoded path may carry — the regex this replaced did not match
+ * one, so {@code /private/**} let {@code /private/a%0Ab} through)</li>
  * <li>{@code ?} — exactly one character other than {@code /}</li>
  * </ul>
  * A pattern that does not start with {@code /} or {@code **} is treated as

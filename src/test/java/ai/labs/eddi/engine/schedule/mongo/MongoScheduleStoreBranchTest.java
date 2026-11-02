@@ -9,6 +9,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import com.mongodb.MongoClientSettings;
 import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
@@ -22,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -190,6 +192,17 @@ class MongoScheduleStoreBranchTest {
 
         assertThrows(IResourceStore.ResourceStoreException.class,
                 () -> store.tryClaim("s1", "inst1", Instant.now(), Instant.now().minusSeconds(300)));
+    }
+
+    @Test
+    @DisplayName("tryClaim re-checks enabled: a schedule disabled after the poll's read cannot be claimed")
+    void tryClaimRequiresEnabled() throws Exception {
+        store.tryClaim("s1", "inst1", Instant.now(), Instant.now().minusSeconds(300));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).findOneAndUpdate(filter.capture(), any(Bson.class));
+        String rendered = filter.getValue().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains("\"enabled\": true"), "the claim filter must require enabled=true: " + rendered);
     }
 
     // ==================== markCompleted error path ====================

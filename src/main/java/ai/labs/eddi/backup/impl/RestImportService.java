@@ -886,7 +886,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 HitlConfigValidation.validate(agentConfig.getHitlConfig());
                 AgentStore.validateContinuation(agentConfig);
 
-                agentConfig.getWorkflows()
+                // Each distinct workflow once. The first pass repoints every occurrence of
+                // a URI, so a repeated one used to be imported again for nothing — a full
+                // copy of the workflow and all its extensions per repetition, left behind
+                // as orphans no agent names.
+                new LinkedHashSet<>(agentConfig.getWorkflows())
                         .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
 
                 URI newAgentUri;
@@ -1000,9 +1004,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             String workflowVersion = String.valueOf(workflowResourceId.getVersion());
 
             var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
+            boolean[] imported = {false};
             try (var directoryStream = Files.newDirectoryStream(dir,
                     wfFilePath -> wfFilePath.toString().endsWith(".workflow.json") || wfFilePath.toString().endsWith(".package.json"))) {
                 directoryStream.forEach(workflowFilePath -> {
+                    imported[0] = true;
                     try {
                         Path workflowPath = workflowFilePath.getParent();
                         String workflowFileString = readFile(workflowFilePath);
@@ -1150,6 +1156,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                     }
                 });
 
+            }
+            if (!imported[0]) {
+                // A workflow directory without a workflow document used to leave the
+                // agent naming the archive's workflow URI as it was — stored without the
+                // check RestAgentStore applies, so an archive could attach an existing
+                // workflow of this deployment that the caller cannot read.
+                throw badArchive("the archive has a directory for workflow " + workflowId + " v" + workflowVersion
+                        + " but no workflow document in it");
             }
 
         } catch (IOException e) {
@@ -1637,6 +1651,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI createNewWorkflow(String workflowFileString, ImportTransaction transaction) throws IOException {
         WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
+        // The REST create's reference check, on the decoded workflow about to be
+        // stored: a reference this import did not rewrite (a spelling the patterns do
+        // not match, a parser document the archive left out) must not name a
+        // configuration the caller could not have named through the API.
+        WorkflowReferenceAccess.requireAccessToReferences(resourceAccessGuard, workflowConfig);
         return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI, transaction);
     }
 
@@ -1777,11 +1796,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateParser(ParserConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestParserStore store = getRestResourceStore(IRestParserStore.class);
-        Response response = store.updateParser(localId, localVersion, config);
-        if (response.getStatus() == 200) {
-            return URI.create(IRestParserStore.resourceURI + localId + IRestParserStore.versionQueryParam + (localVersion + 1));
-        }
-        return createResourceDirect(IParserStore.class, config, IRestParserStore.resourceURI, transaction);
+        // Tracked like every other merge update. Written untracked, a merge that
+        // failed after this point rolled back everything else and left the parser
+        // carrying the archive's content.
+        URI updated = updateTracked(IParserStore.class, IRestParserStore.resourceURI, localId, localVersion, config, store::updateParser,
+                transaction);
+        return updated != null ? updated : createResourceDirect(IParserStore.class, config, IRestParserStore.resourceURI, transaction);
     }
 
     private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs, ImportTransaction transaction) {
@@ -2027,6 +2047,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         continue;
                     }
                     name = connection.getName();
+                    if (resourceAccessGuard != null && !resourceAccessGuard.isAdmin()) {
+                        // Creating a connection is administrator-only over REST
+                        // (IRestConnectionStore is @RolesAllowed("eddi-admin")), and this
+                        // in-process call does not pass through that check — so an editor's
+                        // import would otherwise create what the editor could not.
+                        skipped++;
+                        LOGGER.warnf("Connection '%s' was not imported: creating connections takes eddi-admin; an administrator "
+                                + "can create it, or import this archive", LogSanitizer.sanitize(name));
+                        continue;
+                    }
                     if (connectionStore.idOfName(ConnectionConfiguration.effectiveTenant(connection), name) != null) {
                         skipped++;
                         LOGGER.infof("Connection '%s' already exists and was not imported: an archive never overwrites a live connection's "

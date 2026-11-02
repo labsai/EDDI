@@ -121,6 +121,26 @@
 {{- if and .Values.nats.enabled .Values.nats.externalUrl }}
 {{- fail "nats.enabled=true and nats.externalUrl are both set: EDDI would connect to the in-chart cluster and the external URL would be silently inert. Choose one." }}
 {{- end }}
+{{- if contains "@" (default "" .Values.nats.externalUrl) }}
+{{- fail "nats.externalUrl contains \"@\", i.e. embedded credentials: the URL is written to a ConfigMap, which is readable without Secret access. Remove the credentials from the URL and supply them through nats.externalUsername and nats.externalPassword (stored in a Secret)." }}
+{{- end }}
+{{- /*
+  Credentials for an external NATS must not cross the network in clear text.
+  EDDI's client turns TLS on for a tls:// (or wss://) server URL by itself, with
+  the JVM's default trust store, so the guard is on the URL scheme. It fires for
+  the credentials the chart renders (externalUsername/externalPassword); what an
+  operator puts in eddi.existingSecret the chart cannot see, and values.yaml asks
+  for tls:// there too. nats.externalAllowPlaintext is the explicit opt-out, for a
+  transport that is encrypted underneath EDDI (e.g. a service mesh with mTLS).
+*/}}
+{{- if and (not .Values.nats.enabled) .Values.nats.externalUrl (or .Values.nats.externalUsername .Values.nats.externalPassword) (not .Values.nats.externalAllowPlaintext) }}
+{{- range $server := splitList "," .Values.nats.externalUrl }}
+{{- $s := trim $server | lower }}
+{{- if and $s (not (or (hasPrefix "tls://" $s) (hasPrefix "wss://" $s))) }}
+{{- fail (printf "nats.externalUrl lists %q, which is not tls:// or wss://, while nats.externalUsername/externalPassword are set: the credentials would be sent in clear text. Use tls:// for every server (EDDI then connects over TLS with the JVM's default trust store), or set nats.externalAllowPlaintext=true if the transport is encrypted underneath EDDI, e.g. by a service mesh." (trim $server)) }}
+{{- end }}
+{{- end }}
+{{- end }}
 {{- else if ne (include "eddi.messagingType" .) "in-memory" }}
 {{- fail "eddi.messagingType must be \"in-memory\" or \"nats\"; any other value fails EDDI's boot." }}
 {{- else }}

@@ -146,7 +146,11 @@ public final class BoundedFanOut {
         int threads = Math.max(1, Math.min(maxConcurrency, count));
         Admission gate = admission != null ? admission : Admission.ALWAYS;
         AtomicBoolean closed = new AtomicBoolean(false);
-        // 0 queued, 1 started, 2 finished
+        // 0 queued, 1 started, 2 finished, 3 abandoned (the caller stopped waiting
+        // before it started — it never will). Queued -> started and queued ->
+        // abandoned are both compare-and-set, so the caller's "not sent" and the
+        // item's start cannot both win: reading the state and THEN starting let an
+        // item the caller had just reported as not sent go on and send.
         AtomicIntegerArray states = new AtomicIntegerArray(count);
 
         ExecutorService pool = Executors.newFixedThreadPool(threads, Thread.ofVirtual().name(threadName + "-", 0).factory());
@@ -157,15 +161,19 @@ public final class BoundedFanOut {
                 Callable<T> work = items.get(index);
                 Callable<T> body = () -> {
                     if (closed.get()) {
-                        states.set(index, 2);
+                        states.set(index, STATE_REFUSED);
                         return outcomes.notStarted(index, "the step stopped waiting before this item could start");
                     }
                     String refusal = gate.refuse(index);
                     if (refusal != null) {
-                        states.set(index, 2);
+                        states.compareAndSet(index, 0, STATE_REFUSED);
                         return outcomes.notStarted(index, refusal);
                     }
-                    states.set(index, 1);
+                    if (!states.compareAndSet(index, 0, 1)) {
+                        // The caller already reported this item as not started.
+                        gate.finished(index);
+                        return outcomes.notStarted(index, "the step stopped waiting before this item could start");
+                    }
                     try {
                         return work.call();
                     } catch (Throwable failure) {
@@ -188,7 +196,7 @@ public final class BoundedFanOut {
         for (int i = 0; i < count; i++) {
             Future<T> future = futures.get(i);
             if (stopWaiting && !future.isDone()) {
-                results.add(outcomes.unfinished(i, states.get(i) == 1));
+                results.add(outcomes.unfinished(i, startedOrAbandon(states, i)));
                 continue;
             }
             try {
@@ -202,16 +210,38 @@ public final class BoundedFanOut {
             } catch (TimeoutException e) {
                 closed.set(true);
                 stopWaiting = true;
-                results.add(outcomes.unfinished(i, states.get(i) == 1));
+                results.add(outcomes.unfinished(i, startedOrAbandon(states, i)));
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 closed.set(true);
                 stopWaiting = true;
-                results.add(outcomes.unfinished(i, states.get(i) == 1));
+                results.add(outcomes.unfinished(i, startedOrAbandon(states, i)));
             } catch (ExecutionException e) {
                 results.add(outcomes.failed(i, e.getCause() != null ? e.getCause() : e));
             }
         }
         return results;
     }
+
+    /**
+     * Whether item {@code index} has started; if it has not, marks it abandoned so
+     * it never will — the answer cannot be overtaken by the item starting.
+     */
+    static boolean startedOrAbandon(AtomicIntegerArray states, int index) {
+        if (states.compareAndSet(index, 0, 3)) {
+            return false;
+        }
+        // Already past "queued": only a running or finished item has started. One the
+        // gate refused (or
+        // the step closed on) never ran, and reporting it as started told the caller a
+        // request that
+        // was never sent was "still running", so it was not retried.
+        int state = states.get(index);
+        return state == 1 || state == 2;
+    }
+
+    /**
+     * An item the gate refused, or that found the step closed: it never started.
+     */
+    private static final int STATE_REFUSED = 4;
 }

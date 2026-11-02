@@ -320,7 +320,15 @@ public class RestA2AEndpoint {
                                   JsonRpcRequest request) {
         if (request == null || request.method() == null) {
             count("invalid", "none", "error");
-            return jsonRpcError(request == null ? null : request.id(), A2AModels.ERROR_INVALID_REQUEST, "Invalid JSON-RPC request");
+            return jsonRpcError(request == null || !A2AWireFormat.isAcceptableRequestId(request.id()) ? null : request.id(),
+                    A2AModels.ERROR_INVALID_REQUEST, "Invalid JSON-RPC request");
+        }
+        if (!A2AWireFormat.isAcceptableRequestId(request.id())) {
+            // The id is echoed in every answer, and in every event of a stream: an
+            // object or a long string would multiply the response by the chunk count.
+            count("invalid", "none", "error");
+            return jsonRpcError(null, A2AModels.ERROR_INVALID_REQUEST,
+                    "Invalid JSON-RPC id: a number or a string of at most " + A2AWireFormat.MAX_ID_LENGTH + " characters");
         }
         if (!a2aEnabled) {
             count("disabled", "none", "error");

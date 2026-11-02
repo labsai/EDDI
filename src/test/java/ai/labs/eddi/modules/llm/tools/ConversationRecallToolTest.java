@@ -288,4 +288,19 @@ class ConversationRecallToolTest {
 
         assertTrue(result.contains("Recalled conversation turns 0-7"), result);
     }
+
+    /**
+     * Review finding #3: a turn an input guardrail redacted for the model must not
+     * come back verbatim through the tool.
+     */
+    @Test
+    void recallConversationDetail_inputScreenAppliesToReturnedTurns() {
+        var tool = new ConversationRecallTool(createOutputs(10), 8, 20, text -> text.replace("message 3", "[REDACTED:pii]"));
+
+        String result = tool.recallConversationDetail("turns 2-4");
+
+        assertTrue(result.contains("**Turn 3 — User:** User [REDACTED:pii]"), result);
+        assertFalse(result.contains("User message 3"), result);
+        assertTrue(result.contains("User message 2"), result);
+    }
 }

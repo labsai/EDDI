@@ -728,8 +728,6 @@ export const TRANSLATIONS: Readonly<Record<string, Table>> = LOCALES;
 /** Languages written right to left; applied when a table for one is added. */
 const RTL = new Set(["ar", "he", "fa", "ur"]);
 
-export const SUPPORTED_LOCALES: readonly string[] = Object.keys(LOCALES);
-
 let current = "en";
 
 /** Reduce "de-AT" / "DE_at" to the table key, or null when unsupported. */

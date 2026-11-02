@@ -720,6 +720,37 @@ class GuardrailServiceTest {
         }
 
         @Test
+        @DisplayName("screenHistoricInput: redact rewrites, block withholds, a guardrail that skips history is skipped")
+        void screenHistoricInput() {
+            var redactor = rewriting("pii", "123-45-6789", "[REDACTED:ssn]");
+            var blocker = flagging("bad", "forbidden");
+            var notHistory = new Scripted("costly", BOTH, text -> GuardrailVerdict.violation("x")) {
+                @Override
+                public boolean screensHistory() {
+                    return false;
+                }
+            };
+            var service = new GuardrailService(List.of(redactor, blocker, notHistory), new SimpleMeterRegistry());
+            var configs = List.of(config("pii", "redact"), config("bad", "block"), config("costly", "block"));
+
+            assertEquals("my ssn is [REDACTED:ssn]", service.screenHistoricInput(configs, "my ssn is 123-45-6789", CONTEXT));
+            assertEquals(GuardrailService.HISTORY_PLACEHOLDER, service.screenHistoricInput(configs, "something forbidden", CONTEXT));
+            assertEquals("plain", service.screenHistoricInput(configs, "plain", CONTEXT));
+            assertEquals(0, notHistory.calls.get(), "a model-backed guardrail is not called on history");
+        }
+
+        @Test
+        @DisplayName("warn with failMode=closed buffers: a failed evaluation withholds the answer")
+        void requiresBuffering_warnFailClosed() {
+            var closed = config("g", "warn");
+            closed.setParameters(Map.of("failMode", "closed"));
+            assertTrue(GuardrailService.requiresBuffering(List.of(closed)));
+            var open = config("g", "warn");
+            open.setParameters(Map.of("failMode", "open"));
+            assertFalse(GuardrailService.requiresBuffering(List.of(open)));
+        }
+
+        @Test
         @DisplayName("duplicate types: the first bean wins")
         void duplicateTypes_firstWins() throws Exception {
             var first = flagging("g", "x");

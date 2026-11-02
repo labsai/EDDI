@@ -115,7 +115,7 @@ class RestExportServiceSelectionContractTest {
                 llmStore, mock(IPropertySetterStore.class), mock(IOutputStore.class),
                 mock(IMcpCallsStore.class), mock(IRagStore.class), snippetStore,
                 jsonSerialization, zipArchive, secretScrubber, scheduleStore,
-                mock(ResourceAccessGuard.class), mock(BackupMetrics.class), mock(IConnectionStore.class));
+                viewingGuard(), mock(BackupMetrics.class), mock(IConnectionStore.class));
 
         tmpDir = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp"));
         exportRoot = tmpDir.resolve("export");
@@ -306,5 +306,15 @@ class RestExportServiceSelectionContractTest {
                 }
             });
         }
+    }
+
+    /**
+     * A guard under which the caller may VIEW every listed snippet — what
+     * workspaces-off answers.
+     */
+    private static ResourceAccessGuard viewingGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        when(guard.canAccess(any(), any())).thenReturn(true);
+        return guard;
     }
 }

@@ -43,6 +43,19 @@ updates:
       # breaking bump and the safe updates in it cannot merge either.
       - dependency-name: "io.projectreactor.netty:reactor-netty-http"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # The 3.x lines of these two libraries moved to Jackson 3 (tools.jackson), which the
+      # `ban-jackson3` enforcer rule in pom.xml forbids while Quarkus manages Jackson 2.
+      # A bump fails the build outright. Minor and patch releases stay enabled. Revisit when
+      # Quarkus moves to Jackson 3.
+      - dependency-name: "de.undercouch:bson4jackson"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "com.networknt:json-schema-validator"
+        update-types: ["version-update:semver-major"]
+      # Only a dependencyManagement pin for a transitive dependency (swagger-core), not
+      # something EDDI calls. ClassGraph 5/6 is not binary-compatible with 4.x, so a bump
+      # would break its real consumers at runtime. Hold until they move.
+      - dependency-name: "io.github.classgraph:classgraph"
+        update-types: ["version-update:semver-major"]
 
   # Docker base image digests
   - package-ecosystem: docker
@@ -176,6 +189,10 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "@vitest/*"
         update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the Go-native compiler. typescript-eslint peers typescript <6.1.0, so the
+      # major makes `npm ci` fail with ERESOLVE. Revisit when typescript-eslint supports TS 7.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /ui/chat
@@ -216,6 +233,10 @@ updates:
     ignore:
       # Same as the Manager: a react-router v8 major needs a manual migration.
       - dependency-name: "react-router*"
+        update-types: ["version-update:semver-major"]
+      # TypeScript 7 is the Go-native compiler. typescript-eslint peers typescript <6.1.0, so the
+      # major makes `npm ci` fail with ERESOLVE. Revisit when typescript-eslint supports TS 7.
+      - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
 
   # The documentation site (docs-site/). Its lockfile is committed and CI's Trivy scan reads

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.api;
 
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.lifecycle.TaskId;
@@ -68,10 +69,18 @@ public interface IConversationService {
 
     /**
      * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
-     * READY. Updates both persistent storage and the in-memory cache atomically.
-     * Admin-only operation.
+     * READY — only while it is still in {@code expectedState}, as one
+     * compare-and-set, and the cache follows the store. Admin-only operation.
+     * <p>
+     * The caller reads the state to decide whether a reset is allowed; without the
+     * compare-and-set a turn that started, or an end that landed, between that read
+     * and the write was overwritten with READY.
+     *
+     * @return {@code false} when the conversation had left {@code expectedState} —
+     *         nothing was changed
      */
-    void resetConversationState(String conversationId, ConversationState targetState);
+    boolean resetConversationState(String conversationId, ConversationState expectedState, ConversationState targetState)
+            throws ResourceStoreException;
 
     /**
      * End a conversation with actor attribution. When the conversation was
@@ -411,6 +420,19 @@ public interface IConversationService {
     CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException;
 
     /**
+     * {@link #cancelPausedConversation(String, String)} bound to one pause: applies
+     * only while the conversation is still paused on the pause identified by
+     * {@code pauseId} (as {@code HitlDecision#pauseIdOf} renders it). For cancels
+     * decided for a specific pause and applied later — an ABORT timeout, the
+     * pending-approval retention sweep — so a late one can neither stop a resumed
+     * turn nor abort a newer pause. {@code null} binds to no pause.
+     *
+     * @return {@link CancelOutcome#NOTHING_TO_CANCEL} also when the conversation is
+     *         paused on a different pause
+     */
+    CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy, String pauseId) throws ResourceStoreException;
+
+    /**
      * Resume a paused (HITL) conversation with the given human decision.
      *
      * @param conversationId
@@ -469,6 +491,36 @@ public interface IConversationService {
      *             if the conversation is not found
      */
     ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * The conversation's current state without its history, for reads that show
+     * only where the conversation is now (the approval-status summary). Loads the
+     * last step and output and the server-computed totals instead of the whole
+     * stored document — see {@link ConversationMemoryTail}. Never persist or resume
+     * from it.
+     *
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    ConversationMemoryTail getConversationMemoryTail(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException;
+
+    /**
+     * The full snapshot for the approver view
+     * ({@code approval-status?detail=full}), possibly without the pending batch's
+     * resume-only fields, which that view strips anyway — see
+     * {@code IConversationMemoryStore#loadConversationMemorySnapshotForApprover}.
+     * Never persist or resume from it.
+     *
+     * @throws ResourceStoreException
+     *             on persistence failures
+     * @throws ResourceNotFoundException
+     *             if the conversation is not found
+     */
+    ConversationMemorySnapshot getConversationMemorySnapshotForApprover(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException;
 
     /**
