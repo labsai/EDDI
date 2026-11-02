@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.apicalls.IApiCallsStore;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.rest.ConnectionReadRedactor;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
@@ -46,6 +47,7 @@ import ai.labs.eddi.utils.FileUtilities;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import io.quarkus.scheduler.Scheduled;
+import io.quarkus.security.ForbiddenException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -339,7 +341,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             // alone, so the cleanup in `finally` cannot touch a concurrent export,
             // the import staging root, or a ZIP awaiting download.
             scratchRoot = createExportScratchRoot();
-            Path agentPath = writeDirAndDocument(agentId, agentVersion, jsonSerialization.serialize(agentConfig), scratchRoot, AGENT_EXT);
+            // Scrubbed like every other document in the archive. The agent carries
+            // credentials of its own — a Dream job's model apiKey, a legacy channel's
+            // bot token — and was the one document written as stored.
+            Path agentPath = writeDirAndDocument(agentId, agentVersion,
+                    secretScrubber.scrubJson(jsonSerialization.serialize(agentConfig)), scratchRoot, AGENT_EXT);
             Map<IResourceId, WorkflowConfiguration> workflowConfigurations = readConfigs(workflowStore, agentConfig.getWorkflows());
 
             DocumentDescriptor agentDocumentDescriptor = writeDocumentDescriptor(agentPath, agentId, agentVersion);
@@ -352,6 +358,9 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             for (IResourceId resourceId : workflowConfigurations.keySet()) {
                 WorkflowConfiguration workflowConfig = workflowConfigurations.get(resourceId);
                 String workflowConfigString = jsonSerialization.serialize(workflowConfig);
+                // The references the workflow's steps make were vetted when it was
+                // written; anything else the text scan below turns up was not.
+                Set<String> vettedIds = WorkflowReferenceAccess.referencedIds(workflowConfig);
                 // The workflow is archived exactly as this deployment has it, including
                 // the reference to a config the selection is about to leave out. It is
                 // the importer, the only side that knows the strategy, that decides what
@@ -363,8 +372,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // step-deletion on the promotion flow it exists for: strategy=merge PUTs
                 // the archived workflow over the target's, so the target's own LLM and
                 // output steps vanished when someone promoted just the behaviour rules.
-                Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(), workflowConfigString, agentPath,
-                        WORKFLOW_EXT);
+                // The copy written is scrubbed; the references are found on the
+                // original. A step's free-form config map can hold a credential as
+                // easily as an extension can.
+                Path workflowPath = writeDirAndDocument(resourceId.getId(), resourceId.getVersion(),
+                        secretScrubber.scrubJson(workflowConfigString), agentPath, WORKFLOW_EXT);
                 writeDocumentDescriptor(workflowPath, resourceId.getId(), resourceId.getVersion());
 
                 // Parsers first: a parser document carries its own dictionary
@@ -372,47 +384,47 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // dictionary pass runs — a parser whose dictionaries stayed behind
                 // reaches the target pointing at ids that only exist on this instance.
                 Map<IResourceId, String> parserConfigs = convertConfigsToString(
-                        readExistingConfigs(parserStore, extractResourcesUris(workflowConfigString, PARSER_URI_PATTERN)));
+                        readExistingConfigs(parserStore, discovered(workflowConfigString, PARSER_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, parserConfigs, PARSER_EXT, selectedIds);
 
                 // The workflow's dictionaries must exist, as every extension it names
                 // must. One only a parser document names is carried when it exists:
                 // the pipeline never loads that document, so a dictionary it names
                 // having been deleted must not block the backup.
-                List<URI> workflowDictionaryUris = extractResourcesUris(workflowConfigString, DICTIONARY_URI_PATTERN);
+                List<URI> workflowDictionaryUris = discovered(workflowConfigString, DICTIONARY_URI_PATTERN, vettedIds);
                 Map<IResourceId, Object> dictionaries = new LinkedHashMap<>(
                         readConfigs(regularDictionaryStore, workflowDictionaryUris));
                 dictionaries.putAll(readExistingConfigs(regularDictionaryStore,
-                        parserOnlyUris(parserConfigs, workflowDictionaryUris, DICTIONARY_URI_PATTERN)));
+                        requireViewOnUnvetted(parserOnlyUris(parserConfigs, workflowDictionaryUris, DICTIONARY_URI_PATTERN), vettedIds)));
                 Map<IResourceId, String> dictionaryConfigs = convertConfigsToString(dictionaries);
                 writeSelectedConfigs(workflowPath, dictionaryConfigs, DICTIONARY_EXT, selectedIds);
 
                 Map<IResourceId, String> behaviorConfigs = convertConfigsToString(
-                        readConfigs(behaviorStore, extractResourcesUris(workflowConfigString, BEHAVIOR_URI_PATTERN)));
+                        readConfigs(behaviorStore, discovered(workflowConfigString, BEHAVIOR_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, behaviorConfigs, BEHAVIOR_EXT, selectedIds);
 
                 Map<IResourceId, String> httpCallsConfigs = convertConfigsToString(
-                        readConfigs(httpCallsStore, extractResourcesUris(workflowConfigString, HTTPCALLS_URI_PATTERN)));
+                        readConfigs(httpCallsStore, discovered(workflowConfigString, HTTPCALLS_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, httpCallsConfigs, HTTPCALLS_EXT, selectedIds);
 
                 Map<IResourceId, String> llmConfigs = convertConfigsToString(
-                        readConfigs(llmStore, extractResourcesUris(workflowConfigString, LANGCHAIN_URI_PATTERN)));
+                        readConfigs(llmStore, discovered(workflowConfigString, LANGCHAIN_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, llmConfigs, LLM_EXT, selectedIds);
 
                 Map<IResourceId, String> propertyConfigs = convertConfigsToString(
-                        readConfigs(propertySetterStore, extractResourcesUris(workflowConfigString, PROPERTY_URI_PATTERN)));
+                        readConfigs(propertySetterStore, discovered(workflowConfigString, PROPERTY_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, propertyConfigs, PROPERTY_EXT, selectedIds);
 
                 Map<IResourceId, String> outputConfigs = convertConfigsToString(
-                        readConfigs(outputStore, extractResourcesUris(workflowConfigString, OUTPUT_URI_PATTERN)));
+                        readConfigs(outputStore, discovered(workflowConfigString, OUTPUT_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, outputConfigs, OUTPUT_EXT, selectedIds);
 
                 Map<IResourceId, String> mcpConfigs = convertConfigsToString(
-                        readConfigs(mcpCallsStore, extractResourcesUris(workflowConfigString, MCPCALLS_URI_PATTERN)));
+                        readConfigs(mcpCallsStore, discovered(workflowConfigString, MCPCALLS_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, mcpConfigs, MCPCALLS_EXT, selectedIds);
 
                 Map<IResourceId, String> ragConfigs = convertConfigsToString(
-                        readConfigs(ragStore, extractResourcesUris(workflowConfigString, RAG_URI_PATTERN)));
+                        readConfigs(ragStore, discovered(workflowConfigString, RAG_URI_PATTERN, vettedIds)));
                 writeSelectedConfigs(workflowPath, ragConfigs, RAG_EXT, selectedIds);
 
                 // Collect serialized configs for snippet reference scanning
@@ -560,7 +572,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
 
                 // Walk extensions within this workflow
                 String wfJson = jsonSerialization.serialize(wfConfig);
-                addExtensionResources(resources, wfJson, wfId);
+                addExtensionResources(resources, wfJson, wfId, WorkflowReferenceAccess.referencedIds(wfConfig));
 
                 wfIndex++;
             }
@@ -571,7 +583,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 String wfJson = jsonSerialization.serialize(wfConfig);
                 allExtensionConfigs.add(wfJson);
                 // Also scan extension content for snippet refs
-                addExtensionContentForSnippetScan(allExtensionConfigs, wfJson);
+                addExtensionContentForSnippetScan(allExtensionConfigs, wfJson, WorkflowReferenceAccess.referencedIds(wfConfig));
             }
             Set<String> referencedSnippetNames = extractReferencedSnippetNames(allExtensionConfigs);
             // Emit the snippet's real resource id, like every other row: the
@@ -599,26 +611,35 @@ public class RestExportService extends AbstractBackupService implements IRestExp
     }
 
     private void addExtensionResources(List<ExportableResource> resources, String wfJson,
-                                       String parentWorkflowId) {
-        addExtensionResourcesForType(resources, wfJson, PARSER_URI_PATTERN, PARSER_EXT, parentWorkflowId);
+                                       String parentWorkflowId, Set<String> vettedIds) {
+        addExtensionResourcesForType(resources, wfJson, PARSER_URI_PATTERN, PARSER_EXT, parentWorkflowId, vettedIds);
         // A row for every dictionary the export writes — the ones a parser document
         // names included. Without them a selective export, which posts back exactly
         // the rows it was shown, left those dictionaries out of the archive.
         addExtensionResourcesForType(resources, wfJson + parserDocumentsText(wfJson), DICTIONARY_URI_PATTERN,
-                "regulardictionary", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, LANGCHAIN_URI_PATTERN, "langchain", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, PROPERTY_URI_PATTERN, "property", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, OUTPUT_URI_PATTERN, "output", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, MCPCALLS_URI_PATTERN, "mcpcalls", parentWorkflowId);
-        addExtensionResourcesForType(resources, wfJson, RAG_URI_PATTERN, "rag", parentWorkflowId);
+                "regulardictionary", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, BEHAVIOR_URI_PATTERN, "behavior", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, HTTPCALLS_URI_PATTERN, "httpcalls", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, LANGCHAIN_URI_PATTERN, "langchain", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, PROPERTY_URI_PATTERN, "property", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, OUTPUT_URI_PATTERN, "output", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, MCPCALLS_URI_PATTERN, "mcpcalls", parentWorkflowId, vettedIds);
+        addExtensionResourcesForType(resources, wfJson, RAG_URI_PATTERN, "rag", parentWorkflowId, vettedIds);
     }
 
     private void addExtensionResourcesForType(List<ExportableResource> resources, String wfJson,
-                                              Pattern uriPattern, String typeLabel, String parentWorkflowId) {
+                                              Pattern uriPattern, String typeLabel, String parentWorkflowId,
+                                              Set<String> vettedIds) {
+        List<URI> uris;
         try {
-            List<URI> uris = extractResourcesUris(wfJson, uriPattern);
+            uris = extractResourcesUris(wfJson, uriPattern);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not extract %s resources from workflow: %s", typeLabel, e.getMessage());
+            return;
+        }
+        // Outside the try: a refusal must fail the preview, not be logged and skipped.
+        requireViewOnUnvetted(uris, vettedIds);
+        try {
             for (URI uri : uris) {
                 IResourceId resId = RestUtilities.extractResourceId(uri);
                 if (resId == null)
@@ -636,26 +657,57 @@ public class RestExportService extends AbstractBackupService implements IRestExp
         }
     }
 
-    private void addExtensionContentForSnippetScan(List<String> allConfigs, String wfJson) {
+    private void addExtensionContentForSnippetScan(List<String> allConfigs, String wfJson, Set<String> vettedIds) {
         try {
             // readConfigs already loaded every value; iterating keySet() and reading
             // each resource a second time doubled the datastore round-trips of an
             // interactive preview for no benefit.
-            collectSerializedConfigs(allConfigs, llmStore, wfJson, LANGCHAIN_URI_PATTERN);
-            collectSerializedConfigs(allConfigs, httpCallsStore, wfJson, HTTPCALLS_URI_PATTERN);
-            collectSerializedConfigs(allConfigs, propertySetterStore, wfJson, PROPERTY_URI_PATTERN);
-            collectSerializedConfigs(allConfigs, outputStore, wfJson, OUTPUT_URI_PATTERN);
+            collectSerializedConfigs(allConfigs, llmStore, wfJson, LANGCHAIN_URI_PATTERN, vettedIds);
+            collectSerializedConfigs(allConfigs, httpCallsStore, wfJson, HTTPCALLS_URI_PATTERN, vettedIds);
+            collectSerializedConfigs(allConfigs, propertySetterStore, wfJson, PROPERTY_URI_PATTERN, vettedIds);
+            collectSerializedConfigs(allConfigs, outputStore, wfJson, OUTPUT_URI_PATTERN, vettedIds);
+        } catch (ForbiddenException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.debugf("Could not scan extension content for snippets: %s", e.getMessage());
         }
     }
 
     private void collectSerializedConfigs(List<String> allConfigs, IResourceStore<?> store,
-                                          String wfJson, Pattern uriPattern)
+                                          String wfJson, Pattern uriPattern, Set<String> vettedIds)
             throws Exception {
-        for (Object config : readConfigs(store, extractResourcesUris(wfJson, uriPattern)).values()) {
+        for (Object config : readConfigs(store, discovered(wfJson, uriPattern, vettedIds)).values()) {
             allConfigs.add(jsonSerialization.serialize(config));
         }
+    }
+
+    /**
+     * The URIs the pattern finds in a workflow's text, each one the workflow's
+     * steps do not name checked for {@code VIEW} first.
+     * <p>
+     * Export finds a workflow's dependencies by scanning its whole serialized form,
+     * while the authoring-time check ({@code RestWorkflowStore}) vets only the
+     * references its steps make: {@code config.uri} and each extension's. A URI in
+     * any other field of a step's free-form {@code config} map was stored unchecked
+     * and then exported in full, so an editor could pull another space's private
+     * configuration into the archive of an agent they own. The vetted references
+     * stay exempt on purpose: {@code VIEW} on an agent covers the graph beneath it,
+     * which a share that did not cascade still has to be able to export.
+     */
+    private List<URI> discovered(String workflowJson, Pattern uriPattern, Set<String> vettedIds)
+            throws CallbackMatcher.CallbackMatcherException {
+        return requireViewOnUnvetted(extractResourcesUris(workflowJson, uriPattern), vettedIds);
+    }
+
+    private List<URI> requireViewOnUnvetted(List<URI> uris, Set<String> vettedIds) {
+        for (URI uri : uris) {
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            if (resourceId != null && !vettedIds.contains(resourceId.getId())) {
+                resourceAccessGuard.requireAccess(resourceId.getId(), AccessLevel.VIEW,
+                        "configuration an exported workflow names outside its steps");
+            }
+        }
+        return uris;
     }
 
     /**
@@ -679,6 +731,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 return byName;
             }
             for (DocumentDescriptor descriptor : descriptors) {
+                // Listed is not readable: a listing admits a snippet the caller may
+                // only USE, and its content is not theirs to carry away.
+                if (!resourceAccessGuard.canAccess(descriptor, AccessLevel.VIEW)) {
+                    continue;
+                }
                 try {
                     IResourceId resourceId = RestUtilities.extractResourceId(descriptor.getResource());
                     if (resourceId == null) {
@@ -1084,8 +1141,13 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             Path snippetsDir = Files.createDirectories(Paths.get(agentPath.toString(), "snippets"));
             int exportedCount = 0;
             for (DocumentDescriptor descriptor : descriptors) {
+                // VIEW, as GET /snippetstore requires: the listing scope admits a
+                // snippet shared for USE only, whose text must not leave in an archive.
+                if (!resourceAccessGuard.canAccess(descriptor, AccessLevel.VIEW)) {
+                    continue;
+                }
                 try {
-                    java.net.URI resourceUri = descriptor.getResource();
+                    URI resourceUri = descriptor.getResource();
                     IResourceId resourceId = RestUtilities.extractResourceId(resourceUri);
                     if (resourceId == null)
                         continue;
@@ -1216,7 +1278,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             if (connectionsDir == null) {
                 connectionsDir = Files.createDirectories(Paths.get(agentPath.toString(), CONNECTIONS_DIR));
             }
-            String json = secretScrubber.scrubJson(jsonSerialization.serialize(connection));
+            // The editor read's redaction first: a record stored before the write
+            // path required references can still hold a literal password or client
+            // secret in a field whose name the generic scrubber does not recognise
+            // (passwordRef), and GET /connectionstore never shows it.
+            String json = secretScrubber.scrubJson(jsonSerialization.serialize(ConnectionReadRedactor.redactLegacyLiterals(connection)));
             Path filePath = Paths.get(connectionsDir.toString(), id + "." + CONNECTION_EXT + ".json");
             deleteFileIfExists(filePath);
             try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {

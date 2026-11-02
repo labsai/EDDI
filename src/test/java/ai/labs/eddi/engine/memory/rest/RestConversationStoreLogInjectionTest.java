@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory.rest;
 
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -189,6 +190,8 @@ class RestConversationStoreLogInjectionTest {
     private void deletePermanently(String conversationId) {
         try {
             store.deleteConversationLog(conversationId, true);
+        } catch (ResourceStoreException e) {
+            // Expected when a dependent delete fails: the conversation is kept for a retry.
         } catch (Exception e) {
             throw new IllegalStateException(e);
         }

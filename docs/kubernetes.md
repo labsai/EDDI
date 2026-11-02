@@ -371,7 +371,7 @@ need not be set:
 
 | Value | Replaces | Keys the Secret must carry |
 |---|---|---|
-| `eddi.existingSecret` | `<release>-eddi-secrets` | `application-secrets.properties` — a Quarkus properties file with `eddi.vault.master-key=…` and the datastore line (`mongodb.connectionString=…` for MongoDB, percent-encoding the password; `quarkus.datasource.username=` / `.password=` for an external PostgreSQL), plus `eddi.nats.username=` / `eddi.nats.password=` for an in-chart NATS with auth |
+| `eddi.existingSecret` | `<release>-eddi-secrets` | `application-secrets.properties` — a Quarkus properties file with `eddi.vault.master-key=…` and the datastore line (`mongodb.connectionString=…` for MongoDB, percent-encoding the password; `quarkus.datasource.username=` / `.password=` for an external PostgreSQL), plus `eddi.nats.username=` / `eddi.nats.password=` for an in-chart NATS with auth or an external NATS that needs credentials |
 | `mongodb.existingSecret` | `<release>-eddi-mongodb` | `MONGO_INITDB_ROOT_USERNAME`, `MONGO_INITDB_ROOT_PASSWORD`. Requires `eddi.existingSecret` too: the chart can no longer build EDDI's connection string without the password, so it refuses to render otherwise |
 | `postgres.existingSecret` | `<release>-eddi-postgres` | `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` and `postgres-secrets.properties` (`quarkus.datasource.username=` / `quarkus.datasource.password=`) |
 | `keycloak.existingSecret` | `<release>-eddi-keycloak` | `password` — the bootstrap admin password, the same shape as the Kustomize overlay's `keycloak-admin` Secret |
@@ -733,7 +733,7 @@ helm install eddi ./helm/eddi \
 | `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |
 | `eddi.shutdownDrainTimeoutSeconds` | `""` | 65 s: a terminating pod lets its running turns finish |
 | `podDisruptionBudget.*` | off | `minAvailable: 1` when the release never runs fewer than two replicas (`eddi.replicas`, or `autoscaling.minReplicas` while autoscaling), so a drain never takes the last pod; `maxUnavailable: 1` otherwise |
-| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused |
+| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused. `externalUrl` must not carry credentials (an `@` is refused: it is written to a ConfigMap); put them in `nats.externalUsername` / `nats.externalPassword` (both or neither), which go to the Secret. With those set every server must be `tls://` (or `wss://`): EDDI then connects over TLS with the JVM's default trust store, and a `nats://` server is refused unless `nats.externalAllowPlaintext=true` (for a transport encrypted underneath EDDI, such as a service mesh). With `eddi.existingSecret` they are refused too: put `eddi.nats.username=` / `eddi.nats.password=` in that Secret, and use `tls://` |
 | `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
 | `nats.cluster.routeUsername` / `routePassword` | `route` / `""` | The routes between the NATS nodes authenticate with their own credentials, which client permissions do not cover; `routePassword` is required whenever the in-chart NATS runs more than one node |
 | `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects |

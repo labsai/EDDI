@@ -23,6 +23,7 @@ import java.util.Properties;
 
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -107,6 +108,28 @@ class OpenAiAuthFilterTest {
 
         verify(requestContext, never()).abortWith(any());
         assertNull(resolvedUserId(), "a non-/v1 request must not be touched at all");
+    }
+
+    @Test
+    void matrixParameterOnTheV1SegmentDoesNotSkipTheKeyCheck() {
+        // JAX-RS strips matrix parameters before routing, so this spelling reaches
+        // the /v1 resource; the guard must see it as /v1 too.
+        path("v1;x=y/chat/completions");
+
+        run(OpenAiTestFixtures.config(b -> b.apiKey = KEY));
+
+        assertEquals(401, abortedResponse().getStatus());
+    }
+
+    @Test
+    void guardedPathMatching() {
+        assertTrue(OpenAiAuthFilter.isGuarded("v1"));
+        assertTrue(OpenAiAuthFilter.isGuarded("/v1/models"));
+        assertTrue(OpenAiAuthFilter.isGuarded("//v1/models"));
+        assertTrue(OpenAiAuthFilter.isGuarded("/v1;a=b/chat/completions"));
+        assertFalse(OpenAiAuthFilter.isGuarded("v10/models"));
+        assertFalse(OpenAiAuthFilter.isGuarded("agents/v1"));
+        assertFalse(OpenAiAuthFilter.isGuarded(""));
     }
 
     @Test

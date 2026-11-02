@@ -932,7 +932,7 @@ function LogRow({
             {expanded ? (
               <ChevronDown className="h-3 w-3" />
             ) : (
-              <ChevronRight className="h-3 w-3" />
+              <ChevronRight className="h-3 w-3 rtl:rotate-180" />
             )}
             {expanded
               ? t("logs.hideStacktrace", "Hide stacktrace")

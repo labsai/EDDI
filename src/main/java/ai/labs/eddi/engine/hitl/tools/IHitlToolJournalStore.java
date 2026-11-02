@@ -46,4 +46,18 @@ public interface IHitlToolJournalStore {
      * @return the number of entries deleted
      */
     long deleteByConversationId(String conversationId);
+
+    /**
+     * Repairs storage-level retention drift. The MongoDB store keeps its retention
+     * as a partial TTL index and, during a rolling update, an old pod can recreate
+     * the previous unfiltered one (which also expires crash-orphaned EXECUTING
+     * claims); this finds and removes it and makes sure the right one exists.
+     * Called periodically by {@code HitlToolJournalMaintenance}. Stores without
+     * such an index have nothing to repair.
+     *
+     * @return how many stale indexes were removed
+     */
+    default int reconcileRetention() {
+        return 0;
+    }
 }

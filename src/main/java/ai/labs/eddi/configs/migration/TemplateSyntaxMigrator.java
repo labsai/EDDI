@@ -24,15 +24,30 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class TemplateSyntaxMigrator {
 
+    /*
+     * The possessive quantifiers and the lookahead in the three #strings patterns
+     * are a work bound, not a change of meaning: an imported template is attacker
+     * input. Each spot is one where the next token cannot be what the quantifier
+     * consumes — [^,)] is followed by ',' or ')', [^)] by ')' — or, for the
+     * whitespace before an argument, where the lazy or greedy argument group after
+     * it would absorb any whitespace given back. Plain greedy forms backtracked
+     * there on a template whose closing parenthesis is missing: every split of a
+     * long whitespace run between "\s*" and the argument group was tried, which is
+     * quadratic in the run length per candidate match.
+     */
     private static final List<Map.Entry<Pattern, String>> PATTERNS = List.of(
             // 1. #strings nested calls: #strings.outer(#strings.inner(var, args)) →
             // var.inner(args).outer()
-            Map.entry(Pattern.compile("\\[\\[\\$\\{#strings\\.([a-zA-Z]+)\\(#strings\\.([a-zA-Z]+)\\(" + "([^,)]+)(?:,\\s*([^)]*?))?\\)\\)\\}\\]\\]"),
+            Map.entry(
+                    Pattern.compile("\\[\\[\\$\\{#strings\\.([a-zA-Z]+)\\(#strings\\.([a-zA-Z]+)\\(" + "([^,)]++)(?:,\\s*+([^)]*?))?\\)\\)\\}\\]\\]"),
                     "{$3.$2($4).$1()}"),
-            // 2. #strings.method(var, arg1, arg2) → var.method(arg1, arg2)
-            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^,)]+),\\s*([^)]+)\\)"), "$2.$1($3)"),
+            // 2. #strings.method(var, arg1, arg2) → var.method(arg1, arg2). The
+            // lookahead fails at once when no ')' follows; when one does, the greedy
+            // pair below succeeds on its first or second try (the argument may be a
+            // single whitespace character, which "\s*+" would not give back).
+            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^,)]++),(?=[^)]*+\\))\\s*([^)]+)\\)"), "$2.$1($3)"),
             // 3. #strings.method(var) → var.method()
-            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^)]+)\\)"), "$2.$1()"),
+            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^)]++)\\)"), "$2.$1()"),
             // 4. th:each iteration
             Map.entry(Pattern.compile("\\[#\\s*th:each=\"(\\w+)\\s*:\\s*\\$\\{([^}]+)\\}\"\\]"), "{#for $1 in $2}"),
             // 5. th:if conditional
@@ -368,6 +383,11 @@ public class TemplateSyntaxMigrator {
         if (input == null) {
             return null;
         }
+        long work = conversionWork(input);
+        if (work > MAX_CONVERSION_WORK) {
+            return "the text holds too many template expressions (" + work / input.length() + " in " + input.length()
+                    + " characters) to convert safely";
+        }
         for (String[] delimiters : INLINE_DELIMITERS) {
             int from = 0;
             while (true) {
@@ -388,10 +408,55 @@ public class TemplateSyntaxMigrator {
                         }
                     }
                 }
-                from = bodyStart;
+                // Past the closer, not just past the opener: an opener nested in this
+                // body ends at the same closer, so rescanning from it re-checked a suffix
+                // of what was just checked, and N nested openers cost O(N * length).
+                from = close + delimiters[1].length();
             }
         }
         return null;
+    }
+
+    /**
+     * Upper bound on {@link #conversionWork}. Every conversion step anchors on an
+     * expression opener and may scan from it to the end of the text, so the cost of
+     * converting one string is bounded by openers times length; a text past this
+     * bound (thousands of unterminated openers in a long string, which is no real
+     * template) is reported unconvertible and left as it is instead of costing
+     * quadratic CPU at import or startup.
+     */
+    static final long MAX_CONVERSION_WORK = 50_000_000L;
+
+    /**
+     * The number of anchors a conversion step may scan to the end of the text from
+     * &mdash; the output openers <code>[[${</code> and <code>[(${</code>, the
+     * directive opener {@code [#} and {@code #strings.} &mdash; times the length of
+     * {@code input}.
+     *
+     * <p>
+     * A bare {@code [[} or {@code [(} is not counted. No conversion step anchors on
+     * it: the concatenation pass and the output patterns need the <code>${</code>,
+     * and {@link #unconvertibleReason}'s literal scan continues after each closer,
+     * so it is linear. Counting it charged every nested JSON array
+     * ({@code [[1,2]]}) to the bound, and an imported resource with enough of them
+     * was left in Thymeleaf syntax while every one of its decoded values passed the
+     * import's own check.
+     * </p>
+     */
+    static long conversionWork(String input) {
+        long openers = 0;
+        for (int i = 0; i + 1 < input.length(); i++) {
+            char c = input.charAt(i);
+            if (c == '[') {
+                char next = input.charAt(i + 1);
+                if (next == '#' || ((next == '[' || next == '(') && input.startsWith("${", i + 2))) {
+                    openers++;
+                }
+            } else if (c == '#' && input.startsWith("#strings.", i)) {
+                openers++;
+            }
+        }
+        return openers * input.length();
     }
 
     /**

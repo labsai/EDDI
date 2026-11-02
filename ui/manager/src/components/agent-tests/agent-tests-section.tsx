@@ -112,7 +112,7 @@ export function AgentTestsSection({ agentId, agentVersion }: { agentId: string; 
           {expanded ? (
             <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" aria-hidden="true" />
           )}
           <FlaskConical className="h-5 w-5 text-lime-600" aria-hidden="true" />
           {t("agentTests.title", "Golden conversations")}

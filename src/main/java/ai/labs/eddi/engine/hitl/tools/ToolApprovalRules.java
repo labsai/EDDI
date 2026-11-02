@@ -16,7 +16,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 /**
  * Resolves the per-tool friction rule ({@code toolApprovals.rules}) governing a
@@ -143,7 +142,7 @@ public final class ToolApprovalRules {
         return -wildcards * 1024 + match.length();
     }
 
-    private record CompiledRule(ApprovalRule rule, Pattern pattern) {
+    private record CompiledRule(ApprovalRule rule) {
     }
 
     /** Rules compiled and sorted most-specific-first; invalid entries dropped. */
@@ -160,13 +159,13 @@ public final class ToolApprovalRules {
             }
         }
         sorted.sort(Comparator.comparingInt(ToolApprovalRules::specificity).reversed());
-        return sorted.stream().map(r -> new CompiledRule(r, ToolApprovalPatterns.compile(r.getMatch()))).toList();
+        return sorted.stream().map(CompiledRule::new).toList();
     }
 
     private static ApprovalRule firstMatch(List<CompiledRule> compiled, List<String> addresses) {
         for (CompiledRule cr : compiled) {
             for (String address : addresses) {
-                if (cr.pattern().matcher(address).matches()) {
+                if (ToolApprovalPatterns.matches(cr.rule().getMatch(), address)) {
                     return cr.rule();
                 }
             }

@@ -102,7 +102,7 @@ describe("ChatHistory", () => {
           },
         ]);
       }),
-      http.get("*/agents/production/agent-1/conv1", () => {
+      http.get("*/agents/conv1", () => {
         return HttpResponse.json({
           agentId: "agent-1",
           agentVersion: 1,

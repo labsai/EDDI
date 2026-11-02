@@ -226,6 +226,26 @@ class UnauthenticatedRequestGuardTest {
             assertEquals(Decision.ALLOW, decide(DEFAULTS, method, "/x", "localhost:7070", "https://evil.example", "cross-site"));
         }
 
+        @Test
+        @DisplayName("a GET that creates a managed conversation is held to the cross-site check")
+        void sideEffectingGetIsCrossSiteChecked() {
+            String path = "/agents/managed/support/alice";
+            // An <img> on another site: no Origin, Sec-Fetch-Site cross-site.
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", path, "localhost:7070", null, "cross-site"));
+            // A fetch from a foreign page.
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", path, "localhost:7070", "https://evil.example", null));
+            // HEAD runs the GET method in JAX-RS, and a no-cors fetch may send it.
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "HEAD", path, "localhost:7070", null, "cross-site"));
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "head", path, "localhost:7070", "https://evil.example", null));
+            // Matrix parameters do not dodge the prefix — JAX-RS routes without them.
+            assertEquals(Decision.CROSS_SITE, decide(DEFAULTS, "GET", "/agents;x=1/managed/support/alice", "localhost:7070", null, "cross-site"));
+            // Its own origin, and non-browser clients, still pass.
+            assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", path, "localhost:7070", "http://localhost:7070", "same-origin"));
+            assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", path, "localhost:7070", null, null));
+            // Other GETs are untouched.
+            assertEquals(Decision.ALLOW, decide(DEFAULTS, "GET", "/agentstore/agents/descriptors", "localhost:7070", null, "cross-site"));
+        }
+
         @ParameterizedTest(name = "{0} with a foreign Origin is refused")
         @ValueSource(strings = {"POST", "PUT", "PATCH", "DELETE", "post"})
         void unsafeMethodsAreOriginChecked(String method) {

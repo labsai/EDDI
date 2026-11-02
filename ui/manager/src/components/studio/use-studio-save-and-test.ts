@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { deployAgent, getDeploymentStatus } from "@/lib/api/agents";
 import { useChatStore, useStartConversation } from "@/hooks/use-chat";
+import { chatKeys } from "@/lib/query-keys";
 
 const POLL_ATTEMPTS = 15;
 const POLL_INTERVAL_MS = 2000;
@@ -66,7 +67,7 @@ export function useStudioSaveAndTest() {
         if (!ready) throw new Error(t("chatDrawer.timeout", "Deploy timed out"));
 
         queryClient.invalidateQueries({ queryKey: ["agents"] });
-        queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+        queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
 
         // Bind the chat to THIS agent before starting: the panel follows the
         // global chat store, which may still hold whichever agent was chatted

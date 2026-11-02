@@ -12,6 +12,8 @@ import com.mongodb.MongoWriteException;
 import com.mongodb.ServerAddress;
 import com.mongodb.WriteError;
 import com.mongodb.client.FindIterable;
+import com.mongodb.client.ListIndexesIterable;
+import com.mongodb.client.MongoCursor;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.IndexOptions;
@@ -29,8 +31,10 @@ import org.mockito.Mock;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.Optional;
 
 import com.mongodb.MongoClientSettings;
@@ -108,6 +112,87 @@ class HitlToolJournalStoreTest {
         assertEquals(List.of("conversationId", "pauseEpoch", "callId"),
                 List.copyOf(renderedKey.keySet()),
                 "unique index must compose exactly (conversationId, pauseEpoch, callId) in order");
+    }
+
+    @Test
+    @DisplayName("the retention TTL expires EXECUTED entries only — an orphaned EXECUTING claim must outlive a still-pending approval")
+    void ttlCoversExecutedEntriesOnly() {
+        var optionsCaptor = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(collection, atLeastOnce()).createIndex(any(Bson.class), optionsCaptor.capture());
+        IndexOptions ttl = optionsCaptor.getAllValues().stream().filter(o -> o.getExpireAfter(TimeUnit.SECONDS) != null)
+                .findFirst().orElseThrow();
+        assertEquals(Duration.ofDays(30).toSeconds(), ttl.getExpireAfter(TimeUnit.SECONDS));
+        assertNotNull(ttl.getPartialFilterExpression(), "an unfiltered TTL also expires EXECUTING claims");
+        BsonDocument filter = ttl.getPartialFilterExpression().toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry());
+        assertEquals("EXECUTED", filter.getString("status").getValue());
+        // The previous, unfiltered TTL is dropped so it cannot keep expiring claims.
+        verify(collection).dropIndex("idx_journal_ttl_claimed");
+    }
+
+    @Nested
+    @DisplayName("reconcileRetention")
+    class ReconcileRetention {
+
+        private void indexes(Document... present) {
+            ListIndexesIterable<Document> iterable = mock(ListIndexesIterable.class);
+            MongoCursor<Document> cursor = mock(MongoCursor.class);
+            Boolean[] hasNext = new Boolean[present.length + 1];
+            for (int i = 0; i < present.length; i++) {
+                hasNext[i] = true;
+            }
+            hasNext[present.length] = false;
+            when(cursor.hasNext()).thenReturn(hasNext[0], Arrays.copyOfRange(hasNext, 1, hasNext.length));
+            if (present.length > 0) {
+                when(cursor.next()).thenReturn(present[0], Arrays.copyOfRange(present, 1, present.length));
+            }
+            doReturn(cursor).when(iterable).iterator();
+            doReturn(iterable).when(collection).listIndexes();
+            clearInvocations(collection);
+            doReturn(iterable).when(collection).listIndexes();
+        }
+
+        private Document ttl(String name, boolean partial) {
+            Document index = new Document("name", name).append("key", new Document("claimedAt", 1)).append("expireAfterSeconds", 2592000);
+            return partial ? index.append("partialFilterExpression", new Document("status", "EXECUTED")) : index;
+        }
+
+        @Test
+        @DisplayName("drops an unfiltered claimedAt TTL an old pod recreated, whatever its name, and keeps the partial one")
+        void dropsTheUnfilteredTtl() {
+            indexes(new Document("name", "idx_journal_key").append("key", new Document("conversationId", 1)),
+                    ttl("idx_journal_ttl_completed", true), ttl("some_old_pod_name", false));
+
+            assertEquals(1, store.reconcileRetention());
+
+            verify(collection).dropIndex("some_old_pod_name");
+            verify(collection, never()).dropIndex("idx_journal_ttl_completed");
+            verify(collection, never()).dropIndex("idx_journal_key");
+        }
+
+        @Test
+        @DisplayName("drops the legacy named indexes and re-ensures the partial TTL index")
+        void dropsLegacyNamesAndEnsuresThePartialIndex() {
+            indexes(ttl("idx_journal_ttl_claimed", false), new Document("name", "idx_journal_ttl").append("key", new Document("executedAt", 1)));
+
+            assertEquals(2, store.reconcileRetention());
+
+            verify(collection).dropIndex("idx_journal_ttl_claimed");
+            verify(collection).dropIndex("idx_journal_ttl");
+            var options = ArgumentCaptor.forClass(IndexOptions.class);
+            verify(collection).createIndex(any(Bson.class), options.capture());
+            assertEquals("idx_journal_ttl_completed", options.getValue().getName());
+            assertNotNull(options.getValue().getPartialFilterExpression());
+        }
+
+        @Test
+        @DisplayName("a healthy collection is left alone")
+        void healthyCollectionIsUntouched() {
+            indexes(ttl("idx_journal_ttl_completed", true));
+
+            assertEquals(0, store.reconcileRetention());
+
+            verify(collection, never()).dropIndex(anyString());
+        }
     }
 
     @Nested

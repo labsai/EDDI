@@ -270,7 +270,7 @@ export function UpdateCheckCard() {
             <p className="text-xs text-muted-foreground">
               {t(
                 "updates.privacyNote",
-                "Checks contact api.github.com directly from your browser — no other host, and no deployment data is sent.",
+                "Checks contact api.github.com directly from your browser — no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
               )}
             </p>
           </div>

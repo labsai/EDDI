@@ -379,6 +379,17 @@ public interface AlertStoreContract {
     }
 
     @Test
+    default void digestPendingRuleIdsAreDistinctAndOnlyHeldEvents() {
+        eventStore().insert(event(AGENT, "a", AlertEvent.State.DIGEST_PENDING, NOW, null)).orElseThrow();
+        eventStore().insert(event(AGENT, "b", AlertEvent.State.DIGEST_PENDING, NOW, null)).orElseThrow();
+        eventStore().insert(event(AGENT, "c", AlertEvent.State.DELIVERED, NOW, null)).orElseThrow();
+
+        assertEquals(List.of("6aba70011a25f8be7920e0aa"), eventStore().findDigestPendingRuleIds(10));
+        assertEquals(2, eventStore().releaseDigestPending("6aba70011a25f8be7920e0aa"));
+        assertEquals(List.of(), eventStore().findDigestPendingRuleIds(10), "a released event is no longer held");
+    }
+
+    @Test
     default void retentionAndGdprRedaction() {
         AlertEvent old = eventStore().insert(event(AGENT, "old", AlertEvent.State.DELIVERED, NOW.minus(Duration.ofDays(100)), null))
                 .orElseThrow();

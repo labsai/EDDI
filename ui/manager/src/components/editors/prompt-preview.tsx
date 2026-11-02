@@ -278,7 +278,7 @@ function VariableReferencePanel({
         onClick={() => setOpen(!open)}
         className="flex w-full items-center gap-2 px-3 py-2 text-start text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
       >
-        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+        {open ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3 rtl:rotate-180" />}
         {t("promptPreview.availableVariables", "Available Variables")}
         <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium">
           {availableVariables.length}

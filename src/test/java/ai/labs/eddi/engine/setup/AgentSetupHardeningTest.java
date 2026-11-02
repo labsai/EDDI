@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -163,6 +164,20 @@ class AgentSetupHardeningTest {
             verify(llmStore).deleteLlm("l1", 1, true);
             verify(ruleSetStore).deleteRuleSet("r1", 1, true);
             verify(parserStore).deleteParser("p1", 1, true);
+        }
+
+        @Test
+        @DisplayName("rollback deletes only recorded Location headers — never spec-derived metadata such as an operation tag")
+        void rollbackIgnoresMetadataThatLooksLikeALocation() {
+            var recorded = new LinkedHashMap<String, Object>();
+            recorded.put("httpCallsGroups", List.of("/agentstore/agents/aaaaaaaaaaaaaaaaaaaaaaaa?version=1"));
+            recorded.put("unmatchedEndpoints", List.of("/agentstore/agents/bbbbbbbbbbbbbbbbbbbbbbbb?version=1"));
+            recorded.put("parserLocation", "eddi://ai.labs.parser/parserstore/parsers/p1?version=1");
+
+            service.rollbackCreatedResources(recorded, "api-agent", new RuntimeException("later step failed"));
+
+            verify(parserStore).deleteParser("p1", 1, true);
+            verify(agentStore, never()).deleteAgent(anyString(), any(), anyBoolean(), anyBoolean());
         }
 
         @Test

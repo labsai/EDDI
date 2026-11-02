@@ -298,6 +298,26 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     }
 
     @Override
+    public List<String> findDigestPendingRuleIds(int limit) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn
+                        .prepareStatement(
+                                "SELECT DISTINCT rule_id FROM alert_events WHERE state = 'DIGEST_PENDING' AND rule_id IS NOT NULL LIMIT ?")) {
+            ps.setInt(1, limit);
+            List<String> ruleIds = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ruleIds.add(rs.getString(1));
+                }
+            }
+            return ruleIds;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read the rules holding digest events", e);
+        }
+    }
+
+    @Override
     public long markDigested(Collection<String> ids) {
         ensureSchema();
         if (ids.isEmpty()) {
@@ -305,6 +325,13 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         }
         return update("UPDATE alert_events SET state = 'DIGESTED', version = version + 1 WHERE id = ANY(?) AND state = 'DIGEST_PENDING'",
                 List.of((Object) ids.toArray(new String[0])), false);
+    }
+
+    @Override
+    public long releaseDigestPending(String ruleId) {
+        ensureSchema();
+        return update("UPDATE alert_events SET state = 'INBOX_ONLY', version = version + 1 WHERE rule_id = ? AND state = 'DIGEST_PENDING'",
+                List.<Object>of(ruleId), false);
     }
 
     @Override

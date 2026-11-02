@@ -8,7 +8,7 @@ name: Docs Site
 # that every docs URL written in the backend, the UIs, README and the plugin lands on a
 # page (released images print those links forever), and a change anywhere can add one.
 # The full site build — the link validator over every rendered page — runs when docs/,
-# PRIVACY.md (published as /privacy/), the site or this workflow changed.
+# PRIVACY.md (published as /privacy/), the site, the root vercel.json or this workflow changed.
 
 on:
   push:
@@ -25,7 +25,7 @@ permissions:
 
 env:
   # Same Node as everywhere else (pom.xml node.version; BuildQualityGatesTest keeps them equal).
-  NODE_VERSION: "24.22.0"
+  NODE_VERSION: "26.13.0"
 
 jobs:
   docs-site:
@@ -40,13 +40,14 @@ jobs:
 
       - name: Check paths
         id: filter
-        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             site:
               - 'docs/**'
               - 'PRIVACY.md'
               - 'docs-site/**'
+              - 'vercel.json'
               - '.github/workflows/docs-site.yml'
 
       - name: Set up Node

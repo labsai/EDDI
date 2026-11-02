@@ -44,6 +44,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -327,7 +328,8 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                     : (agentId, principal) -> (sharedCreatedIds.contains(agentId)
                             && createdHere(agentId, callerConversationId, groupConversationId))
                             || useCheck.test(agentId, principal);
-            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck));
+            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
+                    resolveDelegationCeiling(memory)));
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
@@ -336,7 +338,10 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // gated here.
         if (allows(whitelist, whitelistOmitted, "find_agents_by_capability") && capabilityRegistryService != null) {
             if (dynamicConfig.isEnabled() && dynamicConfig.isAllowRecruitment()) {
-                tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService));
+                // The caller's USE rule filters discovery as it does the REST search;
+                // without it the model learned every agent's id and metadata.
+                Predicate<String> discoveryFilter = useCheck == null ? null : agentId -> useCheck.test(agentId, userId);
+                tools.add(new FindAgentsByCapabilityTool(capabilityRegistryService, discoveryFilter));
                 LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool enabled for agent='%s'", sanitize(parentAgentId));
             } else {
                 LOGGER.debugf("[DYNAMIC] FindAgentsByCapabilityTool suppressed for agent='%s': allowRecruitment is off",
@@ -809,6 +814,40 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         }
 
         return 0;
+    }
+
+    /**
+     * The depth ceiling the delegation chain carried into this conversation
+     * ({@code context:delegationDepthMax}), or {@code null} when none did. Read
+     * like {@link #resolveDelegationDepth}: the current step first, then every
+     * earlier step — taking the <em>strictest</em> value there, so a turn issued
+     * without the context cannot lift a ceiling an earlier hop set.
+     */
+    static Integer resolveDelegationCeiling(IConversationMemory memory) {
+        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH_MAX;
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            Integer ceiling = parseDelegationDepth(currentStep.getData(contextKey));
+            if (ceiling != null) {
+                return ceiling;
+            }
+        }
+        var allSteps = memory.getAllSteps();
+        if (allSteps == null) {
+            return null;
+        }
+        List<IData<Object>> priorEntries = allSteps.getExactDataPerStep(contextKey);
+        if (priorEntries == null) {
+            return null;
+        }
+        Integer strictest = null;
+        for (IData<Object> entry : priorEntries) {
+            Integer ceiling = parseDelegationDepth(entry);
+            if (ceiling != null) {
+                strictest = strictest == null ? ceiling : Math.min(strictest, ceiling);
+            }
+        }
+        return strictest;
     }
 
     /**

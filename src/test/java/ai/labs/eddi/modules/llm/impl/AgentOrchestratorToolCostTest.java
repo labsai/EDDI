@@ -50,6 +50,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -169,10 +170,10 @@ class AgentOrchestratorToolCostTest {
 
         lenient().when(memory.getConversationId()).thenReturn(CONVERSATION_ID);
         lenient().when(memory.getCurrentStep()).thenReturn(currentStep);
-        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
-        lenient().when(tenantQuotaService.checkCostBudget(any()))
+        lenient().when(tenantQuotaService.checkCostBudget(any(), anyDouble()))
                 .thenReturn(QuotaCheckResult.OK);
         lenient().when(webSearchTool.searchWeb("eddi", 3)).thenReturn("hits");
     }

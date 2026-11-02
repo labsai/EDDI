@@ -257,6 +257,27 @@ class GroupConversationServiceCostCeilingTest {
     }
 
     @Test
+    @DisplayName("follow-up ceiling lookup: a store failure propagates instead of meaning 'unlimited'")
+    void resolveEffectiveCostCeiling_storeFailure_propagates() throws Exception {
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(mockResourceId());
+        when(groupStore.read(GROUP_ID, 1)).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        var gc = new GroupConversation();
+        gc.setGroupId(GROUP_ID);
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> service.resolveEffectiveCostCeiling(gc));
+    }
+
+    @Test
+    @DisplayName("follow-up ceiling lookup: a missing group is a failure, not 'unlimited'")
+    void resolveEffectiveCostCeiling_missingGroup_isNotFound() throws Exception {
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(null);
+        var gc = new GroupConversation();
+        gc.setGroupId(GROUP_ID);
+
+        assertThrows(IResourceStore.ResourceNotFoundException.class, () -> service.resolveEffectiveCostCeiling(gc));
+    }
+
+    @Test
     @DisplayName("no ceiling configured: every phase runs, no SKIPPED cost entry appears")
     void noCeiling_everyPhaseRuns() throws Exception {
         var phases = List.of(phase("Opinion", PhaseType.OPINION), phase("Summary", PhaseType.SYNTHESIS));

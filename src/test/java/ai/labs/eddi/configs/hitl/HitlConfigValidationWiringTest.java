@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.agents.mongo.AgentStore;
 import ai.labs.eddi.configs.descriptors.mongo.DocumentDescriptorStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -75,7 +76,7 @@ class HitlConfigValidationWiringTest {
         @BeforeEach
         void init() {
             agentStore = new AgentStore(storageFactory,
-                    mock(IDocumentBuilder.class), mock(DocumentDescriptorStore.class));
+                    mock(IDocumentBuilder.class), mock(DocumentDescriptorStore.class), () -> mock(IWorkflowStore.class));
         }
 
         @Test

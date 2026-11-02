@@ -61,7 +61,7 @@ import {
 } from "@/hooks/use-agents";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
   applyChangedFields,
@@ -70,7 +70,7 @@ import {
   type AgentEdit,
 } from "@/lib/agent-draft";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { agentKeys } from "@/lib/query-keys";
+import { agentKeys, chatKeys } from "@/lib/query-keys";
 import { MAX_CONTINUATIONS } from "@/lib/continuation";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
@@ -177,8 +177,30 @@ export function AgentDetailPage() {
    * the version being loaded.
    */
   const configPending = isPlaceholderData;
-  const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
-  const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
+  const {
+    data: deployment,
+    isPlaceholderData: deploymentIsPlaceholder,
+    isPending: deploymentIsPending,
+    isError: deploymentFailed,
+  } = useDeploymentStatus(id!, resolvedVersion);
+  const {
+    data: envStatuses,
+    isPlaceholderData: envStatusesArePlaceholder,
+    isPending: envStatusesArePending,
+    isError: envStatusesFailed,
+  } = useDeploymentStatuses(id!, resolvedVersion);
+  // Until the status of THIS version has arrived, what is on screen belongs to
+  // the one just left (placeholder), or to nothing at all yet (the first fetch),
+  // or the lookup failed: the deploy/undeploy button must not act on any of
+  // those. An unknown status is not "not deployed" - Deploy would be offered for
+  // a version that is already live.
+  const statusPending =
+    deploymentIsPlaceholder ||
+    envStatusesArePlaceholder ||
+    deploymentIsPending ||
+    envStatusesArePending ||
+    (deploymentFailed && !deployment) ||
+    (envStatusesFailed && !envStatuses);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
   // environment a reader assumes), otherwise the first live one — which is what
   // makes a test-only agent reachable at all.
@@ -223,7 +245,7 @@ export function AgentDetailPage() {
         })
       : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
-  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS";
+  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS" || statusPending;
   /** Why production is in ERROR, when the backend said (detailed status, EDIT holders only). */
   const deploymentFailure = status === "ERROR" ? deployment?.failure : undefined;
 
@@ -450,6 +472,8 @@ export function AgentDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // Gone: unsaved edits are moot, and `isDirty` has not re-rendered yet.
+          allowNextNavigation();
           navigate("/manage/agents");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
@@ -718,7 +742,7 @@ export function AgentDetailPage() {
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
                     queryClient.invalidateQueries({ queryKey: ["agents"] });
-                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                    queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);
@@ -1331,7 +1355,7 @@ function BackLink() {
       to="/manage/agents"
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
       {t("agentDetail.backToAgents", "Back to Agents")}
     </Link>
   );
@@ -1646,7 +1670,7 @@ function RawConfigSection({ agent }: { agent: Agent }) {
         {expanded ? (
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" />
         )}
       </button>
       {expanded && (
@@ -1767,7 +1791,7 @@ function A2ASection({
           {isOpen ? (
             <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" aria-hidden="true" />
           )}
           <Handshake className="h-5 w-5 text-primary" aria-hidden="true" />
           {t("agentDetail.a2aSection", "Agent-to-Agent (A2A)")}
@@ -1928,7 +1952,7 @@ function A2ASection({
                 className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="a2a-card-toggle"
               >
-                {showCard ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {showCard ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3 rtl:rotate-180" />}
                 {t("agentDetail.agentCardPreview", "Agent Card Preview")}
               </button>
               {showCard && (

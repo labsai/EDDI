@@ -95,7 +95,7 @@ function AgentLeaderboard({ agents, onAgentClick }: AgentLeaderboardProps) {
                       {agent.errors}
                     </td>
                     <td className="py-2.5 ps-2">
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                      <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" />
                     </td>
                   </tr>
                 );

@@ -26,7 +26,9 @@ import {
   useDeleteGroup,
   useDeleteGroupWithMembers,
   useAvailableStyles,
+  useGroupVersionLookup,
 } from "@/hooks/use-groups";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { styleDisplay } from "@/lib/discussion-styles";
 import {
   MAX_DISCUSSION_ROUNDS,
@@ -91,7 +93,7 @@ function SectionHeader({
           <ChevronRight
             className={cn(
               "h-4 w-4 text-muted-foreground transition-transform duration-200",
-              expanded && "rotate-90"
+              expanded ? "rotate-90" : "rtl:rotate-180"
             )}
           />
         )}
@@ -267,10 +269,22 @@ function WorkforceSettings() {
   const navigate = useNavigate();
   const { boardId } = useParams<{ boardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const version = Number(searchParams.get("version")) || 1;
+  // This page edits and deletes, so it must read the group's CURRENT version
+  // when the URL names none: defaulting to 1 loaded a stale document whose save
+  // and delete both 409 on any group past its first version.
+  const {
+    version: resolvedVersion,
+    lookupFailed: versionLookupFailed,
+    retry: retryVersionLookup,
+  } = useGroupVersionLookup(boardId, searchParams.get("version"));
+  const version = resolvedVersion ?? 1;
 
   // ─── Data hooks ──────────────────────────────────────────────────
-  const { data: config, isLoading, isError } = useGroup(boardId ?? "", version);
+  const { data: config, isLoading: isConfigLoading, isError } = useGroup(
+    resolvedVersion !== undefined ? (boardId ?? "") : "",
+    resolvedVersion,
+  );
+  const isLoading = isConfigLoading || (resolvedVersion === undefined && !versionLookupFailed);
   const { mutateAsync: updateGroupAsync, isPending: isUpdatePending } = useUpdateGroup();
   const deleteMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
@@ -415,19 +429,15 @@ function WorkforceSettings() {
     }
   }, [config, version, baseline, formDiffersFrom, initFrom]);
 
-  // ─── Beforeunload guard ─────────────────────────────────────────
-  useEffect(() => {
-    if (!isDirty) return;
-    const h = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [isDirty]);
+  // ─── Unsaved-changes guard ──────────────────────────────────────
+  // The browser prompt on close/reload AND the in-app prompt for links, Back and
+  // navigate() — the page used to register only the former, so a sidebar click
+  // dropped the edits silently.
+  useUnsavedChangesGuard(isDirty);
 
   // ─── Save handler ───────────────────────────────────────────────
   const handleSave = useCallback(async () => {
-    if (!boardId || !config) return;
+    if (!boardId || !config || resolvedVersion === undefined) return;
     if (!name.trim()) {
       toast.error(t("Workforce.settings.nameRequired", "Task force name is required"));
       return;
@@ -514,6 +524,7 @@ function WorkforceSettings() {
     maxReworks,
     taskListConfig,
     version,
+    resolvedVersion,
     updateGroupAsync,
     setSearchParams,
     t,
@@ -521,7 +532,7 @@ function WorkforceSettings() {
 
   // ─── Delete handler ─────────────────────────────────────────────
   const handleDelete = useCallback(() => {
-    if (!boardId || !config) return;
+    if (!boardId || !config || resolvedVersion === undefined) return;
 
     if (deleteMode === "all") {
       deleteWithMembersMutation.mutate(
@@ -534,6 +545,9 @@ function WorkforceSettings() {
                 "Task force and all agents deleted"
               )
             );
+            // The group is gone: its edits are moot, and `isDirty` has not
+            // re-rendered yet, so the navigation guard would still block this.
+            allowNextNavigation();
             navigate("/workforce");
           },
           onError: (err) => {
@@ -552,6 +566,9 @@ function WorkforceSettings() {
             toast.success(
               t("Workforce.settings.deleteSuccess", "Task force deleted")
             );
+            // The group is gone: its edits are moot, and `isDirty` has not
+            // re-rendered yet, so the navigation guard would still block this.
+            allowNextNavigation();
             navigate("/workforce");
           },
           onError: () => {
@@ -568,6 +585,7 @@ function WorkforceSettings() {
     deleteMode,
     deletePermanently,
     version,
+    resolvedVersion,
     deleteMutation,
     deleteWithMembersMutation,
     navigate,
@@ -663,13 +681,20 @@ function WorkforceSettings() {
   }
 
   // ─── Error state ───────────────────────────────────────────────
-  if (isError || (!isLoading && !config)) {
+  if (versionLookupFailed || isError || (!isLoading && !config)) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
         <p>{t("Workforce.settings.loadError", "Failed to load settings")}</p>
-        <Button onClick={() => navigate('/workforce')}>
-          {t('Workforce.back', 'Back')}
-        </Button>
+        <div className="flex gap-2">
+          {versionLookupFailed && (
+            <Button variant="outline" onClick={retryVersionLookup} data-testid="settings-retry-version">
+              {t("common.retry", "Retry")}
+            </Button>
+          )}
+          <Button onClick={() => navigate('/workforce')}>
+            {t('Workforce.back', 'Back')}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -684,7 +709,7 @@ function WorkforceSettings() {
         to={`/workforce/${boardId}?version=${version}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         {t("Workforce.settings.backToBoard", "Back to Task Force")}
       </Link>
 

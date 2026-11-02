@@ -1,5 +1,4 @@
 import { api } from "../api-client";
-import { BearerEventSource } from "../bearer-event-source";
 import { seg } from "./path-segment";
 
 // ==================== Types ====================
@@ -46,15 +45,3 @@ export async function purgeDeadLetters(): Promise<number> {
   return api.delete<number>(`${BASE}/dead-letters`);
 }
 
-/**
- * Subscribe to the coordinator SSE stream.
- * Uses BearerEventSource (fetch+ReadableStream) instead of the native EventSource
- * because EventSource cannot send custom headers like Authorization.
- */
-export function createCoordinatorEventSource(): BearerEventSource {
-  return new BearerEventSource(
-    `${window.location.origin}${BASE}/stream`,
-    // Re-read on every reconnect so a refreshed token is used (see HeaderSource).
-    () => api.getAuthHeader()
-  );
-}

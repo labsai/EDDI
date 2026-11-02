@@ -59,9 +59,19 @@ final class RemoteToolRequestResolvers {
     private RemoteToolRequestResolvers() {
     }
 
+    /**
+     * A resolver whose resolved URI is the transport endpoint — the MCP server, the
+     * A2A peer — not the target of the operation: which conversation a message goes
+     * to, which resource a management call writes, is inside the tool arguments
+     * (the JSON-RPC {@code params}). A check that judges a request by its URI must
+     * therefore judge such a request by its arguments as well.
+     */
+    interface Envelope extends ToolRequestResolver {
+    }
+
     /** Resolver for one MCP tool on one server. */
     static ToolRequestResolver forMcp(String serverUrl, String toolName, boolean hasCredential) {
-        return toolRequest -> {
+        return (Envelope) toolRequest -> {
             ObjectNode params = JSON.createObjectNode();
             params.put("name", toolName == null ? "" : toolName);
             params.set("arguments", argumentsNode(toolRequest.arguments()));
@@ -72,7 +82,7 @@ final class RemoteToolRequestResolvers {
 
     /** Resolver for one A2A skill on one peer. */
     static ToolRequestResolver forA2A(String agentUrl, boolean hasCredential) {
-        return toolRequest -> ResolvedRequest.of("POST", agentUrl, Map.of(), credentialHeader(hasCredential),
+        return (Envelope) toolRequest -> ResolvedRequest.of("POST", agentUrl, Map.of(), credentialHeader(hasCredential),
                 jsonRpcPreview("tasks/send", argumentsNode(toolRequest.arguments())), true);
     }
 

@@ -202,7 +202,8 @@ class ConversationServiceStaleTurnTest {
         assertTrue(pipelineStarted.await(10, TimeUnit.SECONDS), "the pipeline should have started");
         // The watchdog parked the conversation — this is the state the abandoned turn
         // must not overwrite.
-        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.EXECUTION_INTERRUPTED);
+        verify(conversationMemoryStore, atLeastOnce()).compareAndSetState(CONVERSATION_ID, ConversationState.READY,
+                ConversationState.EXECUTION_INTERRUPTED);
         verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
 
         // Now the abandoned pipeline finishes anyway.
@@ -214,5 +215,6 @@ class ConversationServiceStaleTurnTest {
                         + "that is what overwrites a newer turn");
         // ...and it must not downgrade the watchdog's EXECUTION_INTERRUPTED to ERROR.
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
     }
 }

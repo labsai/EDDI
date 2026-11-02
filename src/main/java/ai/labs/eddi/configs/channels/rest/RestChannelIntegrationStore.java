@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -87,34 +88,58 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
     private final Instance<EmailChannelSupport> emailSupport;
     private final SecretResolver secretResolver;
+    private final ChannelTargetRouter channelTargetRouter;
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard) {
-        this(channelStore, documentDescriptorStore, resourceAccessGuard, (Instance<EmailChannelSupport>) null, (SecretResolver) null);
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, (Instance<EmailChannelSupport>) null, (SecretResolver) null, null);
     }
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard,
             Instance<EmailChannelSupport> emailSupport) {
-        this(channelStore, documentDescriptorStore, resourceAccessGuard, emailSupport, null);
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, emailSupport, null, null);
     }
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard,
             SecretResolver secretResolver) {
-        this(channelStore, documentDescriptorStore, resourceAccessGuard, null, secretResolver);
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, null, secretResolver, null);
     }
 
-    @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard,
             Instance<EmailChannelSupport> emailSupport,
             SecretResolver secretResolver) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, emailSupport, secretResolver, null);
+    }
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            SecretResolver secretResolver,
+            ChannelTargetRouter channelTargetRouter) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, null, secretResolver, channelTargetRouter);
+    }
+
+    /**
+     * @param channelTargetRouter
+     *            consulted for legacy connectors serving a channel; {@code null}
+     *            (the shorter constructors, used by tests) skips only that check
+     */
+    @Inject
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            Instance<EmailChannelSupport> emailSupport,
+            SecretResolver secretResolver,
+            ChannelTargetRouter channelTargetRouter) {
         this.secretResolver = secretResolver;
+        this.channelTargetRouter = channelTargetRouter;
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
@@ -239,43 +264,49 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 : ConfigSecretRedactor.redact(stored, ChannelIntegrationConfiguration.class);
     }
 
+    /**
+     * Cluster mode aside, makes each uniqueness check and the write it guards one
+     * step. The checks scan the stored integrations and the write follows, so two
+     * concurrent saves claiming the same {@code channelType:channelId} (or name)
+     * both passed the scan and both landed, leaving a duplicate routing key the
+     * router resolved by iteration order. Channel writes are rare; serialising them
+     * on this node costs nothing measurable.
+     */
+    private final Object uniquenessLock = new Object();
+
     @Override
     public Response updateChannel(String id, Integer version,
                                   ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
-        validateUniqueChannelId(channelConfiguration, id);
-        validateUniqueName(channelConfiguration, id);
-        if (isEmail(channelConfiguration)) {
-            emailSupport().validateAgainstDeployment(channelConfiguration, id);
+        synchronized (uniquenessLock) {
+            validateUniqueChannelId(channelConfiguration, id);
+            refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
+            validateUniqueName(channelConfiguration, id);
+            if (isEmail(channelConfiguration)) {
+                emailSupport().validateAgainstDeployment(channelConfiguration, id);
+            }
+            Response response = restVersionInfo.update(id, version, channelConfiguration);
+            syncDescriptor(id, channelConfiguration);
+            return withEmailFollowUp(id, channelConfiguration, response);
         }
-        Response response = restVersionInfo.update(id, version, channelConfiguration);
-        syncDescriptor(id, channelConfiguration);
-        return withEmailFollowUp(id, channelConfiguration, response);
     }
 
     @Override
     public Response createChannel(ChannelIntegrationConfiguration channelConfiguration) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
-        validateUniqueChannelId(channelConfiguration, null);
-        validateUniqueName(channelConfiguration, null);
-        if (isEmail(channelConfiguration)) {
-            emailSupport().validateAgainstDeployment(channelConfiguration, null);
-        }
-        Response response = restVersionInfo.create(channelConfiguration);
-        URI location = response.getLocation();
-        String createdId = null;
-        if (location != null) {
-            try {
-                var resourceId = RestUtilities.extractResourceId(location);
-                createdId = resourceId.getId();
-                syncDescriptor(resourceId.getId(), channelConfiguration);
-            } catch (Exception e) {
-                LOG.warn("Failed to sync channel descriptor on create", e);
+        synchronized (uniquenessLock) {
+            validateUniqueChannelId(channelConfiguration, null);
+            refuseLegacyConnectorTakeover(channelConfiguration, null);
+            validateUniqueName(channelConfiguration, null);
+            if (isEmail(channelConfiguration)) {
+                emailSupport().validateAgainstDeployment(channelConfiguration, null);
             }
+            Response response = restVersionInfo.create(channelConfiguration);
+            publishNewIntegration(response, channelConfiguration);
+            return withEmailFollowUp(createdId(response), channelConfiguration, response);
         }
-        return withEmailFollowUp(createdId, channelConfiguration, response);
     }
 
     @Override
@@ -295,24 +326,64 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             config.setName(deriveUniqueDuplicateName(config.getName(), config.getChannelType()));
         }
         validateConfiguration(config);
-        validateUniqueName(config, null);
-        if (isEmail(config)) {
-            // Refused for an email integration: the copy would poll the same mailbox.
-            emailSupport().validateAgainstDeployment(config, null);
-        }
-        Response response = restVersionInfo.create(config);
-        URI location = response.getLocation();
-        String createdId = null;
-        if (location != null) {
-            try {
-                var resourceId = RestUtilities.extractResourceId(location);
-                createdId = resourceId.getId();
-                syncDescriptor(resourceId.getId(), config);
-            } catch (Exception e) {
-                LOG.warn("Failed to sync channel descriptor on duplicate", e);
+        // A copy is a new standing route, so its targets need the same USE check a
+        // create runs: duplicating an old version used to restore a route to an
+        // agent the caller may not use.
+        requireUseOnTargets(config);
+        synchronized (uniquenessLock) {
+            validateUniqueName(config, null);
+            if (isEmail(config)) {
+                // Refused for an email integration: the copy would poll the same mailbox.
+                emailSupport().validateAgainstDeployment(config, null);
             }
+            Response response = restVersionInfo.create(config);
+            publishNewIntegration(response, config);
+            return withEmailFollowUp(createdId(response), config, response);
         }
-        return withEmailFollowUp(createdId, config, response);
+    }
+
+    /**
+     * The id of the integration a create answered, as
+     * {@link #publishNewIntegration} validated it.
+     */
+    private static String createdId(Response response) {
+        return RestUtilities.extractResourceId(response.getLocation()).getId();
+    }
+
+    /**
+     * Makes a just-created integration visible to the next uniqueness check before
+     * {@link #uniquenessLock} is released.
+     *
+     * <p>
+     * Both uniqueness checks enumerate the channel DESCRIPTORS, and a new
+     * integration has none until one is written. The descriptor used to be written
+     * after the lock was released, so a second save could take the lock, scan, miss
+     * the first integration and store the same {@code channelId} or name — the
+     * duplicate the lock exists to prevent. Written here, inside the lock, at the
+     * version the create answered, and strictly: an integration whose descriptor
+     * could not be written is invisible to every later check, so it is removed
+     * again and the save fails instead of leaving it behind.
+     * </p>
+     */
+    private void publishNewIntegration(Response response, ChannelIntegrationConfiguration config) {
+        URI location = response.getLocation();
+        var resourceId = location == null ? null : RestUtilities.extractResourceId(location);
+        if (resourceId == null || resourceId.getId() == null || resourceId.getVersion() == null) {
+            throw new InternalServerErrorException("The channel integration was stored without a usable location.");
+        }
+        try {
+            writeDescriptor(resourceId.getId(), resourceId.getVersion(), config);
+        } catch (Exception e) {
+            LOG.errorf(e, "Could not write the descriptor of new channel integration id=%s; removing it",
+                    sanitizeForLog(resourceId.getId()));
+            try {
+                channelStore.deleteAllPermanently(resourceId.getId());
+            } catch (RuntimeException cleanup) {
+                LOG.errorf(cleanup, "Could not remove channel integration id=%s after its descriptor failed",
+                        sanitizeForLog(resourceId.getId()));
+            }
+            throw new InternalServerErrorException("The channel integration could not be registered. Please retry.");
+        }
     }
 
     @Override
@@ -669,6 +740,48 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
     }
 
+    /**
+     * Refuses a {@code channelId} a deployed agent's legacy
+     * {@code ChannelConnector} already serves. The router lets a standalone
+     * integration take precedence over a legacy connector for the same channel, so
+     * saving one silently replaced that agent's routing and signing identity,
+     * though its author could not edit the agent. Keeping the channel an
+     * integration already had is not a takeover.
+     */
+    private void refuseLegacyConnectorTakeover(ChannelIntegrationConfiguration config, String previousChannelId) {
+        if (channelTargetRouter == null || config.getPlatformConfig() == null) {
+            return;
+        }
+        String channelId = config.getPlatformConfig().get("channelId");
+        if (channelId == null || channelId.isBlank() || channelId.equals(previousChannelId)) {
+            return;
+        }
+        // Legacy connectors only: validateUniqueChannelId has already judged the
+        // standalone integrations against the store. The router answers from the live
+        // deployments, not its cache, and throws when it cannot read them.
+        boolean servedByLegacyConnector;
+        try {
+            servedByLegacyConnector = channelTargetRouter.isServedByLegacyConnector(config.getChannelType(), channelId);
+        } catch (IllegalStateException e) {
+            LOG.warn("Could not check the deployed agents' legacy channel connectors - refusing save", e);
+            throw new ServiceUnavailableException("Could not verify that no deployed agent's channel connector serves channelId '"
+                    + channelId + "'. Please retry.");
+        }
+        if (servedByLegacyConnector) {
+            throw new BadRequestException("channelId '" + channelId + "' is already served by an agent's legacy channel connector. "
+                    + "Migrate that connector to a channel integration (or remove it) before binding the channel here.");
+        }
+    }
+
+    private String storedChannelId(String id, Integer version) {
+        try {
+            ChannelIntegrationConfiguration stored = channelStore.read(id, restVersionInfo.validateParameters(id, version));
+            return stored == null || stored.getPlatformConfig() == null ? null : stored.getPlatformConfig().get("channelId");
+        } catch (Exception e) {
+            return null; // unreadable: judge the channelId as new, the stricter answer
+        }
+    }
+
     // ─── Name uniqueness ───────────────────────────────────────────────────────
 
     /**
@@ -820,62 +933,72 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                                 ChannelIntegrationConfiguration config) {
         try {
             var currentResourceId = channelStore.getCurrentResourceId(resourceId);
-            int version = currentResourceId.getVersion();
-            // Use channelType as description for quick identification in lists
-            String desc = config.getChannelType() != null
-                    ? config.getChannelType() + " integration"
-                    : null;
-
-            // Same lookup as RestAgentGroupStore.syncDescriptor. On CREATE the
-            // descriptor does not exist yet — DocumentDescriptorFilter writes it after
-            // this method runs — and on UPDATE it still lives at version-1 until the
-            // filter promotes it. Reading only the current version failed on both paths,
-            // the catch below swallowed that, and every channel descriptor kept an empty
-            // name, so list_channel_integrations' name filter could never match.
-            DocumentDescriptor descriptor = readDescriptorOrNull(resourceId, version);
-            int descriptorVersion = version;
-            if (descriptor == null && version > 1) {
-                descriptor = readDescriptorOrNull(resourceId, version - 1);
-                descriptorVersion = version - 1;
-            }
-
-            if (descriptor == null) {
-                descriptor = new DocumentDescriptor();
-                descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId, versionQueryParam, version));
-                Date now = new Date(System.currentTimeMillis());
-                descriptor.setCreatedOn(now);
-                descriptor.setLastModifiedOn(now);
-                descriptor.setName(config.getName());
-                descriptor.setDescription(desc);
-                // Stamped like any newly created resource, or the channel is left unowned.
-                resourceAccessGuard.stampNewDescriptor(descriptor);
-                try {
-                    documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
-                } catch (IResourceStore.ResourceStoreException raced) {
-                    // The descriptor filter created it between our lookup and this write.
-                    documentDescriptorStore.setDescriptor(resourceId, version, descriptor);
-                }
-                return;
-            }
-
-            boolean changed = false;
-            if (config.getName() != null
-                    && !config.getName().equals(descriptor.getName())) {
-                descriptor.setName(config.getName());
-                changed = true;
-            }
-            if (desc != null && !desc.equals(descriptor.getDescription())) {
-                descriptor.setDescription(desc);
-                changed = true;
-            }
-
-            if (changed) {
-                descriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
-                documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
-            }
+            writeDescriptor(resourceId, currentResourceId.getVersion(), config);
         } catch (Exception e) {
             LOG.warnf(e, "Failed to sync channel descriptor for id=%s",
                     sanitizeForLog(resourceId));
+        }
+    }
+
+    /**
+     * Creates or updates the descriptor of {@code resourceId} at {@code version}
+     * (or at {@code version - 1}, where an update's descriptor still lives until
+     * the descriptor filter promotes it). Throws on failure; the caller decides
+     * whether that is fatal.
+     */
+    private void writeDescriptor(String resourceId, int version, ChannelIntegrationConfiguration config)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        // Use channelType as description for quick identification in lists
+        String desc = config.getChannelType() != null
+                ? config.getChannelType() + " integration"
+                : null;
+
+        // Same lookup as RestAgentGroupStore.syncDescriptor. On CREATE the
+        // descriptor does not exist yet — DocumentDescriptorFilter writes it after
+        // this method runs — and on UPDATE it still lives at version-1 until the
+        // filter promotes it. Reading only the current version failed on both paths,
+        // the caller's catch swallowed that, and every channel descriptor kept an empty
+        // name, so list_channel_integrations' name filter could never match.
+        DocumentDescriptor descriptor = readDescriptorOrNull(resourceId, version);
+        int descriptorVersion = version;
+        if (descriptor == null && version > 1) {
+            descriptor = readDescriptorOrNull(resourceId, version - 1);
+            descriptorVersion = version - 1;
+        }
+
+        if (descriptor == null) {
+            descriptor = new DocumentDescriptor();
+            descriptor.setResource(RestUtilities.createURI(resourceURI, resourceId, versionQueryParam, version));
+            Date now = new Date(System.currentTimeMillis());
+            descriptor.setCreatedOn(now);
+            descriptor.setLastModifiedOn(now);
+            descriptor.setName(config.getName());
+            descriptor.setDescription(desc);
+            // Stamped like any newly created resource, or the channel is left unowned.
+            resourceAccessGuard.stampNewDescriptor(descriptor);
+            try {
+                documentDescriptorStore.createDescriptor(resourceId, version, descriptor);
+            } catch (IResourceStore.ResourceStoreException raced) {
+                // The descriptor filter created it between our lookup and this write.
+                documentDescriptorStore.setDescriptor(resourceId, version, descriptor);
+            }
+            return;
+        }
+
+        boolean changed = false;
+        if (config.getName() != null
+                && !config.getName().equals(descriptor.getName())) {
+            descriptor.setName(config.getName());
+            changed = true;
+        }
+        if (desc != null && !desc.equals(descriptor.getDescription())) {
+            descriptor.setDescription(desc);
+            changed = true;
+        }
+
+        if (changed) {
+            descriptor.setLastModifiedOn(new Date(System.currentTimeMillis()));
+            documentDescriptorStore.setDescriptor(resourceId, descriptorVersion, descriptor);
         }
     }
 

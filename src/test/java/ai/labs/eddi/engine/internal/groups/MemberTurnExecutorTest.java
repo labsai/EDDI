@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
@@ -23,6 +24,7 @@ import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -32,6 +34,7 @@ import org.mockito.Mockito;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -443,6 +446,42 @@ class MemberTurnExecutorTest {
 
         assertEquals(0.07, gc.getMemberCosts().get(AGENT_A));
         assertEquals(0.07, gc.getTotalCost());
+    }
+
+    /**
+     * The member conversation's startup step can run an LLM task with creation
+     * tools. Started without the group's policy in context, that step resolved the
+     * permissive standalone default — the group's "no creation" did not apply.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void startMemberConversation_carriesTheGroupsDynamicAgentPolicy() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var agentFactory = Mockito.mock(IAgentFactory.class);
+        when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+        when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        var executor = new MemberTurnExecutor(conversationService, agentFactory,
+                new GroupSigningGuard(null, null, null, "default"), new GroupContextBuilder(null),
+                Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        var gc = newGc();
+        gc.getCreatedAgentIds().add("made-earlier");
+
+        executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+        var contextCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(conversationService).startConversation(any(), eq(AGENT_A), any(), contextCaptor.capture());
+        Map<String, Context> startContext = contextCaptor.getValue();
+        var policy = (AgentGroupConfiguration.DynamicAgentConfig) startContext.get("dynamicAgentConfig").getValue();
+        assertFalse(policy.isEnabled(), "no group policy means explicitly disabled, not the standalone default");
+        assertEquals(List.of("made-earlier"), startContext.get("dynamicCreatedAgentIds").getValue());
     }
 
     /**

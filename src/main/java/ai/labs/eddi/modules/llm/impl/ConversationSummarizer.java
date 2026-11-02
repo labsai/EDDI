@@ -16,8 +16,12 @@ import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
+import java.util.function.UnaryOperator;
 
 /**
  * Rolling conversation summary engine.
@@ -130,6 +134,32 @@ public class ConversationSummarizer {
      */
     public void updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext,
                                Map<String, String> inheritedParameters) {
+        updateIfNeeded(memory, config, propertiesContext, inheritedParameters, null, null);
+    }
+
+    /**
+     * As
+     * {@link #updateIfNeeded(IConversationMemory, ConversationSummaryConfig, String, Map)},
+     * screening what is sent and asking before the call is made.
+     *
+     * @param inputScreen
+     *            applied to every user text of the turns sent to the summarizer —
+     *            the calling task's input guardrails re-applied
+     *            ({@code GuardrailService.screenHistoricInput}), so text a
+     *            guardrail redacted for the main model does not reach the
+     *            summarizer (and through the summary every later system prompt)
+     *            verbatim; null sends the stored text
+     * @param admitCall
+     *            asked right before the summarizer is called — the conversation's
+     *            cost ceiling and the tenant budget; false skips the update (the
+     *            boundary stays, the turns keep reaching the model verbatim, and
+     *            the next turn tries again); null always admits
+     * @return the token usage of the summarizer call (a {@code tokenUsage} map),
+     *         empty when no call was made — the caller prices and records it
+     */
+    public Map<String, Object> updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext,
+                                              Map<String, String> inheritedParameters, UnaryOperator<String> inputScreen,
+                                              BooleanSupplier admitCall) {
         config.validate();
         int totalSteps = memory.getConversationOutputs().size();
         int recentWindow = config.getRecentWindowSteps();
@@ -137,13 +167,13 @@ public class ConversationSummarizer {
 
         // Not enough turns to warrant summarization
         if (summarizeThroughStep <= 0) {
-            return;
+            return Map.of();
         }
 
         // Check if we already summarized up to this point
         int alreadySummarized = readSummaryThroughStep(memory);
         if (summarizeThroughStep <= alreadySummarized) {
-            return;
+            return Map.of();
         }
 
         LOGGER.infof("[SUMMARY] Updating rolling summary for conversation='%s': steps %d→%d (recent window=%d)", sanitize(memory.getConversationId()),
@@ -166,8 +196,12 @@ public class ConversationSummarizer {
         int turnBudget = maxChars - reserved;
 
         // A message an input guardrail refused is withheld from the summarizer too:
-        // the summary reaches the main model's prompt on every later turn.
-        List<ConversationOutput> outputs = ConversationLogGenerator.modelFacingOutputs(memory);
+        // the summary reaches the main model's prompt on every later turn. And every
+        // other user text of the batch is screened again by the task's input
+        // guardrails, as the history window is: a redaction applies to the summarizer
+        // as it did to the main model.
+        List<ConversationOutput> outputs = screenInputs(ConversationLogGenerator.modelFacingOutputs(memory), alreadySummarized,
+                summarizeThroughStep, inputScreen);
         String newTurnsText = renderTurns(outputs, alreadySummarized, summarizeThroughStep);
         while (newTurnsText.length() > turnBudget && summarizeThroughStep > alreadySummarized + 1) {
             summarizeThroughStep--;
@@ -187,7 +221,7 @@ public class ConversationSummarizer {
             LOGGER.debugf("[SUMMARY] No renderable content for turns %d-%d, advancing past them.", alreadySummarized, summarizeThroughStep);
             memory.getConversationProperties().put(PROP_SUMMARY_THROUGH_STEP,
                     new Property(PROP_SUMMARY_THROUGH_STEP, summarizeThroughStep, Scope.conversation));
-            return;
+            return Map.of();
         }
 
         if (hasSummary && turnBudget < maxChars / MIN_TURN_SHARE_DIVISOR) {
@@ -204,7 +238,7 @@ public class ConversationSummarizer {
                     + "Raise maxCharsPerUpdate to at least %d so updates resume (the stored summary is not shortened by lowering "
                     + "maxSummaryTokens, which only bounds summaries written after that).", sanitize(memory.getConversationId()), reserved,
                     maxChars, reserved * MIN_TURN_SHARE_DIVISOR / (MIN_TURN_SHARE_DIVISOR - 1) + 1);
-            return;
+            return Map.of();
         }
 
         if (newTurnsText.length() > turnBudget) {
@@ -220,13 +254,29 @@ public class ConversationSummarizer {
                 ? composeContent(existingSummary, alreadySummarized, summarizeThroughStep, newTurnsText)
                 : newTurnsText;
 
+        if (admitCall != null && !admitCall.getAsBoolean()) {
+            LOGGER.warnf("[SUMMARY] Rolling summary update skipped for conversation='%s': the spend check refused the summarizer call. "
+                    + "Will retry next turn.", sanitize(memory.getConversationId()));
+            return Map.of();
+        }
+
         String instructions = buildPrompt(config, propertiesContext);
-        String summary = summarizationService.summarize(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel(),
-                inheritedParameters);
+        String summary;
+        Map<String, Object> usage;
+        try {
+            var result = summarizationService.summarizeWithUsage(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel(),
+                    inheritedParameters);
+            summary = result.summary() != null ? result.summary() : "";
+            usage = tokenUsage(result.inputTokens(), result.outputTokens());
+        } catch (RuntimeException e) {
+            // Logged by the service; a failed call is retried next turn, as before.
+            LOGGER.warnf("[SUMMARY] Summarization failed for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
+            return Map.of();
+        }
 
         if (summary.isEmpty()) {
             LOGGER.warnf("[SUMMARY] Summarization returned empty for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
-            return;
+            return usage;
         }
 
         // Store as conversation properties (persisted with the memory, O(1) lookup)
@@ -236,6 +286,49 @@ public class ConversationSummarizer {
 
         LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers steps 1-%d, summary length=%d chars",
                 sanitize(memory.getConversationId()), summarizeThroughStep, summary.length());
+        return usage;
+    }
+
+    private static Map<String, Object> tokenUsage(int inputTokens, int outputTokens) {
+        if (inputTokens <= 0 && outputTokens <= 0) {
+            return Map.of();
+        }
+        Map<String, Object> usage = new LinkedHashMap<>();
+        usage.put("inputTokens", inputTokens);
+        usage.put("outputTokens", outputTokens);
+        usage.put("totalTokens", inputTokens + outputTokens);
+        return usage;
+    }
+
+    /**
+     * {@code outputs} with the user text of every turn in {@code [from, to)} passed
+     * through {@code inputScreen}; the list itself when there is no screen or it
+     * changed nothing. Copies, never mutates: the outputs are the stored ones.
+     */
+    static List<ConversationOutput> screenInputs(List<ConversationOutput> outputs, int from, int to, UnaryOperator<String> inputScreen) {
+        if (inputScreen == null || outputs == null) {
+            return outputs;
+        }
+        List<ConversationOutput> view = null;
+        for (int i = Math.max(0, from); i < Math.min(to, outputs.size()); i++) {
+            ConversationOutput output = outputs.get(i);
+            String input = output != null ? output.get("input", String.class) : null;
+            if (input == null || input.isBlank()) {
+                continue;
+            }
+            String screened = inputScreen.apply(input);
+            if (screened == null || screened.equals(input)) {
+                continue;
+            }
+            if (view == null) {
+                view = new ArrayList<>(outputs);
+            }
+            var copy = new ConversationOutput();
+            copy.putAll(output);
+            copy.put("input", screened);
+            view.set(i, copy);
+        }
+        return view != null ? view : outputs;
     }
 
     /**

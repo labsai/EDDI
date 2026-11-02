@@ -20,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -37,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -63,6 +65,9 @@ class AlertMaintenanceServiceTest {
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(events.claimDue(any(), any(), anyInt())).thenReturn(List.of());
         when(rules.findEnabled()).thenReturn(List.of());
+        // read() follows whatever findEnabled() currently answers, like a store would.
+        when(rules.read(any())).thenAnswer(inv -> rules.findEnabled().stream().filter(r -> r.id().equals(inv.getArgument(0))).findFirst());
+        when(events.markDigested(any())).thenAnswer(inv -> (long) ((Collection<?>) inv.getArgument(0)).size());
         when(events.insert(any())).thenAnswer(inv -> Optional.of(((AlertEvent) inv.getArgument(0)).withId("6aba70011a25f8be7920e0d1")));
     }
 
@@ -72,7 +77,7 @@ class AlertMaintenanceServiceTest {
         AlertRule rule = errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC"));
         AlertEvent due = event("e1", rule, AlertEvent.State.PENDING, pending(rule));
         when(events.claimDue(NOW, NOW.plus(Duration.ofMinutes(2)), AlertMaintenanceService.CLAIM_BATCH)).thenReturn(List.of(due));
-        when(rules.read(RULE_ID)).thenReturn(Optional.of(rule));
+        doReturn(Optional.of(rule)).when(rules).read(RULE_ID);
 
         AlertMaintenanceService.Result result = service.run();
 
@@ -110,6 +115,32 @@ class AlertMaintenanceServiceTest {
     }
 
     @Test
+    @DisplayName("held events of two agents go out as one digest per agent, each labelled with its own agent — not the rule's scope")
+    void digestPerOriginatingAgent() {
+        // The rule's scope was changed to AGENT after events of another agent were
+        // held.
+        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.HOURLY);
+        when(rules.findEnabled()).thenReturn(List.of(rule));
+        List<AlertEvent> held = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            AlertEvent e = event("h" + i, rule, AlertEvent.State.DIGEST_PENDING, List.of());
+            held.add(new AlertEvent(e.id(), e.ruleId(), e.ruleName(), e.source(), e.kind(), i % 2 == 0 ? "old-agent" : AGENT, e.agentVersion(),
+                    CONVERSATION, NOW.minus(Duration.ofMinutes(90 - i)), e.summary(), e.match(), List.of(), e.state(), null, null, 0, null, null,
+                    null, null, 0));
+        }
+        when(events.findDigestPending(RULE_ID, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(held);
+
+        assertEquals(2, service.run().digests());
+
+        ArgumentCaptor<AlertEvent> digests = ArgumentCaptor.forClass(AlertEvent.class);
+        verify(events, times(2)).insert(digests.capture());
+        assertEquals(List.of("old-agent", AGENT), digests.getAllValues().stream().map(AlertEvent::agentId).toList());
+        assertEquals(List.of(List.of("h0", "h2"), List.of("h1", "h3")),
+                digests.getAllValues().stream().map(AlertEvent::digestEventIds).toList());
+    }
+
+    @Test
     @DisplayName("no digest before the interval has passed")
     void digestNotYet() {
         AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR)), null, AlertRule.DigestMode.HOURLY);
@@ -121,6 +152,87 @@ class AlertMaintenanceServiceTest {
 
         assertEquals(0, service.run().digests());
         verify(events, never()).insert(any());
+    }
+
+    private AlertRule disabled(AlertRule rule) {
+        return new AlertRule(rule.id(), rule.name(), false, rule.scope(), rule.source(), rule.condition(), rule.delivery(), rule.throttle(),
+                rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
+    }
+
+    @Test
+    @DisplayName("events held for a deleted rule are released — a stale cache on another replica created them after the delete")
+    void releasesEventsOfADeletedRule() {
+        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of(RULE_ID));
+        doReturn(Optional.empty()).when(rules).read(RULE_ID);
+        doReturn(3L).when(events).releaseDigestPending(RULE_ID);
+
+        AlertMaintenanceService.Result result = service.run();
+
+        assertEquals(3, result.released());
+        assertFalse(result.isEmpty(), "a pass that released events is worth a fire log");
+        verify(events).releaseDigestPending(RULE_ID);
+    }
+
+    @Test
+    @DisplayName("events held for a disabled rule, or one whose digest is NONE, are released; an enabled digest rule keeps its held events")
+    void releasesOnlyWhatNoLongerDigests() {
+        AlertRule digesting = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.HOURLY);
+        AlertRule off = withThrottle(digesting, null, AlertRule.DigestMode.NONE);
+        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("disabled-rule", "none-rule", "live-rule"));
+        doReturn(Optional.of(disabled(digesting).withId("disabled-rule"))).when(rules).read("disabled-rule");
+        doReturn(Optional.of(off.withId("none-rule"))).when(rules).read("none-rule");
+        doReturn(Optional.of(digesting.withId("live-rule"))).when(rules).read("live-rule");
+        doReturn(1L).when(events).releaseDigestPending(any());
+
+        assertEquals(2, service.run().released());
+
+        verify(events).releaseDigestPending("disabled-rule");
+        verify(events).releaseDigestPending("none-rule");
+        verify(events, never()).releaseDigestPending("live-rule");
+    }
+
+    @Test
+    @DisplayName("a rule that cannot be read does not stop the reconciliation of the others")
+    void reconciliationSurvivesOneFailingRule() {
+        when(events.findDigestPendingRuleIds(AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of("broken", "gone"));
+        doThrow(new IllegalStateException("db down")).when(rules).read("broken");
+        doReturn(Optional.empty()).when(rules).read("gone");
+        doReturn(2L).when(events).releaseDigestPending("gone");
+
+        assertEquals(2, service.run().released());
+    }
+
+    @Test
+    @DisplayName("a rule disabled after the pass began sends no digest of what it held")
+    void digestSkippedWhenTheRuleWasDisabledMeanwhile() {
+        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.HOURLY);
+        AlertRule disabled = new AlertRule(rule.id(), rule.name(), false, rule.scope(), rule.source(), rule.condition(), rule.delivery(),
+                rule.throttle(), rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
+        // The pass lists the rule enabled; by the time it digests, the rule reads back
+        // disabled.
+        when(rules.findEnabled()).thenReturn(List.of(rule));
+        doReturn(Optional.of(disabled)).when(rules).read(rule.id());
+        AlertEvent held = event("h0", rule, AlertEvent.State.DIGEST_PENDING, List.of());
+        when(events.findDigestPending(RULE_ID, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of(held));
+
+        assertEquals(0, service.run().digests());
+        verify(events, never()).insert(any());
+        verify(delivery, never()).deliver(any(), any());
+    }
+
+    @Test
+    @DisplayName("a digest whose held events were all released meanwhile is withdrawn, not delivered")
+    void digestWithdrawnWhenNoHeldEventWasMarked() {
+        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
+                AlertRule.DigestMode.DAILY);
+        AlertEvent h0 = event("h0", rule, AlertEvent.State.DIGEST_PENDING, List.of());
+        doReturn(0L).when(events).markDigested(any()); // releaseDigestPending got there first
+
+        assertFalse(service.sendDigest(rule, List.of(h0), NOW));
+        verify(delivery, never()).deliver(any(), any());
+        verify(events).updateDelivery(any(), anyLong());
     }
 
     @Test

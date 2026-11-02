@@ -302,6 +302,29 @@ public final class ModelOutputParser {
         }
     }
 
+    /**
+     * The first balanced {@code {...}} object in {@code text} — from its first
+     * {@code {} to the matching closer, honouring string literals, escapes and
+     * nested brackets — or {@code null} when there is none, or it is unbalanced or
+     * cut short.
+     * <p>
+     * The one scanner for pulling a JSON object out of model prose within the LLM
+     * module (the confidence judge uses it too), so a reply that one reader accepts
+     * is not misread by another: the greedy first-{@code {}-to-last-{@code }} slice
+     * breaks as soon as prose after the object contains a brace.
+     */
+    public static String extractFirstObject(String text) {
+        if (text == null) {
+            return null;
+        }
+        int open = text.indexOf('{');
+        if (open < 0) {
+            return null;
+        }
+        int end = scan(text, open).end();
+        return end < 0 ? null : text.substring(open, end + 1);
+    }
+
     private static int nextOpener(String s, int from) {
         for (int i = from; i < s.length(); i++) {
             char c = s.charAt(i);

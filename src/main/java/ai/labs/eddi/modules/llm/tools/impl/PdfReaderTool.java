@@ -137,9 +137,11 @@ public class PdfReaderTool {
     private byte[] downloadPdfBytes(String url) throws IOException, InterruptedException {
         LOGGER.debugf("Downloading PDF from URL: %s", sanitize(url));
 
-        // The URL was SSRF-checked by the caller; every redirect hop is checked here.
+        // The URL was SSRF-checked by the caller. STRICT, not HOPS_ONLY: the model
+        // chose it, so the initial hop also gets the facade's post-connect re-check
+        // (DNS rebinding), as every redirect hop does.
         OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, URI.create(url))
-                .ssrf(SsrfPolicy.HOPS_ONLY)
+                .ssrf(SsrfPolicy.STRICT)
                 .timeout(Duration.ofSeconds(30))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
                 .build();

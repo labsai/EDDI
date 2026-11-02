@@ -184,6 +184,20 @@ class ObservableChatModelTest {
         }
 
         @Test
+        void responseLineIsNotWrittenAtInfo() {
+            // Requests were moved to DEBUG; the model's answer about the same
+            // conversation stayed at INFO and reached every production log.
+            ChatModel delegate = providerLikeMock();
+            when(delegate.chat(any(ChatRequest.class))).thenReturn(MOCK_RESPONSE);
+            var request = ChatRequest.builder().messages(List.of(UserMessage.from("hello"))).build();
+            ChatModel wrapped = ObservableChatModel.wrap(delegate, "openai", null, "false", "true", null);
+
+            List<LogRecord> records = captureLogs(() -> wrapped.chat(request), Level.INFO);
+
+            assertTrue(records.stream().noneMatch(r -> rendered(r).contains("Chat response")), "nothing at INFO: " + records);
+        }
+
+        @Test
         void responseLineIsRedacted() {
             ChatModel delegate = providerLikeMock();
             when(delegate.chat(any(ChatRequest.class)))

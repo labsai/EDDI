@@ -14,6 +14,9 @@ import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
+import java.io.Writer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -29,6 +32,17 @@ public class DataFormatterTool {
     private final ObjectMapper jsonMapper = new ObjectMapper();
     private final XmlMapper xmlMapper = new XmlMapper();
     private final CsvMapper csvMapper = new CsvMapper();
+
+    /**
+     * Most characters {@link #csvToJson} produces. Every row repeats every header
+     * name, so a long header over many short rows multiplied a modest argument into
+     * a far larger string in the shared heap; serialization stops at this budget
+     * instead of materializing the whole result first.
+     */
+    static final int MAX_CSV_JSON_CHARS = 1_000_000;
+
+    /** Most data rows {@link #csvToJson} reads. */
+    static final int MAX_CSV_ROWS = 10_000;
 
     @Tool("Validates and formats JSON data. Returns formatted JSON or error message.")
     public String formatJson(@P("The JSON document, as text") String jsonString) {
@@ -80,14 +94,24 @@ public class DataFormatterTool {
 
         try {
             CsvSchema schema = CsvSchema.emptySchema().withHeader();
-            List<?> data;
+            List<Object> data = new ArrayList<>();
             try (var iterator = csvMapper.readerFor(Map.class).with(schema).readValues(csvString)) {
-                data = iterator.readAll();
+                while (iterator.hasNext()) {
+                    if (data.size() >= MAX_CSV_ROWS) {
+                        return "Error: Could not convert CSV to JSON - more than " + MAX_CSV_ROWS + " rows";
+                    }
+                    data.add(iterator.next());
+                }
             }
 
-            String json = jsonMapper.writerWithDefaultPrettyPrinter().writeValueAsString(data);
+            var out = new BoundedWriter(MAX_CSV_JSON_CHARS);
+            try {
+                jsonMapper.writerWithDefaultPrettyPrinter().writeValue(out, data);
+            } catch (BoundedWriter.BudgetExceededException e) {
+                return "Error: Could not convert CSV to JSON - the JSON would exceed " + MAX_CSV_JSON_CHARS + " characters";
+            }
             LOGGER.debug("CSV converted to JSON successfully");
-            return json;
+            return out.toString();
 
         } catch (Exception e) {
             LOGGER.debugf("CSV to JSON conversion error: %s", sanitize(e.getMessage()));
@@ -100,16 +124,37 @@ public class DataFormatterTool {
                                    @P("Dot-separated path to the value, e.g. 'user.address.city' or 'items[0].name'") String path) {
 
         try {
+            if (path == null || path.isBlank()) {
+                return "Error: path must not be empty";
+            }
             JsonNode valueNode = jsonMapper.readTree(jsonString);
 
-            // Simple path traversal (for complex paths, use JSONPath library)
+            // Simple path traversal (for complex paths, use JSONPath library). Every
+            // step is checked: a missing field used to dereference null and hand the
+            // model "Could not extract value - null".
             String[] parts = path.split("\\.");
             for (String part : parts) {
-                if (part.contains("[")) {
-                    // Array access
-                    String arrayName = part.substring(0, part.indexOf('['));
-                    int index = Integer.parseInt(part.substring(part.indexOf('[') + 1, part.indexOf(']')));
-                    valueNode = valueNode.get(arrayName).get(index);
+                int open = part.indexOf('[');
+                if (open >= 0) {
+                    int close = part.indexOf(']', open);
+                    if (close != part.length() - 1) {
+                        return "Error: Malformed array index in path segment '" + part + "' - use name[index]";
+                    }
+                    String arrayName = part.substring(0, open);
+                    int index;
+                    try {
+                        index = Integer.parseInt(part.substring(open + 1, close).trim());
+                    } catch (NumberFormatException e) {
+                        return "Error: Array index in path segment '" + part + "' is not a number";
+                    }
+                    JsonNode array = arrayName.isEmpty() ? valueNode : valueNode.get(arrayName);
+                    if (array == null) {
+                        return "Error: Path not found - " + path + " (no field '" + arrayName + "')";
+                    }
+                    if (!array.isArray()) {
+                        return "Error: Path not found - " + path + " ('" + arrayName + "' is not an array)";
+                    }
+                    valueNode = array.get(index);
                 } else {
                     valueNode = valueNode.get(part);
                 }
@@ -155,6 +200,48 @@ public class DataFormatterTool {
         } catch (Exception e) {
             LOGGER.debugf("JSON minification error: %s", sanitize(e.getMessage()));
             return "Error: Could not minify JSON - " + e.getMessage();
+        }
+    }
+
+    /**
+     * A {@link Writer} into memory that refuses to grow past a character budget.
+     */
+    static final class BoundedWriter extends Writer {
+        private final StringBuilder buffer = new StringBuilder();
+        private final int maxChars;
+
+        BoundedWriter(int maxChars) {
+            this.maxChars = maxChars;
+        }
+
+        @Override
+        public void write(char[] chars, int offset, int length) throws IOException {
+            if (buffer.length() + length > maxChars) {
+                throw new BudgetExceededException();
+            }
+            buffer.append(chars, offset, length);
+        }
+
+        @Override
+        public void flush() {
+            // in memory: nothing to flush
+        }
+
+        @Override
+        public void close() {
+            // in memory: nothing to release
+        }
+
+        @Override
+        public String toString() {
+            return buffer.toString();
+        }
+
+        /** Thrown when a write would exceed the budget. */
+        static final class BudgetExceededException extends IOException {
+            BudgetExceededException() {
+                super("output budget exceeded");
+            }
         }
     }
 }

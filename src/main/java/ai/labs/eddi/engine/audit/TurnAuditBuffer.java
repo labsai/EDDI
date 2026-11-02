@@ -122,9 +122,12 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
     /**
      * Restore the original collector and submit every buffered entry to it, in
      * order. A failing submit is logged and does not stop the rest.
+     *
+     * @return true when the ledger accepted every entry (see
+     *         {@link #releaseLedgerOwnedEvidence})
      */
-    public void flush(IConversationMemory memory) {
-        flush(memory, List.of());
+    public boolean flush(IConversationMemory memory) {
+        return flush(memory, List.of());
     }
 
     /**
@@ -135,8 +138,8 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      *            the turn's secret context values to redact, longest first; the
      *            caller has already dropped values too short to search for
      */
-    public void flush(IConversationMemory memory, List<String> secretContextValues) {
-        flush(memory, secretContextValues, List.of());
+    public boolean flush(IConversationMemory memory, List<String> secretContextValues) {
+        return flush(memory, secretContextValues, List.of());
     }
 
     /**
@@ -148,7 +151,7 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      *            the turn's short secret context values, replaced only where a
      *            value is exactly one of them
      */
-    public void flush(IConversationMemory memory, List<String> secretContextValues, List<String> exactSecretContextValues) {
+    public boolean flush(IConversationMemory memory, List<String> secretContextValues, List<String> exactSecretContextValues) {
         memory.setAuditCollector(delegate);
         List<AuditEntry> pending;
         Set<String> inputs;
@@ -159,6 +162,7 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
             recordedInputs.clear();
         }
         boolean secretInput = inputWasScrubbed(memory);
+        boolean allAccepted = true;
         for (AuditEntry entry : pending) {
             try {
                 AuditEntry submitted = secretInput ? redact(entry, inputs) : entry;
@@ -168,12 +172,46 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                 if (exactSecretContextValues != null && !exactSecretContextValues.isEmpty()) {
                     submitted = redactExactValues(submitted, exactSecretContextValues, MemoryKeys.SECRET_CONTEXT_PLACEHOLDER);
                 }
-                delegate.collect(submitted);
+                if (delegate instanceof IAuditEntryCollector.Acknowledging acknowledging) {
+                    allAccepted &= acknowledging.offer(submitted);
+                } else {
+                    delegate.collect(submitted);
+                }
             } catch (RuntimeException e) {
+                allAccepted = false;
                 LOGGER.warnf(e, "Audit entry for task '%s' of conversation '%s' could not be submitted",
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
             }
         }
+        return allAccepted;
+    }
+
+    /**
+     * Memory keys whose full text the audit ledger holds once a turn's entries have
+     * been accepted, and which the stored conversation therefore need not repeat:
+     * the compiled system prompt and the model response. On a measured 20-step
+     * conversation the prompt alone was a fifth of the document, and every read and
+     * write of the conversation pays for it.
+     * <p>
+     * Deliberately NOT here: {@code audit:tool_calls}, {@code audit:token_usage},
+     * {@code audit:cost}, {@code audit:model_name} and the guardrail records. They
+     * are small, and agent tests, cost metering and the guardrail history replay
+     * read them back from the stored step.
+     */
+    static final List<String> LEDGER_OWNED_EVIDENCE_KEYS = List.of(MemoryKeys.AUDIT_COMPILED_PROMPT, MemoryKeys.AUDIT_MODEL_RESPONSE);
+
+    /**
+     * Remove {@link #LEDGER_OWNED_EVIDENCE_KEYS} from the current step. Call only
+     * after {@link #flush} returned true and only for a turn that is over: a paused
+     * turn resumes from this step. Within the turn nothing is lost, because the
+     * lifecycle manager has already built its entries from these keys.
+     */
+    public static void releaseLedgerOwnedEvidence(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        if (step == null) {
+            return;
+        }
+        LEDGER_OWNED_EVIDENCE_KEYS.forEach(step::removeData);
     }
 
     private static boolean inputWasScrubbed(IConversationMemory memory) {

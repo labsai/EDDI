@@ -165,7 +165,7 @@ export function RagStoragePanel<T extends StorageConfig>({
               onClick={() => setConfirmOpen(true)}
               data-testid="rag-migrate-own-store"
             >
-              <MoveRight className="h-3.5 w-3.5" aria-hidden="true" />
+              <MoveRight className="h-3.5 w-3.5 rtl:rotate-180" aria-hidden="true" />
               {t("ragEditor.layout.migrate", "Move to its own store…")}
             </Button>
             <p className="mt-1 text-[10px] text-muted-foreground">

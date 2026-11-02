@@ -475,6 +475,12 @@ export const MODEL_TYPES: readonly string[] = LLM_PROVIDERS.map((p) => p.id);
  * plain tool for paging through an oversized tool response, and was simply
  * missing from this list.
  *
+ * `artifacts` and `group_tasks` admit a group's shared-artifact and task tools
+ * to a member with a whitelist. Both are self-gating as well: they only appear
+ * in a group discussion whose configuration enables them, so listing them
+ * enables nothing outside one — but leaving them out withholds them from a
+ * whitelisted member even when the group asks for them.
+ *
  * Dynamic-agent tools (create_sub_agent, converse_with_agent,
  * find_agents_by_capability, teardown_agent) are deliberately absent: they let
  * an agent spawn other agents and belong to the Dynamic Agents configuration,
@@ -493,4 +499,6 @@ export const BUILT_IN_TOOLS = [
   "readattachment",
   "conversationRecall",
   "usermemory",
+  "artifacts",
+  "group_tasks",
 ] as const;
