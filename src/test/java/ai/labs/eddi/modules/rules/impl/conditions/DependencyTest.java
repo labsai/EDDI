@@ -4,10 +4,20 @@
  */
 package ai.labs.eddi.modules.rules.impl.conditions;
 
+import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.modules.rules.impl.Rule;
+import ai.labs.eddi.modules.rules.impl.RuleGroup;
+import ai.labs.eddi.modules.rules.impl.RuleSet;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.mockito.Mockito.mock;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -53,5 +63,128 @@ class DependencyTest {
         assertNotSame(dep, cloned);
         assertEquals("dependency", cloned.getId());
         assertEquals("testRule", cloned.getConfigs().get("reference"));
+    }
+
+    /**
+     * Rule i depends twice on rule i-1: acyclic, so the infinite-loop trace never
+     * trips, yet every path to the bottom rule used to be walked.
+     */
+    @Test
+    void sharedDependenciesAreEvaluatedOncePerEvaluation() throws Exception {
+        AtomicInteger bottomExecutions = new AtomicInteger();
+        var memory = mock(IConversationMemory.class);
+
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+        var rules = new LinkedList<Rule>();
+        var bottom = new Rule("r0");
+        bottom.setConditions(List.of(new IRuleCondition() {
+            @Override
+            public String getId() {
+                return "counter";
+            }
+
+            @Override
+            public Map<String, String> getConfigs() {
+                return Map.of();
+            }
+
+            @Override
+            public void setConfigs(Map<String, String> configs) {
+            }
+
+            @Override
+            public ExecutionState execute(IConversationMemory m, List<Rule> trace) {
+                bottomExecutions.incrementAndGet();
+                return ExecutionState.SUCCESS;
+            }
+
+            @Override
+            public IRuleCondition clone() {
+                return this;
+            }
+        }));
+        rules.add(bottom);
+        int depth = 40;
+        for (int i = 1; i <= depth; i++) {
+            var rule = new Rule("r" + i);
+            var first = new Dependency();
+            first.setConfigs(Map.of("reference", "r" + (i - 1)));
+            first.setContainingRuleSet(ruleSet);
+            var second = new Dependency();
+            second.setConfigs(Map.of("reference", "r" + (i - 1)));
+            second.setContainingRuleSet(ruleSet);
+            rule.setConditions(new LinkedList<>(List.of(first, second)));
+            rules.add(rule);
+        }
+        group.setRules(rules);
+        ruleSet.setRuleGroups(List.of(group));
+
+        var top = rules.getLast();
+        IRuleCondition.ExecutionState state = TemplateDataScope.call(memory, () -> top.execute(memory, new ArrayList<>()));
+
+        assertEquals(IRuleCondition.ExecutionState.SUCCESS, state);
+        assertEquals(1, bottomExecutions.get());
+    }
+
+    /**
+     * Rule names need not be unique. A cached rule must not answer for a rule of
+     * the same name that is on the active trace, or a rule that depends on its own
+     * name passes instead of failing as an infinite loop.
+     */
+    @Test
+    void cachedRuleOfTheSameNameDoesNotHideACycle() {
+        var memory = mock(IConversationMemory.class);
+        var ruleSet = new RuleSet();
+        var group = new RuleGroup();
+
+        var firstX = new Rule("x");
+        firstX.setConditions(List.of(succeeding()));
+        var a = new Rule("a");
+        a.setConditions(new LinkedList<>(List.of(dependencyOn("x", ruleSet))));
+        var secondX = new Rule("x");
+        secondX.setConditions(new LinkedList<>(List.of(dependencyOn("x", ruleSet))));
+        group.setRules(new LinkedList<>(List.of(firstX, a, secondX)));
+        ruleSet.setRuleGroups(List.of(group));
+
+        assertThrows(Rule.InfiniteLoopException.class, () -> TemplateDataScope.call(memory, () -> {
+            assertEquals(IRuleCondition.ExecutionState.SUCCESS, a.execute(memory, new ArrayList<>()));
+            return secondX.execute(memory, new ArrayList<>());
+        }));
+    }
+
+    private static Dependency dependencyOn(String reference, RuleSet ruleSet) {
+        var dependency = new Dependency();
+        dependency.setConfigs(Map.of("reference", reference));
+        dependency.setContainingRuleSet(ruleSet);
+        return dependency;
+    }
+
+    private static IRuleCondition succeeding() {
+        return new IRuleCondition() {
+            @Override
+            public String getId() {
+                return "succeeding";
+            }
+
+            @Override
+            public Map<String, String> getConfigs() {
+                return Map.of();
+            }
+
+            @Override
+            public void setConfigs(Map<String, String> configs) {
+            }
+
+            @Override
+            public ExecutionState execute(IConversationMemory m, List<Rule> trace) {
+                return ExecutionState.SUCCESS;
+            }
+
+            @Override
+            public IRuleCondition clone() {
+                return this;
+            }
+        };
     }
 }

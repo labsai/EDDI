@@ -116,4 +116,34 @@ public class PunctuationNormalizerTest {
         // assert
         Assertions.assertEquals(expected, actual);
     }
+
+    @Test
+    public void providerDoesNotLeakOneParsersPatternIntoTheNext() {
+        var provider = new PunctuationNormalizerProvider();
+
+        // a parser with its own pattern...
+        var custom = (PunctuationNormalizer) provider.provide(Map.of("punctuationRegexPattern", "|"));
+        Assertions.assertTrue(custom.containsPunctuation("a|b"));
+
+        // ...must not change the default of a parser built afterwards
+        var plain = (PunctuationNormalizer) provider.provide(Map.of());
+        Assertions.assertFalse(plain.containsPunctuation("a|b"));
+        Assertions.assertTrue(plain.containsPunctuation("a,b"));
+        Assertions.assertEquals(PunctuationNormalizer.PUNCTUATION,
+                provider.getConfigs().get("punctuationRegexPattern").getDefaultValue());
+    }
+
+    @Test
+    public void aPatternThatBacktracksCatastrophicallyIsCutOffNotAwaited() {
+        // "]" closes the generated character class, so the rest is arbitrary regex
+        var pathological = new PunctuationNormalizer(new PunctuationNormalizerProvider().toRegexPattern("x]|(a+)+$|[y"), false);
+        String input = "a".repeat(60) + "!";
+
+        long start = System.nanoTime();
+        String result = pathological.normalize(input, DEFAULT_USER_LANGUAGE);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        Assertions.assertNotNull(result);
+        Assertions.assertTrue(elapsedMs < 5_000, "normalize took " + elapsedMs + "ms");
+    }
 }

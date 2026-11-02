@@ -88,7 +88,7 @@ The same configuration can carry a list of `mcpCalls`, which `McpCallsTask` runs
 | `responseObjectName` | string | `<name>Response` | Name the result is stored under. |
 | `maxResponseSizeInBytes` | number | `2000000` | How much of the result is kept in conversation memory. A longer result is **truncated** (with a warning) and stored as text — memory is loaded on every turn, so an unbounded result costs every later turn. |
 | `continueOnError` | boolean | `false` | Record the failure under `<responseObjectName>Error` and continue instead of failing the turn. |
-| `retry` | object | — | Retry with exponential backoff on transient failures. |
+| `retry` | object | — (single attempt) | Retry with exponential backoff on transient failures. **Opt-in**: without a `retry` block the tool is called exactly once, because an MCP tool may have a side effect that a timeout does not undo. With one, retries stop when the turn deadline leaves no room for another attempt. |
 
 ---
 
