@@ -99,7 +99,6 @@ class EmailImapPollingIT {
     private EmailIntegrationDirectory directory;
     private EmailMailboxPoller poller;
     private List<InputData> turns;
-    private List<ConversationResponseHandler> handlers;
 
     @BeforeAll
     static void startGreenMail() throws Exception {
@@ -128,7 +127,6 @@ class EmailImapPollingIT {
         ledger = new InMemoryEmailMessageLedger();
         state = new InMemoryEmailMailboxStateStore();
         turns = new ArrayList<>();
-        handlers = new ArrayList<>();
         conversations = mock(IConversationService.class);
         AtomicInteger counter = new AtomicInteger();
         when(conversations.startConversation(any(), anyString(), anyString(), any()))
@@ -136,7 +134,6 @@ class EmailImapPollingIT {
         when(conversations.getConversationState(anyString())).thenReturn(ConversationState.READY);
         doAnswer(invocation -> {
             turns.add(invocation.getArgument(4));
-            handlers.add(invocation.getArgument(6));
             return null;
         }).when(conversations).say(anyString(), any(), any(), anyList(), any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
 

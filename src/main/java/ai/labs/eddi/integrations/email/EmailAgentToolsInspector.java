@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -73,7 +74,8 @@ public class EmailAgentToolsInspector {
                     names.add(target.getName());
                 }
             } catch (Exception e) {
-                LOGGER.debugf("Tool inspection skipped for agent %s: %s", target.getTargetId(), e.getMessage());
+                LOGGER.debugf("Tool inspection skipped for agent %s: %s", LogSanitizer.sanitize(target.getTargetId()),
+                        LogSanitizer.sanitize(e.getMessage()));
             }
         }
         return names;

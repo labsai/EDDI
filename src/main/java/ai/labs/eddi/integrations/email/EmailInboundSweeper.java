@@ -136,7 +136,7 @@ public class EmailInboundSweeper {
                     continue;
                 }
             }
-            if (missing) {
+            if (missing || state == null) {
                 if (ledger.transition(row.id(), State.TURN_SUBMITTED, State.REFUSED, null, null, "stranded", false, now)) {
                     resolved++;
                     metrics.stranded("lost");

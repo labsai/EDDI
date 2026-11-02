@@ -74,6 +74,7 @@ class EmailInboundSweeperTest {
         submitted("running", "c-running", now.minusSeconds(1));
         submitted("lost", null, now.minusSeconds(1));
         submitted("gone", "c-gone", now.minusSeconds(1));
+        submitted("nostate", "c-nostate", now.minusSeconds(1));
         submitted("fresh", "c-ready", now.plusSeconds(600));
         when(conversations.getConversationState("c-ready")).thenReturn(ConversationState.READY);
         when(conversations.getConversationState("c-error")).thenReturn(ConversationState.ERROR);
@@ -81,7 +82,7 @@ class EmailInboundSweeperTest {
         when(conversations.getConversationState("c-running")).thenReturn(ConversationState.IN_PROGRESS);
         when(conversations.getConversationState("c-gone")).thenThrow(new IConversationService.ConversationNotFoundException("gone"));
 
-        assertEquals(5, sweeper.resolveStranded(now));
+        assertEquals(6, sweeper.resolveStranded(now));
 
         assertEquals(State.DONE, ledger.findById("done").orElseThrow().state());
         assertEquals("recovered:failed", ledger.findById("failed").orElseThrow().lastError());
@@ -90,8 +91,9 @@ class EmailInboundSweeperTest {
         assertTrue(ledger.findById("running").orElseThrow().nextAttemptAt().isAfter(now), "the deadline moved on");
         assertEquals(State.REFUSED, ledger.findById("lost").orElseThrow().state());
         assertEquals("stranded", ledger.findById("gone").orElseThrow().lastError());
+        assertEquals(State.REFUSED, ledger.findById("nostate").orElseThrow().state(), "a conversation with no state is a lost one");
         assertEquals(State.TURN_SUBMITTED, ledger.findById("fresh").orElseThrow().state(), "not past its deadline");
-        verify(ownerNotifier, times(2)).notifyOnce(eq("int-1"), any(), any(), eq(EmailOwnerNotifier.Reason.LOST), any());
+        verify(ownerNotifier, times(3)).notifyOnce(eq("int-1"), any(), any(), eq(EmailOwnerNotifier.Reason.LOST), any());
     }
 
     @Test
