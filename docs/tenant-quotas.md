@@ -59,24 +59,32 @@ outage at the *gate* refuses the model call (fail closed), as below.
 
 ### Only priced spend counts
 
-There is no built-in provider price table. A model call is metered only when its configuration
-carries `inputPricePer1M` / `outputPricePer1M` (on the LLM task, a cascade step, a cascade judge, or
-the Dream config). An unpriced model meters **$0** in token cost, so its model calls alone never
-reach the budget — but the priced tools a turn calls are charged to the same counter and can.
-Set prices on every model you want the budget to bound — see [LLM Configuration](langchain.md).
+A model call is metered at its price — the config's `inputPricePer1M` / `outputPricePer1M`
+(LLM task, cascade step, cascade judge, guardrail, group summary, Dream), completed by the
+deployment's [price catalog](model-pricing.md). EDDI ships no active prices: with an empty
+catalog, a model with no price on its config meters **$0** in token cost, so its calls alone
+never reach the budget — but the priced tools a turn calls are charged to the same counter and
+can. Price every model you want the budget to bound, in the config or the catalog; unpriced
+calls are reported at deploy time, per step and as `eddi.llm.calls.unpriced`, and the opt-in
+[strict mode](model-pricing.md#strict-mode) refuses them while a budget applies. Anthropic and
+Bedrock cache tokens and Gemini thinking tokens are counted — see
+[What the providers report](model-pricing.md#what-the-providers-report).
+
+Group transcript window summaries and stance summaries are charged to the tenant too, and are
+skipped (plain truncation, an extracted stance) once the budget is spent.
 
 These calls are **not** metered today, priced or not:
 
 | Call | Why |
 |---|---|
-| Group transcript window summaries and stance summaries | Group-level calls outside any member conversation |
 | Embeddings (RAG retrieval, knowledge-base ingestion) | Embedding calls are not priced anywhere |
 | A turn stopped by **lease loss** in cluster mode | Nothing of the turn is stored; the node that took the conversation over runs it again and meters that run |
 
 A replayed idempotent turn (`Idempotency-Key`) is answered from the stored outcome and is not
 metered again. A turn whose model phase **failed** is metered for what it spent before the failure
 (the answered tool-loop rounds, the tools that ran, the cascade steps that were tried); the rolling
-summary and `toolResponseLimits` summarization are metered at the task's prices.
+summary and `toolResponseLimits` summarization are metered at the task's prices when they run on
+the task's own model, and at the catalog price of their own model otherwise.
 
 To bound one conversation rather than the whole tenant, set the agent-level
 `maxCostPerConversationUsd` — see [LLM Configuration → Per-conversation LLM cost
