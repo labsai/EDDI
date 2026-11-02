@@ -29,6 +29,7 @@
 - [HTTP Calls / API Calls](httpcalls.md)
 - [LLM Integration](langchain.md)
   - [LLM Parameters Reference](llm-parameters.md)
+  - [Tool-Call Guardrails](tool-call-guardrails.md)
 - [RAG (Retrieval-Augmented Generation)](rag.md)
 - [Model Cascade](model-cascade.md)
 - [LLM Turn Resilience](llm-resilience.md)
