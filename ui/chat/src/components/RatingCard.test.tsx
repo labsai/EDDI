@@ -20,6 +20,34 @@ function renderCard(profile: RatingProfile, overrides: Partial<Parameters<typeof
 }
 
 describe("RatingCard", () => {
+  it("picks up a rating restored after the card opened, until the person has touched it", async () => {
+    const profile = stars();
+    const props = {
+      profile,
+      onSubmit: vi.fn().mockResolvedValue(true),
+      onWithdraw: vi.fn().mockResolvedValue(true),
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(<RatingCard {...props} current={null} />);
+    expect(screen.queryByTestId("rating-card-thanks")).toBeNull();
+    rerender(<RatingCard {...props} current={{ stepIndex: -1, score: 4, tags: [], comment: "fine" }} />);
+    expect(await screen.findByTestId("rating-card-thanks")).toBeInTheDocument();
+  });
+
+  it("does not overwrite what the person already picked when a restored rating arrives", async () => {
+    const profile = stars({ reasonTags: [] });
+    const props = {
+      profile,
+      onSubmit: vi.fn().mockResolvedValue(true),
+      onWithdraw: vi.fn().mockResolvedValue(true),
+      onClose: vi.fn(),
+    };
+    const { rerender } = render(<RatingCard {...props} current={null} />);
+    fireEvent.click(screen.getByRole("radio", { name: "2 of 5 stars" }));
+    rerender(<RatingCard {...props} current={{ stepIndex: -1, score: 5, tags: [], comment: null }} />);
+    await waitFor(() => expect(screen.getByRole("radio", { name: "2 of 5 stars" })).toHaveAttribute("aria-checked", "true"));
+  });
+
   it("five stars are a radio group; one tap rates, then reasons and a comment appear", async () => {
     const props = renderCard(stars());
     expect(screen.getByRole("radiogroup", { name: "How did we do?" })).toBeInTheDocument();
