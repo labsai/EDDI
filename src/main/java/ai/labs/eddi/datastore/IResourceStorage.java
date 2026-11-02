@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Backend-facing half of the versioned store contract: raw persistence of
@@ -196,6 +197,23 @@ public interface IResourceStorage<T> {
             throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         throw new UnsupportedOperationException(
                 "storeIfFieldEquals(long) is not implemented by " + getClass().getName()
+                        + " — a compare-and-swap must never silently degrade to an unconditional store");
+    }
+
+    /**
+     * As {@link #storeIfFieldEquals(IResource, String, String)}, but the write
+     * lands only when <em>every</em> listed field matches, evaluated inside the one
+     * atomic write. A {@code null} expected value means the field must be absent
+     * (or JSON {@code null}). For compare-and-swaps that must bind to more than one
+     * fact at once — e.g. "still in state X <em>and</em> still the pause with id Y"
+     * — where a single-field CAS lets a stale writer through after the first field
+     * has been moved away and back (ABA). Same zero-match and no-fallback contract
+     * as the single-field overload.
+     */
+    default void storeIfFieldsEqual(IResource<T> newResource, Map<String, String> expectedFields)
+            throws IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
+        throw new UnsupportedOperationException(
+                "storeIfFieldsEqual is not implemented by " + getClass().getName()
                         + " — a compare-and-swap must never silently degrade to an unconditional store");
     }
 
