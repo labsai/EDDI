@@ -403,11 +403,15 @@ class VaultSecretProviderBranchTest {
             // An update: null is passed down as "not supplied", so the store keeps the
             // row's grant.
             when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.of(createEncryptedSecret(KEY_NAME, dek)));
+            when(persistence.updateSecretIfPresent(any())).thenReturn(true);
             provider.store(new SecretReference(TENANT_ID, KEY_NAME),
                     "value", null, null);
 
+            // A rotation is update-only: never the upsert, whose insert branch would
+            // write the wildcard default.
             var captor = ArgumentCaptor.forClass(EncryptedSecret.class);
-            verify(persistence).upsertSecret(captor.capture());
+            verify(persistence).updateSecretIfPresent(captor.capture());
+            verify(persistence, never()).upsertSecret(any());
             assertNull(captor.getValue().getAllowedAgents());
         }
 

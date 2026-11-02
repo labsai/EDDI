@@ -100,6 +100,18 @@ class VaultSealedDataBindingTest {
     }
 
     @Test
+    @DisplayName("with eddi.vault.accept-unbound-legacy-data=false the unbound fallback is retired: such a value fails like a tampered one")
+    void unboundFallbackCanBeRetired() throws Exception {
+        var vault = provider(null);
+        SealedValue legacy = vault.seal(TENANT, "old-token");
+        SealedValue bound = vault.seal(TENANT, "new-token", CONTEXT_A);
+        vault.acceptUnboundLegacyData = false;
+
+        assertThrows(SecretProviderException.class, () -> vault.unseal(TENANT, legacy, CONTEXT_A));
+        assertEquals("new-token", vault.unseal(TENANT, bound, CONTEXT_A), "bound data is unaffected");
+    }
+
+    @Test
     @DisplayName("sealAll seals every field of a row under one generation, even across a rotation")
     void sealAllUsesOneGenerationForTheRow() throws Exception {
         var vault = provider(null);

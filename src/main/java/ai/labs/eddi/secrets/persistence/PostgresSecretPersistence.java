@@ -178,6 +178,40 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
+    public boolean updateSecretIfPresent(EncryptedSecret secret) {
+        ensureSchema();
+        // upsertSecret's update branch, without its insert branch.
+        String sql = """
+                UPDATE secret_vault_secrets
+                   SET encrypted_value = ?, iv = ?, dek_id = ?, checksum = ?,
+                       description = CASE WHEN ? THEN ? ELSE description END,
+                       allowed_agents = CASE WHEN ? THEN ?::jsonb ELSE allowed_agents END,
+                       allowed_hosts = CASE WHEN ? THEN ?::jsonb ELSE allowed_hosts END,
+                       last_accessed_at = ?, last_rotated_at = ?
+                 WHERE tenant_id = ? AND key_name = ?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, secret.getEncryptedValue());
+            ps.setString(2, secret.getIv());
+            ps.setString(3, secret.getDekId());
+            ps.setString(4, secret.getChecksum());
+            ps.setBoolean(5, secret.getDescription() != null);
+            ps.setString(6, secret.getDescription());
+            ps.setBoolean(7, secret.getAllowedAgents() != null);
+            ps.setString(8, secret.getAllowedAgents() == null ? null : MAPPER.writeValueAsString(secret.getAllowedAgents()));
+            ps.setBoolean(9, secret.getAllowedHosts() != null);
+            ps.setString(10, hostsJson(secret.getAllowedHosts()));
+            ps.setTimestamp(11, instantToTimestamp(secret.getLastAccessedAt()));
+            ps.setTimestamp(12, instantToTimestamp(secret.getLastRotatedAt()));
+            ps.setString(13, secret.getTenantId());
+            ps.setString(14, secret.getKeyName());
+            return ps.executeUpdate() == 1;
+        } catch (Exception e) {
+            throw new PersistenceException("Failed to update secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
+    @Override
     public boolean insertSecretIfAbsent(EncryptedSecret secret) {
         ensureSchema();
         String sql = """
@@ -280,21 +314,31 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     }
 
     @Override
-    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv,
+                                       String checksum) {
         ensureSchema();
-        // Guarded on the IV the reader saw: a concurrent store draws a new one.
-        String sql = """
+        // Guarded on the IV the reader saw: a concurrent store draws a new one. The
+        // checksum is written only when one is given; the guard comes last either way.
+        String sql = checksum == null ? """
                 UPDATE secret_vault_secrets
                    SET encrypted_value = ?, iv = ?
                  WHERE tenant_id = ? AND key_name = ? AND dek_id IS NOT DISTINCT FROM ? AND iv = ?
+                """ : """
+                UPDATE secret_vault_secrets
+                   SET encrypted_value = ?, iv = ?, checksum = ?
+                 WHERE tenant_id = ? AND key_name = ? AND dek_id IS NOT DISTINCT FROM ? AND iv = ?
                 """;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, encryptedValue);
-            ps.setString(2, iv);
-            ps.setString(3, tenantId);
-            ps.setString(4, keyName);
-            ps.setString(5, dekId);
-            ps.setString(6, expectedIv);
+            int index = 1;
+            ps.setString(index++, encryptedValue);
+            ps.setString(index++, iv);
+            if (checksum != null) {
+                ps.setString(index++, checksum);
+            }
+            ps.setString(index++, tenantId);
+            ps.setString(index++, keyName);
+            ps.setString(index++, dekId);
+            ps.setString(index, expectedIv);
             return ps.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new PersistenceException("Failed to re-seal secret " + tenantId + "/" + keyName, e);

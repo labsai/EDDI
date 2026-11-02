@@ -87,6 +87,14 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
     }
 
     @Override
+    public boolean exists(String state) {
+        if (state == null || state.isBlank()) {
+            return false;
+        }
+        return states.find(Filters.eq(FIELD_STATE, state)).limit(1).first() != null;
+    }
+
+    @Override
     public int deleteByPrincipal(String principal) {
         return (int) states.deleteMany(Filters.eq(FIELD_PRINCIPAL, principal)).getDeletedCount();
     }

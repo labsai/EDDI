@@ -140,6 +140,7 @@ can reach EDDI.
 | `eddi_vault_rotate_count` | Counter | Secret rotations |
 | `eddi_vault_grant_update_count` | Counter | Grant edits (`allowedAgents` changed without the value) |
 | `eddi_vault_errors_count` | Counter | General vault errors |
+| `eddi_vault_legacy_unbound_opened_count` | Counter | Values opened only through the legacy no-AAD fallback; zero after a `rotate-dek` means `eddi.vault.accept-unbound-legacy-data` can be turned off |
 | `eddi_vault_cache_hits` | Counter | Vault cache hits |
 | `eddi_vault_cache_misses` | Counter | Vault cache misses |
 | `eddi_vault_resolve_time` | Timer | End-to-end resolve time (incl. cache) |

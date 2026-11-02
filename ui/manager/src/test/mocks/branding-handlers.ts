@@ -149,9 +149,17 @@ function detectType(bytes: Uint8Array): string | null {
   if (starts(0x89, 0x50, 0x4e, 0x47)) return "image/png";
   if (starts(0x52, 0x49, 0x46, 0x46) && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP") return "image/webp";
   if (starts(0x00, 0x00, 0x01, 0x00)) return "image/x-icon";
-  const head = new TextDecoder().decode(bytes.slice(0, 1024)).trimStart();
-  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(head)) return "image/svg+xml";
-  return null;
+  let head = new TextDecoder().decode(bytes.slice(0, 1024)).trimStart();
+  // An optional XML declaration and any comments, then the root. Stepped through
+  // rather than matched as (comment\s*)* — nested quantifiers backtrack badly.
+  const declaration = /^<\?xml[^>]*>/i.exec(head);
+  if (declaration) head = head.slice(declaration[0].length).trimStart();
+  while (head.startsWith("<!--")) {
+    const end = head.indexOf("-->");
+    if (end < 0) return null;
+    head = head.slice(end + 3).trimStart();
+  }
+  return /^<svg[\s>]/i.test(head) ? "image/svg+xml" : null;
 }
 
 const UNSAFE_SVG = /<\s*([\w-]+:)?(script|foreignObject|iframe|embed|object|animate|set)\b|\son[a-z]+\s*=|javascript:|<!ENTITY|&#/i;

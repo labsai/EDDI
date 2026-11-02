@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 /**
@@ -64,6 +65,12 @@ public class SecretResolver {
     private final int cacheMaxSize;
 
     private Cache<String, String> cache;
+
+    /**
+     * Bumped by every invalidation, so a resolution that was in flight across one
+     * can tell that the value it read may be stale; see {@code resolveReference}.
+     */
+    private final AtomicLong invalidations = new AtomicLong();
 
     /**
      * Listeners notified when cached secrets are invalidated. Used by downstream
@@ -261,6 +268,7 @@ public class SecretResolver {
             return resolved;
         }
         cacheMissCounter.increment();
+        long generationBefore = invalidations.get();
         resolved = resolveFromProvider(ref, fullMatch);
         if (resolved == null) {
             // Leave the original reference in place if resolution failed
@@ -268,6 +276,14 @@ public class SecretResolver {
         }
         // Only cache successful resolutions — never cache failures
         cache.put(cacheKey, resolved);
+        if (invalidations.get() != generationBefore) {
+            // An invalidation (a delete or rotation) ran while this value was being
+            // read, so it may be the old one. Without this, the put above re-inserted
+            // a deleted or rotated value that then lived for the whole TTL. The
+            // invalidation bumps the counter BEFORE evicting, so either this check
+            // sees it, or the eviction lands after the put.
+            cache.invalidate(cacheKey);
+        }
         return resolved;
     }
 
@@ -311,6 +327,7 @@ public class SecretResolver {
      */
     public void invalidateLocal(SecretReference reference) {
         String cacheKey = reference.tenantId() + "/" + reference.keyName();
+        invalidations.incrementAndGet();
         cache.invalidate(cacheKey);
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
         fireInvalidationListeners(reference);
@@ -328,6 +345,7 @@ public class SecretResolver {
 
     /** The local half of {@link #invalidateAll}; see {@link #invalidateLocal}. */
     public void invalidateAllLocal() {
+        invalidations.incrementAndGet();
         cache.invalidateAll();
         LOGGER.info("All cached secrets invalidated");
         fireInvalidationListeners(null);

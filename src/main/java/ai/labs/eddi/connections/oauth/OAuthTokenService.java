@@ -6,6 +6,7 @@ package ai.labs.eddi.connections.oauth;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.AccessTokenSupplier;
@@ -14,6 +15,7 @@ import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -102,6 +104,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     private final ISecretProvider secretProvider;
     private final CredentialReferenceResolver credentialReferenceResolver;
     private final MeterRegistry meterRegistry;
+    private final IConnectionStore connectionStore;
 
     /** Per-JVM single-flight, keyed by grant. */
     private final ConcurrentHashMap<String, CompletableFuture<String>> inFlight = new ConcurrentHashMap<>();
@@ -120,12 +123,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
 
     @Inject
     public OAuthTokenService(IConnectionGrantStore grantStore, OAuthTokenClient tokenClient, ISecretProvider secretProvider,
-            CredentialReferenceResolver credentialReferenceResolver, MeterRegistry meterRegistry) {
+            CredentialReferenceResolver credentialReferenceResolver, MeterRegistry meterRegistry, IConnectionStore connectionStore) {
         this.grantStore = grantStore;
         this.tokenClient = tokenClient;
         this.secretProvider = secretProvider;
         this.credentialReferenceResolver = credentialReferenceResolver;
         this.meterRegistry = meterRegistry;
+        this.connectionStore = connectionStore;
         // Checked against the CEILING a connection can configure, not against the
         // default. The default is what an unconfigured connection uses; the ceiling
         // is what the slowest configurable one uses, and it is the slow one that
@@ -544,12 +548,48 @@ public class OAuthTokenService implements AccessTokenSupplier {
      * when a rejected one left the row {@code REFRESH_FAILED}. The upsert is keyed
      * on the same triple, so the second case replaces the dead row rather than
      * adding a second one beside it.
+     * <p>
+     * Grants are keyed on the connection's NAME, so the connection is identified by
+     * id before the exchange and again after the write, from the uncached store. A
+     * delete landing during the exchange cleans up grants before this one is
+     * written, and a re-create under the same name would then inherit a token
+     * minted with the old connection's client credentials and scopes. The
+     * authorization-code callback makes the same check
+     * ({@code RestConnectionAuthorization.connectionStillTakesTheGrant}).
      */
     private String mintServiceGrant(ConnectionConfiguration connection, String tenantId, String principal) {
+        String connectionId = currentIdOf(tenantId, connection);
+        if (connectionId == null) {
+            throw new ConnectionException(ConnectionException.Reason.NOT_FOUND,
+                    "Connection '" + connection.getName() + "' no longer exists; no token was requested for it.");
+        }
         TokenResponse token = tokenClient.clientCredentials(connection, resolveClientSecret(connection));
-        persistNew(connection, tenantId, principal, token, token.refreshToken());
+        ConnectionGrant stored = persistNew(connection, tenantId, principal, token, token.refreshToken());
+        String afterWrite;
+        try {
+            afterWrite = currentIdOf(tenantId, connection);
+        } catch (ConnectionException e) {
+            afterWrite = null;
+        }
+        if (!connectionId.equals(afterWrite)) {
+            grantStore.deleteIfSealedWith(tenantId, connection.getName(), principal, stored.getAccessTokenIv());
+            LOGGER.warnf("Connection '%s' was deleted or replaced while its service token was being minted; the grant just stored is "
+                    + "discarded", sanitize(connection.getName()));
+            throw new ConnectionException(ConnectionException.Reason.NOT_FOUND,
+                    "Connection '" + connection.getName() + "' was deleted or replaced while its token was being requested.");
+        }
         increment("eddi.connection.token.refresh.count", "outcome", "minted");
         return token.accessToken();
+    }
+
+    /** The id the connection's name resolves to now, uncached; null when absent. */
+    private String currentIdOf(String tenantId, ConnectionConfiguration connection) {
+        try {
+            return connectionStore.idOfName(tenantId, connection.getName());
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new ConnectionException(ConnectionException.Reason.NOT_FOUND,
+                    "Could not read connection '" + connection.getName() + "': " + e.getClass().getSimpleName(), e);
+        }
     }
 
     /**
@@ -610,7 +650,9 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
-        return credentialReferenceResolver.resolveVaultBacked(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
+        // Checked against the token endpoint, where the client secret is sent.
+        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
+                connection.getName(), "client secret");
     }
 
     private List<ISecretProvider.SealedValue> sealTokens(String tenantId, String accessToken, String refreshToken,

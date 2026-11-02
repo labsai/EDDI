@@ -23,6 +23,7 @@ import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.utils.RestUtilities;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -150,8 +151,8 @@ public class VaultGrantChecker {
 
     /**
      * Every vault reference in {@code agentConfiguration}'s extension configs that
-     * is NOT granted to {@code agentId} — plus every {@code ${connection:…}} whose
-     * document could not be read.
+     * is NOT granted to {@code agentId} — plus every {@code ${connection:…}},
+     * workflow, extension config or {@code ${vars:…}} that could not be read.
      * <p>
      * Only a provable violation is reported for a <em>secret</em>. A secret whose
      * metadata cannot be read — vault disabled, secret absent, provider error — is
@@ -166,11 +167,12 @@ public class VaultGrantChecker {
      * endpoints ask {@link VaultGrantImpactAnalyzer} which deployed agents already
      * reference it, and refuse a grant that leaves one out.
      * <p>
-     * A <em>connection</em> that cannot be read is the opposite case and fails
-     * closed. The hop exists because a connection is an indirect vault reference;
-     * skipping an unreadable one means "whatever secrets it holds are granted",
-     * which is exactly the outcome an agent naming somebody else's connection is
-     * after. The violation names the connection so the operator knows what to fix.
+     * A <em>connection</em>, workflow or extension config that cannot be read is
+     * the opposite case and fails closed. The hop exists because a connection is an
+     * indirect vault reference; skipping an unreadable one means "whatever secrets
+     * it holds are granted", which is exactly the outcome an agent naming somebody
+     * else's connection is after. The violation names the connection so the
+     * operator knows what to fix.
      *
      * @return the offending references, empty when the agent is fully granted
      */
@@ -180,13 +182,20 @@ public class VaultGrantChecker {
         }
 
         List<String> violations = new ArrayList<>();
-        // Unreadable workflows and extension configs are collected and then ignored
-        // here, exactly as before: this is the deploy gate, and what it does with a
-        // config it cannot read is its own decision, separate from reporting.
-        for (String reference : collectVaultReferences(agentConfiguration, violations, new ArrayList<>())) {
+        List<String> unreadable = new ArrayList<>();
+        for (String reference : collectVaultReferences(agentConfiguration, violations, unreadable)) {
             if (!isGranted(reference, agentId)) {
                 violations.add(reference);
             }
+        }
+        // Fail CLOSED on a workflow, extension config or variable that could not be
+        // read. These used to be collected and then dropped, so a config the scan
+        // could not inspect deployed unchecked, while the runtime, reading the same
+        // reference (or holding it in a cache from an earlier build), resolved
+        // whatever secrets it names. A config the runtime cannot read either fails
+        // the deployment anyway, so refusing here costs nothing in that case.
+        for (String resource : unreadable) {
+            violations.add(resource + " (could not be read, so the vault references it may hold cannot be verified)");
         }
         return violations;
     }
@@ -355,22 +364,26 @@ public class VaultGrantChecker {
      *            each connection is scanned once, which also ends a cycle
      */
     private void collectTenants(Object config, Set<String> sink, String tenantId, Set<String> visitedConnections) {
-        String serialized;
-        try {
-            serialized = MAPPER.writeValueAsString(config);
-        } catch (Exception e) {
-            return;
-        }
         List<String> unresolved = new ArrayList<>();
-        String scanned = withVariablesExpanded(withVariablesExpanded(serialized, tenantId, unresolved), tenantId, unresolved);
+        List<String> scanned = new ArrayList<>();
+        for (String value : stringValues(config)) {
+            // Twice over: a variable may hold a reference to another variable.
+            for (String expanded : withVariablesExpanded(value, tenantId, unresolved)) {
+                scanned.addAll(withVariablesExpanded(expanded, tenantId, unresolved));
+            }
+        }
         if (!unresolved.isEmpty()) {
             // A variable that could not be read may hold a reference to any tenant.
             throw new UnverifiableReferencesException("variable " + unresolved.get(0));
         }
-        for (ReferenceScanner.Match match : TENANT_REFERENCES.findAll(scanned)) {
-            sink.add(match.tenant());
+        List<ReferenceScanner.Match> connectionMatches = new ArrayList<>();
+        for (String text : scanned) {
+            for (ReferenceScanner.Match match : TENANT_REFERENCES.findAll(text)) {
+                sink.add(match.tenant());
+            }
+            connectionMatches.addAll(ConnectionReference.findAll(text));
         }
-        for (ReferenceScanner.Match connections : ConnectionReference.findAll(scanned)) {
+        for (ReferenceScanner.Match connections : connectionMatches) {
             ConnectionReference reference = ConnectionReference.of(connections);
             String connectionTenant = reference.tenantId();
             String name = reference.name();
@@ -436,10 +449,10 @@ public class VaultGrantChecker {
      * Every distinct {@code ${vault:...}} reference reachable from the agent's
      * workflows.
      * <p>
-     * Each extension config is serialized and scanned as a whole rather than having
-     * its secret-bearing fields enumerated. Enumeration is how this kind of check
-     * rots: a new credential field is added somewhere and the scanner silently
-     * stops covering it.
+     * Every string value of each extension config is scanned rather than having its
+     * secret-bearing fields enumerated. Enumeration is how this kind of check rots:
+     * a new credential field is added somewhere and the scanner silently stops
+     * covering it.
      */
     private Set<String> collectVaultReferences(AgentConfiguration agentConfiguration, List<String> unreadableConnections,
                                                List<String> unreadableResources) {
@@ -508,15 +521,34 @@ public class VaultGrantChecker {
         }
     }
 
-    /** The extension config behind a workflow step, or {@code null}. */
+    /**
+     * The extension config behind a workflow step, or {@code null}.
+     * <p>
+     * The URI is normalised exactly as the runtime does it
+     * ({@code ResourceUris.require} trims it), and the store is chosen by the
+     * config URI's host, the key {@code ResourceClientLibrary.getResource} reads
+     * with. Parsing the raw value here while the runtime trimmed it meant a
+     * {@code " eddi://ai.labs.llm/…"} failed to parse, was dropped as unreadable
+     * and deployed unchecked, then loaded fine at runtime.
+     */
     private Object readExtensionConfig(String stepType, String configUri, List<String> unreadableResources) {
-        IResourceStore<?> store = storeFor(stepType);
+        URI uri;
+        try {
+            uri = URI.create(configUri.trim());
+        } catch (IllegalArgumentException e) {
+            // Not knowable which store it names. The runtime refuses the same value,
+            // so failing closed here refuses nothing that would have deployed.
+            LOGGER.debugf("Unparseable %s config URI %s while checking vault grants", sanitize(stepType), sanitize(configUri));
+            unreadableResources.add(configUri);
+            return null;
+        }
+        IResourceStore<?> store = storeFor(uri.getHost());
         if (store == null) {
-            // Not a step type whose config can carry a vault reference.
+            // Not a config type that can carry a vault reference.
             return null;
         }
         try {
-            IResourceId id = RestUtilities.extractResourceId(URI.create(configUri));
+            IResourceId id = RestUtilities.extractResourceId(uri);
             Object config = id == null ? null : store.read(id.getId(), id.getVersion());
             if (config == null) {
                 // A store answers absence with ResourceNotFoundException, so null is not
@@ -533,50 +565,55 @@ public class VaultGrantChecker {
     }
 
     /**
-     * The store holding a step type's config, or {@code null} for a type not
-     * scanned.
+     * The store a config URI with this host is read from, or {@code null} for a
+     * config type not scanned.
+     * <p>
+     * An exact match on the host, mirroring the keys of
+     * {@code ResourceClientLibrary}'s store map, which is what decides at runtime
+     * which document a step loads. It used to be {@code contains()} on the step
+     * <em>type</em>: the {@code ai.labs.langchain} alias (an LLM step) matched
+     * nothing and went unscanned, and a type such as
+     * {@code eddi://ai.labs.mcpcalls?x=ai.labs.llm} matched the wrong branch, read
+     * the wrong store, failed and was dropped. The step type no longer matters:
+     * whichever task runs, the config it loads is the one this URI names.
      */
-    private IResourceStore<?> storeFor(String stepType) {
-        if (stepType.contains("ai.labs.llm")) {
-            return llmStore;
+    private IResourceStore<?> storeFor(String configHost) {
+        if (configHost == null) {
+            return null;
         }
-        if (stepType.contains("ai.labs.httpcalls") || stepType.contains("ai.labs.apicalls")) {
-            return apiCallsStore;
-        }
-        if (stepType.contains("ai.labs.mcpcalls")) {
-            return mcpCallsStore;
-        }
-        if (stepType.contains("ai.labs.rag")) {
-            // RagConfiguration carries embedding-model and vector-store
-            // credentials, both resolved through SecretResolver at runtime.
-            return ragStore;
-        }
-        return null;
+        return switch (configHost) {
+            case "ai.labs.llm" -> llmStore;
+            case "ai.labs.httpcalls", "ai.labs.apicalls" -> apiCallsStore;
+            case "ai.labs.mcpcalls" -> mcpCallsStore;
+            // RagConfiguration carries embedding-model and vector-store credentials,
+            // both resolved through SecretResolver at runtime.
+            case "ai.labs.rag" -> ragStore;
+            default -> null;
+        };
     }
 
     /**
      * Follows every {@code ${connection:name}} in a config and scans the connection
      * document it names.
      * <p>
-     * Serialize-and-scan on both hops, deliberately: enumerating which fields may
-     * carry a connection reference is exactly the kind of check that rots when a
-     * new field is added, and the traversal above already made that argument for
-     * vault references.
+     * Every string value is scanned on both hops, deliberately: enumerating which
+     * fields may carry a connection reference is exactly the kind of check that
+     * rots when a new field is added, and the traversal above already made that
+     * argument for vault references.
      */
     private void scanReferencedConnections(Object config, Set<String> sink, List<String> unreadableConnections,
                                            List<String> unreadableResources) {
-        String serialized;
-        try {
-            serialized = MAPPER.writeValueAsString(config);
-        } catch (Exception e) {
-            return;
-        }
         // Variables expanded first, as for the vault scan: a ${vars:x} whose value is
         // ${connection:jira} otherwise hides the whole hop, and with it every secret
         // the connection holds.
-        String scanned = withVariablesExpanded(serialized, ConnectionReference.DEFAULT_TENANT, unreadableResources);
+        List<ReferenceScanner.Match> matches = new ArrayList<>();
+        for (String value : stringValues(config)) {
+            for (String text : withVariablesExpanded(value, ConnectionReference.DEFAULT_TENANT, unreadableResources)) {
+                matches.addAll(ConnectionReference.findAll(text));
+            }
+        }
         Set<String> alreadyScanned = new LinkedHashSet<>();
-        for (ReferenceScanner.Match match : ConnectionReference.findAll(scanned)) {
+        for (ReferenceScanner.Match match : matches) {
             ConnectionReference reference = ConnectionReference.of(match);
             String tenantId = reference.tenantId();
             String name = reference.name();
@@ -622,24 +659,59 @@ public class VaultGrantChecker {
      *            receives every {@code ${vars:…}} that could not be expanded
      */
     private void scanForVaultReferences(Object config, Set<String> sink, String tenantId, List<String> unresolved) {
-        String serialized;
-        try {
-            serialized = MAPPER.writeValueAsString(config);
-        } catch (Exception e) {
-            return;
-        }
-        for (ReferenceScanner.Match match : SecretReference.scanner().findAll(withVariablesExpanded(serialized, tenantId, unresolved))) {
-            sink.add(match.text());
+        for (String value : stringValues(config)) {
+            for (String text : withVariablesExpanded(value, tenantId, unresolved)) {
+                for (ReferenceScanner.Match match : SecretReference.scanner().findAll(text)) {
+                    sink.add(match.text());
+                }
+            }
         }
     }
 
     /**
-     * The serialized config followed by the expansion of every {@code ${vars:…}} in
-     * it, so a scan sees both what is written and what the runtime resolves it to.
-     * One helper for the vault scan and the connection scan: expanding for only one
-     * of them is how a variable came to hide a connection hop.
+     * Every string value in {@code config}, at any depth, each to be scanned on its
+     * own.
      * <p>
-     * The config is also resolved in place, the way the runtime does it. Each
+     * Not the serialized document as one string. The runtime resolves each
+     * parameter value separately, so an unterminated <code>${vault:x</code> in one
+     * field must not be able to swallow a real reference in a later field: scanning
+     * the whole document let that opener run on to the next field's closing brace,
+     * producing one composite match no grant lookup could resolve (which counts as
+     * granted) while the runtime resolved the later reference unchecked.
+     */
+    private static List<String> stringValues(Object config) {
+        List<String> values = new ArrayList<>();
+        JsonNode tree;
+        try {
+            tree = MAPPER.valueToTree(config);
+        } catch (IllegalArgumentException e) {
+            return values;
+        }
+        collectStrings(tree, values);
+        return values;
+    }
+
+    private static void collectStrings(JsonNode node, List<String> sink) {
+        if (node == null) {
+            return;
+        }
+        if (node.isTextual()) {
+            sink.add(node.textValue());
+        } else if (node.isContainerNode()) {
+            for (JsonNode child : node) {
+                collectStrings(child, sink);
+            }
+        }
+    }
+
+    /**
+     * The value followed by the expansion of every {@code ${vars:…}} in it, so a
+     * scan sees both what is written and what the runtime resolves it to. Each is a
+     * separate entry, scanned on its own, for the reason {@link #stringValues}
+     * gives. One helper for the vault scan and the connection scan: expanding for
+     * only one of them is how a variable came to hide a connection hop.
+     * <p>
+     * The value is also resolved in place, the way the runtime does it. Each
      * expansion on its own line could not show a reference split across two
      * variables; resolving in place refuses one
      * ({@link GlobalVariableResolver.AssembledReferenceException}), so such an
@@ -653,16 +725,17 @@ public class VaultGrantChecker {
      *            value was not scanned, so a "does not reference" answer that
      *            ignored it would be a guess
      */
-    private String withVariablesExpanded(String serialized, String tenantId, List<String> unresolved) {
-        if (globalVariableResolver == null) {
-            return serialized;
+    private List<String> withVariablesExpanded(String value, String tenantId, List<String> unresolved) {
+        if (globalVariableResolver == null || value == null || !value.contains("${")) {
+            return value == null ? List.of() : List.of(value);
         }
-        StringBuilder scanned = new StringBuilder(serialized);
-        String inPlace = globalVariableResolver.resolveValue(serialized, tenantId);
-        if (inPlace != null && !inPlace.equals(serialized)) {
-            scanned.append('\n').append(inPlace);
+        List<String> scanned = new ArrayList<>();
+        scanned.add(value);
+        String inPlace = globalVariableResolver.resolveValue(value, tenantId);
+        if (inPlace != null && !inPlace.equals(value)) {
+            scanned.add(inPlace);
         }
-        for (ReferenceScanner.Match vars : VARS_REFERENCES.findAll(serialized)) {
+        for (ReferenceScanner.Match vars : VARS_REFERENCES.findAll(value)) {
             String variable = vars.text();
             String expanded;
             try {
@@ -673,9 +746,9 @@ public class VaultGrantChecker {
                 continue;
             }
             if (expanded != null && !expanded.equals(variable)) {
-                scanned.append('\n').append(expanded);
+                scanned.add(expanded);
             }
         }
-        return scanned.toString();
+        return scanned;
     }
 }
