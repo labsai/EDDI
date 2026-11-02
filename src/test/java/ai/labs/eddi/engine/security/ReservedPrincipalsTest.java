@@ -67,6 +67,8 @@ class ReservedPrincipalsTest {
             Map.entry("b:", "webhook signature digest tag"),
             Map.entry("t:", "webhook signature digest tag"),
             Map.entry("event:", "webhook event dedup fallback key"),
+            Map.entry("tool:", "tool quota counter name (ToolQuotaRules)"),
+            Map.entry("pool:", "tool quota counter name (ToolQuotaRules)"),
             Map.entry("v2:", "ciphertext/HMAC format version"),
             Map.entry("v3:", "ciphertext/HMAC format version"),
             Map.entry("v4:", "ciphertext/HMAC format version"),

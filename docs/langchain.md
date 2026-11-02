@@ -928,6 +928,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
+| `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
@@ -1985,7 +1986,7 @@ The Langchain task configurations can be managed via REST API endpoints.
 All tool invocations—both built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
 
 ```
-Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Quota (toolQuotas) ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
 ```
 
 ### Controls
@@ -1993,6 +1994,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (t
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Per-subject quotas** | Caps per user (or other subject) per time window, across conversations and nodes; counts real executions only; fails closed | `toolQuotas` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 | **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |
@@ -2015,6 +2017,7 @@ difference between a rule that binds and one that is silently ignored:
 | `toolPricing`                | slug **or** dispatch name — dispatch name wins       |
 | `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
 | `toolTimeoutsMs`             | slug **or** dispatch name — dispatch name wins       |
+| `toolQuotas.tools`           | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -2046,6 +2049,87 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Per-subject tool quotas (`toolQuotas`)
+
+`toolRateLimits` is a per-minute allowance **per conversation**, `maxBudgetPerConversation` is reset by
+starting a new conversation, and a [tenant quota](tenant-quotas.md) is shared by everyone. None of them
+says "this *user* may make at most 100 content improvements a day". `toolQuotas` does: it caps how often
+one **subject** (normally the end user) may make a tool run within a fixed time window, counted **across
+conversations and across EDDI nodes**.
+
+```json
+"toolQuotas": {
+  "subject": "{context.personId}",
+  "tools": {
+    "updateAction":        { "limit": 100, "window": "P1D", "pool": "improvements" },
+    "updateSession":       { "limit": 100, "window": "P1D", "pool": "improvements" },
+    "generateActionImage": { "limit": 30,  "window": "P1D" }
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `tools` | Rules keyed by tool name, **exactly like `toolRateLimits`**: the dispatch name the model invoked, or the built-in slug; the dispatch name wins. Works for every tool source, **HTTP-call tools** (`httpcalls` exposed as tools) included. A rule keyed by a slug is one counter for all of that tool's operations |
+| `limit` | Calls permitted per window; a positive integer |
+| `window` | ISO-8601 duration, from `PT1M` to `P31D` (`P1D`, `PT12H`, `PT90M`). Windows are **fixed and aligned to the UTC epoch**: `P1D` resets at 00:00 UTC, `PT1H` on the hour. Weeks and months (`P1W`, `P1M`) are not accepted |
+| `pool` | Optional. Rules naming the same pool **share one counter** (above, 100 improvements per day across `updateAction` and `updateSession` together). All rules of a pool must state the same `limit` and `window` — anything else is a `400` at save time |
+| `subject` | Optional template, rendered with the turn's template data (the same syntax as a system prompt). Default: the conversation's user id. A template that renders blank falls back to the user id; a rendered subject longer than 256 characters is shortened to a prefix plus a digest. Without any user id (an unauthenticated caller) the conversation id is used, so an anonymous caller is capped per conversation |
+
+**Choosing the subject.** A [managed conversation](mcp-server.md) uses a composite user id
+(`<user>-<company>-<program>`), so the default counts **per program**. To count **per person**, render a
+subject that is the same across their programs, as above. Counters are keyed by (agent, tool or pool,
+subject, window), so two agents never share a count and a new agent *version* continues the old one.
+
+With `{context.personId}` the value is a per-turn context variable of type `string` named `personId`
+(stored in the step as `context:personId`).
+
+> **Security: the subject must be a value the end user cannot choose**, for example context set by a
+> trusted backend. A value a browser client sends directly is not enough: a user who changes it gets a
+> fresh quota. The anonymous fallback (`conversation:<id>`, used when there is no user id) is reset by
+> starting a new conversation, so it does **not** give fair use for unauthenticated users.
+
+**What counts.** A call is counted only when its tool **really runs**. The reservation is made at one
+point in the pipeline — after the rate limit and the cache, immediately before the tool executes — so a
+cache hit, a rate-limited call, a call refused by the conversation budget or the tenant cost budget, a
+call a human rejected, and a call that never ran are **never counted**. If the execution then fails, the
+reservation is **given back**: an exception, a tool-reported error, and for an HTTP tool a non-2xx
+status or a transport failure. A call that **times out** keeps its count: the abandoned worker cannot be
+stopped and may still complete the tool's side effect. The reservation is an atomic
+increment-if-below-limit in the datastore (MongoDB and PostgreSQL), so with three calls left a batch of
+five parallel calls runs exactly three, from one node or from several.
+
+**The refusal.** An exhausted call is not run and the model is handed a final result, not an error to
+retry; the turn does not fail:
+
+```json
+{"status":"NOT_EXECUTED","reason":"Not run: the daily limit for this tool (100) is reached; it resets at 2026-11-03T00:00:00Z. This is final: do not call this tool again in this conversation until then, and tell the user the limit is reached."}
+```
+
+**Human approval ([`toolApprovals`](hitl.md#tool-level-approval-gating)).** Approved calls run later, on
+the resume path, through the *same* execution pipeline — so the quota is applied there, at execution
+time, and a call approved while the allowance was spent elsewhere is refused. And a gated call proposed
+while its quota is **already exhausted** is refused straight away, instead of pausing the conversation
+for an approval that would then be refused. That pre-check is a read: nothing is counted while a call
+waits for approval. With one slot left and two gated calls proposed, both go to the human (the first may
+be rejected), and the second is refused at execution if the first took the slot.
+
+**Fails closed.** If the counter store cannot answer — or a stored rule cannot be applied, or the subject
+template fails to render — the call is **not run** and the model is told the limit could not be checked
+(`Not run: the usage limit for this tool could not be checked right now…`). A failure is logged at WARN
+with the agent, conversation and a short digest of the user id (never the raw subject), at most once a
+minute, and always counted in `eddi_tool_quota_store_failures_total`. Decisions are counted in
+`eddi_tool_quota_decisions_total{tool, outcome}` (see [metrics](metrics.md)).
+
+**Absent means unchanged.** A task without `toolQuotas`, or a tool no rule names, reads no store and takes
+exactly the path it always took.
+
+**Data protection.** Counters hold a subject identifier and a count, never content. They are removed by
+the [GDPR erasure cascade](gdpr-compliance.md) (deleted by subject), are part of the data export, and
+expire on their own an hour after their window ends. If your `subject` template derives an identifier
+that differs from the conversation's user id, erasure deletes the counters whose subject equals the
+**erased user id**; erase by the derived identifier too, or let them expire.
 
 #### Repeated failing tool calls
 

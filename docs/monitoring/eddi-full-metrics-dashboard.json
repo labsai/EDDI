@@ -3147,6 +3147,93 @@
               "sort": "desc"
             }
           }
+        },
+        {
+          "id": 288,
+          "type": "timeseries",
+          "title": "Tool quota decisions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "Per-subject tool quotas (`toolQuotas`). `allowed` calls were counted and ran; `refused` calls hit the limit and were answered with a final refusal; `precheck_refused` are gated calls refused before a human was asked to approve them; `unavailable` calls could not be checked because the counter store did not answer, and were refused (fail closed); `released` are reservations given back because the call failed. A steady `refused` line for one tool is a user (or a script) spending the whole allowance; any `unavailable` is a counter-store problem. The second series counts failed counter-store operations (`eddi_tool_quota_store_failures_total`) by operation.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 44
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (outcome) (rate(eddi_tool_quota_decisions_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{outcome}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (operation) (rate(eddi_tool_quota_store_failures_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "store failure: {{operation}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
         }
       ]
     },

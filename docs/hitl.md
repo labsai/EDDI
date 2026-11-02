@@ -303,6 +303,8 @@ The two surfaces above pause **turns** (a behavior-rule `PAUSE_CONVERSATION`) or
 
 The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail-safe**: a gated call is intercepted *before* execution. It reuses the existing pause machinery — same `AWAITING_HUMAN` state, same `POST /agents/{id}/resume` endpoint, same timeout/audit/Slack/crash-recovery paths — with `hitlPauseType = "TOOL_CALL"` distinguishing it from a `RULE` pause. A single resume verdict resolves either pause type.
 
+**Tool quotas ([`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas)).** A gated call whose per-subject quota is **already exhausted** is refused immediately — the model gets a final `NOT_EXECUTED` result and the conversation does not pause — so a human is never asked to approve a call that would then be refused. The check is a read; nothing is counted while a call waits. The quota is applied again, and the call counted, when the approved call actually runs on resume, through the same execution pipeline as a live call; a call approved after the allowance was spent elsewhere is refused then. A rejected call is never counted.
+
 ### Configuration
 
 `toolApprovals` has two homes, both optional:

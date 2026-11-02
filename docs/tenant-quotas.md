@@ -171,6 +171,13 @@ of `0` on a tenant that was busy yesterday is correct, not a lost write.
 Resetting is an operator escape hatch — it zeroes the stored counters for the current windows and
 does not change the limits.
 
+## Not to be confused with `toolQuotas`
+
+A tenant quota is shared by everyone in the tenant. To cap what **one user** may do with a **tool**
+within a time window — "100 content improvements per user per day", across conversations and nodes — use
+the agent designer's [`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas), which is configured
+per LLM task and counted per subject. The two stack: a call must pass both.
+
 ## See also
 
 - [Configuration Reference](configuration-reference.md) — the `eddi.tenant.quota.*` defaults
