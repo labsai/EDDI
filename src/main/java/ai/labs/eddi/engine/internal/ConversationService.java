@@ -3164,6 +3164,11 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     @Override
+    public void validateHitlDecision(String conversationId, HitlDecision decision) throws ResourceStoreException, ResourceNotFoundException {
+        conversationHitlService.validateDecision(conversationId, decision);
+    }
+
+    @Override
     public ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         return conversationHitlService.getConversationMemorySnapshot(conversationId);

@@ -26,3 +26,11 @@ shape that analytics can rely on.
   [`HitlDecisionValidator`](../../src/main/java/ai/labs/eddi/engine/hitl/review/HitlDecisionValidator.java)
   against `review.reasonCodes` or the built-in vocabulary. `approval-status` lists the vocabulary and the category in
   `pauseDetails`.
+- **Approve a RULE pause with an edited answer** — `editedAnswer` on the resume body, for agents with
+  `review.allowAnswerEdits`. The draft is kept with the pause (also without `onRejection: REVISE`), checked before the
+  CAS (not blank, `maxEditChars`, no control characters, a JSON object for a `convertToObject` task), and applied by
+  the LLM task in place ([`LlmAnswerEditor`](../../src/main/java/ai/labs/eddi/modules/llm/impl/LlmAnswerEditor.java)):
+  the answer's own output item and data keys, nothing after it, no `postResponse`, no task re-run. Under
+  `screenEdits: OUTPUT_GUARDRAILS` the task's output guardrails screen the edit (`reprompt` acts as `block`); a blocked
+  edit or a changed configuration pauses the turn again on the unchanged draft, records `hitl.edit.refused` and shows
+  `lastEditRefused` on the next pause. `approval-status` serves the redacted draft as `pauseDetails.editableAnswer`.

@@ -1568,6 +1568,31 @@ public class Conversation implements IConversation {
     }
 
     /**
+     * "Approve with edits" ({@code hitlConfig.review.allowAnswerEdits}): the
+     * approver's text replaces the draft (see {@link ReviewerEditStep}). When the
+     * engine refuses it — an output guardrail blocked it, or the configuration
+     * changed since the pause — the human's decision stands but cannot be applied:
+     * the turn pauses again, on the same task and the unchanged draft, with a new
+     * pause id.
+     */
+    private void applyReviewerEdit(HitlDecision decision, HitlRevisionCandidate candidate, IWritableConversationStep step)
+            throws LifecycleException, ConversationPauseException {
+        HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
+        String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
+        int pausedIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex();
+        IExecutableWorkflow workflow = policy != null && policy.captureDraft() && candidate != null && candidate.getDraft() != null
+                && answerPrecedesPause(candidate, pausedWorkflowId, pausedIndex) ? findWorkflow(candidate.getWorkflowId()) : null;
+        var outcome = ReviewerEditStep.apply(conversationMemory, step, workflow, candidate, decision, policy != null && policy.screenEdits());
+        step.setCurrentWorkflowId(pausedWorkflowId);
+        if (!outcome.applied()) {
+            conversationMemory.setHitlRevisionCandidate(candidate);
+            clearHitlStatusMarker(step);
+            throw new ConversationPauseException(pausedWorkflowId, pausedIndex, conversationMemory.getHitlPauseReason(),
+                    ConversationPauseException.PauseOrigin.RULE);
+        }
+    }
+
+    /**
      * Whether the answer was given before the pause in pipeline order: earlier in
      * the paused workflow, or in a workflow that runs before it.
      */
@@ -1897,6 +1922,12 @@ public class Conversation implements IConversation {
                 // action data.
                 stripPauseAction(currentStep);
                 return;
+            }
+
+            // review.allowAnswerEdits: an approval with an edited answer replaces the
+            // draft before the remaining tasks run; a refused edit pauses again.
+            if (!toolPause && decision.getEditedAnswer() != null) {
+                applyReviewerEdit(decision, revisionCandidate, currentStep);
             }
 
             String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
