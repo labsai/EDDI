@@ -215,7 +215,7 @@ class PostgresTenantQuotaStoreTest {
         }
 
         @Test
-        @DisplayName("should handle SQL exception gracefully")
+        @DisplayName("a failed write is reported, not acknowledged as the quota the admin asked for")
         void setQuota_sqlException() throws Exception {
             TenantQuota quota = new TenantQuota(TENANT_ID, 100, 5, 60, 500.0, true);
             // After schema init, the second getConnection call throws
@@ -223,7 +223,7 @@ class PostgresTenantQuotaStoreTest {
                     .thenReturn(connection) // schema init
                     .thenThrow(new SQLException("write error"));
 
-            assertDoesNotThrow(() -> sut.setQuota(quota));
+            assertThrows(QuotaAccountingUnavailableException.class, () -> sut.setQuota(quota));
         }
     }
 
@@ -842,15 +842,16 @@ class PostgresTenantQuotaStoreTest {
         }
 
         @Test
-        @DisplayName("should return 0.0 on SQL exception")
+        @DisplayName("should refuse as accounting-unavailable on SQL exception, not report $0 spent (fail closed)")
         void sqlException() throws Exception {
             when(dataSource.getConnection())
                     .thenReturn(connection) // schema init
                     .thenThrow(new SQLException("db error"));
 
-            double cost = sut.getMonthlyCost(TENANT_ID);
+            var thrown = assertThrows(QuotaAccountingUnavailableException.class, () -> sut.getMonthlyCost(TENANT_ID));
 
-            assertEquals(0.0, cost);
+            assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, thrown.getMessage());
+            assertInstanceOf(SQLException.class, thrown.getCause(), "the driver exception stays attached");
         }
     }
 

@@ -185,7 +185,7 @@ export function PreviewStep({
           onClick={onBack}
           disabled={isLoading}
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("common.back", "Back")}
         </Button>
         <Button
@@ -376,7 +376,7 @@ function PreviewRow({
               {expanded ? (
                 <ChevronDown className="h-4 w-4" />
               ) : (
-                <ChevronRight className="h-4 w-4" />
+                <ChevronRight className="h-4 w-4 rtl:rotate-180" />
               )}
               </button>
             )}

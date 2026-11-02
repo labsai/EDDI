@@ -268,4 +268,35 @@ class EmbeddingStoreFactoryBranchTest {
             }
         }
     }
+
+    @Nested
+    @DisplayName("parseIntParam — resolved values are not echoed")
+    class ParseIntParamRedaction {
+
+        @Test
+        @DisplayName("a non-numeric port names the parameter, never its (vault-resolved) value")
+        void invalidPortValueIsNotQuoted() {
+            GlobalVariableResolver gvr = mock(GlobalVariableResolver.class);
+            SecretResolver sr = mock(SecretResolver.class);
+            when(gvr.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(sr.resolveSecrets(any())).thenAnswer(inv -> {
+                Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
+                resolved.replaceAll((k, v) -> "${vault:victim}".equals(v) ? "s3cr3t-plaintext" : v);
+                return resolved;
+            });
+            var redactingFactory = new EmbeddingStoreFactory(gvr, sr);
+
+            var config = new RagConfiguration();
+            config.setStoreNamespace("id");
+            config.setStoreType("pgvector");
+            config.setStoreParameters(Map.of("password", "p", "port", "${vault:victim}"));
+
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> redactingFactory.getOrCreate("kb-port-redaction", config));
+            for (Throwable t = e; t != null; t = t.getCause()) {
+                assertFalse(String.valueOf(t.getMessage()).contains("s3cr3t-plaintext"), t.getMessage());
+            }
+            assertTrue(e.getMessage().contains("storeParameters.port"), e.getMessage());
+        }
+    }
 }

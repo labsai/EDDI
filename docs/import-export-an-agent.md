@@ -36,8 +36,23 @@ When you export an agent, EDDI packages:
   of that name exists yet; an existing one is **never overwritten**, and a document this
   deployment refuses (a `PER_USER` connection without OIDC, an OAuth one without an active
   vault) is skipped with the reason logged rather than failing the import. Both cases are
-  counted in an `X-Connections-Skipped` response header. See
-  [Connections → Export and import](connections.md#export-and-import).
+  counted in an `X-Connections-Skipped` response header. Creating a connection takes
+  `eddi-admin`, exactly as over REST, so an editor's import skips every connection (also
+  counted). See [Connections → Export and import](connections.md#export-and-import).
+
+**Every document is scrubbed**, the agent and its workflows included: a Dream job's model
+`apiKey` or a legacy channel's bot token leaves as `${vault:REDACTED}`. A query parameter
+whose name marks a credential (`key`, `sig`, `signature`, `accessKey`, …) is redacted in
+paths and URLs exactly as an editor's read redacts it.
+
+**Workspaces (`eddi.workspaces.enabled=true`).** Export carries what `VIEW` on the agent
+covers: the configurations its workflow steps name, which were checked when the workflow was
+written. A URI that sits anywhere else in a workflow (another field of a step's `config`) or
+only in a parser document needs `VIEW` of its own, or the export (and its preview) answers 403.
+A prompt snippet travels only when the caller holds `VIEW` on it — a snippet shared for `USE`
+stays behind. On import and on sync, every workflow written straight to the store passes the
+same reference check as `POST /workflowstore/workflows`, and a workflow directory without a
+workflow document is a bad archive (400) rather than a reference kept as the archive wrote it.
 
 **Note**: Conversations and conversation history are **NOT** exported (only configurations).
 HITL approval-timeout schedules are not exported either: they are safety timers for one

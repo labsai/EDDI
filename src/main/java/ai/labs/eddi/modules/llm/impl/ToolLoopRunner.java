@@ -23,6 +23,7 @@ import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.MemorySnapshotService;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -34,6 +35,8 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -60,6 +63,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -201,7 +205,7 @@ class ToolLoopRunner {
         double toolCostBefore = conversationToolCost(conversationId);
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
-        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0,
+        String response = runToolCallLoop(chatModel, messages, activeSpecs, trace, 0, toolCostBefore,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, ClearedToolCalls.none(), transcriptMaxBytes, tokenHolder,
                 jsonPolicy,
                 finalTranscript, exchangeRecorder);
@@ -290,9 +294,10 @@ class ToolLoopRunner {
 
     /**
      * Dollar cost the tools of THIS model call added, as the difference between two
-     * snapshots of the conversation total. Clamped at zero because
-     * {@link ToolCostTracker#resetConversation} can fire between the snapshots and
-     * would otherwise yield a negative "cost".
+     * snapshots of the conversation total. Clamped at zero because the tracker can
+     * drop the conversation's entry between the snapshots (its size-bounded
+     * eviction, {@link ToolCostTracker#resetAll}), which would otherwise yield a
+     * negative "cost".
      */
     double toolCostDelta(String conversationId, double costBefore) {
         return Math.max(0.0, conversationToolCost(conversationId) - costBefore);
@@ -304,9 +309,9 @@ class ToolLoopRunner {
      * retry can never re-execute a tool that already ran. Used by the live path
      * (start iteration 0, no cleared calls) and by {@link #resumeToolLoop} (start
      * iteration {@code batch.getIterationIndex()+1}, {@code clearedCalls} = the
-     * calls a human approved, so an identical reissue is not re-gated). A fresh
-     * gated batch throws {@link ToolApprovalRequiredException} to re-pause — it
-     * escapes unchanged.
+     * approved calls the resumer already ran, so an identical reissue is gated
+     * again as a repeat). A fresh gated batch throws
+     * {@link ToolApprovalRequiredException} to re-pause — it escapes unchanged.
      *
      * @param initialMessages
      *            the message list the loop starts from (defensively copied inside);
@@ -314,6 +319,10 @@ class ToolLoopRunner {
      *            verdict-applied tool results
      * @param startIteration
      *            first loop index — carries budget continuity across a pause
+     * @param toolCostBefore
+     *            the conversation's tracked tool cost before this run's first tool
+     *            ran — for a resume, before the approved calls, so the cost ceiling
+     *            counts what they charged
      * @param clearedCalls
      *            calls a human already approved this pause, bound to id, tool and
      *            arguments and consumed on first match
@@ -332,7 +341,8 @@ class ToolLoopRunner {
      *            survives a pause, a failure or a cancellation of this run
      */
     String runToolCallLoop(ChatModel chatModel, List<ChatMessage> initialMessages, List<ToolSpecification> activeSpecs,
-                           List<Map<String, Object>> trace, int startIteration, AgentOrchestrator.ToolSetup setup, boolean isLazy,
+                           List<Map<String, Object>> trace, int startIteration, double toolCostBefore, AgentOrchestrator.ToolSetup setup,
+                           boolean isLazy,
                            LlmConfiguration.Task task, IConversationMemory memory, ToolApprovalsConfig effectiveToolApprovals,
                            int llmTaskIndex, ClearedToolCalls clearedCalls, int transcriptMaxBytes, TokenUsage[] tokenHolder,
                            JsonResponseFormatPolicy jsonPolicy, List<ChatMessage> transcriptOut, ToolExchangeRecorder exchangeRecorder)
@@ -361,6 +371,14 @@ class ToolLoopRunner {
         // One backoff budget for every model request of this loop run, so per-request
         // retries keep the documented total ceiling instead of one per request.
         long[] backoffSpentMs = new long[1];
+        // What this run has spent and not yet recorded: its model rounds at the
+        // prices of the model it runs on (a cascade step's, when a cascade runs it)
+        // and its tool calls. One figure for every exit and every check — the
+        // mid-loop ceiling, the tenant check before each tool call, the pause and a
+        // failure — so they cannot price the same rounds differently.
+        ModelPrices prices = exchangeRecorder != null && exchangeRecorder.prices() != null ? exchangeRecorder.prices() : ModelPrices.ofTask(task);
+        DoubleSupplier runSpend = () -> prices.cost(tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
+                + toolCostDelta(conversationId, toolCostBefore);
         try {
             tokenHolder[0] = null;
             List<ChatMessage> currentMessages = new ArrayList<>(initialMessages);
@@ -401,17 +419,20 @@ class ToolLoopRunner {
             // spent so far — its tokens at the task's prices and its tool cost. Without
             // it one tool-heavy turn could run far past the ceiling, since the task-level
             // gate only sees a loop's cost once the whole loop has finished.
-            OptionalDouble costCeiling = memory.getConversationCostCeilingUsd();
+            // A scheduled fire's maxCostPerFire tightens it
+            // (LlmSpendGate.effectiveCeiling).
+            OptionalDouble costCeiling = LlmSpendGate.effectiveCeiling(memory);
             boolean ceilingApplies = LlmSpendGate.ceilingApplies(costCeiling);
             double costBeforeLoop = ceilingApplies ? LlmSpendGate.conversationCost(memory) : 0.0;
-            double toolCostAtLoopStart = ceilingApplies ? conversationToolCost(conversationId) : 0.0;
+            // The live path's first request was gated by the task-level preflight, so
+            // the check starts once the model has answered. A resume (startIteration
+            // > 0) has already run the approved calls, whose cost no preflight saw:
+            // its first request is checked too.
+            boolean resumed = startIteration > 0;
 
             for (int i = startIteration; i < maxIterations; i++) {
-                if (ceilingApplies && modelAnswered) {
-                    double spent = costBeforeLoop
-                            + TokenPricing.cost(task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                                    tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null)
-                            + toolCostDelta(conversationId, toolCostAtLoopStart);
+                if (ceilingApplies && (modelAnswered || resumed)) {
+                    double spent = costBeforeLoop + runSpend.getAsDouble();
                     if (spent >= costCeiling.getAsDouble()) {
                         String detail = String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", costCeiling.getAsDouble(),
                                 spent);
@@ -496,6 +517,9 @@ class ToolLoopRunner {
                 // Accumulate token usage for cost/observability reporting.
                 if (chatResponse.metadata() != null && chatResponse.metadata().tokenUsage() != null) {
                     tokenHolder[0] = ToolContextBudget.sumTokens(tokenHolder[0], chatResponse.metadata().tokenUsage());
+                    if (exchangeRecorder != null) {
+                        exchangeRecorder.recordUsage(chatResponse.metadata().tokenUsage());
+                    }
                 }
 
                 if (aiMessage.hasToolExecutionRequests()) {
@@ -512,13 +536,16 @@ class ToolLoopRunner {
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
-                    // calls. clearedCalls carries the calls a human approved on resume
-                    // (bound to id + tool + arguments, each usable once). Inert when
+                    // calls. clearedCalls carries the approved calls the resumer already
+                    // ran (bound to id + tool + arguments); a reissue of one is gated
+                    // again as a repeat. Inert when
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
                     var screened = refuseDoomedGatedCalls(
-                            toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                    effectiveToolApprovals, clearedCalls),
+                            refuseExhaustedGatedCalls(
+                                    toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                            effectiveToolApprovals, clearedCalls),
+                                    task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
                     var gateResult = screened.gateResult();
                     // The pin step below reuses what the screening already resolved.
@@ -579,7 +606,7 @@ class ToolLoopRunner {
                                 executeGuarded(repeatGuard, allowedReq, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
                                         () -> executeToolCall(allowedReq, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                                 toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                                                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
+                                                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
                             }
                             // Abandoned-thread guard: a cascade step that timed out (or
                             // the agentTimeout watchdog on the live path) cancels the future
@@ -620,8 +647,15 @@ class ToolLoopRunner {
                                     pinResolvers);
                             memory.setHitlPendingToolCalls(batch);
                             ToolApprovalGateSupport.incrementToolPauseCount(memory, pausesSoFar);
-                            throw new ToolApprovalRequiredException(
+                            var pause = new ToolApprovalRequiredException(
                                     ToolApprovalGateSupport.buildPauseReason(effectiveToolApprovals, gateResult, governingRule), batch);
+                            // What this run spent up to the pause — its model rounds and its
+                            // tool calls (for a resume, from before the approved calls).
+                            // LlmTask records it on the step as the pause passes, so the
+                            // resume's spend checks count it.
+                            Map<String, Object> usageSoFar = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
+                            pause.addSpend(usageSoFar, runSpend.getAsDouble());
+                            throw pause;
                         }
                     }
 
@@ -651,7 +685,7 @@ class ToolLoopRunner {
                         executeGuarded(repeatGuard, toolRequest, aiMessage, currentMessages, trace, toolSources, exchangeRecorder,
                                 () -> executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
                                         toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs));
+                                        enableCostTracking, task, isLazy, builtInSpecs, activeSpecs, runSpend));
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
 
@@ -687,16 +721,27 @@ class ToolLoopRunner {
             }
             return finish(currentMessages, transcriptOut, iterationBudgetSpentMessage(maxIterations));
         } catch (ToolApprovalRequiredException e) {
-            // The pause signal travels up unchanged.
+            // The pause signal travels up unchanged; it carries its own spend.
             throw e;
         } catch (LifecycleException.LifecycleInterruptedException e) {
             // Deliberately NOT unchanged: see wrapLoopFailure.
-            throw wrapLoopFailure(e);
+            throw withRunSpend(wrapLoopFailure(e), tokenHolder, prices, runSpend);
         } catch (LifecycleException e) {
-            throw e;
+            throw withRunSpend(e, tokenHolder, prices, runSpend);
         } catch (Exception e) {
-            throw wrapLoopFailure(e);
+            throw withRunSpend(wrapLoopFailure(e), tokenHolder, prices, runSpend);
         }
+    }
+
+    /**
+     * Attaches what this run spent before it failed to the failure
+     * ({@link UnrecordedSpend}): the rounds the model answered and the tools that
+     * ran are paid for whether or not the run returns.
+     */
+    private static <T extends Exception> T withRunSpend(T failure, TokenUsage[] tokenHolder, ModelPrices prices, DoubleSupplier runSpend) {
+        Map<String, Object> usage = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
+        double llmCost = prices.cost(usage);
+        return UnrecordedSpend.attach(failure, usage, llmCost, runSpend.getAsDouble() - llmCost);
     }
 
     /**
@@ -806,6 +851,48 @@ class ToolLoopRunner {
                 trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit", limit));
             }
         }
+    }
+
+    /**
+     * Refuses, before a human is asked, every gated call whose {@code toolQuotas}
+     * allowance is already spent. Approving it would be an approval spent on
+     * nothing: the quota is applied again when the approved call runs, and it is
+     * refused then. The check is a read — nothing is counted here; the count
+     * happens when the call actually executes, on the live path and on the HITL
+     * resume path alike.
+     * <p>
+     * Deliberately only "already exhausted": with one call left and two gated calls
+     * proposed, both go to the human, because the first may be rejected and leave
+     * the second its slot. The second is refused at execution if it did not. A
+     * store that cannot answer refuses the call too (fail closed) — it would be
+     * refused at execution anyway.
+     */
+    private ToolApprovalGate.GateResult refuseExhaustedGatedCalls(ToolApprovalGate.GateResult gateResult, LlmConfiguration.Task task,
+                                                                  IConversationMemory memory, Map<String, String> toolCanonicalNames,
+                                                                  List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                                  List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+        ToolQuotaService quotaService = toolExecutionService.getQuotaService();
+        if (task.getToolQuotas() == null || quotaService == null || memory == null || gateResult.gated().isEmpty()) {
+            return gateResult;
+        }
+        List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        for (ToolExecutionRequest req : gateResult.gated()) {
+            String canonicalName = ToolNameResolver.canonical(req.name(), toolCanonicalNames);
+            var refusal = quotaService.precheck(task.getToolQuotas(), req.name(), canonicalName, memory);
+            if (refusal.isEmpty()) {
+                stillGated.add(req);
+                continue;
+            }
+            addResult(currentMessages, aiMessage, req, refusal.get(), exchangeRecorder);
+            Map<String, Object> step = new HashMap<>();
+            step.put("type", "tool_error");
+            step.put("tool", req.name());
+            step.put("error", "tool_quota_refused");
+            trace.add(step);
+        }
+        return stillGated.size() == gateResult.gated().size()
+                ? gateResult
+                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
     }
 
     /**
@@ -1065,8 +1152,8 @@ class ToolLoopRunner {
                                        LlmConfiguration.Task task, boolean isLazy,
                                        List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
         return executeToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit,
-                maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)
-                .governed();
+                maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs,
+                NO_RUN_SPEND).governed();
     }
 
     /**
@@ -1091,8 +1178,73 @@ class ToolLoopRunner {
     }
 
     /**
+     * The spend side of a tool result's {@code summarize} truncation: admitted
+     * while the conversation's cost ceiling and the tenant budget allow another
+     * paid call (with this run's unrecorded spend counted), and charged to the
+     * conversation as a priced tool call ({@code summarizeToolResponse}) — so it
+     * lands in the run's tool cost, {@code audit:cost} and
+     * {@code maxBudgetPerConversation} like any other. Priced at the task's own
+     * rates: the summarizer runs on the task's provider, and no separate price is
+     * configured for it.
+     */
+    private ToolResponseTruncator.SummarizerSpend summarizerSpend(IConversationMemory memory, LlmConfiguration.Task task,
+                                                                  String conversationId, boolean enableCostTracking, DoubleSupplier runSpend) {
+        return new ToolResponseTruncator.SummarizerSpend() {
+            @Override
+            public boolean admit() {
+                double unsettled = runSpend != null ? runSpend.getAsDouble() : 0.0;
+                if (memory != null) {
+                    OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
+                    if (LlmSpendGate.ceilingApplies(ceiling) && LlmSpendGate.conversationCost(memory) + unsettled >= ceiling.getAsDouble()) {
+                        return false;
+                    }
+                }
+                if (tenantQuotaService == null) {
+                    return true;
+                }
+                try {
+                    return tenantQuotaService
+                            .checkCostBudget(tenantQuotaService.getDefaultTenantId(),
+                                    Math.max(0.0, LlmSpendGate.unmeteredStepCost(memory) + unsettled))
+                            .allowed();
+                } catch (RuntimeException e) {
+                    // Fail closed, as every other tenant check: the result is truncated.
+                    return false;
+                }
+            }
+
+            @Override
+            public void charge(Map<String, Object> tokenUsage) {
+                if (!enableCostTracking || conversationId == null || toolExecutionService == null
+                        || toolExecutionService.getCostTracker() == null) {
+                    return;
+                }
+                double price = ModelPrices.ofTask(task).cost(tokenUsage);
+                toolExecutionService.getCostTracker()
+                        .trackToolCall(new ToolInvocation(SUMMARIZER_DISPATCH_NAME, SUMMARIZER_DISPATCH_NAME, price), conversationId);
+            }
+        };
+    }
+
+    /**
+     * The tool name a {@code summarize} truncation's model call is charged under.
+     */
+    static final String SUMMARIZER_DISPATCH_NAME = "summarizeToolResponse";
+
+    /**
+     * Unsettled spend of a call made outside a running loop (a resume's approved
+     * call).
+     */
+    static final DoubleSupplier NO_RUN_SPEND = () -> 0.0;
+
+    /**
      * {@link #executeSingleToolCallResult} with the raw result kept alongside the
-     * governed one. The only addition over that method's contract is the record.
+     * governed one, and with the spend of the loop run making the call.
+     *
+     * @param runSpend
+     *            what the calling loop run has spent and not yet recorded — the
+     *            tenant budget is checked against it as well, as
+     *            {@link LlmSpendGate} checks every other paid call of a turn
      */
     ToolCallResult executeToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
                                    List<Map<String, Object>> trace,
@@ -1101,7 +1253,7 @@ class ToolLoopRunner {
                                    int defaultRateLimit, Double maxBudget, String conversationId,
                                    boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                    LlmConfiguration.Task task, boolean isLazy,
-                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
+                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
         // Live "Using {tool}…" signal for streaming clients — name only, before
         // execution, so the status line moves the moment work starts rather than
         // when the whole loop summarizes at turn end.
@@ -1142,12 +1294,23 @@ class ToolLoopRunner {
         trace.add(callStep);
 
         // Agent test harness: a test conversation's tool call is answered by its
-        // suite's mock (or refused) and never reaches an executor. A no-op prefix check
-        // for
-        // every other conversation. Self-contained early return — keep it that way.
-        String mockedResult = ToolMockRegistry.interceptToolCall(memory, toolRequest.name(), toolRequest.arguments(),
-                toolSources == null ? null : toolSources.get(toolRequest.name()));
-        if (mockedResult != null) {
+        // suite's mock (or refused) and never reaches the outside world. A no-op
+        // prefix check for every other conversation. The call is decided here and
+        // recorded once. A refusal, and a mock for any tool whose executor has no use
+        // for it, are recorded and return early; a mock for a MockAwareToolExecutor
+        // (an httpcall tool), and a call the suite runs live, go through the executor
+        // below instead — so the response handling a live call gets, saveResponse and
+        // postResponse property instructions, runs on the mock — and are recorded only
+        // once the budget, quota and deadline gates have let them through.
+        String mockSource = toolSources == null ? null : toolSources.get(toolRequest.name());
+        ToolMockRegistry.Decision testDecision = ToolMockRegistry.previewToolCall(memory, toolRequest.name(), toolRequest.arguments(),
+                mockSource);
+        ToolMockRegistry.MockResult mockDecision = testDecision != null ? testDecision.result() : null;
+        MockAwareToolExecutor mockingExecutor = mockDecision != null && mockDecision.outcome() == ToolMockRegistry.Outcome.MOCKED
+                && toolExecutors.get(toolRequest.name()) instanceof MockAwareToolExecutor aware ? aware : null;
+        if (mockDecision != null && mockingExecutor == null) {
+            ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+            String mockedResult = ToolMockRegistry.toolResultOf(mockDecision, mockSource);
             Map<String, Object> mockedStep = new HashMap<>();
             mockedStep.put("type", "tool_result");
             mockedStep.put("tool", toolRequest.name());
@@ -1181,9 +1344,32 @@ class ToolLoopRunner {
             return new ToolCallResult("Error: " + budgetError);
         }
 
-        // Check tenant-level monthly cost budget (MCP governance)
+        // Check tenant-level monthly cost budget (MCP governance), with what this turn
+        // has spent and the monthly counter has not been charged yet: the step's
+        // unmetered audit:cost (earlier tasks, a pre-pause segment) and this loop
+        // run's own rounds and tools. The counter is charged when the turn settles,
+        // so without it every tool call of a long loop was compared against the
+        // counter as it stood before the turn — the same figure LlmSpendGate.admit
+        // passes for every other paid call.
         if (tenantQuotaService != null) {
-            var costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId());
+            QuotaCheckResult costCheck;
+            try {
+                double unsettled = LlmSpendGate.unmeteredStepCost(memory) + (runSpend != null ? runSpend.getAsDouble() : 0.0);
+                costCheck = tenantQuotaService.checkCostBudget(tenantQuotaService.getDefaultTenantId(), Math.max(0.0, unsettled));
+            } catch (RuntimeException e) {
+                // Same guard as LlmSpendGate: a check that throws is a defect, not an
+                // outage (the service answers those) — refuse the tool call (fail
+                // closed) under the tenant_check_error reason instead of failing the turn.
+                String checkError = LlmSpendGate.tenantCheckFailed(null, conversationId, "tool call", e);
+                Map<String, Object> errorStep = new HashMap<>();
+                errorStep.put("type", "tool_error");
+                errorStep.put("tool", toolRequest.name());
+                errorStep.put("error", checkError);
+                trace.add(errorStep);
+                // The exception class stays in the trace and the log; the model gets
+                // generic wording.
+                return new ToolCallResult("Error: " + LlmSpendGate.TENANT_CHECK_ERROR_MESSAGE);
+            }
             if (!costCheck.allowed()) {
                 // The reason string already distinguishes the two, but the log line
                 // in front of it did not: an operator grepping for "cost budget
@@ -1211,6 +1397,7 @@ class ToolLoopRunner {
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
         boolean notExecuted = false;
+        ToolQuotaGate quotaGate = null;
         if (executor != null && memory != null && memory.getTurnDeadline() != null && memory.getTurnDeadline().isExpired()) {
             Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "tool").increment();
             toolResult = "Error: the turn deadline has passed; tool '" + toolRequest.name() + "' was not run";
@@ -1243,7 +1430,9 @@ class ToolLoopRunner {
             // A tool object built for this conversation (attachments, artifacts, memory,
             // dynamic agents) is never cached — derived from the executor's class, see
             // ToolCacheService#isConversationBound.
-            boolean cacheThisCall = enableCaching
+            // A mocked call is never cached (a mock must not answer a later live call)
+            // and costs nothing.
+            boolean cacheThisCall = enableCaching && mockingExecutor == null
                     && !ToolCacheService.isConversationBound(executor)
                     && ToolCacheService.mayCache(toolSource, toolRequest.name(), canonicalName, task.getToolCacheScopes());
             String cacheScopeTag = cacheThisCall
@@ -1260,13 +1449,35 @@ class ToolLoopRunner {
             }
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
+            // Per-subject quota (toolQuotas). Null when the task has none or no rule names
+            // this tool — then no store is read. A mocked call never reaches the outside
+            // world and is not counted. The reservation itself is made by
+            // ToolExecutionService, right before the tool runs.
+            ToolQuotaService quotaService = toolExecutionService.getQuotaService();
+            quotaGate = mockingExecutor == null && task.getToolQuotas() != null && quotaService != null && memory != null
+                    ? quotaService.gateFor(task.getToolQuotas(), invocation, memory, ToolLoopRunner::indicatesUnfinishedCall)
+                    : null;
             // The source and the model's call id label the execute_tool span the
             // service opens; they ride in the OTel context because nothing but the
             // trace depends on them (see ToolCallTrace).
             try (Scope ignored = new ToolCallTrace(toolSource, toolRequest.id()).makeCurrent()) {
-                toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                        () -> executor.execute(toolRequest, null), enableRateLimiting, cacheThisCall, enableCostTracking, rateLimit,
-                        toolTimeoutMs);
+                final ToolMockRegistry.MockResult mock = mockingExecutor != null ? mockDecision : null;
+                // Every gate passed: the call is made now, so it counts now.
+                if (testDecision != null) {
+                    ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
+                }
+                Supplier<String> execution = mock != null
+                        ? () -> mockingExecutor.executeMocked(toolRequest, mock)
+                        : () -> executor.execute(toolRequest, null);
+                boolean trackCost = enableCostTracking && mock == null;
+                // Without a quota gate the call takes exactly the path it always took.
+                toolResult = quotaGate == null
+                        ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
+                                enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs)
+                        : toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
+                                enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs, quotaGate);
+                // The quota refused it: the tool never ran.
+                notExecuted = quotaGate != null && quotaGate.refused();
             }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
@@ -1278,6 +1489,19 @@ class ToolLoopRunner {
         // NO discovered tool was ever activated.
         String untruncatedResult = toolResult;
 
+        // Credentials out BEFORE anything leaves for a model. The result below is
+        // sent to the task's (possibly hosted) model, and the summarize truncation
+        // strategy sends it to a second one first. An administrator's tool reads
+        // configuration documents unredacted — that is their right — but the
+        // plaintext key in one is not the model provider's: until this line only
+        // the display trace was filtered, so the operator showed `<REDACTED>` while
+        // the provider received the key. Same scan as the trace, so the model never
+        // sees more than the person watching it does. Before truncation, because a
+        // cut can leave a key too short for the shape rules to recognise. The raw
+        // result stays internal: LAZY activation parses it and the repeat guard
+        // classifies it, and neither sends it anywhere.
+        toolResult = SecretRedactionFilter.redact(toolResult);
+
         // Apply response truncation (MCP governance).
         //
         // The provenance envelope is added AFTER this, so the budget handed to the
@@ -1286,16 +1510,19 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters());
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, enableCostTracking, runSpend));
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
-        // The MODEL still receives the raw result — the return value below is
-        // untouched; only the display record is filtered.
+        // toolResult was redacted above; it is scanned again because truncation
+        // (summarize strategy) can produce new text.
         resultStep.put("result", SecretRedactionFilter.redact(toolResult));
+        if (mockingExecutor != null) {
+            resultStep.put("mocked", true);
+        }
         trace.add(resultStep);
 
         // LAZY mode: after discover_tools returns, activate the matching built-in
@@ -1334,6 +1561,17 @@ class ToolLoopRunner {
         }
 
         return new ToolCallResult(outcome.result(), untruncatedResult, notExecuted);
+    }
+
+    /**
+     * Whether a tool's raw result says the call did not complete — it failed, or it
+     * never ran — so that a {@code toolQuotas} reservation made for it is given
+     * back. Reads the result the way the repeat guard does (HTTP status, an
+     * {@code error} object, an {@code Error:} string).
+     */
+    static boolean indicatesUnfinishedCall(String rawResult) {
+        ToolOutcomeClassifier.Outcome outcome = ToolOutcomeClassifier.classify(rawResult);
+        return outcome.isFailure() || outcome == ToolOutcomeClassifier.Outcome.NOT_EXECUTED;
     }
 
     /**

@@ -720,6 +720,37 @@ class GuardrailServiceTest {
         }
 
         @Test
+        @DisplayName("screenHistoricInput: redact rewrites, block withholds, a guardrail that skips history is skipped")
+        void screenHistoricInput() {
+            var redactor = rewriting("pii", "123-45-6789", "[REDACTED:ssn]");
+            var blocker = flagging("bad", "forbidden");
+            var notHistory = new Scripted("costly", BOTH, text -> GuardrailVerdict.violation("x")) {
+                @Override
+                public boolean screensHistory() {
+                    return false;
+                }
+            };
+            var service = new GuardrailService(List.of(redactor, blocker, notHistory), new SimpleMeterRegistry());
+            var configs = List.of(config("pii", "redact"), config("bad", "block"), config("costly", "block"));
+
+            assertEquals("my ssn is [REDACTED:ssn]", service.screenHistoricInput(configs, "my ssn is 123-45-6789", CONTEXT));
+            assertEquals(GuardrailService.HISTORY_PLACEHOLDER, service.screenHistoricInput(configs, "something forbidden", CONTEXT));
+            assertEquals("plain", service.screenHistoricInput(configs, "plain", CONTEXT));
+            assertEquals(0, notHistory.calls.get(), "a model-backed guardrail is not called on history");
+        }
+
+        @Test
+        @DisplayName("warn with failMode=closed buffers: a failed evaluation withholds the answer")
+        void requiresBuffering_warnFailClosed() {
+            var closed = config("g", "warn");
+            closed.setParameters(Map.of("failMode", "closed"));
+            assertTrue(GuardrailService.requiresBuffering(List.of(closed)));
+            var open = config("g", "warn");
+            open.setParameters(Map.of("failMode", "open"));
+            assertFalse(GuardrailService.requiresBuffering(List.of(open)));
+        }
+
+        @Test
         @DisplayName("duplicate types: the first bean wins")
         void duplicateTypes_firstWins() throws Exception {
             var first = flagging("g", "x");
@@ -748,6 +779,118 @@ class GuardrailServiceTest {
             });
             assertEquals("write to [REDACTED:email]", result.text());
             assertInstanceOf(String.class, result.text());
+        }
+    }
+
+    @Nested
+    @DisplayName("spend checks of a reprompt (E4)")
+    class RepromptSpend {
+
+        /**
+         * Admits the first {@code admitted} calls; records what it was asked and spent.
+         */
+        private final class Recording implements PaidCallGate {
+            final int admitted;
+            final List<Double> expected = new ArrayList<>();
+            final List<Double> spent = new ArrayList<>();
+            int open;
+
+            Recording(int admitted) {
+                this.admitted = admitted;
+            }
+
+            @Override
+            public PaidCall begin(double expectedUsd) {
+                expected.add(expectedUsd);
+                boolean admit = expected.size() <= admitted;
+                open++;
+                return new PaidCall() {
+                    @Override
+                    public String refusalReason() {
+                        return admit ? null : "conversation_ceiling";
+                    }
+
+                    @Override
+                    public void spent(double actualUsd) {
+                        spent.add(actualUsd);
+                    }
+
+                    @Override
+                    public void close() {
+                        open--;
+                    }
+                };
+            }
+        }
+
+        @Test
+        @DisplayName("a refused reprompt is never sent: the answer is blocked, as when no reprompt can start")
+        void refusedRepromptBlocks() throws Exception {
+            var service = new GuardrailService(List.of(flagging("json", "prose")), new SimpleMeterRegistry());
+            var cfg = config("json", "reprompt");
+            cfg.setMaxRetries(3);
+            cfg.setBlockMessage("Could not answer.");
+            var gate = new Recording(0);
+            AtomicInteger asked = new AtomicInteger();
+            Reprompter reprompter = (rejected, corrective) -> {
+                asked.incrementAndGet();
+                return new Reprompter.Attempt("{}", Map.of(), 0.01);
+            };
+            List<GuardrailOutcome> outcomes = new ArrayList<>();
+
+            var result = service.runOutput(List.of(cfg), "prose", reprompter, CONTEXT.withSpend(gate), outcomes::add);
+
+            assertEquals(0, asked.get());
+            assertTrue(result.isBlocked());
+            assertEquals("Could not answer.", result.text());
+            assertEquals(0, result.blocked().retryCount());
+            assertEquals(List.of(GuardrailAction.BLOCK), outcomes.stream().map(GuardrailOutcome::action).toList());
+            assertEquals(0, gate.open, "the refused admission is closed");
+        }
+
+        @Test
+        @DisplayName("each admitted reprompt reports its cost; the next one expects the previous one's cost; the spend refuses the third")
+        void costsAreReported() throws Exception {
+            var service = new GuardrailService(List.of(flagging("json", "prose")), new SimpleMeterRegistry());
+            var cfg = config("json", "reprompt");
+            cfg.setMaxRetries(3);
+            var gate = new Recording(2);
+            AtomicInteger asked = new AtomicInteger();
+            Reprompter reprompter = (rejected, corrective) -> new Reprompter.Attempt("still prose", Map.of(), 0.01 * asked.incrementAndGet());
+
+            var result = service.runOutput(List.of(cfg), "prose", reprompter, CONTEXT.withSpend(gate), o -> {
+            });
+
+            assertEquals(2, asked.get(), "the third reprompt was refused");
+            assertTrue(result.isBlocked());
+            assertEquals(List.of(0.01, 0.02), gate.spent);
+            assertEquals(List.of(0.0, 0.01, 0.02), gate.expected);
+            assertEquals(0, gate.open);
+        }
+
+        @Test
+        @DisplayName("a failing reprompt still releases its admission")
+        void failureReleases() {
+            var service = new GuardrailService(List.of(flagging("json", "prose")), new SimpleMeterRegistry());
+            var gate = new Recording(5);
+            Reprompter failing = (rejected, corrective) -> {
+                throw new LifecycleException("provider down");
+            };
+
+            assertThrows(LifecycleException.class,
+                    () -> service.runOutput(List.of(config("json", "reprompt")), "prose", failing, CONTEXT.withSpend(gate), o -> {
+                    }));
+            assertEquals(0, gate.open);
+        }
+
+        @Test
+        @DisplayName("the context keeps its spend checks across phase changes; a context without one admits everything")
+        void contextCarriesTheGate() {
+            var gate = new Recording(0);
+            assertSame(gate, CONTEXT.withSpend(gate).with(GuardrailPhase.OUTPUT, Map.of(), List.of()).spend());
+            assertSame(PaidCallGate.UNGATED, CONTEXT.spend());
+            assertSame(PaidCallGate.UNGATED, CONTEXT.withSpend(null).spend());
+            assertTrue(PaidCallGate.UNGATED.begin(1.0).admitted());
         }
     }
 }

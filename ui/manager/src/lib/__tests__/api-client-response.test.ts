@@ -65,6 +65,42 @@ describe("api.getWithResponse", () => {
   });
 });
 
+describe("api.postWithResponse / putWithResponse", () => {
+  it("hands back the response headers, which carry save-time warnings", async () => {
+    server.use(
+      http.post(URL, () =>
+        new HttpResponse(null, {
+          status: 201,
+          headers: { Location: "/probe/1?version=1", "X-Eddi-Warnings": "email.open-trigger" },
+        }),
+      ),
+    );
+    const response = await api.postWithResponse<{ location: string }>(PATH, { a: 1 });
+    expect(response.status).toBe(201);
+    expect(response.data).toEqual({ location: "/probe/1?version=1" });
+    expect(response.headers.get("X-Eddi-Warnings")).toBe("email.open-trigger");
+  });
+
+  it("sends the PUT body and keeps the headers of an empty 200", async () => {
+    let received: unknown;
+    server.use(
+      http.put(URL, async ({ request }) => {
+        received = await request.json();
+        return new HttpResponse(null, { status: 200, headers: { "X-Eddi-Warnings": "x" } });
+      }),
+    );
+    const response = await api.putWithResponse<undefined>(PATH, { b: 2 });
+    expect(received).toEqual({ b: 2 });
+    expect(response.data).toBeUndefined();
+    expect(response.headers.get("X-Eddi-Warnings")).toBe("x");
+  });
+
+  it("throws on a non-2xx exactly as the plain verb does", async () => {
+    server.use(http.post(URL, () => HttpResponse.json({ message: "bad key" }, { status: 400 })));
+    await expect(api.postWithResponse(PATH, {})).rejects.toMatchObject({ status: 400, message: "bad key" });
+  });
+});
+
 describe("error message length", () => {
   it("keeps a strict-parser rejection intact past the old 400-character cap", async () => {
     // EDDI names the offending field, then lists every field the model
@@ -136,5 +172,29 @@ describe("Bean Validation 400s", () => {
     );
 
     await expect(api.put(PATH, {})).rejects.toMatchObject({ message: "members must not be empty" });
+  });
+});
+
+describe("error codes", () => {
+  it("keeps the stable code of an {error, message} body beside the message", async () => {
+    server.use(
+      http.patch(URL, () =>
+        HttpResponse.json({ error: "RATING_CHANGED", message: "The rating was changed meanwhile" }, { status: 409 }),
+      ),
+    );
+
+    await expect(api.patch(PATH, {})).rejects.toMatchObject({
+      status: 409,
+      code: "RATING_CHANGED",
+      message: "The rating was changed meanwhile",
+    });
+  });
+
+  it("has no code when `error` is the only field, which is then the message", async () => {
+    server.use(http.get(URL, () => HttpResponse.json({ error: "System prompt is required" }, { status: 400 })));
+
+    const error = await api.get(PATH).catch((e: unknown) => e);
+    expect(error).toMatchObject({ status: 400, message: "System prompt is required" });
+    expect((error as { code?: string }).code).toBeUndefined();
   });
 });

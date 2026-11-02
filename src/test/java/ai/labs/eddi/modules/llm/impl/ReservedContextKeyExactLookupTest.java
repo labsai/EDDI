@@ -139,4 +139,21 @@ class ReservedContextKeyExactLookupTest {
 
         assertNull(AgentOrchestrator.groupConversationIdOf(memory));
     }
+
+    @Test
+    @DisplayName("the chain's delegation ceiling: the current step's wins, otherwise the strictest earlier one — never lifted by omission")
+    void delegationCeiling_strictestEarlierUnlessTheCurrentStepCarriesOne() {
+        var memory = memory();
+        assertNull(DynamicAgentToolsProvider.resolveDelegationCeiling(memory));
+
+        putContext(memory, "delegationDepthMax", 2);
+        memory.startNextStep();
+        putContext(memory, "delegationDepthMax", 4);
+        memory.startNextStep();
+        // A turn without the context: the strictest earlier ceiling still applies.
+        assertEquals(2, DynamicAgentToolsProvider.resolveDelegationCeiling(memory));
+
+        putContext(memory, "delegationDepthMax", 3);
+        assertEquals(3, DynamicAgentToolsProvider.resolveDelegationCeiling(memory));
+    }
 }

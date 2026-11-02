@@ -46,6 +46,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -164,7 +165,7 @@ public class EmbeddingStoreFactory {
     static final int MAX_MONGO_CLIENTS = MAX_STORES + 14;
 
     /** External-store clients only — see the class comment. */
-    private final Cache<String, EmbeddingStore<TextSegment>> cache;
+    private final Cache<StoreCacheKey, EmbeddingStore<TextSegment>> cache;
 
     /**
      * In-memory stores, keyed by knowledge base id. Never evicted — the class
@@ -346,9 +347,10 @@ public class EmbeddingStoreFactory {
             return inMemoryStores.computeIfAbsent(inMemoryKey(ragConfigId, config), key -> newInMemoryStore(config, key)).store();
         }
         // Include storeParameters in cache key (different connection params = different
-        // store)
-        String paramsKey = config.getStoreParameters() != null ? new TreeMap<>(config.getStoreParameters()).toString() : "";
-        String cacheKey = config.getStoreType() + ":" + ragConfigId + ":" + namespaceOf(config) + ":" + paramsKey;
+        // store). A structural key, not a concatenated string: TreeMap.toString() has
+        // no unambiguous entry boundaries ({a='x, b=y'} renders like {a='x', b='y'}),
+        // so two configurations could share one store.
+        var cacheKey = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
         return cache.get(cacheKey, k -> build(ragConfigId, config));
     }
 
@@ -966,9 +968,12 @@ public class EmbeddingStoreFactory {
             return defaultValue;
         }
         try {
-            return Integer.parseInt(raw);
+            return Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Invalid integer value for '" + key + "': " + raw, e);
+            // Neither the value nor the cause (whose message quotes it): vault
+            // references are resolved by now and this message reaches ingestion
+            // status and RAG search responses.
+            throw new IllegalArgumentException("Invalid integer value for storeParameters." + key);
         }
     }
 
@@ -1145,5 +1150,16 @@ public class EmbeddingStoreFactory {
         // invalidateAll fires the removal listener, which closes each client.
         mongoClientCache.invalidateAll();
         mongoClientCache.cleanUp();
+    }
+
+    /**
+     * Store cache key: equal only when every field compares equal. Absent
+     * parameters ({@code null}) stay distinct from an empty map, as they were under
+     * the string key.
+     */
+    private record StoreCacheKey(String storeType, String ragConfigId, String namespace, Map<String, String> storeParameters) {
+        private StoreCacheKey {
+            storeParameters = storeParameters == null ? null : Collections.unmodifiableMap(new TreeMap<>(storeParameters));
+        }
     }
 }

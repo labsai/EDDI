@@ -226,6 +226,12 @@ export function ResourceDetailPage() {
   // Version diff dialog state
   const [showDiff, setShowDiff] = useState(false);
 
+  // Whether the editor holds edits that are not saved. The version picker is
+  // disabled while it does; "Switch to latest" must be too, or the edits made on
+  // the old version are carried onto the latest one and saved there.
+  const [draftDirty, setDraftDirty] = useState(false);
+  const handleDraftChange = useCallback((draft: { dirty: boolean }) => setDraftDirty(draft.dirty), []);
+
   // Build version list from descriptors
   const versions = versionDescriptors
     ? versionDescriptors.map((d) => {
@@ -715,7 +721,14 @@ export function ResourceDetailPage() {
               latest: latestVersion,
             })}
           </p>
-          <Button variant="warning" size="sm" onClick={() => setCurrentVersion(latestVersion)} className="shrink-0">
+          <Button
+            variant="warning"
+            size="sm"
+            onClick={() => setCurrentVersion(latestVersion)}
+            disabled={draftDirty}
+            className="shrink-0"
+            data-testid="switch-to-latest"
+          >
             {t("resources.switchToLatest", "Switch to latest")}
           </Button>
         </div>
@@ -773,6 +786,7 @@ export function ResourceDetailPage() {
             renderFormEditor={EDITOR_MAP[type ?? ""]}
             jsonSchema={jsonSchema}
             onCompare={() => setShowDiff(true)}
+            onDraftChange={handleDraftChange}
           />
           </OwningAgentContext.Provider>
           {/* Version diff dialog */}

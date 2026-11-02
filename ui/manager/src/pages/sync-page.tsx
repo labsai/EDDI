@@ -459,7 +459,7 @@ export function SyncPage() {
                         {expandedAgent === m.remoteId ? (
                           <ChevronDown className="h-3 w-3" />
                         ) : (
-                          <ChevronRight className="h-3 w-3" />
+                          <ChevronRight className="h-3 w-3 rtl:rotate-180" />
                         )}
                       </button>
                     )}
@@ -733,7 +733,7 @@ function AgentSyncDetail({
                           {isExpanded ? (
                             <ChevronDown className="h-4 w-4" />
                           ) : (
-                            <ChevronRight className="h-4 w-4" />
+                            <ChevronRight className="h-4 w-4 rtl:rotate-180" />
                           )}
                         </button>
                       )}

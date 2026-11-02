@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -547,7 +548,7 @@ class HitlCrashRecoveryObserverTest {
 
             observer(true, true).sweepExpiredPendingApprovals();
 
-            verify(conversationService, never()).cancelConversation(any(), any(), any());
+            verify(conversationService, never()).cancelPausedConversation(any(), any(), any());
         }
 
         @Test
@@ -556,15 +557,19 @@ class HitlCrashRecoveryObserverTest {
             var oldOne = summary("old", Instant.now().minus(40, ChronoUnit.DAYS));
             var recentOne = summary("recent", Instant.now().minus(1, ChronoUnit.DAYS));
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(oldOne, recentOne));
-            when(conversationService.cancelConversation(eq("old"), any(), eq("system:retention")))
+            when(conversationService.cancelPausedConversation(eq("old"), eq("system:retention"), any()))
                     .thenReturn(IConversationService.CancelOutcome.CANCELLED);
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
             // G6: the 3-arg form with the system actor — so the audit records
             // decidedBy=system:retention (automated), not the default "unknown".
-            verify(conversationService).cancelConversation(eq("old"), eq(ControlSignal.CANCEL_GRACEFUL), eq("system:retention"));
-            verify(conversationService, never()).cancelConversation(eq("recent"), any(), any());
+            // The paused-only cancel bound to the pause the scan saw: a pause resumed in
+            // between is not stopped, and a newer pause is not the expired one.
+            verify(conversationService).cancelPausedConversation(eq("old"), eq("system:retention"),
+                    eq(HitlDecision.pauseIdOf(oldOne.getPausedAt())));
+            verify(conversationService, never()).cancelConversation(any(), any(), any());
+            verify(conversationService, never()).cancelPausedConversation(eq("recent"), any(), any());
         }
 
         @Test
@@ -575,7 +580,7 @@ class HitlCrashRecoveryObserverTest {
 
             observerWithRetention(Duration.ZERO).sweepExpiredPendingApprovals();
 
-            verify(conversationService, never()).cancelConversation(any(), any(), any());
+            verify(conversationService, never()).cancelPausedConversation(any(), any(), any());
         }
 
         @Test
@@ -595,13 +600,12 @@ class HitlCrashRecoveryObserverTest {
             toolPause.setPauseType("TOOL_CALL");
             toolPause.setToolNames(List.of("sendEmail", "chargeCard"));
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(toolPause));
-            when(conversationService.cancelConversation(eq("tool-conv"), any(), eq("system:retention")))
+            when(conversationService.cancelPausedConversation(eq("tool-conv"), eq("system:retention"), any()))
                     .thenReturn(IConversationService.CancelOutcome.CANCELLED);
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
-            verify(conversationService).cancelConversation(
-                    eq("tool-conv"), eq(ControlSignal.CANCEL_GRACEFUL), eq("system:retention"));
+            verify(conversationService).cancelPausedConversation(eq("tool-conv"), eq("system:retention"), any());
         }
 
         private GroupConversation groupPausedAt(String id, Instant pausedAt) {

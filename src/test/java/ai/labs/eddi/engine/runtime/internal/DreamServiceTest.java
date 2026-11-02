@@ -10,9 +10,11 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -1662,6 +1664,28 @@ class DreamServiceTest {
         verify(store).deleteEntry("1");
     }
 
+    @Test
+    void processScheduledFire_refusesAnAgentVersionNamingAnUngrantedSecret() throws Exception {
+        // The grant gate runs at deployment; a Dream schedule reads any stored version,
+        // and dream.parameters reach the model registry without a grant check.
+        var dream = new AgentConfiguration.DreamConfig();
+        dream.setEnabled(true);
+        var memoryConfig = new AgentConfiguration.UserMemoryConfig();
+        memoryConfig.setDream(dream);
+        var agentConfiguration = new AgentConfiguration();
+        agentConfiguration.setUserMemoryConfig(memoryConfig);
+        when(agentStore.read("agent-1", 7)).thenReturn(agentConfiguration);
+        var gate = mock(VaultGrantGate.class);
+        when(gate.check("agent-1", 7)).thenReturn(
+                new VaultGrantGate.GrantCheck(VaultGrantGate.Mode.ENFORCE, List.of("${vault:default/openai}"), true));
+        dreamService.vaultGrantGate = gate;
+
+        var result = dreamService.processScheduledFire("agent-1", 7, "user-1");
+
+        assertFalse(result.isSuccess());
+        verify(store, never()).getAllEntries(anyString());
+    }
+
     /**
      * The schedule's {@code agentId} is the ownership boundary, not just the config
      * source: a dream schedule for agent-1 must not prune agent-2's memories for
@@ -1814,6 +1838,27 @@ class DreamServiceTest {
     }
 
     @Test
+    void tenantCost_chargeLostToAnOutageIsCarriedToTheNextConsolidationCharge() throws Exception {
+        enableSummarization();
+        dreamConfig.setInputPricePer1M(1.0);
+        dreamConfig.setOutputPricePer1M(2.0);
+        TenantQuotaService quota = tenantQuotaWithBudget(true);
+        when(quota.recordCost(anyString(), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable())
+                .thenReturn(QuotaCheckResult.OK);
+        when(store.getAllEntries("user-1")).thenReturn(makeEntries(6, "fact", "agent-1"));
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(llmResult("[{\"key\": \"s1\", \"value\": \"v1\"}]", 1000, 500));
+
+        dreamService.process("user-1", "agent-1", dreamConfig); // store down: $0.002 not recorded
+        assertEquals(0.002, dreamService.pendingTenantCost(), 1e-12, "the unrecorded charge is kept, not dropped");
+
+        dreamService.process("user-1", "agent-1", dreamConfig); // store back: this run's $0.002 plus the carried $0.002
+
+        verify(quota).recordCost(eq("default"), doubleThat(d -> Math.abs(d - 0.004) < 1e-12));
+        assertEquals(0.0, dreamService.pendingTenantCost(), 1e-12);
+    }
+
+    @Test
     void tenantCost_unpricedConsolidationMetersNothing() throws Exception {
         enableSummarization();
         TenantQuotaService quota = tenantQuotaWithBudget(true);
@@ -1846,5 +1891,33 @@ class DreamServiceTest {
         assertEquals(3.0, DreamService.pricedCost(usage, 0, 3.0, null), 1e-12);
         assertEquals(5.0, DreamService.pricedCost(usage, 0, null, 5.0), 1e-12);
         assertEquals(0.0, DreamService.pricedCost(usage, 0, -1.0, -1.0));
+    }
+
+    @Test
+    void splitGroupScopedGroupsByGroupIds_neverMergesDifferentGroupReaderships() {
+        Instant now = Instant.now();
+        var inA = new UserMemoryEntry("1", "user-1", "k1", "v1", "fact", Visibility.group, "agent-1", List.of("A"), "c", false, 0, now, now);
+        var inAToo = new UserMemoryEntry("2", "user-1", "k2", "v2", "fact", Visibility.group, "agent-1", List.of("A", "A"), "c", false, 0, now,
+                now);
+        var inB = new UserMemoryEntry("3", "user-1", "k3", "v3", "fact", Visibility.group, "agent-1", List.of("B"), "c", false, 0, now, now);
+        var global = new UserMemoryEntry("4", "user-1", "k4", "v4", "fact", Visibility.global, "agent-1", List.of(), "c", false, 0, now, now);
+
+        var parts = DreamService.splitGroupScopedGroupsByGroupIds(Map.of("fact", List.of(inA, inB, inAToo, global)));
+
+        assertEquals(3, parts.size(), parts.keySet().toString());
+        assertTrue(parts.values().contains(List.of(inA, inAToo)));
+        assertTrue(parts.values().contains(List.of(inB)));
+        assertTrue(parts.values().contains(List.of(global)));
+    }
+
+    @Test
+    void splitGroupScopedGroupsByGroupIds_leavesASingleReadershipAlone() {
+        Instant now = Instant.now();
+        var a1 = new UserMemoryEntry("1", "user-1", "k1", "v1", "fact", Visibility.group, "agent-1", List.of("A", "B"), "c", false, 0, now, now);
+        var a2 = new UserMemoryEntry("2", "user-1", "k2", "v2", "fact", Visibility.group, "agent-1", List.of("B", "A"), "c", false, 0, now, now);
+
+        var parts = DreamService.splitGroupScopedGroupsByGroupIds(Map.of("fact", List.of(a1, a2)));
+
+        assertEquals(Map.of("fact", List.of(a1, a2)), parts);
     }
 }

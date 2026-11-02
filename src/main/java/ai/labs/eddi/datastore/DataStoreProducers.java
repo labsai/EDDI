@@ -29,6 +29,8 @@ import ai.labs.eddi.datastore.postgres.PostgresConversationMemoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresDatabaseLogs;
 import ai.labs.eddi.datastore.postgres.PostgresDeploymentStorage;
 import ai.labs.eddi.datastore.postgres.PostgresGlobalVariableStore;
+import ai.labs.eddi.datastore.postgres.PostgresAlertEventStore;
+import ai.labs.eddi.datastore.postgres.PostgresAlertRuleStore;
 import ai.labs.eddi.datastore.postgres.PostgresConversationRatingStore;
 import ai.labs.eddi.datastore.postgres.PostgresHitlToolJournalStore;
 import ai.labs.eddi.datastore.postgres.PostgresMigrationLogStore;
@@ -42,6 +44,10 @@ import ai.labs.eddi.engine.audit.AuditStore;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.hitl.tools.mongo.HitlToolJournalStore;
+import ai.labs.eddi.engine.alerts.IAlertEventStore;
+import ai.labs.eddi.engine.alerts.IAlertRuleStore;
+import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
+import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
@@ -62,10 +68,22 @@ import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
+import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
+import ai.labs.eddi.modules.llm.tools.quota.MongoToolQuotaStore;
+import ai.labs.eddi.modules.llm.tools.quota.PostgresToolQuotaStore;
 import ai.labs.eddi.engine.triggermanagement.IAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.AgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.mongo.UserConversationStore;
+import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
+import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
+import ai.labs.eddi.integrations.email.ledger.MongoEmailMailboxStateStore;
+import ai.labs.eddi.integrations.email.ledger.MongoEmailSuppressionStore;
+import ai.labs.eddi.integrations.email.ledger.MongoEmailMessageLedger;
+import ai.labs.eddi.integrations.email.ledger.PostgresEmailMailboxStateStore;
+import ai.labs.eddi.integrations.email.ledger.PostgresEmailSuppressionStore;
+import ai.labs.eddi.integrations.email.ledger.PostgresEmailMessageLedger;
 import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import ai.labs.eddi.integrations.slack.hitl.MongoSlackApprovalRecordStore;
 import ai.labs.eddi.integrations.slack.hitl.PostgresSlackApprovalRecordStore;
@@ -157,6 +175,18 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IAlertRuleStore alertRuleStore(Instance<AlertRuleStore> mongo, Instance<PostgresAlertRuleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAlertEventStore alertEventStore(Instance<AlertEventStore> mongo, Instance<PostgresAlertEventStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IConversationMemoryStore conversationMemoryStore(Instance<ConversationMemoryStore> mongo,
                                                             Instance<PostgresConversationMemoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
@@ -211,6 +241,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public ISlackApprovalRecordStore slackApprovalRecordStore(Instance<MongoSlackApprovalRecordStore> mongo,
                                                               Instance<PostgresSlackApprovalRecordStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IToolQuotaStore toolQuotaStore(Instance<MongoToolQuotaStore> mongo, Instance<PostgresToolQuotaStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
@@ -310,6 +346,26 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IWorkspaceSettingsStore workspaceSettingsStore(Instance<MongoWorkspaceSettingsStore> mongo,
                                                           Instance<PostgresWorkspaceSettingsStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IEmailMessageLedger emailMessageLedger(Instance<MongoEmailMessageLedger> mongo, Instance<PostgresEmailMessageLedger> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IEmailMailboxStateStore emailMailboxStateStore(Instance<MongoEmailMailboxStateStore> mongo,
+                                                          Instance<PostgresEmailMailboxStateStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IEmailSuppressionStore emailSuppressionStore(Instance<MongoEmailSuppressionStore> mongo,
+                                                        Instance<PostgresEmailSuppressionStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 }

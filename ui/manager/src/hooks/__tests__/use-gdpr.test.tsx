@@ -113,6 +113,8 @@ describe("useDeleteUserData — cache invalidation", () => {
       ["gdpr", "restricted", "user-123"],
       // The dashboard's "Recent conversations" card lists them too.
       ["dashboard", "recent-conversations", 5],
+      // Workforce analytics caches each group's conversations under its own prefix.
+      ["workforce-analytics", "conversations", "g1"],
     ];
     for (const key of seeded) queryClient.setQueryData(key, { seeded: true });
     const untouched = ["agents"];

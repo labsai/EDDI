@@ -133,12 +133,16 @@ services:
   # KC_BOOTSTRAP_ADMIN_PASSWORD only when it first creates the master realm, so a
   # keycloak-data volume first started with admin/admin keeps that login however
   # .env changes later. This one-shot runs once Keycloak is up, before EDDI starts.
-  # If a password other than `admin` is configured and the stored admin account
-  # still accepts `admin`, it sets the account's password to the configured one
-  # through the admin API (what install.sh / install.ps1 do on a re-run). The new
-  # password goes to kcadm on stdin, never on its command line. With the dev
-  # default there is nothing to rotate to, and keycloak-guard already keeps that
-  # case on loopback.
+  # If a password other than `admin` is configured, every account that still
+  # accepts `admin` - the configured admin user and, when that user was renamed,
+  # the original `admin` account too - gets the configured password through the
+  # admin API (what install.sh / install.ps1 do on a re-run). The volume is marked
+  # verified only after that, and only once a login with the configured
+  # credentials succeeds. The configured password never reaches a kcadm command
+  # line: the new password goes on stdin, and the login reads it from
+  # KC_CLI_PASSWORD (kcadm's documented alternative to --password; a prompt is not
+  # one, it needs a TTY this container lacks). With the dev default there is
+  # nothing to rotate to, and keycloak-guard already keeps that case on loopback.
   keycloak-admin-rotate:
     image: quay.io/keycloak/keycloak:26.8.0
     depends_on:
@@ -150,22 +154,44 @@ services:
     environment:
       KC_ADMIN_USER: "${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+      # Read by `kcadm config credentials` when --password is absent.
+      KC_CLI_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
     command:
       - |
         [ -z "$$KC_BOOTSTRAP_ADMIN_PASSWORD" ] || [ "$$KC_BOOTSTRAP_ADMIN_PASSWORD" = "admin" ] && exit 0
         kcadm=/opt/keycloak/bin/kcadm.sh; cfg=/tmp/kcadm.config
         marker=/opt/keycloak/data/.eddi-admin-verified
+        login_default() {
+          "$$kcadm" config credentials --config "$$cfg" --server http://keycloak:8080 --realm master \
+            --user "$$1" --password admin >/dev/null 2>&1
+        }
+        # Sets the configured password on account $$1, using the session login_default just opened.
+        rotate() {
+          local id pw
+          if id=$$("$$kcadm" get users --config "$$cfg" -r master -q exact=true -q "username=$$1" --fields id --format csv --noquotes) \
+              && [ -n "$$id" ]; then
+            pw=$${KC_BOOTSTRAP_ADMIN_PASSWORD//\\/\\\\}; pw=$${pw//\"/\\\"}
+            if printf '{"type":"password","temporary":false,"value":"%s"}' "$$pw" \
+                | "$$kcadm" update "users/$$id/reset-password" --config "$$cfg" -r master -n -f -; then
+              echo "[SECURITY] Keycloak account '$$1' still accepted the default password 'admin'; it now uses KC_BOOTSTRAP_ADMIN_PASSWORD."
+              return 0
+            fi
+          fi
+          echo "[SECURITY] Keycloak account '$$1' accepts the default password 'admin' but could not be rotated; change its password in the admin console or reset the keycloak-data volume." >&2
+          exit 1
+        }
+        if login_default "$$KC_ADMIN_USER"; then rotate "$$KC_ADMIN_USER"; fi
+        # A renamed KC_BOOTSTRAP_ADMIN_USERNAME on an existing volume leaves the original
+        # admin/admin account in place, and a login as the configured user says nothing about it.
+        if [ "$$KC_ADMIN_USER" != "admin" ] && login_default admin; then rotate admin; fi
+        # "admin refused" is not proof the volume is safe: only a successful login with the
+        # configured credentials certifies it. kcadm reads the password from KC_CLI_PASSWORD.
         if ! "$$kcadm" config credentials --config "$$cfg" --server http://keycloak:8080 --realm master \
-            --user "$$KC_ADMIN_USER" --password admin >/dev/null 2>&1; then
-          touch "$$marker"   # the default no longer works: keycloak-guard may now allow a wider bind
-          exit 0
+            --user "$$KC_ADMIN_USER" </dev/null >/dev/null 2>&1; then
+          echo "[SECURITY] Could not log in to Keycloak as '$$KC_ADMIN_USER' with KC_BOOTSTRAP_ADMIN_PASSWORD; not marking the admin account verified. If you renamed KC_BOOTSTRAP_ADMIN_USERNAME on an existing volume, restore it or reset the keycloak-data volume." >&2
+          exit 1
         fi
-        id=$$("$$kcadm" get users --config "$$cfg" -r master -q exact=true -q "username=$$KC_ADMIN_USER" --fields id --format csv --noquotes) || exit 1
-        pw=$${KC_BOOTSTRAP_ADMIN_PASSWORD//\\/\\\\}; pw=$${pw//\"/\\\"}
-        printf '{"type":"password","temporary":false,"value":"%s"}' "$$pw" \
-          | "$$kcadm" update "users/$$id/reset-password" --config "$$cfg" -r master -n -f - || exit 1
-        touch "$$marker"
-        echo "[SECURITY] Keycloak's admin account still accepted the default password 'admin'; it now uses KC_BOOTSTRAP_ADMIN_PASSWORD."
+        touch "$$marker"   # keycloak-guard may now allow a wider bind
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.8.0

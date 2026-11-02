@@ -116,6 +116,17 @@ public class A2AToolProviderManager {
     private static final long CIRCUIT_BREAKER_COOLDOWN_MS = 60_000;
     private static final int MAX_RESPONSE_SIZE_BYTES = 1_048_576; // 1MB
 
+    /**
+     * Longest agent name or skill id taken from a card into a tool name. Both are
+     * remote-authored and the name is copied into every skill's tool name: an
+     * unbounded name times thousands of skills multiplied a 1 MB card into
+     * gigabytes of retained strings.
+     */
+    static final int MAX_NAME_PART_CHARS = 64;
+
+    /** Most skills one agent card may turn into tools; the rest are dropped. */
+    static final int MAX_SKILLS_PER_AGENT = 256;
+
     /** The A2A 0.3+/1.0 well-known Agent Card path. */
     static final String WELL_KNOWN_AGENT_CARD = "/.well-known/agent-card.json";
 
@@ -308,7 +319,7 @@ public class A2AToolProviderManager {
             return;
         }
 
-        String agentName = config.getName() != null ? config.getName() : (String) agentCard.getOrDefault("name", "a2a-agent");
+        String agentName = boundedNamePart(config.getName() != null ? config.getName() : (String) agentCard.getOrDefault("name", "a2a-agent"));
         RemoteEndpoint endpoint = resolveEndpoint(agentUrl, agentCard);
 
         // Build the parameter schema for the "message" parameter
@@ -323,6 +334,10 @@ public class A2AToolProviderManager {
         if (skills == null || skills.isEmpty()) {
             // Single default tool for the entire agent
             String toolName = sanitizeToolName(agentName);
+            if (claimedByAnotherPeer(toolName, executors)) {
+                warnClaimed(agentName, 1);
+                return;
+            }
             String desc = (String) agentCard.getOrDefault("description", "Remote A2A agent: " + agentName);
 
             ToolSpecification spec = ToolSpecification.builder().name(toolName).description(governDescription(desc, agentName))
@@ -340,14 +355,28 @@ public class A2AToolProviderManager {
 
         // Create a tool for each skill
         Set<String> seenToolNames = new HashSet<>();
+        int duplicates = 0;
+        int claimed = 0;
+        int admitted = 0;
         for (Map<String, Object> skill : skills) {
-            String skillId = (String) skill.getOrDefault("id", "skill");
+            if (admitted >= MAX_SKILLS_PER_AGENT) {
+                LOGGER.warnf("A2A agent '%s' advertises more than %d skills — the rest are dropped", sanitizeForLog(agentName),
+                        MAX_SKILLS_PER_AGENT);
+                break;
+            }
+            // The id as the card gave it: what skillsFilter names. Only the TOOL NAME is
+            // bounded, and
+            // an id too long for it keeps a hash of the whole id, so two long ids sharing a
+            // prefix
+            // stay two tools instead of the second being dropped as a duplicate.
+            String rawSkillId = (String) skill.getOrDefault("id", "skill");
+            String skillId = distinctNamePart(rawSkillId);
             String skillName = (String) skill.getOrDefault("name", skillId);
             String skillDesc = (String) skill.getOrDefault("description", "Skill: " + skillName);
 
             // Apply skills filter if configured
             if (config.getSkillsFilter() != null && !config.getSkillsFilter().isEmpty()) {
-                if (!config.getSkillsFilter().contains(skillId) && !config.getSkillsFilter().contains(skillName)) {
+                if (!config.getSkillsFilter().contains(rawSkillId) && !config.getSkillsFilter().contains(skillName)) {
                     continue;
                 }
             }
@@ -358,8 +387,13 @@ public class A2AToolProviderManager {
             // — and, charged before the replacement, eat the per-agent schema budget
             // of a distinct skill further down the card.
             if (!seenToolNames.add(toolName)) {
-                LOGGER.warnf("A2A agent '%s' advertises skill '%s' more than once — keeping the first, dropping the duplicate",
-                        sanitizeForLog(agentName), sanitizeForLog(toolName));
+                // Counted and reported once per card: a warning per duplicate let a
+                // card of repeated skills multiply into an unbounded volume of logs.
+                duplicates++;
+                continue;
+            }
+            if (claimedByAnotherPeer(toolName, executors)) {
+                claimed++;
                 continue;
             }
 
@@ -378,7 +412,55 @@ public class A2AToolProviderManager {
             toolSpecs.add(spec);
             executors.put(toolName, createA2AToolExecutor(endpoint, config));
             requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
+            admitted++;
         }
+        if (duplicates > 0) {
+            LOGGER.warnf("A2A agent '%s' advertised %d duplicate skill(s) — kept the first of each, dropped the rest",
+                    sanitizeForLog(agentName), duplicates);
+        }
+        if (claimed > 0) {
+            warnClaimed(agentName, claimed);
+        }
+    }
+
+    /**
+     * True when an earlier peer in this discovery already registered
+     * {@code toolName}. The specs list and the executor/resolver maps are shared
+     * across peers, so a later peer generating the same name (an identical card
+     * name, or {@code x}+{@code y_z} against {@code x_y}+{@code z}) would leave the
+     * first peer's spec advertised with the second peer's executor — the model's
+     * call going to a peer other than the one described. The first registration
+     * wins; set a distinct {@code name} on the agent config to keep both.
+     */
+    private static boolean claimedByAnotherPeer(String toolName, Map<String, ToolExecutor> executors) {
+        return executors.containsKey(toolName);
+    }
+
+    /**
+     * One warning per card for its tool names another peer already claimed —
+     * counted, not listed, like duplicate skills, so a remote card cannot turn into
+     * an unbounded volume of log lines.
+     */
+    private static void warnClaimed(String agentName, int claimed) {
+        LOGGER.warnf("A2A agent '%s' would register %d tool name(s) another A2A agent already registered — skipped; "
+                + "give the agents distinct names in the configuration", sanitizeForLog(agentName), claimed);
+    }
+
+    /**
+     * {@code part} as a tool-name part: unchanged when it fits, otherwise cut to
+     * fit with a short hash of the WHOLE value, so distinct long ids stay distinct.
+     */
+    static String distinctNamePart(String part) {
+        if (part == null || part.length() <= MAX_NAME_PART_CHARS) {
+            return part;
+        }
+        String suffix = "_" + Integer.toHexString(part.hashCode());
+        return part.substring(0, MAX_NAME_PART_CHARS - suffix.length()) + suffix;
+    }
+
+    /** {@code part}, cut to {@link #MAX_NAME_PART_CHARS}; null stays null. */
+    static String boundedNamePart(String part) {
+        return part != null && part.length() > MAX_NAME_PART_CHARS ? part.substring(0, MAX_NAME_PART_CHARS) : part;
     }
 
     /**

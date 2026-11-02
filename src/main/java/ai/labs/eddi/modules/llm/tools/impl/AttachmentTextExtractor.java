@@ -10,6 +10,8 @@ import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.contentstream.operator.Operator;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -22,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Calendar;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -64,6 +67,18 @@ public class AttachmentTextExtractor {
 
     /** Wall-clock bound for the raw-byte pre-scan of one PDF. */
     private static final Duration PRE_SCAN_DURATION = Duration.ofSeconds(30);
+
+    /**
+     * Most content-stream operators one text extraction may interpret. The decode
+     * budget counts filtered bytes only: a page that references the same unfiltered
+     * stream or form XObject over and over multiplied parser work without spending
+     * it, and the page and character caps apply only after the whole extraction
+     * finished.
+     */
+    static final long MAX_CONTENT_OPERATORS = 10_000_000L;
+
+    /** Wall-clock ceiling on one text extraction, checked between operators. */
+    static final Duration EXTRACTION_DEADLINE = Duration.ofSeconds(60);
 
     private final int defaultMaxChars;
     private final int maxPages;
@@ -229,7 +244,7 @@ public class AttachmentTextExtractor {
 
     private String extractAllPages(byte[] pdfBytes, int cap) throws IOException {
         try (PDDocument document = loadPdf(pdfBytes)) {
-            PDFTextStripper stripper = new PDFTextStripper();
+            PDFTextStripper stripper = new BoundedTextStripper(MAX_CONTENT_OPERATORS, EXTRACTION_DEADLINE);
             // Stop at the page cap: a document with tens of thousands of pages would
             // otherwise have every page extracted into memory before the character
             // cap trims the result. Extracting only up to the cap bounds both.
@@ -268,7 +283,7 @@ public class AttachmentTextExtractor {
             // page of a document with any number of them.
             effectiveEnd = (int) Math.min(effectiveEnd, (long) startPage + maxPages - 1);
 
-            PDFTextStripper stripper = new PDFTextStripper();
+            PDFTextStripper stripper = new BoundedTextStripper(MAX_CONTENT_OPERATORS, EXTRACTION_DEADLINE);
             stripper.setStartPage(startPage);
             stripper.setEndPage(effectiveEnd);
             String text = stripper.getText(document);
@@ -349,6 +364,55 @@ public class AttachmentTextExtractor {
 
         public AttachmentExtractionException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    /**
+     * A {@link PDFTextStripper} with a work budget: it counts every content-stream
+     * operator it interprets — form XObjects included, however often they are
+     * referenced — and gives up past {@code maxOperators}, past its deadline, or
+     * when its thread is interrupted (the tool timeout), instead of running to
+     * completion on a crafted document.
+     * <p>
+     * Once tripped it stays tripped: PDFBox logs and swallows an exception thrown
+     * while drawing a form ({@code Do}), so every later operator throws again until
+     * one outside a form ends the extraction.
+     */
+    static final class BoundedTextStripper extends PDFTextStripper {
+        private final long maxOperators;
+        private final long deadlineNanos;
+        private long operators;
+        private String tripped;
+
+        BoundedTextStripper(long maxOperators, Duration deadline) {
+            this.maxOperators = maxOperators;
+            this.deadlineNanos = System.nanoTime() + deadline.toNanos();
+        }
+
+        @Override
+        protected void processOperator(Operator operator, List<COSBase> operands) throws IOException {
+            if (tripped == null) {
+                if (++operators > maxOperators) {
+                    tripped = "the PDF needs more than " + maxOperators + " content operators to extract";
+                } else if ((operators & 0x3FF) == 0 && System.nanoTime() - deadlineNanos > 0) {
+                    tripped = "text extraction exceeded " + EXTRACTION_DEADLINE.toSeconds() + " seconds";
+                } else if (Thread.currentThread().isInterrupted()) {
+                    tripped = "text extraction was interrupted";
+                }
+            }
+            if (tripped != null) {
+                throw new IOException("Refused: " + tripped);
+            }
+            super.processOperator(operator, operands);
+        }
+
+        @Override
+        public String getText(PDDocument document) throws IOException {
+            String text = super.getText(document);
+            if (tripped != null) {
+                throw new IOException("Refused: " + tripped);
+            }
+            return text;
         }
     }
 }

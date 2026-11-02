@@ -7,7 +7,10 @@ package ai.labs.eddi.modules.ingestion.extract;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.contentstream.operator.Operator;
+import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -16,6 +19,8 @@ import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.time.Instant;
 import java.util.List;
 
@@ -160,6 +165,39 @@ public class PdfTextExtractor implements DocumentTextExtractor {
         }
     }
 
+    /**
+     * Charges the decode budget for the page content PDFBox reads around its
+     * counted filters, before the page is parsed.
+     *
+     * <p>
+     * Two paths bypass the counter. A page whose {@code /Contents} is one stream
+     * filtered by exactly {@code /FlateDecode} is inflated by a decoder PDFBox
+     * constructs itself, not one from the filter factory; that stream is decoded
+     * once here through the counted filter, so its real size is known before the
+     * parser is given it. And unfiltered content is never decoded at all, so one
+     * unfiltered stream referenced thousands of times from a {@code /Contents}
+     * array — each reference parsed in full, its operands retained until an
+     * operator arrives — cost nothing; each reference is now charged its length.
+     */
+    static void chargePageContents(PDPage page) throws IOException {
+        COSBase contents = page.getCOSObject().getDictionaryObject(COSName.CONTENTS);
+        if (contents instanceof COSStream stream) {
+            if (COSName.FLATE_DECODE.equals(stream.getFilters())) {
+                try (InputStream decoded = stream.createInputStream()) {
+                    decoded.transferTo(OutputStream.nullOutputStream());
+                }
+            } else if (stream.getFilters() == null) {
+                PdfDecodeBudget.charge(stream.getLength());
+            }
+        } else if (contents instanceof COSArray array) {
+            for (int i = 0; i < array.size(); i++) {
+                if (array.getObject(i) instanceof COSStream stream && stream.getFilters() == null) {
+                    PdfDecodeBudget.charge(stream.getLength());
+                }
+            }
+        }
+    }
+
     /** Stops a page that runs too long or lays out too much. */
     private static final class BoundedTextStripper extends PDFTextStripper {
 
@@ -195,6 +233,7 @@ public class PdfTextExtractor implements DocumentTextExtractor {
          */
         @Override
         public void processPage(PDPage page) throws IOException {
+            chargePageContents(page);
             try {
                 super.processPage(page);
             } catch (PageTooLong e) {

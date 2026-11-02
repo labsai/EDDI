@@ -97,7 +97,7 @@ export function StrategyStep({
 
       <div className="flex justify-between pt-2">
         <Button variant="ghost" onClick={onBack} disabled={isLoading}>
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("common.back", "Back")}
         </Button>
         <Button onClick={onNext} disabled={isLoading} data-testid="import-confirm-strategy">
@@ -108,7 +108,7 @@ export function StrategyStep({
               : strategy === "merge"
                 ? t("importDialog.previewChanges", "Preview Changes")
                 : t("common.next", "Next")}
-          <ArrowRight className="h-4 w-4" />
+          <ArrowRight className="h-4 w-4 rtl:rotate-180" />
         </Button>
       </div>
     </div>

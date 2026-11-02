@@ -451,6 +451,44 @@ class GroupHitlCoordinatorTest {
         assertNull(GroupHitlCoordinator.resumeCallerFor(null, gc));
     }
 
+    /**
+     * The HUMAN member who answers a turn is usually not the discussion's owner.
+     * Their bearer token must not be bound to the rest of the owner's discussion
+     * (later member turns could call {@code ${caller:token}} APIs as them) — the
+     * resume runs with no caller, exactly like a foreign approver's resume.
+     */
+    @Test
+    void submitHumanInput_foreignSubmitter_resumeRunsWithoutTheirIdentity() throws Exception {
+        var identityContext = mock(CallerIdentityContext.class);
+        var member = new CallerIdentity("member-token", "h-1", "https://eddi.example:443");
+        when(identityContext.captureOrCurrent()).thenReturn(member);
+        when(identityContext.withIdentity(any(), any(Runnable.class))).thenAnswer(inv -> inv.getArgument(1));
+        conversationStore = mock(IGroupConversationStore.class);
+        groupStore = mock(IAgentGroupStore.class);
+        scheduleStore = mock(IScheduleStore.class);
+        executorService = mock(ExecutorService.class);
+        groupConversationService = mock(GroupConversationService.class);
+        var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore,
+                mock(AuditLedgerService.class), new GroupSigningGuard(null, null, null, "default"),
+                new ConcurrentHashMap<>(), executorService, identityContext, groupConversationService,
+                new SimpleMeterRegistry().counter("test.hitl.pause"),
+                new SimpleMeterRegistry().counter("test.hitl.resume"),
+                new SimpleMeterRegistry().counter("test.group.failure"));
+        var gc = humanPausedGc(); // owned by user-1, answered by h-1
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        var resId = mock(IResourceStore.IResourceId.class);
+        when(resId.getVersion()).thenReturn(1);
+        when(groupStore.getCurrentResourceId(GROUP_ID)).thenReturn(resId);
+        var config = humanGroupConfig("PT4H");
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(config);
+        when(groupConversationService.effectivePhases(any(), eq(config))).thenReturn(List.of(opinionPhase()));
+
+        coordinator.submitHumanInput(GC_ID, "h-1", "My answer.", "h-1", null);
+
+        verify(identityContext).withIdentity(isNull(), any(Runnable.class));
+        verify(identityContext, never()).withIdentity(eq(member), any(Runnable.class));
+    }
+
     @Test
     void submitHumanInput_wrongMember_rejectsBeforeAnyMutation() throws Exception {
         var coordinator = coordinator();
@@ -622,6 +660,35 @@ class GroupHitlCoordinatorTest {
     }
 
     @Test
+    void skipHumanTurnOnTimeout_forAnEarlierPause_doesNotSkipTheCurrentTurn() throws Exception {
+        var coordinator = coordinator();
+        var gc = humanPausedGc();
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        String stalePauseId = HitlDecision.pauseIdOf(gc.getPausedAt().minusSeconds(60));
+
+        coordinator.skipHumanTurnOnTimeout(GC_ID, stalePauseId);
+
+        assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+        assertTrue(gc.getTranscript().isEmpty());
+        verify(conversationStore, never()).updateIfState(any(), any());
+    }
+
+    @Test
+    void cancelPausedDiscussion_forAnEarlierPause_refused() throws Exception {
+        var coordinator = coordinator();
+        var gc = humanPausedGc();
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+        String stalePauseId = HitlDecision.pauseIdOf(gc.getPausedAt().minusSeconds(60));
+
+        assertFalse(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL, stalePauseId));
+        assertEquals(GroupConversationState.AWAITING_HUMAN_INPUT, gc.getState());
+
+        assertTrue(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL,
+                HitlDecision.pauseIdOf(gc.getPausedAt())));
+        assertEquals(GroupConversationState.CANCELLED, gc.getState());
+    }
+
+    @Test
     void skipHumanTurnOnTimeout_storeFailure_propagates_soTheTimeoutCanBeReArmed() throws Exception {
         var coordinator = coordinator();
         when(conversationStore.read(GC_ID)).thenThrow(new IResourceStore.ResourceStoreException("store blip"));
@@ -641,6 +708,50 @@ class GroupHitlCoordinatorTest {
         assertNull(gc.getPendingHumanInput(), "a cancelled turn is no longer owed");
         verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
         verify(scheduleStore).deleteSchedulesByName(anyString());
+    }
+
+    @Test
+    void cancelPausedDiscussion_paused_cancels() throws Exception {
+        var coordinator = coordinator();
+        var gc = humanPausedGc();
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+
+        assertTrue(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
+
+        assertEquals(GroupConversationState.CANCELLED, gc.getState());
+        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_HUMAN_INPUT);
+    }
+
+    @Test
+    void cancelPausedDiscussion_storedRunning_refusedWithoutWrite() throws Exception {
+        var coordinator = coordinator();
+        var gc = gc(GroupConversationState.IN_PROGRESS);
+        when(conversationStore.read(GC_ID)).thenReturn(gc);
+
+        assertFalse(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
+
+        assertEquals(GroupConversationState.IN_PROGRESS, gc.getState());
+        verify(conversationStore, never()).updateIfState(any(), any());
+    }
+
+    @Test
+    void cancelPausedDiscussion_liveLeg_refusedWithoutSignalling() throws Exception {
+        var tokens = new ConcurrentHashMap<String, DiscussionControlToken>();
+        var token = new DiscussionControlToken();
+        tokens.put(GC_ID, token);
+        conversationStore = mock(IGroupConversationStore.class);
+        var coordinator = new GroupHitlCoordinator(mock(IAgentGroupStore.class), conversationStore,
+                mock(IScheduleStore.class), mock(AuditLedgerService.class),
+                new GroupSigningGuard(null, null, null, "default"), tokens, mock(ExecutorService.class),
+                new CallerIdentityContext(null, null), mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.hitl.pause"),
+                new SimpleMeterRegistry().counter("test.hitl.resume"),
+                new SimpleMeterRegistry().counter("test.group.failure"));
+
+        assertFalse(coordinator.cancelPausedDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL));
+
+        assertFalse(token.isCancelled(), "a running leg is not the approver's to stop");
+        verifyNoInteractions(conversationStore);
     }
 
     /**

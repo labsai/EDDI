@@ -16,6 +16,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
@@ -25,14 +26,24 @@ import java.net.InetAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Polls the schedule store for due schedules and fires them.
@@ -108,6 +119,21 @@ public class SchedulePollerService {
     @ConfigProperty(name = "eddi.schedule.hitl-timeout-retry-interval", defaultValue = "2m")
     Duration hitlTimeoutRetryInterval = Duration.ofMinutes(2);
 
+    /**
+     * Most fires this instance runs at once. The poll claims only as many due
+     * schedules as there are free slots, so a burst never starts more work than
+     * this, and the rest stay due for the next cycle (or another instance).
+     */
+    @ConfigProperty(name = "eddi.schedule.max-concurrent-fires", defaultValue = "100")
+    int maxConcurrentFires = 100;
+
+    /**
+     * On shutdown: how long in-flight fires are given to finish before they are
+     * interrupted, and then how long the interrupted ones are given to record their
+     * outcome.
+     */
+    Duration shutdownDrain = Duration.ofSeconds(5);
+
     /** Margin the effective lease keeps above {@code fireTimeout + batchGrace}. */
     static final Duration LEASE_MARGIN = Duration.ofMinutes(1);
 
@@ -127,6 +153,13 @@ public class SchedulePollerService {
     private Counter fireLogsPrunedCounter;
     private Timer fireDurationTimer;
     private Counter fireTimedOutCounter;
+
+    // Fire execution, decoupled from the claim cycle. Created in init().
+    private Semaphore fireSlots;
+    private ExecutorService fireWorkers;
+    private ScheduledExecutorService fireWatchdog;
+    private final Set<InFlightFire> inFlight = ConcurrentHashMap.newKeySet();
+    private volatile boolean stopping;
 
     @Inject
     public SchedulePollerService(IScheduleStore scheduleStore, ScheduleFireExecutor fireExecutor, MeterRegistry meterRegistry,
@@ -184,18 +217,24 @@ public class SchedulePollerService {
                     leaseTimeout, fireTimeout, batchGrace, effectiveLeaseTimeout);
         }
 
+        fireSlots = new Semaphore(Math.max(1, maxConcurrentFires));
+        fireWorkers = Executors.newVirtualThreadPerTaskExecutor();
+        ScheduledThreadPoolExecutor watchdog = new ScheduledThreadPoolExecutor(1, runnable -> {
+            Thread thread = new Thread(runnable, "schedule-fire-watchdog");
+            thread.setDaemon(true);
+            return thread;
+        });
+        watchdog.setRemoveOnCancelPolicy(true);
+        fireWatchdog = watchdog;
+
         if (schedulingEnabled) {
-            LOGGER.infof("Schedule poller initialized (instance=%s, leaseTimeout=%s, fireTimeout=%s, maxRetries=%d)", instanceId,
-                    effectiveLeaseTimeout, fireTimeout, maxRetries);
+            LOGGER.infof("Schedule poller initialized (instance=%s, leaseTimeout=%s, fireTimeout=%s, maxRetries=%d, maxConcurrentFires=%d)",
+                    instanceId, effectiveLeaseTimeout, fireTimeout, maxRetries, Math.max(1, maxConcurrentFires));
         } else {
             LOGGER.info("Schedule poller DISABLED (eddi.schedule.enabled=false)");
         }
     }
 
-    /**
-     * Main poll loop — runs at the configured interval. Finds due schedules, claims
-     * them atomically, and fires.
-     */
     /** How long a batch waits for its fires: the fire timeout plus the grace. */
     Duration batchDeadline() {
         Duration timeout = fireTimeout != null ? fireTimeout : Duration.ofMinutes(5);
@@ -219,9 +258,25 @@ public class SchedulePollerService {
         return effectiveLeaseTimeout;
     }
 
-    @Scheduled(every = "${eddi.schedule.poll-interval:15s}", identity = "schedule-poller")
+    /**
+     * Main poll loop — runs at the configured interval. Finds due schedules, claims
+     * them atomically, hands each claimed schedule to the fire executor and
+     * returns.
+     * <p>
+     * This is the short <em>claim cycle</em> and nothing else: it never waits for a
+     * fire, so {@code SKIP} only skips a claim cycle that overlaps another claim
+     * cycle. It used to wait up to the fire timeout for its batch, so one fire that
+     * ran for minutes suppressed every poll on the instance, and a schedule that
+     * fell due meanwhile (a HITL approval deadline included) waited for the long
+     * fire instead of being claimed near its due time. Fires now run on their own
+     * executor (see {@link #dispatch}), at most
+     * {@code eddi.schedule.max-concurrent-fires} at once, and a poll claims no more
+     * schedules than there are free slots.
+     */
+    @Scheduled(every = "${eddi.schedule.poll-interval:15s}", identity = "schedule-poller",
+               concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void pollDueSchedules() {
-        if (!schedulingEnabled) {
+        if (!schedulingEnabled || stopping) {
             return;
         }
 
@@ -238,23 +293,56 @@ public class SchedulePollerService {
             }
 
             // Claim BEFORE dispatch: the cluster-wide CAS claim must run on the poll
-            // thread so exactly one instance owns each schedule. Only the schedules
-            // this instance won are dispatched.
-            List<ScheduleConfiguration> claimed = new ArrayList<>();
+            // thread so exactly one instance owns each schedule. A fire slot is taken
+            // first, so nothing is claimed that this instance has no room to run (its
+            // lease would tick away unfired); the rest stay due for the next cycle or
+            // another instance. Claimed schedules fire concurrently on virtual threads
+            // with per-fire error isolation, so a burst of one-shot HITL timeouts does
+            // not serialize behind one thread.
             for (ScheduleConfiguration schedule : dueSchedules) {
-                if (claimSchedule(schedule, now, leaseExpiry)) {
-                    claimed.add(schedule);
+                if (!fireSlots.tryAcquire()) {
+                    LOGGER.debugf("[SCHEDULE] All %d fire slots busy — leaving the remaining due schedules for the next cycle",
+                            Math.max(1, maxConcurrentFires));
+                    break;
+                }
+                boolean handedOver = false;
+                try {
+                    // Read BEFORE the claim overwrites it: a due row still CLAIMED is one
+                    // whose lease expired with no outcome recorded.
+                    boolean staleClaim = schedule.getFireStatus() == FireStatus.CLAIMED;
+                    if (claimSchedule(schedule, now, leaseExpiry)) {
+                        if (staleClaim) {
+                            onUnreportedFire(schedule);
+                        } else {
+                            handedOver = dispatch(schedule);
+                        }
+                    }
+                } finally {
+                    if (!handedOver) {
+                        fireSlots.release();
+                    }
                 }
             }
-
-            // Fire claimed schedules concurrently on virtual threads with per-fire
-            // error isolation: a large burst of one-shot HITL timeouts (each doing a
-            // synchronous snapshot load) no longer serializes behind one thread and
-            // starves other schedule types (Dream, maintenance) for the poll cycle.
-            dispatchClaimed(claimed);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Poll cycle failed");
         }
+    }
+
+    /**
+     * A claim whose lease ran out without an outcome: the fire that held it never
+     * reported — its node died (an out-of-memory kill, say) or it wedged in a call
+     * that ignored the interrupt. Re-claiming used to re-fire it at once with
+     * {@code failCount} untouched, so a fire that kills its node killed the next
+     * one too, forever, and never dead-lettered. It counts as the failed attempt it
+     * was instead: retried with backoff, dead-lettered after {@code max-retries}.
+     */
+    private void onUnreportedFire(ScheduleConfiguration schedule) {
+        // No fireFailedCounter.increment() here: onFireFailed counts the attempt (or
+        // the dead letter), exactly as for a fire that reported its failure.
+        LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) was still claimed when its lease expired: the previous fire never reported "
+                + "an outcome (its node stopped, or the fire wedged). Counting it as a failed attempt.", schedule.getName(),
+                schedule.getId());
+        onFireFailed(schedule);
     }
 
     /**
@@ -339,60 +427,128 @@ public class SchedulePollerService {
     }
 
     /**
-     * Fire all claimed schedules on a virtual-thread-per-task executor and wait for
-     * the batch to finish within the poll cycle. Each fire is isolated so one
-     * failure never blocks the rest of the batch.
+     * One fire handed to the executor: it releases its slot and its bookkeeping
+     * exactly once, whether it ended normally or was cut off by the watchdog.
      */
-    private void dispatchClaimed(List<ScheduleConfiguration> claimed) {
-        if (claimed.isEmpty()) {
-            return;
-        }
-        // Deliberately NOT try-with-resources: ExecutorService.close() awaits
-        // termination indefinitely, and future.cancel(true) only unblocks a task that
-        // honors Thread.interrupt(). The real fire path (say() → synchronous DB driver
-        // calls) can stall on a NON-interruptible socket read, which close() would then
-        // wait on forever — pinning this @Scheduled poll thread and stopping this
-        // instance from claiming or firing ANY further schedule (HITL timeouts, Dream,
-        // maintenance). That is the exact hang the per-fire timeout exists to prevent.
-        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
-        try {
-            List<Future<?>> futures = new ArrayList<>(claimed.size());
-            for (ScheduleConfiguration schedule : claimed) {
-                futures.add(executor.submit(() -> fireClaimedSchedule(schedule)));
+    private final class InFlightFire {
+        private final AtomicBoolean finished = new AtomicBoolean();
+        private volatile ScheduledFuture<?> deadline;
+
+        void finish() {
+            if (finished.compareAndSet(false, true)) {
+                ScheduledFuture<?> watch = deadline;
+                if (watch != null) {
+                    watch.cancel(false);
+                }
+                inFlight.remove(this);
+                fireSlots.release();
             }
-            // Bound the WHOLE batch by ONE shared deadline, not a timeout per future:
-            // a per-future bound in this sequential loop would let N stalled fires pin
-            // the poll thread for N times as long (hours for a large batch), defeating
-            // the point of the timeout. The deadline is the FIRE timeout plus a grace,
-            // and deliberately not the lease: when the two were equal, a fire that ran
-            // to the deadline was interrupted at the very moment its claim became
-            // stealable, so a long Dream run was both cut short and re-fired. init()
-            // keeps the lease strictly longer than this deadline. On timeout, cancel
-            // (best-effort interrupt) and move on.
+        }
+    }
+
+    /**
+     * Run one claimed schedule on the fire executor and return at once. The caller
+     * holds a fire slot; on success this method owns it and releases it when the
+     * fire ends.
+     * <p>
+     * Each fire is bounded on its own by the fire timeout plus the grace: a
+     * watchdog cancels it at the deadline, which interrupts it best-effort. A fire
+     * that ignores the interrupt keeps its (cheap) virtual thread but gives its
+     * slot back, and its claim expires with the lease. Deliberately never awaited —
+     * waiting on a non-interruptible call is the hang the timeout exists to
+     * prevent.
+     *
+     * @return {@code false} when the executor refused it (shutting down); the
+     *         caller keeps the slot and the claim simply expires with its lease
+     */
+    private boolean dispatch(ScheduleConfiguration schedule) {
+        InFlightFire fire = new InFlightFire();
+        FutureTask<Void> task = new FutureTask<>(() -> {
+            try {
+                fireClaimedSchedule(schedule);
+            } finally {
+                fire.finish();
+            }
+        }, null);
+        inFlight.add(fire);
+        try {
             Duration deadline = batchDeadline();
-            long deadlineNanos = System.nanoTime() + Math.max(deadline.toNanos(), 1_000_000L);
-            for (Future<?> future : futures) {
-                long remainingMs = Math.max(0L, (deadlineNanos - System.nanoTime()) / 1_000_000L);
-                try {
-                    future.get(remainingMs, TimeUnit.MILLISECONDS);
-                } catch (TimeoutException e) {
-                    future.cancel(true);
+            fire.deadline = fireWatchdog.schedule(() -> {
+                if (!task.isDone()) {
+                    task.cancel(true);
                     fireTimedOutCounter.increment();
                     LOGGER.errorf("[SCHEDULE] A fire exceeded eddi.schedule.fire-timeout (%s, plus %s grace) and was interrupted. "
-                            + "It is recorded FAILED and retried with backoff; raise eddi.schedule.fire-timeout for jobs that "
-                            + "legitimately run longer (the lease follows it). If it ignores the interrupt, its schedule becomes "
-                            + "reclaimable once the %s lease expires.", fireTimeout, batchGrace, effectiveLeaseTimeout);
-                } catch (Exception e) {
-                    LOGGER.errorf(e, "[SCHEDULE] Dispatched fire task failed unexpectedly");
+                            + "If it honours the interrupt it is recorded FAILED and retried with backoff; if it ignores it, nothing "
+                            + "is recorded until its %s lease expires, and the re-claim then counts it as a failed attempt. Raise "
+                            + "eddi.schedule.fire-timeout for jobs that legitimately run longer (the lease follows it).", fireTimeout,
+                            batchGrace, effectiveLeaseTimeout);
+                    fire.finish();
                 }
+            }, Math.max(deadline.toNanos(), 1_000_000L), TimeUnit.NANOSECONDS);
+            fireWorkers.execute(task);
+            return true;
+        } catch (RejectedExecutionException e) {
+            inFlight.remove(fire);
+            if (fire.deadline != null) {
+                fire.deadline.cancel(false);
             }
+            LOGGER.warnf("[SCHEDULE] Fire of schedule %s not started: the executor is shutting down; its claim expires with the lease",
+                    schedule.getId());
+            return false;
+        }
+    }
+
+    /** Number of fires currently in flight — for tests and diagnostics. */
+    int inFlightFires() {
+        return inFlight.size();
+    }
+
+    /** Waits until no fire is in flight. Test seam: production never waits. */
+    boolean awaitIdle(Duration timeout) throws InterruptedException {
+        long end = System.nanoTime() + timeout.toNanos();
+        while (!inFlight.isEmpty()) {
+            if (System.nanoTime() > end) {
+                return false;
+            }
+            Thread.sleep(2);
+        }
+        return true;
+    }
+
+    /** One claim cycle, then wait for the fires it started. Test seam. */
+    void pollAndAwait() {
+        pollDueSchedules();
+        try {
+            awaitIdle(batchDeadline().plusSeconds(5));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Graceful shutdown: stop claiming, give in-flight fires {@link #shutdownDrain}
+     * to finish, then interrupt the rest and give them the same to record their
+     * outcome. A fire that still has not reported is left to its claim's lease,
+     * which counts it as a failed attempt.
+     */
+    @PreDestroy
+    void shutdownFires() {
+        stopping = true;
+        if (fireWorkers == null) {
+            return;
+        }
+        fireWorkers.shutdown();
+        try {
+            if (!fireWorkers.awaitTermination(shutdownDrain.toMillis(), TimeUnit.MILLISECONDS)) {
+                LOGGER.warnf("[SCHEDULE] %d fire(s) still running after %s — interrupting", inFlight.size(), shutdownDrain);
+                fireWorkers.shutdownNow();
+                fireWorkers.awaitTermination(shutdownDrain.toMillis(), TimeUnit.MILLISECONDS);
+            }
+        } catch (InterruptedException e) {
+            fireWorkers.shutdownNow();
+            Thread.currentThread().interrupt();
         } finally {
-            // shutdownNow() interrupts any still-running task (best effort) and returns
-            // immediately WITHOUT awaiting termination — so a fire wedged in a
-            // non-interruptible call leaks a single (cheap) virtual thread rather than
-            // freezing the poll loop. The claim's lease expiry lets another instance
-            // reclaim the schedule. Never awaitTermination() here.
-            executor.shutdownNow();
+            fireWatchdog.shutdownNow();
         }
     }
 
@@ -627,6 +783,110 @@ public class SchedulePollerService {
     }
 
     // --- Manual (REST-initiated) fires ---
+
+    /**
+     * The bound a manual fire runs under — the same one a polled batch has
+     * ({@link #batchDeadline}). A manual fire used to run unbounded on the request
+     * thread: a Dream or ingestion run that outlasted the claim's lease had its
+     * schedule re-claimed by the poller and started a second time alongside it. The
+     * lease is kept strictly longer than this bound (see {@link #init}).
+     */
+    public Duration manualFireDeadline() {
+        return batchDeadline();
+    }
+
+    /**
+     * Runs {@code fire} on a virtual thread and waits at most {@code deadline} for
+     * it (the default fire timeout plus grace when {@code null}); a fire still
+     * running then is interrupted and abandoned, exactly as in {@link #dispatch}.
+     * Otherwise the fire behaves as if it had run on the caller's thread: what it
+     * throws is rethrown, and an interrupt it re-asserted on the way out is
+     * re-asserted on the caller.
+     * <p>
+     * Only an interrupt the fire itself ended with is carried over. The interrupt
+     * that {@code cancel(true)} delivers to a fire cut off at the deadline belongs
+     * to the abandoned worker; carrying it over (it can land after the timeout,
+     * whenever the worker unwinds) interrupted the caller — the request thread —
+     * for nothing. A caller interrupted while waiting cancels the fire and keeps
+     * its own interrupt.
+     *
+     * @param deadline
+     *            the bound; {@code null} or not positive means the default
+     * @return the fire log
+     * @throws FireAbandonedException
+     *             when the fire was cut off at the deadline or the caller was
+     *             interrupted. The worker was only asked to stop: one that ignores
+     *             the interrupt is still acting, so the caller must NOT release the
+     *             schedule's claim — it stays {@code CLAIMED} until the lease
+     *             expires, and the poller then counts it as the failed attempt it
+     *             was (see {@link #onUnreportedFire}) instead of starting another
+     *             alongside it.
+     */
+    public static ScheduleFireLog runWithinDeadline(Callable<ScheduleFireLog> fire, Duration deadline) throws Exception {
+        Duration bound = deadline != null && deadline.isPositive() ? deadline : Duration.ofMinutes(5).plusSeconds(30);
+        AtomicBoolean endedInterrupted = new AtomicBoolean();
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        try {
+            Future<ScheduleFireLog> future = executor.submit(() -> {
+                try {
+                    return fire.call();
+                } finally {
+                    endedInterrupted.set(Thread.interrupted());
+                }
+            });
+            try {
+                ScheduleFireLog log = future.get(Math.max(bound.toMillis(), 1L), TimeUnit.MILLISECONDS);
+                restoreInterrupt(endedInterrupted.get());
+                return log;
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                LOGGER.errorf("[SCHEDULE] A manual fire exceeded its %s bound (eddi.schedule.fire-timeout plus grace) and was interrupted",
+                        bound);
+                throw new FireAbandonedException("The fire exceeded its " + bound + " bound and was interrupted", true);
+            } catch (InterruptedException e) {
+                future.cancel(true);
+                Thread.currentThread().interrupt();
+                throw new FireAbandonedException("The caller stopped waiting for the fire", false);
+            } catch (ExecutionException e) {
+                // The worker's finally ran before the future completed exceptionally.
+                restoreInterrupt(endedInterrupted.get());
+                if (e.getCause() instanceof Exception cause) {
+                    throw cause;
+                }
+                throw e;
+            }
+        } finally {
+            // As in dispatch: never await a fire wedged in a non-interruptible call.
+            executor.shutdownNow();
+        }
+    }
+
+    /**
+     * A manual fire that was cut off (deadline) or whose caller stopped waiting.
+     * The fire may still be running, so its claim is left to expire rather than
+     * released.
+     */
+    public static class FireAbandonedException extends Exception {
+        private final boolean timedOut;
+
+        FireAbandonedException(String message, boolean timedOut) {
+            super(message);
+            this.timedOut = timedOut;
+        }
+
+        /**
+         * True when the deadline passed; false when the waiting caller was interrupted.
+         */
+        public boolean timedOut() {
+            return timedOut;
+        }
+    }
+
+    private static void restoreInterrupt(boolean interrupted) {
+        if (interrupted) {
+            Thread.currentThread().interrupt();
+        }
+    }
 
     /**
      * Claim a schedule on behalf of a manual {@code POST /schedules/{id}/fire}, on

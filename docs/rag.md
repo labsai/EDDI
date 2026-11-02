@@ -81,8 +81,8 @@ A `RagConfiguration` is a versioned resource at `/ragstore/rags/`. It defines:
 | `storeParameters` | — | Store-specific connection params |
 | `storeNamespace` | `id` for every new KB | How the vector store is addressed: `id` (by this KB's id — its own store) or, for a KB created before 6.6, absent/`name` (the 6.5.0 layout, by name). Set by EDDI; see [Knowledge base isolation](#knowledge-base-isolation) |
 | `chunkStrategy` | `recursive` | Document chunking strategy |
-| `chunkSize` | `512` | Chunk size in characters |
-| `chunkOverlap` | `64` | Chunk overlap in characters |
+| `chunkSize` | `512` | Chunk size in characters, 1–32768 |
+| `chunkOverlap` | `64` | Chunk overlap in characters, at most half of `chunkSize`. Saving a larger value is refused; a stored configuration that predates the check is clamped when it is ingested or imported |
 | `maxResults` | `5` | Default top-K results |
 | `minScore` | `0.6` | Default minimum similarity score (0.0–1.0) |
 
@@ -311,7 +311,9 @@ knowledge base with the same name, which in 6.5.0 shared its store. To migrate o
 everything, and documents ingested through `/ingest` have to be ingested again. The old location is
 left in place — drop the table or collection by hand once nothing uses it. Renaming a 6.5.0 knowledge
 base does the same migration automatically: in 6.5.0 a rename already moved it to a new, empty store —
-the one named after its new name, which could be another knowledge base's. A knowledge base with an
+the one named after its new name, which could be another knowledge base's. Removing the explicit
+`table`/`collectionName`/`indexName` of a 6.5.0 knowledge base migrates it the same way, since its default
+location would otherwise be whatever its (possibly changed) name maps to. A knowledge base with an
 explicit `table`/`collectionName`/`indexName` stays in the same table when it is switched: its old
 chunks are no longer tagged with the id retrieval filters on, so they stop being returned (and stay
 in the table); sources re-ingest and re-tag everything, `/ingest` documents have to be ingested again.
@@ -331,7 +333,11 @@ Rules enforced when a knowledge base is saved:
   location another knowledge base already uses only if you may edit that knowledge base too (`public.t`
   and `t` are the same pgvector table). A pgvector `table` must be a plain identifier, optionally
   qualified with a schema (letters, digits, `_`, `$`; no quotes, spaces or punctuation), because the
-  store puts it into SQL as it is. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
+  store puts it into SQL as it is. An Elasticsearch `indexName` must name one index (lower-case letters,
+  digits, `_`, `-`, `.`, not starting with `-`/`_`/`+`): Elasticsearch reads it as an index expression, so
+  a wildcard (`*`), a list (`a,b`) or an exclusion would search indexes the check never compared. If the
+  deployment holds more knowledge bases than the collision check can scan (20,000), an explicit location is
+  refused rather than saved unchecked. The location must be written out: a `${vars:...}` or `${vault:...}` reference there is refused when saved (global variables are editable by any editor, so a reference could later resolve to another knowledge base's table). **Upgrading:** a knowledge base stored with such a reference as its location stops working — ingestion and retrieval report that the location must be written out — until it is saved once with the literal name. It is refused whatever the reference currently resolves to, because changing the variable later would re-point the knowledge base. Two knowledge bases in the `"id"` layout that share a table still see only their
   own chunks. These checks run when the value is new or changed; a stored value is never refused on a
   save that leaves it alone. The comparison is by store type and name only (not host), so it can ask for
   edit rights on a knowledge base that is actually on another server.
@@ -390,7 +396,8 @@ preview, purge, and the deletion rules below.
 optional fields are simply absent rather than defaulted: without `cron` the source runs only when
 somebody asks, and without `costPerThousandSegments` a run reports no dollar figure.
 `excludePatterns` are globs matched against the URL **path** (`*` stays inside one segment, `**`
-crosses them).
+crosses them). Links longer than 8,192 characters are not followed, and sitemap entries longer than the
+protocol's 2,048 characters are ignored.
 
 **`cron` is a standard five-field expression** — `min hour dom month dow` — the same form the schedule
 API takes. Six- and seven-field Quartz expressions with a seconds column are **refused when the
@@ -439,7 +446,7 @@ down gracefully are closed as `CANCELLED` rather than left to be reaped.
 | --- | --- | --- |
 | `maxContentLength` | `100000` | Characters kept per document after conversion to Markdown. A longer page is truncated, never split across documents |
 | `maxBytesPerPage` | `5242880` | Cap on one response body. Must be positive — a non-positive value would read as "no cap" |
-| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control |
+| `maxSegmentsPerRun` | `20000` | Hard ceiling on embedded chunks per run: the cost control. Checked before a document is embedded: a document that would cross it waits for the next run, and one that alone needs more chunks than the ceiling is reported as failed rather than embedded in part |
 | `costPerThousandSegments` | unset | Optional rate used to report a run's cost in the run history |
 | `tombstoneAfterMissedRuns` | `2` | Consecutive complete runs a document may be missing before its vectors go |
 | `timeBudgetMinutes` | `10` | Wall-clock ceiling for one run, 1–1440 |

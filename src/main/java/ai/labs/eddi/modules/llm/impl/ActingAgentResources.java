@@ -10,6 +10,9 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard.Protection;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard.StoredGateLookup;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard.StoredLlmLookup;
+import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
@@ -44,6 +47,7 @@ final class ActingAgentResources {
 
     private static final Logger LOGGER = Logger.getLogger(ActingAgentResources.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final String LLM_URI_PREFIX = "eddi://ai.labs.llm/llmstore/llms/";
 
     /**
      * The id at the end of an {@code eddi://…/{id}?version=n} URI, in either shape
@@ -60,17 +64,41 @@ final class ActingAgentResources {
     }
 
     static Protection resolve(IAgentStore agentStore, IWorkflowStore workflowStore, String agentId, Integer agentVersion) {
-        StoredGateLookup storedGates = agentStore == null ? null : targetId -> {
+        return resolve(agentStore, workflowStore, null, agentId, agentVersion);
+    }
+
+    /**
+     * @param resourceClientLibrary
+     *            reads the stored LLM configuration an LLM-store write targets, so
+     *            the guard can refuse one that drops a stored task gate by
+     *            omission; nullable
+     */
+    static Protection resolve(IAgentStore agentStore, IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
+                              String agentId, Integer agentVersion) {
+        StoredGateLookup storedGatesLookup = agentStore == null ? null : targetId -> {
             AgentConfiguration target = agentStore.read(targetId, agentStore.getCurrentResourceId(targetId).getVersion());
             return target.getHitlConfig() == null ? null : MAPPER.valueToTree(target.getHitlConfig());
         };
+        StoredLlmLookup storedLlms = resourceClientLibrary == null ? null : (llmId, version) -> {
+            if (version == null) {
+                // An update names its version; without one nothing can be compared.
+                throw new IllegalArgumentException("no version");
+            }
+            return MAPPER.valueToTree(
+                    resourceClientLibrary.getResource(URI.create(LLM_URI_PREFIX + llmId + "?version=" + version), LlmConfiguration.class));
+        };
+        return resolve(agentStore, workflowStore, agentId, agentVersion, storedGatesLookup, storedLlms);
+    }
+
+    private static Protection resolve(IAgentStore agentStore, IWorkflowStore workflowStore, String agentId, Integer agentVersion,
+                                      StoredGateLookup storedGatesLookup, StoredLlmLookup storedLlms) {
         if (agentId == null || agentId.isBlank()) {
-            return new Protection(agentId, Set.of(), false, storedGates);
+            return new Protection(agentId, Set.of(), false, storedGatesLookup, storedLlms);
         }
         if (agentStore == null || workflowStore == null) {
             LOGGER.warnf("Own resources of agent '%s' cannot be resolved without the agent and workflow stores — every configuration "
                     + "store write in this approved batch is refused", sanitize(agentId));
-            return new Protection(agentId, Set.of(), true, storedGates);
+            return new Protection(agentId, Set.of(), true, storedGatesLookup, storedLlms);
         }
         Set<String> ids = new HashSet<>();
         try {
@@ -102,9 +130,9 @@ final class ActingAgentResources {
         } catch (Exception e) {
             LOGGER.warnf("Own resources of agent '%s' could not be resolved (%s) — every configuration store write in this approved "
                     + "batch is refused", sanitize(agentId), e.getClass().getSimpleName());
-            return new Protection(agentId, ids, true, storedGates);
+            return new Protection(agentId, ids, true, storedGatesLookup, storedLlms);
         }
-        return new Protection(agentId, ids, false, storedGates);
+        return new Protection(agentId, ids, false, storedGatesLookup, storedLlms);
     }
 
     /**

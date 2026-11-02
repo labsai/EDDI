@@ -158,7 +158,7 @@ public final class NegotiationEngine {
     static BargainMove parseBargain(String content, int maxConcessionsPerMove) {
         JsonNode node = readJson(content);
         if (node == null) {
-            node = readJson(embeddedJson(content));
+            node = EmbeddedJson.soleObjectWithAnyField(content, NegotiationEngine::readJson, "accept", "proposal", "concessions");
         }
         if (node == null || !node.isObject()) {
             return null;
@@ -219,12 +219,20 @@ public final class NegotiationEngine {
                 // Signing someone else's terms abandons the signer's own live
                 // offer — the symmetric half of addProposal's withdrawal rule: any
                 // move that puts an agent's name on new terms removes their
-                // competing one from the table.
-                for (Proposal own : state.getProposals()) {
-                    if (GroupConversation.PROPOSAL_OPEN.equals(own.status())
-                            && own.byAgentId().equals(agentId) && !own.id().equals(target.id())) {
-                        state.replaceProposal(own, new Proposal(own.id(), own.byAgentId(), own.round(), own.terms(),
-                                GroupConversation.PROPOSAL_SUPERSEDED, own.acceptedBy(), own.acceptanceEntryIndices()));
+                // competing one from the table. And it withdraws the signer's
+                // signature from every OTHER open proposal: an agent stands behind
+                // one set of terms at a time. Without that, a signature given to p1
+                // and then superseded by an accept of p2 still counted toward p1's
+                // unanimity — recording an AGREEMENT on terms the signer had left.
+                for (Proposal other : state.getProposals()) {
+                    if (!GroupConversation.PROPOSAL_OPEN.equals(other.status()) || other.id().equals(target.id())) {
+                        continue;
+                    }
+                    if (other.byAgentId().equals(agentId)) {
+                        state.replaceProposal(other, new Proposal(other.id(), other.byAgentId(), other.round(), other.terms(),
+                                GroupConversation.PROPOSAL_SUPERSEDED, other.acceptedBy(), other.acceptanceEntryIndices()));
+                    } else if (other.acceptedBy().contains(agentId)) {
+                        state.replaceProposal(other, withoutSignature(other, agentId));
                     }
                 }
             }
@@ -270,18 +278,22 @@ public final class NegotiationEngine {
                 state.replaceProposal(p, new Proposal(p.id(), p.byAgentId(), p.round(), p.terms(),
                         GroupConversation.PROPOSAL_SUPERSEDED, p.acceptedBy(), p.acceptanceEntryIndices()));
             } else if (p.acceptedBy().contains(agentId)) {
-                List<String> acceptedBy = new ArrayList<>(p.acceptedBy());
-                acceptedBy.remove(agentId);
-                Map<String, Integer> indices = new LinkedHashMap<>(p.acceptanceEntryIndices());
-                indices.remove(agentId);
-                state.replaceProposal(p, new Proposal(p.id(), p.byAgentId(), p.round(), p.terms(),
-                        p.status(), List.copyOf(acceptedBy), Map.copyOf(indices)));
+                state.replaceProposal(p, withoutSignature(p, agentId));
             }
         }
         Proposal proposal = new Proposal("p" + (state.getProposals().size() + 1), agentId, round, terms,
                 GroupConversation.PROPOSAL_OPEN, List.of(agentId), Map.of(agentId, entryIndex));
         state.addProposal(proposal);
         return proposal;
+    }
+
+    private static Proposal withoutSignature(Proposal p, String agentId) {
+        List<String> acceptedBy = new ArrayList<>(p.acceptedBy());
+        acceptedBy.remove(agentId);
+        Map<String, Integer> indices = new LinkedHashMap<>(p.acceptanceEntryIndices());
+        indices.remove(agentId);
+        return new Proposal(p.id(), p.byAgentId(), p.round(), p.terms(), p.status(), List.copyOf(acceptedBy),
+                Map.copyOf(indices));
     }
 
     private static Proposal findById(NegotiationState state, String id) {
@@ -335,8 +347,10 @@ public final class NegotiationEngine {
                 String outcome = "Agreement on proposal %s (by %s), signed by all %d participants: %s%s".formatted(
                         p.id(), p.byAgentId(), required.size(), truncate(p.terms()),
                         ledgerSummary(state));
-                gc.setDecision(new DecisionRecord(DecisionType.AGREEMENT, outcome, p.id(), tally, List.of(),
-                        METHOD_NEGOTIATION, phaseName, null));
+                // Carrying dissents: a dissent round that ran before the agreement
+                // recorded positions this record must not erase.
+                PhaseExecutionEngine.setDecisionCarryingDissents(gc, new DecisionRecord(DecisionType.AGREEMENT, outcome,
+                        p.id(), tally, List.of(), METHOD_NEGOTIATION, phaseName, null));
                 LOGGER.infof("Group %s: negotiation reached agreement on proposal %s",
                         LogSanitizer.sanitize(gc.getId()), p.id());
                 return true;
@@ -366,18 +380,20 @@ public final class NegotiationEngine {
     /**
      * Records the moderator's arbitration as the discussion's VERDICT (I11) — the
      * bargaining failed, so the last arbitration entry's prose is the decision.
-     * Never overwrites an existing decision.
+     * Never overwrites a real decision — but a {@code NONE} record is not one: a
+     * dissent round creates it only to hold the minority positions, and the verdict
+     * replaces it while keeping those dissents.
      */
     public static void recordArbitration(GroupConversation gc, List<TranscriptEntry> repeatEntries, String phaseName) {
-        if (gc.getDecision() != null || repeatEntries == null) {
+        if (repeatEntries == null || (gc.getDecision() != null && gc.getDecision().type() != DecisionType.NONE)) {
             return;
         }
         repeatEntries.stream()
                 .filter(e -> e != null && e.type() == TranscriptEntryType.SYNTHESIS && e.content() != null
                         && !e.content().isBlank())
                 .reduce((first, second) -> second)
-                .ifPresent(e -> gc.setDecision(new DecisionRecord(DecisionType.VERDICT, e.content(), null, null,
-                        List.of(), METHOD_ARBITRATION, phaseName, null)));
+                .ifPresent(e -> PhaseExecutionEngine.setDecisionCarryingDissents(gc, new DecisionRecord(DecisionType.VERDICT,
+                        e.content(), null, null, List.of(), METHOD_ARBITRATION, phaseName, null)));
     }
 
     /**
@@ -462,39 +478,4 @@ public final class NegotiationEngine {
         }
     }
 
-    /** JSON embedded in prose or a code fence — first balanced object. */
-    private static String embeddedJson(String content) {
-        if (content == null) {
-            return null;
-        }
-        int start = content.indexOf('{');
-        if (start < 0) {
-            return null;
-        }
-        int depth = 0;
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = start; i < content.length(); i++) {
-            char c = content.charAt(i);
-            if (escaped) {
-                escaped = false;
-                continue;
-            }
-            if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                inString = !inString;
-            } else if (!inString) {
-                if (c == '{') {
-                    depth++;
-                } else if (c == '}') {
-                    depth--;
-                    if (depth == 0) {
-                        return content.substring(start, i + 1);
-                    }
-                }
-            }
-        }
-        return null;
-    }
 }

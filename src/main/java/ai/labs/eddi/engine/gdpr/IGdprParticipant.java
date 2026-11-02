@@ -37,4 +37,20 @@ public interface IGdprParticipant {
      * {@code null} when nothing is.
      */
     Object export(String userId) throws Exception;
+
+    /**
+     * When this participant runs relative to the others, ascending; ties in no
+     * particular order. Default {@code 0}.
+     * <p>
+     * It matters for one dependency: a participant that finds a person's records by
+     * their email address (the email ledger) looks the address up in the user
+     * directory, so the directory, which erases that address, runs last
+     * ({@value #LAST}).
+     */
+    default int order() {
+        return 0;
+    }
+
+    /** {@link #order()} of a participant others may still need to read. */
+    int LAST = 1000;
 }

@@ -22,13 +22,20 @@ import org.jboss.logging.Logger;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
+import org.jsoup.nodes.Node;
+import org.jsoup.nodes.TextNode;
 import org.jsoup.select.Elements;
+import org.jsoup.select.NodeFilter;
+import org.jsoup.select.NodeTraversor;
 import org.jsoup.select.Selector;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -83,6 +90,15 @@ public class WebScraperTool {
     /** Cap on what a single extraction hands back to the model. */
     private static final int MAX_EXTRACTED_CHARACTERS = 5000;
 
+    /** Most elements a selector extraction lists. */
+    static final int MAX_SELECTOR_ELEMENTS = 20;
+
+    /**
+     * Cap on the text of all listed elements together. Each element is also held to
+     * {@link #MAX_EXTRACTED_CHARACTERS}, so one huge match cannot take it all.
+     */
+    static final int MAX_SELECTOR_OUTPUT_CHARACTERS = 20_000;
+
     /** Backstop response cap used when no configuration is supplied (5 MiB). */
     static final long DEFAULT_MAX_RESPONSE_BYTES = 5L * 1024 * 1024;
 
@@ -100,6 +116,14 @@ public class WebScraperTool {
      * {@code :matchText}, rewrite the document — plus the {@code ~=} attribute
      * operator, which jsoup also evaluates as a regex. Matched case-insensitively.
      */
+    /**
+     * Pseudo-selectors whose parenthesised argument is text or an index, never a
+     * selector — exactly the names jsoup's {@code QueryParser} reads that way.
+     */
+    private static final Set<String> LITERAL_ARGUMENT_PSEUDOS = Set.of("contains", "containsOwn", "containsData",
+            "containsWholeText", "containsWholeOwnText", "nth-child", "nth-last-child", "nth-of-type", "nth-last-of-type", "eq",
+            "lt", "gt");
+
     private static final Pattern REGEX_SELECTOR = Pattern.compile("(?i):match(es|esown|eswholetext|eswholeowntext|text)\\b|~=");
 
     private final OutboundHttp http;
@@ -238,7 +262,8 @@ public class WebScraperTool {
     @Tool("Extracts structured data from a web page using CSS selectors")
     public String extractWithSelector(@P("Absolute http(s) URL of the page") String url,
                                       @P("CSS selector, e.g. 'h2.title' or 'table tr td:eq(1)'. Regex pseudo-selectors "
-                                              + "(:matches and friends) and the ~= operator are not supported; at most 256 characters") String cssSelector) {
+                                              + "(:matches and friends), the ~= operator, sibling combinators (~ and +) and CSS "
+                                              + "escapes are not supported; at most 256 characters") String cssSelector) {
 
         String rejection = rejectSelector(cssSelector);
         if (rejection != null) {
@@ -258,14 +283,27 @@ public class WebScraperTool {
             StringBuilder result = new StringBuilder();
             result.append("Found ").append(elements.size()).append(" element(s) matching '").append(cssSelector).append("':\n\n");
 
+            // Element.text() copies an element's WHOLE descendant text, so a selector
+            // matching nested ancestors (`div` on twenty nested divs) used to hand back
+            // the same page text twenty times over. An element inside one already
+            // listed is skipped — its text is part of that ancestor's — and every
+            // element's text is gathered against what is left of one output budget,
+            // so nothing past the budget is ever materialized.
+            Set<Element> listed = Collections.newSetFromMap(new IdentityHashMap<>());
+            int budget = MAX_SELECTOR_OUTPUT_CHARACTERS;
             int count = 0;
             for (Element element : elements) {
-                if (count >= 20) { // Limit to 20 elements
+                if (hasListedAncestor(element, listed)) {
+                    continue;
+                }
+                if (count >= MAX_SELECTOR_ELEMENTS || budget <= 0) {
                     result.append("\n[Additional elements truncated]");
                     break;
                 }
-
-                result.append(++count).append(". ").append(element.text()).append("\n");
+                listed.add(element);
+                String text = boundedText(element, Math.min(budget, MAX_EXTRACTED_CHARACTERS));
+                budget -= text.length();
+                result.append(++count).append(". ").append(text).append("\n");
             }
 
             LOGGER.debugf("Extracted %d elements from %s", count, sanitize(url));
@@ -283,6 +321,80 @@ public class WebScraperTool {
         }
     }
 
+    /** Whether an ancestor of {@code element} is already in the result. */
+    private static boolean hasListedAncestor(Element element, Set<Element> listed) {
+        if (listed.isEmpty()) {
+            return false;
+        }
+        for (Element parent = element.parent(); parent != null; parent = parent.parent()) {
+            if (listed.contains(parent)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * The element's text like {@link Element#text()} — descendant text with
+     * whitespace collapsed and block boundaries read as a space — but gathered only
+     * up to {@code maxChars}: the walk stops there, so an element holding the whole
+     * page costs its budget, not its size. Package-private for tests.
+     */
+    static String boundedText(Element element, int maxChars) {
+        StringBuilder text = new StringBuilder(Math.min(maxChars, 1024));
+        NodeTraversor.filter(new NodeFilter() {
+            @Override
+            public FilterResult head(Node node, int depth) {
+                if (text.length() >= maxChars) {
+                    return FilterResult.STOP;
+                }
+                if (node instanceof TextNode textNode) {
+                    appendCollapsed(text, textNode.getWholeText(), maxChars);
+                } else if (node instanceof Element child && (child.isBlock() || child.nameIs("br"))) {
+                    appendCollapsed(text, " ", maxChars);
+                }
+                return FilterResult.CONTINUE;
+            }
+
+            @Override
+            public FilterResult tail(Node node, int depth) {
+                // A block also ends with a boundary: "<p>next</p>tail" reads "next tail".
+                if (node != element && node instanceof Element child && child.isBlock()) {
+                    appendCollapsed(text, " ", maxChars);
+                }
+                return text.length() >= maxChars ? FilterResult.STOP : FilterResult.CONTINUE;
+            }
+        }, element);
+        int end = text.length();
+        while (end > 0 && text.charAt(end - 1) == ' ') {
+            end--;
+        }
+        return text.substring(0, end);
+    }
+
+    /** Space, tab, line feed, form feed or carriage return: jsoup's whitespace. */
+    private static boolean isJsoupWhitespace(char c) {
+        return c == ' ' || c == 9 || c == 10 || c == 12 || c == 13;
+    }
+
+    /**
+     * Appends {@code raw} with each whitespace run as one space, up to the cap. The
+     * whitespace set is jsoup's own, so a no-break space survives as it does in
+     * {@link Element#text()}.
+     */
+    private static void appendCollapsed(StringBuilder text, String raw, int maxChars) {
+        for (int i = 0; i < raw.length() && text.length() < maxChars; i++) {
+            char c = raw.charAt(i);
+            if (isJsoupWhitespace(c)) {
+                if (text.length() > 0 && text.charAt(text.length() - 1) != ' ') {
+                    text.append(' ');
+                }
+            } else {
+                text.append(c);
+            }
+        }
+    }
+
     /**
      * Why a model-supplied selector is refused, or {@code null} when it may run.
      * Package-private for tests.
@@ -294,11 +406,115 @@ public class WebScraperTool {
         if (cssSelector.length() > MAX_SELECTOR_LENGTH) {
             return "Error: cssSelector is too long (max " + MAX_SELECTOR_LENGTH + " characters).";
         }
+        // jsoup decodes CSS escapes before it decides which pseudo-selector to run, so
+        // ":\6d atches(...)" reached the regex evaluator although the name check below
+        // never saw ":matches". No legitimate scraping selector needs an escape.
+        if (cssSelector.indexOf('\\') >= 0) {
+            return "Error: CSS escapes (backslashes) are not supported in cssSelector.";
+        }
         if (REGEX_SELECTOR.matcher(cssSelector).find()) {
             return "Error: regular-expression selectors (:matches, :matchesOwn, :matchText, :matchesWholeText, "
                     + ":matchesWholeOwnText, [attr~=regex]) are not supported. Use :contains(text) or :containsOwn(text) instead.";
         }
+        // Sibling combinators make jsoup walk every preceding sibling of every
+        // candidate: quadratic (or worse, chained) in a page's width, CPU work the
+        // parse timeout cannot interrupt, holding a shared parser worker meanwhile.
+        if (hasSiblingCombinator(cssSelector)) {
+            return "Error: sibling combinators ('~' and '+') are not supported. Select the parent and its children instead "
+                    + "(e.g. 'ul > li' or 'li:eq(2)').";
+        }
         return null;
+    }
+
+    /**
+     * Whether {@code selector} uses {@code ~} or {@code +} as a combinator. The two
+     * characters are also ordinary text inside a quoted string, an attribute
+     * selector ({@code [href*=a+b]}), a text pseudo's argument
+     * ({@code :contains(C++)}) and an index formula ({@code :nth-child(2n+1)}) —
+     * none of which is a combinator — so those spans are skipped. The argument of a
+     * structural pseudo ({@code :has}, {@code :not}, {@code :is}) is a selector
+     * itself and is scanned. Package-private for tests.
+     */
+    static boolean hasSiblingCombinator(String selector) {
+        int i = 0;
+        int n = selector.length();
+        while (i < n) {
+            char c = selector.charAt(i);
+            if (c == '"' || c == '\'') {
+                i = skipQuoted(selector, i);
+            } else if (c == '[') {
+                i = skipBalanced(selector, i, '[', ']');
+            } else if (c == '(' && isLiteralArgumentPseudo(selector, i)) {
+                i = skipBalanced(selector, i, '(', ')');
+            } else if (c == '~' || c == '+') {
+                return true;
+            } else {
+                i++;
+            }
+            if (i < 0) {
+                // An unterminated quote, bracket or argument: fail closed rather than
+                // trust that whatever follows is text.
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * True when the pseudo-class directly before {@code openParen} takes text or an
+     * index formula, not a selector — the pseudos jsoup's {@code QueryParser} reads
+     * with a balanced-parenthesis chomp of raw text ({@code :contains*}) or an
+     * index ({@code :nth-*}, {@code :eq}, {@code :lt}, {@code :gt}). Names compare
+     * exactly, as jsoup's do ({@code :CONTAINS(} is a parse error there, so it is
+     * not skipped here either). A structural pseudo ({@code :has}, {@code :not},
+     * {@code :is}) is not literal: its argument is a selector and is scanned like
+     * the rest.
+     */
+    private static boolean isLiteralArgumentPseudo(String selector, int openParen) {
+        int start = openParen;
+        while (start > 0 && (Character.isLetter(selector.charAt(start - 1)) || selector.charAt(start - 1) == '-')) {
+            start--;
+        }
+        if (start == 0 || selector.charAt(start - 1) != ':') {
+            return false;
+        }
+        return LITERAL_ARGUMENT_PSEUDOS.contains(selector.substring(start, openParen));
+    }
+
+    /**
+     * Index just past the quoted string opening at {@code open}, or {@code -1} when
+     * it is unterminated.
+     */
+    private static int skipQuoted(String s, int open) {
+        int close = s.indexOf(s.charAt(open), open + 1);
+        return close < 0 ? -1 : close + 1;
+    }
+
+    /**
+     * Index just past the closer matching the opener at {@code open}, honouring
+     * quotes, or {@code -1} when it is unbalanced or a quote inside is
+     * unterminated.
+     */
+    private static int skipBalanced(String s, int open, char opener, char closer) {
+        int depth = 0;
+        int i = open;
+        while (i < s.length()) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\'') {
+                i = skipQuoted(s, i);
+                if (i < 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (c == opener) {
+                depth++;
+            } else if (c == closer && --depth == 0) {
+                return i + 1;
+            }
+            i++;
+        }
+        return -1;
     }
 
     @Tool("Gets metadata from a web page (title, description, keywords)")
@@ -422,13 +638,15 @@ public class WebScraperTool {
 
     /**
      * Fetches the content of a URL through {@link OutboundHttp}. The URL is
-     * SSRF-checked here, and every redirect hop by the facade.
+     * SSRF-checked here, and by the facade under {@code STRICT}: the model chose
+     * it, so the initial hop gets the facade's post-connect re-check too (DNS
+     * rebinding), not only the redirect hops {@code HOPS_ONLY} covered.
      */
     private FetchedPage fetchUrl(String url) throws IOException, InterruptedException {
         validateUrl(url);
 
         OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, URI.create(url))
-                .ssrf(SsrfPolicy.HOPS_ONLY)
+                .ssrf(SsrfPolicy.STRICT)
                 .timeout(Duration.ofSeconds(15))
                 .header("User-Agent", "Mozilla/5.0 (EDDI-Agent/1.0)")
                 .build();

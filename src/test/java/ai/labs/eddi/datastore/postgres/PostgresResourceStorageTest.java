@@ -417,6 +417,8 @@ class PostgresResourceStorageTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("data -> 'meta' ->> 'owner'"), sql.getValue());
         assertTrue(sql.getValue().contains("ORDER BY data -> 'meta' ->> 'updatedAt' DESC NULLS LAST"), sql.getValue());
+        // a unique tiebreaker, so OFFSET paging over equal sort values is stable
+        assertTrue(sql.getValue().contains("DESC NULLS LAST, id DESC"), sql.getValue());
     }
 
     // ─── batch read ────────────────────────────────────────────

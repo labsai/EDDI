@@ -376,6 +376,17 @@ class ApiCallExecutorConfigReferenceTest {
         }
 
         @Test
+        @DisplayName("a full-form variable reference naming another workspace, typed by the user, is refused before expansion")
+        void explicitTenantReferenceFromDataRefused() throws Exception {
+            var failure = assertThrows(LifecycleException.class, () -> executor
+                    .execute(call(Map.of(), "{\"q\":\"{memory.current.input}\"}"), memory, data("${vars:otherSpace/dbUrl}"), SERVER));
+
+            assertTrue(failure.getMessage().contains("${vars:otherSpace/dbUrl}"), failure.getMessage());
+            verify(globalVariableResolver, never()).resolveValue(contains("otherSpace"));
+            verify(request, never()).send();
+        }
+
+        @Test
         @DisplayName("a variable reference typed by the user is refused in a header")
         void refusedInHeader() throws Exception {
             var failure = assertThrows(LifecycleException.class,

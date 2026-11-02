@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -21,6 +22,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 @ApplicationScoped
 public class TextSummarizerTool {
     private static final Logger LOGGER = Logger.getLogger(TextSummarizerTool.class);
+
+    /**
+     * A run of sentence punctuation followed by whitespace. Anchored to the start
+     * of the run by the lookbehind, and possessive, so it is linear: the plain
+     * {@code [.!?]+\\s+} retried from every position inside a punctuation run that
+     * had no whitespace after it, quadratic in the run's length — and a regex
+     * ignores the tool timeout's interrupt.
+     */
+    private static final Pattern SENTENCE_BOUNDARY = Pattern.compile("(?<![.!?])[.!?]++\\s+");
 
     @Tool("Summarizes long text by extracting the most important sentences. Good for quick overviews of articles or documents.")
     public String summarizeText(@P("The text to summarize") String text,
@@ -37,7 +47,7 @@ public class TextSummarizerTool {
             LOGGER.debug("Summarizing text to " + numSentences + " sentences");
 
             // Split into sentences
-            String[] sentences = text.split("[.!?]+\\s+");
+            String[] sentences = SENTENCE_BOUNDARY.split(text);
 
             if (sentences.length <= numSentences) {
                 return "Summary:\n" + text;

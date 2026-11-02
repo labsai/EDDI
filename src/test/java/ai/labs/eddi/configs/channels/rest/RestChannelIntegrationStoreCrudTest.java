@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import com.fasterxml.jackson.core.JsonParseException;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -248,7 +250,7 @@ class RestChannelIntegrationStoreCrudTest {
 
             when(channelStore.read(CHANNEL_ID, 1)).thenReturn(config);
             when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 1));
-            when(channelStore.create(any())).thenReturn(dummyResourceId("newId12345678901234", 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ddeeff00112233445566aabb", 1));
             lenient().when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
                     .thenReturn(List.of());
 
@@ -266,7 +268,7 @@ class RestChannelIntegrationStoreCrudTest {
 
             when(channelStore.read(CHANNEL_ID, 1)).thenReturn(config);
             when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 1));
-            when(channelStore.create(any())).thenReturn(dummyResourceId("newId12345678901234", 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ddeeff00112233445566aabb", 1));
             lenient().when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
                     .thenReturn(List.of());
 
@@ -324,7 +326,7 @@ class RestChannelIntegrationStoreCrudTest {
         void duplicatePicksFirstFreeCopyName() throws Exception {
             when(channelStore.read(CHANNEL_ID, 1)).thenReturn(validConfig());
             when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenReturn(dummyResourceId(CHANNEL_ID, 1));
-            when(channelStore.create(any())).thenReturn(dummyResourceId("newId12345678901234", 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ddeeff00112233445566aabb", 1));
 
             var copy1 = new DocumentDescriptor();
             copy1.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/aabbccddeeff112233445501?version=1"));
@@ -492,7 +494,7 @@ class RestChannelIntegrationStoreCrudTest {
             var config = validConfig();
             config.setPlatformConfig(new HashMap<>()); // no channelId
 
-            when(channelStore.create(any())).thenReturn(dummyResourceId("newChan12345678901", 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ccddee00112233445566aabb", 1));
 
             assertDoesNotThrow(() -> sut.createChannel(config));
         }
@@ -503,7 +505,7 @@ class RestChannelIntegrationStoreCrudTest {
             var config = validConfig();
             config.setPlatformConfig(null);
 
-            when(channelStore.create(any())).thenReturn(dummyResourceId("newChan12345678901", 1));
+            when(channelStore.create(any())).thenReturn(dummyResourceId("ccddee00112233445566aabb", 1));
 
             assertDoesNotThrow(() -> sut.createChannel(config));
         }
@@ -515,17 +517,48 @@ class RestChannelIntegrationStoreCrudTest {
     @DisplayName("sanitizeForLog edge cases")
     class SanitizeForLog {
 
+        /**
+         * The uniqueness checks enumerate descriptors, so a new integration is
+         * invisible to them until its descriptor exists. Written after the lock was
+         * released, a second save could slip in between and store the same channelId or
+         * name.
+         */
         @Test
-        @DisplayName("descriptor sync should handle exceptions gracefully")
-        void descriptorSyncError() throws Exception {
+        @DisplayName("a new integration's descriptor is written while the uniqueness lock is still held")
+        void descriptorWrittenInsideUniquenessLock() throws Exception {
             var config = validConfig();
             when(channelStore.create(any())).thenReturn(dummyResourceId(CHANNEL_ID, 1));
-            when(channelStore.getCurrentResourceId(CHANNEL_ID)).thenThrow(new IResourceStore.ResourceNotFoundException("not found"));
             lenient().when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
                     .thenReturn(List.of());
+            Field lockField = RestChannelIntegrationStore.class.getDeclaredField("uniquenessLock");
+            lockField.setAccessible(true);
+            Object lock = lockField.get(sut);
+            boolean[] heldWhileWriting = {false};
+            doAnswer(invocation -> {
+                heldWhileWriting[0] = Thread.holdsLock(lock);
+                return null;
+            }).when(documentDescriptorStore).createDescriptor(eq(CHANNEL_ID), eq(1), any());
 
-            // Should not throw — descriptor sync failure is logged, not rethrown
-            assertDoesNotThrow(() -> sut.createChannel(config));
+            sut.createChannel(config);
+
+            verify(documentDescriptorStore).createDescriptor(eq(CHANNEL_ID), eq(1), any());
+            assertTrue(heldWhileWriting[0], "the descriptor must exist before the next save can run its uniqueness checks");
+        }
+
+        @Test
+        @DisplayName("a new integration whose descriptor cannot be written is removed and the save fails")
+        void descriptorWriteFailureFailsTheCreate() throws Exception {
+            var config = validConfig();
+            when(channelStore.create(any())).thenReturn(dummyResourceId(CHANNEL_ID, 1));
+            lenient().when(documentDescriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
+                    .thenReturn(List.of());
+            doThrow(new IResourceStore.ResourceStoreException("descriptor store down"))
+                    .when(documentDescriptorStore).createDescriptor(eq(CHANNEL_ID), eq(1), any());
+            doThrow(new IResourceStore.ResourceStoreException("descriptor store down"))
+                    .when(documentDescriptorStore).setDescriptor(eq(CHANNEL_ID), eq(1), any());
+
+            assertThrows(InternalServerErrorException.class, () -> sut.createChannel(config));
+            verify(channelStore).deleteAllPermanently(CHANNEL_ID);
         }
     }
 
