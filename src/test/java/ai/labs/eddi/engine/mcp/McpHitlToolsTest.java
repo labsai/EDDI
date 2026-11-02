@@ -103,7 +103,7 @@ class McpHitlToolsTest {
                 () -> tools.getApprovalStatus("c1", "summary"),
                 () -> tools.listPendingApprovals("10"),
                 () -> tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null, null),
-                () -> tools.submitGroupHumanInput("g1", "gc1", "m1", "hello"),
+                () -> tools.submitGroupHumanInput("g1", "gc1", "m1", "hello", null),
                 () -> tools.cancelGroupDiscussion("g1", "gc1"),
                 () -> tools.getGroupApprovalStatus("g1", "gc1", "summary"),
                 () -> tools.listGroupPendingApprovals("g1", "10"),
@@ -517,7 +517,7 @@ class McpHitlToolsTest {
         when(guard.mayReadResumedDiscussion("owner")).thenReturn(false);
         when(json.serialize(any())).thenAnswer(inv -> new ObjectMapper().writeValueAsString(inv.getArgument(0)));
 
-        String out = tools.submitGroupHumanInput("g1", "gc1", "m1", "hello");
+        String out = tools.submitGroupHumanInput("g1", "gc1", "m1", "hello", null);
 
         ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
         verify(json).serialize(captor.capture());
@@ -533,7 +533,7 @@ class McpHitlToolsTest {
         when(guard.mayReadResumedDiscussion("owner")).thenReturn(true);
         when(json.serialize(any())).thenReturn("{}");
 
-        tools.submitGroupHumanInput("g1", "gc1", "m1", "hello");
+        tools.submitGroupHumanInput("g1", "gc1", "m1", "hello", null);
 
         verify(json).serialize(gc);
     }

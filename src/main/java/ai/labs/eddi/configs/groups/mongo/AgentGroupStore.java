@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.groups.validation.GroupGapsValidation;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -727,12 +728,9 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
             if (voteConfig.optionsSource() == AgentGroupConfiguration.OptionsSource.EXPLICIT && voteConfig.options().size() < 2) {
                 throw new IllegalArgumentException(path + " with optionsSource EXPLICIT needs at least 2 options");
             }
-            if (voteConfig.tiePolicy() == AgentGroupConfiguration.TiePolicy.HUMAN_DECIDES) {
-                // HUMAN members themselves DO ship (see the I6 matrix above, which
-                // validates them). What is missing is the resume machinery a tie
-                // break needs: a tally that stops mid-phase has no pause to re-enter.
-                throw new IllegalArgumentException(path + ".tiePolicy HUMAN_DECIDES is not supported yet — breaking a tie needs a "
-                        + "resume path that a paused VOTE phase does not have. Use MODERATOR_DECIDES or NO_DECISION");
+            List<String> tieBreakProblems = GroupGapsValidation.tieBreakProblems(path + ".voteConfig", voteConfig, groupConfiguration);
+            if (!tieBreakProblems.isEmpty()) {
+                throw new IllegalArgumentException(String.join("; ", tieBreakProblems));
             }
             for (Map.Entry<String, Double> weight : voteConfig.weights().entrySet()) {
                 // isFinite: NaN passes every < comparison and would poison the

@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
+import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
+import ai.labs.eddi.engine.internal.groups.PendingHumanInputView;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
@@ -448,6 +450,7 @@ public class McpHitlTools {
                 if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
+                PendingHumanInputView.addTo(summary, gc);
             }
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
@@ -579,25 +582,33 @@ public class McpHitlTools {
           description = "Submit a HUMAN group member's response for the turn an AWAITING_HUMAN_INPUT discussion is "
                   + "waiting on (I6). The response is recorded as the member's transcript entry and the discussion "
                   + "resumes from the next speaker. Only the pending member's own principal (or an admin) may submit "
-                  + "— this is the member SPEAKING, not an approval.")
+                  + "— this is the member SPEAKING, not an approval. When the pending kind is TIE_BREAK "
+                  + "(get_group_approval_status pendingKind/pendingOptions), pass choice = exactly one of the options; "
+                  + "content is then an optional rationale.")
     public String submitGroupHumanInput(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId,
                                         @ToolArg(description = "The pending HUMAN member's id (their principal id)") String memberId,
-                                        @ToolArg(description = "The member's response text") String content) {
+                                        @ToolArg(description = "The member's response text (for a tie-break: optional rationale)",
+                                                 required = false) String content,
+                                        @ToolArg(description = "For a TIE_BREAK pause: exactly one of the pendingOptions",
+                                                 required = false) String choice) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
             return disabled;
         }
         if (groupId == null || groupId.isBlank() || conversationId == null || conversationId.isBlank()
-                || memberId == null || memberId.isBlank() || content == null || content.isBlank()) {
-            return errorJson("groupId, conversationId, memberId and content are required", "BAD_REQUEST", null);
+                || memberId == null || memberId.isBlank()
+                || ((content == null || content.isBlank()) && (choice == null || choice.isBlank()))) {
+            return errorJson("groupId, conversationId, memberId and content (or choice for a tie-break) are required", "BAD_REQUEST",
+                    null);
         }
         try {
             hitlAccessGuard.requireGroupHumanInputAccess(groupId, conversationId, memberId);
-            GroupConversation result = groupConversationService.submitHumanInput(
-                    conversationId, memberId, content, principalWithMcpPrefix());
+            GroupConversation result = choice != null
+                    ? groupConversationService.submitHumanInput(conversationId, memberId, content, choice, principalWithMcpPrefix())
+                    : groupConversationService.submitHumanInput(conversationId, memberId, content, principalWithMcpPrefix());
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", "HUMAN_INPUT").increment();
             return readableSubmission(result);
         } catch (ForbiddenException e) {
@@ -613,6 +624,9 @@ public class McpHitlTools {
             return errorJson("Group conversation is not awaiting human input — the turn may have been resolved, "
                     + "timed out, or cancelled", "WRONG_STATE", null);
         } catch (IllegalArgumentException e) {
+            if (e.getMessage() != null && e.getMessage().startsWith(HumanTieBreakEngine.INVALID_CHOICE_PREFIX)) {
+                return errorJson(e.getMessage(), "BAD_REQUEST", null);
+            }
             return errorJson("Invalid submission: the memberId does not match the pending turn, or the content is "
                     + "blank or too long", "BAD_REQUEST", null);
         } catch (Exception e) {

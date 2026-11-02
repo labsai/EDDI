@@ -961,12 +961,15 @@ public class AgentGroupConfiguration {
      * @param tiePolicy
      *            what resolves a tie or a quorum failure: {@code MODERATOR_DECIDES}
      *            (one moderator turn choosing among the tied options),
-     *            {@code HUMAN_DECIDES} (reserved for I6 human members — rejected at
-     *            save time until that ships), or {@code NO_DECISION} (default:
-     *            record {@code type=NONE} and carry on)
+     *            {@code HUMAN_DECIDES} (the discussion pauses until the
+     *            {@code humanTieBreak} decider chooses), or {@code NO_DECISION}
+     *            (default: record {@code type=NONE} and carry on)
+     * @param humanTieBreak
+     *            who decides under {@code HUMAN_DECIDES}, how long they have and
+     *            what a timeout resolves to. See {@link HumanTieBreakConfig}
      */
     public record VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
-            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy, HumanTieBreakConfig humanTieBreak) {
 
         public static final double DEFAULT_QUORUM = 0.5;
 
@@ -980,6 +983,12 @@ public class AgentGroupConfiguration {
             }
             weights = weights == null ? Map.of() : Map.copyOf(weights);
             tiePolicy = tiePolicy == null ? TiePolicy.NO_DECISION : tiePolicy;
+        }
+
+        /** Backward-compatible constructor without {@code humanTieBreak}. */
+        public VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
+                Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+            this(method, optionsSource, options, quorum, weights, weightByConfidence, tiePolicy, null);
         }
 
         /**

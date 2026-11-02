@@ -53,6 +53,8 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.internal.groups.GroupContextBuilder;
 import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
+import ai.labs.eddi.engine.internal.groups.GroupTieBreakPauses;
+import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
 import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
@@ -358,6 +360,9 @@ public class GroupConversationService implements IGroupConversationService, User
         this.hitlCoordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, auditLedgerService,
                 signingGuard, discussionControls, executorService, callerIdentityContext, this,
                 counterGroupHitlPause, counterGroupHitlResume, counterGroupFailure);
+        this.hitlCoordinator.setTieBreakPauses(new GroupTieBreakPauses(groupStore, conversationStore, auditLedgerService, discussionControls,
+                executorService, callerIdentityContext, this, hitlCoordinator, phaseExecutionEngine, meterRegistry, counterGroupHitlPause,
+                counterGroupHitlResume));
     }
 
     @PreDestroy
@@ -1248,9 +1253,10 @@ public class GroupConversationService implements IGroupConversationService, User
                     // fires decision_reached itself). Last repeat only, same reasoning
                     // as the verdict above — a re-balloting round's draft tally is not
                     // the decision.
+                    HumanTieBreakEngine.PendingTieBreak tieBreak = null;
                     if (phase.type() == PhaseType.VOTE && lastRepeat) {
-                        phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers, listener,
-                                turnCounter, maxTurns);
+                        tieBreak = phaseExecutionEngine.recordVoteDecision(gc, config, phase, protocol, phaseIdx, repeatEntries, speakers,
+                                listener, turnCounter, maxTurns);
                     }
 
                     // I8: a completed RETRO phase harvests its lessons into
@@ -1299,6 +1305,9 @@ public class GroupConversationService implements IGroupConversationService, User
                         listener.onPhaseComplete(new GroupConversationEventSink.PhaseCompleteEvent(phaseIdx, phase.name()));
                     }
 
+                    // A human tie-break owns this boundary: a deferred escalation is
+                    // recorded and dropped (the decider is about to be asked anyway).
+                    deferredFacilitatorAction = GroupTieBreakPauses.yieldEscalation(gc, tieBreak, deferredFacilitatorAction, phaseIdx, phase);
                     // I12: apply the checkpoint's stashed structural effects now that
                     // the repeat's own decisions are recorded and persisted.
                     if (deferredFacilitatorAction != null) {
@@ -1354,6 +1363,14 @@ public class GroupConversationService implements IGroupConversationService, User
                                 // decision block; NONE never lands here.
                             }
                         }
+                    }
+
+                    // tiePolicy HUMAN_DECIDES: the vote is persisted with its NONE
+                    // record; pause until the decider chooses (GroupTieBreakPauses).
+                    if (tieBreak != null) {
+                        hitlCoordinator.commitTieBreakPause(gc, phaseIdx, repeat, phase, tieBreak, turnCounter.get(), listener);
+                        convertPauseToCancelIfSignalled(gc, listener);
+                        return gc;
                     }
 
                     if (!outcome.isContinue()) {
@@ -2758,6 +2775,15 @@ public class GroupConversationService implements IGroupConversationService, User
             IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
         rejectIfShuttingDown();
         return withArtifacts(hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, submittedBy, null));
+    }
+
+    @Override
+    public GroupConversation submitHumanInput(String groupConversationId, String memberId, String content, String choice,
+                                              String submittedBy)
+            throws GroupDiscussionException, IResourceStore.ResourceStoreException,
+            IResourceStore.ResourceNotFoundException, IResourceStore.ResourceModifiedException {
+        rejectIfShuttingDown();
+        return withArtifacts(hitlCoordinator.submitHumanInput(groupConversationId, memberId, content, choice, submittedBy, null));
     }
 
     @Override
