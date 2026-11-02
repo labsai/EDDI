@@ -29,9 +29,17 @@ function asciiDomain(domain: string): string | null {
   // Non-ASCII labels go through the platform's IDNA (UTS 46) conversion, the
   // counterpart of the server's IDN.toASCII.
   if (Array.from(domain).some((ch) => ch.charCodeAt(0) > 0x7f)) {
+    // new URL() parses a whole URL and reports only the host, so anything that
+    // is URL syntax rather than domain text (path, query, fragment, port,
+    // userinfo, brackets, escapes, spaces) would be dropped and the address
+    // accepted, while the server rejects the original. Refuse it up front.
+    if (/[/?#:\\@[\]%\s]/.test(domain)) return null;
+    // UTS 46 (the platform) keeps these four characters, while IDN.toASCII
+    // (IDNA 2003, the server) maps or drops them, so the two would normalise
+    // the domain differently. Only their punycode spelling is accepted.
+    if (/[\u00df\u03c2\u200c\u200d]/.test(domain)) return null;
     try {
-      const host = new URL(`http://${domain}`).hostname;
-      return host.includes("@") || host.includes("/") ? null : host;
+      return new URL(`http://${domain}`).hostname;
     } catch {
       return null;
     }

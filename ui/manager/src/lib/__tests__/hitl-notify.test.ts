@@ -59,6 +59,23 @@ describe("internationalised domains — the server converts the domain to ASCII"
     expect(isValidNotifyAddress("ops@bü cher.example")).toBe(false);
   });
 
+  it("refuses URL syntax after a Unicode domain instead of parsing it away", () => {
+    // new URL() would drop the path, query, fragment or port and report only the host.
+    for (const tail of ["/path", "?x=1", "#frag", ":25", "\\evil", "%2f"]) {
+      expect(isValidNotifyAddress(`ops@bücher.example${tail}`)).toBe(false);
+    }
+  });
+
+  it("refuses the characters whose IDNA 2003 and 2008 conversions differ (the server uses IDN.toASCII)", () => {
+    // sharp s, final sigma, zero-width non-joiner / joiner: the platform keeps them,
+    // Java's IDN.toASCII maps or drops them, so the two would disagree on the domain.
+    for (const domain of ["faß.example", "σς.example", "a‌b.example", "a‍b.example"]) {
+      expect(isValidNotifyAddress(`ops@${domain}`)).toBe(false);
+    }
+    // the punycode spelling is plain ASCII and stays valid
+    expect(isValidNotifyAddress("ops@xn--fa-hia.example")).toBe(true);
+  });
+
   it("treats the Unicode and punycode spellings of one domain as a duplicate", () => {
     const parsed = parseNotifyRecipients("ops@bücher.example, OPS@xn--bcher-kva.example");
     expect(parsed.error).toBe("duplicate");
