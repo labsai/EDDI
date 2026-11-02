@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.llm.impl.LlmTelemetryListener;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
 import dev.langchain4j.exception.ToolArgumentsException;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.opentelemetry.api.GlobalOpenTelemetry;
@@ -22,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -192,6 +195,14 @@ public class ToolExecutionService {
     MeterRegistry meterRegistry;
 
     /**
+     * Per-subject tool quotas ({@code toolQuotas}). Null-tolerant: unit tests build
+     * this service by hand, and a task without {@code toolQuotas} never asks for
+     * it.
+     */
+    @Inject
+    ToolQuotaService quotaService;
+
+    /**
      * Carries the turn's caller (and resolution principal) onto the timeout worker.
      * <p>
      * Without it a time-bounded tool call would lose both bindings the moment it
@@ -202,6 +213,13 @@ public class ToolExecutionService {
      */
     @Inject
     CallerIdentityContext callerIdentityContext;
+
+    /**
+     * The per-subject quota service, for building a call's {@link ToolQuotaGate}.
+     */
+    public ToolQuotaService getQuotaService() {
+        return quotaService;
+    }
 
     /**
      * Returns the cost tracker for budget checking.
@@ -308,6 +326,30 @@ public class ToolExecutionService {
     public String executeToolWrapped(ToolInvocation invocation, String arguments, String cacheScopeTag, String conversationId,
                                      Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
                                      boolean enableCostTracking, int rateLimit, int timeoutMs) {
+        return executeToolWrapped(invocation, arguments, cacheScopeTag, conversationId, toolExecution, enableRateLimiting, enableCaching,
+                enableCostTracking, rateLimit, timeoutMs, null);
+    }
+
+    /**
+     * As above, additionally subject to a per-subject {@code toolQuotas} rule.
+     *
+     * <p>
+     * The quota is reserved at exactly one point: after the rate limit and the
+     * cache have been consulted, immediately before the tool runs. That is what
+     * makes "count real executions only" true by construction — a rate-limited
+     * call, a cache hit and a call refused by an earlier gate never reach it. A
+     * refused reservation returns the gate's refusal as the result, uncached and
+     * uncharged. After the run the reservation is settled: a failed call gives it
+     * back. A timed-out call keeps its count, because the abandoned worker may
+     * still complete the tool's side effect.
+     * </p>
+     *
+     * @param quotaGate
+     *            the call's quota gate, or {@code null} when no quota applies
+     */
+    public String executeToolWrapped(ToolInvocation invocation, String arguments, String cacheScopeTag, String conversationId,
+                                     Supplier<String> toolExecution, boolean enableRateLimiting, boolean enableCaching,
+                                     boolean enableCostTracking, int rateLimit, int timeoutMs, ToolQuotaGate quotaGate) {
 
         String toolName = invocation.dispatchName();
         long startTime = System.currentTimeMillis();
@@ -357,7 +399,28 @@ public class ToolExecutionService {
             // is bounded here rather than in each of the seven tool sources because
             // this is the one place all of them pass through.
             span.setAttribute(ATTR_CACHE_HIT, false);
-            String result = executeBounded(toolExecution, timeoutMs);
+            if (quotaGate != null) {
+                Optional<String> refusal = quotaGate.reserve();
+                if (refusal.isPresent()) {
+                    markFailed(span, "quota_exceeded");
+                    return refusal.get();
+                }
+            }
+            String result;
+            try {
+                result = executeBounded(toolExecution, timeoutMs);
+            } catch (ToolTimedOut timedOut) {
+                // Outcome unknown: the worker may still finish the side effect. Keep the count.
+                throw timedOut;
+            } catch (Exception | Error failed) {
+                if (quotaGate != null) {
+                    quotaGate.settle(null, failed);
+                }
+                throw failed;
+            }
+            if (quotaGate != null) {
+                quotaGate.settle(result, null);
+            }
 
             // 4. Cache result (TTL from the canonical slug, key from the dispatch name)
             if (cacheable) {

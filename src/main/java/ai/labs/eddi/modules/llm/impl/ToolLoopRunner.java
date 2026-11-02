@@ -35,6 +35,8 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
+import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -529,8 +531,10 @@ class ToolLoopRunner {
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
                     var screened = refuseDoomedGatedCalls(
-                            toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                    effectiveToolApprovals, clearedCalls),
+                            refuseExhaustedGatedCalls(
+                                    toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                            effectiveToolApprovals, clearedCalls),
+                                    task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
                     var gateResult = screened.gateResult();
                     // The pin step below reuses what the screening already resolved.
@@ -827,6 +831,48 @@ class ToolLoopRunner {
                 trace.add(Map.of("type", "tool_call_capped", "tool", skipped.name(), "limit", limit));
             }
         }
+    }
+
+    /**
+     * Refuses, before a human is asked, every gated call whose {@code toolQuotas}
+     * allowance is already spent. Approving it would be an approval spent on
+     * nothing: the quota is applied again when the approved call runs, and it is
+     * refused then. The check is a read — nothing is counted here; the count
+     * happens when the call actually executes, on the live path and on the HITL
+     * resume path alike.
+     * <p>
+     * Deliberately only "already exhausted": with one call left and two gated calls
+     * proposed, both go to the human, because the first may be rejected and leave
+     * the second its slot. The second is refused at execution if it did not. A
+     * store that cannot answer refuses the call too (fail closed) — it would be
+     * refused at execution anyway.
+     */
+    private ToolApprovalGate.GateResult refuseExhaustedGatedCalls(ToolApprovalGate.GateResult gateResult, LlmConfiguration.Task task,
+                                                                  IConversationMemory memory, Map<String, String> toolCanonicalNames,
+                                                                  List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                                  List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+        ToolQuotaService quotaService = toolExecutionService.getQuotaService();
+        if (task.getToolQuotas() == null || quotaService == null || memory == null || gateResult.gated().isEmpty()) {
+            return gateResult;
+        }
+        List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        for (ToolExecutionRequest req : gateResult.gated()) {
+            String canonicalName = ToolNameResolver.canonical(req.name(), toolCanonicalNames);
+            var refusal = quotaService.precheck(task.getToolQuotas(), req.name(), canonicalName, memory);
+            if (refusal.isEmpty()) {
+                stillGated.add(req);
+                continue;
+            }
+            addResult(currentMessages, aiMessage, req, refusal.get(), exchangeRecorder);
+            Map<String, Object> step = new HashMap<>();
+            step.put("type", "tool_error");
+            step.put("tool", req.name());
+            step.put("error", "tool_quota_refused");
+            trace.add(step);
+        }
+        return stillGated.size() == gateResult.gated().size()
+                ? gateResult
+                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
     }
 
     /**
@@ -1259,6 +1305,7 @@ class ToolLoopRunner {
         ToolExecutor executor = toolExecutors.get(toolRequest.name());
         String toolResult;
         boolean notExecuted = false;
+        ToolQuotaGate quotaGate = null;
         if (executor != null && memory != null && memory.getTurnDeadline() != null && memory.getTurnDeadline().isExpired()) {
             Metrics.globalRegistry.counter("eddi.llm.turn.deadline.exceeded", "stage", "tool").increment();
             toolResult = "Error: the turn deadline has passed; tool '" + toolRequest.name() + "' was not run";
@@ -1310,6 +1357,14 @@ class ToolLoopRunner {
             }
 
             var invocation = new ToolInvocation(toolRequest.name(), canonicalName, priceOverride);
+            // Per-subject quota (toolQuotas). Null when the task has none or no rule names
+            // this tool — then no store is read. A mocked call never reaches the outside
+            // world and is not counted. The reservation itself is made by
+            // ToolExecutionService, right before the tool runs.
+            ToolQuotaService quotaService = toolExecutionService.getQuotaService();
+            quotaGate = mockingExecutor == null && task.getToolQuotas() != null && quotaService != null && memory != null
+                    ? quotaService.gateFor(task.getToolQuotas(), invocation, memory, ToolLoopRunner::indicatesUnfinishedCall)
+                    : null;
             // The source and the model's call id label the execute_tool span the
             // service opens; they ride in the OTel context because nothing but the
             // trace depends on them (see ToolCallTrace).
@@ -1319,9 +1374,18 @@ class ToolLoopRunner {
                 if (testDecision != null) {
                     ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
                 }
-                toolResult = toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
-                        mock != null ? () -> mockingExecutor.executeMocked(toolRequest, mock) : () -> executor.execute(toolRequest, null),
-                        enableRateLimiting, cacheThisCall, enableCostTracking && mock == null, rateLimit, toolTimeoutMs);
+                Supplier<String> execution = mock != null
+                        ? () -> mockingExecutor.executeMocked(toolRequest, mock)
+                        : () -> executor.execute(toolRequest, null);
+                boolean trackCost = enableCostTracking && mock == null;
+                // Without a quota gate the call takes exactly the path it always took.
+                toolResult = quotaGate == null
+                        ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
+                                enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs)
+                        : toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
+                                enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs, quotaGate);
+                // The quota refused it: the tool never ran.
+                notExecuted = quotaGate != null && quotaGate.refused();
             }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
@@ -1405,6 +1469,17 @@ class ToolLoopRunner {
         }
 
         return new ToolCallResult(outcome.result(), untruncatedResult, notExecuted);
+    }
+
+    /**
+     * Whether a tool's raw result says the call did not complete — it failed, or it
+     * never ran — so that a {@code toolQuotas} reservation made for it is given
+     * back. Reads the result the way the repeat guard does (HTTP status, an
+     * {@code error} object, an {@code Error:} string).
+     */
+    static boolean indicatesUnfinishedCall(String rawResult) {
+        ToolOutcomeClassifier.Outcome outcome = ToolOutcomeClassifier.classify(rawResult);
+        return outcome.isFailure() || outcome == ToolOutcomeClassifier.Outcome.NOT_EXECUTED;
     }
 
     /**
