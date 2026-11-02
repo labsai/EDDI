@@ -1,4 +1,12 @@
 {
+  "approvalContext": {
+    "cutShort": "途中で切り詰められました。",
+    "errorRenderFailed": "このブロックを生成できませんでした。",
+    "errorTooLarge": "このブロックは大きすぎて生成できませんでした。",
+    "heading": "この判断のための文脈",
+    "leftOut": "カードを短く保つため、一部の文脈を省略しました。",
+    "notVerified": "一時停止時に会話データから生成されたもので、EDDI は内容を検証していません。"
+  },
   "attachments": {
     "title": "添付ファイル",
     "empty": "この会話には添付ファイルがありません。",

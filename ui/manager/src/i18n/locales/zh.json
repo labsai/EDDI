@@ -1,4 +1,12 @@
 {
+  "approvalContext": {
+    "cutShort": "已截断。",
+    "errorRenderFailed": "无法生成此内容块。",
+    "errorTooLarge": "此内容块过大，无法生成。",
+    "heading": "此决定的上下文",
+    "leftOut": "为保持卡片简短，部分上下文已省略。",
+    "notVerified": "在暂停时根据对话数据生成，未经 EDDI 验证。"
+  },
   "attachments": {
     "title": "附件",
     "empty": "此对话没有附件。",

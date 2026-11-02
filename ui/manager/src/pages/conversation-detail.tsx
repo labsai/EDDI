@@ -377,6 +377,7 @@ export function ConversationDetailPage() {
           timeoutPolicy={approvalStatus?.timeoutPolicy}
           approvalTimeout={approvalStatus?.approvalTimeout}
           pauseDetails={approvalStatus?.pauseDetails ?? null}
+          approvalContext={approvalStatus?.approvalContext ?? null}
           // The query's own flags rather than `!approvalStatus` — see the same
           // change in approvals.tsx. All three approval surfaces derive this
           // identically now, so the same pause can no longer be approvable on

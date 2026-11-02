@@ -1,4 +1,12 @@
 {
+  "approvalContext": {
+    "cutShort": "Gekürzt.",
+    "errorRenderFailed": "Dieser Block konnte nicht erzeugt werden.",
+    "errorTooLarge": "Dieser Block war zu groß, um ihn zu erzeugen.",
+    "heading": "Kontext für diese Entscheidung",
+    "leftOut": "Ein Teil des Kontexts wurde ausgelassen, damit die Karte kurz bleibt.",
+    "notVerified": "Beim Pausieren aus Gesprächsdaten erzeugt – von EDDI nicht geprüft."
+  },
   "attachments": {
     "title": "Anhänge",
     "empty": "Diese Unterhaltung hat keine Anhänge.",

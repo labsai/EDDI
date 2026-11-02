@@ -1,4 +1,12 @@
 {
+  "approvalContext": {
+    "cutShort": "잘렸습니다.",
+    "errorRenderFailed": "이 블록을 생성하지 못했습니다.",
+    "errorTooLarge": "이 블록은 너무 커서 생성할 수 없었습니다.",
+    "heading": "이 결정을 위한 컨텍스트",
+    "leftOut": "카드를 짧게 유지하기 위해 일부 컨텍스트를 생략했습니다.",
+    "notVerified": "일시 중지 시점의 대화 데이터에서 생성되었으며 EDDI가 검증하지 않았습니다."
+  },
   "attachments": {
     "title": "첨부 파일",
     "empty": "이 대화에는 첨부 파일이 없습니다.",

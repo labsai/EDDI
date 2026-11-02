@@ -1,4 +1,12 @@
 {
+  "approvalContext": {
+    "cutShort": "Cut short.",
+    "errorRenderFailed": "This block could not be rendered.",
+    "errorTooLarge": "This block was too large to render.",
+    "heading": "Context for this decision",
+    "leftOut": "Some context was left out to keep this card short.",
+    "notVerified": "Rendered from conversation data at pause time — not verified by EDDI."
+  },
   "attachments": {
     "title": "Attachments",
     "empty": "This conversation has no attachments.",

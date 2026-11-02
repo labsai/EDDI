@@ -1,4 +1,12 @@
 {
+  "approvalContext": {
+    "cutShort": "Recortado.",
+    "errorRenderFailed": "No se pudo generar este bloque.",
+    "errorTooLarge": "Este bloque era demasiado grande para generarse.",
+    "heading": "Contexto para esta decisión",
+    "leftOut": "Se omitió parte del contexto para mantener la tarjeta breve.",
+    "notVerified": "Generado a partir de los datos de la conversación al pausar; EDDI no lo ha verificado."
+  },
   "attachments": {
     "title": "Adjuntos",
     "empty": "Esta conversación no tiene adjuntos.",
