@@ -75,6 +75,14 @@ public class ClusterConfig {
     @ConfigProperty(name = "eddi.nats.tls.enabled", defaultValue = "false")
     boolean natsTlsEnabled;
 
+    /**
+     * Verify that the broker's certificate was issued for the host it was dialled
+     * as (HTTPS-style endpoint identification). On by default; turning it off goes
+     * back to trusting any certificate the trust store accepts, for any host.
+     */
+    @ConfigProperty(name = "eddi.nats.tls.verify-hostname", defaultValue = "true")
+    boolean natsTlsVerifyHostname = true;
+
     @ConfigProperty(name = "eddi.nats.tls.truststore-path")
     Optional<String> natsTlsTruststorePath = Optional.empty();
 
@@ -255,6 +263,10 @@ public class ClusterConfig {
 
     public boolean natsTlsEnabled() {
         return natsTlsEnabled;
+    }
+
+    public boolean natsTlsVerifyHostname() {
+        return natsTlsVerifyHostname;
     }
 
     public Optional<String> natsTlsTruststorePath() {
@@ -439,16 +451,6 @@ public class ClusterConfig {
         return this;
     }
 
-    public ClusterConfig withDegradedNonces(String decision) {
-        this.degradedNonces = decision;
-        return this;
-    }
-
-    public ClusterConfig withDegradedRateLimits(String decision) {
-        this.degradedRateLimits = decision;
-        return this;
-    }
-
     public ClusterConfig withEventsOutboxSize(int size) {
         this.eventsOutboxSize = size;
         return this;
@@ -461,12 +463,6 @@ public class ClusterConfig {
 
     public ClusterConfig withPresenceInterval(Duration interval) {
         this.presenceInterval = interval;
-        return this;
-    }
-
-    public ClusterConfig withHitlRecovery(Duration interval, Duration minAge) {
-        this.hitlRecoveryInterval = interval;
-        this.hitlRecoveryMinAge = minAge;
         return this;
     }
 }

@@ -393,6 +393,10 @@ public class SlackEventHandler {
             LOGGER.debugf("Incomplete Slack event — missing text/user/channel");
             return;
         }
+        if (!SlackUserIdentity.isValidSlackUserId(slackUserId)) {
+            LOGGER.warnf("Slack event with a malformed user id %s — ignoring", sanitize(slackUserId));
+            return;
+        }
         SlackUser user = slackUser(origin, slackUserId);
 
         // Strip bot mention prefix: "<@U0123BOTID> hello" → "hello"
@@ -544,7 +548,7 @@ public class SlackEventHandler {
 
         String text = (String) event.get("text");
         String slackUserId = (String) event.get("user");
-        if (slackUserId == null) {
+        if (!SlackUserIdentity.isValidSlackUserId(slackUserId)) {
             return false;
         }
         SlackUser user = slackUser(origin, slackUserId);
@@ -1008,13 +1012,13 @@ public class SlackEventHandler {
                 pauseType, pendingToolCalls);
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
-        // H6: never send "Bearer null". If neither the resolved integration token
-        // nor the approval-channel lookup yields a non-blank token, skip the call
-        // and log an explicit non-delivery error (a bare invalid_auth warn hides it).
+        // H6: never send "Bearer null". Only the originating integration's own token
+        // may post its approval card. There is deliberately no fallback to the token
+        // of whatever integration serves the approval channel: that channel is an
+        // editor-supplied setting, so the fallback let a token-less integration post
+        // with another integration's bot identity into a channel it has no authority
+        // over. Without a token, log an explicit non-delivery error.
         String botToken = resolved.botToken();
-        if (botToken == null || botToken.isBlank()) {
-            botToken = channelTargetRouter.getBotToken("slack", approvalChannel);
-        }
         if (botToken == null || botToken.isBlank()) {
             LOGGER.errorf("No bot token — HITL approval notification NOT delivered for %s",
                     sanitize(conversationId));

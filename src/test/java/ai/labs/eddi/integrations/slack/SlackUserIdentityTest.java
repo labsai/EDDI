@@ -37,6 +37,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -276,5 +277,23 @@ class SlackUserIdentityTest {
         verify(slackApi).postBlocksMessage(anyString(), eq("C_APPROVAL"), any(), blocks.capture(), anyString());
         assertFalse(blocks.getValue().toString().contains(SlackHitlSupport.ACTION_APPROVE),
                 "a card no decision can be accepted on must not carry buttons");
+    }
+
+    @Test
+    void aUserComponentThatIsNotASlackIdIsRefused() {
+        // A teamless signer sending user "T1:U2" must not be named slack:T1:U2.
+        assertThrows(IllegalArgumentException.class, () -> SlackUserIdentity.eddiUserId(null, "T1:U2"));
+        assertThrows(IllegalArgumentException.class, () -> SlackUserIdentity.eddiUserId("T1", "u123"));
+        assertThrows(IllegalArgumentException.class, () -> SlackUserIdentity.eddiUserId("T1", null));
+        assertEquals("slack:U123ABC", SlackUserIdentity.eddiUserId(null, "U123ABC"));
+    }
+
+    @Test
+    void slackPrincipals() {
+        assertTrue(SlackUserIdentity.isSlackPrincipal("slack:T1:U123"));
+        // A raw, pre-namespacing id is only a shape: an OIDC principal can have it.
+        assertFalse(SlackUserIdentity.isSlackPrincipal("U123ABC"));
+        assertFalse(SlackUserIdentity.isSlackPrincipal("alice"));
+        assertFalse(SlackUserIdentity.isSlackPrincipal(null));
     }
 }

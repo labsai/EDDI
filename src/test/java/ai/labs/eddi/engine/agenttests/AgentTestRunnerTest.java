@@ -4,6 +4,14 @@
  */
 package ai.labs.eddi.engine.agenttests;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import java.util.LinkedHashMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.DoubleAdder;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Defaults;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Expectation;
@@ -219,6 +227,39 @@ class AgentTestRunnerTest {
         assertFalse(turn.passed());
         assertEquals("timed out", turn.failures().getFirst().actual());
         verify(engine.service).endConversation(anyString(), eq(AgentTestConversations.SYSTEM_ACTOR));
+    }
+
+    /**
+     * The engine keeps running a turn the runner gave up on; its spend is charged
+     * when it lands, so turns that keep timing out still reach the run's ceiling.
+     */
+    @Test
+    @DisplayName("an abandoned turn's cost is charged to the run when the turn finally completes")
+    void abandonedTurnIsChargedWhenItLands() throws Exception {
+        var engine = engine();
+        var ctx = new AgentTestRunner.RunContext(null, null, null, 1.0, new DoubleAdder(), new AtomicBoolean(), ConcurrentHashMap.newKeySet(),
+                new AtomicReference<>(), new AtomicBoolean());
+        var outcome = new CompletableFuture<SimpleConversationMemorySnapshot>();
+        List<CompletableFuture<?>> abandoned = new ArrayList<>();
+        var stored = new ConversationMemorySnapshot();
+        stored.setConversationId("c1");
+        stored.setConversationState(ConversationState.READY);
+        stored.setConversationProperties(new LinkedHashMap<>());
+        ScriptedEngine.apply(stored, ScriptedEngine.Step.of(List.of("start"), "hi"));
+        ScriptedEngine.apply(stored, ScriptedEngine.Step.of(List.of("think"), "late").costing(0.4));
+        engine.conversations.put("c1", stored);
+
+        runner(engine, 4).abandon(ctx, "c1", 1, outcome, abandoned);
+        assertEquals(0.0, ctx.cost().sum());
+
+        outcome.complete(ConversationMemoryUtilities.convertSimpleConversationMemorySnapshot(stored, true, true, null));
+
+        long deadline = System.currentTimeMillis() + 5_000;
+        while (ctx.cost().sum() == 0.0 && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20);
+        }
+        assertEquals(0.4, ctx.cost().sum(), 1e-9);
+        assertEquals(List.of(outcome), abandoned);
     }
 
     @Test

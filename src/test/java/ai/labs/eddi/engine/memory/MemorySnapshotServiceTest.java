@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.memory;
 
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.MemoryCheckpoint;
+import ai.labs.eddi.engine.model.Context;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -255,6 +257,50 @@ class MemorySnapshotServiceTest {
             snapshotService.createCheckpoint(memory, "test", "TestClass");
 
             // Counter is registered in SimpleMeterRegistry — just verify no exception
+        }
+    }
+
+    @Nested
+    @DisplayName("Secret context values")
+    class SecretContextValues {
+
+        @Test
+        @DisplayName("a secret context value copied into a property is not persisted in the checkpoint")
+        void secretContextValueIsRedactedFromTheCheckpoint() {
+            var secret = new Context(Context.ContextType.string, "plain-test-credential-0123456789abcdef");
+            secret.setSecret(true);
+            var pin = new Context(Context.ContextType.string, "4711");
+            pin.setSecret(true);
+            var step = mock(IConversationMemory.IWritableConversationStep.class);
+            when(step.getAllElements()).thenReturn(List.of(new Data<>("context:apiToken", secret), new Data<>("context:pin", pin)));
+            when(memory.getCurrentStep()).thenReturn(step);
+
+            Map<String, Property> props = new LinkedHashMap<>();
+            props.put("token", new Property("token", "Bearer plain-test-credential-0123456789abcdef", Scope.step));
+            props.put("pinCopy", new Property("pinCopy", "4711", Scope.conversation));
+            props.put("order", new Property("order", "order 14711", Scope.conversation));
+
+            Map<String, Property> redacted = MemorySnapshotService.withoutSecretContextValues(memory, props);
+
+            assertEquals("Bearer " + MemoryKeys.SECRET_CONTEXT_PLACEHOLDER, redacted.get("token").getValueString());
+            assertEquals(MemoryKeys.SECRET_CONTEXT_PLACEHOLDER, redacted.get("pinCopy").getValueString());
+            // A short secret is replaced only where a value IS it.
+            assertEquals("order 14711", redacted.get("order").getValueString());
+            // The live properties are untouched.
+            assertEquals("Bearer plain-test-credential-0123456789abcdef", props.get("token").getValueString());
+        }
+
+        @Test
+        @DisplayName("without secret context the properties pass through unchanged")
+        void noSecretContextPassesThrough() {
+            var plain = new Context(Context.ContextType.string, "not-a-secret-value");
+            var step = mock(IConversationMemory.IWritableConversationStep.class);
+            when(step.getAllElements()).thenReturn(List.of(new Data<>("context:x", plain)));
+            when(memory.getCurrentStep()).thenReturn(step);
+            Map<String, Property> props = new LinkedHashMap<>();
+            props.put("x", new Property("x", "not-a-secret-value", Scope.conversation));
+
+            assertSame(props, MemorySnapshotService.withoutSecretContextValues(memory, props));
         }
     }
 }

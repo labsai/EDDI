@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import java.time.Duration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -16,6 +17,7 @@ import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -456,6 +458,25 @@ class RestScheduleStoreTest {
 
         assertEquals(409, response.getStatus());
         verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void fireNow_afterTheDeadline_answersATimeoutAndLeavesTheClaimToExpire() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(false);
+        var regular = makeCronSchedule("r1");
+        when(scheduleStore.readSchedule("r1")).thenReturn(regular);
+        when(pollerService.manualFireDeadline()).thenReturn(Duration.ofMillis(100));
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.sleep(10_000); // outlives the bound
+            return null;
+        });
+
+        Response response = rest.fireNow("r1");
+
+        assertEquals(504, response.getStatus(), "a timed-out fire is not a 200 with an empty body");
+        // The worker may still be running: the claim is not released, so the poller
+        // cannot start a second attempt.
+        verify(pollerService, never()).recordManualFireOutcome(any(), any());
     }
 
     @Test
@@ -2357,6 +2378,49 @@ class RestScheduleStoreTest {
         doThrow(new ForbiddenException("no")).when(guard).requireAccess("kb-1", AccessLevel.EDIT, "RAG configuration");
 
         assertThrows(ForbiddenException.class, () -> rest.fireNow("i1"));
+        verify(fireExecutor, never()).fire(any(), any(), anyInt());
+    }
+
+    // --- email poll schedules: minted by the channel store only ---
+
+    @Test
+    void createSchedule_declaringAnEmailPoll_isRefused() throws Exception {
+        asAdmin("root");
+        var forged = makeCronSchedule("e1");
+        forged.setName(EmailPollSchedules.scheduleName("someone-elses-integration"));
+        forged.setMetadata(EmailPollSchedules.metadata("someone-elses-integration"));
+
+        Response response = rest.createSchedule(forged);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void updateSchedule_ofStoredEmailPoll_isRefusedEvenWithoutMetadataInTheBody() throws Exception {
+        asAdmin("root");
+        var stored = makeCronSchedule("e2");
+        stored.setName(EmailPollSchedules.scheduleName("int-1"));
+        stored.setUserId("system:scheduler");
+        stored.setMetadata(EmailPollSchedules.metadata("int-1"));
+        when(scheduleStore.readSchedule("e2")).thenReturn(stored);
+
+        Response response = rest.updateSchedule("e2", makeCronSchedule("e2"));
+
+        assertEquals(409, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    @Test
+    void fireNow_emailPollWithoutEditOnTheIntegration_isForbidden() throws Exception {
+        asEditor("editor-1");
+        ResourceAccessGuard guard = enforcedGuard();
+        var poll = makeCronSchedule("e3");
+        poll.setMetadata(EmailPollSchedules.metadata("int-1"));
+        when(scheduleStore.readSchedule("e3")).thenReturn(poll);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess("int-1", AccessLevel.EDIT, "channel integration");
+
+        assertThrows(ForbiddenException.class, () -> rest.fireNow("e3"));
         verify(fireExecutor, never()).fire(any(), any(), anyInt());
     }
 }

@@ -38,7 +38,7 @@ function ResourceTypeCard({
         <div className="rounded-xl bg-primary/10 p-3">
           <Icon className="h-6 w-6 text-primary" />
         </div>
-        <ChevronRight className="h-5 w-5 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+        <ChevronRight className="h-5 w-5 text-muted-foreground/40 transition-transform group-hover:translate-x-0.5 group-hover:text-primary rtl:rotate-180" />
       </div>
 
       <div className="mt-4">

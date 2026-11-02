@@ -610,7 +610,16 @@ public class RestGroupConversation implements IRestGroupConversation {
                 : "anonymous";
         try {
             var gc = groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), submittedBy);
-            return Response.ok(gc).build();
+            // Submitting a turn is not reading the discussion: the pending member is
+            // refused the full status view, so the response must not hand it over.
+            if (hitlAccessGuard.mayReadResumedDiscussion(gc.getUserId())) {
+                return Response.ok(gc).build();
+            }
+            var acknowledgement = new LinkedHashMap<String, Object>();
+            acknowledgement.put("groupConversationId", gcId);
+            acknowledgement.put("accepted", true);
+            acknowledgement.put("state", gc.getState() != null ? gc.getState().name() : "");
+            return Response.ok(acknowledgement).build();
         } catch (IResourceStore.ResourceModifiedException e) {
             // Double-submit or a concurrent cancel won the CAS.
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)

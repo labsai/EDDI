@@ -486,7 +486,7 @@ class HitlCrashRecoveryObserverCoverageTest {
 
             observerWithRetention(Duration.ofDays(30).negated()).sweepExpiredPendingApprovals();
 
-            verify(conversationService, never()).cancelConversation(any(), any(), any());
+            verify(conversationService, never()).cancelPausedConversation(any(), any(), any());
         }
 
         @Test
@@ -497,7 +497,7 @@ class HitlCrashRecoveryObserverCoverageTest {
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
-            verify(conversationService, never()).cancelConversation(any(), any(), any());
+            verify(conversationService, never()).cancelPausedConversation(any(), any(), any());
         }
 
         @Test
@@ -506,12 +506,12 @@ class HitlCrashRecoveryObserverCoverageTest {
             when(memStore.findPendingApprovalSummaries(anyInt())).thenReturn(List.of(
                     pausedSummary("old", "WAIT_INDEFINITELY", null,
                             Instant.now().minus(40, ChronoUnit.DAYS))));
-            when(conversationService.cancelConversation(eq("old"), any(), eq("system:retention")))
+            when(conversationService.cancelPausedConversation(eq("old"), eq("system:retention"), any()))
                     .thenReturn(IConversationService.CancelOutcome.NOT_FOUND);
 
             observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals();
 
-            verify(conversationService).cancelConversation(eq("old"), any(), eq("system:retention"));
+            verify(conversationService).cancelPausedConversation(eq("old"), eq("system:retention"), any());
         }
 
         @Test
@@ -522,13 +522,13 @@ class HitlCrashRecoveryObserverCoverageTest {
                             Instant.now().minus(40, ChronoUnit.DAYS)),
                     pausedSummary("ok", "WAIT_INDEFINITELY", null,
                             Instant.now().minus(41, ChronoUnit.DAYS))));
-            when(conversationService.cancelConversation(eq("boom"), any(), any()))
+            when(conversationService.cancelPausedConversation(eq("boom"), any(), any()))
                     .thenThrow(new RuntimeException("cancel failed"));
-            when(conversationService.cancelConversation(eq("ok"), any(), any()))
+            when(conversationService.cancelPausedConversation(eq("ok"), any(), any()))
                     .thenReturn(IConversationService.CancelOutcome.CANCELLED);
 
             assertDoesNotThrow(() -> observerWithRetention(Duration.ofDays(30)).sweepExpiredPendingApprovals());
-            verify(conversationService).cancelConversation(eq("ok"), any(), any());
+            verify(conversationService).cancelPausedConversation(eq("ok"), any(), any());
         }
 
         @Test

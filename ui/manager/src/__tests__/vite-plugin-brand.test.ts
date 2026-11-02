@@ -39,7 +39,7 @@ async function buildShell(name: string): Promise<string> {
   );
   writeFileSync(join(work, name), html);
   writeFileSync(join(work, "entry.js"), 'import "./entry.css";\n');
-  writeFileSync(join(work, "entry.css"), ":root{--color-primary:#f59e0b}\n");
+  writeFileSync(join(work, "entry.css"), ":root{--color-primary:#0f766e}\n");
   const output = await build({
     configFile: false,
     root: work,

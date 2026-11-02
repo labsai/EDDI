@@ -527,14 +527,14 @@ public class AgentTestRunner {
                     });
             turnSnapshot = awaitTurn(ctx, outcome, timeoutSeconds);
             if (turnSnapshot == null && ctx.cancelled() && !outcome.isDone()) {
-                abandoned.add(outcome);
+                abandon(ctx, conversationId, index, outcome, abandoned);
                 return failedTurn(turn, index, startNanos, "turn", "completed", "abandoned: the run was cancelled");
             }
             if (turnSnapshot == null) {
                 return failedTurn(turn, index, startNanos, "turn", "executed", "skipped: the conversation was busy or paused");
             }
         } catch (TimeoutException e) {
-            abandoned.add(outcome);
+            abandon(ctx, conversationId, index, outcome, abandoned);
             return failedTurn(turn, index, startNanos, "turn", "completed within " + timeoutSeconds + "s", "timed out");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -620,6 +620,26 @@ public class AgentTestRunner {
     private static TurnResult failedTurn(Turn turn, int index, long startNanos, String expectation, Object expected, Object actual) {
         return new TurnResult(index, turn.input(), false, 0.0, TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos), null, null, null,
                 null, List.of(new ExpectationFailure(expectation, expected, actual)));
+    }
+
+    /**
+     * Gives up waiting for a turn, but not on paying for it: the engine keeps
+     * running an abandoned turn, and its model and tool spend is real. It is
+     * charged to the run when the turn completes, so a run whose turns keep timing
+     * out still reaches its {@code maxCostUsd} ceiling instead of spending without
+     * limit.
+     */
+    void abandon(RunContext ctx, String conversationId, int stepIndex, CompletableFuture<SimpleConversationMemorySnapshot> outcome,
+                 List<CompletableFuture<?>> abandoned) {
+        abandoned.add(outcome);
+        // The cost is read from the stored step, as for a turn that answered in time
+        // (withStoredCost waits for the write-back), on a thread of its own: the
+        // completion runs on the engine's thread.
+        outcome.thenAcceptAsync(late -> {
+            if (late != null) {
+                charge(ctx, withStoredCost(conversationId, stepIndex, TurnObservation.fromTurnSnapshot(late)));
+            }
+        }, task -> Thread.ofVirtual().name("agent-test-late-charge").start(task));
     }
 
     private static double charge(RunContext ctx, TurnObservation observed) {

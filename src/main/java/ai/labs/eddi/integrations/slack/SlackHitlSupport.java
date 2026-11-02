@@ -310,7 +310,7 @@ public final class SlackHitlSupport {
     private static List<Map<String, Object>> buildToolCallDetailBlocks(PendingToolCallBatch batch) {
         var detailBlocks = new ArrayList<Map<String, Object>>();
         for (String line : HitlToolCallPreview.lines(batch)) {
-            detailBlocks.add(context(line));
+            detailBlocks.add(context(safe(line)));
         }
         return detailBlocks;
     }
@@ -362,8 +362,14 @@ public final class SlackHitlSupport {
         return btn;
     }
 
+    /**
+     * Untrusted text for a mrkdwn field: the pause reason, agent label and tool
+     * preview can carry model- or user-influenced text, which must render as
+     * literal text in the bot's trusted approval card - never as a
+     * {@code <!channel>} ping or a {@code <url|label>} link.
+     */
     private static String safe(String s) {
-        return s == null ? "" : s;
+        return SlackMrkdwn.escape(s);
     }
 
     // ─── Response-text extraction (shared with SlackEventHandler) ───

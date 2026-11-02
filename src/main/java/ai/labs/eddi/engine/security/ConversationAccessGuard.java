@@ -144,18 +144,41 @@ public class ConversationAccessGuard {
      *             if no descriptor exists at all and the caller is not an admin
      */
     public String requireConversationOwner(String conversationId) {
+        return requireOwner(conversationId, true, null, false);
+    }
+
+    /**
+     * The owner check every {@code require*Owner*} variant shares: resolve the
+     * descriptor (live, else archived), decide what a missing one means, resolve
+     * the owner and require the caller to be that owner or an admin.
+     *
+     * @param adminMayAddressMissing
+     *            whether an admin is admitted (with a {@code null} owner) to a
+     *            conversation that has no descriptor at all; otherwise that is a
+     *            {@link NotFoundException} for everyone
+     * @param legacyOwnerLookup
+     *            owner source for a descriptor that records none; may be null
+     * @param requireAgentUse
+     *            whether the caller must also hold {@code USE} on the
+     *            conversation's agent (the turn-running variant)
+     */
+    private String requireOwner(String conversationId, boolean adminMayAddressMissing, LegacyOwnerLookup legacyOwnerLookup,
+                                boolean requireAgentUse) {
         var descriptor = resolveDescriptor(conversationId);
         if (descriptor == null) {
-            if (ownershipValidator.isAdmin(identity)) {
+            if (adminMayAddressMissing && ownershipValidator.isAdmin(identity)) {
                 // Also true when authorization is disabled — unchanged behaviour there.
                 LOGGER.debugf("No conversation descriptor for %s — admitted as admin", sanitize(conversationId));
                 return null;
             }
-            LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
+            LOGGER.debugf("No conversation descriptor for %s — denying access", sanitize(conversationId));
             throw new NotFoundException("Conversation not found");
         }
-        String owner = ownerOf(descriptor, conversationId, null);
+        String owner = ownerOf(descriptor, conversationId, legacyOwnerLookup);
         ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
+        if (requireAgentUse) {
+            requireUseOfConversationAgent(descriptor, conversationId);
+        }
         return owner;
     }
 
@@ -181,19 +204,7 @@ public class ConversationAccessGuard {
      *         it
      */
     public String requireConversationTurnAccess(String conversationId) {
-        var descriptor = resolveDescriptor(conversationId);
-        if (descriptor == null) {
-            if (ownershipValidator.isAdmin(identity)) {
-                LOGGER.debugf("No conversation descriptor for %s — admitted as admin", sanitize(conversationId));
-                return null;
-            }
-            LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
-            throw new NotFoundException("Conversation not found");
-        }
-        String owner = ownerOf(descriptor, conversationId, null);
-        ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
-        requireUseOfConversationAgent(descriptor, conversationId);
-        return owner;
+        return requireOwner(conversationId, true, null, true);
     }
 
     private void requireUseOfConversationAgent(ConversationDescriptor descriptor, String conversationId) {
@@ -300,13 +311,7 @@ public class ConversationAccessGuard {
      *         conversation that records no owner anywhere
      */
     public String requireExistingConversationOwner(String conversationId) {
-        var descriptor = resolveDescriptor(conversationId);
-        if (descriptor == null) {
-            throw new NotFoundException("Conversation not found");
-        }
-        String owner = ownerOf(descriptor, conversationId, null);
-        ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
-        return owner;
+        return requireOwner(conversationId, false, null, false);
     }
 
     /**
@@ -382,18 +387,7 @@ public class ConversationAccessGuard {
      *            {@link #ownerOf})
      */
     public String requireConversationOwnerStrict(String conversationId, LegacyOwnerLookup legacyOwnerLookup) {
-        var descriptor = resolveDescriptor(conversationId);
-        if (descriptor == null) {
-            if (ownershipValidator.isAdmin(identity)) {
-                LOGGER.debugf("No conversation descriptor for %s — admitted as admin", sanitize(conversationId));
-                return null;
-            }
-            LOGGER.debugf("No conversation descriptor for %s — denying non-admin access", sanitize(conversationId));
-            throw new NotFoundException("Conversation not found");
-        }
-        String owner = ownerOf(descriptor, conversationId, legacyOwnerLookup);
-        ownershipValidator.requireOwnerOrAdminStrict(identity, owner, RESOURCE_TYPE);
-        return owner;
+        return requireOwner(conversationId, true, legacyOwnerLookup, false);
     }
 
     private static String lookUpLegacyOwner(String conversationId, LegacyOwnerLookup legacyOwnerLookup) {

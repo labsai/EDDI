@@ -50,7 +50,11 @@ export function useLatestVersions(resourceUris: string[]) {
             let maxVersion = 1;
             for (const d of descriptors) {
               try {
-                const { version } = parseResourceUri(d.resource);
+                // `filter` is a substring search over names and descriptions, so
+                // the result can hold other resources whose text merely mentions
+                // this id. Only this resource's own versions count.
+                const { id: descriptorId, version } = parseResourceUri(d.resource);
+                if (descriptorId !== id) continue;
                 if (version > maxVersion) maxVersion = version;
               } catch {
                 // skip
