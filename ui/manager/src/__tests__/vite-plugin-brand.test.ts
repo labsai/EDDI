@@ -101,6 +101,21 @@ describe("dev-server defaults", () => {
     for (const page of [manage, welcome, workforce]) expect(page).not.toMatch(PLACEHOLDER);
   });
 
+  it("gives the dev entry (index.html, deep links under npm run dev) the brand like the shells", () => {
+    // Not a build input, so only the dev half applies: it must load the brand
+    // script before the bundle and the stylesheet, and use the brand's icon.
+    const html = shell("index.html");
+    expect(html).toContain('<script src="/branding/__brand__.js"></script>');
+    expect(html.indexOf("/branding/__brand__.js")).toBeLessThan(html.indexOf("/src/main.tsx"));
+    expect(html).toContain('<link rel="stylesheet" href="/branding/brand.css" />');
+    expect(html).toContain('<link rel="icon" href="/branding/icon" />');
+    expect(html).not.toContain("eddi-icon.svg");
+
+    const index = substituteBrandDefaults(html, "index.html");
+    expect(index).toContain("<title>EDDI Manager</title>");
+    expect(index).not.toMatch(PLACEHOLDER);
+  });
+
   it("is a dev-server-only plugin that serves the unbranded script", () => {
     const plugin = brandDefaults({ assets: {} });
     expect(plugin.apply).toBe("serve");

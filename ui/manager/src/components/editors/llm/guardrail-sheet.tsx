@@ -1111,7 +1111,7 @@ function JudgeFields({
       <p className="text-[10px] leading-relaxed text-muted-foreground">
         {t(
           "llmEditor.grJudgeNote",
-          "Asks a model to grade the answer after it is written: one extra model call per answer, and one more per reprompt. EDDI adds the reply format itself; the judge may only name the issue codes below, and a reprompt tells the model only your fix texts. Any other model parameter your provider takes can be added in the JSON view.",
+          "Asks a model to grade the answer after it is written: one extra model call per answer, and one more per reprompt. {{productName}} adds the reply format itself; the judge may only name the issue codes below, and a reprompt tells the model only your fix texts. Any other model parameter your provider takes can be added in the JSON view.",
         )}
       </p>
 

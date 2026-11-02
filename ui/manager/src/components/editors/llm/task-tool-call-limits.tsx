@@ -115,7 +115,7 @@ export function TaskToolCallLimits({ task, onChange, readOnly }: TaskSectionProp
       <p id={hintId} className="text-[10px] leading-relaxed text-muted-foreground">
         {t(
           "llmEditor.maxToolCallsHint",
-          "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs EDDI 6.6 or later — leave blank on an older server.",
+          "Calls past a cap are not run: each gets a NOT_EXECUTED result telling the model the limit was reached, and the model answers with what it has. Refused calls never reach the approval gate. The per-turn count includes calls made before an approval pause. -1 or 0 removes a cap. Needs server version 6.6 or later — leave blank on an older server.",
         )}
       </p>
       {uncapped && (
@@ -225,7 +225,7 @@ export function TaskToolCallLimits({ task, onChange, readOnly }: TaskSectionProp
         <p id={guardHintId} className="text-[10px] leading-relaxed text-muted-foreground">
           {t(
             "llmEditor.repeatGuardHint",
-            "A tool call that already failed identically, with nothing succeeding since, is answered NOT_EXECUTED instead of being run again; after the refusal limit the turn ends with a fixed message. On by default; leave fields blank to keep the defaults. A terminal failure (for example HTTP 403/404) is refused on the very next identical call, a retryable one after the failures allowed. Max identical successful calls is off unless set (-1 or 0 = unlimited). Needs EDDI 6.6 or later - leave untouched on an older server.",
+            "A tool call that already failed identically, with nothing succeeding since, is answered NOT_EXECUTED instead of being run again; after the refusal limit the turn ends with a fixed message. On by default; leave fields blank to keep the defaults. A terminal failure (for example HTTP 403/404) is refused on the very next identical call, a retryable one after the failures allowed. Max identical successful calls is off unless set (-1 or 0 = unlimited). Needs server version 6.6 or later - leave untouched on an older server.",
           )}
         </p>
       </div>

@@ -58,7 +58,7 @@ export function TaskGuardrailsSection({ task, onChange, readOnly }: TaskSectionP
         <p className="text-[10px] leading-relaxed text-muted-foreground">
           {t(
             "llmEditor.grIntro",
-            "Screen the user's message before the model is called, and the model's answer before it is stored or delivered. Nothing is screened unless you add a guardrail. Needs EDDI 6.6 or later: an older server ignores these lists and runs the agent unguarded.",
+            "Screen the user's message before the model is called, and the model's answer before it is stored or delivered. Nothing is screened unless you add a guardrail. Needs server version 6.6 or later: an older server ignores these lists and runs the agent unguarded.",
           )}
         </p>
 

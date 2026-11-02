@@ -175,7 +175,7 @@ export function AdminActionsView() {
                 : undefined
               : t(
                   "audit.adminActions.emptyHint",
-                  "EDDI records them from version 6.6 on, unless eddi.audit.admin-actions.enabled is false. An older server shows nothing here.",
+                  "The server records them from version 6.6 on, unless eddi.audit.admin-actions.enabled is false. An older server shows nothing here.",
                 )
           }
         />
@@ -286,8 +286,8 @@ function AdminActionsError({ error, onRetry }: { error: unknown; onRetry: () => 
     return (
       <EmptyState
         icon={History}
-        title={t("audit.adminActions.unsupported", "This EDDI does not record administrative actions")}
-        description={t("audit.adminActions.unsupportedHint", "They are recorded from EDDI 6.6 on.")}
+        title={t("audit.adminActions.unsupported", "This server does not record administrative actions")}
+        description={t("audit.adminActions.unsupportedHint", "They are recorded from server version 6.6 on.")}
       />
     );
   }

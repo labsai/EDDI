@@ -156,7 +156,7 @@ export function PropertyValueField<T extends TypedPropertyValue>({
       )}
       {(shownKind === "long" || shownKind === "double") && (
         <p className="text-[10px] text-muted-foreground" data-testid={`${testIdPrefix}-needs-66`}>
-          {t("propertyValue.needs66", "Long integer and Decimal need EDDI 6.6 or later.")}
+          {t("propertyValue.needs66", "Long integer and Decimal need server version 6.6 or later.")}
         </p>
       )}
       {conflicting.length > 1 && (

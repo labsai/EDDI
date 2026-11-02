@@ -78,7 +78,7 @@ export function SyncConfigPanel({
     >
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-foreground">
-          {t("syncPage.sourceUrl", "Source EDDI Instance URL")}
+          {t("syncPage.sourceUrl", "Source {{productName}} Instance URL")}
         </label>
         <input
           type="url"
