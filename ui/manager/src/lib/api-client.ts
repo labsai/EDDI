@@ -21,12 +21,19 @@ export interface ApiError {
 export class ApiClientError extends Error implements ApiError {
   readonly status: number;
   readonly url?: string;
+  /**
+   * The stable machine code of an `{"error": "<CODE>", "message": "…"}` body
+   * (e.g. the rating endpoints' `RATING_CHANGED`), when the body had both
+   * fields. `message` holds the sentence; this is what a caller branches on.
+   */
+  readonly code?: string;
 
-  constructor(status: number, message: string, url?: string) {
+  constructor(status: number, message: string, url?: string, code?: string) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     if (url !== undefined) this.url = url;
+    if (code !== undefined) this.code = code;
   }
 }
 
@@ -50,13 +57,33 @@ export async function apiErrorFromResponse(
   url: string = response.url,
 ): Promise<ApiClientError> {
   let message = fallbackMessage;
+  let code: string | undefined;
   try {
-    const extracted = extractErrorMessage(await response.text());
+    const body = await response.text();
+    const extracted = extractErrorMessage(body);
     if (extracted) message = extracted;
+    code = extractErrorCode(body);
   } catch {
     // Body unreadable — keep the fallback.
   }
-  return new ApiClientError(response.status, message, url);
+  return new ApiClientError(response.status, message, url, code);
+}
+
+/**
+ * The `error` code of EDDI's `{"error": "<code>", "message": "…"}` envelope —
+ * only when BOTH are strings, because a body with just `error` uses it as the
+ * message (see `extractErrorMessage`).
+ */
+function extractErrorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body.trim()) as Record<string, unknown> | null;
+    if (parsed && typeof parsed === "object" && typeof parsed.error === "string" && typeof parsed.message === "string") {
+      return parsed.error;
+    }
+  } catch {
+    // Not JSON: no code.
+  }
+  return undefined;
 }
 
 /** Type guard to check if an error is an ApiError from our client */

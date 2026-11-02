@@ -9,6 +9,7 @@ import ai.labs.eddi.secrets.model.EncryptedSecret;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -89,8 +90,11 @@ public interface ISecretPersistence {
     List<EncryptedSecret> listSecretsByTenant(String tenantId);
 
     /**
-     * Rewrites one secret's ciphertext, IV and dekId, but only while the row still
-     * names {@code expectedDekId}.
+     * Rewrites one secret's ciphertext, IV, dekId, lastRotatedAt and checksum, but
+     * only while the row still names {@code expectedDekId}. The checksum is written
+     * because a rotation is what moves a legacy bare SHA-256 checksum onto the
+     * keyed form; it is the row's own checksum (or that upgrade), never another
+     * value's.
      *
      * @param expectedDekId
      *            the dekId read from the row, exactly as stored — a missing value
@@ -372,6 +376,29 @@ public interface ISecretPersistence {
      */
     default void deleteMetaValue(String key) {
         // Default = no-op
+    }
+
+    /**
+     * Removes a metadata value only while it still equals {@code expected}, so a
+     * value another writer replaced in between is kept. Used to take back a
+     * one-time value written under a key that was retired meanwhile (the vault's
+     * checksum key), without deleting the re-wrapped value a KEK rotation may have
+     * put in its place.
+     * <p>
+     * The default is a non-atomic read-then-delete, adequate only for a store
+     * without concurrent writers; the database-backed implementations override it
+     * with an atomic conditional delete.
+     *
+     * @return whether a value was removed
+     * @throws PersistenceException
+     *             if the read or delete fails
+     */
+    default boolean deleteMetaValueIfEquals(String key, String expected) {
+        if (!Objects.equals(getMetaValue(key), expected)) {
+            return false;
+        }
+        deleteMetaValue(key);
+        return true;
     }
 
     /**

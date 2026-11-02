@@ -49,7 +49,27 @@ public class InputData {
     @JsonIgnore
     private Long callerGivesUpAtEpochMs;
 
+    /**
+     * Set only when the engine runs a self-continuation turn
+     * ({@code CONTINUE_CONVERSATION}): its number, which the turn's step records so
+     * a re-delivered continuation is recognised and {@code maxContinuations} can be
+     * counted. Never read from or written to a request body — a client cannot claim
+     * a turn is a continuation.
+     */
+    @JsonIgnore
+    private Integer continuationNumber;
+
     public InputData() {
+    }
+
+    @JsonIgnore
+    public Integer getContinuationNumber() {
+        return continuationNumber;
+    }
+
+    @JsonIgnore
+    public void setContinuationNumber(Integer continuationNumber) {
+        this.continuationNumber = continuationNumber;
     }
 
     @JsonIgnore

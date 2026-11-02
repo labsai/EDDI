@@ -1,0 +1,8 @@
+{
+  "name": "eddi-no-sharp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stand-in for sharp, which astro lists as an optional dependency; package.json overrides sharp with this. The docs site uses the pass-through image service and never loads it; the real package would pull in libvips (LGPL-3.0), which the repository's dependency licence policy denies. Named eddi-no-sharp, not sharp, so that scanners matching packages by name (Trivy) do not report sharp advisories against code that is not here. See ../../README.md.",
+  "license": "Apache-2.0",
+  "main": "index.js"
+}

@@ -14,6 +14,7 @@ import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -23,6 +24,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMessageLedger;
@@ -51,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
@@ -80,6 +83,7 @@ class HitlEmailNotifierTest {
     private IAgentStore agents;
     private IDocumentDescriptorStore descriptors;
     private AuditLedgerService audit;
+    private GdprPseudonymizer pseudonymizer;
     private SimpleMeterRegistry meters;
     private ConversationMemorySnapshot snapshot;
     private AgentConfiguration agent;
@@ -103,6 +107,10 @@ class HitlEmailNotifierTest {
         descriptors = mock(IDocumentDescriptorStore.class);
         audit = mock(AuditLedgerService.class);
         when(audit.isEnabled()).thenReturn(true);
+        pseudonymizer = mock(GdprPseudonymizer.class);
+        // A stand-in keyed token: stable per address, and never the address itself.
+        when(pseudonymizer.pseudonymFor(anyString()))
+                .thenAnswer(i -> "gdpr-erased:k1:" + Integer.toHexString(i.getArgument(0, String.class).hashCode()));
         meters = new SimpleMeterRegistry();
         connectionsConfig = mock(ConnectionsConfig.class);
         when(connectionsConfig.getPublicBaseUrl()).thenReturn("https://eddi.example.com");
@@ -141,7 +149,8 @@ class HitlEmailNotifierTest {
         Instance<ConnectionsConfig> instance = mock(Instance.class);
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(connectionsConfig);
-        var notifier = new HitlEmailNotifier(mailer, ledger, conversations, agents, descriptors, instance, audit, meters, Duration.ofDays(30),
+        var notifier = new HitlEmailNotifier(mailer, ledger, conversations, agents, descriptors, instance, audit, pseudonymizer, meters,
+                Duration.ofDays(30),
                 maxAttempts, Duration.ofMinutes(1), Optional.of(allowedDomains), maxPerHour);
         notifier.registerGauge();
         return notifier;
@@ -185,6 +194,25 @@ class HitlEmailNotifierTest {
 
         assertEquals(2, sent.size());
         assertEquals(2, ledger.all().size());
+    }
+
+    @Test
+    @DisplayName("one recipient's store failure does not cost the other recipients their notification")
+    void recipientsAreIsolated() throws Exception {
+        ledger = new InMemoryEmailMessageLedger() {
+            @Override
+            public synchronized long countCreatedSince(String recipient, Kind kind, Instant since) {
+                if ("ops@example.com".equals(recipient)) {
+                    throw new IllegalStateException("connection reset");
+                }
+                return super.countCreatedSince(recipient, kind, since);
+            }
+        };
+
+        notifier(6).notifyPause(CONVERSATION, PAUSE, NOW);
+
+        assertEquals(List.of("manager@example.com"), ledger.all().stream().map(LedgerEntry::recipient).toList());
+        assertEquals(1, sent.size());
     }
 
     @Test
@@ -292,6 +320,26 @@ class HitlEmailNotifierTest {
 
             assertEquals(State.FAILED, ledger.all().get(0).state());
             assertEquals(1, ledger.all().get(0).attempts());
+        }
+
+        @Test
+        @DisplayName("a send failure that is not a MailSendException is an attempt: retried, then FAILED at max-attempts")
+        void unexpectedSendFailureCountsAsAttempt() throws Exception {
+            notifyTo("ops@example.com");
+            doThrow(new IllegalArgumentException("bad allowed-hosts entry")).when(mailer).send(any(), anyList());
+            var notifier = notifier(2);
+
+            notifier.notifyPause(CONVERSATION, PAUSE, NOW);
+            LedgerEntry first = ledger.all().get(0);
+            assertEquals(State.PENDING, first.state());
+            assertTrue(first.lastError().startsWith("SEND: IllegalArgumentException"), first.lastError());
+            assertEquals(1.0, outbound("retry"));
+            notifier.sweep(first.nextAttemptAt());
+
+            LedgerEntry row = ledger.all().get(0);
+            assertEquals(State.FAILED, row.state());
+            assertEquals(2, row.attempts());
+            assertEquals(1.0, outbound("failed"));
         }
 
         @Test
@@ -461,7 +509,7 @@ class HitlEmailNotifierTest {
         }
 
         @Test
-        @DisplayName("the audit entry names the recipient by hash and domain, never in plain text, and carries no body")
+        @DisplayName("the audit entry names the recipient by keyed pseudonym and domain, never in plain text, and carries no body")
         void auditMinimised() throws Exception {
             notifyTo("ops@example.com");
 
@@ -472,7 +520,8 @@ class HitlEmailNotifierTest {
             AuditEntry entry = captor.getValue();
             assertEquals(CONVERSATION, entry.conversationId());
             assertEquals("email.notify", entry.taskId());
-            assertEquals(HitlEmailNotifier.recipientHash("ops@example.com"), entry.output().get("recipientHash"));
+            assertEquals(pseudonymizer.pseudonymFor("ops@example.com"), entry.output().get("recipientPseudonym"));
+            assertFalse(entry.output().containsKey("recipientHash"), "no unkeyed hash beside the domain");
             assertEquals("example.com", entry.output().get("recipientDomain"));
             String flat = entry.toString() + entry.output();
             assertFalse(flat.contains("ops@example.com"), flat);

@@ -255,7 +255,9 @@ public class MailDnsResolver {
         TxtLookup lookup = interpret(answer);
         count(lookup.status(), false);
         if (lookup.status() != Status.TEMPFAIL) {
-            Duration ttl = answer.ttl() != null ? answer.ttl() : lookup.status() == Status.FOUND ? Duration.ZERO : DEFAULT_NEGATIVE_TTL;
+            Duration ttl = answer != null && answer.ttl() != null
+                    ? answer.ttl()
+                    : lookup.status() == Status.FOUND ? Duration.ZERO : DEFAULT_NEGATIVE_TTL;
             long nanos = clampTtl(ttl).toNanos();
             if (nanos > 0) {
                 cache.put(key, new Cached(lookup, nanos));

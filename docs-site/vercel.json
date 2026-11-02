@@ -1,0 +1,2227 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "astro",
+  "installCommand": "npm ci",
+  "buildCommand": "npm run build",
+  "outputDirectory": ".generated/dist",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- . ../docs ../PRIVACY.md",
+  "trailingSlash": true,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains"
+        },
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://img.shields.io https://quay.io; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+        }
+      ]
+    },
+    {
+      "source": "/(.*)\\.md",
+      "headers": [
+        {
+          "key": "Content-Type",
+          "value": "text/markdown; charset=utf-8"
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [
+        {
+          "type": "host",
+          "value": "docs.labs.ai"
+        }
+      ],
+      "destination": "https://docs.eddi.technology/:path*",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/getting-started",
+      "destination": "/getting-started/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/getting-started/",
+      "destination": "/getting-started/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/getting-started.md",
+      "destination": "/getting-started.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/developer-quickstart",
+      "destination": "/developer-quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/developer-quickstart/",
+      "destination": "/developer-quickstart/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/developer-quickstart.md",
+      "destination": "/developer-quickstart.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/agent-manager-gui",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/agent-manager-gui/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/agent-manager-gui.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/putting-it-all-together",
+      "destination": "/putting-it-all-together/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/putting-it-all-together/",
+      "destination": "/putting-it-all-together/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/putting-it-all-together.md",
+      "destination": "/putting-it-all-together.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/import-export-an-agent",
+      "destination": "/import-export-an-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/import-export-an-agent/",
+      "destination": "/import-export-an-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/import-export-an-agent.md",
+      "destination": "/import-export-an-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/troubleshooting",
+      "destination": "/troubleshooting/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/troubleshooting/",
+      "destination": "/troubleshooting/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/troubleshooting.md",
+      "destination": "/troubleshooting.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/architecture",
+      "destination": "/architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/architecture/",
+      "destination": "/architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/architecture.md",
+      "destination": "/architecture.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/project-philosophy",
+      "destination": "/project-philosophy/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/project-philosophy/",
+      "destination": "/project-philosophy/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/project-philosophy.md",
+      "destination": "/project-philosophy.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/conversation-memory",
+      "destination": "/conversation-memory/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/conversation-memory/",
+      "destination": "/conversation-memory/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/conversation-memory.md",
+      "destination": "/conversation-memory.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/memory-policy",
+      "destination": "/memory-policy/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/memory-policy/",
+      "destination": "/memory-policy/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/memory-policy.md",
+      "destination": "/memory-policy.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/properties",
+      "destination": "/properties/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/properties/",
+      "destination": "/properties/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/properties.md",
+      "destination": "/properties.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/user-memory",
+      "destination": "/user-memory/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/user-memory/",
+      "destination": "/user-memory/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/user-memory.md",
+      "destination": "/user-memory.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/extensions",
+      "destination": "/extensions/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/extensions/",
+      "destination": "/extensions/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/extensions.md",
+      "destination": "/extensions.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/agent-config-authoring",
+      "destination": "/agent-config-authoring/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/agent-config-authoring/",
+      "destination": "/agent-config-authoring/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/agent-config-authoring.md",
+      "destination": "/agent-config-authoring.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/behavior-rules",
+      "destination": "/behavior-rules/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/behavior-rules/",
+      "destination": "/behavior-rules/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/behavior-rules.md",
+      "destination": "/behavior-rules.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/httpcalls",
+      "destination": "/httpcalls/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/httpcalls/",
+      "destination": "/httpcalls/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/httpcalls.md",
+      "destination": "/httpcalls.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/langchain",
+      "destination": "/langchain/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/langchain/",
+      "destination": "/langchain/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/langchain.md",
+      "destination": "/langchain.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/langchain/llm-parameters",
+      "destination": "/llm-parameters/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/langchain/llm-parameters/",
+      "destination": "/llm-parameters/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/langchain/llm-parameters.md",
+      "destination": "/llm-parameters.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/rag",
+      "destination": "/rag/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/rag/",
+      "destination": "/rag/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/rag.md",
+      "destination": "/rag.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/model-cascade",
+      "destination": "/model-cascade/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/model-cascade/",
+      "destination": "/model-cascade/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/model-cascade.md",
+      "destination": "/model-cascade.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/llm-resilience",
+      "destination": "/llm-resilience/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/llm-resilience/",
+      "destination": "/llm-resilience/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/llm-resilience.md",
+      "destination": "/llm-resilience.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/prompt-snippets-guide",
+      "destination": "/prompt-snippets-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/prompt-snippets-guide/",
+      "destination": "/prompt-snippets-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/prompt-snippets-guide.md",
+      "destination": "/prompt-snippets-guide.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/output-configuration",
+      "destination": "/output-configuration/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/output-configuration/",
+      "destination": "/output-configuration/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/output-configuration.md",
+      "destination": "/output-configuration.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/output-templating",
+      "destination": "/output-templating/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/output-templating/",
+      "destination": "/output-templating/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/output-templating.md",
+      "destination": "/output-templating.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/semantic-parser",
+      "destination": "/semantic-parser/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/semantic-parser/",
+      "destination": "/semantic-parser/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/semantic-parser.md",
+      "destination": "/semantic-parser.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/passing-context-information",
+      "destination": "/passing-context-information/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/passing-context-information/",
+      "destination": "/passing-context-information/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/passing-context-information.md",
+      "destination": "/passing-context-information.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/attachments-guide",
+      "destination": "/attachments-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/attachments-guide/",
+      "destination": "/attachments-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/attachments-guide.md",
+      "destination": "/attachments-guide.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/conversations",
+      "destination": "/conversations/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/conversations/",
+      "destination": "/conversations/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/conversations.md",
+      "destination": "/conversations.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/rest-api-reference",
+      "destination": "/rest-api-reference/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/rest-api-reference/",
+      "destination": "/rest-api-reference/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/rest-api-reference.md",
+      "destination": "/rest-api-reference.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/group-conversations",
+      "destination": "/group-conversations/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/group-conversations/",
+      "destination": "/group-conversations/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/group-conversations.md",
+      "destination": "/group-conversations.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/hitl",
+      "destination": "/hitl/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/hitl/",
+      "destination": "/hitl/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/hitl.md",
+      "destination": "/hitl.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/managed-agents",
+      "destination": "/managed-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/managed-agents/",
+      "destination": "/managed-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/managed-agents.md",
+      "destination": "/managed-agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/scheduling",
+      "destination": "/scheduling/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/scheduling/",
+      "destination": "/scheduling/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/scheduling.md",
+      "destination": "/scheduling.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/capability-match-guide",
+      "destination": "/capability-match-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/capability-match-guide/",
+      "destination": "/capability-match-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/capability-match-guide.md",
+      "destination": "/capability-match-guide.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/deployment-management-of-agents",
+      "destination": "/deployment-management-of-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/deployment-management-of-agents/",
+      "destination": "/deployment-management-of-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/deployment-management-of-agents.md",
+      "destination": "/deployment-management-of-agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/agent-testing",
+      "destination": "/agent-testing/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/agent-testing/",
+      "destination": "/agent-testing/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/agent-testing.md",
+      "destination": "/agent-testing.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/agent-sync-guide",
+      "destination": "/agent-sync-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/agent-sync-guide/",
+      "destination": "/agent-sync-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/agent-sync-guide.md",
+      "destination": "/agent-sync-guide.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/mcp-server",
+      "destination": "/mcp-server/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/mcp-server/",
+      "destination": "/mcp-server/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/mcp-server.md",
+      "destination": "/mcp-server.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/mcp-client",
+      "destination": "/mcp-client/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/mcp-client/",
+      "destination": "/mcp-client/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/mcp-client.md",
+      "destination": "/mcp-client.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/a2a-protocol",
+      "destination": "/a2a-protocol/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/a2a-protocol/",
+      "destination": "/a2a-protocol/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/a2a-protocol.md",
+      "destination": "/a2a-protocol.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/connections",
+      "destination": "/connections/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/connections/",
+      "destination": "/connections/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/connections.md",
+      "destination": "/connections.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/slack-integration",
+      "destination": "/slack-integration/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/slack-integration/",
+      "destination": "/slack-integration/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/slack-integration.md",
+      "destination": "/slack-integration.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/webhook-triggers",
+      "destination": "/webhook-triggers/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/webhook-triggers/",
+      "destination": "/webhook-triggers/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/webhook-triggers.md",
+      "destination": "/webhook-triggers.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/open-webui-integration",
+      "destination": "/open-webui-integration/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/open-webui-integration/",
+      "destination": "/open-webui-integration/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/open-webui-integration.md",
+      "destination": "/open-webui-integration.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/chat-ui-embedding",
+      "destination": "/chat-ui-embedding/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/chat-ui-embedding/",
+      "destination": "/chat-ui-embedding/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/chat-ui-embedding.md",
+      "destination": "/chat-ui-embedding.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/security",
+      "destination": "/security/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/security/",
+      "destination": "/security/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/security.md",
+      "destination": "/security.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/cryptography",
+      "destination": "/cryptography/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/cryptography/",
+      "destination": "/cryptography/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/cryptography.md",
+      "destination": "/cryptography.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/workspaces",
+      "destination": "/workspaces/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/workspaces/",
+      "destination": "/workspaces/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/workspaces.md",
+      "destination": "/workspaces.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/secrets-vault",
+      "destination": "/secrets-vault/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/secrets-vault/",
+      "destination": "/secrets-vault/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/secrets-vault.md",
+      "destination": "/secrets-vault.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/global-variables",
+      "destination": "/global-variables/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/global-variables/",
+      "destination": "/global-variables/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/global-variables.md",
+      "destination": "/global-variables.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/audit-ledger",
+      "destination": "/audit-ledger/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/audit-ledger/",
+      "destination": "/audit-ledger/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/audit-ledger.md",
+      "destination": "/audit-ledger.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/tenant-quotas",
+      "destination": "/tenant-quotas/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/tenant-quotas/",
+      "destination": "/tenant-quotas/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/tenant-quotas.md",
+      "destination": "/tenant-quotas.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/gdpr-compliance",
+      "destination": "/gdpr-compliance/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/gdpr-compliance/",
+      "destination": "/gdpr-compliance/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/gdpr-compliance.md",
+      "destination": "/gdpr-compliance.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/hipaa-compliance",
+      "destination": "/hipaa-compliance/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/hipaa-compliance/",
+      "destination": "/hipaa-compliance/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/hipaa-compliance.md",
+      "destination": "/hipaa-compliance.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/baa-template",
+      "destination": "/baa-template/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/baa-template/",
+      "destination": "/baa-template/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/baa-template.md",
+      "destination": "/baa-template.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/eu-ai-act-compliance",
+      "destination": "/eu-ai-act-compliance/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/eu-ai-act-compliance/",
+      "destination": "/eu-ai-act-compliance/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/eu-ai-act-compliance.md",
+      "destination": "/eu-ai-act-compliance.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/compliance-data-flow",
+      "destination": "/compliance-data-flow/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/compliance-data-flow/",
+      "destination": "/compliance-data-flow/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/compliance-data-flow.md",
+      "destination": "/compliance-data-flow.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/incident-response",
+      "destination": "/incident-response/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/incident-response/",
+      "destination": "/incident-response/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/incident-response.md",
+      "destination": "/incident-response.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/security-review",
+      "destination": "/security-review/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/security-review/",
+      "destination": "/security-review/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/security-review.md",
+      "destination": "/security-review.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/privacy",
+      "destination": "/privacy/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/privacy/",
+      "destination": "/privacy/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/privacy.md",
+      "destination": "/privacy.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/configuration-reference",
+      "destination": "/configuration-reference/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/configuration-reference/",
+      "destination": "/configuration-reference/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/configuration-reference.md",
+      "destination": "/configuration-reference.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-5x",
+      "destination": "/upgrading-from-5x/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-5x/",
+      "destination": "/upgrading-from-5x/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-5x.md",
+      "destination": "/upgrading-from-5x.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-6.4",
+      "destination": "/upgrading-from-6.4/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-6.4/",
+      "destination": "/upgrading-from-6.4/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-6.4.md",
+      "destination": "/upgrading-from-6.4.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-6.5",
+      "destination": "/upgrading-from-6.5/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-6.5/",
+      "destination": "/upgrading-from-6.5/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/upgrading-from-6.5.md",
+      "destination": "/upgrading-from-6.5.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/docker",
+      "destination": "/docker/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/docker/",
+      "destination": "/docker/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/docker.md",
+      "destination": "/docker.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/kubernetes",
+      "destination": "/kubernetes/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/kubernetes/",
+      "destination": "/kubernetes/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/kubernetes.md",
+      "destination": "/kubernetes.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/clustering",
+      "destination": "/clustering/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/clustering/",
+      "destination": "/clustering/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/clustering.md",
+      "destination": "/clustering.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/redhat-openshift",
+      "destination": "/redhat-openshift/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/redhat-openshift/",
+      "destination": "/redhat-openshift/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/redhat-openshift.md",
+      "destination": "/redhat-openshift.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/setup-eddi-on-aws-with-mongodb-atlas",
+      "destination": "/setup-eddi-on-aws-with-mongodb-atlas/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/setup-eddi-on-aws-with-mongodb-atlas/",
+      "destination": "/setup-eddi-on-aws-with-mongodb-atlas/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/setup-eddi-on-aws-with-mongodb-atlas.md",
+      "destination": "/setup-eddi-on-aws-with-mongodb-atlas.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-versioning",
+      "destination": "/release-versioning/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-versioning/",
+      "destination": "/release-versioning/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-versioning.md",
+      "destination": "/release-versioning.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-signing",
+      "destination": "/release-signing/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-signing/",
+      "destination": "/release-signing/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-signing.md",
+      "destination": "/release-signing.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-notes",
+      "destination": "/release-notes/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-notes/",
+      "destination": "/release-notes/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-notes.md",
+      "destination": "/release-notes.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-notes/release-notes-6.0.2",
+      "destination": "/release-notes-6.0.2/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-notes/release-notes-6.0.2/",
+      "destination": "/release-notes-6.0.2/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/release-notes/release-notes-6.0.2.md",
+      "destination": "/release-notes-6.0.2.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/metrics",
+      "destination": "/metrics/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/metrics/",
+      "destination": "/metrics/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/metrics.md",
+      "destination": "/metrics.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/monitoring-guide",
+      "destination": "/monitoring-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/monitoring-guide/",
+      "destination": "/monitoring-guide/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/monitoring-guide.md",
+      "destination": "/monitoring-guide.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/log-administration",
+      "destination": "/log-administration/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/log-administration/",
+      "destination": "/log-administration/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/log-administration.md",
+      "destination": "/log-administration.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/coordinator-admin",
+      "destination": "/coordinator-admin/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/coordinator-admin/",
+      "destination": "/coordinator-admin/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/coordinator-admin.md",
+      "destination": "/coordinator-admin.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/agent-sync-architecture",
+      "destination": "/agent-sync-architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/agent-sync-architecture/",
+      "destination": "/agent-sync-architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/agent-sync-architecture.md",
+      "destination": "/agent-sync-architecture.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/code-review-standards",
+      "destination": "/code-review-standards/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/code-review-standards/",
+      "destination": "/code-review-standards/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/code-review-standards.md",
+      "destination": "/code-review-standards.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/build-reproducibility",
+      "destination": "/build-reproducibility/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/build-reproducibility/",
+      "destination": "/build-reproducibility/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/build-reproducibility.md",
+      "destination": "/build-reproducibility.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog",
+      "destination": "/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/",
+      "destination": "/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog.md",
+      "destination": "/changelog.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-10",
+      "destination": "/changelog/2026-10/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-10/",
+      "destination": "/changelog/2026-10/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-10.md",
+      "destination": "/changelog/2026-10.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-09",
+      "destination": "/changelog/2026-09/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-09/",
+      "destination": "/changelog/2026-09/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-09.md",
+      "destination": "/changelog/2026-09.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-08",
+      "destination": "/changelog/2026-08/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-08/",
+      "destination": "/changelog/2026-08/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-08.md",
+      "destination": "/changelog/2026-08.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-07",
+      "destination": "/changelog/2026-07/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-07/",
+      "destination": "/changelog/2026-07/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-07.md",
+      "destination": "/changelog/2026-07.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-06",
+      "destination": "/changelog/2026-06/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-06/",
+      "destination": "/changelog/2026-06/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-06.md",
+      "destination": "/changelog/2026-06.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-05",
+      "destination": "/changelog/2026-05/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-05/",
+      "destination": "/changelog/2026-05/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-05.md",
+      "destination": "/changelog/2026-05.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-04",
+      "destination": "/changelog/2026-04/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-04/",
+      "destination": "/changelog/2026-04/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-04.md",
+      "destination": "/changelog/2026-04.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-03",
+      "destination": "/changelog/2026-03/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-03/",
+      "destination": "/changelog/2026-03/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/2026-03.md",
+      "destination": "/changelog/2026-03.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/changelog.d",
+      "destination": "/changelog/pending/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/changelog.d/",
+      "destination": "/changelog/pending/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/changelog/changelog.d.md",
+      "destination": "/changelog/pending.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/how-to...",
+      "destination": "/faq/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/how-to.../",
+      "destination": "/faq/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/how-to....md",
+      "destination": "/faq.md",
+      "permanent": true
+    },
+    {
+      "source": "/archive/handoff-v6.0-snapshot",
+      "destination": "/handoff-v6.0-snapshot/",
+      "permanent": true
+    },
+    {
+      "source": "/archive/handoff-v6.0-snapshot/",
+      "destination": "/handoff-v6.0-snapshot/",
+      "permanent": true
+    },
+    {
+      "source": "/archive/handoff-v6.0-snapshot.md",
+      "destination": "/handoff-v6.0-snapshot.md",
+      "permanent": true
+    },
+    {
+      "source": "/how-to...",
+      "destination": "/faq/",
+      "permanent": true
+    },
+    {
+      "source": "/how-to.../",
+      "destination": "/faq/",
+      "permanent": true
+    },
+    {
+      "source": "/how-to....md",
+      "destination": "/faq.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/how-to...",
+      "destination": "/faq/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/how-to.../",
+      "destination": "/faq/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/how-to....md",
+      "destination": "/faq.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/creating-your-first-agent",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/creating-your-first-agent/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/creating-your-first-agent.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/creating-your-first-agent-1",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/creating-your-first-agent-1/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/creating-your-first-agent/creating-your-first-agent-1.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/your-first-agent",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/your-first-agent/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/your-first-agent.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/your-first-agent/understanding-your-first-agent",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/your-first-agent/understanding-your-first-agent/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/getting-started/your-first-agent/understanding-your-first-agent.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/creating-your-first-chatbot",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/creating-your-first-chatbot/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/creating-your-first-chatbot.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/creating-your-first-chatbot-1",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/creating-your-first-chatbot-1/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/creating-your-first-chatbot/creating-your-first-chatbot-1.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/your-first-bot",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/your-first-bot/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/your-first-bot.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/your-first-bot/understanding-your-first-bot",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/your-first-bot/understanding-your-first-bot/",
+      "destination": "/creating-your-first-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/your-first-bot/understanding-your-first-bot.md",
+      "destination": "/creating-your-first-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/bot-manager-gui",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/bot-manager-gui/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/bot-manager-gui.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/import-export-a-chatbot",
+      "destination": "/import-export-an-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/import-export-a-chatbot/",
+      "destination": "/import-export-an-agent/",
+      "permanent": true
+    },
+    {
+      "source": "/import-export-a-chatbot.md",
+      "destination": "/import-export-an-agent.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployement-management-of-chatbots",
+      "destination": "/deployment-management-of-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/deployement-management-of-chatbots/",
+      "destination": "/deployment-management-of-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/deployement-management-of-chatbots.md",
+      "destination": "/deployment-management-of-agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-management-of-chatbots",
+      "destination": "/deployment-management-of-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-management-of-chatbots/",
+      "destination": "/deployment-management-of-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-management-of-chatbots.md",
+      "destination": "/deployment-management-of-agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/managed-bots",
+      "destination": "/managed-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/managed-bots/",
+      "destination": "/managed-agents/",
+      "permanent": true
+    },
+    {
+      "source": "/managed-bots.md",
+      "destination": "/managed-agents.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-conversation-flow",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-conversation-flow/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-conversation-flow.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-deep-dive",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-deep-dive/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-deep-dive.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-implementation-summary",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-implementation-summary/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-implementation-summary.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-langchain-tools-guide",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-langchain-tools-guide/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-langchain-tools-guide.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-langchain-updates",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-langchain-updates/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-langchain-updates.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-tools-configuration-fix",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-tools-configuration-fix/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/agent-father-tools-configuration-fix.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-conversation-flow",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-conversation-flow/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-conversation-flow.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-deep-dive",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-deep-dive/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-deep-dive.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-implementation-summary",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-implementation-summary/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-implementation-summary.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-langchain-tools-guide",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-langchain-tools-guide/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-langchain-tools-guide.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-langchain-updates",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-langchain-updates/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-langchain-updates.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-tools-configuration-fix",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-tools-configuration-fix/",
+      "destination": "/agent-manager-gui/",
+      "permanent": true
+    },
+    {
+      "source": "/advanced-concepts/bot-father-tools-configuration-fix.md",
+      "destination": "/agent-manager-gui.md",
+      "permanent": true
+    },
+    {
+      "source": "/http2-and-ssl",
+      "destination": "/security/",
+      "permanent": true
+    },
+    {
+      "source": "/http2-and-ssl/",
+      "destination": "/security/",
+      "permanent": true
+    },
+    {
+      "source": "/http2-and-ssl.md",
+      "destination": "/security.md",
+      "permanent": true
+    },
+    {
+      "source": "/facebook-channel-setup",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/facebook-channel-setup/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/facebook-channel-setup.md",
+      "destination": "/index.md",
+      "permanent": true
+    },
+    {
+      "source": "/git-support",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/git-support/",
+      "destination": "/",
+      "permanent": true
+    },
+    {
+      "source": "/git-support.md",
+      "destination": "/index.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/tasks",
+      "destination": "/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/tasks/",
+      "destination": "/changelog/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/tasks.md",
+      "destination": "/changelog.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/git-commit-guide",
+      "destination": "https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/git-commit-guide/",
+      "destination": "https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/git-commit-guide.md",
+      "destination": "https://github.com/labsai/EDDI/blob/main/CONTRIBUTING.md",
+      "permanent": true
+    },
+    {
+      "source": "/Release.Notes",
+      "destination": "/release-notes/",
+      "permanent": true
+    },
+    {
+      "source": "/Release.Notes/",
+      "destination": "/release-notes/",
+      "permanent": true
+    },
+    {
+      "source": "/Release.Notes.md",
+      "destination": "/release-notes.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts",
+      "destination": "/architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/",
+      "destination": "/architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts.md",
+      "destination": "/architecture.md",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration",
+      "destination": "/agent-config-authoring/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/",
+      "destination": "/agent-config-authoring/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration.md",
+      "destination": "/agent-config-authoring.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration",
+      "destination": "/conversations/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/",
+      "destination": "/conversations/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration.md",
+      "destination": "/conversations.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration",
+      "destination": "/mcp-server/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/",
+      "destination": "/mcp-server/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration.md",
+      "destination": "/mcp-server.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance",
+      "destination": "/security/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/",
+      "destination": "/security/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance.md",
+      "destination": "/security.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure",
+      "destination": "/configuration-reference/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/",
+      "destination": "/configuration-reference/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure.md",
+      "destination": "/configuration-reference.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference",
+      "destination": "/agent-sync-architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/",
+      "destination": "/agent-sync-architecture/",
+      "permanent": true
+    },
+    {
+      "source": "/reference.md",
+      "destination": "/agent-sync-architecture.md",
+      "permanent": true
+    },
+    {
+      "source": "/archive",
+      "destination": "/handoff-v6.0-snapshot/",
+      "permanent": true
+    },
+    {
+      "source": "/archive/",
+      "destination": "/handoff-v6.0-snapshot/",
+      "permanent": true
+    },
+    {
+      "source": "/archive.md",
+      "destination": "/handoff-v6.0-snapshot.md",
+      "permanent": true
+    },
+    {
+      "source": "/handoff-v6.0-snapshot",
+      "destination": "/handoff-v6.0-snapshot/",
+      "permanent": true
+    },
+    {
+      "source": "/release-notes-6.0.2",
+      "destination": "/release-notes-6.0.2/",
+      "permanent": true
+    },
+    {
+      "source": "/upgrading-from-6.4",
+      "destination": "/upgrading-from-6.4/",
+      "permanent": true
+    },
+    {
+      "source": "/upgrading-from-6.5",
+      "destination": "/upgrading-from-6.5/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/agent-configuration/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/architecture-and-concepts/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/archive/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/archive/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/archive/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/conversations-and-orchestration/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/deployment-and-infrastructure/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/protocols-and-integration/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/reference/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/reference/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/:slug([^/.]+)",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/:slug([^/.]+)/",
+      "destination": "/:slug/",
+      "permanent": true
+    },
+    {
+      "source": "/security-and-compliance/:slug([^/.]+).md",
+      "destination": "/:slug.md",
+      "permanent": true
+    }
+  ]
+}

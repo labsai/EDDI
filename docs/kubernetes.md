@@ -301,7 +301,7 @@ kubectl apply -k k8s/examples/postgres-ha/
                │
     ┌──────────▼──────────┐    ┌─────────────┐
     │  EDDI Deployment     │───▶│  MongoDB    │
-    │  (labsai/eddi:6.5.0) │    │ StatefulSet │
+    │  (labsai/eddi:6.6.0) │    │ StatefulSet │
     │                      │    └─────────────┘
     │  replicas: 1         │    ┌─────────────┐
     │  (N with NATS)       │───▶│ PostgreSQL  │
@@ -496,6 +496,7 @@ hosts, because the Ingress fronts EDDI and not Keycloak.
 | Keycloak's own hostname (what it stamps as the token issuer) | `KC_HOSTNAME` in `keycloak-statefulset.yaml` | `eddi.oidc.publicUrl` |
 | URL handed to the Manager SPA | `EDDI_KEYCLOAK_PUBLIC_URL` patch | `eddi.oidc.publicUrl` |
 | Issuer EDDI validates tokens against | `QUARKUS_OIDC_TOKEN_ISSUER` patch | derived from `eddi.oidc.publicUrl` |
+| Keycloak trusts `X-Forwarded-*` from a TLS-terminating proxy, so its token/JWKS/userinfo URLs are `https` (MCP clients refuse an `http` token endpoint) | add `KC_PROXY_HEADERS: xforwarded` to `keycloak-statefulset.yaml` when a proxy terminates TLS | `keycloak.proxyHeaders` — automatic `xforwarded` when `eddi.oidc.publicUrl` is https |
 
 **One names the browser-facing origin of EDDI** — where the Manager SPA is
 served, i.e. `ingress.hosts[0].host` (e.g. `https://eddi.example.com`), *not*

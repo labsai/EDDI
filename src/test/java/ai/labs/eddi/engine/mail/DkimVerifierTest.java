@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -406,6 +407,14 @@ class DkimVerifierTest {
             assertFail(verifyOne(sign(standardMessage(), new Options().extraTags("t=" + (now - 100) + "; x=" + (now - 200))),
                     dnsFor(rsa2048())), "before t=");
             assertFail(verifyOne(sign(standardMessage(), new Options().extraTags("t=12ab")), dnsFor(rsa2048())), "t=");
+        }
+
+        @ParameterizedTest
+        @ValueSource(strings = {"abc", "-5", "1e9", "99999999999999999999", "9223372036854775808", "1234567890123"})
+        @DisplayName("a non-numeric or overflowing t= or x= fails the signature instead of throwing")
+        void malformedTimestamps(String bad) {
+            assertFail(verifyOne(sign(standardMessage(), new Options().extraTags("t=" + bad)), dnsFor(rsa2048())), "t=");
+            assertFail(verifyOne(sign(standardMessage(), new Options().extraTags("x=" + bad)), dnsFor(rsa2048())), "x=");
         }
 
         @Test

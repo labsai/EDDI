@@ -31,6 +31,11 @@ export const DEV_ASSET_PATHS = [
   "*/@react-refresh",
   // Pre-bundled dependencies (`/node_modules/.vite/deps/*`).
   "*/node_modules/*",
+  // The brand: in production EDDI serves /branding/*; under the dev server the
+  // brand-defaults plugin does (scripts/vite-plugin-brand.mjs). The shells load
+  // /branding/icon and /branding/logo, which have no file extension, so the
+  // unhandled-request recorder would otherwise count them as API calls.
+  "*/branding/*",
 ];
 
 export const devAssetPassthrough: RequestHandler[] = DEV_ASSET_PATHS.map(

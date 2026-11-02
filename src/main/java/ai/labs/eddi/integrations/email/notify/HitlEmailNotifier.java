@@ -14,6 +14,7 @@ import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -125,6 +126,7 @@ public class HitlEmailNotifier {
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final Instance<ConnectionsConfig> connectionsConfig;
     private final AuditLedgerService auditLedgerService;
+    private final GdprPseudonymizer pseudonymizer;
     private final MeterRegistry meterRegistry;
     private final Duration retention;
     private final int maxAttempts;
@@ -133,7 +135,9 @@ public class HitlEmailNotifier {
     private final String recipientPolicyError;
     private final int maxPerRecipientPerHour;
 
-    /** recipient hash to when this pod last warned that it was rate-limited. */
+    /**
+     * recipient pseudonym to when this pod last warned that it was rate-limited.
+     */
     private final Map<String, Instant> rateLimitWarned = new ConcurrentHashMap<>();
 
     private final AtomicReference<Double> pending = new AtomicReference<>(Double.NaN);
@@ -141,7 +145,7 @@ public class HitlEmailNotifier {
     @Inject
     public HitlEmailNotifier(SystemMailer mailer, IEmailMessageLedger ledger, IConversationMemoryStore conversationMemoryStore,
             IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, Instance<ConnectionsConfig> connectionsConfig,
-            AuditLedgerService auditLedgerService, MeterRegistry meterRegistry,
+            AuditLedgerService auditLedgerService, GdprPseudonymizer pseudonymizer, MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d") Duration retention,
             @ConfigProperty(name = "eddi.email.outbound.max-attempts", defaultValue = "6") int maxAttempts,
             @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff,
@@ -154,6 +158,7 @@ public class HitlEmailNotifier {
         this.documentDescriptorStore = documentDescriptorStore;
         this.connectionsConfig = connectionsConfig;
         this.auditLedgerService = auditLedgerService;
+        this.pseudonymizer = pseudonymizer;
         this.meterRegistry = meterRegistry;
         this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
         this.maxAttempts = Math.max(1, maxAttempts);
@@ -224,27 +229,43 @@ public class HitlEmailNotifier {
         }
         MailAddress from = mailer.from().orElseThrow();
         for (String recipient : recipients) {
-            String refusal = refusal(recipient, now);
-            if (refusal != null) {
-                LedgerEntry suppressed = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY,
-                        Direction.OUT, MessageIds.generate(from.domain()), conversationId, pauseId,
-                        idempotencyKey(conversationId, pauseId, recipient), recipient, State.SUPPRESSED, 0, null, null, null, refusal, now, now,
-                        now.plus(retention));
-                if (ledger.insertIfAbsent(suppressed)) {
-                    boolean rateLimited = RATE_LIMITED.equals(refusal);
-                    count(rateLimited ? "rate_limited" : "not_allowed");
-                    if (rateLimited) {
-                        warnRateLimited(recipient, now);
-                    }
+            try {
+                notifyRecipient(conversationId, pauseId, recipient, from, context.get(), now);
+            } catch (RuntimeException e) {
+                // One recipient's failure (a store error, say) must not leave the rest
+                // without a row: the sweep retries rows, it never creates them. A row
+                // this recipient already got stays PENDING under its lease.
+                LOGGER.warnf("HITL notification to recipient %s for conversation %s failed: %s", recipientPseudonym(recipient),
+                        sanitize(conversationId), e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * One recipient of a pause: a SUPPRESSED row, or a PENDING row and its first
+     * attempt.
+     */
+    private void notifyRecipient(String conversationId, String pauseId, String recipient, MailAddress from, PauseContext context, Instant now) {
+        String refusal = refusal(recipient, now);
+        if (refusal != null) {
+            LedgerEntry suppressed = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY,
+                    Direction.OUT, MessageIds.generate(from.domain()), conversationId, pauseId,
+                    idempotencyKey(conversationId, pauseId, recipient), recipient, State.SUPPRESSED, 0, null, null, null, refusal, now, now,
+                    now.plus(retention));
+            if (ledger.insertIfAbsent(suppressed)) {
+                boolean rateLimited = RATE_LIMITED.equals(refusal);
+                count(rateLimited ? "rate_limited" : "not_allowed");
+                if (rateLimited) {
+                    warnRateLimited(recipient, now);
                 }
-                continue;
             }
-            LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
-                    MessageIds.generate(from.domain()), conversationId, pauseId, idempotencyKey(conversationId, pauseId, recipient), recipient,
-                    State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null, null, now, now, now.plus(retention));
-            if (ledger.insertIfAbsent(row)) {
-                attempt(row, context.get(), now);
-            }
+            return;
+        }
+        LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
+                MessageIds.generate(from.domain()), conversationId, pauseId, idempotencyKey(conversationId, pauseId, recipient), recipient,
+                State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null, null, now, now, now.plus(retention));
+        if (ledger.insertIfAbsent(row)) {
+            attempt(row, context, now);
         }
     }
 
@@ -266,9 +287,11 @@ public class HitlEmailNotifier {
         return null;
     }
 
-    /** One WARN per recipient per hour on this pod; the address only as a hash. */
+    /**
+     * One WARN per recipient per hour on this pod; the address only as a pseudonym.
+     */
     private void warnRateLimited(String recipient, Instant now) {
-        String key = recipientHash(recipient);
+        String key = recipientPseudonym(recipient);
         Instant last = rateLimitWarned.get(key);
         if (last != null && last.isAfter(now.minus(Duration.ofHours(1)))) {
             return;
@@ -287,7 +310,7 @@ public class HitlEmailNotifier {
      * {@code recipient}.
      */
     boolean warnedRateLimited(String recipient) {
-        return rateLimitWarned.containsKey(recipientHash(recipient));
+        return rateLimitWarned.containsKey(recipientPseudonym(recipient));
     }
 
     /**
@@ -425,6 +448,16 @@ public class HitlEmailNotifier {
                 LOGGER.infof("HITL notification %s for conversation %s deferred after attempt %d: %s", row.id(), sanitize(row.conversationId()),
                         row.attempts(), e.getCategory());
             }
+        } catch (RuntimeException e) {
+            // Not a categorised SMTP failure (a bad address, a mailer that could not be
+            // built): still an attempt. Escaping here would leave the row PENDING,
+            // reclaimed after every lease without ever reaching max-attempts.
+            String error = "SEND: " + e.getClass().getSimpleName() + ": " + truncate(e.getMessage(), 300);
+            if (row.attempts() >= maxAttempts) {
+                fail(row, context.get(), error, now);
+            } else if (ledger.reschedule(row.id(), row.claimToken(), now.plus(backoff(row.attempts())), error, now)) {
+                count("retry");
+            }
         }
     }
 
@@ -512,7 +545,7 @@ public class HitlEmailNotifier {
             Map<String, Object> detail = new LinkedHashMap<>();
             detail.put("kind", row.kind().name());
             detail.put("outcome", outcome);
-            detail.put("recipientHash", recipientHash(row.recipient()));
+            detail.put("recipientPseudonym", recipientPseudonym(row.recipient()));
             detail.put("recipientDomain", row.recipient().substring(row.recipient().lastIndexOf('@') + 1));
             detail.put("messageId", row.messageId());
             detail.put("ledgerId", row.id());
@@ -533,18 +566,16 @@ public class HitlEmailNotifier {
     }
 
     /**
-     * SHA-256 of the normalised address, hex. The audit ledger is write-once, so it
-     * records who was mailed in a form that answers "was alice@… notified?" for
-     * someone who knows the address, without writing the address itself into an
-     * immutable store that GDPR erasure cannot reach.
+     * The keyed pseudonym of the normalised address ({@link GdprPseudonymizer}).
+     * The audit ledger is write-once and GDPR erasure cannot reach it, so it names
+     * the recipient in a form an operator holding the deployment's key can match
+     * ("was alice@… notified?"), but that a reader of the ledger or the logs cannot
+     * confirm by hashing a list of candidate addresses — which an unkeyed hash
+     * beside the recipient's domain would allow. It is the same token GDPR erasure
+     * writes for that identifier, so both name one person alike.
      */
-    static String recipientHash(String recipient) {
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(recipient.toLowerCase(Locale.ROOT).getBytes(StandardCharsets.UTF_8));
-            return "sha256:" + HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is not available", e);
-        }
+    String recipientPseudonym(String recipient) {
+        return pseudonymizer.pseudonymFor(recipient.toLowerCase(Locale.ROOT));
     }
 
     private static String truncate(String value, int max) {

@@ -181,7 +181,7 @@ public class ImapMailTransport implements MailTransport {
         } catch (SocketPolicyException e) {
             throw new MailboxException(MailboxException.Category.POLICY, e.getMessage(), e);
         }
-        String[] login = login(settings, endpoint);
+        String[] login = login(settings);
         Properties properties = connector.angusProperties(endpoint);
         properties.setProperty("mail.imap.peek", "true");
         properties.setProperty("mail.imap.auth.mechanisms", login[2]);
@@ -213,7 +213,7 @@ public class ImapMailTransport implements MailTransport {
     }
 
     /** {@code [user, secret, mechanisms]}. */
-    private String[] login(EmailChannelSettings settings, SafeSocketConnector.Endpoint endpoint) throws MailboxException {
+    private String[] login(EmailChannelSettings settings) throws MailboxException {
         if (connectionResolver == null || !connectionResolver.isResolvable()) {
             throw new MailboxException(MailboxException.Category.CREDENTIAL, "Connections are not available in this deployment.", null);
         }

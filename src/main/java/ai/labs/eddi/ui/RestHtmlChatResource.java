@@ -4,17 +4,20 @@
  */
 package ai.labs.eddi.ui;
 
+import ai.labs.eddi.configs.branding.BrandRequest;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
-
-import static ai.labs.eddi.utils.RuntimeUtilities.getResourceAsStream;
 
 /**
  * @author ginccc
  */
 @ApplicationScoped
 public class RestHtmlChatResource implements IRestHtmlChatResource {
+
+    private final BrandedShellRenderer shellRenderer;
 
     /**
      * Whether the widget may take its bearer token from {@code ?token=}. A crafted
@@ -25,6 +28,11 @@ public class RestHtmlChatResource implements IRestHtmlChatResource {
     @ConfigProperty(name = "eddi.chat.url-token.enabled", defaultValue = "false")
     boolean urlTokenEnabled;
 
+    @Inject
+    public RestHtmlChatResource(BrandedShellRenderer shellRenderer) {
+        this.shellRenderer = shellRenderer;
+    }
+
     @Override
     public Response viewDefault() {
         return viewHtml("/");
@@ -32,23 +40,18 @@ public class RestHtmlChatResource implements IRestHtmlChatResource {
 
     @Override
     public Response viewHtml(String path) {
-        // No leading slash, and a null check — matching RestWelcomeResource and
-        // RestWorkforceResource. getResourceAsStream() delegates to the thread context
-        // classloader, and only Quarkus' own loader strips a leading '/'; on a plain
-        // JDK loader "/META-INF/..." resolves to null, and the unchecked null then
-        // answered 200 with an empty body instead of surfacing the error.
-        var stream = getResourceAsStream("META-INF/resources/chat.html");
-        if (stream == null) {
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR).build();
-        }
-        return Response.ok(stream).build();
+        // A null check rather than an unchecked stream: a missing shell answered 200
+        // with an empty body once (the leading-slash lookup), instead of surfacing
+        // the error.
+        return shellRenderer.render(BrandedShell.CHAT, BrandRequest.NONE)
+                .map(page -> Response.ok(page, MediaType.TEXT_HTML_TYPE.withCharset("UTF-8")).build())
+                .orElseGet(() -> Response.status(Response.Status.INTERNAL_SERVER_ERROR).build());
     }
 
     @Override
     public Response fetchChatConfig() {
-        // Only booleans are spliced in, so there is nothing to escape; add escaping
-        // with the first string value (see RestManagerResource.escapeJs).
-        return Response.ok("window.__EDDI_CHAT__={urlTokenEnabled:" + urlTokenEnabled + "};")
+        // The shared builder escapes any string value added later (JsGlobalScript).
+        return Response.ok(JsGlobalScript.assign("__EDDI_CHAT__").put("urlTokenEnabled", urlTokenEnabled).toJs())
                 .type("application/javascript")
                 .header("Cache-Control", "no-cache, must-revalidate")
                 .build();

@@ -4,8 +4,13 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
+import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -16,6 +21,8 @@ import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
@@ -48,16 +55,22 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Executes a scheduled fire by resolving the conversation strategy and calling
  * {@link IConversationService#say}.
  * <p>
- * Two schedule kinds are recognised by their metadata and bypass the
- * conversation path entirely, because neither is a conversation turn:
+ * These schedule kinds are recognised by their metadata and bypass the
+ * strategy-based conversation path:
  * <ul>
  * <li>{@code hitlType=hitl_timeout} — HITL approval deadlines
  * ({@code HitlTimeoutHandler})</li>
  * <li>{@code dreamType=dream_consolidation} — background user-memory
  * maintenance ({@link DreamService})</li>
+ * <li>{@code alertType=alert_maintenance} — alert delivery retries, digests and
+ * retention ({@link AlertMaintenanceService})</li>
+ * <li>{@code continuationType=conversation_continuation} — the next turn of a
+ * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
+ * one whose input, identity and once-only check are the engine's, not a
+ * schedule's</li>
  * </ul>
- * Both still run under the poller's cluster-wide claim, lease, retry/backoff
- * and fire-log machinery.
+ * All of them still run under the poller's cluster-wide claim, lease,
+ * retry/backoff and fire-log machinery.
  * <p>
  * All existing guards apply automatically:
  * <ul>
@@ -92,6 +105,12 @@ public class ScheduleFireExecutor {
     TeamCadenceService teamCadenceService;
 
     @Inject
+    AlertMaintenanceService alertMaintenanceService;
+
+    @Inject
+    ContinuationFireHandler continuationFireHandler;
+
+    @Inject
     RagSourceIngestionService ragSourceIngestionService;
 
     @Inject
@@ -110,6 +129,14 @@ public class ScheduleFireExecutor {
      */
     @Inject
     ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * The freshest server-side record of the creator's teams, used to narrow the
+     * create-time snapshot — see {@link #currentCreatorTeams}. Null only in unit
+     * tests that do not exercise it.
+     */
+    @Inject
+    UserDirectory userDirectory;
 
     /**
      * How long a single conversation fire may take before it is abandoned as
@@ -210,6 +237,20 @@ public class ScheduleFireExecutor {
             // (claim, lease, fire log) as the ingestion fast-path.
             return fireEmailPoll(schedule, instanceId, attemptNumber);
         }
+        if (AlertSchedules.isMaintenanceSchedule(md)) {
+            // Alert maintenance fast-path — a system job (delivery retries, digests,
+            // retention), not a conversation turn and not anybody's schedule, so it
+            // runs before the creator check. The poller's claim and lease make one
+            // node run it at a time.
+            return fireAlertMaintenance(schedule, instanceId, attemptNumber);
+        }
+        if (ConversationContinuations.isContinuationSchedule(md)) {
+            // Self-continuation fast-path: the next turn of one conversation, armed by
+            // the engine after the previous turn committed. Before the creator check
+            // for the same reason as the HITL timeout: the engine minted it, there is
+            // no creator, and the conversation's own owner and agent govern the turn.
+            return fireContinuation(schedule, instanceId, attemptNumber);
+        }
 
         ResourceAccessGuard.UseCheck creatorAccess = creatorUseCheck(schedule);
         if (creatorAccess == ResourceAccessGuard.UseCheck.DENIED) {
@@ -267,6 +308,7 @@ public class ScheduleFireExecutor {
 
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
+            addMaxCostPerFire(inputData, schedule);
 
             // 3. Execute via ConversationService.say()
             // This enforces tenant quotas, audit trail, conversation ordering
@@ -397,6 +439,29 @@ public class ScheduleFireExecutor {
         return fireLog;
     }
 
+    private ScheduleFireLog fireContinuation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        Map<String, Object> md = schedule.getMetadata();
+        String conversationId = (String) md.get(ConversationContinuations.METADATA_CONVERSATION_ID_KEY);
+        Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
+        ContinuationFireHandler.Result result = continuationFireHandler != null
+                ? continuationFireHandler.fire(md, schedule.getUserId(), schedule.getMessage(), timeout)
+                : new ContinuationFireHandler.Result(ScheduleConfiguration.FireStatus.FAILED.name(), "continuations are not available");
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(),
+                startedAt, Instant.now(), result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0);
+        // The handler re-asserts an interrupt it caught; park it across the fire-log
+        // write (a set flag can fail the store's connection checkout), as fire() does.
+        boolean interrupted = Thread.interrupted();
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log continuation fire for schedule %s", schedule.getId());
+        } finally {
+            restoreInterrupt(interrupted);
+        }
+        return fireLog;
+    }
+
     /**
      * Whether the person who created this schedule has lost the right to use its
      * agent since — the grant was revoked, the agent was unshared from their team,
@@ -435,7 +500,50 @@ public class ScheduleFireExecutor {
         if (schedule.getCreatorTeams() == null) {
             return null;
         }
-        return resourceAccessGuard.checkPrincipalUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin());
+        return resourceAccessGuard.checkPrincipalUse(agentId, creator, currentCreatorTeams(schedule), schedule.isCreatorAdmin());
+    }
+
+    /**
+     * The creator's team subjects as far as the server knows them now: the snapshot
+     * taken at create time, narrowed to the teams their most recent sign-in still
+     * listed.
+     * <p>
+     * The snapshot alone is historical authority — a creator removed from a team
+     * kept firing a schedule on an agent shared only with that team. EDDI has no
+     * live directory of anybody's groups outside their own request, but the user
+     * directory records the team subjects each signed-in token carried, refreshed
+     * every few minutes while the person is active. When that record is newer than
+     * the snapshot, a team it no longer lists is dropped. Only ever narrowing: a
+     * team the person joined later never widens what the schedule was authorized
+     * with. With no directory, no entry, or no entry newer than the snapshot (the
+     * creator has not signed in since), the snapshot stands — there is nothing
+     * fresher to go on.
+     */
+    List<String> currentCreatorTeams(ScheduleConfiguration schedule) {
+        List<String> snapshot = schedule.getCreatorTeams();
+        if (snapshot == null || snapshot.isEmpty() || userDirectory == null || schedule.getCreatedAt() == null) {
+            return snapshot;
+        }
+        try {
+            if (!userDirectory.isActive()) {
+                return snapshot;
+            }
+            DirectoryUser seen = userDirectory.lookup(List.of(schedule.getCreatedBy())).get(schedule.getCreatedBy());
+            if (seen == null || seen.lastSeen() == null || seen.lastSeen().isBefore(schedule.getCreatedAt())) {
+                return snapshot;
+            }
+            Set<String> current = new HashSet<>(seen.teams());
+            List<String> narrowed = snapshot.stream().filter(current::contains).toList();
+            if (narrowed.size() < snapshot.size()) {
+                LOGGER.infof("[SCHEDULE] Creator of schedule %s no longer lists team(s) %s at their last sign-in — not counted",
+                        sanitize(schedule.getId()),
+                        sanitize(String.valueOf(snapshot.stream().filter(t -> !current.contains(t)).toList())));
+            }
+            return narrowed;
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "[SCHEDULE] Could not read the user directory for schedule %s", sanitize(schedule.getId()));
+            return snapshot;
+        }
     }
 
     private static String revokedReason(ScheduleConfiguration schedule) {
@@ -706,6 +814,41 @@ public class ScheduleFireExecutor {
         return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED;
     }
 
+    /**
+     * One pass of the alert maintenance job. A pass that did nothing writes no fire
+     * log: the job runs every minute, and a log row per idle minute would bury the
+     * schedule's history (and the fire-log collection) in noise.
+     */
+    private ScheduleFireLog fireAlertMaintenance(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        boolean worthLogging;
+        try {
+            AlertMaintenanceService.Result result = alertMaintenanceService.run();
+            worthLogging = !result.isEmpty();
+            if (worthLogging) {
+                LOGGER.debugf("[SCHEDULE] Alert maintenance: retried=%d, digests=%d, deleted=%d", result.retried(), result.digests(),
+                        result.deleted());
+            }
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            worthLogging = true;
+            LOGGER.warnf(e, "[SCHEDULE] Alert maintenance failed (schedule %s)", schedule.getId());
+        }
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
+                Instant.now(), status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        if (worthLogging) {
+            try {
+                scheduleStore.logFire(fireLog);
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[SCHEDULE] Failed to log alert maintenance fire for schedule %s", schedule.getId());
+            }
+        }
+        return fireLog;
+    }
+
     private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
         String status;
@@ -714,6 +857,7 @@ public class ScheduleFireExecutor {
         boolean interrupted = false;
 
         try {
+            requireUnreservedUserId(schedule);
             // userId is passed through unchanged — DreamService rejects a missing or
             // placeholder identity loudly; defaulting it here would silently
             // consolidate an empty memory set.
@@ -847,11 +991,28 @@ public class ScheduleFireExecutor {
     }
 
     /** The user a conversation this schedule starts belongs to. */
-    private static String scheduleUserId(ScheduleConfiguration schedule) {
+    static String scheduleUserId(ScheduleConfiguration schedule) {
+        requireUnreservedUserId(schedule);
         return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
     }
 
+    /**
+     * A run's tool mocks and call record are keyed on its conversations' user ids;
+     * a fire acting as one would join a live run's session. Refused on every fire
+     * path — new, reused and rolled-over conversations, Dream — whatever path
+     * stored the schedule (a legacy row may predate the save-time check).
+     */
+    static void requireUnreservedUserId(ScheduleConfiguration schedule) {
+        if (AgentTestConversations.isReservedUserId(schedule.getUserId())) {
+            throw new IllegalStateException("Schedule " + schedule.getId() + " runs as a user id in the reserved '"
+                    + AgentTestConversations.USER_ID_PREFIX + "' namespace; it is not fired. Change its userId.");
+        }
+    }
+
     private String resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+        // Before the reuse path below, which returns an existing conversation without
+        // ever starting one.
+        requireUnreservedUserId(schedule);
         String conversationId = schedule.getPersistentConversationId();
         Map<String, Property> carriedProperties = Map.of();
 
@@ -1012,6 +1173,24 @@ public class ScheduleFireExecutor {
         } catch (Exception e) {
             LOGGER.warnf(e, "[SCHEDULE] Conversation properties not carried into %s (schedule %s)", newConversationId, schedule.getId());
         }
+    }
+
+    /**
+     * Carries {@code maxCostPerFire} into the fire's turn, where the LLM spend gate
+     * and the tool loop hold it to the conversation's spend before the turn plus
+     * this allowance — the ceiling machinery an agent's
+     * {@code maxCostPerConversationUsd} already uses, so a
+     * {@code conversationStrategy=persistent} schedule is capped per fire, not for
+     * its lifetime. It travels in the input, so it applies on whichever node runs
+     * the turn. Zero or below means unlimited, as it always has (Postgres stores
+     * {@code 0} as NULL, so the two cannot be told apart).
+     */
+    static void addMaxCostPerFire(InputData inputData, ScheduleConfiguration schedule) {
+        double allowance = schedule.getMaxCostPerFire();
+        if (!(allowance > 0) || Double.isInfinite(allowance)) {
+            return;
+        }
+        inputData.getContext().put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {

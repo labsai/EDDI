@@ -133,16 +133,26 @@ public class TracePropagation {
      *            (case-insensitively — the caller's header store decides how)
      */
     public Map<String, String> headersMissingFrom(Predicate<String> alreadyPresent) {
-        Map<String, String> headers = currentHeaders();
-        if (headers.isEmpty()) {
-            return headers;
+        return withoutIfAnyPresent(currentHeaders(), alreadyPresent);
+    }
+
+    /**
+     * The all-or-nothing rule of {@link #headersMissingFrom} for trace headers that
+     * were taken from somewhere other than the current context (the MCP transport
+     * reads them from the message, see {@code McpToolProviderManager}): {@code
+     * candidates} unchanged when the request carries neither trace header, empty
+     * when it carries either.
+     */
+    public static Map<String, String> withoutIfAnyPresent(Map<String, String> candidates, Predicate<String> alreadyPresent) {
+        if (candidates.isEmpty()) {
+            return candidates;
         }
         for (String name : HEADERS) {
             if (alreadyPresent.test(name)) {
                 return Map.of();
             }
         }
-        return headers;
+        return candidates;
     }
 
     /**

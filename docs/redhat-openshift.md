@@ -177,7 +177,7 @@ docker run -i --rm --network eddi -p 127.0.0.1:7070:7070 \
   -e EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_MCP_ALLOW_UNAUTHENTICATED=true \
   -e EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED=true \
-  labsai/eddi:6.5.0
+  labsai/eddi:6.6.0
 ```
 
 Open `http://localhost:7070`. Clean up with `docker rm -f mongodb` and `docker network rm eddi`.
@@ -194,7 +194,7 @@ docker run -d \
   -e QUARKUS_OIDC_TENANT_ENABLED=true \
   -e QUARKUS_OIDC_AUTH_SERVER_URL='https://keycloak.example.com/realms/eddi' \
   -e QUARKUS_OIDC_CLIENT_ID=eddi-backend 
-  labsai/eddi:6.5.0
+  labsai/eddi:6.6.0
 ```
 
 Supply the connection string (for example `mongodb://<user>:<password>@<host>:27017/eddi?authSource=admin`) and the master key from your secret store rather than typing them on the command line; on OpenShift, inject them from a `Secret` with `secretKeyRef`. See [Security](security.md) for the realm and roles and [Secrets Vault](secrets-vault.md) for the master key.

@@ -276,6 +276,9 @@ final class DkimTestSigner {
 
     /** Ordered TXT records by name, for {@link FakeDns}. */
     static Map<String, String> records(Object... nameThenRecord) {
+        if (nameThenRecord.length % 2 != 0) {
+            throw new IllegalArgumentException("records() takes name/record pairs, got " + nameThenRecord.length + " arguments");
+        }
         Map<String, String> records = new LinkedHashMap<>();
         for (int i = 0; i < nameThenRecord.length; i += 2) {
             records.put((String) nameThenRecord[i], (String) nameThenRecord[i + 1]);

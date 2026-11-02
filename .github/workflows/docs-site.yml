@@ -1,0 +1,67 @@
+name: Docs Site
+
+# Builds docs/ into the documentation site (docs-site/, Astro + Starlight) and checks it.
+# Vercel deploys it from its own Git integration; this workflow only validates, so it
+# needs no secrets and runs the same for pull requests from forks.
+#
+# The tests run on every pull request, not only docs changes: they include the guard
+# that every docs URL written in the backend, the UIs, README and the plugin lands on a
+# page (released images print those links forever), and a change anywhere can add one.
+# The full site build — the link validator over every rendered page — runs when docs/,
+# PRIVACY.md (published as /privacy/), the site or this workflow changed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: docs-site-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # Same Node as everywhere else (pom.xml node.version; BuildQualityGatesTest keeps them equal).
+  NODE_VERSION: "24.22.0"
+
+jobs:
+  docs-site:
+    name: Docs Site
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs-site
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Check paths
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        with:
+          filters: |
+            site:
+              - 'docs/**'
+              - 'PRIVACY.md'
+              - 'docs-site/**'
+              - '.github/workflows/docs-site.yml'
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: docs-site/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Test (sync, anchors, redirects, docs links in the repo)
+        run: npm test
+
+      - name: Build (every page, link validator)
+        if: steps.filter.outputs.site == 'true'
+        run: npm run build
