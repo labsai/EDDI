@@ -29,7 +29,7 @@ import java.util.regex.Pattern;
  * </ul>
  * Stateless; built per {@link GuardrailService}.
  *
- * @since 6.8.0
+ * @since 6.7.0
  */
 public final class ToolCallGuardrailScreener {
 

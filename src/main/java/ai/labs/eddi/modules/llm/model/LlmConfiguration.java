@@ -565,6 +565,15 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private ToolResultGuardrailConfig toolResultGuardrails;
 
+        /**
+         * Guardrails on the ARGUMENTS of the tool calls the model asks for, run before
+         * the tool-approval gate and again, block-only, on an approved call. Null or
+         * empty: nothing runs. See {@link ToolCallGuardrailConfig}.
+         *
+         * @since 6.7.0
+         */
+        private List<ToolCallGuardrailConfig> toolCallGuardrails;
+
         // === Behavioral Counterweight & Identity Masking (Wave 1) ===
 
         /**
@@ -1128,6 +1137,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolResultGuardrails(ToolResultGuardrailConfig toolResultGuardrails) {
             this.toolResultGuardrails = toolResultGuardrails;
+        }
+
+        public List<ToolCallGuardrailConfig> getToolCallGuardrails() {
+            return toolCallGuardrails;
+        }
+
+        public void setToolCallGuardrails(List<ToolCallGuardrailConfig> toolCallGuardrails) {
+            this.toolCallGuardrails = toolCallGuardrails;
         }
 
         public void setToolResponseLimits(ToolResponseLimits toolResponseLimits) {

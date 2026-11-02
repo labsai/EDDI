@@ -35,7 +35,7 @@ import java.util.Set;
  * that dropped the label is refused there with reason {@value #REASON_ADDED},
  * which reads as "label missing".
  *
- * @since 6.8.0
+ * @since 6.7.0
  */
 @ApplicationScoped
 public class DisclosureGuardrail implements ContentGuardrail {

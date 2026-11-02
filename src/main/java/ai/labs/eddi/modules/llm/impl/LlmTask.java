@@ -3719,6 +3719,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             for (String warning : guardrailService.warnings("outputGuardrails", task.getOutputGuardrails())) {
                 LOGGER.warnf("LLM task '%s' %s", taskId, warning);
             }
+            problems.addAll(ToolCallGuardrailValidation.deployProblems(guardrailService, task, taskId));
             warnSelfJudging(task, taskId);
         }
         if (!problems.isEmpty()) {

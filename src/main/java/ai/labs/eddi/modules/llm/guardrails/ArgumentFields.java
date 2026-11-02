@@ -40,7 +40,7 @@ import java.util.Map;
  * the guardrail's {@code failMode} applies, so a {@code block} entry refuses
  * the call rather than letting it through unscreened.
  *
- * @since 6.8.0
+ * @since 6.7.0
  */
 public final class ArgumentFields {
 
