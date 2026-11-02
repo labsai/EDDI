@@ -99,7 +99,14 @@ public final class UnpricedSightings {
         }
     }
 
-    private static String tag(String model) {
+    /**
+     * {@code model} as a bounded meter tag: at most 100 distinct values, then
+     * {@code other}.
+     */
+    public static String tag(String model) {
+        if (model == null || model.isBlank()) {
+            return "unknown";
+        }
         if (MODEL_TAGS.contains(model)) {
             return model;
         }

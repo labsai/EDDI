@@ -11,7 +11,11 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
 import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
+import ai.labs.eddi.modules.llm.impl.LlmTask;
 import ai.labs.eddi.modules.llm.impl.TokenPricing;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -187,6 +191,13 @@ final class GuardrailModelClient {
             Map<String, String> modelParameters = modelParameters(context, call.ownParameters(), call.defaultTimeoutMs());
             ChatModel model = chatModelRegistry.getOrCreate(provider.trim(), modelParameters);
             providerTag = provider.trim();
+            // strict pricing mode: an unpriced guardrail call is "could not decide", so
+            // failMode applies
+            if (UnpricedCallPolicy.check(PriceOverride.of(price(context, PARAM_INPUT_PRICE), price(context, PARAM_OUTPUT_PRICE)), providerTag,
+                    LlmTask.resolveModelName(modelParameters, providerTag), null, false, "guardrail") != null) {
+                outcome = UnpricedCallPolicy.REASON;
+                throw new GuardrailUndecidedException(UnpricedCallPolicy.REASON, 0.0);
+            }
             ChatRequest.Builder request = ChatRequest.builder().messages(messages);
             ResponseFormat format = call.responseFormat() != null ? call.responseFormat().choose(providerTag, modelParameters) : null;
             if (format != null) {
@@ -345,10 +356,8 @@ final class GuardrailModelClient {
         if (usage == null) {
             return 0.0;
         }
-        Map<String, Object> tokenUsage = new HashMap<>();
-        tokenUsage.put("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0);
-        tokenUsage.put("outputTokens", usage.outputTokenCount() != null ? usage.outputTokenCount() : 0);
-        double cost = TokenPricing.cost(inputPrice, outputPrice, tokenUsage);
+        // the metered map, so cache tokens and the catalog price are seen
+        double cost = TokenPricing.cost(inputPrice, outputPrice, ToolContextBudget.tokenUsageMap(usage));
         return Double.isFinite(cost) && cost > 0.0 ? cost : 0.0;
     }
 

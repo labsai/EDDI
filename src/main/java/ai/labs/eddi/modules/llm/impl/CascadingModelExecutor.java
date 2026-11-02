@@ -578,6 +578,8 @@ class CascadingModelExecutor {
             var stepExchange = new ToolExchangeRecorder(stepPrices);
 
             try {
+                // strict mode: a refused unpriced step fails like any other and escalates
+                UnpricedCallPolicy.require(stepPrices.override(), modelType, modelName, memory, cascade.getMaxCostPerRun() != null, "cascade_step");
                 // Live-stream a step only when it is GUARANTEED to be accepted regardless of
                 // the confidence value — otherwise tokens could be sent for a step that then
                 // escalates. That is: the last step (always accepted), a null-threshold step

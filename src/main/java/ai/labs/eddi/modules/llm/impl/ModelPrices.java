@@ -56,6 +56,32 @@ record ModelPrices(Double inputPer1M, Double outputPer1M, ModelPricing pricing) 
         return task == null ? UNPRICED : new ModelPrices(task.getInputPricePer1M(), task.getOutputPricePer1M(), task.getPricing());
     }
 
+    /**
+     * The rolling conversation summary: the task's prices when it runs on the
+     * task's own model, otherwise none of its own — the summary's model is then
+     * priced from the catalog. It used to be priced at the task's rates even when
+     * {@code llmProvider}/{@code llmModel} named a different, cheaper model.
+     */
+    static ModelPrices forSummary(Task task, String taskType, String taskModel, String summaryType, String summaryModel) {
+        boolean sameType = summaryType == null || summaryType.isBlank() || summaryType.equalsIgnoreCase(taskType);
+        boolean sameModel = summaryModel == null || summaryModel.isBlank() || summaryModel.equalsIgnoreCase(taskModel);
+        return sameType && sameModel ? ofTask(task) : UNPRICED;
+    }
+
+    /**
+     * A tool-response {@code summarize} call: on the task's provider, with the
+     * {@code summarizerModel}. The task's prices apply only when that is the task's
+     * own model; a different model is priced from the catalog.
+     */
+    static ModelPrices forToolSummarizer(Task task) {
+        if (task == null) {
+            return UNPRICED;
+        }
+        String summarizerModel = task.getToolResponseLimits() != null ? task.getToolResponseLimits().getSummarizerModel() : null;
+        String taskModel = task.getParameters() != null ? LlmTask.resolveModelName(task.getParameters(), task.getType()) : null;
+        return forSummary(task, task.getType(), taskModel, task.getType(), summarizerModel);
+    }
+
     /** A cascade step: its own prices, else the cascade's defaults. */
     static ModelPrices ofCascadeStep(CascadeStep step, ModelCascadeConfig cascade) {
         if (step == null) {

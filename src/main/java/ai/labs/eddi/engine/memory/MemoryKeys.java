@@ -220,6 +220,14 @@ public final class MemoryKeys {
     public static final String AUDIT_DISCARDED_COST = "audit:discarded_cost";
 
     /**
+     * How the step's model spend was priced: {@code {calls, unpricedCalls, sources,
+     * cacheReadTokens, cacheWriteTokens}}. Deliberately not prefixed
+     * {@code audit:cost} — step lookups prefix-match. Copied into the audit entry's
+     * {@code llmDetail.pricing}.
+     */
+    public static final String AUDIT_PRICING = "audit:pricing";
+
+    /**
      * Prefix of the guardrail evidence keys,
      * {@code audit:guardrail:<phase>:<type>}: a {@code List} of {@code {phase,
      * type, action, reason, retryCount, taskId}} records, one per time that

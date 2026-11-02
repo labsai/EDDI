@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.tenancy;
 
+import ai.labs.eddi.engine.pricing.SpendEvents;
+import ai.labs.eddi.engine.pricing.SpendSinks;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
@@ -67,6 +69,14 @@ public class TurnCostMeter {
     private final TenantQuotaService tenantQuotaService;
     private final MeterRegistry meterRegistry;
 
+    /**
+     * Receives every charge the tenant counter accepted (the attribution SPI).
+     * Field-injected so the direct constructor and its tests are unaffected; null
+     * delivers nothing.
+     */
+    @Inject
+    SpendSinks spendSinks;
+
     @Inject
     public TurnCostMeter(TenantQuotaService tenantQuotaService, MeterRegistry meterRegistry) {
         this.tenantQuotaService = tenantQuotaService;
@@ -115,6 +125,9 @@ public class TurnCostMeter {
                 step.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.0));
             }
             count(result.allowed() ? "recorded" : "over_budget");
+            if (spendSinks != null) {
+                spendSinks.fire(SpendEvents.forTurn(memory, tenantId, charge));
+            }
             return charge;
         } catch (RuntimeException e) {
             count("error");
