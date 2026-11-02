@@ -77,6 +77,7 @@
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)
 - [Tenant Quotas](tenant-quotas.md)
+  - [Team Budgets](team-budgets.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
 - [Business Associate Agreement (BAA) Template](templates/baa-template.md)

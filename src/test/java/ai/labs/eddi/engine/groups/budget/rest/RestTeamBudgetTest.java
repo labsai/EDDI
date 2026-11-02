@@ -25,6 +25,7 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.Method;
 import java.security.Principal;
 import java.time.Clock;
 import java.time.Instant;
@@ -32,6 +33,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.IntStream;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -129,7 +131,7 @@ class RestTeamBudgetTest {
 
     @Test
     void theListingIsBounded() {
-        String many = String.join(",", java.util.stream.IntStream.range(0, 51).mapToObj(i -> "g" + i).toList());
+        String many = String.join(",", IntStream.range(0, 51).mapToObj(i -> "g" + i).toList());
         assertEquals(400, teamsRest.listBudgets(many).getStatus());
     }
 
@@ -156,7 +158,7 @@ class RestTeamBudgetTest {
                 roles(IRestTeamBudgets.class.getMethod("transfer", String.class, IRestTeamBudgets.TransferRequest.class)));
     }
 
-    private static Set<String> roles(java.lang.reflect.Method method) {
+    private static Set<String> roles(Method method) {
         return Set.of(method.getAnnotation(RolesAllowed.class).value());
     }
 

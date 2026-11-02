@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -58,7 +59,7 @@ class TeamBudgetConfigValidatorTest {
         assertThrows(IllegalArgumentException.class,
                 () -> TeamBudgetConfigValidator.validate("g1", with(new TeamBudgetConfig(1.0, null, new Oversight(many)))));
         assertThrows(IllegalArgumentException.class, () -> TeamBudgetConfigValidator.validate("g1",
-                with(new TeamBudgetConfig(1.0, null, new Oversight(java.util.Arrays.asList("a", " "))))));
+                with(new TeamBudgetConfig(1.0, null, new Oversight(Arrays.asList("a", " "))))));
     }
 
     @Test
