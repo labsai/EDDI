@@ -24,15 +24,30 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class TemplateSyntaxMigrator {
 
+    /*
+     * The possessive quantifiers and the lookahead in the three #strings patterns
+     * are a work bound, not a change of meaning: an imported template is attacker
+     * input. Each spot is one where the next token cannot be what the quantifier
+     * consumes — [^,)] is followed by ',' or ')', [^)] by ')' — or, for the
+     * whitespace before an argument, where the lazy or greedy argument group after
+     * it would absorb any whitespace given back. Plain greedy forms backtracked
+     * there on a template whose closing parenthesis is missing: every split of a
+     * long whitespace run between "\s*" and the argument group was tried, which is
+     * quadratic in the run length per candidate match.
+     */
     private static final List<Map.Entry<Pattern, String>> PATTERNS = List.of(
             // 1. #strings nested calls: #strings.outer(#strings.inner(var, args)) →
             // var.inner(args).outer()
-            Map.entry(Pattern.compile("\\[\\[\\$\\{#strings\\.([a-zA-Z]+)\\(#strings\\.([a-zA-Z]+)\\(" + "([^,)]+)(?:,\\s*([^)]*?))?\\)\\)\\}\\]\\]"),
+            Map.entry(
+                    Pattern.compile("\\[\\[\\$\\{#strings\\.([a-zA-Z]+)\\(#strings\\.([a-zA-Z]+)\\(" + "([^,)]++)(?:,\\s*+([^)]*?))?\\)\\)\\}\\]\\]"),
                     "{$3.$2($4).$1()}"),
-            // 2. #strings.method(var, arg1, arg2) → var.method(arg1, arg2)
-            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^,)]+),\\s*([^)]+)\\)"), "$2.$1($3)"),
+            // 2. #strings.method(var, arg1, arg2) → var.method(arg1, arg2). The
+            // lookahead fails at once when no ')' follows; when one does, the greedy
+            // pair below succeeds on its first or second try (the argument may be a
+            // single whitespace character, which "\s*+" would not give back).
+            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^,)]++),(?=[^)]*+\\))\\s*([^)]+)\\)"), "$2.$1($3)"),
             // 3. #strings.method(var) → var.method()
-            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^)]+)\\)"), "$2.$1()"),
+            Map.entry(Pattern.compile("#strings\\.([a-zA-Z]+)\\(([^)]++)\\)"), "$2.$1()"),
             // 4. th:each iteration
             Map.entry(Pattern.compile("\\[#\\s*th:each=\"(\\w+)\\s*:\\s*\\$\\{([^}]+)\\}\"\\]"), "{#for $1 in $2}"),
             // 5. th:if conditional
