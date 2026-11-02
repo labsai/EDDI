@@ -212,6 +212,7 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 | Property | Default | Description |
 |---|---|---|
 | `eddi.streaming.cancel-on-client-disconnect` | `true` | Abort the turn when an SSE client goes away. Set `false` to let the turn finish and persist, so a reconnecting client can read the result |
+| `eddi.streaming.keepalive-interval-seconds` | `15` | Write an SSE comment line (`: keep-alive`) on a turn stream that has carried nothing for this many seconds, so a load balancer or proxy idle timeout does not cut a turn whose model is still working. `0` turns it off |
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream). Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
