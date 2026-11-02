@@ -143,6 +143,13 @@ class AgentTestSuiteValidatorTest {
     }
 
     @Test
+    @DisplayName("a NaN or infinite cost ceiling is refused: NaN fails every range comparison, so it disabled the budget")
+    void costCeilingMustBeFinite() {
+        assertTrue(message(new AgentTestSuite("s", null, null, Double.NaN, null, null)).contains("maxCostPerRun"));
+        assertTrue(message(new AgentTestSuite("s", null, null, Double.POSITIVE_INFINITY, null, null)).contains("maxCostPerRun"));
+    }
+
+    @Test
     @DisplayName("the store runs the validator before anything is written")
     @SuppressWarnings("unchecked")
     void storeValidatesBeforeWriting() {

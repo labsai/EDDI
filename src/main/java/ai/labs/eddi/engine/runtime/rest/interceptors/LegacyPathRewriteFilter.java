@@ -33,8 +33,16 @@ import java.util.Map;
  * <li>/regulardictionarystore/regulardictionaries →
  * /dictionarystore/dictionaries</li>
  * <li>/bottriggerstore/bottriggers → /AgentTriggerStore/agenttriggers</li>
- * <li>/{unrestricted|restricted}/ → /production/</li>
+ * <li>/administration/{unrestricted|restricted}/… →
+ * /administration/production/…</li>
  * </ul>
+ * <p>
+ * Every rewrite is anchored at a known position. A store prefix is rewritten
+ * only where the path starts with it, and an environment name only where the
+ * one endpoint family with an environment path segment declares it — a
+ * substring replacement anywhere turned {@code DELETE /admin/gdpr/restricted}
+ * into an erasure of user {@code production}, and a secret key or tenant named
+ * {@code restricted} into the key {@code production}.
  * <p>
  * The environment rewrites mirror {@code Deployment.Environment.fromString},
  * which still maps the v5 names {@code unrestricted} and {@code restricted}
@@ -50,6 +58,7 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     private static final String LEGACY_ENV_UNRESTRICTED = "unrestricted";
     private static final String LEGACY_ENV_RESTRICTED = "restricted";
     private static final String ENV_PRODUCTION = "production";
+    private static final String ADMINISTRATION_PREFIX = "/administration/";
 
     /**
      * Store path rewrites: old prefix → new prefix. Backed by a
@@ -87,16 +96,17 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     static String rewritePath(String path) {
         String result = path;
 
-        // Rewrite store paths
+        // Rewrite store paths — only as the path's leading segments
         for (var entry : PATH_REWRITES.entrySet()) {
-            if (result.contains(entry.getKey())) {
-                result = result.replace(entry.getKey(), entry.getValue());
+            String prefix = entry.getKey();
+            if (result.startsWith(prefix) && (result.length() == prefix.length() || result.charAt(prefix.length()) == '/')) {
+                result = entry.getValue() + result.substring(prefix.length());
                 break; // Only one store path match per request
             }
         }
 
-        // Rewrite environment segments: /unrestricted/ → /production/, /restricted/ →
-        // /production/
+        // Rewrite the environment segment of /administration/{environment}/… — the
+        // only v6 path with one (IRestAgentAdministration).
         result = rewriteEnvironment(result, LEGACY_ENV_UNRESTRICTED);
         result = rewriteEnvironment(result, LEGACY_ENV_RESTRICTED);
 
@@ -104,18 +114,14 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
     }
 
     /**
-     * Replaces a legacy environment segment with {@code production}, both when it
-     * sits between two slashes and when it terminates the path (e.g.
-     * {@code /agents/{id}/unrestricted}).
+     * Replaces a legacy environment name with {@code production} where
+     * {@code /administration/{environment}/…} declares it, and nowhere else.
      */
     private static String rewriteEnvironment(String path, String legacyEnvironment) {
-        String result = path.replace("/" + legacyEnvironment + "/", "/" + ENV_PRODUCTION + "/");
-
-        String trailing = "/" + legacyEnvironment;
-        if (result.endsWith(trailing)) {
-            result = result.substring(0, result.length() - trailing.length()) + "/" + ENV_PRODUCTION;
+        String legacy = ADMINISTRATION_PREFIX + legacyEnvironment;
+        if (path.startsWith(legacy) && (path.length() == legacy.length() || path.charAt(legacy.length()) == '/')) {
+            return ADMINISTRATION_PREFIX + ENV_PRODUCTION + path.substring(legacy.length());
         }
-
-        return result;
+        return path;
     }
 }

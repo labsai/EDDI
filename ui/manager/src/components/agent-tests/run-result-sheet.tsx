@@ -93,7 +93,7 @@ function TurnRow({ turn, unmocked }: { turn: TurnResult; unmocked: string[] }) {
         aria-expanded={open}
         className="flex w-full items-center gap-2 p-2 text-start"
       >
-        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+        {open ? <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : <ChevronRight className="h-3.5 w-3.5 shrink-0 rtl:rotate-180" aria-hidden="true" />}
         <StatusIcon passed={turn.passed} />
         <span className="shrink-0 text-xs font-semibold text-muted-foreground">
           {t("agentTests.result.turn", { index: turn.index, defaultValue: "Turn {{index}}" })}
@@ -226,7 +226,7 @@ function CaseBlock({ result }: { result: CaseResult }) {
         aria-expanded={open}
         className="flex w-full items-center gap-2 p-3 text-start"
       >
-        {open ? <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" /> : <ChevronRight className="h-4 w-4 shrink-0" aria-hidden="true" />}
+        {open ? <ChevronDown className="h-4 w-4 shrink-0" aria-hidden="true" /> : <ChevronRight className="h-4 w-4 shrink-0 rtl:rotate-180" aria-hidden="true" />}
         <StatusIcon passed={result.passed} />
         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">{result.name}</span>
         <span className="shrink-0 text-xs text-muted-foreground" data-testid="case-pass-count">

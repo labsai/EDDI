@@ -48,6 +48,7 @@ class ReservedPrincipalsTest {
             Map.entry("owner:", "descriptor access token (Subjects.OWNER_TOKEN_PREFIX)"),
             Map.entry("space:", "descriptor access token (Subjects.SPACE_TOKEN_PREFIX)"),
             Map.entry("conversation:", "attachment lock key"),
+            Map.entry("legacy:", "ChannelTargetRouter warn-once key for a legacy Slack connector's credentials"),
             Map.entry("agent:", "tool-cache scope tag"),
             Map.entry("context:", "cache/template key"),
             Map.entry("file:", "URL scheme"),
@@ -66,6 +67,8 @@ class ReservedPrincipalsTest {
             Map.entry("b:", "webhook signature digest tag"),
             Map.entry("t:", "webhook signature digest tag"),
             Map.entry("event:", "webhook event dedup fallback key"),
+            Map.entry("tool:", "tool quota counter name (ToolQuotaRules)"),
+            Map.entry("pool:", "tool quota counter name (ToolQuotaRules)"),
             Map.entry("v2:", "ciphertext/HMAC format version"),
             Map.entry("v3:", "ciphertext/HMAC format version"),
             Map.entry("v4:", "ciphertext/HMAC format version"),
@@ -83,7 +86,17 @@ class ReservedPrincipalsTest {
             Map.entry("system-value:", "template value tag"),
             Map.entry("pii:", "guardrail audit reason code (PiiRedactionGuardrail: pii:<kinds>)"),
             Map.entry("unknown:", "in-memory dedupe key for the unknown-guardrail-type WARN (GuardrailService)"),
-            Map.entry("notify:", "email ledger idempotency key (HitlEmailNotifier)"));
+            Map.entry("notify:", "email ledger idempotency key (HitlEmailNotifier)"),
+            Map.entry("notice:", "email ledger idempotency key (EmailOwnerNotifier)"),
+            Map.entry("reply:", "email ledger idempotency key of a conversation-mode reply (EmailReplySender)"),
+            Map.entry("bounce:", "email suppression reason, e.g. bounce:5.1.1 (EmailReplySender)"),
+            Map.entry("in:", "email ledger idempotency key of an inbound mail"),
+            Map.entry("imap:", "email ledger sourceRef (IMAP folder:uidvalidity:uid)"),
+            Map.entry("email-poll:", "schedule name (EmailPollSchedules)"),
+            Map.entry("loop:", "inbound mail refusal reason"),
+            Map.entry("unauthenticated:", "inbound mail refusal reason"),
+            Map.entry("failed:", "inbound mail refusal reason"),
+            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"));
 
     @Test
     @DisplayName("every principal-shaped prefix in src/main is either reserved or known not to be a principal")

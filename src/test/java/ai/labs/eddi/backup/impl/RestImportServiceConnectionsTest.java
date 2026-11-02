@@ -89,6 +89,7 @@ class RestImportServiceConnectionsTest {
     private IAgentStore agentStore;
     private UpgradeExecutor upgradeExecutor;
     private RestImportService importService;
+    private ResourceAccessGuard guard;
 
     private static final String TARGET_AGENT_ID = "eeff11112222333344445555";
 
@@ -105,9 +106,12 @@ class RestImportServiceConnectionsTest {
         when(templateSyntaxMigrator.migrate(anyString())).thenAnswer(inv -> inv.getArgument(0));
 
         upgradeExecutor = mock(UpgradeExecutor.class);
+        // Creating connections is administrator-only, as over REST.
+        guard = mock(ResourceAccessGuard.class);
+        when(guard.isAdmin()).thenReturn(true);
         importService = new RestImportService(zipArchive, jsonSerialization, mock(IMigrationManager.class), documentDescriptorStore,
                 templateSyntaxMigrator, mock(StructuralMatcher.class), upgradeExecutor, mock(IScheduleStore.class),
-                mock(BackupMetrics.class), mock(ResourceAccessGuard.class), mock(SpaceContext.class), mock(RagSourceIngestionService.class),
+                mock(BackupMetrics.class), guard, mock(SpaceContext.class), mock(RagSourceIngestionService.class),
                 true, false, Optional.empty());
 
         when(jsonSerialization.deserialize(anyString(), eq(AgentConfiguration.class)))
@@ -161,6 +165,23 @@ class RestImportServiceConnectionsTest {
         // ${connection:jira} is found through the descriptor index, and no response
         // filter runs on an in-process call.
         verify(documentDescriptorStore).createDescriptor(eq(CREATED_CONNECTION_ID), eq(1), any());
+    }
+
+    @Test
+    @DisplayName("an editor's import does not create a connection — that takes eddi-admin, as over REST")
+    void editorCannotCreateAConnection() throws Exception {
+        when(guard.isAdmin()).thenReturn(false);
+        when(connectionStore.idOfName("default", "jira")).thenReturn(null);
+
+        Response response;
+        try (var cdi = stubCdi(IAgentStore.class, agentStore, IRestConnectionStore.class, restConnectionStore, IConnectionStore.class,
+                connectionStore)) {
+            response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+        }
+
+        assertEquals(201, response.getStatus(), "the agent is still imported");
+        assertEquals("1", response.getHeaderString("X-Connections-Skipped"));
+        verify(restConnectionStore, never()).createConnection(any());
     }
 
     @Test

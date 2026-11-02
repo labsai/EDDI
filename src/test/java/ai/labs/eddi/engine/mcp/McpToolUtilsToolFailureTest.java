@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.quarkus.security.ForbiddenException;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -62,6 +63,35 @@ class McpToolUtilsToolFailureTest {
         assertFalse(result.contains("Holder"), result);
         assertFalse(result.contains("McpToolUtilsToolFailureTest"), result);
         assertTrue(result.contains("\"errorCode\":\"INTERNAL\""), result);
+    }
+
+    @Test
+    @DisplayName("an access refusal of EDDI's guards is FORBIDDEN with its reason, not INTERNAL")
+    void guardRefusalIsForbidden() {
+        var denied = new ForbiddenException("Access denied: you do not have edit access to this agent");
+
+        String described = McpToolUtils.toolFailure(LOG, "update_resource", "Failed to update resource", denied);
+        String bare = McpToolUtils.toolFailure(LOG, "update_resource", denied);
+
+        for (String result : List.of(described, bare)) {
+            assertTrue(result.contains("\"errorCode\":\"FORBIDDEN\""), result);
+            assertTrue(result.contains("you do not have edit access to this agent"), result);
+            assertFalse(result.contains("INTERNAL"), result);
+        }
+        assertTrue(described.contains("Failed to update resource: Access denied"), described);
+    }
+
+    @Test
+    @DisplayName("an access refusal raised outside EDDI's code keeps FORBIDDEN but not its text")
+    void foreignRefusalTextIsNotEchoed() {
+        var denied = new ForbiddenException("permission check io.example.Internal#check failed");
+        denied.setStackTrace(new StackTraceElement[]{new StackTraceElement("io.quarkus.security.Checker", "check", "Checker.java", 1)});
+
+        String result = McpToolUtils.toolFailure(LOG, "update_resource", "Failed to update resource", denied);
+
+        assertTrue(result.contains("\"errorCode\":\"FORBIDDEN\""), result);
+        assertTrue(result.contains("Failed to update resource: Access denied"), result);
+        assertFalse(result.contains("io.example"), result);
     }
 
     @Test

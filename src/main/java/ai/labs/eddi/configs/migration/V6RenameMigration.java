@@ -11,6 +11,7 @@ import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.result.UpdateResult;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.Document;
@@ -1862,19 +1863,19 @@ public class V6RenameMigration {
     private boolean saveDocument(MongoCollection<Document> collection, Document document, boolean isHistory) {
         Object idObj = document.get(ID_FIELD);
         try {
+            // Addressed by the _id exactly as stored, and counted only when the replace
+            // matched. A string _id used to be queried as new ObjectId(string), which can
+            // never equal a string - the replace matched nothing, the document was still
+            // counted as migrated, and the migration recorded itself complete with it
+            // left unconverted.
             if (isHistory) {
                 if (idObj instanceof Map<?, ?>) {
                     var idMap = (Map<String, Object>) idObj;
                     var query = eq(ID_FIELD, new Document((Map<String, Object>) idMap));
-                    collection.replaceOne(query, document);
-                    return true;
+                    return replaced(collection.replaceOne(query, document), idObj);
                 }
-            } else if (idObj instanceof ObjectId) {
-                collection.replaceOne(eq(ID_FIELD, idObj), document);
-                return true;
-            } else if (idObj instanceof String) {
-                collection.replaceOne(eq(ID_FIELD, new ObjectId((String) idObj)), document);
-                return true;
+            } else if (idObj instanceof ObjectId || idObj instanceof String) {
+                return replaced(collection.replaceOne(eq(ID_FIELD, idObj), document), idObj);
             }
             LOGGER.warnf("Not saving a migrated document: its _id is a %s, which this migration cannot address",
                     idObj == null ? "null" : idObj.getClass().getSimpleName());
@@ -1883,5 +1884,13 @@ public class V6RenameMigration {
             LOGGER.warnf("Failed to save migrated document %s: %s", idObj, e.getMessage());
             return false;
         }
+    }
+
+    private static boolean replaced(UpdateResult result, Object id) {
+        if (result != null && result.getMatchedCount() > 0) {
+            return true;
+        }
+        LOGGER.warnf("Not saving a migrated document: no document matched its _id %s", id);
+        return false;
     }
 }

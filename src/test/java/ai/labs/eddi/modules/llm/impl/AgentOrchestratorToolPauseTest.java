@@ -55,6 +55,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -144,11 +145,11 @@ class AgentOrchestratorToolPauseTest {
         when(memory.getAgentVersion()).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
         // toolResponseTruncator is transparent by default
-        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         // tenant quota always allows
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
-        when(tenantQuotaService.checkCostBudget(any()))
+        when(tenantQuotaService.checkCostBudget(any(), anyDouble()))
                 .thenReturn(QuotaCheckResult.OK);
         // executeToolWrapped actually runs the supplied executor so we can verify
         // which tool method was invoked.

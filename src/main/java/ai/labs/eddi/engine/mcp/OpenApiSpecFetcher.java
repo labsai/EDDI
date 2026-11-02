@@ -160,7 +160,8 @@ public class OpenApiSpecFetcher {
             targetPolicy.validateUrl(uri.toString());
             // This hop passed targetPolicy.validateUrl above, which is the gate (it
             // carries the deployment's SSRF flag and allowed hosts), so the facade adds
-            // no check of its own; redirects are this loop's, never the facade's.
+            // no check of its own - the after-exchange recheck below repeats it;
+            // redirects are this loop's, never the facade's.
             OutboundRequest request = OutboundRequest.get(Profile.DEFAULT, uri)
                     .ssrf(SsrfPolicy.NONE)
                     .redirects(RedirectPolicy.NEVER)
@@ -179,6 +180,19 @@ public class OpenApiSpecFetcher {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IllegalArgumentException("Interrupted while fetching the OpenAPI spec from " + forMessage(uri), e);
+            }
+            // The facade adds no check here (NONE), so this loop does the post-connect
+            // re-check OutboundHttp gives its own policies: the JDK resolved the host
+            // again to connect, and if the entry in the JVM DNS cache changed between
+            // that and the check above (DNS rebinding), the lookup now cached is the
+            // address actually used. A target that no longer passes is discarded before
+            // its body — or its redirect — is used.
+            try {
+                targetPolicy.validateUrl(uri.toString());
+            } catch (RuntimeException e) {
+                closeQuietly(response.body());
+                throw new IllegalArgumentException("OpenAPI spec response from " + forMessage(uri)
+                        + " discarded: the target no longer passes the outbound policy after connecting: " + e.getMessage(), e);
             }
             int status = response.status();
             if (REDIRECT_CODES.contains(status)) {

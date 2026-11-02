@@ -639,7 +639,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             var gc = groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), submittedBy);
             // The pending member may speak, but the full conversation is not theirs
             // to read (approval-status withholds it from them too).
-            return Response.ok(readableResult(gc)).build();
+            return Response.ok(readableSubmission(gc)).build();
         } catch (IResourceStore.ResourceModifiedException e) {
             // Double-submit or a concurrent cancel won the CAS.
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
@@ -1022,6 +1022,21 @@ public class RestGroupConversation implements IRestGroupConversation {
             return gc;
         }
         return stateReceipt(gc.getState());
+    }
+
+    /**
+     * A submitted turn answers the owner or an admin with the conversation; anyone
+     * else gets the acknowledgement {@code {groupConversationId, accepted, state}}.
+     */
+    private Object readableSubmission(GroupConversation gc) {
+        if (gc == null || hitlAccessGuard.mayReadResumedDiscussion(gc.getUserId())) {
+            return gc;
+        }
+        var acknowledgement = new LinkedHashMap<String, Object>();
+        acknowledgement.put("groupConversationId", gc.getId());
+        acknowledgement.put("accepted", true);
+        acknowledgement.put("state", gc.getState() != null ? gc.getState().name() : "");
+        return acknowledgement;
     }
 
     private static Map<String, Object> stateReceipt(GroupConversation.GroupConversationState state) {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.notifications;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -68,7 +69,7 @@ class WorkspaceNotificationsTest {
         }).when(executor).execute(any());
         when(spaceContext.currentPrincipal()).thenReturn("bob");
         when(directory.labelFor(anyString())).thenAnswer(i -> "Name " + i.getArgument(0));
-        sut = new WorkspaceNotifications(store, descriptors, guard, spaceContext, directory, executor);
+        sut = new WorkspaceNotifications(store, descriptors, guard, spaceContext, directory, executor, ConfigResourceTypes.of("ai.labs.agent"));
     }
 
     private DocumentDescriptor ownedBy(String owner) throws Exception {
@@ -109,6 +110,19 @@ class WorkspaceNotificationsTest {
             assertEquals(WorkspaceNotifications.RequestOutcome.SENT, sut.requestAccess(RESOURCE, AccessLevel.USE, null),
                     "a different answer would make this an oracle for which ids exist");
             verify(store, never()).add(any());
+        }
+
+        @Test
+        @DisplayName("for a non-configuration id (a conversation) are answered like a missing one, after counting the attempt")
+        void nonConfigurationResourceLooksDelivered() throws Exception {
+            var conversation = new DocumentDescriptor();
+            conversation.setOwnerId("alice");
+            conversation.setResource(URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + RESOURCE));
+            when(descriptors.readCurrentDescriptor(RESOURCE)).thenReturn(conversation);
+
+            assertEquals(WorkspaceNotifications.RequestOutcome.SENT, sut.requestAccess(RESOURCE, AccessLevel.USE, null));
+            verify(store, never()).add(any());
+            verify(store).countByActorSince(eq("bob"), eq(WorkspaceNotification.Type.ACCESS_REQUESTED), any());
         }
 
         @Test

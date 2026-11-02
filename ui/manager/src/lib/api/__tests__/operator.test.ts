@@ -547,7 +547,7 @@ describe("gateLooksInstalled", () => {
       hitlConfig: { toolApprovals: { requireApproval: ["http.get:*"], exempt: [] } },
     });
     expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/gates no write method/);
+    expect(result.reason).toMatch(/does not gate every POST call/);
   });
 
   it("accepts a broad wildcard as gating writes", () => {
@@ -622,6 +622,67 @@ describe("gateLooksInstalled", () => {
     // prefix with every gated write pattern and must not be swept up.
     expect(gateLooksInstalled(agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: ["http.get:*"] } })).ok).toBe(true);
     expect(gateLooksInstalled(agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: ["http.get:/administration/logs"] } })).ok).toBe(true);
+  });
+
+  it.each(["*:*", "h*", "*post*", "http*", "*:/agentstore/agents", "http.p*:/x"])(
+    "rejects a wildcard exempt that can match a write address: %s",
+    (wildcard) => {
+      // The backend compiles `*` to `.*` anywhere in a pattern, so these all
+      // match `http.post:/…` and, exempt being tested first, un-gate it.
+      const result = gateLooksInstalled(
+        agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: [wildcard] } }),
+      );
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain(wildcard);
+    },
+  );
+
+  it.each(["builtin:*", "mcp:read_*", "http.get:/agentstore/*", "http.head:*", "http.options:*"])(
+    "still accepts a wildcard exempt that cannot reach a write: %s",
+    (safe) => {
+      expect(
+        gateLooksInstalled(agentWithGate({ toolApprovals: { ...buildToolApprovals(), exempt: [safe] } })).ok,
+      ).toBe(true);
+    },
+  );
+
+  it("rejects a gate that covers only one write method", () => {
+    // Any single write-prefixed pattern used to be enough, so a PATCH-only gate
+    // certified an operator whose POST/PUT/DELETE calls ran unapproved.
+    const result = gateLooksInstalled({
+      hitlConfig: { toolApprovals: { requireApproval: ["http.patch:*"], exempt: [] } },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/POST/);
+  });
+
+  it("rejects a gate whose patterns are narrower than the whole method", () => {
+    const result = gateLooksInstalled({
+      hitlConfig: {
+        toolApprovals: {
+          requireApproval: ["http.post:/agentstore/*", "http.put:*", "http.patch:*", "http.delete:*"],
+        },
+      },
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/POST/);
+  });
+
+  it("accepts write methods covered by separate broad wildcards", () => {
+    expect(
+      gateLooksInstalled({
+        hitlConfig: { toolApprovals: { requireApproval: ["http.p*", "http.delete:*"] } },
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("rejects an AUTO_APPROVE rule whose wildcard match reaches a write", () => {
+    const result = gateLooksInstalled(
+      agentWithGate({
+        toolApprovals: { ...buildToolApprovals(), rules: [{ match: "http.*:/x", timeoutPolicy: "AUTO_APPROVE" }] },
+      }),
+    );
+    expect(result.ok).toBe(false);
   });
 
   it("rejects a per-tool rule that AUTO_APPROVEs a gated write endpoint", () => {

@@ -133,9 +133,9 @@ export function CapabilitiesPage() {
         )}
 
         {!skillsError && registryError && (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-amber-500/30 bg-amber-500/5 py-4">
-            <AlertCircle className="h-6 w-6 text-amber-500" />
-            <p className="mt-1.5 text-xs text-amber-700 dark:text-amber-300">{t("capabilities.partialError", "Some skill queries failed")}</p>
+          <div className="flex flex-col items-center justify-center rounded-xl border border-warn-500/30 bg-warn-500/5 py-4">
+            <AlertCircle className="h-6 w-6 text-warn-500" />
+            <p className="mt-1.5 text-xs text-warn-700 dark:text-warn-300">{t("capabilities.partialError", "Some skill queries failed")}</p>
             <button onClick={() => refetchMatches()} className="mt-1.5 text-xs text-primary hover:underline">{t("common.retry")}</button>
           </div>
         )}
@@ -173,7 +173,7 @@ export function CapabilitiesPage() {
                     <div className="flex items-center gap-2">
                       {isExpanded
                         ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0 rtl:rotate-180" />
                       }
                       <span className="text-xs font-medium text-foreground">{entry.skill}</span>
                     </div>

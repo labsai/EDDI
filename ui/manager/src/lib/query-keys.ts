@@ -21,10 +21,16 @@
  *
  * ## Hierarchy
  *
- * TanStack matches keys by PREFIX, so nesting is the invalidation API:
- * `invalidateQueries({ queryKey: agentKeys.all })` clears every agent query,
- * while `agentKeys.descriptor(id)` clears one. Keep the general-to-specific
- * ordering when adding keys — a key that puts its id first cannot be swept.
+ * TanStack matches keys by PREFIX, so nesting is the invalidation API: a key
+ * that sits under a prefix is swept when that prefix is invalidated. Keep the
+ * general-to-specific ordering when adding keys — a key that puts its id first
+ * cannot be swept.
+ *
+ * `agentKeys.all` covers the agent LISTS and the deployment, impact and version
+ * entries (`useAgent` itself caches under `[...agentKeys.all, id, version]`).
+ * It does NOT cover `agentKeys.detail`, `agentKeys.descriptor` or
+ * `agentKeys.prompt`, which have their own roots — so a write that changes an
+ * agent invalidates `agentWriteInvalidations(id)`, not `agentKeys.all` alone.
  *
  * Only keys with more than one call site, or with an invalidator somewhere other
  * than the file that reads them, need to live here. A query read and invalidated
@@ -109,6 +115,18 @@ export function agentDeploymentQueries(agentIds: readonly string[]) {
     },
   };
 }
+
+/**
+ * The chat surface's queries. `deployedAgents` is the list of agents the chat
+ * pickers offer: every deploy, undeploy and save-and-deploy invalidates it, from
+ * nine call sites in seven files that each typed the literal.
+ */
+export const chatKeys = {
+  all: ["chat"] as const,
+  deployedAgents: ["chat", "deployedAgents"] as const,
+  history: (agentId?: string | null) =>
+    agentId === undefined ? (["chat", "history"] as const) : (["chat", "history", agentId] as const),
+} as const;
 
 export const groupKeys = {
   all: ["groups"] as const,

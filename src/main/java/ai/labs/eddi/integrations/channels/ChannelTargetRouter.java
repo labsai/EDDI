@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
@@ -19,13 +20,13 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
@@ -63,12 +64,29 @@ public class ChannelTargetRouter {
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
     private static final String CHANNEL_TYPE_SLACK = "slack";
     private static final String CHANNEL_TYPE_WEBHOOK = "webhook";
+    private static final String KEY_BOT_TOKEN = "botToken";
+    private static final String KEY_SIGNING_SECRET = "signingSecret";
+
+    /**
+     * The only platform settings whose {@code ${vault:...}} references the router
+     * resolves. Everything else in {@code platformConfig} is configuration or
+     * content (a webhook's {@code inputTemplate} becomes conversation input), and
+     * expanding a reference there would hand the plaintext of any secret the editor
+     * can name to whoever reads that conversation.
+     */
+    static final Set<String> CREDENTIAL_KEYS = Set.of(KEY_BOT_TOKEN, KEY_SIGNING_SECRET);
+
+    /**
+     * Where a Slack bot token is sent - checked against the secret's allowedHosts.
+     */
+    private static final String SLACK_API_DESTINATION = "https://slack.com/api/";
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
     private final IDeploymentStatusReader agentAdmin;
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
+    private final VaultHostAllowlist vaultHostAllowlist;
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
 
@@ -110,6 +128,13 @@ public class ChannelTargetRouter {
      * wrong after a rotation is reported again.
      */
     private final Set<String> weakWebhookSecretWarned = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Credentials already warned about as unusable (an unresolved reference, or a
+     * bot token whose secret may not go to Slack), so a refresh does not repeat the
+     * warning every minute.
+     */
+    private final Set<String> unusableCredentialWarned = ConcurrentHashMap.newKeySet();
     private final AtomicInteger weakWebhookSecretWarnings = new AtomicInteger();
 
     /**
@@ -135,12 +160,14 @@ public class ChannelTargetRouter {
             IDeploymentStatusReader agentAdmin,
             IAgentStore agentStore,
             SecretResolver secretResolver,
+            VaultHostAllowlist vaultHostAllowlist,
             ICacheFactory cacheFactory) {
         this.channelStore = channelStore;
         this.descriptorStore = descriptorStore;
         this.agentAdmin = agentAdmin;
         this.agentStore = agentStore;
         this.secretResolver = secretResolver;
+        this.vaultHostAllowlist = vaultHostAllowlist;
         this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
     }
 
@@ -322,7 +349,7 @@ public class ChannelTargetRouter {
         if (a == null || b == null || a.isBlank() || b.isBlank()) {
             return false;
         }
-        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+        return HmacSignatures.constantTimeEquals(a, b);
     }
 
     /**
@@ -355,6 +382,65 @@ public class ChannelTargetRouter {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a deployed agent's legacy {@code ChannelConnector} binds
+     * {@code platformChannelId} — the authority a channel-integration save asks
+     * before it may claim a channel.
+     *
+     * <p>
+     * Read from the deployments and the deployed agent configurations themselves,
+     * not from {@link #legacyMap}: that cache is rebuilt at most once per
+     * {@link #REFRESH_INTERVAL_MS} and only a vault-secret change invalidates it,
+     * so a connector deployed a moment ago is absent from it, and a save judged
+     * against it could take that agent's routing over. Standalone integrations are
+     * ignored for the same reason in the other direction; the integration store is
+     * the authority on them. Channel saves are rare, so a live read is affordable.
+     * </p>
+     *
+     * @throws IllegalStateException
+     *             when the deployments or a deployed agent cannot be read, so the
+     *             caller can refuse the save rather than guess
+     */
+    public boolean isServedByLegacyConnector(String channelType, String platformChannelId) {
+        if (platformChannelId == null || platformChannelId.isBlank()) {
+            return false;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (!CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            return false;
+        }
+        List<AgentDeploymentStatus> statuses;
+        try {
+            statuses = agentAdmin.readAllDeploymentStatuses(Deployment.Environment.production);
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("Could not read the agent deployments", e);
+        }
+        for (AgentDeploymentStatus status : statuses) {
+            if (status.getDescriptor() == null || status.getDescriptor().isDeleted()) {
+                continue;
+            }
+            AgentConfiguration agentConfig;
+            try {
+                agentConfig = agentStore.read(status.getAgentId(), status.getAgentVersion());
+            } catch (IResourceStore.ResourceNotFoundException gone) {
+                continue; // a deployment of a deleted agent routes nothing
+            } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                throw new IllegalStateException("Could not read deployed agent " + sanitize(status.getAgentId()), e);
+            }
+            if (agentConfig != null && agentConfig.getChannels() != null) {
+                for (ChannelConnector connector : agentConfig.getChannels()) {
+                    if (connector != null && connector.getType() != null
+                            && connector.getType().toString().equalsIgnoreCase(CHANNEL_TYPE_SLACK)
+                            && connector.getConfig() != null
+                            && platformChannelId.equals(connector.getConfig().get("channelId"))) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -819,6 +905,7 @@ public class ChannelTargetRouter {
                 lastRefreshTime = 0;
             }
             weakWebhookSecretWarned.clear();
+            unusableCredentialWarned.clear();
             LOGGER.info("Channel integration cache marked stale after a vault secret change");
         });
     }
@@ -884,10 +971,12 @@ public class ChannelTargetRouter {
                         }
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
-                            resolvePlatformSecrets(copy);
+                            String integrationKey = resId.getId() + ":" + resId.getVersion();
+                            resolvePlatformSecrets(integrationKey, copy);
                             if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
-                                vetWebhookSigningSecret(resId.getId() + ":" + resId.getVersion(), config, copy);
+                                vetWebhookSigningSecret(integrationKey, config, copy);
                             }
+                            dropUnresolvedCredentials(integrationKey, copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
                             coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
@@ -937,10 +1026,11 @@ public class ChannelTargetRouter {
                                 // connector)
                                 String coveredKey = CHANNEL_TYPE_SLACK + ":" + chId;
                                 if (chId != null && !coveredChannelKeys.contains(coveredKey)) {
-                                    String bt = resolveSecret(
-                                            connector.getConfig().get("botToken"));
-                                    String ss = resolveSecret(
-                                            connector.getConfig().get("signingSecret"));
+                                    String legacyKey = "legacy:" + agentId + ":" + chId;
+                                    String bt = usableCredential(legacyKey, KEY_BOT_TOKEN,
+                                            connector.getConfig().get(KEY_BOT_TOKEN));
+                                    String ss = usableCredential(legacyKey, KEY_SIGNING_SECRET,
+                                            connector.getConfig().get(KEY_SIGNING_SECRET));
                                     String gid = connector.getConfig().get("groupId");
                                     newLegacyMap.put(chId,
                                             new LegacyTarget(agentId, bt, ss,
@@ -1002,12 +1092,87 @@ public class ChannelTargetRouter {
         return copy;
     }
 
-    private void resolvePlatformSecrets(ChannelIntegrationConfiguration config) {
-        Map<String, String> resolved = new HashMap<>();
-        for (var entry : config.getPlatformConfig().entrySet()) {
-            resolved.put(entry.getKey(), resolveSecret(entry.getValue()));
+    /**
+     * Resolves the vault references of the {@link #CREDENTIAL_KEYS} only. Every
+     * other value is kept verbatim: a reference in one stays literal text. A Slack
+     * bot token whose secret may not be sent to Slack is removed rather than
+     * resolved.
+     */
+    private void resolvePlatformSecrets(String integrationKey, ChannelIntegrationConfiguration config) {
+        Map<String, String> resolved = new HashMap<>(config.getPlatformConfig());
+        for (String key : CREDENTIAL_KEYS) {
+            if (!resolved.containsKey(key)) {
+                continue;
+            }
+            String raw = resolved.get(key);
+            if (KEY_BOT_TOKEN.equals(key) && CHANNEL_TYPE_SLACK.equalsIgnoreCase(config.getChannelType())
+                    && !botTokenMayGoToSlack(integrationKey, raw)) {
+                resolved.remove(key);
+                continue;
+            }
+            resolved.put(key, resolveSecret(raw));
         }
         config.setPlatformConfig(resolved);
+    }
+
+    /**
+     * Removes credentials whose vault reference did not resolve, for every channel
+     * type. The resolver passes such a reference through unchanged, and its text is
+     * public: kept as a signing secret it would let anyone who read the
+     * configuration sign requests. A Slack integration without a usable signing
+     * secret authenticates nothing, which is the point.
+     */
+    private void dropUnresolvedCredentials(String integrationKey, ChannelIntegrationConfiguration config) {
+        // getPlatformConfig() hands out a copy: edit it, then set it back.
+        Map<String, String> resolved = config.getPlatformConfig();
+        for (String key : CREDENTIAL_KEYS) {
+            String value = resolved.get(key);
+            if (value != null && SecretReference.isVaultReference(value)) {
+                resolved.remove(key);
+                warnUnusable(integrationKey, key, "does not resolve to a vault value");
+            }
+        }
+        config.setPlatformConfig(resolved);
+    }
+
+    /**
+     * The resolved value of one legacy credential, or {@code null} when it is
+     * absent, unresolved, or a bot token that may not go to Slack.
+     */
+    private String usableCredential(String integrationKey, String key, String raw) {
+        if (KEY_BOT_TOKEN.equals(key) && !botTokenMayGoToSlack(integrationKey, raw)) {
+            return null;
+        }
+        String value = resolveSecret(raw);
+        if (value != null && SecretReference.isVaultReference(value)) {
+            warnUnusable(integrationKey, key, "does not resolve to a vault value");
+            return null;
+        }
+        return value;
+    }
+
+    /**
+     * Whether the secret behind a Slack bot token reference may be sent to Slack's
+     * API under its {@code allowedHosts}. A plaintext token is not the vault's
+     * business and passes.
+     */
+    private boolean botTokenMayGoToSlack(String integrationKey, String raw) {
+        if (raw == null || !SecretReference.isVaultReference(raw)) {
+            return true;
+        }
+        try {
+            vaultHostAllowlist.requireAllowed(List.of(raw), SLACK_API_DESTINATION, "Slack integration " + integrationKey + " bot token");
+            return true;
+        } catch (VaultHostAllowlist.HostNotAllowedException e) {
+            warnUnusable(integrationKey, KEY_BOT_TOKEN, "may not be sent to slack.com (" + e.getMessage() + ")");
+            return false;
+        }
+    }
+
+    private void warnUnusable(String integrationKey, String key, String problem) {
+        if (unusableCredentialWarned.add(integrationKey + "/" + key)) {
+            LOGGER.warnf("Channel integration %s: its %s %s - it is not used until that is fixed", sanitize(integrationKey), key, problem);
+        }
     }
 
     /**

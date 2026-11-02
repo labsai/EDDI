@@ -6,6 +6,7 @@ import { useChatDrawerStore } from "./use-chat-drawer";
 import { useChatStore, useStartConversation } from "./use-chat";
 import { runDeployWithGrants } from "./use-deploy-with-grants";
 import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";
+import { chatKeys } from "@/lib/query-keys";
 
 /**
  * Hook that provides a `saveAndDeploy` function.
@@ -85,7 +86,7 @@ export function useSaveAndDeploy() {
           // so the toast can carry the action.
           const refresh = () => {
             queryClient.invalidateQueries({ queryKey: ["agents"] });
-            queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+            queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
           };
           drawerStore.setStep("error", deployFailureMessage(outcome, t));
           reportDeployOutcome(outcome, deployOptions, t, undefined, refresh);
@@ -96,7 +97,7 @@ export function useSaveAndDeploy() {
         // Invalidate immediately after deployment is confirmed so caches
         // are fresh even if the conversation start below fails.
         queryClient.invalidateQueries({ queryKey: ["agents"] });
-        queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+        queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
 
         // Step 4: Start conversation
         drawerStore.setStep("starting");

@@ -58,12 +58,14 @@ class ToolCacheServiceTest {
         /** Every tool class that is built per turn with one conversation's state. */
         private static final Class<?>[] PER_CONVERSATION_TOOLS = {ArtifactTools.class, GroupTaskTools.class, CreateSubAgentTool.class,
                 ConverseWithAgentTool.class, RecruitAgentTool.class, TeardownAgentTool.class, FindAgentsByCapabilityTool.class,
-                UserMemoryTool.class, ConversationRecallTool.class, ReadAttachmentTool.class, DiscoverToolsTool.class};
+                UserMemoryTool.class, ConversationRecallTool.class, ReadAttachmentTool.class, DiscoverToolsTool.class,
+                // A CDI bean, but production calls copies bound to one conversation:
+                // a cached page skipped the copy's conversation check.
+                FetchToolResponsePageTool.class};
 
         /** Every shared CDI bean among the built-ins. */
         private static final Class<?>[] SHARED_BEAN_TOOLS = {CalculatorTool.class, DateTimeTool.class, DataFormatterTool.class,
-                WebSearchTool.class, WebScraperTool.class, WeatherTool.class, PdfReaderTool.class, TextSummarizerTool.class,
-                FetchToolResponsePageTool.class};
+                WebSearchTool.class, WebScraperTool.class, WeatherTool.class, PdfReaderTool.class, TextSummarizerTool.class};
 
         @Test
         @DisplayName("ReadAttachmentTool — the class the hand-kept list forgot — is conversation-bound")

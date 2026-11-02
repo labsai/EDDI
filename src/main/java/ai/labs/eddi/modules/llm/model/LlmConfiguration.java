@@ -355,6 +355,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Map<String, Integer> toolRateLimits;
 
         /**
+         * Per-subject, per-window caps on tool calls, counted across conversations —
+         * see {@link ToolQuotaConfig}. Absent means no quota.
+         *
+         * @since 6.5.0
+         */
+        private ToolQuotaConfig toolQuotas;
+
+        /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
          * 120000 (two minutes).
          * <p>
@@ -1004,6 +1012,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolRateLimits(Map<String, Integer> toolRateLimits) {
             this.toolRateLimits = toolRateLimits;
+        }
+
+        public ToolQuotaConfig getToolQuotas() {
+            return toolQuotas;
+        }
+
+        public void setToolQuotas(ToolQuotaConfig toolQuotas) {
+            this.toolQuotas = toolQuotas;
         }
 
         public Integer getDefaultToolTimeoutMs() {

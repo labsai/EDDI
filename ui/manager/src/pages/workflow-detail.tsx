@@ -717,7 +717,7 @@ export function WorkflowDetailPage() {
           {/* Dirty indicator */}
           {isDirty && (
             <span
-              className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+              className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 text-xs font-medium text-warn-800 dark:bg-warn-900/30 dark:text-warn-400"
               data-testid="dirty-indicator"
             >
               <AlertCircle className="h-3 w-3" />
@@ -954,7 +954,7 @@ function BackLink() {
         to={`/manage/agentview/${parentAgentId}`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         {t("packageDetail.backToAgent", "Back to Agent")}
       </Link>
     );
@@ -965,7 +965,7 @@ function BackLink() {
       to="/manage/workflows"
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
       {t("packageDetail.backToWorkflows", "Back to Workflows")}
     </Link>
   );

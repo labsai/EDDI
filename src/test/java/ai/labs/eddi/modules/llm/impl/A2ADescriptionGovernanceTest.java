@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Constructor;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -106,6 +107,43 @@ class A2ADescriptionGovernanceTest {
     }
 
     @Test
+    @DisplayName("a remote agent name and skill ids are bounded, and so is the number of skills turned into tools")
+    void namesAndSkillCountAreBounded() throws Exception {
+        var skills = new ArrayList<Map<String, Object>>();
+        for (int i = 0; i < A2AToolProviderManager.MAX_SKILLS_PER_AGENT + 50; i++) {
+            skills.add(Map.of("id", "s" + i + "x".repeat(500), "name", "s" + i, "description", "d"));
+        }
+        plantAgentCard(Map.of("name", "n".repeat(100_000), "skills", skills));
+        var config = new A2AAgentConfig();
+        config.setUrl(AGENT_URL);
+
+        var result = manager.discoverTools(List.of(config));
+
+        assertEquals(A2AToolProviderManager.MAX_SKILLS_PER_AGENT, result.toolSpecs().size());
+        for (var spec : result.toolSpecs()) {
+            assertTrue(spec.name().length() <= 2 * A2AToolProviderManager.MAX_NAME_PART_CHARS + 1, spec.name());
+        }
+    }
+
+    @Test
+    @DisplayName("a second peer generating an already registered tool name is skipped, not swapped in under the first peer's spec")
+    void crossPeerNameCollisionKeepsTheFirstPeer() throws Exception {
+        String otherUrl = "https://other.example.com";
+        plantAgentCard(Map.of("name", "peer", "description", "first peer"));
+        plantAgentCard(otherUrl, Map.of("name", "peer", "description", "second peer"));
+        var first = new A2AAgentConfig();
+        first.setUrl(AGENT_URL);
+        var second = new A2AAgentConfig();
+        second.setUrl(otherUrl);
+
+        var result = manager.discoverTools(List.of(first, second));
+
+        assertEquals(1, result.toolSpecs().size(), result.toolSpecs().toString());
+        assertEquals("first peer", result.toolSpecs().get(0).description());
+        assertEquals(1, result.executors().size());
+    }
+
+    @Test
     @DisplayName("M7: a directive inside a tool's parameter schema is redacted on the A2A side too")
     void governsParameterSchemas() throws Exception {
         var registry = new SimpleMeterRegistry();
@@ -138,8 +176,12 @@ class A2ADescriptionGovernanceTest {
      * Puts a card straight into the manager's agent cache, which
      * {@code fetchAgentCard} consults before any network call.
      */
-    @SuppressWarnings("unchecked")
     private void plantAgentCard(Map<String, Object> card) throws Exception {
+        plantAgentCard(AGENT_URL, card);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void plantAgentCard(String url, Map<String, Object> card) throws Exception {
         Field cacheField = A2AToolProviderManager.class.getDeclaredField("agentCache");
         cacheField.setAccessible(true);
         var cache = (ConcurrentHashMap<String, Object>) cacheField.get(manager);
@@ -147,6 +189,6 @@ class A2ADescriptionGovernanceTest {
         Class<?> cachedType = Class.forName("ai.labs.eddi.modules.llm.impl.A2AToolProviderManager$CachedAgentInfo");
         Constructor<?> constructor = cachedType.getDeclaredConstructors()[0];
         constructor.setAccessible(true);
-        cache.put(AGENT_URL, constructor.newInstance(card, System.currentTimeMillis()));
+        cache.put(url, constructor.newInstance(card, System.currentTimeMillis()));
     }
 }

@@ -51,6 +51,17 @@ class SlackSignatureVerifierTest {
     }
 
     @Test
+    void anUnresolvedVaultReferenceIsNeverAKey() {
+        // Its text is in the configuration: signing with it must not authenticate.
+        String reference = "${vault:slack-signing-secret}";
+        String timestamp = String.valueOf(Instant.now().getEpochSecond());
+        String forged = computeHmac(reference, "v0:" + timestamp + ":" + TEST_BODY);
+
+        assertFalse(verifier.verify(timestamp, TEST_BODY, forged, Set.of(reference)));
+        assertFalse(verifier.verifyWithSecret(timestamp, TEST_BODY, forged, reference));
+    }
+
+    @Test
     void verify_noMatchingSecret_returnsFalse() {
         String timestamp = String.valueOf(Instant.now().getEpochSecond());
         String baseString = "v0:" + timestamp + ":" + TEST_BODY;

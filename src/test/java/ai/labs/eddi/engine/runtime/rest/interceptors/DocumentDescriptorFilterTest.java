@@ -528,6 +528,27 @@ class DocumentDescriptorFilterTest {
         }
 
         @Test
+        @DisplayName("a slash in an unrelated query parameter cannot redirect the deleted flag to another descriptor")
+        void queryCannotSelectAnotherDescriptor() throws Exception {
+            var request = mock(ContainerRequestContext.class);
+            var response = mock(ContainerResponseContext.class);
+            when(response.getStatus()).thenReturn(200);
+            when(request.getMethod()).thenReturn("DELETE");
+            when(response.getHeaderString("Location")).thenReturn(null);
+            when(uriInfo.getRequestUri()).thenReturn(URI.create(
+                    "http://localhost:7070/outputstore/outputsets/aabbccdd11223344eeff5566?x=/ffffffffffffffffffffffff&version=1"));
+            when(uriInfo.getPath()).thenReturn("/outputstore/outputsets/aabbccdd11223344eeff5566");
+
+            var descriptor = mock(DocumentDescriptor.class);
+            doReturn(descriptor).when(documentDescriptorStore).readDescriptor("aabbccdd11223344eeff5566", 1);
+
+            filter.filter(request, response);
+
+            verify(documentDescriptorStore, never()).readDescriptor(eq("ffffffffffffffffffffffff"), anyInt());
+            verify(documentDescriptorStore).setDescriptor(eq("aabbccdd11223344eeff5566"), eq(1), eq(descriptor));
+        }
+
+        @Test
         @DisplayName("a DELETE of a sub-resource leaves the descriptor alone — its last segment is not a configuration id")
         void subResourceDeleteDoesNotTouchDescriptors() throws Exception {
             // The upload-file delete: a 32-hex file id that extractResourceId accepts.

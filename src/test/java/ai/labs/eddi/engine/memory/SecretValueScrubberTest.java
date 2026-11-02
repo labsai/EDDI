@@ -224,4 +224,27 @@ class SecretValueScrubberTest {
                 () -> (String) SecretValueScrubber.scrubDeepKeepingReferences(hostile, List.of("cessToken"), "<p>"));
         assertEquals("${vault:".repeat(200_000) + "<p>", cleaned);
     }
+
+    @Test
+    @DisplayName("substring mode finds a secret with JSON-escaped characters inside serialized JSON arguments")
+    void substringModeFindsAJsonEscapedSecret() {
+        String secret = "pa\"ss\\word-1234";
+        // As a tool call's serialized arguments carry it: quote and backslash escaped.
+        String arguments = "{\"password\":\"pa\\\"ss\\\\word-1234\",\"user\":\"bob\"}";
+
+        Object cleaned = SecretValueScrubber.scrubAll(arguments, List.of(secret), "<secret>");
+
+        assertEquals("{\"password\":\"<secret>\",\"user\":\"bob\"}", cleaned);
+    }
+
+    @Test
+    @DisplayName("whole-token mode finds a JSON-escaped secret inside serialized JSON too")
+    void wholeTokenModeFindsAJsonEscapedSecret() {
+        String secret = "a\"b";
+        String arguments = "{\"pin\":\"a\\\"b\"}";
+
+        Object cleaned = SecretValueScrubber.scrubDeepTokens(arguments, List.of(secret), "<secret>");
+
+        assertEquals("{\"pin\":\"<secret>\"}", cleaned);
+    }
 }

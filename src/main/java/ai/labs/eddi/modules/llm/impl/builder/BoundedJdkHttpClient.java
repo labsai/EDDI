@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl.builder;
 
+import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import dev.langchain4j.http.client.jdk.JdkHttpClient;
 import dev.langchain4j.http.client.jdk.JdkHttpClientBuilder;
 import org.eclipse.microprofile.config.ConfigProvider;
@@ -15,6 +16,7 @@ import java.net.Authenticator;
 import java.net.CookieHandler;
 import java.net.InetAddress;
 import java.net.ProxySelector;
+import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -29,6 +31,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Flow;
+import java.util.function.Consumer;
 
 /**
  * The langchain4j {@link JdkHttpClient} with a cap on how many bytes one LLM
@@ -48,22 +51,48 @@ import java.util.concurrent.Flow;
  * The cap is {@value #MAX_RESPONSE_BYTES_PROPERTY} (default
  * {@value #DEFAULT_MAX_RESPONSE_BYTES} bytes), counted per response — for a
  * streaming chat, over the whole stream.
+ * <p>
+ * Built with an {@link OutboundTargetPolicy}, the client also re-checks every
+ * request's URL against it before sending. Models are cached for as long as
+ * they are used, so a destination validated once at build time would otherwise
+ * be re-resolved by the JDK client on every new connection, unchecked: a
+ * hostname whose DNS answer changed after the build reached a private address
+ * (DNS rebinding). The per-request check is the same one the MCP transport
+ * applies; the residual gap between that lookup and the JDK's own is the
+ * cache-expiry window documented in {@code docs/security.md}.
  */
 public final class BoundedJdkHttpClient {
 
     static final String MAX_RESPONSE_BYTES_PROPERTY = "eddi.llm.max-response-bytes";
     static final long DEFAULT_MAX_RESPONSE_BYTES = 32L * 1024 * 1024;
 
+    /** A request guard that admits everything. */
+    private static final Consumer<URI> NO_GUARD = uri -> {
+    };
+
     private BoundedJdkHttpClient() {
     }
 
     /** {@code JdkHttpClient.builder()} with the response cap installed. */
     public static JdkHttpClientBuilder builder() {
-        return builder(maxResponseBytes());
+        return builder(maxResponseBytes(), NO_GUARD);
+    }
+
+    /**
+     * {@link #builder()} that also validates every request's URL against
+     * {@code targetPolicy} immediately before it is sent.
+     */
+    public static JdkHttpClientBuilder builder(OutboundTargetPolicy targetPolicy) {
+        OutboundTargetPolicy policy = OutboundTargetPolicy.orPermissive(targetPolicy);
+        return builder(maxResponseBytes(), uri -> policy.validateUrl(uri.toString()));
     }
 
     static JdkHttpClientBuilder builder(long maxResponseBytes) {
-        return JdkHttpClient.builder().httpClientBuilder(new CappedBuilder(HttpClient.newBuilder(), maxResponseBytes));
+        return builder(maxResponseBytes, NO_GUARD);
+    }
+
+    static JdkHttpClientBuilder builder(long maxResponseBytes, Consumer<URI> requestGuard) {
+        return JdkHttpClient.builder().httpClientBuilder(new CappedBuilder(HttpClient.newBuilder(), maxResponseBytes, requestGuard));
     }
 
     static long maxResponseBytes() {
@@ -140,29 +169,49 @@ public final class BoundedJdkHttpClient {
         }
     }
 
-    /** An {@link HttpClient} that caps every response it sends. */
+    /**
+     * An {@link HttpClient} that caps every response it sends and runs its request
+     * guard before every send.
+     */
     static final class CappedClient extends HttpClient {
         private final HttpClient delegate;
         private final long maxBytes;
+        private final Consumer<URI> requestGuard;
 
         CappedClient(HttpClient delegate, long maxBytes) {
+            this(delegate, maxBytes, NO_GUARD);
+        }
+
+        CappedClient(HttpClient delegate, long maxBytes, Consumer<URI> requestGuard) {
             this.delegate = delegate;
             this.maxBytes = maxBytes;
+            this.requestGuard = requestGuard;
         }
 
         @Override
         public <T> HttpResponse<T> send(HttpRequest request, BodyHandler<T> handler) throws IOException, InterruptedException {
+            requestGuard.accept(request.uri());
             return delegate.send(request, capped(handler, maxBytes));
         }
 
         @Override
         public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, BodyHandler<T> handler) {
+            try {
+                requestGuard.accept(request.uri());
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
             return delegate.sendAsync(request, capped(handler, maxBytes));
         }
 
         @Override
         public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request, BodyHandler<T> handler,
                                                                 PushPromiseHandler<T> pushPromiseHandler) {
+            try {
+                requestGuard.accept(request.uri());
+            } catch (RuntimeException e) {
+                return CompletableFuture.failedFuture(e);
+            }
             return delegate.sendAsync(request, capped(handler, maxBytes), pushPromiseHandler);
         }
 
@@ -241,10 +290,16 @@ public final class BoundedJdkHttpClient {
     static final class CappedBuilder implements HttpClient.Builder {
         private final HttpClient.Builder delegate;
         private final long maxBytes;
+        private final Consumer<URI> requestGuard;
 
         CappedBuilder(HttpClient.Builder delegate, long maxBytes) {
+            this(delegate, maxBytes, NO_GUARD);
+        }
+
+        CappedBuilder(HttpClient.Builder delegate, long maxBytes, Consumer<URI> requestGuard) {
             this.delegate = delegate;
             this.maxBytes = maxBytes;
+            this.requestGuard = requestGuard;
         }
 
         @Override
@@ -315,7 +370,7 @@ public final class BoundedJdkHttpClient {
 
         @Override
         public HttpClient build() {
-            return new CappedClient(delegate.build(), maxBytes);
+            return new CappedClient(delegate.build(), maxBytes, requestGuard);
         }
     }
 }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime;
 
+import java.util.concurrent.atomic.AtomicIntegerArray;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("BoundedFanOut")
@@ -41,6 +43,21 @@ class BoundedFanOutTest {
     @Nested
     @DisplayName("ordering and concurrency")
     class OrderingAndConcurrency {
+
+        @Test
+        void anItemTheGateRefusedHasNotStarted() {
+            var states = new AtomicIntegerArray(4);
+            states.set(0, 1); // running
+            states.set(1, 2); // finished
+            states.set(2, 4); // refused: never ran
+            // index 3 stays queued: it is abandoned by the question and has not started
+            // either
+
+            assertTrue(BoundedFanOut.startedOrAbandon(states, 0));
+            assertTrue(BoundedFanOut.startedOrAbandon(states, 1));
+            assertFalse(BoundedFanOut.startedOrAbandon(states, 2), "a refused item was never sent");
+            assertFalse(BoundedFanOut.startedOrAbandon(states, 3));
+        }
 
         @Test
         @DisplayName("outcomes come back in item order, whatever order the items finish in")
@@ -218,6 +235,40 @@ class BoundedFanOutTest {
             assertEquals("unfinished:1:false", results.get(1));
             assertEquals("unfinished:2:false", results.get(2));
             assertEquals(1, started.get(), "nothing starts after the caller gave up waiting");
+        }
+
+        /**
+         * The item passed its checks, the caller timed out and read it as not yet
+         * started, and then it started anyway: reported "not sent", it sent. The item
+         * here is held inside its admission check while the caller gives up.
+         */
+        @Test
+        @DisplayName("an item the caller reported as not started never starts afterwards")
+        void anItemReportedNotStartedCannotStartLater() throws Exception {
+            CountDownLatch inAdmission = new CountDownLatch(1);
+            CountDownLatch releaseAdmission = new CountDownLatch(1);
+            AtomicInteger sent = new AtomicInteger();
+            BoundedFanOut.Admission slowGate = index -> {
+                inAdmission.countDown();
+                try {
+                    releaseAdmission.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return null;
+            };
+            List<Callable<String>> items = List.of(() -> {
+                sent.incrementAndGet();
+                return "sent";
+            });
+
+            List<String> results = BoundedFanOut.run(items, 1, slowGate, OUTCOMES, null, 100, "test");
+            assertTrue(inAdmission.await(1, TimeUnit.SECONDS));
+            releaseAdmission.countDown();
+            Thread.sleep(200);
+
+            assertEquals("unfinished:0:false", results.get(0));
+            assertEquals(0, sent.get(), "reported as not started, so it must not have been sent");
         }
 
         @Test
