@@ -38,6 +38,9 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import jakarta.enterprise.event.Event;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -47,6 +50,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.time.Instant;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -140,7 +144,11 @@ class ConversationServiceSayHitlTest {
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
                 meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), AGENT_TIMEOUT);
+        conversationService.hitlPauseCommittedEvent = pauseCommittedEvent;
     }
+
+    @SuppressWarnings("unchecked")
+    private final Event<HitlPauseCommittedEvent> pauseCommittedEvent = mock(Event.class);
 
     // =========================================================================
     // Fast-fail: say() on an AWAITING_HUMAN memory
@@ -514,6 +522,7 @@ class ConversationServiceSayHitlTest {
             // the pause is produced during execution.
             doAnswer(inv -> {
                 memoryRef.get().setConversationState(ConversationState.AWAITING_HUMAN);
+                memoryRef.get().setHitlPausedAt(Instant.parse("2026-10-24T10:00:00Z"));
                 return null;
             }).when(conversation).say(anyString(), any());
 
@@ -531,6 +540,11 @@ class ConversationServiceSayHitlTest {
             assertEquals("hitl-timeout-" + CONVERSATION_ID, schedule.getName());
             assertEquals("AUTO_REJECT", schedule.getMetadata().get("policy"));
             assertEquals("regular", schedule.getMetadata().get("surface"));
+            // ...and announced, after the commit, with the pause it committed.
+            ArgumentCaptor<HitlPauseCommittedEvent> announced = ArgumentCaptor.forClass(HitlPauseCommittedEvent.class);
+            verify(pauseCommittedEvent).fireAsync(announced.capture());
+            assertEquals(CONVERSATION_ID, announced.getValue().conversationId());
+            assertEquals(HitlDecision.pauseIdOf(memoryRef.get().getHitlPausedAt()), announced.getValue().pauseId());
         }
     }
 
@@ -625,6 +639,7 @@ class ConversationServiceSayHitlTest {
             // (c) scheduleHitlTimeout is NOT called — no timeout armed for a discarded
             // pause.
             verify(scheduleStore, never()).createSchedule(any());
+            verify(pauseCommittedEvent, never()).fireAsync(any());
         }
 
         @Test

@@ -45,7 +45,9 @@
 - [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
+- [Long Jobs — the Conversation as the Job Log](long-jobs.md)
 - [Conversation Ratings](conversation-ratings.md)
+- [Alerts](alerts.md)
 - [Managed Agents](managed-agents.md)
 - [Scheduled Execution & Heartbeats](scheduling.md)
 - [Capability Matching](capability-match-guide.md)
@@ -61,6 +63,7 @@
 - [Connections](connections.md)
 - [Slack Integration](slack-integration.md)
 - [Webhook Triggers (CloudEvents)](webhook-triggers.md)
+- [Email Integration](email-integration.md)
 - [OpenAI-Compatible API (Open WebUI)](open-webui-integration.md)
 - [Embedding the Chat UI](chat-ui-embedding.md)
 

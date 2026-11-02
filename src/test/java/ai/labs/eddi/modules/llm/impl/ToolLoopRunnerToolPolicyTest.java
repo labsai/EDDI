@@ -5,7 +5,11 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.engine.caching.CacheFactory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
@@ -93,8 +97,8 @@ class ToolLoopRunnerToolPolicyTest {
         truncator = mock(ToolResponseTruncator.class);
         lenient().when(truncator.truncateIfNeeded(any(), any(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
 
-        runner = new ToolLoopRunner(service, truncator, null, null, new ToolApprovalGate(), null, null,
-                new ToolResultGuardrail(new SimpleMeterRegistry()));
+        runner = new ToolLoopRunner(service, truncator, null, null, new ToolApprovalGate(),
+                new ToolApprovalGateSupport(new ChatTranscriptCodec()), null, new ToolResultGuardrail(new SimpleMeterRegistry()));
         task = new LlmConfiguration.Task();
         task.setId("tool-policy");
     }
@@ -277,6 +281,38 @@ class ToolLoopRunnerToolPolicyTest {
                     0, null);
 
             assertEquals("done", result.response());
+        }
+
+        @Test
+        @DisplayName("the ungated half of a gated batch is guarded too: a repeated failing call is refused, not run, before the pause")
+        void ungatedHalfOfGatedBatchIsGuarded() throws Exception {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            ToolExecutor failing = (request, memoryId) -> {
+                executed.incrementAndGet();
+                return "{\"httpCode\":403,\"body\":\"no\"}";
+            };
+            ToolExecutor gatedTool = (request, memoryId) -> "deployed";
+            var getUser = ToolSpecification.builder().name("getUser").description("d").build();
+            var deploy = ToolSpecification.builder().name("deploy").description("d").build();
+            var setup = new AgentOrchestrator.ToolSetup(List.of(getUser, deploy), new HashMap<>(Map.of("getUser", failing, "deploy", gatedTool)),
+                    new HashMap<>(Map.of("getUser", "http", "deploy", "http")), List.of(getUser, deploy), new HashMap<>(), new HashMap<>(),
+                    new HashMap<>());
+            ChatModel model = mock(ChatModel.class);
+            when(model.chat(any(ChatRequest.class))).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from(List.of(
+                    ToolExecutionRequest.builder().id("c1").name("getUser").arguments("{\"a\":1,\"b\":2}").build(),
+                    ToolExecutionRequest.builder().id("c2").name("getUser").arguments("{\"b\":2,\"a\":1}").build(),
+                    ToolExecutionRequest.builder().id("c3").name("deploy").arguments("{}").build()))).build());
+            var approvals = new ToolApprovalsConfig();
+            approvals.setRequireApproval(List.of("deploy"));
+
+            var pause = assertThrows(ToolApprovalRequiredException.class,
+                    () -> runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup, task, memory("conv-1"), approvals, 0, 0,
+                            null));
+
+            assertEquals(1, executed.get(), "the identical second call must be refused by the guard on the pre-pause path");
+            assertTrue(pause.getBatch().getTraceSoFar().stream().anyMatch(t -> "tool_repeat_refused".equals(t.get("type"))),
+                    "trace: " + pause.getBatch().getTraceSoFar());
         }
 
         @Test

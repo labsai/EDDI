@@ -561,7 +561,7 @@ The five mistakes it exists to prevent:
 2. **Every behavior rule needs an `actionmatcher` on `lastStep`.** A rule with only an `inputmatcher` fires on any step of the conversation. And within a group only the **first** matching rule fires by default (`executeUntilFirstSuccess`) — put independent rules in separate groups.
 3. **A comma list in `actionmatcher` means AND** (a contiguous sublist), not OR. Use a shared action or an `OR` connector.
 4. **Any `{…}` placeholder in output or a prompt needs `eddi://ai.labs.templating` as the last workflow step**, or users see the raw template.
-5. **Reserved actions are not quick-reply expressions** — `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION` and `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)).
+5. **Reserved actions are not quick-reply expressions** — `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `PAUSE_CONVERSATION` (the HITL gate; see [`docs/hitl.md`](docs/hitl.md)) and `CONTINUE_CONVERSATION` (self-continuation; see [`docs/long-jobs.md`](docs/long-jobs.md)).
 
 ---
 

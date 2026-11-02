@@ -1485,6 +1485,7 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
         role: "user",
         content: input,
         timestamp: Date.now(),
+        stepIndex: i,
       });
     }
     for (const part of parts) {
@@ -1493,6 +1494,7 @@ function snapshotToMessages(snapshot: SimpleConversationMemorySnapshot): ChatMes
         role: "agent",
         content: part,
         timestamp: Date.now(),
+        stepIndex: i,
       });
     }
   }

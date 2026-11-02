@@ -124,6 +124,20 @@ class MimeMessageParserTest {
         }
 
         @Test
+        @DisplayName("a valid mailbox beside an unparseable entry in From: no sender either")
+        void validBesideInvalidFrom() throws Exception {
+            InboundMail mail = parser().parse(message("""
+                    From: a@example.com, <garbage>
+                    Message-ID: <w@example.com>
+
+                    body
+                    """), MailLimits.defaults(), true);
+
+            assertNull(mail.from());
+            assertTrue(mail.anomalies().contains(MailAnomaly.MULTIPLE_FROM), mail.anomalies().toString());
+        }
+
+        @Test
         @DisplayName("a duplicated Subject is recorded for the DKIM phase")
         void duplicateSingleton() throws Exception {
             InboundMail mail = parser().parse(message("""
