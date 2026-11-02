@@ -413,10 +413,10 @@ class PostgresJournalExtraCoverageTest {
         }
 
         @Test
-        @DisplayName("ABORT group: cancelDiscussion returns false → 'already terminal' skipped branch")
+        @DisplayName("ABORT group: paused-only cancel returns false → 'no longer awaiting' skipped branch")
         void abortGroup_alreadyTerminal() throws Exception {
-            when(groupConversationService.cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL))
-                    .thenReturn(false); // false → the "skipped — already terminal" branch
+            when(groupConversationService.cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, null))
+                    .thenReturn(false); // false → the "skipped — no longer awaiting" branch
             var metadata = Map.<String, Object>of(
                     "policy", "ABORT",
                     "surface", "group",
@@ -424,7 +424,7 @@ class PostgresJournalExtraCoverageTest {
 
             assertDoesNotThrow(() -> handler.handleTimeout(metadata));
 
-            verify(groupConversationService).cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, null);
         }
     }
 }

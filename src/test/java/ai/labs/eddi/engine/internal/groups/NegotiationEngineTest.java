@@ -268,6 +268,56 @@ class NegotiationEngineTest {
         assertSame(existing, gc.getDecision(), "an existing decision is never overwritten");
     }
 
+    @Test
+    @DisplayName("accepting one proposal withdraws the signer's signature from every other open proposal")
+    void accept_movesTheSignature_noStaleAgreement() {
+        var carol = new GroupMember("a3", "Carol", 3, null);
+        var participants = List.of(ALICE, BOB, carol, MOD);
+        var gc = gc();
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "p1 terms"), proposal("a2", "p2 terms")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a3", "{\"accept\": \"p1\"}")), 2, 1);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a3", "{\"accept\": \"p2\"}")), 3, 1);
+        // B's acceptance of p1 used to complete {A, B, C} on p1 — C's signature from
+        // before C moved to p2 still counted.
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 4, 2);
+
+        assertFalse(NegotiationEngine.checkAndRecordAgreement(gc, participants, "mod", "Bargaining"),
+                "Carol's last move endorsed p2 — p1 is not unanimous");
+        assertNull(gc.getDecision());
+    }
+
+    @Test
+    @DisplayName("an agreement keeps the dissents a dissent round recorded")
+    void agreement_keepsRecordedDissents() {
+        var gc = gc();
+        var dissent = new GroupConversation.Dissent("a2", "Bob", "I still prefer 60/40");
+        gc.setDecision(new GroupConversation.DecisionRecord(DecisionType.NONE, null, null, null, List.of(dissent),
+                "dissent-round", "Dissent", null));
+        NegotiationEngine.applyRepeat(gc, List.of(proposal("a1", "50/50")), 0, 0);
+        NegotiationEngine.applyRepeat(gc, List.of(bargain("a2", "{\"accept\": \"p1\"}")), 1, 1);
+
+        assertTrue(NegotiationEngine.checkAndRecordAgreement(gc, List.of(ALICE, BOB, MOD), "mod", "Bargaining"));
+
+        assertEquals(DecisionType.AGREEMENT, gc.getDecision().type());
+        assertEquals(List.of(dissent), gc.getDecision().dissents());
+    }
+
+    @Test
+    @DisplayName("arbitration replaces a dissent-only NONE record (keeping its dissents)")
+    void arbitration_replacesNoneRecord() {
+        var gc = gc();
+        var dissent = new GroupConversation.Dissent("a2", "Bob", "I still prefer 60/40");
+        gc.setDecision(new GroupConversation.DecisionRecord(DecisionType.NONE, null, null, null, List.of(dissent),
+                "dissent-round", "Dissent", null));
+
+        NegotiationEngine.recordArbitration(gc, List.of(new TranscriptEntry("mod", "Moderator", "Split 55/45.", 3,
+                "Arbitration", TranscriptEntryType.SYNTHESIS, Instant.now(), null, null)), "Arbitration");
+
+        assertEquals(DecisionType.VERDICT, gc.getDecision().type());
+        assertEquals("Split 55/45.", gc.getDecision().outcome());
+        assertEquals(List.of(dissent), gc.getDecision().dissents());
+    }
+
     // =================================================================
     // ledger rendering — the accountability mechanism
     // =================================================================
