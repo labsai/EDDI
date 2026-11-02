@@ -153,9 +153,11 @@ public class ObservableChatModel implements ChatModel {
 
         long elapsedMs = System.currentTimeMillis() - startMs;
 
-        if (logResponses) {
+        if (logResponses && LOGGER.isDebugEnabled()) {
+            // DEBUG, like the request line: the answer is model output about the
+            // user's conversation, and at INFO it reached every production log.
             var text = response.aiMessage() != null ? response.aiMessage().text() : "<null>";
-            LOGGER.infof("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, truncate(LogRecordRedactor.rewrite(text), 500));
+            LOGGER.debugf("[%s] Chat response (%dms): \"%s\"", modelType, elapsedMs, truncate(LogRecordRedactor.rewrite(text), 500));
         }
 
         return response;

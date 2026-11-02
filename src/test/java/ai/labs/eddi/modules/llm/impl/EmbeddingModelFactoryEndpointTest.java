@@ -176,4 +176,29 @@ class EmbeddingModelFactoryEndpointTest {
 
         assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
     }
+
+    @Test
+    @DisplayName("a vault reference in a numeric field is not echoed back in its resolved form")
+    void resolvedSecretInNumericFieldIsNotEchoed() {
+        // The error reaches RAG search responses and ingestion status: quoting the
+        // resolved value would hand an editor the plaintext the vault API withholds.
+        var timeout = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "timeout", "${vault:victim}"));
+        var e1 = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(timeout, EmbeddingInputType.DOCUMENT));
+        assertNoPlaintext(e1);
+
+        var dimensions = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "dimensions", "${vault:victim}"));
+        var e2 = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(dimensions, EmbeddingInputType.DOCUMENT));
+        assertNoPlaintext(e2);
+
+        var model = config("openai", Map.of("baseUrl", baseUrl(), "apiKey", "k", "model", "${vault:victim}", "modelName", "x"));
+        var e3 = assertThrows(IllegalArgumentException.class, () -> factory.getOrCreate(model, EmbeddingInputType.DOCUMENT));
+        assertNoPlaintext(e3);
+    }
+
+    private static void assertNoPlaintext(Throwable e) {
+        for (Throwable t = e; t != null; t = t.getCause()) {
+            String message = String.valueOf(t.getMessage());
+            assertTrue(!message.contains("vault-value-for-victim"), message);
+        }
+    }
 }

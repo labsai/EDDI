@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.llm.tools.impl;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -188,5 +190,26 @@ class TextSummarizerToolTest {
         String result = textSummarizerTool.extractKeywords(text, -1);
         assertNotNull(result);
         assertTrue(result.contains("Top Keywords:"));
+    }
+
+    @Test
+    void summarizeText_longPunctuationRunWithoutWhitespace_isLinear() {
+        // "[.!?]+\\s+" retried from every position of the run: quadratic, and a regex
+        // ignores the tool timeout's interrupt.
+        String text = "First sentence. Second one! " + "!".repeat(200_000) + "x";
+
+        String result = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> textSummarizerTool.summarizeText(text, 3));
+
+        assertTrue(result.startsWith("Summary:"), result.substring(0, 40));
+    }
+
+    @Test
+    void summarizeText_splitsSentencesAsBefore() {
+        String text = "Alpha beta gamma. Delta epsilon!! Zeta eta? Theta iota kappa. Lambda mu nu.";
+
+        String result = textSummarizerTool.summarizeText(text, 2);
+
+        assertTrue(result.startsWith("Summary:"), result);
+        assertFalse(result.contains("!!"), "a punctuation run is one boundary: " + result);
     }
 }

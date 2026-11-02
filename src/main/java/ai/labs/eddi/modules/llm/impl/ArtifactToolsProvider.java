@@ -18,6 +18,8 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Contributes the shared-artifact tools (I17) — {@code createArtifact},
  * {@code readArtifact}, {@code proposeArtifactUpdate}, {@code listArtifacts} —
@@ -37,6 +39,12 @@ import java.util.Map;
 class ArtifactToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(ArtifactToolsProvider.class);
+
+    /**
+     * The {@code builtInToolsWhitelist} slug that admits these tools for a member
+     * with a non-empty whitelist.
+     */
+    public static final String WHITELIST_SLUG = "artifacts";
 
     private final LiveDiscussionRegistry liveDiscussionRegistry;
     private final IAgentGroupStore groupStore;
@@ -62,6 +70,15 @@ class ArtifactToolsProvider implements ToolSourceProvider {
         }
         Boolean enableBuiltInTools = ctx.task() != null ? ctx.task().getEnableBuiltInTools() : null;
         if (enableBuiltInTools == null || !enableBuiltInTools) {
+            return ToolContribution.empty();
+        }
+        // So does its explicit tool selection: a member whose builtInToolsWhitelist
+        // is non-empty gets the artifact tools only when the list names "artifacts".
+        // Otherwise the group's opt-in widened a policy the member's own config
+        // had narrowed.
+        if (!ctx.hasNoWhitelist() && !ctx.isWhitelisted(WHITELIST_SLUG)) {
+            LOGGER.debugf("Group artifact tools withheld from agent '%s': its builtInToolsWhitelist does not name 'artifacts'",
+                    sanitize(ctx.agentId()));
             return ToolContribution.empty();
         }
         String callerConversationId = ctx.memory() != null ? ctx.memory().getConversationId() : null;

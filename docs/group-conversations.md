@@ -654,7 +654,13 @@ Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own
 `enableBuiltInTools` switch still applies — a member whose LLM task does not
 set it takes part **without** the tools, and saving a group that enables
-artifacts, agent task creation or dynamic agents logs that prerequisite. Artifact,
+artifacts, agent task creation or dynamic agents logs that prerequisite. So does
+its explicit tool selection: a member whose `builtInToolsWhitelist` is non-empty
+receives the artifact tools only if the list names `artifacts`, and the task
+tools only if it names `group_tasks` — a group opt-in never widens a whitelist
+the member's own configuration narrowed. An omitted or empty whitelist admits
+both, as before. When upgrading, add the two slugs to any member whitelist that
+should keep these tools; the Manager's tool picker offers both. Artifact,
 task and dynamic-agent tool results are never served from the tool cache: every
 member runs as the same user, so a cached `listArtifacts()` would hide a peer's
 new artifact. `markFinal: true` freezes an
@@ -1099,7 +1105,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
-| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused |
+| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused. The ceiling travels with the chain: each hop applies the stricter of its own limit and the one it was handed, so a delegate with a higher limit cannot extend a chain the originator capped |
 | `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
 | `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |

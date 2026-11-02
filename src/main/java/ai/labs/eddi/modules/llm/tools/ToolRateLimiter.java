@@ -233,6 +233,42 @@ public class ToolRateLimiter {
     }
 
     /**
+     * Save-time check of a task's rate-limit settings: every limit must be zero or
+     * positive. A bucket holds {@code max(0, limit)} tokens, so a negative limit —
+     * written by someone expecting the {@code -1 = no bound} convention of the tool
+     * timeouts — silently blocked the tool for good. {@code 0} is accepted and
+     * blocks the tool on purpose; to switch rate limiting off, set
+     * {@code enableRateLimiting} to {@code false}.
+     *
+     * @param defaultRateLimit
+     *            the task's {@code defaultRateLimit}, or {@code null}
+     * @param toolRateLimits
+     *            the task's {@code toolRateLimits}, or {@code null}
+     * @param fieldPath
+     *            the task's path in the configuration, for the message
+     * @throws IllegalArgumentException
+     *             naming the first negative limit
+     */
+    public static void validateLimits(Integer defaultRateLimit, Map<String, Integer> toolRateLimits, String fieldPath) {
+        if (defaultRateLimit != null && defaultRateLimit < 0) {
+            throw new IllegalArgumentException(fieldPath + ".defaultRateLimit is " + defaultRateLimit
+                    + ": a rate limit must be 0 (blocks the tool) or more calls per minute. "
+                    + "To switch rate limiting off, set enableRateLimiting to false.");
+        }
+        if (toolRateLimits == null) {
+            return;
+        }
+        for (var entry : toolRateLimits.entrySet()) {
+            Integer limit = entry.getValue();
+            if (limit != null && limit < 0) {
+                throw new IllegalArgumentException(fieldPath + ".toolRateLimits." + entry.getKey() + " is " + limit
+                        + ": a rate limit must be 0 (blocks the tool) or more calls per minute. "
+                        + "To switch rate limiting off, set enableRateLimiting to false.");
+            }
+        }
+    }
+
+    /**
      * Token bucket for one (scope, tool) pair.
      *
      * <p>
