@@ -358,6 +358,66 @@ Conventions:
 - Validate a change with `promtool check rules docs/monitoring/eddi-alerts.yml` and
   `promtool test rules docs/monitoring/eddi-alerts.test.yml` (CI runs both).
 
+### Alerting on alert delivery
+
+EDDI's own [alert rules](../alerts.md) tell agent owners about low ratings and
+failed turns. For an ops team that already runs Grafana, the
+[alert metrics](../metrics.md#alert-metrics) answer the next question: is that
+alerting itself healthy? These are **examples**, not part of `eddi-alerts.yml` —
+provision them in Grafana (or translate them into Prometheus rules) if you want
+them:
+
+```yaml
+# Grafana alerting provisioning (grafana-provisioning/alerting/eddi-alerts.yml)
+apiVersion: 1
+groups:
+  - orgId: 1
+    name: eddi-alert-delivery
+    folder: EDDI
+    interval: 1m
+    rules:
+      - uid: eddi-alert-delivery-giving-up
+        title: EDDI alerts are not being delivered
+        condition: C
+        for: 10m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 900, to: 0 }
+            model:
+              # Deliveries that gave up after their last retry, per target type
+              expr: sum by (type) (increase(eddi_alerts_deliveries_total{outcome="gave_up"}[15m]))
+          - refId: C
+            datasourceUid: __expr__
+            model: { type: threshold, expression: A, conditions: [{ evaluator: { type: gt, params: [0] } }] }
+        labels: { severity: warning }
+        annotations:
+          summary: "EDDI gave up delivering alerts to {{ $labels.type }}"
+          description: "Check the Alerts inbox in the Manager: each failed delivery shows its last error (a removed Slack integration, a webhook answering non-2xx, an unresolvable signing secret)."
+      - uid: eddi-alert-queue-dropping
+        title: EDDI is dropping alert work
+        condition: C
+        for: 0m
+        data:
+          - refId: A
+            datasourceUid: prometheus
+            relativeTimeRange: { from: 300, to: 0 }
+            model:
+              expr: sum(increase(eddi_alerts_dropped_total[5m]))
+          - refId: C
+            datasourceUid: __expr__
+            model: { type: threshold, expression: A, conditions: [{ evaluator: { type: gt, params: [0] } }] }
+        labels: { severity: warning }
+        annotations:
+          summary: "The alert queue overflowed"
+          description: "Turns and ratings were not slowed, but some alerts were never evaluated. Raise eddi.alerts.queue-capacity, or find what keeps the alert worker busy (a slow webhook or database)."
+```
+
+The same expressions work as Prometheus rules
+(`increase(eddi_alerts_deliveries_total{outcome="gave_up"}[15m]) > 0`). Counters
+appear on their first increment, so the first give-up after a restart is not seen
+by `increase()` — see the convention above.
+
 ## Alert runbooks
 
 ### EddiDown

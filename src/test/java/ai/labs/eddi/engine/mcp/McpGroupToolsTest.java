@@ -1109,6 +1109,19 @@ class McpGroupToolsTest {
     }
 
     @Test
+    void followupWithMember_withoutUseOnTheGroup_isRefused() throws Exception {
+        // Owning the transcript is not still being allowed to run the group's members.
+        GroupConversation gc = ownedBy("mcp-client");
+        gc.setGroupId("g1");
+        doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("g1", "group");
+
+        String result = tools.followup_with_member("gc1", "Analyst", "why?");
+
+        assertTrue(result.contains("Access denied"), result);
+        verify(groupConversationService, never()).followUpWithMember(any(), any(), any());
+    }
+
+    @Test
     void addTeamTask_withoutEditOnTheGroup_isRefused() throws Exception {
         var workspace = teamWorkspace();
         when(resourceAccessGuard.hasAccess("g1", AccessLevel.EDIT)).thenReturn(false);
