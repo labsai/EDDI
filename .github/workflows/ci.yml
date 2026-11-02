@@ -1037,11 +1037,126 @@ jobs:
             --set postgres.password=ci-placeholder-pg \
             --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi
 
+  # ─── Maven repository cache ─────────────────────────────────────
+  # The one writer of the ~/.m2/repository cache. Every other Maven job only
+  # restores it. setup-java's `cache: maven` let the first job to finish save a
+  # cache keyed on pom.xml alone, and nothing ever updated it: a compile-only job
+  # (CodeQL) could win and save a repository without the surefire/failsafe
+  # providers, the Quarkus deployment jars or the plugins the later jobs need, and
+  # those were then fetched from Maven Central by many concurrent runs, which
+  # answers HTTP 429. This job resolves everything the pipeline uses, once per
+  # pom.xml / wrapper change, and saves it under an exact key.
+  #
+  # Ungated on purpose: CodeQL runs on every push and PR (see its header) and
+  # needs the repository too. On a docs-only PR the exact key already exists, the
+  # lookup hits, and every other step is skipped in seconds.
+  #
+  # continue-on-error: a failed warm-up must not fail the pipeline or skip the
+  # required checks that `need` it; they then resolve from Central as before (the
+  # retry settings in .mvn/maven.config apply).
+  maven-cache:
+    name: Maven Cache
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      # Checkout comes FIRST: both cache steps compute their key with hashFiles over the
+      # poms and the wrapper properties, which hashes nothing (an empty key that never
+      # matches) until the files are on disk. Checked out only on a miss, the lookup
+      # always missed and every run redid the whole warm-up.
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # Exact key only, and lookup-only: a hit downloads nothing.
+      - name: Look up the cache
+        id: lookup
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          lookup-only: true
+
+      # A miss starts from the nearest older cache (main's, usually) so the
+      # resolves below only fetch what the pom change added.
+      - name: Restore the nearest older cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Resolve dependencies and plugins
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: ./mvnw -B -ntp -DskipUi=true dependency:go-offline
+
+      - name: Run the lifecycle once, tests skipped
+        # `package` loads every plugin the build jobs run (formatter, Checkstyle,
+        # JaCoCo, Quarkus, failsafe) and the Quarkus build resolves the extension
+        # *-deployment jars, which dependency:go-offline does not. No style skips
+        # on purpose: Build & Test runs those gates, so their plugins are needed.
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: ./mvnw -B -ntp -DskipUi=true -DskipTests -DskipITs=true package
+
+      - name: Fetch the surefire and failsafe JUnit providers
+        # Providers are resolved at execution time from the test classpath, so
+        # nothing above fetches them. A tiny plain unit test forces surefire's;
+        # failsafe runs the same provider artifact but its own plugin, forced by
+        # a verify that selects no integration test. That verify loads no coverage,
+        # so the JaCoCo merged-check would fail it: haltOnFailure=false keeps the
+        # plugin resolved (the point) without enforcing a threshold here.
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          ./mvnw -B -ntp -DskipUi=true -Dtest=ChangelogFragmentTest -Dsurefire.failIfNoSpecifiedTests=false test
+          ./mvnw -B -ntp -DskipUi=true -DskipUTs=true -DskipITs=false -Dit.test=NoSuchIT -Djacoco.haltOnFailure=false -Dfailsafe.failIfNoSpecifiedTests=false -Dsurefire.failIfNoSpecifiedTests=false verify
+
+      - name: Fetch the SBOM and license plugins
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          ./mvnw -B -ntp -DskipUi=true org.cyclonedx:cyclonedx-maven-plugin:2.9.1:makeBom -DskipTests
+          ./mvnw -B -ntp -DskipUi=true -DskipTests -Dformatter.skip=true -Dcheckstyle.skip=true -Plicense-gen process-resources
+
+      # The Node archive the UI build unpacks lives in the same repository
+      # (com.github.eirslett:node), so it is cached with it: Build Image then finds it
+      # and downloads nothing. Placed and checked exactly as Build Image does, against
+      # the pinned hash, so a cached copy that does not match is never trusted.
+      - name: Fetch the checksum-verified Node archive
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          DIR="$HOME/.m2/repository/com/github/eirslett/node/${NODE_VERSION}"
+          ARCHIVE="${DIR}/node-${NODE_VERSION}-linux-x64.tar.gz"
+          mkdir -p "$DIR"
+          if [ -f "$ARCHIVE" ] && ! echo "${NODE_SHA256_LINUX_X64}  ${ARCHIVE}" | sha256sum -c --status -; then
+            rm -f "$ARCHIVE"
+          fi
+          if [ ! -f "$ARCHIVE" ]; then
+            curl -fsSL --retry 3 -o "${ARCHIVE}.part" \
+              "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz"
+            echo "${NODE_SHA256_LINUX_X64}  ${ARCHIVE}.part" | sha256sum -c -
+            mv "${ARCHIVE}.part" "$ARCHIVE"
+          fi
+          echo "Node ${NODE_VERSION} archive verified at ${ARCHIVE}"
+
+      - name: Save the Maven repository cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+
   # ─── Job 1: Build & Test ────────────────────────────────────────
   build-and-test:
     name: Build & Test
     runs-on: ubuntu-latest
-    needs: detect-changes
+    needs: [detect-changes, maven-cache]
     # backend or operator_docs on a pull request; code on push and on tags.
     #
     # operator_docs: DeploymentManifestsTest asserts things about
@@ -1076,7 +1191,14 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
 
       - name: Build and test
         # -DskipUi=true is belt and braces: `test` stops before prepare-package, where
@@ -1176,7 +1298,7 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-and-test]
+    needs: [detect-changes, build-and-test, maven-cache]
     # Same split as build-and-test: on a pull request only a backend change runs the
     # Testcontainers suite; on push and on tags any code change does.
     if: needs.detect-changes.outputs.code == 'true' && (github.event_name != 'pull_request' || needs.detect-changes.outputs.backend == 'true')
@@ -1190,7 +1312,14 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
 
       # Build & Test already ran the unit tests on this commit (this job `needs` it).
       # Their coverage data and reports are restored instead of re-running ~20k tests,
@@ -1318,6 +1447,7 @@ jobs:
   codeql:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
+    needs: maven-cache
     permissions:
       security-events: write
       contents: read
@@ -1330,7 +1460,14 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
@@ -1679,7 +1816,7 @@ jobs:
     # The `code` condition is explicit rather than inherited: build-and-test also
     # runs for an operator-docs-only change now, and an SBOM of unchanged code is
     # noise.
-    needs: [detect-changes, build-and-test]
+    needs: [detect-changes, build-and-test, maven-cache]
     if: github.event_name == 'push' && needs.detect-changes.outputs.code == 'true'
     steps:
       - name: Checkout
@@ -1690,7 +1827,14 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
 
       - name: Set up Node ${{ env.NODE_VERSION }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -1748,7 +1892,7 @@ jobs:
   build-image:
     name: Build Image
     runs-on: ubuntu-latest
-    needs: detect-changes
+    needs: [detect-changes, maven-cache]
     if: needs.detect-changes.outputs.code == 'true'
     outputs:
       primary-tag: ${{ steps.meta.outputs.primary-tag }}
@@ -1786,7 +1930,14 @@ jobs:
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
-          cache: maven
+
+      - name: Restore the Maven repository cache
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+        with:
+          path: ~/.m2/repository
+          key: maven-v1-${{ runner.os }}-${{ hashFiles('**/pom.xml', '.mvn/wrapper/maven-wrapper.properties') }}
+          restore-keys: |
+            maven-v1-${{ runner.os }}-
 
       - name: Compute Docker tags
         id: meta
@@ -1888,8 +2039,8 @@ jobs:
 
       # frontend-maven-plugin 1.15.1 downloads Node from nodejs.org and verifies
       # nothing — no checksum, no signature — and it reuses any archive it finds
-      # in the local Maven repository, which setup-java restores from the Actions
-      # cache. So the archive is put there here, at the exact path the plugin
+      # in the local Maven repository, which the Maven cache restore step above
+      # brings back from the Actions cache. So the archive is put there here, at the exact path the plugin
       # resolves (RepositoryCacheResolver: com.github.eirslett:node:<version>,
       # classifier linux-x64, extension tar.gz), and checked against the pinned
       # hash. The plugin then finds it and downloads nothing. A cached copy that
