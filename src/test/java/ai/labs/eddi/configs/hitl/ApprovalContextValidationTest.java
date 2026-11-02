@@ -17,6 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -69,7 +70,7 @@ class ApprovalContextValidationTest {
         assertDoesNotThrow(() -> ApprovalContextValidation.validate(List.of(block("L", "x".repeat(4000))), "path", Scope.AGENT));
         assertTrue(refusal(List.of(block("L", "x".repeat(4001))), Scope.AGENT).contains("path[0].template exceeds"));
         assertTrue(refusal(List.of(block("L", "  ")), Scope.AGENT).contains("template must not be blank"));
-        assertTrue(refusal(java.util.Collections.singletonList(null), Scope.AGENT).contains("must not be null"));
+        assertTrue(refusal(Collections.singletonList(null), Scope.AGENT).contains("must not be null"));
     }
 
     @ParameterizedTest
