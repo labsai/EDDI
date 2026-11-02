@@ -5,9 +5,14 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
+import ai.labs.eddi.integrations.email.reply.EmailReplySender;
+import ai.labs.eddi.integrations.email.reply.EmailReplyThread;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
@@ -21,6 +26,8 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -37,12 +44,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * deadline ({@code eddi.email.inbound.stranded-after}, default 30 min) and to
  * {@code DONE} from the turn's completion callback. A row still submitted past
  * its deadline lost that callback — the node died, or the callback's write
- * failed. In trigger mode there is no reply to rebuild, so the sweep only
- * <em>resolves</em> the row, from the conversation it recorded:
+ * failed. The sweep resolves the row from the conversation it recorded:
  * <ul>
- * <li>the conversation is idle (READY, ENDED), failed (ERROR, interrupted) or
- * waiting for a human (AWAITING_HUMAN): the turn ran — {@code DONE}, the state
- * noted ({@code outcome=done|failed|awaiting_human});</li>
+ * <li>the conversation holds the mail's step and is idle (READY, ENDED), failed
+ * (ERROR, interrupted) or waiting for a human (AWAITING_HUMAN): the turn ran —
+ * {@code DONE}, the state noted ({@code outcome=done|failed|awaiting_human});
+ * an ended or failed conversation without the step is resolved the same way,
+ * since its turn may have partly run;</li>
  * <li>still IN_PROGRESS: the deadline moves on, the turn is not touched;</li>
  * <li>no conversation recorded, or it is gone: the node died while starting the
  * conversation, whose {@code CONVERSATION_START} turn may already have called
@@ -50,13 +58,30 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * and the row ends {@code REFUSED(stranded)} ({@code outcome=lost}), logged at
  * WARN with the ledger id, and the integration's owners get the once-a-day
  * {@code lost} notice.</li>
+ * <li>the conversation is idle or paused but holds no step for the mail: the
+ * conversation was started, and the node died before the mail's own turn ran.
+ * Nothing of the mail has run, so it is <b>submitted again</b>: the row goes
+ * back to {@code RECEIVED}, keeping its conversation, and the next poll finds
+ * the mail in the mailbox by its Message-ID and runs its turn in that
+ * conversation ({@code outcome=resubmitted}). Once: the transition is
+ * conditional, the turn carries the mail's ledger key as its idempotency key,
+ * and a later sweep sees the step.</li>
  * </ul>
+ * <b>Conversation mode</b> also rebuilds what the dead node did not send: a
+ * mail whose step exists but has no reply row gets its reply rendered from the
+ * stored conversation, and a mail whose turn paused gets its pause notice
+ * ({@link EmailReplySender#ensureFor}, idempotent —
+ * {@code outcome=reply_rebuilt}). A rebuild that fails leaves the row
+ * {@code TURN_SUBMITTED} with its deadline moved on, so a later sweep tries
+ * again ({@link #MAX_REBUILD_ATTEMPTS} times in all) before the row is closed
+ * without the reply.
+ * <p>
  * Each resolution is a conditional transition, so several nodes running the
  * sweep at once resolve each row once.
  * <p>
- * <b>Schedules.</b> Every trigger-mode integration gets its poll schedule back
- * if it is missing (an integration imported from a ZIP, or a schedule deleted
- * by hand).
+ * <b>Schedules.</b> Every email integration gets its poll schedule back if it
+ * is missing (an integration imported from a ZIP, or a schedule deleted by
+ * hand).
  */
 @ApplicationScoped
 public class EmailInboundSweeper {
@@ -65,6 +90,25 @@ public class EmailInboundSweeper {
 
     static final int BATCH = 50;
 
+    /**
+     * The note on a row handed back because the mail's turn never ran; the poll
+     * finds such a row by its recorded conversation.
+     */
+    public static final String RESUBMIT = "resubmit";
+
+    /**
+     * The note on a submitted row whose reply could not be rebuilt yet, followed by
+     * how many sweeps failed so far.
+     */
+    static final String REBUILD_FAILED = "reply_rebuild_failed:";
+
+    /**
+     * Sweeps that try to rebuild a reply before the row is closed without it — one
+     * every {@code stranded-after}, so a store outage of a few hours is covered and
+     * a reply that can never be built does not keep its row open for ever.
+     */
+    static final int MAX_REBUILD_ATTEMPTS = 5;
+
     private final IEmailMessageLedger ledger;
     private final IConversationService conversationService;
     private final EmailIntegrationDirectory directory;
@@ -72,6 +116,14 @@ public class EmailInboundSweeper {
     private final EmailOwnerNotifier ownerNotifier;
     private final EmailMetrics metrics;
     private final Duration strandedAfter;
+
+    /**
+     * Conversation mode's replies, for the rebuild. Field-injected so the
+     * constructor stays the one the tests use; null there, and then no reply is
+     * rebuilt.
+     */
+    @Inject
+    EmailReplySender replies;
 
     @Inject
     public EmailInboundSweeper(IEmailMessageLedger ledger, IConversationService conversationService, EmailIntegrationDirectory directory,
@@ -151,6 +203,48 @@ public class EmailInboundSweeper {
                 ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, null, now.plus(strandedAfter), null, false, now);
                 continue;
             }
+            // Gone (null): resolved as before, without a resubmission — when in doubt the
+            // mail is not run a second time. A store that cannot be read is not "gone":
+            // closing the row would leave the reply to nobody, so it is kept for a later
+            // sweep, bounded like a failed rebuild.
+            SimpleConversationMemorySnapshot snapshot;
+            try {
+                snapshot = readFull(row.conversationId());
+            } catch (IllegalStateException e) {
+                int failures = rebuildFailures(row) + 1;
+                if (failures < MAX_REBUILD_ATTEMPTS) {
+                    ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, null, now.plus(strandedAfter), REBUILD_FAILED + failures,
+                            false, now);
+                    continue;
+                }
+                LOGGER.warnf("Email integration %s: the conversation of inbound mail %s could not be read in %d sweeps; the mail is closed "
+                        + "without its reply", sanitize(row.integrationId()), row.id(), failures);
+                snapshot = null;
+            }
+            boolean idle = state == ConversationState.READY || state == ConversationState.AWAITING_HUMAN;
+            int step = snapshot == null ? -1 : EmailReplyThread.mailStep(snapshot.getConversationOutputs(), row.messageId());
+            if (snapshot != null && step < 0 && idle) {
+                if (ledger.transition(row.id(), State.TURN_SUBMITTED, State.RECEIVED, null, now, RESUBMIT, false, now)) {
+                    resolved++;
+                    metrics.stranded("resubmitted");
+                    LOGGER.warnf("Email integration %s: the turn of inbound mail %s never ran in conversation %s (the node stopped after "
+                            + "starting it); the next poll submits it again", sanitize(row.integrationId()), row.id(),
+                            sanitize(row.conversationId()));
+                }
+                continue;
+            }
+            if (step >= 0 && !rebuildReply(row, snapshot, now)) {
+                // Closing the row now would leave the reply to nobody: the outbound row may
+                // not exist yet, and DONE leaves every recovery query. Kept for a later sweep.
+                int failures = rebuildFailures(row) + 1;
+                if (failures < MAX_REBUILD_ATTEMPTS) {
+                    ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, null, now.plus(strandedAfter), REBUILD_FAILED + failures,
+                            false, now);
+                    continue;
+                }
+                LOGGER.warnf("Email integration %s: the reply to inbound mail %s could not be rebuilt in %d sweeps; the mail is closed "
+                        + "without it", sanitize(row.integrationId()), row.id(), failures);
+            }
             String outcome = switch (state) {
                 case ERROR, EXECUTION_INTERRUPTED -> "failed";
                 case AWAITING_HUMAN -> "awaiting_human";
@@ -164,6 +258,61 @@ public class EmailInboundSweeper {
         return resolved;
     }
 
+    /**
+     * Conversation mode: the reply (or pause notice) the dead node did not queue.
+     *
+     * @return false when it could not be rebuilt (and may be tried again); true
+     *         when it exists now or none is due
+     */
+    private boolean rebuildReply(LedgerEntry row, SimpleConversationMemorySnapshot snapshot, Instant now) {
+        if (replies == null) {
+            return true;
+        }
+        try {
+            Optional<EmailIntegration> integration = directory.find(row.integrationId());
+            if (integration.isPresent() && integration.get().settings().replies()
+                    && replies.ensureFor(integration.get().settings(), row, snapshot, now)) {
+                metrics.stranded("reply_rebuilt");
+                LOGGER.infof("Email integration %s: rebuilt the reply to inbound mail %s from conversation %s", sanitize(row.integrationId()),
+                        row.id(), sanitize(row.conversationId()));
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email integration %s: the reply to inbound mail %s could not be rebuilt: %s", sanitize(row.integrationId()), row.id(),
+                    e.getMessage());
+            return false;
+        }
+        return true;
+    }
+
+    /** How many sweeps failed to rebuild the reply of {@code row} so far. */
+    static int rebuildFailures(LedgerEntry row) {
+        String note = row.lastError();
+        if (note == null || !note.startsWith(REBUILD_FAILED)) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(note.substring(REBUILD_FAILED.length())));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * The detailed conversation, or null when it is gone.
+     *
+     * @throws IllegalStateException
+     *             when the store cannot be read
+     */
+    private SimpleConversationMemorySnapshot readFull(String conversationId) {
+        try {
+            return conversationService.readConversation(conversationId, true, false, List.of());
+        } catch (ResourceNotFoundException e) {
+            return null;
+        } catch (ResourceStoreException e) {
+            throw new IllegalStateException("Could not read conversation " + conversationId, e);
+        }
+    }
+
     private void notifyLost(LedgerEntry row, Instant now) {
         try {
             var integration = directory.find(row.integrationId());
@@ -175,13 +324,13 @@ public class EmailInboundSweeper {
     }
 
     /**
-     * Creates the poll schedule of every trigger-mode integration that lacks one.
+     * Creates the poll schedule of every email integration that lacks one.
      */
     int ensureSchedules() {
         int created = 0;
         for (EmailIntegration integration : directory.scan()) {
             EmailChannelSettings settings = integration.settings();
-            if (settings.mode() != EmailChannelSettings.Mode.TRIGGER
+            if (settings.mode() == null
                     || !EmailChannelSettings.validate(integration.configuration().getPlatformConfig()).isEmpty()) {
                 continue;
             }

@@ -102,11 +102,88 @@ describe("EmailPlatformFields", () => {
   });
 });
 
+describe("EmailPlatformFields — conversation mode", () => {
+  const BASE = { mode: "conversation", connection: "mailbox", host: "imap.example.com", address: "support@example.com" };
+
+  it("switching to conversation shows the reply fields, forces authentication and drops the trigger-only key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<Harness initial={{ correlateThreads: "true", requireAuthentication: "false" }} onChange={onChange} />);
+    expect(screen.queryByTestId("email-replies-section")).toBeNull();
+
+    await user.selectOptions(screen.getByTestId("email-mode"), "conversation");
+
+    expect(onChange).toHaveBeenLastCalledWith({ mode: "conversation", transport: "imap" });
+    expect(screen.getByTestId("email-replies-section")).toBeInTheDocument();
+    expect(screen.getByTestId("email-require-authentication")).toBeChecked();
+    expect(screen.getByTestId("email-require-authentication")).toBeDisabled();
+    expect(screen.queryByTestId("email-correlate-threads")).toBeNull();
+    expect(screen.getByTestId("email-smtp-port")).toHaveValue("587");
+    expect(screen.getByTestId("email-max-replies")).toHaveAttribute("placeholder", "5");
+    expect(screen.getByTestId("email-thread-participants")).toHaveValue("originalSenderOnly");
+    expect(screen.getByTestId("email-ai-disclosure")).toHaveAttribute("placeholder", "This reply was written by an AI assistant.");
+    expect(screen.getByTestId("email-problem-smtpHostRequired")).toBeInTheDocument();
+  });
+
+  it("switching back to trigger drops every reply key", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<Harness initial={{ ...BASE, smtpHost: "smtp.example.com", aiDisclosure: "", honorReplyTo: "true" }} onChange={onChange} />);
+
+    await user.selectOptions(screen.getByTestId("email-mode"), "trigger");
+
+    expect(onChange).toHaveBeenLastCalledWith({ mode: "trigger", transport: "imap", connection: "mailbox", host: "imap.example.com", address: "support@example.com" });
+  });
+
+  it("switching the disclosure off writes an empty value and warns; on again restores the default", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<Harness initial={{ ...BASE, smtpHost: "smtp.example.com" }} onChange={onChange} />);
+    expect(screen.queryByTestId("email-ai-disclosure-warning")).toBeNull();
+
+    await user.click(screen.getByTestId("email-ai-disclosure-enabled"));
+    expect(onChange).toHaveBeenLastCalledWith({ ...BASE, smtpHost: "smtp.example.com", aiDisclosure: "" });
+    expect(screen.getByTestId("email-ai-disclosure-warning")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-ai-disclosure")).toBeNull();
+
+    await user.click(screen.getByTestId("email-ai-disclosure-enabled"));
+    expect(onChange).toHaveBeenLastCalledWith({ ...BASE, smtpHost: "smtp.example.com" });
+  });
+
+  it("warns about Reply-To when it is honoured, and writes the reply keys the user set", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<Harness initial={{ ...BASE }} onChange={onChange} />);
+
+    await user.type(screen.getByTestId("email-smtp-host"), "smtp.example.com");
+    await user.selectOptions(screen.getByTestId("email-smtp-port"), "465");
+    await user.click(screen.getByTestId("email-honor-reply-to"));
+    expect(screen.getByTestId("email-honor-reply-to-warning")).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId("email-reply-template"), { target: { value: "{output}\n-- Support" } });
+
+    expect(onChange).toHaveBeenLastCalledWith({
+      ...BASE,
+      smtpHost: "smtp.example.com",
+      smtpPort: "465",
+      honorReplyTo: "true",
+      replyTemplate: "{output}\n-- Support",
+    });
+    expect(screen.queryByTestId("email-problem-smtpHostRequired")).toBeNull();
+  });
+});
+
 describe("EmailSecurityNotes", () => {
   it("explains the per-mailbox Exchange restriction", () => {
     renderWithProviders(<EmailSecurityNotes />);
     const text = screen.getByTestId("email-exchange-note").textContent ?? "";
     expect(text).toContain("Add-MailboxPermission");
     expect(text).toContain("IMAP.AccessAsApp");
+    expect(screen.queryByTestId("email-dkim-note")).toBeNull();
+  });
+
+  it("in conversation mode, names the DKIM/DMARC requirement for replies and how suppressions are cleared", () => {
+    renderWithProviders(<EmailSecurityNotes conversation />);
+    expect(screen.getByTestId("email-dkim-note").textContent).toContain("DKIM");
+    expect(screen.getByTestId("email-bounce-note").textContent).toContain("email-suppressions/clear");
   });
 });

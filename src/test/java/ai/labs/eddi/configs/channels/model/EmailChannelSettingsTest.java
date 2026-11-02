@@ -70,17 +70,114 @@ class EmailChannelSettingsTest {
         assertTrue(refused(with("port", "25"), "993 (TLS) or 143"));
     }
 
+    static Map<String, String> conversation() {
+        Map<String, String> pc = minimal();
+        pc.put("mode", "conversation");
+        pc.put("smtpHost", "SMTP.office365.com");
+        return pc;
+    }
+
+    private static Map<String, String> conversationWith(String key, String value) {
+        Map<String, String> pc = conversation();
+        pc.put(key, value);
+        return pc;
+    }
+
+    @Nested
+    @DisplayName("conversation mode")
+    class ConversationMode {
+
+        @Test
+        @DisplayName("the minimal configuration validates and reads with the documented defaults")
+        void defaults() {
+            assertEquals(List.of(), EmailChannelSettings.validate(conversation()));
+            var settings = EmailChannelSettings.from(conversation());
+            assertEquals(EmailChannelSettings.Mode.CONVERSATION, settings.mode());
+            assertTrue(settings.replies());
+            assertEquals("smtp.office365.com", settings.smtpHost());
+            assertEquals(587, settings.smtpPort());
+            assertEquals("smtp://smtp.office365.com:587", settings.smtpOrigin());
+            assertEquals(EmailChannelSettings.DEFAULT_REPLY_TEMPLATE, settings.replyTemplate());
+            assertEquals(EmailChannelSettings.DEFAULT_AI_DISCLOSURE, settings.aiDisclosure());
+            assertEquals(EmailChannelSettings.ThreadParticipants.ORIGINAL_SENDER_ONLY, settings.threadParticipants());
+            assertEquals(5, settings.maxRepliesPerThreadPerHour());
+            assertFalse(settings.honorReplyTo());
+            assertNull(settings.fromName());
+            assertTrue(settings.requireAuthentication());
+            assertTrue(settings.correlateThreads(), "a conversation always keeps its thread");
+            assertEquals(List.of(), EmailChannelSettings.warnings(settings));
+        }
+
+        @Test
+        @DisplayName("465 names smtps://host as the origin; other ports are refused")
+        void smtpPorts() {
+            assertEquals("smtps://smtp.office365.com", EmailChannelSettings.from(conversationWith("smtpPort", "465")).smtpOrigin());
+            assertTrue(refused(conversationWith("smtpPort", "25"), "587 (STARTTLS, required) or 465"));
+            assertTrue(refused(conversationWith("smtpPort", "2525"), "smtpPort"));
+            Map<String, String> noHost = conversation();
+            noHost.remove("smtpHost");
+            assertTrue(refused(noHost, "requires platformConfig.smtpHost"));
+        }
+
+        @Test
+        @DisplayName("requireAuthentication cannot be switched off: false is refused, and even unvalidated it reads true")
+        void authenticationForced() {
+            assertTrue(refused(conversationWith("requireAuthentication", "false"), "cannot be false in conversation mode"));
+            assertEquals(List.of(), EmailChannelSettings.validate(conversationWith("requireAuthentication", "true")));
+            assertTrue(EmailChannelSettings.from(conversationWith("requireAuthentication", "false")).requireAuthentication(),
+                    "a reader of the settings never sees false in conversation mode");
+            assertFalse(EmailChannelSettings.from(with("requireAuthentication", "false")).requireAuthentication(), "trigger mode may");
+        }
+
+        @Test
+        @DisplayName("trigger-mode keys with a value are refused")
+        void triggerKeys() {
+            assertTrue(refused(conversationWith("correlateThreads", "false"), "belongs to email trigger mode"));
+            assertEquals(List.of(), EmailChannelSettings.validate(conversationWith("correlateThreads", "")));
+        }
+
+        @Test
+        @DisplayName("an emptied aiDisclosure switches it off and warns; honorReplyTo warns")
+        void warnings() {
+            var noDisclosure = EmailChannelSettings.from(conversationWith("aiDisclosure", ""));
+            assertEquals("", noDisclosure.aiDisclosure());
+            assertEquals(List.of(EmailChannelSettings.WARNING_AI_DISCLOSURE_DISABLED), EmailChannelSettings.warnings(noDisclosure));
+            var replyTo = EmailChannelSettings.from(conversationWith("honorReplyTo", "true"));
+            assertTrue(replyTo.honorReplyTo());
+            assertEquals(List.of(EmailChannelSettings.WARNING_HONOR_REPLY_TO), EmailChannelSettings.warnings(replyTo));
+            assertEquals(List.of(), EmailChannelSettings.warnings(EmailChannelSettings.from(with("aiDisclosure", ""))),
+                    "trigger mode has nothing to disclose");
+        }
+
+        @Test
+        @DisplayName("lengths, header-safe fromName, enumerations and ranges")
+        void limits() {
+            assertTrue(refused(conversationWith("fromName", "Support\r\nBcc: x@evil.example"), "fromName"));
+            assertTrue(refused(conversationWith("fromName", "x".repeat(101)), "fromName"));
+            assertTrue(refused(conversationWith("replyTemplate", "x".repeat(4001)), "replyTemplate"));
+            assertTrue(refused(conversationWith("aiDisclosure", "x".repeat(501)), "aiDisclosure"));
+            assertTrue(refused(conversationWith("threadParticipants", "everyone"), "threadParticipants"));
+            assertTrue(refused(conversationWith("maxRepliesPerThreadPerHour", "0"), "maxRepliesPerThreadPerHour"));
+            assertTrue(refused(conversationWith("honorReplyTo", "maybe"), "honorReplyTo"));
+            assertEquals(EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT,
+                    EmailChannelSettings.from(conversationWith("threadParticipants", "anyAuthenticatedParticipant")).threadParticipants());
+            assertEquals("Contoso Support", EmailChannelSettings.from(conversationWith("fromName", "Contoso Support")).fromName());
+        }
+    }
+
     @Nested
     @DisplayName("refusals")
     class Refusals {
 
         @Test
-        @DisplayName("conversation mode is not supported yet, and its keys are refused in trigger mode")
-        void conversationMode() {
-            assertTrue(refused(with("mode", "conversation"), "not supported yet"));
+        @DisplayName("conversation-mode keys with a value are refused in trigger mode; blank ones are ignored")
+        void conversationKeysInTriggerMode() {
             assertTrue(refused(with("replyTemplate", "{output}"), "conversation mode"));
             assertTrue(refused(with("aiDisclosure", "x"), "conversation mode"));
             assertTrue(refused(with("smtpHost", "smtp.office365.com"), "conversation mode"));
+            assertTrue(refused(with("honorReplyTo", "true"), "conversation mode"));
+            assertEquals(List.of(), EmailChannelSettings.validate(with("aiDisclosure", "")));
+            assertFalse(EmailChannelSettings.from(minimal()).replies(), "trigger mode never replies");
         }
 
         @Test

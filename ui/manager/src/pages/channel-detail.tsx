@@ -24,7 +24,7 @@ import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
-import { emailConfigProblems, withEmailFixedKeys } from "@/lib/email-channel";
+import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
@@ -567,7 +567,7 @@ export function ChannelDetailPage() {
       {isEmail && (
         <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3" data-testid="email-setup-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.setupTitle", "Setup and security")}</h2>
-          <EmailSecurityNotes />
+          <EmailSecurityNotes conversation={emailMode(draft?.platformConfig ?? {}) === "conversation"} />
         </section>
       )}
 

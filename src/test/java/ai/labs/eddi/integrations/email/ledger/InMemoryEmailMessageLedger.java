@@ -135,11 +135,40 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public synchronized List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
+        return rows.values().stream()
+                .filter(r -> r.integrationId().equals(integrationId) && r.state() == State.RECEIVED && r.kind() == Kind.TRIGGER
+                        && r.conversationId() != null && r.nextAttemptAt() != null && !r.nextAttemptAt().isAfter(now))
+                .sorted(Comparator.comparing(LedgerEntry::nextAttemptAt)).limit(limit).toList();
+    }
+
+    @Override
     public synchronized long countInboundTurns(String integrationId, String sender, Instant since) {
         return rows.values().stream()
                 .filter(r -> r.integrationId().equals(integrationId) && sender.equals(r.recipient()) && r.kind() == Kind.TRIGGER
                         && !r.createdAt().isBefore(since) && (r.state() == State.TURN_SUBMITTED || r.state() == State.DONE))
                 .count();
+    }
+
+    @Override
+    public synchronized Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest) {
+        List<LedgerEntry> turns = rows.values().stream()
+                .filter(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.TRIGGER && r.direction() == Direction.IN
+                        && (r.state() == State.TURN_SUBMITTED || r.state() == State.DONE))
+                .sorted(Comparator.comparing(LedgerEntry::createdAt)).toList();
+        return turns.isEmpty() ? Optional.empty() : Optional.of(turns.get(latest ? turns.size() - 1 : 0));
+    }
+
+    @Override
+    public synchronized boolean hasSentReply(String conversationId, String recipient) {
+        return rows.values().stream().anyMatch(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY
+                && r.direction() == Direction.OUT && r.state() == State.SENT && recipient.equals(r.recipient()));
+    }
+
+    @Override
+    public synchronized long countByConversationSince(String conversationId, Kind kind, Instant since) {
+        return rows.values().stream().filter(r -> conversationId.equals(r.conversationId()) && r.kind() == kind && !r.createdAt().isBefore(since)
+                && r.state() != State.SUPPRESSED).count();
     }
 
     /**

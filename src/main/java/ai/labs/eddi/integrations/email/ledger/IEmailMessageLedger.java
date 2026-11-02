@@ -44,8 +44,15 @@ import java.util.Optional;
  * conditional {@link #transition}s. While a row is {@code RECEIVED},
  * {@code nextAttemptAt} is when a deferred mail may be tried again; while it is
  * {@code TURN_SUBMITTED}, it is the deadline after which the turn counts as
- * stranded ({@link #findDue}). Replies add {@link Kind#REPLY}; relay webhooks
- * add single-use replay tokens.
+ * stranded ({@link #findDue}).
+ * <p>
+ * <b>Replies (Phase 3).</b> A conversation-mode reply is a {@link Kind#REPLY}
+ * row, {@link Direction#OUT}, under an idempotency key derived from
+ * conversation, step and reply kind, worked like a notification (claim, lease,
+ * complete, reschedule). Its Message-ID is what a correspondent's next mail
+ * names in {@code In-Reply-To}/{@code References}, so the row is also the
+ * thread index ({@link #findByMessage} with {@link Direction#OUT}). Relay
+ * webhooks will add single-use replay tokens.
  */
 public interface IEmailMessageLedger {
 
@@ -295,12 +302,47 @@ public interface IEmailMessageLedger {
     List<LedgerEntry> findDue(Kind kind, State state, Instant now, int limit);
 
     /**
+     * Up to {@code limit} {@link Kind#TRIGGER} rows of {@code integrationId} in
+     * {@link State#RECEIVED} that already name a conversation and whose
+     * {@code nextAttemptAt} is at or before {@code now}, oldest first — the mail
+     * one integration's poll must find again by its Message-ID and submit once
+     * more. Scoped to the integration in the store, so rows nobody polls any more
+     * (a deleted integration's, an invalid one's) never take another integration's
+     * places; retention removes them.
+     */
+    List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit);
+
+    /**
      * How many {@link Kind#TRIGGER} rows of {@code integrationId} from
      * {@code sender} created at or after {@code since} reached a turn
      * ({@link State#TURN_SUBMITTED} or {@link State#DONE}) — the per-sender daily
      * budget.
      */
     long countInboundTurns(String integrationId, String sender, Instant since);
+
+    /**
+     * The first ({@code latest} false) or the latest ({@code latest} true) by
+     * {@code createdAt} {@link Kind#TRIGGER} row, {@link Direction#IN}, of
+     * {@code conversationId} that reached a turn ({@link State#TURN_SUBMITTED} or
+     * {@link State#DONE}), of any integration — the mail that started a thread (its
+     * sender may continue it) and the mail a reply answers (email plan §11). One
+     * indexed lookup however many rows the conversation has.
+     */
+    Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest);
+
+    /**
+     * Whether a {@link Kind#REPLY} row of {@code conversationId} to
+     * {@code recipient} (normalised) reached {@link State#SENT} — the
+     * {@code anyAuthenticatedParticipant} test of who may continue a thread.
+     */
+    boolean hasSentReply(String conversationId, String recipient);
+
+    /**
+     * How many {@code kind} rows of {@code conversationId} were created at or after
+     * {@code since} and not {@link State#SUPPRESSED} — the per-thread reply budget
+     * ({@code maxRepliesPerThreadPerHour}), counted cluster-wide.
+     */
+    long countByConversationSince(String conversationId, Kind kind, Instant since);
 
     /** Rows addressed to {@code recipient} (normalised), for GDPR export. */
     List<LedgerEntry> findByRecipient(String recipient);

@@ -82,6 +82,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.ascending(F_MESSAGE_ID), new IndexOptions().name("idx_email_ledger_message_id"));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_RECIPIENT), Indexes.ascending(F_KIND),
                 Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_inbound_sender"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
+                new IndexOptions().name("idx_email_ledger_conversation"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
@@ -206,10 +208,42 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
+        List<LedgerEntry> result = new ArrayList<>();
+        for (Document document : rows.find(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_STATE, State.RECEIVED.name()),
+                Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.ne(F_CONVERSATION, null), Filters.lte(F_NEXT, Date.from(now))))
+                .sort(Sorts.ascending(F_NEXT)).limit(limit)) {
+            result.add(toEntry(document));
+        }
+        return result;
+    }
+
+    @Override
     public long countInboundTurns(String integrationId, String sender, Instant since) {
         return rows.countDocuments(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_RECIPIENT, sender),
                 Filters.eq(F_KIND, Kind.TRIGGER.name()), Filters.gte(F_CREATED, Date.from(since)),
                 Filters.in(F_STATE, State.TURN_SUBMITTED.name(), State.DONE.name())));
+    }
+
+    @Override
+    public Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest) {
+        Bson filter = Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.eq(F_DIRECTION, Direction.IN.name()), Filters.in(F_STATE, State.TURN_SUBMITTED.name(), State.DONE.name()));
+        Bson order = latest ? Sorts.descending(F_CREATED, F_ID) : Sorts.ascending(F_CREATED, F_ID);
+        return Optional.ofNullable(rows.find(filter).sort(order).first()).map(MongoEmailMessageLedger::toEntry);
+    }
+
+    @Override
+    public boolean hasSentReply(String conversationId, String recipient) {
+        return rows.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
+                Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()), Filters.eq(F_RECIPIENT, recipient)))
+                .first() != null;
+    }
+
+    @Override
+    public long countByConversationSince(String conversationId, Kind kind, Instant since) {
+        return rows.countDocuments(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, kind.name()),
+                Filters.gte(F_CREATED, Date.from(since)), Filters.ne(F_STATE, State.SUPPRESSED.name())));
     }
 
     @Override

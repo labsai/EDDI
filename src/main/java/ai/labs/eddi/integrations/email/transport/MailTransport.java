@@ -5,15 +5,18 @@
 package ai.labs.eddi.integrations.email.transport;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.engine.mail.MailSendException;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
- * A polled mailbox transport (email plan §6): fetch raw bytes, mark done. The
- * one input format is the raw RFC 5322 message; parsing, sender authentication
- * and every guard are transport-independent. IMAP is the only implementation of
- * this phase ({@link ImapMailTransport}).
+ * A mailbox transport (email plan §6): fetch raw bytes, mark done, and — for a
+ * conversation-mode integration only — send raw bytes. The one input format is
+ * the raw RFC 5322 message; parsing, sender authentication and every guard are
+ * transport-independent. IMAP in + SMTP out is the only implementation so far
+ * ({@link ImapMailTransport}).
  */
 public interface MailTransport {
 
@@ -52,12 +55,55 @@ public interface MailTransport {
          */
         MarkResult markProcessed(MailboxMessage message, EmailChannelSettings settings) throws MailboxException;
 
+        /**
+         * Finds a message by its Message-ID in the polled folder or, when processed
+         * mail is moved, in that folder, and fetches it (at most {@code maxBytes}). How
+         * a mail whose turn never ran is submitted again: it was marked or moved
+         * already, so the cursor does not list it any more. Empty when it is in neither
+         * folder.
+         */
+        default Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings settings, long maxBytes) throws MailboxException {
+            return Optional.empty();
+        }
+
         @Override
         void close();
     }
 
+    /**
+     * Submits one rendered reply to exactly one recipient, with the mailbox address
+     * as envelope sender (bounces come back to the polled mailbox). Implementations
+     * refuse an integration that is not in conversation mode: trigger mode never
+     * sends.
+     *
+     * @return what the relay answered on acceptance
+     * @throws MailSendException
+     *             when it was not accepted — permanent only for a refusal that a
+     *             retry cannot change
+     */
+    default String send(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " cannot send mail.", null);
+    }
+
     /** The keyword a processed message gets. */
     String PROCESSED_KEYWORD = "$EddiProcessed";
+
+    /**
+     * A message found again by its Message-ID, already fetched.
+     *
+     * @param raw
+     *            the raw message
+     * @param internalDate
+     *            when the server received it, or null
+     * @param sourceRef
+     *            where it was found
+     */
+    record FoundMessage(byte[] raw, Instant internalDate, String sourceRef) {
+        @Override
+        public String toString() {
+            return "FoundMessage[" + raw.length + " bytes, " + sourceRef + "]";
+        }
+    }
 
     /** What {@link MailboxSession#markProcessed} did. */
     enum MarkResult {

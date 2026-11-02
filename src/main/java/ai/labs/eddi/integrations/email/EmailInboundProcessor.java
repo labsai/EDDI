@@ -43,7 +43,9 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.transport.MailTransport.MailboxMessage;
+import ai.labs.eddi.integrations.email.reply.EmailReplySender;
 import ai.labs.eddi.integrations.email.transport.MailboxException;
+import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -110,6 +112,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <b>Mail is data.</b> The turn's input is the author's {@code inputTemplate}
  * rendered by the restricted runtime engine with the mail as its data; nothing
  * from the mail is ever parsed as a template.
+ * <p>
+ * <b>Conversation mode</b> (email plan §11) adds three things, and only behind
+ * {@link EmailChannelSettings#replies()}: a mail answering one of the
+ * integration's own replies (its {@code In-Reply-To} / {@code References} name
+ * a Message-ID the ledger records) continues that reply's conversation — when
+ * the authenticated sender is the one who started it, or, with
+ * {@code threadParticipants: anyAuthenticatedParticipant}, an address a reply
+ * in it went to; anyone else starts their own. A finished turn hands its output
+ * to {@link EmailReplySender} before the row is closed. And a delivery report
+ * for a reply this integration sent updates that reply and the suppression
+ * list. Trigger mode never reaches any of them: it sends nothing.
  */
 @ApplicationScoped
 public class EmailInboundProcessor {
@@ -166,6 +179,14 @@ public class EmailInboundProcessor {
      */
     @Inject
     Instance<AuditLedgerService> auditLedger;
+
+    /**
+     * Conversation mode's replies. Field-injected so the constructor stays the one
+     * the tests use; null there, and then no reply is ever attempted.
+     */
+    @Inject
+    EmailReplySender replies;
+
     private final EmailMetrics metrics;
     private final Duration strandedAfter;
     private final Duration retention;
@@ -278,10 +299,13 @@ public class EmailInboundProcessor {
         parsed = parsed.withAuthentication(authentication);
         boolean authenticated = authentication.isAuthenticated();
 
-        // 6. Loops, lists, authentication requirement.
+        // 6. Delivery reports for replies this integration sent, then loops, lists,
+        // authentication requirement. A report is still refused as a loop: it is
+        // feedback for the ledger, never input for a turn.
+        boolean bounce = parsed.deliveryReport() != null && applyDeliveryReport(id, parsed, now);
         Optional<String> loop = EmailLoopGuard.check(parsed, id, settings.address(), ctx.otherIntegrationAddresses(), ledger);
         if (loop.isPresent()) {
-            return refuse(ctx, row, loop.get(), EmailMetrics.LOOP, now);
+            return refuse(ctx, row, loop.get(), bounce ? EmailMetrics.BOUNCE : EmailMetrics.LOOP, now);
         }
         if (sender == null) {
             return refuse(ctx, row, "blocked:no_single_sender", EmailMetrics.BLOCKED, now);
@@ -326,7 +350,31 @@ public class EmailInboundProcessor {
                 ? correlationIntent(id, target.getTargetId(), threadRoot(parsed), sender)
                 : null;
         String existingConversation = null;
-        if (intent != null) {
+        // A row that already names a conversation was handed back after the
+        // conversation was started (a failed turn submission, or the stranded sweep
+        // finding the mail's turn never ran): the mail belongs to that conversation.
+        if (row.conversationId() != null && target.getType() != ChannelTarget.TargetType.GROUP) {
+            ConversationState recorded = stateOf(row.conversationId());
+            if (recorded == ConversationState.IN_PROGRESS || recorded == ConversationState.AWAITING_HUMAN) {
+                return defer(ctx, row, now.plus(RETRY_SHORT), "conversation_busy", EmailMetrics.DEFERRED, now);
+            }
+            if (recorded != null && recorded != ConversationState.ENDED) {
+                existingConversation = row.conversationId();
+            }
+        }
+        if (existingConversation == null && settings.replies() && authenticated && target.getType() != ChannelTarget.TargetType.GROUP) {
+            String continued = continuedConversation(id, settings, parsed, sender);
+            if (continued != null) {
+                ConversationState state = stateOf(continued);
+                if (state == ConversationState.IN_PROGRESS || state == ConversationState.AWAITING_HUMAN) {
+                    return defer(ctx, row, now.plus(RETRY_SHORT), "conversation_busy", EmailMetrics.DEFERRED, now);
+                }
+                if (state != null && state != ConversationState.ENDED) {
+                    existingConversation = continued;
+                }
+            }
+        }
+        if (intent != null && existingConversation == null) {
             try {
                 UserConversation mapped = userConversationStore.readUserConversation(intent, userId);
                 if (mapped != null && mapped.getConversationId() != null) {
@@ -377,7 +425,8 @@ public class EmailInboundProcessor {
             if (target.getType() == ChannelTarget.TargetType.GROUP) {
                 // A group takes a question, not a context map: the rendered input is all
                 // its members see of the mail.
-                var discussion = groupConversationService.startAndDiscussAsync(target.getTargetId(), input, userId, null);
+                var discussion = groupConversationService.startAndDiscussAsync(target.getTargetId(), input, userId,
+                        settings.replies() ? groupReplyListener(ctx, row, userId, mailData(parsed, List.of(), false)) : null);
                 ledger.transition(row.id(), State.TURN_SUBMITTED, State.DONE, discussion.getId(), null, "group_discussion", false, now);
                 count(ctx, EmailMetrics.PROCESSED);
                 LOGGER.infof("Email integration %s: mail %s started group discussion %s", sanitize(id), row.id(), sanitize(discussion.getId()));
@@ -398,7 +447,12 @@ public class EmailInboundProcessor {
             context.put(MAIL_CONTEXT_KEY, new Context(Context.ContextType.object, mail));
             context.put(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, id));
             input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true));
-            submit(ctx, row, conversationId, costBefore, new InputData(input, context));
+            InputData inputData = new InputData(input, context);
+            // The turn carries the mail's ledger key: a turn submitted again for the same
+            // mail (stranded-turn recovery) is recognised by the conversation instead of
+            // running twice, while the engine still remembers the first.
+            inputData.setIdempotencyKey(row.idempotencyKey());
+            submit(ctx, row, conversationId, costBefore, inputData);
             count(ctx, EmailMetrics.PROCESSED);
             LOGGER.infof("Email integration %s: mail %s submitted to conversation %s", sanitize(id), row.id(), sanitize(conversationId));
             return Disposition.SETTLED;
@@ -449,6 +503,48 @@ public class EmailInboundProcessor {
             release(row, now.plus(RETRY_SHORT.multipliedBy(attempt)), "failed:" + e.getClass().getSimpleName(), now);
             count(ctx, EmailMetrics.FAILED);
             return Disposition.DEFERRED;
+        }
+    }
+
+    /** Rows one poll resubmits at most. */
+    static final int MAX_RESUBMISSIONS_PER_POLL = 20;
+
+    /**
+     * Due {@code RECEIVED} rows of {@code integrationId} that already name a
+     * conversation: mail to be processed again in that conversation, which the poll
+     * has to find in the mailbox by its Message-ID (the cursor no longer lists it).
+     * The store filters by integration, so other integrations' due rows — a deleted
+     * integration's, which nothing polls any more — never crowd them out.
+     */
+    public List<LedgerEntry> pendingResubmissions(String integrationId, Instant now) {
+        return ledger.findDueResubmissions(integrationId, now, MAX_RESUBMISSIONS_PER_POLL);
+    }
+
+    /**
+     * A mail to be resubmitted is in neither the polled nor the move folder any
+     * more (someone moved or deleted it): it is refused, and the owners hear about
+     * it as a lost mail.
+     */
+    public void resubmissionLost(IntegrationContext ctx, LedgerEntry row, Instant now) {
+        if (ledger.transition(row.id(), State.RECEIVED, State.REFUSED, null, null, "stranded:not_in_mailbox", false, now)) {
+            metrics.stranded("lost");
+            LOGGER.warnf("Email integration %s: mail %s was to be submitted again but is no longer in the mailbox", sanitize(ctx.integrationId()),
+                    row.id());
+            ownerNotifier.notifyOnce(ctx.integrationId(), ctx.integration().getName(), ctx.settings(), Reason.LOST, now);
+        }
+    }
+
+    /**
+     * A mail to be resubmitted was found but is over {@code maxMessageBytes} (the
+     * limit was lowered since its first turn): it is refused as too large, like a
+     * new mail of that size — not as lost, since it is still in the mailbox.
+     */
+    public void resubmissionTooLarge(IntegrationContext ctx, LedgerEntry row, Instant now) {
+        if (ledger.transition(row.id(), State.RECEIVED, State.REFUSED, null, null, "too_large", false, now)) {
+            count(ctx, EmailMetrics.TOO_LARGE);
+            audit(ctx, row, "too_large", row.recipient());
+            LOGGER.infof("Email integration %s: mail %s was to be submitted again but is larger than maxMessageBytes; refused",
+                    sanitize(ctx.integrationId()), row.id());
         }
     }
 
@@ -505,27 +601,36 @@ public class EmailInboundProcessor {
     }
 
     private void submit(IntegrationContext ctx, LedgerEntry row, String conversationId, double costBefore, InputData inputData) throws Exception {
-        String integrationId = ctx.integrationId();
-        conversationService.say(conversationId, false, true, Collections.emptyList(), inputData, false,
+        // A reply is built from the conversation's outputs (the first one includes the
+        // CONVERSATION_START output) and needs each step's context, which only the
+        // detailed projection keeps — so conversation mode asks for all of it.
+        boolean replies = ctx.settings().replies();
+        conversationService.say(conversationId, replies, !replies, Collections.emptyList(), inputData, false,
                 new IConversationService.ConversationResponseHandler() {
                     @Override
                     public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                        completed(integrationId, row, snapshot, costBefore, false);
+                        completed(ctx, row, conversationId, snapshot, costBefore, false);
                     }
 
                     @Override
                     public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                        completed(integrationId, row, snapshot, costBefore, true);
+                        completed(ctx, row, conversationId, snapshot, costBefore, true);
                     }
                 });
     }
 
     /**
-     * The turn finished: record its cost against the day's budget and close the
-     * row.
+     * The turn finished: record its cost against the day's budget, in conversation
+     * mode hand its output to the reply sender (before the row is closed, so a
+     * crash in between leaves a row the stranded sweep rebuilds the reply for), and
+     * close the row.
      */
-    void completed(String integrationId, LedgerEntry row, SimpleConversationMemorySnapshot snapshot, double costBefore, boolean skipped) {
+    void completed(IntegrationContext ctx, LedgerEntry row, String conversationId, SimpleConversationMemorySnapshot snapshot, double costBefore,
+                   boolean skipped) {
+        String integrationId = ctx.integrationId();
         Instant now = Instant.now();
+        // The cost first: it is recorded once, here — the stranded sweep that rebuilds
+        // a reply which could not be queued below never sees the turn's cost.
         try {
             double after = snapshot != null && snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0;
             double delta = after - costBefore;
@@ -534,6 +639,17 @@ public class EmailInboundProcessor {
             }
         } catch (RuntimeException e) {
             LOGGER.warnf("Email integration %s: the cost of mail %s could not be recorded: %s", sanitize(integrationId), row.id(), e.getMessage());
+        }
+        if (!skipped && ctx.settings().replies() && replies != null) {
+            try {
+                LedgerEntry current = ledger.findById(row.id()).orElse(row);
+                replies.onTurnCompleted(integrationId, ctx.settings(), current, conversationId, snapshot, now);
+            } catch (RuntimeException e) {
+                // The row stays TURN_SUBMITTED; the stranded sweep rebuilds the reply.
+                LOGGER.warnf("Email integration %s: the reply to mail %s could not be queued: %s", sanitize(integrationId), row.id(),
+                        e.getMessage());
+                return;
+            }
         }
         ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
         String note = skipped
@@ -654,6 +770,9 @@ public class EmailInboundProcessor {
         data.put("subject", mail.subject());
         data.put("date", mail.date() == null ? null : mail.date().toString());
         data.put("messageId", mail.messageId());
+        data.put("inReplyTo", mail.inReplyTo());
+        data.put("references", mail.references());
+        data.put("replyTo", mail.replyTo().stream().map(MailAddress::address).toList());
         data.put("authentication", verdictId(mail.authentication()));
         data.put("signingDomain", mail.authentication().signingDomain());
         data.put("quotedHistoryRemoved", mail.quotedHistoryRemoved());
@@ -696,6 +815,92 @@ public class EmailInboundProcessor {
             return mail.references().get(0);
         }
         return mail.inReplyTo() != null ? mail.inReplyTo() : mail.messageId();
+    }
+
+    /**
+     * The conversation a conversation-mode mail continues, found through EDDI's own
+     * replies: the first id in {@code In-Reply-To}, then {@code References} newest
+     * first, that the ledger records as a reply this integration sent. Null when
+     * there is none, or when {@code sender} may not continue it.
+     * <p>
+     * <b>The hijack guard</b> for this path: a Message-ID travels in every forward,
+     * so naming it proves nothing. The sender must be the authenticated address
+     * that started the conversation (its first inbound mail) or, with
+     * {@code threadParticipants: anyAuthenticatedParticipant}, an address one of
+     * its replies was sent to. Anyone else falls through to the thread key, which
+     * holds their own address, and so starts their own conversation.
+     */
+    String continuedConversation(String integrationId, EmailChannelSettings settings, InboundMail mail, String sender) {
+        List<String> referenced = new ArrayList<>();
+        if (mail.inReplyTo() != null) {
+            referenced.add(mail.inReplyTo());
+        }
+        List<String> references = new ArrayList<>(mail.references());
+        Collections.reverse(references);
+        referenced.addAll(references);
+        int checked = 0;
+        for (String id : referenced) {
+            if (checked++ >= EmailLoopGuard.MAX_REFERENCES_CHECKED) {
+                break;
+            }
+            Optional<LedgerEntry> sent = ledger.findByMessage(integrationId, Direction.OUT, id);
+            if (sent.isEmpty() || sent.get().kind() != Kind.REPLY || sent.get().conversationId() == null) {
+                continue;
+            }
+            String conversationId = sent.get().conversationId();
+            return participantOf(conversationId, settings, sender) ? conversationId : null;
+        }
+        return null;
+    }
+
+    /** Whether {@code sender} may continue {@code conversationId} (see above). */
+    boolean participantOf(String conversationId, EmailChannelSettings settings, String sender) {
+        // The first mail that ran in the conversation names its original sender.
+        Optional<LedgerEntry> first = ledger.findInboundTurn(conversationId, false);
+        if (first.isPresent() && sender.equals(first.get().recipient())) {
+            return true;
+        }
+        return settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT
+                && ledger.hasSentReply(conversationId, sender);
+    }
+
+    /**
+     * In conversation mode, a group discussion's synthesis is the reply to the mail
+     * that started it.
+     */
+    private IGroupConversationService.GroupDiscussionEventListener groupReplyListener(IntegrationContext ctx, LedgerEntry row, String userId,
+                                                                                      Map<String, Object> mail) {
+        return new IGroupConversationService.GroupDiscussionEventListener() {
+            @Override
+            public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
+                if (replies == null) {
+                    return;
+                }
+                try {
+                    // The row names the discussion once startAndDiscussAsync returned; a
+                    // discussion that finished faster than that is keyed by the mail alone.
+                    LedgerEntry current = ledger.findById(row.id()).orElse(row);
+                    replies.onGroupCompleted(ctx.integrationId(), ctx.settings(), current, current.conversationId(), userId, mail,
+                            event.synthesizedAnswer(), Instant.now());
+                } catch (RuntimeException e) {
+                    LOGGER.warnf("Email integration %s: the group reply to mail %s could not be queued: %s", sanitize(ctx.integrationId()),
+                            row.id(), e.getMessage());
+                }
+            }
+        };
+    }
+
+    /** Hands a delivery report to the reply sender; never throws. */
+    private boolean applyDeliveryReport(String integrationId, InboundMail mail, Instant now) {
+        if (replies == null) {
+            return false;
+        }
+        try {
+            return replies.applyDeliveryReport(integrationId, mail.deliveryReport(), now);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email integration %s: a delivery report could not be applied: %s", sanitize(integrationId), e.getMessage());
+            return false;
+        }
     }
 
     /**
@@ -846,7 +1051,7 @@ public class EmailInboundProcessor {
     }
 
     private void count(IntegrationContext ctx, String outcome) {
-        metrics.inbound(ctx.integrationId(), ctx.settings().transport(), outcome);
+        metrics.inbound(ctx.integrationId(), ctx.settings(), outcome);
     }
 
     static String inboundKey(String integrationId, String messageId) {

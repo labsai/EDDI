@@ -8,6 +8,9 @@ import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.engine.mail.MailAddress;
+import ai.labs.eddi.engine.mail.MailSendException;
+import ai.labs.eddi.engine.mail.SmtpSubmitter;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -21,6 +24,7 @@ import jakarta.mail.Message;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import jakarta.mail.UIDFolder;
+import jakarta.mail.search.HeaderTerm;
 import org.eclipse.angus.mail.imap.IMAPFolder;
 import org.eclipse.angus.mail.imap.IMAPMessage;
 import org.eclipse.angus.mail.imap.IMAPStore;
@@ -35,6 +39,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -61,6 +66,16 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * checked from {@code RFC822.SIZE} before the body is fetched, and again while
  * it is read. {@link MailboxSession#markProcessed} sets a keyword and
  * optionally moves; nothing is ever deleted or expunged.
+ * <p>
+ * <b>Sending (conversation mode only).</b> {@link #send} submits a reply over
+ * SMTP to {@code smtpHost}/{@code smtpPort} — 587 with STARTTLS required, or
+ * 465 with TLS — on an endpoint from the same author policy
+ * ({@code SafeSocketConnector.resolve} for {@code Protocol.SMTP}), never the
+ * operator policy of the system mailer; the login is the integration's
+ * connection, whose allowlist must name the SMTP origin
+ * ({@link EmailChannelSettings#smtpOrigin()}). An integration in trigger mode
+ * is refused before any socket is opened. This is the one place under
+ * {@code integrations/email/} that speaks SMTP.
  */
 @ApplicationScoped
 public class ImapMailTransport implements MailTransport {
@@ -77,11 +92,13 @@ public class ImapMailTransport implements MailTransport {
 
     private final SafeSocketConnector connector;
     private final EndpointResolver endpoints;
+    private final EndpointResolver smtpEndpoints;
     private final Instance<ConnectionResolver> connectionResolver;
 
     @Inject
     public ImapMailTransport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver) {
-        this(connector, (host, port) -> connector.resolve(host, port, SafeSocketConnector.Protocol.IMAP), connectionResolver);
+        this(connector, (host, port) -> connector.resolve(host, port, SafeSocketConnector.Protocol.IMAP),
+                (host, port) -> connector.resolve(host, port, SafeSocketConnector.Protocol.SMTP), connectionResolver);
     }
 
     /**
@@ -91,9 +108,64 @@ public class ImapMailTransport implements MailTransport {
      * the policy.
      */
     public ImapMailTransport(SafeSocketConnector connector, EndpointResolver endpoints, Instance<ConnectionResolver> connectionResolver) {
+        this(connector, endpoints, (host, port) -> connector.resolve(host, port, SafeSocketConnector.Protocol.SMTP), connectionResolver);
+    }
+
+    /** For tests: resolvers for both the IMAP and the SMTP side. */
+    public ImapMailTransport(SafeSocketConnector connector, EndpointResolver endpoints, EndpointResolver smtpEndpoints,
+            Instance<ConnectionResolver> connectionResolver) {
         this.connector = connector;
         this.endpoints = endpoints;
+        this.smtpEndpoints = smtpEndpoints;
         this.connectionResolver = connectionResolver;
+    }
+
+    @Override
+    public String send(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        if (settings == null || !settings.replies()) {
+            // Trigger mode sends nothing, whoever asks.
+            throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true,
+                    "Email integration " + integrationId + " is not in conversation mode and never sends mail.", null);
+        }
+        SafeSocketConnector.Endpoint endpoint;
+        try {
+            endpoint = smtpEndpoints.resolve(settings.smtpHost(), settings.smtpPort());
+        } catch (SocketPolicyException e) {
+            boolean transientDns = e.getReason() == SocketPolicyException.Reason.UNRESOLVABLE;
+            throw new MailSendException(MailSendException.Category.SOCKET_POLICY, !transientDns, e.getMessage(), e);
+        }
+        if (endpoint.policy() != SafeSocketConnector.Policy.AUTHOR || endpoint.protocol() != SafeSocketConnector.Protocol.SMTP) {
+            // The relay is the channel author's choice: an operator endpoint (private
+            // addresses, plaintext) must never carry a channel's reply.
+            throw new MailSendException(MailSendException.Category.SOCKET_POLICY, true, "A channel reply needs an author-policy SMTP endpoint.",
+                    null);
+        }
+        SmtpSubmitter.Login login = smtpLogin(settings, endpoint);
+        return SmtpSubmitter.submit(connector, endpoint, settings.address(), login, mime, List.of(new MailAddress(recipient, null)));
+    }
+
+    /** The SMTP login from the integration's connection, for the SMTP origin. */
+    private SmtpSubmitter.Login smtpLogin(EmailChannelSettings settings, SafeSocketConnector.Endpoint endpoint) throws MailSendException {
+        if (connectionResolver == null || !connectionResolver.isResolvable()) {
+            throw new MailSendException(MailSendException.Category.AUTHENTICATION, false, "Connections are not available in this deployment.",
+                    null);
+        }
+        String reference = "${connection:" + settings.connection() + "}";
+        URI target = URI.create(settings.smtpOrigin());
+        ConnectionResolver resolver = connectionResolver.get();
+        try {
+            if (resolver.authTypeOf(reference).orElse(null) == AuthType.BASIC) {
+                ConnectionResolver.BasicLogin basic = resolver.resolveBasicLogin(reference, target);
+                return new SmtpSubmitter.Login(basic.username(), basic.password(), "PLAIN LOGIN");
+            }
+            // XOAUTH2: the mailbox as the user, the token as the secret.
+            return new SmtpSubmitter.Login(settings.address(), resolver.resolveAccessToken(reference, target, null), "XOAUTH2");
+        } catch (ConnectionException e) {
+            throw new MailSendException(MailSendException.Category.AUTHENTICATION, false,
+                    "The SMTP credential of connection '" + settings.connection() + "' could not be resolved for " + endpoint.host() + ": "
+                            + e.getMessage(),
+                    e);
+        }
     }
 
     @Override
@@ -316,6 +388,47 @@ public class ImapMailTransport implements MailTransport {
                         + "processedAction 'move:<folder>' (recommended for Exchange Online) to see processed mail leave the folder.",
                         sanitize(integrationId), PROCESSED_KEYWORD, sanitize(settings.folder()));
             }
+        }
+
+        @Override
+        public Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings settings, long maxBytes) throws MailboxException {
+            if (messageId == null || messageId.isBlank()) {
+                return Optional.empty();
+            }
+            try {
+                Optional<FoundMessage> found = search(folder, messageId, maxBytes);
+                if (found.isPresent() || !settings.movesProcessed()) {
+                    return found;
+                }
+                Folder moved = store.getFolder(settings.moveToFolder());
+                if (!moved.exists()) {
+                    return Optional.empty();
+                }
+                moved.open(Folder.READ_ONLY);
+                try {
+                    return search((IMAPFolder) moved, messageId, maxBytes);
+                } finally {
+                    moved.close(false);
+                }
+            } catch (MessagingException e) {
+                throw new MailboxException(MailboxException.Category.CONNECTION, "Searching the mailbox failed: " + rootMessage(e), e);
+            }
+        }
+
+        /**
+         * {@code SEARCH HEADER Message-ID} is a substring match, so every hit is
+         * compared with the id exactly before it is fetched.
+         */
+        private static Optional<FoundMessage> search(IMAPFolder in, String messageId, long maxBytes) throws MessagingException, MailboxException {
+            for (Message candidate : in.search(new HeaderTerm("Message-ID", messageId))) {
+                String[] ids = candidate.getHeader("Message-ID");
+                if (ids == null || Arrays.stream(ids).noneMatch(id -> id != null && id.strip().equalsIgnoreCase(messageId))) {
+                    continue;
+                }
+                ImapMessage message = new ImapMessage((IMAPMessage) candidate, in.getUID(candidate), in.getUIDValidity(), in.getFullName());
+                return Optional.of(new FoundMessage(message.fetchRaw(maxBytes), message.internalDate(), message.sourceRef()));
+            }
+            return Optional.empty();
         }
 
         @Override

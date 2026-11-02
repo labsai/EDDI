@@ -1,4 +1,4 @@
-import { initialEmailPlatformConfig } from "./email-channel";
+import { EMAIL_CONVERSATION_KEYS, initialEmailPlatformConfig } from "./email-channel";
 
 /**
  * The platformConfig keys each channel type reads, as its settings forms
@@ -29,6 +29,7 @@ const EMAIL_KEYS = [
   "pollSeconds", "requireAuthentication", "senderAllowlist", "senderBlocklist", "identityMode",
   "correlateThreads", "attachments", "attachmentMimeTypes", "maxMessageBytes", "stripQuotedHistory",
   "inputTemplate", "maxTurnsPerSenderPerDay", "dailyCostBudgetUsd", "ownerNotifyAddresses",
+  ...EMAIL_CONVERSATION_KEYS,
 ];
 
 function keysOf(type: string): readonly string[] {

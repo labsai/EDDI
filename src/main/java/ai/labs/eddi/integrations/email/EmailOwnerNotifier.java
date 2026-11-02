@@ -70,7 +70,11 @@ public class EmailOwnerNotifier {
                 "a sender reached maxTurnsPerSenderPerDay; that sender's further mail waits until the next UTC day"), QUOTA("quota",
                         "the tenant quota refused a new conversation or turn; mail waits for the next poll"), LOST("lost",
                                 "a node stopped while it was starting the turn of a mail, so that mail may have partly run and is not run again; "
-                                        + "check the email ledger rows in state REFUSED with reason stranded");
+                                        + "check the email ledger rows in state REFUSED with reason stranded"), REPLY_FAILED("reply_failed",
+                                                "a reply could not be delivered after its last attempt (or the relay refused it for good); check the "
+                                                        + "email ledger rows of kind REPLY in state FAILED"), THREAD_THROTTLED("thread_throttled",
+                                                                "a thread reached maxRepliesPerThreadPerHour, so further replies in it are not sent "
+                                                                        + "until the hour has passed — possibly a mail loop");
 
         private final String id;
         private final String text;
@@ -82,6 +86,11 @@ public class EmailOwnerNotifier {
 
         public String id() {
             return id;
+        }
+
+        /** A reply was held back; mail intake goes on. */
+        boolean isReplyProblem() {
+            return this == REPLY_FAILED || this == THREAD_THROTTLED;
         }
     }
 
@@ -130,7 +139,8 @@ public class EmailOwnerNotifier {
         if (!claimed) {
             return false;
         }
-        LOGGER.warnf("Email integration %s stopped taking mail: %s.", sanitize(integrationId), reason.text);
+        LOGGER.warnf(reason.isReplyProblem() ? "Email integration %s: %s." : "Email integration %s stopped taking mail: %s.", sanitize(integrationId),
+                reason.text);
         if (mailer == null || !mailer.isEnabled() || settings == null || settings.ownerNotifyAddresses().isEmpty()) {
             return true;
         }
@@ -154,10 +164,18 @@ public class EmailOwnerNotifier {
 
     private void send(String integrationId, String integrationName, Reason reason, String day, MailAddress from, String recipient, Instant now) {
         String messageId = MessageIds.generate(from.domain());
-        String subject = "[EDDI] Email integration paused: " + flatten(integrationName == null ? integrationId : integrationName);
-        String text = "The email integration '" + flatten(integrationName == null ? integrationId : integrationName) + "' (" + integrationId
-                + ") stopped taking new mail: " + reason.text + ".\n\nMail that arrives meanwhile stays in the mailbox and is processed later. "
-                + "Nothing was sent to any sender.\n";
+        String name = flatten(integrationName == null ? integrationId : integrationName);
+        String subject;
+        String text;
+        if (reason.isReplyProblem()) {
+            subject = "[EDDI] Email integration replies held back: " + name;
+            text = "The email integration '" + name + "' (" + integrationId + ") did not send a reply: " + reason.text
+                    + ".\n\nMail keeps being processed. No content of the conversation is included here.\n";
+        } else {
+            subject = "[EDDI] Email integration paused: " + name;
+            text = "The email integration '" + name + "' (" + integrationId + ") stopped taking new mail: " + reason.text
+                    + ".\n\nMail that arrives meanwhile stays in the mailbox and is processed later. Nothing was sent to any sender.\n";
+        }
         State state;
         String error = null;
         String provider = null;

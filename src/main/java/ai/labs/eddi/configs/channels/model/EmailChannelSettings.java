@@ -24,11 +24,15 @@ import java.util.regex.Pattern;
  * through {@link #validate}) and the receive path (the mailbox poller), so a
  * default cannot differ between what was accepted and what runs.
  * <p>
- * <b>Trigger mode only, for now.</b> {@code mode: "conversation"} and every key
- * that only means something in conversation mode (replies) are refused: a reply
- * setting on an integration that never replies would read as if it did
+ * <b>Two modes.</b> {@code trigger}: mail starts agent turns and nothing is
+ * ever sent back. {@code conversation} (email plan §5, §9, §10): the agent
+ * replies in the thread over SMTP, to the authenticated sender only. A key that
+ * only means something in the other mode is refused when it has a value — a
+ * reply setting on an integration that never replies would read as if it did
  * something. Unknown non-blank keys are refused too, so a typo cannot silently
- * produce a differently configured mailbox.
+ * produce a differently configured mailbox. In conversation mode
+ * {@code requireAuthentication} is always true: EDDI never replies to a
+ * {@code From} that DKIM and DMARC alignment did not authenticate.
  * <p>
  * <b>No secrets here.</b> Credentials come from the EDDI connection named by
  * {@code connection}; there is no password, token or secret key, and any key of
@@ -58,7 +62,15 @@ public record EmailChannelSettings(
         String inputTemplate,
         int maxTurnsPerSenderPerDay,
         BigDecimal dailyCostBudgetUsd,
-        List<String> ownerNotifyAddresses) {
+        List<String> ownerNotifyAddresses,
+        String smtpHost,
+        int smtpPort,
+        String fromName,
+        String replyTemplate,
+        String aiDisclosure,
+        ThreadParticipants threadParticipants,
+        int maxRepliesPerThreadPerHour,
+        boolean honorReplyTo) {
 
     /** The channel type this applies to. */
     public static final String CHANNEL_TYPE = "email";
@@ -85,19 +97,55 @@ public record EmailChannelSettings(
     public static final String KEY_MAX_TURNS_PER_SENDER_PER_DAY = "maxTurnsPerSenderPerDay";
     public static final String KEY_DAILY_COST_BUDGET_USD = "dailyCostBudgetUsd";
     public static final String KEY_OWNER_NOTIFY_ADDRESSES = "ownerNotifyAddresses";
+    public static final String KEY_SMTP_HOST = "smtpHost";
+    public static final String KEY_SMTP_PORT = "smtpPort";
+    public static final String KEY_FROM_NAME = "fromName";
+    public static final String KEY_REPLY_TEMPLATE = "replyTemplate";
+    public static final String KEY_AI_DISCLOSURE = "aiDisclosure";
+    public static final String KEY_THREAD_PARTICIPANTS = "threadParticipants";
+    public static final String KEY_MAX_REPLIES_PER_THREAD_PER_HOUR = "maxRepliesPerThreadPerHour";
+    public static final String KEY_HONOR_REPLY_TO = "honorReplyTo";
 
-    /** Every key trigger mode reads. */
-    public static final Set<String> TRIGGER_KEYS = Set.of(KEY_MODE, KEY_TRANSPORT, KEY_CONNECTION, KEY_HOST, KEY_PORT, KEY_ADDRESS, KEY_FOLDER,
+    /** Every key both modes read. */
+    public static final Set<String> COMMON_KEYS = Set.of(KEY_MODE, KEY_TRANSPORT, KEY_CONNECTION, KEY_HOST, KEY_PORT, KEY_ADDRESS, KEY_FOLDER,
             KEY_PROCESSED_ACTION, KEY_POLL_SECONDS, KEY_REQUIRE_AUTHENTICATION, KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST, KEY_IDENTITY_MODE,
-            KEY_CORRELATE_THREADS, KEY_ATTACHMENTS, KEY_ATTACHMENT_MIME_TYPES, KEY_MAX_MESSAGE_BYTES, KEY_STRIP_QUOTED_HISTORY, KEY_INPUT_TEMPLATE,
+            KEY_ATTACHMENTS, KEY_ATTACHMENT_MIME_TYPES, KEY_MAX_MESSAGE_BYTES, KEY_STRIP_QUOTED_HISTORY, KEY_INPUT_TEMPLATE,
             KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES);
 
     /**
-     * Keys that only mean something in conversation mode (email plan §10), refused
-     * with their own message so an author learns why.
+     * Keys only trigger mode reads: a conversation always threads, so
+     * {@code correlateThreads} would read as if it could be switched off.
      */
-    public static final Set<String> CONVERSATION_KEYS = Set.of("smtpHost", "smtpPort", "fromName", "replyTemplate", "aiDisclosure",
-            "threadParticipants", "maxRepliesPerThreadPerHour", "honorReplyTo");
+    public static final Set<String> TRIGGER_ONLY_KEYS = Set.of(KEY_CORRELATE_THREADS);
+
+    /**
+     * Keys that only mean something in conversation mode (email plan §10), refused
+     * in trigger mode with their own message so an author learns why.
+     */
+    public static final Set<String> CONVERSATION_KEYS = Set.of(KEY_SMTP_HOST, KEY_SMTP_PORT, KEY_FROM_NAME, KEY_REPLY_TEMPLATE, KEY_AI_DISCLOSURE,
+            KEY_THREAD_PARTICIPANTS, KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, KEY_HONOR_REPLY_TO);
+
+    /** Every key trigger mode reads. */
+    public static final Set<String> TRIGGER_KEYS = union(COMMON_KEYS, TRIGGER_ONLY_KEYS);
+
+    /** Every key conversation mode reads. */
+    public static final Set<String> CONVERSATION_MODE_KEYS = union(COMMON_KEYS, CONVERSATION_KEYS);
+
+    /** SMTP submission with implicit TLS. */
+    public static final int SMTP_IMPLICIT_TLS_PORT = 465;
+    /** SMTP submission with STARTTLS, which is required. The default. */
+    public static final int SMTP_STARTTLS_PORT = 587;
+    public static final String DEFAULT_REPLY_TEMPLATE = "{output}";
+    /**
+     * Appended to every reply unless the author empties {@code aiDisclosure} (email
+     * plan §10; EU AI Act Art. 50 transparency).
+     */
+    public static final String DEFAULT_AI_DISCLOSURE = "This reply was written by an AI assistant.";
+    public static final int DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR = 5;
+    public static final int MAX_MAX_REPLIES_PER_THREAD_PER_HOUR = 1000;
+    public static final int MAX_REPLY_TEMPLATE_LENGTH = 4000;
+    public static final int MAX_AI_DISCLOSURE_LENGTH = 500;
+    public static final int MAX_FROM_NAME_LENGTH = 100;
 
     /** The only transport of this phase. */
     public static final String TRANSPORT_IMAP = "imap";
@@ -131,7 +179,7 @@ public record EmailChannelSettings(
     private static final Pattern CONNECTION_NAME = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
     private static final Pattern MIME_TYPE = Pattern.compile("^[a-z0-9][a-z0-9!#$&^_.+-]{0,62}/(\\*|[a-z0-9][a-z0-9!#$&^_.+-]{0,126})$");
 
-    /** Trigger now; conversation mode (replies) is a later phase. */
+    /** Trigger (no reply, ever) or conversation (replies in the thread). */
     public enum Mode {
         TRIGGER("trigger"), CONVERSATION("conversation");
 
@@ -152,6 +200,43 @@ public record EmailChannelSettings(
             String normalized = value.trim().toLowerCase(Locale.ROOT);
             for (Mode mode : values()) {
                 if (mode.id.equals(normalized)) {
+                    return mode;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Who, besides the sender who started a thread, may continue it (email plan
+     * §11).
+     */
+    public enum ThreadParticipants {
+        /** Only the authenticated sender who started the conversation. */
+        ORIGINAL_SENDER_ONLY("originalSenderOnly"),
+        /**
+         * Also any authenticated address EDDI's own replies in that conversation went
+         * to — relevant with {@code honorReplyTo}, where a reply goes to the
+         * {@code Reply-To}.
+         */
+        ANY_AUTHENTICATED_PARTICIPANT("anyAuthenticatedParticipant");
+
+        private final String id;
+
+        ThreadParticipants(String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public static ThreadParticipants fromId(String value) {
+            if (value == null || value.isBlank()) {
+                return ORIGINAL_SENDER_ONLY;
+            }
+            for (ThreadParticipants mode : values()) {
+                if (mode.id.equalsIgnoreCase(value.trim())) {
                     return mode;
                 }
             }
@@ -234,6 +319,19 @@ public record EmailChannelSettings(
     }
 
     /**
+     * The SMTP origin the connection's allowlist has to name in conversation mode:
+     * {@code smtps://<smtpHost>} (465) or {@code smtp://<smtpHost>:587}.
+     */
+    public String smtpOrigin() {
+        return smtpPort == SMTP_IMPLICIT_TLS_PORT ? "smtps://" + smtpHost : "smtp://" + smtpHost + ":" + SMTP_STARTTLS_PORT;
+    }
+
+    /** Whether this integration replies at all: conversation mode only. */
+    public boolean replies() {
+        return mode == Mode.CONVERSATION;
+    }
+
+    /**
      * Reads the settings, defaults applied. Values that do not parse read as their
      * default (or null for a required field); {@link #validate} reports them, and
      * the poller refuses to run an integration whose settings do not validate.
@@ -255,51 +353,76 @@ public record EmailChannelSettings(
                 dailyBudget = null;
             }
         }
-        return new EmailChannelSettings(Mode.fromId(pc.get(KEY_MODE)), lower(blankToNull(pc.get(KEY_TRANSPORT))), connectionName(connection),
+        Mode mode = Mode.fromId(pc.get(KEY_MODE));
+        boolean conversation = mode == Mode.CONVERSATION;
+        String smtpHost = blankToNull(pc.get(KEY_SMTP_HOST));
+        String replyTemplate = pc.get(KEY_REPLY_TEMPLATE);
+        // Absent: the default sentence. Present but blank: the author switched the
+        // disclosure off (the save path warns).
+        String disclosure = pc.containsKey(KEY_AI_DISCLOSURE)
+                ? (pc.get(KEY_AI_DISCLOSURE) == null ? "" : pc.get(KEY_AI_DISCLOSURE).strip())
+                : DEFAULT_AI_DISCLOSURE;
+        return new EmailChannelSettings(mode, lower(blankToNull(pc.get(KEY_TRANSPORT))), connectionName(connection),
                 host == null ? null : host.toLowerCase(Locale.ROOT), (int) longValue(pc.get(KEY_PORT), DEFAULT_PORT), normalizedAddress,
                 orDefault(blankToNull(pc.get(KEY_FOLDER)), DEFAULT_FOLDER), moveTo,
-                (int) longValue(pc.get(KEY_POLL_SECONDS), DEFAULT_POLL_SECONDS), bool(pc.get(KEY_REQUIRE_AUTHENTICATION), true),
+                (int) longValue(pc.get(KEY_POLL_SECONDS), DEFAULT_POLL_SECONDS),
+                // Conversation mode never runs mail from an unauthenticated From, whatever the
+                // key says: forced here, so no reader of these settings can see false.
+                conversation || bool(pc.get(KEY_REQUIRE_AUTHENTICATION), true),
                 list(pc.get(KEY_SENDER_ALLOWLIST)), list(pc.get(KEY_SENDER_BLOCKLIST)), IdentityMode.fromId(pc.get(KEY_IDENTITY_MODE)),
-                bool(pc.get(KEY_CORRELATE_THREADS), false), Attachments.fromId(pc.get(KEY_ATTACHMENTS)), list(pc.get(KEY_ATTACHMENT_MIME_TYPES)),
+                conversation || bool(pc.get(KEY_CORRELATE_THREADS), false), Attachments.fromId(pc.get(KEY_ATTACHMENTS)),
+                list(pc.get(KEY_ATTACHMENT_MIME_TYPES)),
                 longValue(pc.get(KEY_MAX_MESSAGE_BYTES), DEFAULT_MAX_MESSAGE_BYTES), bool(pc.get(KEY_STRIP_QUOTED_HISTORY), true),
                 orDefault(pc.get(KEY_INPUT_TEMPLATE) == null || pc.get(KEY_INPUT_TEMPLATE).isBlank() ? null : pc.get(KEY_INPUT_TEMPLATE),
                         DEFAULT_INPUT_TEMPLATE),
                 (int) longValue(pc.get(KEY_MAX_TURNS_PER_SENDER_PER_DAY), DEFAULT_MAX_TURNS_PER_SENDER_PER_DAY), dailyBudget,
-                list(pc.get(KEY_OWNER_NOTIFY_ADDRESSES)));
+                list(pc.get(KEY_OWNER_NOTIFY_ADDRESSES)), smtpHost == null ? null : smtpHost.toLowerCase(Locale.ROOT),
+                (int) longValue(pc.get(KEY_SMTP_PORT), SMTP_STARTTLS_PORT), blankToNull(pc.get(KEY_FROM_NAME)),
+                replyTemplate == null || replyTemplate.isBlank() ? DEFAULT_REPLY_TEMPLATE : replyTemplate, disclosure,
+                ThreadParticipants.fromId(pc.get(KEY_THREAD_PARTICIPANTS)),
+                (int) longValue(pc.get(KEY_MAX_REPLIES_PER_THREAD_PER_HOUR), DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR),
+                bool(pc.get(KEY_HONOR_REPLY_TO), false));
     }
 
     /**
-     * Every reason this {@code platformConfig} cannot back a working trigger-mode
-     * email integration, as messages fit for a 400; empty when it can. Pure: the
-     * checks that need the deployment (the connection, the host's DNS, address
-     * uniqueness) run in the store.
+     * Every reason this {@code platformConfig} cannot back a working email
+     * integration, as messages fit for a 400; empty when it can. Pure: the checks
+     * that need the deployment (the connection, the hosts' DNS, address uniqueness)
+     * run in the store.
      */
     public static List<String> validate(Map<String, String> platformConfig) {
         List<String> errors = new ArrayList<>();
         Map<String, String> pc = platformConfig == null ? Map.of() : platformConfig;
 
-        for (var entry : pc.entrySet()) {
-            String key = entry.getKey();
-            if (key == null || TRIGGER_KEYS.contains(key)) {
-                continue;
-            }
-            if (CONVERSATION_KEYS.contains(key)) {
-                errors.add("platformConfig." + key + " belongs to email conversation mode (replies), which is not supported yet. "
-                        + "A trigger-mode integration never replies; remove the key.");
-            } else if (entry.getValue() != null && !entry.getValue().isBlank()) {
-                errors.add("Unknown platformConfig key '" + key + "' for an email integration.");
-            }
-        }
-
         String modeValue = pc.get(KEY_MODE);
         Mode mode = Mode.fromId(modeValue);
         if (modeValue == null || modeValue.isBlank()) {
-            errors.add("An email integration requires platformConfig.mode ('trigger').");
+            errors.add("An email integration requires platformConfig.mode ('trigger' or 'conversation').");
         } else if (mode == null) {
-            errors.add("Unknown platformConfig.mode '" + modeValue + "'. Supported: trigger.");
-        } else if (mode == Mode.CONVERSATION) {
-            errors.add("Email conversation mode (replies) is not supported yet. Use mode 'trigger': mail starts agent turns and "
-                    + "nothing is sent back.");
+            errors.add("Unknown platformConfig.mode '" + modeValue + "'. Supported: trigger, conversation.");
+        }
+        boolean conversation = mode == Mode.CONVERSATION;
+
+        for (var entry : pc.entrySet()) {
+            String key = entry.getKey();
+            if (key == null || COMMON_KEYS.contains(key)) {
+                continue;
+            }
+            boolean hasValue = entry.getValue() != null && !entry.getValue().isBlank();
+            if (CONVERSATION_KEYS.contains(key)) {
+                // In conversation mode a present, empty aiDisclosure is how it is switched off.
+                if (!conversation && hasValue) {
+                    errors.add("platformConfig." + key + " belongs to email conversation mode (replies). A trigger-mode integration "
+                            + "never replies; remove the key, or set mode 'conversation'.");
+                }
+            } else if (TRIGGER_ONLY_KEYS.contains(key)) {
+                if (conversation && hasValue) {
+                    errors.add("platformConfig." + key + " belongs to email trigger mode. In conversation mode a thread always stays in "
+                            + "one conversation; remove the key.");
+                }
+            } else if (hasValue) {
+                errors.add("Unknown platformConfig key '" + key + "' for an email integration.");
+            }
         }
 
         String transport = blankToNull(pc.get(KEY_TRANSPORT));
@@ -361,6 +484,13 @@ public record EmailChannelSettings(
 
         rangeCheck(errors, pc, KEY_POLL_SECONDS, MIN_POLL_SECONDS, MAX_POLL_SECONDS);
         booleanCheck(errors, pc, KEY_REQUIRE_AUTHENTICATION);
+        if (conversation && "false".equalsIgnoreCase(blankToNull(pc.get(KEY_REQUIRE_AUTHENTICATION)))) {
+            errors.add("platformConfig.requireAuthentication cannot be false in conversation mode: EDDI never answers a sender whose "
+                    + "From DKIM and DMARC alignment did not authenticate, because that address may be forged.");
+        }
+        if (conversation) {
+            validateConversation(errors, pc);
+        }
         booleanCheck(errors, pc, KEY_CORRELATE_THREADS);
         booleanCheck(errors, pc, KEY_STRIP_QUOTED_HISTORY);
         for (String key : List.of(KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST)) {
@@ -423,17 +553,82 @@ public record EmailChannelSettings(
         return errors;
     }
 
+    private static void validateConversation(List<String> errors, Map<String, String> pc) {
+        if (blankToNull(pc.get(KEY_SMTP_HOST)) == null) {
+            errors.add("Conversation mode requires platformConfig.smtpHost (the SMTP submission server, e.g. smtp.office365.com).");
+        }
+        String smtpPort = blankToNull(pc.get(KEY_SMTP_PORT));
+        if (smtpPort != null) {
+            long value = longValue(smtpPort, -1);
+            if (value != SMTP_STARTTLS_PORT && value != SMTP_IMPLICIT_TLS_PORT) {
+                errors.add("platformConfig.smtpPort must be 587 (STARTTLS, required) or 465 (TLS).");
+            }
+        }
+        String fromName = pc.get(KEY_FROM_NAME);
+        if (fromName != null && (fromName.length() > MAX_FROM_NAME_LENGTH || hasControl(fromName))) {
+            errors.add("platformConfig.fromName must be at most " + MAX_FROM_NAME_LENGTH + " characters, without line breaks or control "
+                    + "characters.");
+        }
+        String template = pc.get(KEY_REPLY_TEMPLATE);
+        if (template != null && template.length() > MAX_REPLY_TEMPLATE_LENGTH) {
+            errors.add("platformConfig.replyTemplate is longer than " + MAX_REPLY_TEMPLATE_LENGTH + " characters.");
+        }
+        String disclosure = pc.get(KEY_AI_DISCLOSURE);
+        if (disclosure != null && disclosure.length() > MAX_AI_DISCLOSURE_LENGTH) {
+            errors.add("platformConfig.aiDisclosure is longer than " + MAX_AI_DISCLOSURE_LENGTH + " characters.");
+        }
+        String participants = pc.get(KEY_THREAD_PARTICIPANTS);
+        if (ThreadParticipants.fromId(participants) == null) {
+            errors.add("Unknown platformConfig.threadParticipants '" + participants + "'. Supported: originalSenderOnly, "
+                    + "anyAuthenticatedParticipant.");
+        }
+        rangeCheck(errors, pc, KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, 1, MAX_MAX_REPLIES_PER_THREAD_PER_HOUR);
+        booleanCheck(errors, pc, KEY_HONOR_REPLY_TO);
+    }
+
+    private static boolean hasControl(String value) {
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isISOControl(c) || c == (char) 0x2028 || c == (char) 0x2029) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * Save-time warnings that do not refuse the configuration: a stable code per
      * finding (the Manager translates them).
      */
     public static List<String> warnings(EmailChannelSettings settings) {
         List<String> warnings = new ArrayList<>();
-        if (settings != null && settings.mode() == Mode.TRIGGER && !settings.requireAuthentication() && settings.senderAllowlist().isEmpty()) {
+        if (settings == null) {
+            return warnings;
+        }
+        if (settings.mode() == Mode.TRIGGER && !settings.requireAuthentication() && settings.senderAllowlist().isEmpty()) {
             warnings.add(WARNING_OPEN_TRIGGER);
+        }
+        if (settings.mode() == Mode.CONVERSATION) {
+            if (settings.aiDisclosure() == null || settings.aiDisclosure().isBlank()) {
+                warnings.add(WARNING_AI_DISCLOSURE_DISABLED);
+            }
+            if (settings.honorReplyTo()) {
+                warnings.add(WARNING_HONOR_REPLY_TO);
+            }
         }
         return warnings;
     }
+
+    /**
+     * Replies no longer say an AI wrote them ({@code aiDisclosure} emptied) — see
+     * {@code docs/eu-ai-act-compliance.md}.
+     */
+    public static final String WARNING_AI_DISCLOSURE_DISABLED = "email.ai-disclosure-disabled";
+    /**
+     * Replies go to the {@code Reply-To}, which DMARC does not cover: whoever gets
+     * a mail authenticated by an allowed domain decides where the reply goes.
+     */
+    public static final String WARNING_HONOR_REPLY_TO = "email.honor-reply-to";
 
     /**
      * Anyone on the internet can make the agent run: no allowlist, no
@@ -538,6 +733,12 @@ public record EmailChannelSettings(
 
     private static String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static Set<String> union(Set<String> a, Set<String> b) {
+        Set<String> all = new LinkedHashSet<>(a);
+        all.addAll(b);
+        return Set.copyOf(all);
     }
 
     /**
