@@ -33,6 +33,7 @@ import {
   MAX_GROUP_MEMBERS,
   DEFAULT_MAX_DELEGATION_DEPTH,
   DEFAULT_DELEGATION_TIMEOUT_SECONDS,
+  MAX_REWORKS,
   normalizeLifecyclePolicy,
   type DiscussionStyle,
   type GroupMember,
@@ -289,6 +290,8 @@ function WorkforceSettings() {
   const [dynamicAgents, setDynamicAgents] = useState<DynamicAgentConfig>(DEFAULT_DYNAMIC);
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
   const [recordDissents, setRecordDissents] = useState(false);
+  /** Reworks per task after a failed VERIFY (E2); 0 = a failed verification is final. */
+  const [maxReworks, setMaxReworks] = useState(0);
   const [taskListConfig, setTaskListConfig] = useState<GroupTaskConfig>(DEFAULT_GROUP_TASK_CONFIG);
   /** Raw text of the delegation allow-list; see the field for why it is separate. */
   const [delegationTargetsDraft, setDelegationTargetsDraft] = useState("");
@@ -328,6 +331,7 @@ function WorkforceSettings() {
     );
     setTasks(cfg.tasks ?? []);
     setRecordDissents(!!cfg.recordDissents);
+    setMaxReworks(cfg.maxReworks ?? 0);
     setTaskListConfig(
       cfg.taskListConfig ? normalizeGroupTaskConfig(cfg.taskListConfig) : DEFAULT_GROUP_TASK_CONFIG,
     );
@@ -364,6 +368,7 @@ function WorkforceSettings() {
     ) return true;
     if (JSON.stringify(tasks) !== JSON.stringify(cfg.tasks ?? [])) return true;
     if (recordDissents !== !!cfg.recordDissents) return true;
+    if (maxReworks !== (cfg.maxReworks ?? 0)) return true;
     if (
       JSON.stringify(taskListConfig) !==
       JSON.stringify(
@@ -373,7 +378,7 @@ function WorkforceSettings() {
       )
     ) return true;
     return false;
-  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, taskListConfig]);
+  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, maxReworks, taskListConfig]);
 
   const isDirty = useMemo(() => (config ? formDiffersFrom(config) : false), [config, formDiffersFrom]);
 
@@ -457,6 +462,8 @@ function WorkforceSettings() {
       dynamicAgents,
       tasks: style === "TASK_FORCE" ? tasks : config.tasks,
       recordDissents,
+      // 0 is the default: keep a group that never set it free of the field.
+      ...(maxReworks > 0 || config.maxReworks ? { maxReworks } : {}),
       // Absent means the addGroupTask/listGroupTasks tools are never assembled.
       // Writing a disabled block instead would be equivalent for the engine but
       // is noise in the stored document, so only persist it once it is on — or
@@ -504,6 +511,7 @@ function WorkforceSettings() {
     dynamicAgents,
     tasks,
     recordDissents,
+    maxReworks,
     taskListConfig,
     version,
     updateGroupAsync,
@@ -1097,6 +1105,20 @@ function WorkforceSettings() {
               <input id="settings-max-turns" type="number" min={0} max={100} step={1} value={protocol.maxTurns ?? 0}
                 onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setProtocol((p) => ({ ...p, maxTurns: Math.max(0, Math.min(100, v)) })); }}
                 className="h-10 w-full sm:w-1/2 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+            </FormField>
+            {/* maxReworks (E2) — a task that fails VERIFY goes back to its member
+                with the verifier's feedback. Bounded by maxTurns and the ceiling. */}
+            <FormField label={t("Workforce.settings.maxReworks", "Reworks after a failed verification (0–5)")} htmlFor="settings-max-reworks">
+              <input id="settings-max-reworks" type="number" min={0} max={MAX_REWORKS} step={1} value={maxReworks}
+                onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setMaxReworks(Math.max(0, Math.min(MAX_REWORKS, Math.trunc(v)))); }}
+                data-testid="settings-max-reworks"
+                className="h-10 w-full sm:w-1/2 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(
+                  "Workforce.settings.maxReworksDesc",
+                  "A task the verifier fails goes back to its member with the feedback, up to this many times. 0 keeps a failed verification final.",
+                )}
+              </p>
             </FormField>
 
             {/* Cost ceiling (EDDI I1) — a dollar bound on the whole discussion,

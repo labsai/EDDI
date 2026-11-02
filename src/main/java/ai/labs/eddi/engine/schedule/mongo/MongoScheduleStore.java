@@ -424,11 +424,48 @@ public class MongoScheduleStore implements IScheduleStore {
             sweepFireLogsOf(ids);
             int count = (int) result.getDeletedCount();
             if (count > 0) {
-                LOGGER.infof("Deleted %d HITL timeout schedule(s) with name '%s'", count, sanitize(name));
+                LOGGER.infof("Deleted %d schedule(s) with name '%s'", count, sanitize(name));
             }
             return count;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to delete schedules by name: " + name, e);
+        }
+    }
+
+    @Override
+    public int deleteUsedUpOneShotsByName(String name) throws IResourceStore.ResourceStoreException {
+        try {
+            // Exactly what markCompleted leaves behind for a one-shot: disabled, PENDING,
+            // no next fire, fired, unclaimed and with no disabledReason. A pending,
+            // claimed (FIRE_STATUS CLAIMED), failed, dead-lettered, undeploy-disabled or
+            // hand-disabled row (which keeps its nextFire) does not match.
+            Bson usedUp = and(eq(NAME, name), eq(ENABLED, false), eq(FIRE_STATUS, FireStatus.PENDING.name()), eq(NEXT_FIRE, null),
+                    ne(LAST_FIRED, null), eq(DISABLED_REASON, null), eq(CLAIMED_BY, null));
+            List<String> ids = deleteFireLogsOfSchedulesMatching(usedUp);
+            if (ids.isEmpty()) {
+                return 0;
+            }
+            // Only the rows whose fire logs were just cascaded: a row that became used
+            // up in between is left for the next prune rather than orphaning its logs.
+            var result = scheduleCollection.deleteMany(and(usedUp, in(ID, ids)));
+            sweepFireLogsOf(ids);
+            int count = (int) result.getDeletedCount();
+            if (count > 0) {
+                LOGGER.infof("Pruned %d used-up one-shot schedule(s) with name '%s'", count, sanitize(name));
+            }
+            return count;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to prune used-up schedules by name: " + name, e);
+        }
+    }
+
+    @Override
+    public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
+        try {
+            return (int) scheduleCollection.countDocuments(and(eq(NAME, name),
+                    or(eq(ENABLED, true), eq(DISABLED_REASON, ScheduleConfiguration.DISABLED_BY_UNDEPLOY))));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count pending schedules by name: " + name, e);
         }
     }
 

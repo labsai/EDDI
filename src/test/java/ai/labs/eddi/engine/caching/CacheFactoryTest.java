@@ -4,8 +4,13 @@
  */
 package ai.labs.eddi.engine.caching;
 
+import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
+import ai.labs.eddi.engine.cluster.SharedBucket;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -15,6 +20,10 @@ import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link CacheFactory} — covers named cache creation, TTL caches,
@@ -425,5 +434,41 @@ class CacheFactoryTest {
                 "the restriction cache must have its own entry, not the default");
         assertEquals("gdprProcessingRestrictions", GdprComplianceService.RESTRICTION_CACHE_NAME);
         assertEquals("tenantQuotas", TenantQuotaService.QUOTA_CACHE_NAME);
+    }
+
+    @Test
+    @DisplayName("the webhook dedup cache has its own entry and is sized for the 10-minute window, not the 1,000 default")
+    void webhookDedupCacheIsSizedForItsWindow() {
+        Duration window = Duration.ofMinutes(10);
+        assertTrue(CacheFactory.hasExplicitSize("webhook-event-dedup"),
+                "unlisted, ~500 deliveries from one integration evict another's replay keys");
+        long capacity = evictionMaximumOf(factory.getCache("webhook-event-dedup", window));
+        long steadyState = (long) CacheFactory.WEBHOOK_PEAK_DEDUP_KEYS_PER_SECOND * window.toSeconds();
+        assertEquals(CacheFactory.maximumSizeFor("webhook-event-dedup", window), capacity);
+        assertTrue(capacity >= (long) (steadyState * CacheFactory.RATE_SIZED_EVICTION_HEADROOM),
+                "capacity " + capacity + " must hold the peak window with head-room");
+        assertTrue(capacity > 100_000L);
+    }
+
+    @Test
+    @DisplayName("in cluster mode the webhook dedup cache is shared through the DEDUP bucket, like Slack's")
+    void webhookDedupCacheIsSharedInAClusterThroughTheDedupBucket() {
+        assertEquals("DEDUP", CacheFactory.SHARED_BUCKETS.get("webhook-event-dedup"));
+        assertEquals(CacheFactory.SHARED_BUCKETS.get("slack-event-dedup"), CacheFactory.SHARED_BUCKETS.get("webhook-event-dedup"));
+
+        ClusterConfig clusterConfig = mock(ClusterConfig.class);
+        when(clusterConfig.isNats()).thenReturn(true);
+        NatsSharedStateFactory nats = mock(NatsSharedStateFactory.class);
+        when(nats.bucket(any(SharedBucket.class))).thenReturn(mock(ISharedKv.class));
+        @SuppressWarnings("unchecked")
+        Instance<NatsSharedStateFactory> instance = mock(Instance.class);
+        when(instance.get()).thenReturn(nats);
+        factory.clusterConfig = clusterConfig;
+        factory.natsSharedState = instance;
+
+        ICache<String, String> cache = factory.getCache("webhook-event-dedup", Duration.ofMinutes(10));
+
+        assertInstanceOf(SharedKvCache.class, cache);
+        verify(nats).bucket(new SharedBucket("DEDUP", Duration.ofMinutes(10), -1));
     }
 }

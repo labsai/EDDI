@@ -181,6 +181,7 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         stored.setIv(secret.getIv());
         stored.setDekId(secret.getDekId());
         stored.setLastRotatedAt(secret.getLastRotatedAt());
+        stored.setChecksum(secret.getChecksum());
         return true;
     }
 
@@ -345,11 +346,22 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     String failNextSetIfAbsentFor;
 
     /**
+     * Runs once, just before the next {@link #setMetaValueIfAbsent} — e.g. a KEK
+     * rotation elsewhere completing between the caller's check and its insert.
+     */
+    Runnable beforeNextSetIfAbsent;
+
+    /**
      * Atomic, as both production stores are: {@link #hideMetaOnceFor} only fools a
      * plain {@link #getMetaValue}, never the insert-if-absent itself.
      */
     @Override
     public String setMetaValueIfAbsent(String key, String value) {
+        Runnable hook = beforeNextSetIfAbsent;
+        beforeNextSetIfAbsent = null;
+        if (hook != null) {
+            hook.run();
+        }
         if (key.equals(failNextSetIfAbsentFor)) {
             failNextSetIfAbsentFor = null;
             throw new PersistenceException("simulated failure writing " + key);
