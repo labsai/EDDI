@@ -3477,7 +3477,6 @@
     "voteOptionsList": "選択肢（1行に1つ）",
     "voteOptionsSource": "投票の選択肢",
     "voteQuorum": "定足数",
-    "voteTieHuman": "人間が決定（まだ利用できません）",
     "voteTieModerator": "モデレーターが決定",
     "voteTieNoDecision": "決定なし",
     "voteTiePolicy": "同点の場合",
@@ -4196,6 +4195,20 @@
     "emptyDescription": "このサーバーにはグループテンプレートが同梱されていません。ウィザードで一から作成できます。",
     "wizardNote": "進めながら新しいエージェントを作る、またはゼロから構築したい場合は、グループウィザードにより軽量なスターターのプリセットがあります。",
     "wizardLink": "グループウィザードを開く"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "投票が同数です — {{name}} さんが決めてください",
+    "chooseOne": "選択肢を 1 つ選んでください",
+    "rationalePlaceholder": "理由 (任意)",
+    "inboxBadge": "決選",
+    "inboxReason": "{{member}} さんが同数の投票を決めるのを待っています",
+    "policyOption": "人が決める",
+    "decider": "決定者",
+    "timeout": "タイムアウト (ISO-8601)",
+    "onTimeout": "タイムアウト時",
+    "onTimeoutAbort": "ディスカッションをキャンセル",
+    "deciderRequired": "決定者を指定してください — グループに既定の決定者となる HUMAN メンバーがちょうど 1 人いません。",
+    "note": "同数になると、決定者が 1 つ選ぶまでディスカッションは一時停止します。回答できるのは決定者か管理者だけです。"
   },
   "channels": {
     "agentIdPlaceholder": "メッセージを処理するエージェント ID",

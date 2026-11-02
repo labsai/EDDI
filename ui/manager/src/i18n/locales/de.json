@@ -3477,7 +3477,6 @@
     "voteOptionsList": "Optionen (eine pro Zeile)",
     "voteOptionsSource": "Abstimmungsoptionen",
     "voteQuorum": "Quorum",
-    "voteTieHuman": "Mensch entscheidet (noch nicht verfügbar)",
     "voteTieModerator": "Moderator entscheidet",
     "voteTieNoDecision": "Keine Entscheidung",
     "voteTiePolicy": "Bei Gleichstand",
@@ -3968,6 +3967,20 @@
     "emptyDescription": "Dieser Server liefert keine Gruppenvorlagen mit. Sie können eine Gruppe weiterhin im Assistenten von Grund auf erstellen.",
     "wizardNote": "Lieber neue Agenten unterwegs erstellen oder von Grund auf bauen? Der Gruppenassistent bietet leichtere Starter-Vorlagen.",
     "wizardLink": "Gruppenassistent öffnen"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "Die Abstimmung ist unentschieden — {{name}}, du entscheidest",
+    "chooseOne": "Wähle eine Option",
+    "rationalePlaceholder": "Begründung (optional)",
+    "inboxBadge": "Stichentscheid",
+    "inboxReason": "Wartet auf {{member}}, um ein Unentschieden aufzulösen",
+    "policyOption": "Ein Mensch entscheidet",
+    "decider": "Entscheider",
+    "timeout": "Zeitlimit (ISO-8601)",
+    "onTimeout": "Bei Zeitüberschreitung",
+    "onTimeoutAbort": "Diskussion abbrechen",
+    "deciderRequired": "Gib einen Entscheider an — die Gruppe hat nicht genau ein HUMAN-Mitglied, das standardmäßig entscheidet.",
+    "note": "Ein Unentschieden pausiert die Diskussion, bis der Entscheider eine Option wählt. Nur der Entscheider oder ein Admin kann antworten."
   },
   "memories": {
     "title": "Nutzererinnerungen",

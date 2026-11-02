@@ -3477,7 +3477,6 @@
     "voteOptionsList": "옵션(줄당 하나)",
     "voteOptionsSource": "투표 옵션",
     "voteQuorum": "정족수",
-    "voteTieHuman": "사람이 결정(아직 사용 불가)",
     "voteTieModerator": "진행자가 결정",
     "voteTieNoDecision": "결정 없음",
     "voteTiePolicy": "동점 시",
@@ -4196,6 +4195,20 @@
     "emptyDescription": "이 서버에는 그룹 템플릿이 포함되어 있지 않습니다. 마법사로 처음부터 그룹을 만들 수 있습니다.",
     "wizardNote": "진행하면서 새 에이전트를 만들거나 처음부터 구성하고 싶으신가요? 그룹 마법사는 더 가벼운 스타터 프리셋을 제공합니다.",
     "wizardLink": "그룹 마법사 열기"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "투표가 동률입니다 — {{name}}님이 결정하세요",
+    "chooseOne": "옵션을 하나 선택하세요",
+    "rationalePlaceholder": "이유 (선택)",
+    "inboxBadge": "동률 결정",
+    "inboxReason": "{{member}}님이 동률 투표를 결정하기를 기다리는 중",
+    "policyOption": "사람이 결정",
+    "decider": "결정자",
+    "timeout": "제한 시간 (ISO-8601)",
+    "onTimeout": "시간 초과 시",
+    "onTimeoutAbort": "토론 취소",
+    "deciderRequired": "결정자를 지정하세요 — 그룹에 기본으로 결정할 HUMAN 멤버가 정확히 한 명 있지 않습니다.",
+    "note": "동률이 되면 결정자가 옵션 하나를 고를 때까지 토론이 일시 중지됩니다. 결정자나 관리자만 응답할 수 있습니다."
   },
   "channels": {
     "agentIdPlaceholder": "메시지를 처리할 에이전트 ID",
