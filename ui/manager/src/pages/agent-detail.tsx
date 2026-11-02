@@ -71,6 +71,7 @@ import {
 } from "@/lib/agent-draft";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
 import { agentKeys } from "@/lib/query-keys";
+import { MAX_CONTINUATIONS } from "@/lib/continuation";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
@@ -91,6 +92,7 @@ import {
   MemoryPolicySection,
   SessionManagementSection,
   LimitsSection,
+  ContinuationSection,
   HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -271,6 +273,8 @@ export function AgentDetailPage() {
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
   const [ceilingInvalid, setCeilingInvalid] = useState(false);
+  /** Whether the max-continuations box holds a count that cannot be saved (see `ContinuationSection`). */
+  const [continuationInvalid, setContinuationInvalid] = useState(false);
   /** Whether the approval-email recipients box holds a list that cannot be saved (see `HitlConfigSection`). */
   const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
   /** Whether the Ratings section holds a value the backend would refuse (see `RatingConfigSection`). */
@@ -283,6 +287,14 @@ export function AgentDetailPage() {
     // leave-page guard — so this is the one place that can refuse them all.
     if (ceilingInvalid) {
       toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
+      return false;
+    }
+    if (continuationInvalid) {
+      toast.error(
+        t("agentDetail.maxContinuationsInvalid", "Enter a whole number from 0 to {{max}}, or leave empty for off.", {
+          max: MAX_CONTINUATIONS,
+        }),
+      );
       return false;
     }
     if (hitlNotifyInvalid) {
@@ -340,6 +352,7 @@ export function AgentDetailPage() {
     queryClient,
     t,
     ceilingInvalid,
+    continuationInvalid,
     hitlNotifyInvalid,
     ratingInvalid,
   ]);
@@ -538,6 +551,7 @@ export function AgentDetailPage() {
     touched("memoryPolicy"),
     touched("sessionManagement"),
     touched("maxCostPerConversationUsd"),
+    touched("maxContinuations", "continuationInput"),
     touched("conversationReview"),
     touched("ratingConfig"),
     touched("hitlConfig"),
@@ -1055,6 +1069,16 @@ export function AgentDetailPage() {
 
       {/* Spend limits */}
       <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
+
+      {/* Self-continuation */}
+      <ContinuationSection
+        key={`continuation-${id}-${resolvedVersion}`}
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("maxContinuations", "continuationInput")}
+        onValidityChange={setContinuationInvalid}
+      />
 
       {/* Human-in-the-Loop */}
       <HitlConfigSection

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
+import ai.labs.eddi.engine.alerts.AlertSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -12,7 +14,11 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.integrations.email.EmailMailboxPoller;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -22,6 +28,7 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
@@ -34,6 +41,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -136,6 +144,29 @@ class ScheduleFireExecutorTest {
         assertTrue(e.getMessage().contains("reserved"), e.getMessage());
         schedule.setUserId("alice");
         assertEquals("alice", ScheduleFireExecutor.scheduleUserId(schedule));
+    }
+
+    @Test
+    void alertMaintenanceRunsAsASystemJobAndLogsOnlyWhenItDidSomething() throws Exception {
+        AlertMaintenanceService maintenance = mock(AlertMaintenanceService.class);
+        setField(executor, "alertMaintenanceService", maintenance);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("alerts");
+        schedule.setName(AlertSchedules.SCHEDULE_NAME);
+        schedule.setMetadata(AlertSchedules.maintenanceMetadata());
+
+        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(0, 0, 0));
+        ScheduleFireLog idle = executor.fire(schedule, "node-1", 1);
+        assertEquals(FireStatus.COMPLETED.name(), idle.status());
+        verify(scheduleStore, never()).logFire(any());
+
+        when(maintenance.run()).thenReturn(new AlertMaintenanceService.Result(2, 1, 0));
+        executor.fire(schedule, "node-1", 1);
+        verify(scheduleStore).logFire(any());
+
+        when(maintenance.run()).thenThrow(new IllegalStateException("db down"));
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "node-1", 1).status());
+        verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
     }
 
     @Test
@@ -1373,6 +1404,65 @@ class ScheduleFireExecutorTest {
         return s;
     }
 
+    // ==================== Self-continuation fires ====================
+
+    @Test
+    void fire_continuation_routesToTheHandlerWithTheDesignerInputAndLogsTheFire() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-1");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 4, 10));
+        when(handler.fire(any(), any(), eq("next phase"), any())).thenReturn(new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "busy"));
+
+        var log = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals(FireStatus.FAILED.name(), log.status(), "a failed continuation is retried by the poller like any fire");
+        assertEquals("conv-9", log.conversationId());
+        assertEquals("busy", log.errorMessage());
+        verify(scheduleStore).logFire(log);
+        // Never the strategy path: no say() from the executor itself.
+        verify(conversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void fire_continuation_parksAnInterruptAcrossTheFireLogWriteAndRestoresIt() throws Exception {
+        var handler = mock(ContinuationFireHandler.class);
+        setField(executor, "continuationFireHandler", handler);
+        var schedule = new ScheduleConfiguration();
+        schedule.setId("cont-2");
+        schedule.setName(ConversationContinuations.scheduleName("conv-9"));
+        schedule.setAgentId("agent-1");
+        schedule.setMessage("next phase");
+        schedule.setFireStatus(FireStatus.CLAIMED);
+        schedule.setNextFire(Instant.now().minusSeconds(1));
+        schedule.setMetadata(ConversationContinuations.metadata("conv-9", 1, 10));
+        // The handler caught an InterruptedException and re-asserted the flag.
+        when(handler.fire(any(), any(), any(), any())).thenAnswer(inv -> {
+            Thread.currentThread().interrupt();
+            return new ContinuationFireHandler.Result(FireStatus.FAILED.name(), "interrupted");
+        });
+        var flagDuringLog = new AtomicBoolean(true);
+        doAnswer(inv -> {
+            flagDuringLog.set(Thread.currentThread().isInterrupted());
+            return null;
+        }).when(scheduleStore).logFire(any());
+
+        try {
+            executor.fire(schedule, "instance-1", 1);
+
+            assertFalse(flagDuringLog.get(), "the fire log is written with the interrupt parked");
+            assertTrue(Thread.currentThread().isInterrupted(), "and the interrupt is restored afterwards");
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
     // ==================== RAG ingestion fires ====================
 
     @Test
@@ -1460,6 +1550,57 @@ class ScheduleFireExecutorTest {
         assertEquals(FireStatus.FAILED.name(), log.status());
         assertNotNull(log.errorMessage());
         verify(ragSourceIngestionService, never()).processScheduledFire(any(), any(), any(), any());
+    }
+
+    @Nested
+    class EmailPoll {
+
+        private EmailMailboxPoller poller;
+
+        @BeforeEach
+        void wirePoller() {
+            poller = mock(EmailMailboxPoller.class);
+            setField(executor, "emailMailboxPoller", poller);
+        }
+
+        private ScheduleConfiguration pollSchedule(String name, String integrationId) {
+            var schedule = new ScheduleConfiguration();
+            schedule.setId("poll-1");
+            schedule.setName(name);
+            schedule.setTriggerType(TriggerType.HEARTBEAT);
+            schedule.setHeartbeatIntervalSeconds(60L);
+            schedule.setMetadata(EmailPollSchedules.metadata(integrationId));
+            return schedule;
+        }
+
+        @Test
+        void pollsTheMailboxAndNeverRunsAConversation() throws Exception {
+            when(poller.poll("int-1")).thenReturn(new EmailMailboxPoller.PollReport(false, "1 processed"));
+
+            var log = executor.fire(pollSchedule("email-poll:int-1", "int-1"), "node-1", 1);
+
+            assertEquals(ScheduleConfiguration.FireStatus.COMPLETED.name(), log.status());
+            verify(poller).poll("int-1");
+            verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        }
+
+        @Test
+        void aMailServerOutageIsRecordedButNotAFailedFire() {
+            when(poller.poll("int-1")).thenReturn(new EmailMailboxPoller.PollReport(true, "CONNECTION: refused"));
+
+            var log = executor.fire(pollSchedule("email-poll:int-1", "int-1"), "node-1", 1);
+
+            assertEquals(ScheduleConfiguration.FireStatus.COMPLETED.name(), log.status(), "the poller backs off itself; no dead-lettering");
+            assertEquals("CONNECTION: refused", log.errorMessage());
+        }
+
+        @Test
+        void aRowWhoseNameDoesNotMatchItsIntegrationIsRefused() {
+            var log = executor.fire(pollSchedule("email-poll:my-integration", "victim-integration"), "node-1", 1);
+
+            assertEquals(ScheduleConfiguration.FireStatus.FAILED.name(), log.status());
+            verify(poller, never()).poll(anyString());
+        }
     }
 
     private static ScheduleConfiguration makeIngestionSchedule(String id, String ragConfigId, int version,

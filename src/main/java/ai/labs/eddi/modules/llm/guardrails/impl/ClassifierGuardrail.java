@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.llm.guardrails.ContentGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.RegexDeadline;
@@ -68,6 +69,11 @@ import java.util.regex.Pattern;
  * applies: {@code closed} — the default for a {@code block} or {@code reprompt}
  * guardrail — refuses the text, {@code open} records a warning and lets it
  * through.
+ * <h3>Spend</h3> The call is asked of {@link GuardrailContext#spend()} before
+ * it starts: once the conversation has reached its
+ * {@code maxCostPerConversationUsd} or the tenant its monthly budget, it is not
+ * made, and the guardrail could not decide
+ * ({@link PaidCallGate#REASON_SPEND_REFUSED}) — {@code failMode} applies.
  * <h3>History</h3> {@link #screensHistory()} is false: one model call per
  * earlier message of the window on every turn would multiply the cost by the
  * window size. Each message was classified on its own turn.

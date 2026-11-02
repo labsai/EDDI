@@ -1205,15 +1205,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
      * <p>
      * {@code type} names a guardrail implementation ({@code prompt-injection},
      * {@code pii-redaction}, {@code regex-filter}, {@code max-length},
-     * {@code json-object}, {@code classifier}, {@code judge}); an unknown type is
-     * skipped with a WARN at run time, never rejected, so a config written for a
-     * newer EDDI still loads on an older one. {@code action} decides what a finding
-     * does: {@code block} (the default), {@code redact}, {@code reprompt} (output
-     * only — the same model is asked again, at most {@code maxRetries} times, then
-     * the answer is blocked, or with {@code onExhausted: deliver-best} the best
-     * attempt is delivered) or {@code warn}. An unknown action is treated as
-     * {@code block}. {@code parameters} reach the guardrail as plain strings and
-     * are never run through the template engine.
+     * {@code json-object}, {@code classifier}, {@code judge}, {@code expression});
+     * an unknown type is skipped with a WARN at run time, never rejected, so a
+     * config written for a newer EDDI still loads on an older one. {@code action}
+     * decides what a finding does: {@code block} (the default), {@code redact},
+     * {@code reprompt} (output only — the same model is asked again, at most
+     * {@code maxRetries} times, then the answer is blocked, or with
+     * {@code onExhausted: deliver-best} the best attempt is delivered) or
+     * {@code warn}. An unknown action is treated as {@code block}.
+     * {@code parameters} reach the guardrail as plain strings and are never run
+     * through the template engine.
      *
      * @since 6.6.0
      */

@@ -284,6 +284,36 @@ public class ConnectionResolver {
         }
     }
 
+    /**
+     * Save-time check of a mail login, without resolving any credential: the
+     * connection exists, can log in to a mailbox ({@code BASIC} for an app
+     * password, an OAuth type for {@code XOAUTH2}; never {@code CALLER_SUPPLIED})
+     * and its {@code baseUrlAllowlist} names {@code targetUrl} (a mail origin such
+     * as {@code imaps://outlook.office365.com}). The same rules
+     * {@link #resolveBasicLogin} and {@link #resolveAccessToken} apply when the
+     * login happens, checked where the author is waiting for an answer.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed
+     */
+    public void requireMailLoginTarget(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection = connectionRegistry.require(parsed);
+        if (connection.getAuthType() != AuthType.BASIC) {
+            requireBareTokenAvailable(connection);
+        } else if (connection.getBinding() == Binding.CALLER_SUPPLIED) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, which has no username and password to log in with.");
+        }
+        if (connection.getBinding() == Binding.PER_USER) {
+            // A poll runs as no verified person, so a per-user grant could never be used.
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is bound PER_USER, but a mailbox poll runs as no verified user. Use a "
+                            + "SERVICE-bound connection for a mailbox.");
+        }
+        requireTargetAllowed(connection, targetUrl);
+    }
+
     private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
         AuthType authType = connection.getAuthType();
         boolean oauth = authType == AuthType.OAUTH2_CLIENT_CREDENTIALS || authType == AuthType.OAUTH2_AUTHORIZATION_CODE;

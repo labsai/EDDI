@@ -1324,16 +1324,22 @@ public class McpToolProviderManager {
             return headers;
         }
         Map<String, Object> meta = request.getParams().getMeta();
-        Map<String, String> merged = null;
+        Map<String, String> fromMeta = new LinkedHashMap<>();
         for (String name : TracePropagation.HEADERS) {
-            if (meta.get(name) instanceof String value && !value.isBlank() && !containsIgnoreCase(headers, name)) {
-                if (merged == null) {
-                    merged = new LinkedHashMap<>(headers);
-                }
-                merged.put(name, value);
+            if (meta.get(name) instanceof String value && !value.isBlank()) {
+                fromMeta.put(name, value);
             }
         }
-        return merged != null ? merged : headers;
+        // All-or-nothing, like every other outbound path (HttpClientWrapper,
+        // OutboundHttp): an author's own traceparent must not get a tracestate from
+        // another trace next to it.
+        Map<String, String> toAdd = TracePropagation.withoutIfAnyPresent(fromMeta, name -> containsIgnoreCase(headers, name));
+        if (toAdd.isEmpty()) {
+            return headers;
+        }
+        Map<String, String> merged = new LinkedHashMap<>(headers);
+        merged.putAll(toAdd);
+        return merged;
     }
 
     private static boolean containsIgnoreCase(Map<String, String> headers, String name) {

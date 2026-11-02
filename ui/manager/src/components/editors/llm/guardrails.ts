@@ -12,6 +12,7 @@ export const GUARDRAIL_TYPES = [
   "classifier",
   "judge",
   "json-object",
+  "expression",
 ] as const;
 export type GuardrailTypeName = (typeof GUARDRAIL_TYPES)[number];
 
@@ -44,10 +45,17 @@ const PHASES_BY_TYPE: Record<GuardrailTypeName, GuardrailPhaseName[]> = {
   classifier: ["input", "output"],
   judge: ["output"],
   "json-object": ["output"],
+  expression: ["output"],
 };
 
 /** Types without a rewrite: `redact` has nothing to rewrite with, so the engine blocks instead. */
-const NO_REWRITE: ReadonlySet<string> = new Set(["prompt-injection", "classifier", "judge", "json-object"]);
+const NO_REWRITE: ReadonlySet<string> = new Set([
+  "prompt-injection",
+  "classifier",
+  "judge",
+  "json-object",
+  "expression",
+]);
 
 export function isKnownGuardrailType(type: string): type is GuardrailTypeName {
   return (GUARDRAIL_TYPES as readonly string[]).includes(type);
@@ -226,6 +234,42 @@ export function classifierNeedsSafeLabel(g: GuardrailConfig): boolean {
   return g.type === "classifier" && unsafe !== "" && unsafe.toLowerCase() !== "yes" && !(g.parameters?.safeLabel ?? "").trim();
 }
 
+/** Mirrors the backend `ExpressionGuardrail` bounds. */
+export const EXPRESSION_MAX_CHARS = 2000;
+export const EXPRESSION_FIX_MAX_CHARS = 1000;
+/** An issue code: upper-case letters, digits and underscores, starting with a letter, at most 40. */
+export const ISSUE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,39}$/;
+
+/** What the backend's deploy-time check of an `expression` guardrail would refuse. */
+export type ExpressionProblem =
+  | "exprRequired"
+  | "exprTooLong"
+  | "issueRequired"
+  | "issueInvalid"
+  | "fixRequired"
+  | "fixTooLong";
+
+/**
+ * The problems `ExpressionGuardrail.validate` refuses the deploy for, minus the
+ * expression's syntax, which only the server's parser can judge (it names the
+ * position). An empty list for any other type.
+ */
+export function expressionProblems(g: GuardrailConfig): ExpressionProblem[] {
+  if (g.type !== "expression") return [];
+  const p = g.parameters ?? {};
+  const problems: ExpressionProblem[] = [];
+  const expr = p.expr ?? "";
+  if (!expr.trim()) problems.push("exprRequired");
+  else if (expr.length > EXPRESSION_MAX_CHARS) problems.push("exprTooLong");
+  const issue = p.issue ?? "";
+  if (!issue) problems.push("issueRequired");
+  else if (!ISSUE_CODE_PATTERN.test(issue)) problems.push("issueInvalid");
+  const fix = p.fix ?? "";
+  if (!fix.trim()) problems.push("fixRequired");
+  else if (fix.length > EXPRESSION_FIX_MAX_CHARS) problems.push("fixTooLong");
+  return problems;
+}
+
 /** One line for the list row: the parameters that say what this guardrail does. */
 export function summarizeGuardrail(g: GuardrailConfig): string {
   const p = g.parameters ?? {};
@@ -237,6 +281,8 @@ export function summarizeGuardrail(g: GuardrailConfig): string {
       return enabledPiiKinds(g).join(", ");
     case "max-length":
       return p.maxChars ? `${p.maxChars}` : "";
+    case "expression":
+      return [p.issue, p.expr && p.expr.length > 60 ? `${p.expr.slice(0, 60)}…` : p.expr].filter(Boolean).join(" · ");
     default:
       return "";
   }
@@ -285,6 +331,12 @@ export const TYPE_TEXT: Record<GuardrailTypeName, [string, string, string, strin
     "JSON object",
     "llmEditor.grTypeJsonDesc",
     "Finds an answer that is not exactly one JSON object (a Markdown code fence is tolerated). Checks the shape only.",
+  ],
+  expression: [
+    "llmEditor.grTypeExpression",
+    "Expression check",
+    "llmEditor.grTypeExpressionDesc",
+    "Evaluates your boolean expression over the JSON answer, e.g. sum(lines[*].amount) == total. When it is false, a reprompt tells the model your fix text and nothing else.",
   ],
 };
 

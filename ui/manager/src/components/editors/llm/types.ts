@@ -252,8 +252,9 @@ export type GuardrailOnExhausted = "block" | "deliver-best";
  * One input or output guardrail of an LLM task. Mirrors the backend
  * `LlmConfiguration.GuardrailConfig`. Built-in `type`s: `prompt-injection`
  * (input), `pii-redaction`, `regex-filter`, `max-length`, `classifier` (both),
- * `judge`, `json-object` (output); an unknown type is skipped by the engine
- * with a WARN. `classifier` calls an author-configured safety-classifier model,
+ * `judge`, `json-object`, `expression` (output); an unknown type is skipped by
+ * the engine with a WARN. `expression` takes `expr`, `issue` and `fix`
+ * parameters. `classifier` calls an author-configured safety-classifier model,
  * `judge` a model that grades the answer with author-declared issue codes;
  * their `parameters` take `provider` plus that provider's own model parameters.
  */

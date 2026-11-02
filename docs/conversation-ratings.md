@@ -12,7 +12,8 @@ ratings must be aggregated across conversations.
 
 > **Status.** The backend (REST API, storage, metrics, GDPR), the Chat UI's
 > rating controls, the Manager's Feedback page, the MCP tools and the Platform
-> Operator's read access are in place. Push alerts follow in a later release.
+> Operator's read access are in place. To be told about low ratings or comments in
+> Slack or at a webhook, write an [alert rule](alerts.md) with source `RATING`.
 
 ## Switching ratings on
 

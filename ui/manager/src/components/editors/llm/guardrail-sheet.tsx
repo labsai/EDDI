@@ -8,6 +8,8 @@ import { NumberInput } from "../number-input";
 import { modelParamSpec } from "./model-params";
 import {
   DEFAULT_REPROMPT_RETRIES,
+  EXPRESSION_FIX_MAX_CHARS,
+  EXPRESSION_MAX_CHARS,
   JUDGE_DEFAULT_TIMEOUT_MS,
   JUDGE_MAX_FIX_CHARS,
   JUDGE_MAX_ISSUES,
@@ -18,6 +20,7 @@ import {
   classifierNeedsSafeLabel,
   effectiveAction,
   enabledPiiKinds,
+  expressionProblems,
   isKnownGuardrailType,
   judgeIssuesProblem,
   parseJudgeIssues,
@@ -33,6 +36,7 @@ import {
   withPiiKinds,
   withText,
   withType,
+  type ExpressionProblem,
   type GuardrailPhaseName,
   type GuardrailTypeName,
   type JudgeIssue,
@@ -535,6 +539,10 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
             </p>
           )}
 
+          {value.type === "expression" && (
+            <ExpressionFields value={value} readOnly={readOnly} idOf={id} setParam={setParam} />
+          )}
+
           {value.type === "classifier" && (
             <ClassifierFields
               value={value}
@@ -609,6 +617,134 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
   );
 
   return createPortal(body, document.body);
+}
+
+function ExpressionFields({
+  value,
+  readOnly,
+  idOf,
+  setParam,
+}: {
+  value: GuardrailConfig;
+  readOnly?: boolean;
+  idOf: (name: string) => string;
+  setParam: (key: string, v: string) => void;
+}) {
+  const { t } = useTranslation();
+  const p = value.parameters ?? {};
+  const problems = expressionProblems(value);
+  const has = (problem: ExpressionProblem) => problems.includes(problem);
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3" data-testid="guardrail-expression">
+      <p className="text-[10px] leading-relaxed text-muted-foreground">
+        {t(
+          "llmEditor.grExprNote",
+          "The answer is parsed as JSON and the expression evaluated over it; only true passes. An answer that is not JSON, or an expression that cannot be evaluated (a missing value in arithmetic, a number compared with text, division by zero), counts as undecided and follows the fail mode below.",
+        )}
+      </p>
+
+      <Field
+        label={t("llmEditor.grExprExpr", "Expression")}
+        htmlFor={idOf("expr")}
+        hint={t(
+          "llmEditor.grExprExprHint",
+          "Paths (total, invoice.total, lines[0].amount, lines[*].amount), decimal arithmetic, == != < <= > >=, && || !, and sum, count, min, max, len, abs, round, exists, approx. A missing path is null; comparing null with < or > is false. The syntax is checked when the agent is deployed.",
+        )}
+      >
+        <textarea
+          id={idOf("expr")}
+          rows={3}
+          value={p.expr ?? ""}
+          onChange={(e) => setParam("expr", e.target.value)}
+          readOnly={readOnly}
+          placeholder="sum(lines[*].amount) == total"
+          aria-invalid={has("exprRequired") || has("exprTooLong")}
+          className={AREA}
+          data-testid="guardrail-expr"
+        />
+      </Field>
+      {has("exprRequired") && (
+        <Warning testId="guardrail-expr-required">
+          {t("llmEditor.grExprRequired", "An expression is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+      {has("exprTooLong") && (
+        <Warning testId="guardrail-expr-too-long">
+          {t("llmEditor.grExprTooLong", "The expression is longer than {{max}} characters: the deploy is refused.", {
+            max: EXPRESSION_MAX_CHARS,
+          })}
+        </Warning>
+      )}
+
+      <Field
+        label={t("llmEditor.grExprIssue", "Issue code")}
+        htmlFor={idOf("issue")}
+        hint={t(
+          "llmEditor.grExprIssueHint",
+          "Reported in the audit record as expression_failed:<code>. Upper-case letters, digits and underscores, starting with a letter, at most 40 characters.",
+        )}
+      >
+        <input
+          id={idOf("issue")}
+          type="text"
+          value={p.issue ?? ""}
+          onChange={(e) => setParam("issue", e.target.value)}
+          readOnly={readOnly}
+          placeholder="LINE_SUM"
+          aria-invalid={has("issueRequired") || has("issueInvalid")}
+          className={`${FIELD} font-mono`}
+          data-testid="guardrail-expr-issue"
+        />
+      </Field>
+      {has("issueRequired") && (
+        <Warning testId="guardrail-expr-issue-required">
+          {t("llmEditor.grExprIssueRequired", "An issue code is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+      {has("issueInvalid") && (
+        <Warning testId="guardrail-expr-issue-invalid">
+          {t(
+            "llmEditor.grExprIssueInvalid",
+            "Use upper-case letters, digits and underscores, starting with a letter, at most 40 characters: the deploy is refused otherwise.",
+          )}
+        </Warning>
+      )}
+
+      <Field
+        label={t("llmEditor.grExprFix", "Fix text")}
+        htmlFor={idOf("fix")}
+        hint={t(
+          "llmEditor.grExprFixHint",
+          "What a reprompt tells the model when the expression is false. It is the only text from this check the model sees: no value from the answer is ever added.",
+        )}
+      >
+        <textarea
+          id={idOf("fix")}
+          rows={2}
+          value={p.fix ?? ""}
+          onChange={(e) => setParam("fix", e.target.value)}
+          readOnly={readOnly}
+          placeholder={t("llmEditor.grExprFixPlaceholder", "Make total equal the sum of the line amounts.")}
+          aria-invalid={has("fixRequired") || has("fixTooLong")}
+          className={AREA}
+          data-testid="guardrail-expr-fix"
+        />
+      </Field>
+      {has("fixRequired") && (
+        <Warning testId="guardrail-expr-fix-required">
+          {t("llmEditor.grExprFixRequired", "A fix text is required: the deploy is refused without one.")}
+        </Warning>
+      )}
+      {has("fixTooLong") && (
+        <Warning testId="guardrail-expr-fix-too-long">
+          {t("llmEditor.grExprFixTooLong", "The fix text is longer than {{max}} characters: the deploy is refused.", {
+            max: EXPRESSION_FIX_MAX_CHARS,
+          })}
+        </Warning>
+      )}
+    </div>
+  );
 }
 
 function ClassifierFields({

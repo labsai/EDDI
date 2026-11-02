@@ -38,6 +38,12 @@ public class ApiCall {
      * ({@code eddi.httpcalls.default-max-response-size-bytes}, 2 MB).
      */
     private Integer maxResponseSizeInBytes;
+    /**
+     * Run the call once per element of an array and collect every element's result
+     * into one array. {@code null} (the default) sends exactly one request, as
+     * before. See {@link ForEachInstruction}.
+     */
+    private ForEachInstruction forEach;
     private HttpPreRequest preRequest;
     private Request request;
     private HttpPostResponse postResponse;
@@ -136,6 +142,14 @@ public class ApiCall {
 
     public void setMaxResponseSizeInBytes(Integer maxResponseSizeInBytes) {
         this.maxResponseSizeInBytes = maxResponseSizeInBytes;
+    }
+
+    public ForEachInstruction getForEach() {
+        return forEach;
+    }
+
+    public void setForEach(ForEachInstruction forEach) {
+        this.forEach = forEach;
     }
 
     public HttpPreRequest getPreRequest() {

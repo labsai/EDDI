@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.SpendReservations;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.FormatRetryRunner.Asker;
 import ai.labs.eddi.modules.llm.impl.FormatRetryRunner.Attempt;
@@ -610,6 +611,137 @@ class FormatRetryRunnerTest {
             assertThrows(LifecycleException.class, () -> runner.run(policy(), original(), askerOver(other), () -> List.of(UserMessage.from("q")),
                     RemainingBudget.UNBOUNDED, ReaskGate.ALWAYS, ReaskListener.NONE));
             assertEquals(1, other.callCount());
+        }
+    }
+
+    @Nested
+    @DisplayName("spend checks (E4): a re-ask is admitted by the conversation's ceiling and the tenant budget")
+    class SpendChecks {
+
+        /** $1 per attempt: 1M input tokens at $1 per 1M. */
+        private final Map<String, Object> dollar = Map.of("tokenUsage",
+                Map.of("inputTokens", 1_000_000L, "outputTokens", 0L, "totalTokens", 1_000_000L));
+
+        private final List<double[]> asked = new ArrayList<>();
+        private final AtomicInteger closed = new AtomicInteger();
+
+        /**
+         * Records every (pending, expected) it is asked and refuses from the n-th call
+         * on.
+         */
+        private FormatRetryRunner.ReaskSpend refusingFrom(int n) {
+            return (pending, expected) -> {
+                asked.add(new double[]{pending, expected});
+                if (asked.size() >= n) {
+                    return new LlmSpendGate.Admission(new LlmSpendGate.Refusal(LlmSpendGate.REASON_CONVERSATION_CEILING, "reached"), null);
+                }
+                var reservations = new SpendReservations();
+                var reservation = reservations.tryReserve(0.0, 100.0, expected).orElseThrow();
+                return new LlmSpendGate.Admission(null, reservation);
+            };
+        }
+
+        private Policy pricedPolicy(int maxRetries, FormatRetryRunner.ReaskSpend spend) {
+            return Policy.from(validation(v -> {
+                v.setOnInvalidJson("retry");
+                v.setMaxRetries(maxRetries);
+            }), null, true, null, 1.0, 1.0).withSpend(spend);
+        }
+
+        @Test
+        @DisplayName("a refused re-ask is not sent: the reply stays unresolved and skipped_spend is counted")
+        void refusedReaskIsNotSent() throws Exception {
+            var calls = new AtomicInteger();
+            Asker asker = (messages, maxTokens) -> {
+                calls.incrementAndGet();
+                return new Attempt(PROSE, dollar);
+            };
+
+            var outcome = runner.resolve(pricedPolicy(3, refusingFrom(1)), new Attempt(PROSE, dollar), original(), asker,
+                    RemainingBudget.UNBOUNDED, ReaskGate.ALWAYS, ReaskListener.NONE);
+
+            assertEquals(0, calls.get());
+            assertFalse(outcome.usable());
+            assertEquals(Trigger.INVALID_JSON, outcome.unresolved());
+            assertEquals(1.0, counter("retry", FormatRetryRunner.SKIPPED_SPEND, "invalid_json"));
+        }
+
+        @Test
+        @DisplayName("each re-ask is asked with every attempt so far as pending and the last attempt's price as expected")
+        void pendingGrowsWithEachAttempt() throws Exception {
+            var calls = new AtomicInteger();
+            Asker asker = (messages, maxTokens) -> {
+                calls.incrementAndGet();
+                return new Attempt(PROSE, dollar);
+            };
+
+            runner.resolve(pricedPolicy(3, refusingFrom(3)), new Attempt(PROSE, dollar), original(), asker, RemainingBudget.UNBOUNDED,
+                    ReaskGate.ALWAYS, ReaskListener.NONE);
+
+            assertEquals(2, calls.get(), "the third admission was refused");
+            assertEquals(3, asked.size());
+            assertEquals(1.0, asked.get(0)[0], 1e-9, "the first reply's $1 is pending before the first re-ask");
+            assertEquals(1.0, asked.get(0)[1], 1e-9);
+            assertEquals(2.0, asked.get(1)[0], 1e-9);
+            assertEquals(3.0, asked.get(2)[0], 1e-9);
+        }
+
+        @Test
+        @DisplayName("the admission is closed after the re-ask, also when the re-ask fails")
+        void admissionClosedAfterFailure() throws Exception {
+            var reservations = new SpendReservations();
+            FormatRetryRunner.ReaskSpend spend = (pending, expected) -> new LlmSpendGate.Admission(null,
+                    reservations.tryReserve(0.0, 100.0, 0.5).orElseThrow());
+            Asker failing = (messages, maxTokens) -> {
+                assertEquals(1, reservations.openReservations(), "held while the re-ask runs");
+                throw new LifecycleException("provider down");
+            };
+
+            runner.resolve(pricedPolicy(1, spend), new Attempt(PROSE, dollar), original(), failing, RemainingBudget.UNBOUNDED, ReaskGate.ALWAYS,
+                    ReaskListener.NONE);
+
+            assertEquals(0, reservations.openReservations());
+            assertEquals(0.0, reservations.heldUsd(), 1e-12);
+        }
+
+        @Test
+        @DisplayName("no spend check is asked when another limit already skips the re-ask")
+        void otherSkipsComeFirst() throws Exception {
+            runner.resolve(pricedPolicy(0, refusingFrom(1)), new Attempt(PROSE, dollar), original(), (m, t) -> new Attempt(VALID, Map.of()),
+                    RemainingBudget.UNBOUNDED, ReaskGate.ALWAYS, ReaskListener.NONE);
+
+            assertTrue(asked.isEmpty());
+            assertEquals(1.0, counter("retry", "skipped_budget", "invalid_json"));
+        }
+
+        @Test
+        @DisplayName("plus() adds the earlier steps' cost to the pending figure")
+        void plusAddsOffset() {
+            FormatRetryRunner.ReaskSpend base = refusingFrom(99);
+            base.plus(2.5).admit(1.0, 0.0);
+            base.plus(Double.NaN).admit(1.0, 0.0);
+
+            assertEquals(3.5, asked.get(0)[0], 1e-9);
+            assertEquals(1.0, asked.get(1)[0], 1e-9);
+        }
+
+        @Test
+        @DisplayName("context too long: a refused re-ask lets the refusal propagate, the model is asked once")
+        void contextReaskRefused() {
+            var tooLong = new InvalidRequestException("This model's maximum context length is 8192 tokens");
+            var model = FaultInjectingChatModel.script(Step.fail(tooLong), Step.text("fits now"));
+            var policy = Policy.from(validation(v -> v.setOnContextTooLong("retry")), null, false, null, null, null).withSpend(refusingFrom(1));
+
+            assertThrows(LifecycleException.class, () -> runner.run(policy, original(), askerOver(model), () -> List.of(UserMessage.from("q")),
+                    RemainingBudget.UNBOUNDED, ReaskGate.ALWAYS, ReaskListener.NONE));
+            assertEquals(1, model.callCount());
+            assertEquals(1.0, counter("retry", FormatRetryRunner.SKIPPED_SPEND, "context_too_long"));
+        }
+
+        @Test
+        @DisplayName("withSpend(null) keeps the policy unchecked")
+        void nullSpendIsNone() {
+            assertTrue(pricedPolicy(1, null).spend() == FormatRetryRunner.ReaskSpend.NONE);
         }
     }
 

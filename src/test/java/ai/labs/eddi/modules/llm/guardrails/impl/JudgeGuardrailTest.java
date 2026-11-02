@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailUndecidedException;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.guardrails.Reprompter;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
@@ -526,6 +527,73 @@ class JudgeGuardrailTest {
         void phases() {
             assertEquals(Set.of(GuardrailPhase.OUTPUT), judge.phases());
             assertFalse(judge.screensHistory());
+        }
+    }
+
+    // === spend checks ===
+
+    @Nested
+    @DisplayName("spend checks: the judge's call is admitted before it starts")
+    class Spend {
+
+        private final List<Double> expected = new ArrayList<>();
+        private final List<Double> spent = new ArrayList<>();
+
+        private PaidCallGate gate(boolean admit) {
+            return expectedUsd -> {
+                expected.add(expectedUsd);
+                return new PaidCallGate.PaidCall() {
+                    @Override
+                    public String refusalReason() {
+                        return admit ? null : "conversation_ceiling";
+                    }
+
+                    @Override
+                    public void spent(double actualUsd) {
+                        spent.add(actualUsd);
+                    }
+
+                    @Override
+                    public void close() {
+                    }
+                };
+            };
+        }
+
+        @Test
+        @DisplayName("refused: the model is never called and the judge could not decide with reason spend_refused")
+        void refused() throws Exception {
+            StubModel model = install(StubModel.answering("{\"issues\": []}"));
+
+            var undecided = assertThrows(GuardrailUndecidedException.class,
+                    () -> judge.evaluate("We open at nine.", output(params()).withSpend(gate(false))));
+
+            assertEquals(PaidCallGate.REASON_SPEND_REFUSED, undecided.reason());
+            assertTrue(model.requests.isEmpty());
+            assertTrue(spent.isEmpty());
+        }
+
+        @Test
+        @DisplayName("admitted: the call runs and its cost is reported, with an expected cost from the input price")
+        void admitted() throws Exception {
+            install(StubModel.answering("{\"issues\": []}", new TokenUsage(1_000_000, 0)));
+
+            var verdict = judge.evaluate("We open at nine.", output(params("inputPricePer1M", "2")).withSpend(gate(true)));
+
+            assertFalse(verdict.triggered());
+            assertEquals(List.of(2.0), spent);
+            assertTrue(expected.get(0) > 0.0);
+        }
+
+        @Test
+        @DisplayName("an unreadable answer still reports its cost")
+        void unparseableReportsCost() throws Exception {
+            install(StubModel.answering("no json here", new TokenUsage(1_000_000, 0)));
+
+            assertThrows(GuardrailUndecidedException.class,
+                    () -> judge.evaluate("We open at nine.", output(params("inputPricePer1M", "3")).withSpend(gate(true))));
+
+            assertEquals(List.of(3.0), spent);
         }
     }
 }

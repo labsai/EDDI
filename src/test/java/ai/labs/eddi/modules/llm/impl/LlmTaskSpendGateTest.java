@@ -26,7 +26,10 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.guardrails.impl.JsonObjectGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -46,6 +49,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
 
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
@@ -150,7 +154,7 @@ class LlmTaskSpendGateTest {
                 new CallerIdentityContext(null, null));
         tenantQuotaService = mock(TenantQuotaService.class);
         lenient().when(tenantQuotaService.getDefaultTenantId()).thenReturn("default");
-        lenient().when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.OK);
+        lenient().when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK);
         llmTask.spendGate = new LlmSpendGate(tenantQuotaService, meterRegistry);
     }
 
@@ -191,7 +195,8 @@ class LlmTaskSpendGateTest {
     void spentTenantBudgetSkipsTheModel() throws Exception {
         var model = new CountingModel();
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble()))
+                .thenReturn(QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
         var task = task();
         var v = new ResponseValidation();
         v.setFallbackMessage("Budget reached, please contact support.");
@@ -211,7 +216,7 @@ class LlmTaskSpendGateTest {
     void unavailableAccountingRefuses() throws Exception {
         var model = new CountingModel();
         when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(ITenantQuotaStore.accountingUnavailable());
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(ITenantQuotaStore.accountingUnavailable());
 
         run(task());
 
@@ -267,7 +272,7 @@ class LlmTaskSpendGateTest {
         assertEquals(ResponseValidation.DEFAULT_FALLBACK_MESSAGE, templateData.get("taskA"));
         verify(dataFactory).createData(eq(LLM_SPEND_REFUSED_PREFIX + "taskA"),
                 argThat(r -> r instanceof Map<?, ?> m && LlmSpendGate.REASON_CONVERSATION_CEILING.equals(m.get("reason"))));
-        verify(tenantQuotaService, never()).checkCostBudget(anyString());
+        verify(tenantQuotaService, never()).checkCostBudget(anyString(), anyDouble());
     }
 
     @Test
@@ -282,6 +287,135 @@ class LlmTaskSpendGateTest {
 
         assertEquals(1, model.calls);
         verify(steps, never()).getExactDataPerStep(AUDIT_COST);
+    }
+
+    // === E4: every attempt after the first is checked too ===
+
+    /**
+     * Prices at which one CountingModel call costs $0.002 (1000 x $1/1M + 500 x
+     * $2/1M).
+     */
+    private static LlmConfiguration.Task priced(LlmConfiguration.Task task) {
+        task.setInputPricePer1M(1.0);
+        task.setOutputPricePer1M(2.0);
+        return task;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void conversation(double ceiling, double alreadySpent) {
+        when(memory.getConversationCostCeilingUsd()).thenReturn(OptionalDouble.of(ceiling));
+        IConversationMemory.IConversationStepStack steps = mock(IConversationMemory.IConversationStepStack.class);
+        IData<Object> spent = mock(IData.class);
+        when(spent.getResult()).thenReturn(alreadySpent);
+        when(steps.getExactDataPerStep(AUDIT_COST)).thenReturn(List.of(spent));
+        when(memory.getAllSteps()).thenReturn(steps);
+    }
+
+    /**
+     * A model that answers with nothing and reports 1000 input / 500 output tokens.
+     */
+    private static final class EmptyModel implements ChatModel {
+        int calls;
+
+        @Override
+        public ChatResponse doChat(ChatRequest request) {
+            calls++;
+            return ChatResponse.builder().aiMessage(AiMessage.from("")).tokenUsage(new TokenUsage(1000, 500)).build();
+        }
+    }
+
+    private static LlmConfiguration.Task reaskingOnEmpty() {
+        var task = priced(task());
+        var v = new ResponseValidation();
+        v.setEnabled(true);
+        v.setOnEmpty("retry");
+        v.setMaxRetries(1);
+        task.setResponseValidation(v);
+        return task;
+    }
+
+    @Test
+    @DisplayName("a same-model re-ask is refused once the first attempt's own cost reaches the ceiling (it is not in audit:cost yet)")
+    void reaskRefusedByTheCeiling() throws Exception {
+        var model = new EmptyModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        // $0.001 recorded + the first attempt's $0.002 = $0.003 >= $0.0025
+        conversation(0.0025, 0.001);
+
+        run(reaskingOnEmpty());
+
+        assertEquals(1, model.calls);
+        assertEquals(1.0, meterRegistry.counter(LlmSpendGate.METRIC, "reason", LlmSpendGate.REASON_CONVERSATION_CEILING).count());
+        assertEquals(1.0, meterRegistry.counter("eddi.llm.recovery", "action", "retry", "outcome", FormatRetryRunner.SKIPPED_SPEND, "trigger",
+                "empty").count());
+    }
+
+    @Test
+    @DisplayName("within the ceiling the re-ask is sent as before")
+    void reaskWithinTheCeiling() throws Exception {
+        var model = new EmptyModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        conversation(1.00, 0.001);
+
+        run(reaskingOnEmpty());
+
+        assertEquals(2, model.calls);
+    }
+
+    private LlmConfiguration.Task repromptingJsonTask() {
+        llmTask.guardrailService = new GuardrailService(List.of(new JsonObjectGuardrail()), meterRegistry);
+        var task = priced(task());
+        var cfg = new GuardrailConfig();
+        cfg.setType("json-object");
+        cfg.setAction("reprompt");
+        cfg.setMaxRetries(1);
+        cfg.setBlockMessage("Could not produce a valid answer.");
+        task.setOutputGuardrails(List.of(cfg));
+        return task;
+    }
+
+    @Test
+    @DisplayName("a guardrail reprompt is refused once the answer's own cost reaches the ceiling: the answer is blocked, no second call")
+    void repromptRefusedByTheCeiling() throws Exception {
+        var model = new CountingModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        // the primary call passes ($0.001 < $0.0025); its $0.002 makes $0.003 before
+        // the reprompt
+        conversation(0.0025, 0.001);
+
+        run(repromptingJsonTask());
+
+        assertEquals(1, model.calls);
+        assertEquals("Could not produce a valid answer.", templateData.get("taskA"));
+        assertEquals(1.0, meterRegistry.counter(LlmSpendGate.METRIC, "reason", LlmSpendGate.REASON_CONVERSATION_CEILING).count());
+    }
+
+    @Test
+    @DisplayName("a guardrail reprompt is refused once the tenant budget is spent mid-turn")
+    void repromptRefusedByTheTenantBudget() throws Exception {
+        var model = new CountingModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        // allowed for the primary call, spent by the time the reprompt would start
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK,
+                QuotaCheckResult.denied("Monthly cost budget ($1.00) exceeded"));
+
+        run(repromptingJsonTask());
+
+        assertEquals(1, model.calls);
+        assertEquals("Could not produce a valid answer.", templateData.get("taskA"));
+        assertEquals(1.0, meterRegistry.counter(LlmSpendGate.METRIC, "reason", LlmSpendGate.REASON_TENANT_BUDGET).count());
+    }
+
+    @Test
+    @DisplayName("within the ceiling the reprompt is sent as before")
+    void repromptWithinTheCeiling() throws Exception {
+        var model = new CountingModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        conversation(1.00, 0.001);
+
+        run(repromptingJsonTask());
+
+        assertEquals(2, model.calls);
     }
 
     /** A pause whose run spent 1000 input tokens and $0.025 before it. */

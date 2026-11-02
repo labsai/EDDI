@@ -227,6 +227,37 @@ class LlmTaskResumeModeTest {
         verify(memory).setHitlPendingToolCalls(null);
     }
 
+    @Test
+    @DisplayName("resuming a paused cascade step prices the resumed tokens at the STEP's rates, not the task's")
+    void resumedCascadeStepIsPricedAtTheStepsRates() throws Exception {
+        var b = batch("taskA", 0);
+        b.setCascadeStepIndex(0);
+        wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
+        var usage = new HashMap<String, Object>();
+        usage.put("inputTokens", 1_000_000);
+        usage.put("outputTokens", 0);
+        var metadata = new HashMap<String, Object>();
+        metadata.put("tokenUsage", usage);
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>(), metadata));
+
+        var t = task("taskA", List.of("action1"));
+        t.setInputPricePer1M(100.0);
+        t.setOutputPricePer1M(100.0);
+        var step = new LlmConfiguration.CascadeStep();
+        step.setInputPricePer1M(1.0);
+        step.setOutputPricePer1M(1.0);
+        var cascade = new LlmConfiguration.ModelCascadeConfig();
+        cascade.setEnabled(true);
+        cascade.setSteps(List.of(step));
+        t.setModelCascade(cascade);
+
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        verify(dataFactory).createData(eq(MemoryKeys.AUDIT_COST), eq(1.0));
+        verify(dataFactory, never()).createData(eq(MemoryKeys.AUDIT_COST), eq(100.0));
+    }
+
     // ============================================================
     // Pre-LLM bypass checklist — each of these MUST be skipped on resume
     // ============================================================

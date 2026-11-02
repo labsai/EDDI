@@ -204,6 +204,9 @@ class ConversationHitlService {
             // finished pause is harmless: its fire finds nothing awaiting a decision
             // and completes.
             deleteHitlTimeoutSchedule(conversationId);
+            if (!pausedOnly) {
+                conversationService.disarmContinuations(conversationId);
+            }
             conversationService.cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
                 // A pending human approval was terminally resolved outside resume:
@@ -227,6 +230,17 @@ class ConversationHitlService {
         if (inFlightMemory != null || remoteSignalled) {
             // Nothing persisted to flip, but a running pipeline was signalled —
             // it will stop at the next task boundary and persist its own state.
+            // A cancelled job must not start its next turn either.
+            if (!pausedOnly) {
+                conversationService.disarmContinuations(conversationId);
+            }
+            return IConversationService.CancelOutcome.CANCELLED;
+        }
+        // Between two turns of a self-continuing job nothing runs and nothing is
+        // paused, but the job is still live: its next turn is queued. Withdrawing it
+        // is what cancelling that job means. Never on the approver's paused-only
+        // cancel, which may stop a pending approval and nothing else.
+        if (!pausedOnly && conversationService.disarmContinuations(conversationId) > 0) {
             return IConversationService.CancelOutcome.CANCELLED;
         }
         // READY / ENDED / ERROR / EXECUTION_INTERRUPTED: nothing paused, nothing
@@ -603,6 +617,11 @@ class ConversationHitlService {
                         // atomic
                         // compare-and-store lets the terminal writer win; when it does,
                         // discard the resumed outcome (no persist, no schedule/notify).
+                        // A resumed turn that settled may ask to continue, like any turn:
+                        // decided before the store, armed below once it is committed.
+                        if (!rePaused) {
+                            conversationService.decideContinuation(memory);
+                        }
                         boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
                         if (!persisted) {
                             LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
@@ -635,6 +654,7 @@ class ConversationHitlService {
                             // best-effort: a failing observer must never affect the
                             // persisted resume above.
                             fireHitlResumeCompleted(conversationId, environment, memory, decision);
+                            conversationService.armContinuation(conversationId, memory, environment);
                         }
                     } catch (ResourceStoreException e) {
                         conversationService.logConversationError(loggingContext, conversationId, e);

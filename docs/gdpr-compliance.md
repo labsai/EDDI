@@ -134,11 +134,25 @@ principal, not a user: erasing or exporting it is refused with 400.
 15. Stores that registered as GDPR participants — the user directory, workspace
     notifications and the **A2A task store** (a peer's tasks and context bindings,
     each holding the message it sent and the reply it got, keyed by the peer's
-    principal), and the **email ledger** (HITL notification rows addressed to the
-    person — matched through the user id when it is an address and the email the
-    user directory recorded; it runs before the directory is erased) —
+    principal), the **email ledger** (HITL notification rows and conversation-mode
+    reply rows addressed to the person, and inbound mail rows sent by them — matched
+    through the user id when it is an address or an `email:<integrationId>:<address>`
+    identity, and the email the user directory recorded; it runs before the
+    directory is erased), the **email suppression list** (the addresses a reply
+    bounced from permanently, stored as hashes, matched the same way — erasure
+    deletes the entry rather than keeping a hash to honour "never mail me again":
+    conversation mode only answers mail the person sends, so EDDI writes to them
+    again only if they write first),
+    and **email identities**: an erasure for an *address* runs this whole cascade
+    again for every `email:<integrationId>:<address>` identity of that address —
+    the conversations, memories and properties an [email integration](email-integration.md#identity)
+    stored under it — for every current email integration and every integration
+    the address's inbound ledger rows name. Export collects the same
+    identities. A nested erasure that is incomplete fails the step. The one-off
+    `email-anon:` identities of unauthenticated senders hold no memory and are not
+    linked to an address. All of it is
     **permanently deleted**. Each reports under its own step name
-    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`)
+    (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`)
 16. **Conversation ratings** the user gave (score, tags, comment) — **permanently
     deleted** by the `conversationRatings` participant, which also forgets the user
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
@@ -170,6 +184,12 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   agent and version, score, tags, comment, triage status and note — without the
   reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)
   blocks new ratings
+- Alerting (`alerts`): for a user who runs agents, the alert rules they created or last
+  edited — id, name, times and which role — and the alert events they acknowledged —
+  id, rule name, source, agent, fired and acknowledged times; for a user who chatted,
+  the `OUTPUT_MATCH` values alerts stored from their conversations (`outputMatchValues`:
+  value, conversation, time). No other person's identity; capped at 10,000 each.
+  Erasure blanks those values and forgets the user as acknowledger and rule author
 - A2A tasks the user, as a peer, created (`a2aTasks`: task and context ids, the
   message sent, the reply, state and timestamps)
 - Group discussions the user started (`groupConversations`: question, transcript,

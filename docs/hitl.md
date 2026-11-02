@@ -99,7 +99,9 @@ Validation happens at **save time** (and on ZIP import): a finite policy without
 }
 ```
 
-`PAUSE_CONVERSATION` is a **reserved action** (like `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`). Do not reuse it as a quick-reply expression.
+`PAUSE_CONVERSATION` is a **reserved action** (like `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `CONTINUE_CONVERSATION`). Do not reuse it as a quick-reply expression.
+
+**Pauses and self-continuation.** A turn that pauses never arms a [self-continuation](long-jobs.md): only a turn that settles is followed by its own next turn. A continuation that falls due while the conversation is `AWAITING_HUMAN` is not run; the turn resumed from the pause may emit `CONTINUE_CONVERSATION` again, and is followed like any settled turn.
 
 ### REST API
 
@@ -590,7 +592,7 @@ Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-re
 - **Operator canary/gate metrics** (client-reported): the write canary and gate-installed check both run entirely client-side (there is no server-side notion of "the operator", just an agent with a particular `hitlConfig`), so the Manager reports outcomes via `POST /administration/operator/{canary-result,gate-status}` (`eddi-admin` only) purely so they show up on `/q/metrics` without a Manager tab open. This is a relay, not a verification — a report is trusted at face value. Produces `eddi.operator.canary{outcome=pass|fail|unknown}`, `eddi.operator.canary.duration`, and the gauge `eddi.operator.gate.verified` (1 only while every provisioned version last read back with a sound gate; defaults to 0, including on a deployment that has never activated an operator — that ambiguity is real and unresolved by this signal alone).
 - **Operator self-URL** (`GET /administration/operator/self-url`, `eddi-admin`): answers the address this deployment can reach *itself* at, which is what the operator's generated tools must target. `eddi.self.base-url` when set, otherwise `http://${quarkus.http.host}:${quarkus.http.port}` when the listener binds one specific address (loopback ones such as `127.0.0.5` or `::1` included; an IPv6 literal is bracketed, e.g. `http://[::1]:7070`), and `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty or `localhost` bind; the response is `{baseUrl, source}` with `source` one of `configured`, `loopback` or `unresolved`. `unresolved` (with `baseUrl: null`) means a random HTTP port (`quarkus.http.port=0`) and no override — the Manager then refuses to guess and asks for the base URL explicitly. It exists because the only other candidate a provisioning client has is its own browser origin, and the two coincide only when nothing sits between the browser and EDDI — a tunnelled staging instance was provisioned with `localhost:7080` in front of a container on `:7070`, and the operator reported itself deployed and gate-verified while all 22 of its tools failed on connect. Deliberately a GET with no arguments: the answer must not depend on a `Host` header or an `X-Forwarded-*` chain a proxy can rewrite. Note that pointing the tools at that address makes them cross-origin to `${caller:token}`'s same-origin rule, which is why `CallerIdentityResolver` also releases the token when the target is this very process — the same argument `LoopbackCallerAuthFilter` makes for the internal hop; the value comes from deployment configuration alone. It is not narrower than same-origin: the self address bypasses whatever sits in front of EDDI, so what the token reaches is what EDDI's own authorization allows. A deployment that also relies on its proxy's rules sets `eddi.caller-identity.self-release.enabled=false`; a caller whose origin could not be captured never gets the self release.
 - **Undeploy**: paused conversations do **not** count as active — an agent version with pending approvals can be undeployed. Resuming afterwards returns `409 agent not deployed` and the pause is restored (redeploy, then retry). Its approval timeouts stay armed through the undeploy (they are not among the schedules an undeploy disables) and fire at their due time; if the decision cannot be applied then, it is retried every `eddi.schedule.hitl-timeout-retry-interval` as described under timeouts. The idle-conversation cleanup sweep likewise **spares** `AWAITING_HUMAN` conversations — a pending approval is never silently force-ended by maintenance.
-- **Cancel semantics (regular)**: cancels a paused conversation, or signals a turn executing on the same pod to stop at the next task boundary. `CANCEL_IMMEDIATE` currently degrades to graceful on the regular surface. Cancelling an idle conversation returns `409` (use `endConversation`). An approver who is neither the owner nor an admin can only cancel a paused (`AWAITING_HUMAN`) conversation — see [Who May Decide](#who-may-decide).
+- **Cancel semantics (regular)**: cancels a paused conversation, or signals a turn executing on the same pod to stop at the next task boundary. `CANCEL_IMMEDIATE` currently degrades to graceful on the regular surface. Cancelling an idle conversation returns `409` (use `endConversation`) — unless it has a pending [self-continuation](long-jobs.md): a job between two of its turns is cancelled by withdrawing its next turn, and the answer is `200`. The full cancel withdraws a pending continuation in every case; the approver's paused-only cancel never does. An approver who is neither the owner nor an admin can only cancel a paused (`AWAITING_HUMAN`) conversation — see [Who May Decide](#who-may-decide).
 - **Timeout schedules are not manually operable**: HITL timeout schedules live in the schedule store but the schedule REST surface refuses to fire them manually (`409`, use `/resume` or `/cancel` — manual firing would bypass the approval authz), restricts update/delete/enable/disable to `eddi-admin` (`403` otherwise, so an editor cannot disarm an ABORT/AUTO_REJECT safety timeout), and redacts them from non-admin listings.
 - **Pause retention (optional)**: `eddi.hitl.pending.max-age` (ISO-8601 duration, default **off**) auto-cancels pauses older than the threshold — audited, schedule-disarmed, via the normal cancel path; `eddi.hitl.pending.sweep-interval` (default 6h) controls the sweep cadence. Under the default `WAIT_INDEFINITELY` policy, pauses otherwise accumulate until decided.
 - **Mass-timeout drain**: due schedules are claimed in configurable batches (`eddi.schedule.poll-batch-size`, default 100) and fired concurrently on virtual threads with per-fire error isolation.
@@ -694,6 +696,30 @@ user directory recorded for that principal.
 
 **Not yet:** group conversations (`AWAITING_APPROVAL` discussions) are not notified by email; their approvals
 appear on the Approvals page and in Slack as before.
+
+## Email conversations
+
+A conversation that an [email integration in conversation mode](email-integration.md#conversation-mode) runs answers
+its correspondent in the mail thread, and that includes pauses — the counterpart of Slack's in-thread notice and
+continuation push:
+
+- **In-thread pause notice.** When the turn of a mail pauses, the sender gets a reply in the thread: the agent's
+  output so far, a fixed sentence that a person must approve the next step, and the agent's `pauseReason`. Never the
+  tool's name or its arguments — the same data minimisation as Slack's in-thread notice; the approver sees those on
+  the Approvals page or in their [notification](#email-notifications). It is sent from `HitlPauseCommittedEvent`,
+  after the pause is durable, so it always carries the reason of the pause it is about.
+- **Continuation.** `EmailHitlResumeObserver` listens for `HitlResumeCompletedEvent`, as `SlackHitlResumeObserver`
+  does: after an approval the sender gets the resumed turn's output; after a rejection, a cancellation or a timeout a
+  plain notice that the step was not carried out; after a resume that failed, that it could not be completed. Who
+  decided is never named — approvers are staff, the correspondent is outside.
+- **One row, any node.** Both are reply rows in the email ledger, keyed by conversation and pause (or by the
+  continuation's verdict and text), retried like every reply and rebuilt from the conversation if a node dies; a
+  second observer of the event sends nothing. The ledger deduplicates rows, not deliveries: a node that dies after
+  the relay accepted a notice but before its row was marked `SENT` leaves a row whose lease runs out, and the retry
+  sends it again (same Message-ID, so most mail clients show it once). A pause decided before its notice went out
+  ends `SUPPRESSED`.
+- Mail the sender writes while the conversation is paused waits in the mailbox until the decision, then runs.
+- A pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn ran, sends no notice.
 
 ## MCP Surface
 

@@ -54,9 +54,6 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
     endedCardRef.current = endedCard;
   });
 
-  // Keyed on whether ratings are on, not on the profile object, so a new but
-  // equal profile never wipes what was restored.
-  const enabled = !!profile;
   // Once the server names the controls of the version this conversation runs
   // on, they decide what is shown — a rating write is checked against them.
   const effective = controls !== undefined ? controls : profile;
@@ -69,7 +66,9 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
     // A newly opened conversation replaces the ended one's card; the cleared
     // transcript that ending leaves behind (no id) keeps it.
     if (conversationId) setEndedCard(null);
-    if (!enabled || !conversationId) return;
+    // Read the conversation's own ratings and controls even when the current
+    // profile is null: the conversation may run on a version that asks for them.
+    if (!conversationId) return;
     let cancelled = false;
     readOwnRatings(conversationId)
       .then((ratings) => {
@@ -87,7 +86,7 @@ export function useChatRatings(conversationId: string | null, profile: RatingPro
     return () => {
       cancelled = true;
     };
-  }, [conversationId, enabled]);
+  }, [conversationId]);
 
   const fail = useCallback(
     (err: unknown) => {

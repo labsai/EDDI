@@ -109,6 +109,15 @@ out, and only an admin sees who rated.
 
 `read_docs("conversation-ratings")` has the scales and filters.
 
+**Alerts.** Alert rules (written over REST; the Manager has no Alerts page yet) report low ratings,
+failed turns and turns whose result matched an `OUTPUT_MATCH` condition to an inbox,
+Slack or an https webhook. Events name no user; a rating comment, or an output-match
+value (only when the rule asks for it and the agent has conversation review on), appears cut to 280
+characters. `list_alert_events` with `acknowledged`
+false is the open inbox — each event names what matched and whether each target got
+it (a `FAILED` delivery carries its last error); `acknowledge_alert_event` closes one,
+recording the user you act for, so do it only when they ask. `read_docs("alerts")`.
+
 ## Debug
 
 "Why did it say that?" and "why did it fail?" have a fixed path — conversation log →
@@ -129,7 +138,14 @@ audit trail → server log → the configuration that produced it. Follow
 - **Channels** connect agents to Slack and similar: `list_channel_integrations`,
   `read_channel_integration`, `create_channel_integration`, `update_channel_integration`,
   `delete_channel_integration`. Platform tokens are vault references.
-  `read_docs("slack-integration")`.
+  `read_docs("slack-integration")`. An `email` channel polls an IMAP mailbox and starts a turn
+  per mail: `mode: "trigger"` never replies, `mode: "conversation"` replies in the thread over
+  SMTP (an SMTP host is required) to the DKIM/DMARC-authenticated sender only (with the honorReplyTo setting
+  true, to the mail's single Reply-To instead). Its credential is a
+  connection name whose allowlist names the IMAP (and SMTP) origin, and the result's `warnings`
+  (`email.open-trigger`, `email.tools-without-approvals`, `email.ai-disclosure-disabled`,
+  `email.honor-reply-to`) are worth relaying. Where a helpdesk already owns the mailbox, use a
+  `webhook` channel instead. `read_docs("email-integration")`.
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
   `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`; requests from a
