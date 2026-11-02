@@ -71,6 +71,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
@@ -181,10 +182,10 @@ class ToolQuotaHitlTest {
         when(memory.getUserId()).thenReturn("user-1");
         when(memory.getAgentVersion()).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
-        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
-        when(tenantQuotaService.checkCostBudget(any())).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);
         when(journalStore.tryClaim(anyString(), anyString(), anyString(), anyString(), anyString())).thenReturn(true);
     }
 
