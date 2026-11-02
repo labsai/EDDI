@@ -409,9 +409,10 @@ public class ToolExecutionService {
             String result;
             try {
                 result = executeBounded(toolExecution, timeoutMs);
-            } catch (ToolTimedOut timedOut) {
-                // Outcome unknown: the worker may still finish the side effect. Keep the count.
-                throw timedOut;
+            } catch (ToolTimedOut | InterruptedException unknownOutcome) {
+                // Outcome unknown: the worker may still finish the side effect (an interrupt
+                // abandons it exactly as a timeout does). Keep the count.
+                throw unknownOutcome;
             } catch (Exception | Error failed) {
                 if (quotaGate != null) {
                     quotaGate.settle(null, failed);

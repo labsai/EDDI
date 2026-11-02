@@ -116,7 +116,7 @@ public class PostgresToolQuotaStore implements IToolQuotaStore {
                     return new Acquisition(true, rows.getInt(1));
                 }
             }
-            return new Acquisition(false, Math.max(limit, used(key)));
+            return new Acquisition(false, Math.max(limit, read(connection, key)));
         } catch (SQLException e) {
             throw new ToolQuotaStoreException("Could not count a tool call", e);
         }
@@ -136,13 +136,23 @@ public class PostgresToolQuotaStore implements IToolQuotaStore {
     @Override
     public int used(ToolQuotaKey key) {
         createSchema();
-        try (Connection connection = dataSourceInstance.get().getConnection(); PreparedStatement statement = connection.prepareStatement(READ)) {
+        try (Connection connection = dataSourceInstance.get().getConnection()) {
+            return read(connection, key);
+        } catch (SQLException e) {
+            throw new ToolQuotaStoreException("Could not read a tool quota counter", e);
+        }
+    }
+
+    /**
+     * Reads on a connection the caller already holds, so a refusal needs no second
+     * one.
+     */
+    private static int read(Connection connection, ToolQuotaKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(READ)) {
             bindKey(statement, key);
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? rows.getInt(1) : 0;
             }
-        } catch (SQLException e) {
-            throw new ToolQuotaStoreException("Could not read a tool quota counter", e);
         }
     }
 
