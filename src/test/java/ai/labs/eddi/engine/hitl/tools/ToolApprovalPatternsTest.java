@@ -47,6 +47,16 @@ class ToolApprovalPatternsTest {
     }
 
     @Test
+    void teamIsAKnownSource_soTheHandoffToolCanBeGatedOrExemptedByName() {
+        assertTrue(ToolApprovalPatterns.KNOWN_SOURCES.contains("team"));
+        assertTrue(ToolApprovalPatterns.validate("team:*").isEmpty());
+        assertTrue(ToolApprovalPatterns.validate("team:handoff_to_team").isEmpty());
+        assertTrue(ToolApprovalPatterns.compile("team:handoff_to_team").matcher("team:handoff_to_team").matches());
+        // a builtin exemption must not cover it
+        assertFalse(ToolApprovalPatterns.compile("builtin:*").matcher("team:handoff_to_team").matches());
+    }
+
+    @Test
     void stars_inTheMiddleAndAtBothEnds() {
         assertTrue(ToolApprovalPatterns.compile("*mid*").matcher("amidb").matches());
         assertTrue(ToolApprovalPatterns.compile("*mid*").matcher("mid").matches());

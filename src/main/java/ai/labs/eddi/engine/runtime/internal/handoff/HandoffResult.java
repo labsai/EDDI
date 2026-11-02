@@ -76,7 +76,7 @@ public record HandoffResult(Outcome outcome, String handoffId, String status, St
         return outcome.success();
     }
 
-    static HandoffResult of(Outcome outcome, String message) {
+    public static HandoffResult of(Outcome outcome, String message) {
         return new HandoffResult(outcome, null, null, message);
     }
 }
