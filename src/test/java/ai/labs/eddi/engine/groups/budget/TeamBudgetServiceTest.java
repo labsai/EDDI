@@ -9,7 +9,10 @@ import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Map;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -49,6 +52,16 @@ class TeamBudgetServiceTest {
     @Test
     void monthKeyIsTheUtcMonth() {
         assertEquals(MONTH, t.service.currentMonth());
+    }
+
+    @Test
+    void theMonthRollsOverAtUtcMidnightNotLocalMidnight() {
+        for (var entry : Map.of("2026-11-30T23:59:59Z", "2026-11", "2026-12-01T00:00:00Z", "2026-12", "2026-11-01T00:00:00Z", "2026-11")
+                .entrySet()) {
+            var clock = Clock.fixed(Instant.parse(entry.getKey()), ZoneOffset.ofHours(-10));
+            var service = new TeamBudgetService(t.store, t.groupStore, t.tenant, t.registry, t.audit, clock);
+            assertEquals(entry.getValue(), service.currentMonth(), entry.getKey());
+        }
     }
 
     @Test
