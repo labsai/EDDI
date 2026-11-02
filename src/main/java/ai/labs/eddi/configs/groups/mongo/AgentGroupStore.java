@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeValidation;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -177,6 +178,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
                     && !AgentGroupConfiguration.ConvergenceConfig.MODE_VERDICT.equals(convergence.mode())) {
                 problems.add("phases[" + i + "].convergence.mode must be SIMILARITY or VERDICT, got " + convergence.mode());
             }
+            problems.addAll(ServiceJudgeValidation.problems("phases[" + i + "].convergence", convergence, config.getName()));
         }
         problems.addAll(presetRoleProblems(config));
         return problems;

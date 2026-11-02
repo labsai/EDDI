@@ -1035,11 +1035,12 @@ public class AgentGroupConfiguration {
      *            threshold converges
      * @param judge
      *            {@code "MODERATOR"} (default) runs the group's configured
-     *            moderator agent as the judge. {@code "SERVICE"} is accepted and
-     *            documented but currently falls back to MODERATOR with a warning:
-     *            the shared {@code SummarizationService} needs LLM provider/model
-     *            coordinates and credentials that {@code AgentGroupConfiguration}
-     *            does not carry, so wiring it needs config this item does not add
+     *            moderator agent as the judge. {@code "SERVICE"} asks the model
+     *            named in {@code service} directly — one cheap call, no agent turn,
+     *            and it works in a group without a moderator. {@code "SERVICE"}
+     *            without a configured {@code service} block falls back to the
+     *            moderator with a warning, which is what it did before the block
+     *            existed
      * @param mode
      *            {@code "SIMILARITY"} (default, the behaviour before 6.6): the
      *            judge scores agreement between this repeat and the previous one
@@ -1050,8 +1051,12 @@ public class AgentGroupConfiguration {
      *            1, the check runs after every repeat). Either way a verdict that
      *            cannot be parsed never ends the phase. The all-abstained exit
      *            applies in both modes
+     * @param service
+     *            the model {@code judge: "SERVICE"} calls; ignored for MODERATOR.
+     *            See {@link ServiceJudgeConfig}
      */
-    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode) {
+    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode,
+            ServiceJudgeConfig service) {
 
         /**
          * The lowest {@code minRepeats} that can mean anything — see the record
@@ -1081,6 +1086,11 @@ public class AgentGroupConfiguration {
             judge = judge == null || judge.isBlank() ? JUDGE_MODERATOR : judge.trim().toUpperCase();
         }
 
+        /** Backward-compatible constructor without {@code service}. */
+        public ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode) {
+            this(enabled, minRepeats, threshold, judge, mode, null);
+        }
+
         /** Backward-compatible constructor without {@code mode}: SIMILARITY. */
         public ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge) {
             this(enabled, minRepeats, threshold, judge, null);
@@ -1095,6 +1105,14 @@ public class AgentGroupConfiguration {
         @JsonIgnore
         public boolean isVerdictMode() {
             return MODE_VERDICT.equals(mode);
+        }
+
+        /**
+         * Whether the SERVICE judge runs: {@code judge: "SERVICE"} with a model named.
+         */
+        @JsonIgnore
+        public boolean usesServiceJudge() {
+            return JUDGE_SERVICE.equals(judge) && service != null && service.isConfigured();
         }
     }
 
