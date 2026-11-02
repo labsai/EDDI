@@ -55,6 +55,26 @@ public class HitlRevisionCandidate {
     private int outputMark = -1;
     private int quickRepliesMark = -1;
     private int roundsUsed;
+    /** {@code TEXT} or {@code JSON} ({@code convertToObject}); since 6.7. */
+    private String answerFormat = FORMAT_TEXT;
+
+    /** {@link #getAnswerFormat()} of a plain-text answer. */
+    public static final String FORMAT_TEXT = "TEXT";
+    /** {@link #getAnswerFormat()} of a {@code convertToObject} (JSON) answer. */
+    public static final String FORMAT_JSON = "JSON";
+
+    /**
+     * {@code JSON} when the task parses its answer as an object
+     * ({@code convertToObject}), so an approver's edit must be a JSON object too;
+     * {@code TEXT} otherwise.
+     */
+    public String getAnswerFormat() {
+        return answerFormat;
+    }
+
+    public void setAnswerFormat(String answerFormat) {
+        this.answerFormat = FORMAT_JSON.equals(answerFormat) ? FORMAT_JSON : FORMAT_TEXT;
+    }
 
     public String getWorkflowId() {
         return workflowId;
@@ -183,6 +203,7 @@ public class HitlRevisionCandidate {
         map.put("outputMark", outputMark);
         map.put("quickRepliesMark", quickRepliesMark);
         map.put("roundsUsed", roundsUsed);
+        map.put("answerFormat", answerFormat);
         return map;
     }
 
@@ -209,6 +230,7 @@ public class HitlRevisionCandidate {
         candidate.setOutputMark(asInt(map.get("outputMark"), -1));
         candidate.setQuickRepliesMark(asInt(map.get("quickRepliesMark"), -1));
         candidate.setRoundsUsed(asInt(map.get("roundsUsed"), 0));
+        candidate.setAnswerFormat(asString(map.get("answerFormat")));
         return candidate;
     }
 

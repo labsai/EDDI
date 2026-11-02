@@ -24,6 +24,8 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupPauseMismatchExcep
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
+import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.review.HitlDecisionRecords;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
@@ -86,6 +88,10 @@ public class GroupHitlCoordinator {
     private final IGroupConversationStore conversationStore;
     private final IScheduleStore scheduleStore;
     private final AuditLedgerService auditLedgerService;
+    /**
+     * The {@code hitl.approval} audit contract (schema 2) — see HitlApprovalAudit.
+     */
+    private final HitlApprovalAudit approvalAudit;
     private final GroupSigningGuard signingGuard;
     private final ConcurrentHashMap<String, DiscussionControlToken> discussionControls;
     private final ExecutorService executorService;
@@ -104,6 +110,7 @@ public class GroupHitlCoordinator {
         this.conversationStore = conversationStore;
         this.scheduleStore = scheduleStore;
         this.auditLedgerService = auditLedgerService;
+        this.approvalAudit = new HitlApprovalAudit(auditLedgerService);
         this.signingGuard = signingGuard;
         this.discussionControls = discussionControls;
         this.executorService = executorService;
@@ -458,6 +465,7 @@ public class GroupHitlCoordinator {
         }
         boolean wasPaused = state == GroupConversationState.AWAITING_APPROVAL
                 || state == GroupConversationState.AWAITING_HUMAN_INPUT;
+        final Instant cancelledPausedAt = gc.getPausedAt();
         gc.setState(GroupConversationState.CANCELLED);
         gc.setPausedAt(null); // keep isPaused() consistent with the terminal state
         gc.setPendingHumanInput(null); // I6: a cancelled turn is no longer owed
@@ -476,7 +484,7 @@ public class GroupHitlCoordinator {
         if (wasPaused) {
             // Cancelling a pending approval is an HITL decision — audit it, and
             // release resources that were kept alive across the pause.
-            auditHitlCancellation(gc, mode);
+            auditHitlCancellation(gc, mode, cancelledPausedAt);
             cleanupAfterTerminalState(gc);
         }
         return true;
@@ -513,6 +521,11 @@ public class GroupHitlCoordinator {
                     + "review the current pause and decide again");
         }
 
+        // The pause as it was, for the decision's audit entry — captured before the
+        // task approvals and the bookmark clear below change it.
+        final HitlDecisionRecords.GroupPause pauseFacts = groupPauseFacts(gc, gc.getPausedAt());
+        AgentGroupConfiguration.HitlConfig groupHitlConfig = null;
+
         // Apply task-level approvals if present
         // Phase 5a: Load rejection policy from config
         boolean retryOnReject = false;
@@ -520,6 +533,7 @@ public class GroupHitlCoordinator {
             var resId = groupStore.getCurrentResourceId(gc.getGroupId());
             if (resId != null) {
                 var config = groupStore.read(gc.getGroupId(), resId.getVersion());
+                groupHitlConfig = config.getHitlConfig();
                 if (config.getHitlConfig() != null) {
                     retryOnReject = config.getHitlConfig().getOnTaskRejection() == HitlRejectionPolicy.RETRY;
                 }
@@ -634,7 +648,7 @@ public class GroupHitlCoordinator {
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
             // Delete timeout schedule only after CAS succeeds (Phase 5e)
             deleteGroupHitlTimeoutSchedule(groupConversationId);
-            auditHitlDecision(gc, decision);
+            auditHitlDecision(gc, decision, pauseFacts, groupHitlConfig, request);
             // A rejection is terminal: notify the (SSE) listener so streams close
             // instead of hanging, and release paused-state resources.
             if (listener != null) {
@@ -898,7 +912,7 @@ public class GroupHitlCoordinator {
         // and write the audit entry, so a rolled-back submit does not pollute the
         // metric or the compliance trail (mirrors the regular surface).
         counterGroupHitlResume.increment();
-        auditHitlDecision(gc, decision);
+        auditHitlDecision(gc, decision, pauseFacts, groupHitlConfig, request);
 
         // The live gc instance is being mutated by the background thread — hand
         // the HTTP layer a freshly-read copy instead (CME-safe serialization).
@@ -1367,27 +1381,39 @@ public class GroupHitlCoordinator {
     }
 
     /**
-     * Submits an {@code hitl.approval} audit entry for a group HITL decision (#15,
-     * EU AI Act). Covers human and automated timeout decisions.
+     * The pause of {@code gc} as the audit contract describes it. {@code pausedAt}
+     * is passed separately because a cancel clears it first.
      */
-    private void auditHitlDecision(GroupConversation gc, HitlDecision decision) {
+    static HitlDecisionRecords.GroupPause groupPauseFacts(GroupConversation gc, Instant pausedAt) {
+        List<String> awaiting = gc.getTaskList() == null
+                ? List.of()
+                : gc.getTaskList().all().stream()
+                        .filter(t -> t.status() == SharedTaskList.TaskStatus.AWAITING_APPROVAL)
+                        .map(SharedTaskList.TaskItem::id)
+                        .toList();
+        return new HitlDecisionRecords.GroupPause(gc.getHitlPauseType() != null ? gc.getHitlPauseType().name() : HitlPauseType.PHASE.name(),
+                gc.getPausedPhaseName(), pausedAt, gc.getHitlTimeoutPolicy() != null ? gc.getHitlTimeoutPolicy().name() : null, awaiting,
+                gc.getHitlPauseReason());
+    }
+
+    /**
+     * Submits an {@code hitl.approval} audit entry for a group HITL decision (#15,
+     * EU AI Act). Covers human and automated timeout decisions. Schema 2: one unit
+     * for the phase, or one per decided task — see {@link HitlApprovalAudit}.
+     */
+    private void auditHitlDecision(GroupConversation gc, HitlDecision decision, HitlDecisionRecords.GroupPause pause,
+                                   AgentGroupConfiguration.HitlConfig hitlConfig, GroupApprovalRequest request) {
         if (auditLedgerService == null || !auditLedgerService.isEnabled() || decision == null) {
             return;
         }
         try {
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("verdict", decision.getVerdict() != null ? decision.getVerdict().name() : "UNKNOWN");
-            detail.put("decidedBy", decision.getDecidedBy() != null ? decision.getDecidedBy() : "unknown");
-            detail.put("automated", decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:"));
-            detail.put("surface", "group");
-            if (decision.getNote() != null) {
-                detail.put("note", decision.getNote());
+            Map<String, HitlDecisionRecords.TaskOutcome> taskOutcomes = new LinkedHashMap<>();
+            if (request != null && request.getTaskApprovals() != null) {
+                request.getTaskApprovals().forEach((taskId, value) -> taskOutcomes.put(taskId,
+                        new HitlDecisionRecords.TaskOutcome(HitlDecision.HitlVerdict.fromString(value), null, null)));
             }
-            auditLedgerService.submit(new AuditEntry(
-                    UUID.randomUUID().toString(), gc.getId(), gc.getGroupId(), null, gc.getUserId(),
-                    null, -1, "hitl.approval", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    Instant.now(), null, null));
+            approvalAudit.write(HitlDecisionRecords.groupDecision(gc.getId(), gc.getGroupId(), gc.getUserId(), decision, hitlConfig, pause,
+                    taskOutcomes, null));
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL audit entry for group conversation %s: %s",
                     gc.getId(), e.getMessage());
@@ -1400,20 +1426,32 @@ public class GroupHitlCoordinator {
      * proceed, which is just as much an HITL decision as approve/reject.
      */
     public void auditHitlCancellation(GroupConversation gc, ControlSignal mode) {
+        auditHitlCancellation(gc, mode, gc != null ? gc.getPausedAt() : null);
+    }
+
+    /**
+     * As above, with the {@code pausedAt} of the cancelled pause (a cancel clears
+     * it before it audits). {@code decidedBy} is the caller the cancel runs for, or
+     * {@code system:unattributed} for a cancel no request identity carries (a
+     * timeout ABORT, crash recovery).
+     */
+    public void auditHitlCancellation(GroupConversation gc, ControlSignal mode, Instant pausedAt) {
         if (auditLedgerService == null || !auditLedgerService.isEnabled()) {
             return;
         }
         try {
-            var detail = new LinkedHashMap<String, Object>();
-            detail.put("verdict", "CANCELLED");
-            detail.put("mode", mode != null ? mode.name() : ControlSignal.CANCEL_GRACEFUL.name());
-            detail.put("surface", "group");
-            detail.put("pauseReason", gc.getHitlPauseReason() != null ? gc.getHitlPauseReason() : "");
-            auditLedgerService.submit(new AuditEntry(
-                    UUID.randomUUID().toString(), gc.getId(), gc.getGroupId(), null, gc.getUserId(),
-                    null, -1, "hitl.approval", "hitl", -1, 0L,
-                    Map.of(), detail, null, null, List.of(), 0.0,
-                    Instant.now(), null, null));
+            CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.captureOrCurrent() : null;
+            String cancelledBy = caller != null && caller.userId() != null ? caller.userId() : "system:unattributed";
+            AgentGroupConfiguration.HitlConfig hitlConfig = null;
+            try {
+                IResourceStore.IResourceId resId = groupStore.getCurrentResourceId(gc.getGroupId());
+                hitlConfig = resId != null ? groupStore.read(gc.getGroupId(), resId.getVersion()).getHitlConfig() : null;
+            } catch (Exception e) {
+                LOGGER.debugf("Group config of %s not readable for the cancel audit: %s", LogSanitizer.sanitize(gc.getGroupId()),
+                        e.getMessage());
+            }
+            approvalAudit.write(HitlDecisionRecords.groupCancellation(gc.getId(), gc.getGroupId(), gc.getUserId(), hitlConfig,
+                    groupPauseFacts(gc, pausedAt), mode != null ? mode.name() : ControlSignal.CANCEL_GRACEFUL.name(), cancelledBy));
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL cancellation audit entry for group conversation %s: %s",
                     LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));

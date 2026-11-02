@@ -1016,7 +1016,15 @@ public class RestGroupConversation implements IRestGroupConversation {
         // ledger.
         String name = identity == null || identity.getPrincipal() == null ? null : identity.getPrincipal().getName();
         request.getDecision().setDecidedBy(name == null || name.isBlank() ? null : name);
+        request.getDecision().setChannel(HitlClientChannelReader.of(hitlClientChannelReader));
     }
+
+    /**
+     * Reads {@code X-EDDI-Client} for the HITL audit channel; nullable in unit
+     * tests.
+     */
+    @Inject
+    HitlClientChannelReader hitlClientChannelReader;
 
     // --- SSE Helpers ---
 
