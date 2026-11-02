@@ -147,7 +147,7 @@ export function PropertyValueField<T extends TypedPropertyValue>({
         </p>
       )}
       {problem === "unsafeLong" && (
-        <p id={problemId} className="text-[10px] text-amber-700 dark:text-amber-400" role="alert" data-testid={`${testIdPrefix}-unsafe-long`}>
+        <p id={problemId} className="text-[10px] text-warn-700 dark:text-warn-400" role="alert" data-testid={`${testIdPrefix}-unsafe-long`}>
           {t(
             "propertyValue.unsafeLong",
             "Beyond 9,007,199,254,740,991 the browser cannot hold this whole number exactly; edit it in the JSON tab.",
@@ -160,7 +160,7 @@ export function PropertyValueField<T extends TypedPropertyValue>({
         </p>
       )}
       {conflicting.length > 1 && (
-        <p className="text-[10px] text-amber-700 dark:text-amber-400" role="status" data-testid={`${testIdPrefix}-conflict`}>
+        <p className="text-[10px] text-warn-700 dark:text-warn-400" role="status" data-testid={`${testIdPrefix}-conflict`}>
           {t("propertyValue.conflict", {
             defaultValue:
               "This row sets {{fields}}. Only {{winner}} is used; choosing a type here keeps that one value and removes the rest.",

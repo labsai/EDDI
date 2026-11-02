@@ -46,7 +46,7 @@ interface AgentCardProps {
 // Status labels use i18n keys — resolved in component body
 const statusIcons = {
   READY: { icon: Rocket, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/20" },
-  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/20" },
+  IN_PROGRESS: { icon: Clock, color: "text-warn-500", bg: "bg-warn-500/10", ring: "ring-warn-500/20" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10", ring: "ring-destructive/20" },
   NOT_FOUND: { icon: CircleDashed, color: "text-muted-foreground", bg: "bg-muted", ring: "ring-border" },
 };

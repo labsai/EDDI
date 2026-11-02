@@ -72,10 +72,10 @@ export function CreateOrWizardDialog({
           {/* Guided Wizard card */}
           <button
             onClick={handleWizard}
-            className="group flex flex-col items-start gap-4 rounded-xl border-2 border-border bg-card p-6 text-start transition-all hover:-translate-y-1 hover:border-amber-500/60 hover:shadow-xl"
+            className="group flex flex-col items-start gap-4 rounded-xl border-2 border-border bg-card p-6 text-start transition-all hover:-translate-y-1 hover:border-brand-500/60 hover:shadow-xl"
             data-testid="choice-wizard"
           >
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500 transition-colors group-hover:bg-amber-500/20">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-brand-500/10 text-brand-500 transition-colors group-hover:bg-brand-500/20">
               <Wand2 className="h-6 w-6" />
             </div>
             <div>

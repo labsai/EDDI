@@ -606,7 +606,7 @@ function VaultPopup({
       >
         {!vaultAvailable ? (
           <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn-500" />
             <span>
               {vaultError ||
                 t(
@@ -645,7 +645,7 @@ function VaultPopup({
               }`}
               data-testid={`vault-key-${secret.keyName}`}
             >
-              <KeyRound className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />
+              <KeyRound className="mt-0.5 h-3 w-3 shrink-0 text-warn-500" />
               <div className="min-w-0 flex-1">
                 <span className="block truncate font-mono font-medium">
                   {secret.keyName}
@@ -1124,8 +1124,8 @@ export function SecretKeyPicker({
           aria-describedby={describedBy}
           className={`flex h-7 items-center gap-1.5 rounded-md border px-2 ${
             readOnly
-              ? "border-amber-500/30 bg-amber-500/5"
-              : "border-amber-500/50 bg-amber-500/10"
+              ? "border-warn-500/30 bg-warn-500/5"
+              : "border-warn-500/50 bg-warn-500/10"
           }`}
           title={
             currentDescription
@@ -1133,8 +1133,8 @@ export function SecretKeyPicker({
               : currentVaultKey
           }
         >
-          <KeyRound className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-          <span className="flex-1 truncate font-mono text-xs font-medium text-amber-700 dark:text-amber-300">
+          <KeyRound className="h-3 w-3 shrink-0 text-warn-600 dark:text-warn-400" />
+          <span className="flex-1 truncate font-mono text-xs font-medium text-warn-700 dark:text-warn-300">
             {currentVaultKey}
           </span>
           <RestrictedBadge
@@ -1150,7 +1150,7 @@ export function SecretKeyPicker({
                 "This key was not found in the vault",
               )}
             >
-              <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+              <AlertTriangle className="h-3 w-3 shrink-0 text-warn-500" />
             </span>
           )}
           {/* Clear button */}
@@ -1158,7 +1158,7 @@ export function SecretKeyPicker({
             <button
               type="button"
               onClick={handleClearVault}
-              className="rounded p-0.5 text-amber-600/70 transition-colors hover:text-amber-700 dark:text-amber-400/70 dark:hover:text-amber-300"
+              className="rounded p-0.5 text-warn-600/70 transition-colors hover:text-warn-700 dark:text-warn-400/70 dark:hover:text-warn-300"
               aria-label={t("secretPicker.clearVault", "Clear vault reference")}
               data-testid={`${testId}-clear`}
             >

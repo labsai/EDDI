@@ -166,20 +166,6 @@ class RuleTest {
         assertEquals(rule, rule);
     }
 
-    // --- clone ---
-
-    @Test
-    void clone_copiesNameAndConditions() throws CloneNotSupportedException {
-        var rule = new Rule("original");
-        var cond = mock(IRuleCondition.class);
-        when(cond.clone()).thenReturn(cond);
-        rule.setConditions(new LinkedList<>(List.of(cond)));
-
-        var clone = rule.clone();
-        assertEquals("original", clone.getName());
-        assertEquals(1, clone.getConditions().size());
-    }
-
     // --- toString ---
 
     @Test

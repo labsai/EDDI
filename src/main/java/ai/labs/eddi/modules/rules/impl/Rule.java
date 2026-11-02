@@ -15,7 +15,7 @@ import java.util.Objects;
 /**
  * @author ginccc
  */
-public class Rule implements Cloneable {
+public class Rule {
     private String name;
     private List<String> actions = new LinkedList<>();
     private List<IRuleCondition> conditions = new LinkedList<>();
@@ -78,20 +78,6 @@ public class Rule implements Cloneable {
     @Override
     public int hashCode() {
         return Objects.hash(name);
-    }
-
-    @Override
-    public Rule clone() throws CloneNotSupportedException {
-        Rule clone = new Rule(name);
-
-        List<IRuleCondition> executablesClone = new LinkedList<>();
-        for (IRuleCondition condition : conditions) {
-            IRuleCondition exClone = condition.clone();
-            executablesClone.add(exClone);
-        }
-        clone.setConditions(executablesClone);
-
-        return clone;
     }
 
     @Override

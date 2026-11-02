@@ -174,6 +174,8 @@ public final class RuntimeTemplateEngineFactory {
         // allocates it — ahead of the generated, unchecked implementations.
         builder.addValueResolver(BoundedResolvers.bound(new BoundedFormat.Instance(maxChars), maxChars));
         builder.addNamespaceResolver(BoundedResolvers.bound(new BoundedFormat.Namespace(maxChars), maxChars));
+        // str:concat / str:join: measured before the generated resolver builds them.
+        builder.addNamespaceResolver(new BoundedFormat.ConcatenationPrecheck(maxChars));
         for (ValueResolver resolver : source.getValueResolvers()) {
             if (resolver instanceof ReflectionValueResolver) {
                 continue;

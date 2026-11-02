@@ -149,7 +149,7 @@ public class ConnectionResolver {
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
-            ResolvedCredential credential = resolveCredential(connection, targetUrl, principalOverride);
+            ResolvedCredential credential = resolveCredential(connection, principalOverride, targetUrl);
             record(connection, "success", sample);
             return credential;
         } catch (ConnectionException e) {
@@ -416,7 +416,7 @@ public class ConnectionResolver {
         }
     }
 
-    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, URI targetUrl, String principalOverride) {
+    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride, URI targetUrl) {
         // Binding decides before authType does: CALLER_SUPPLIED is always STATIC, but
         // its value comes from the turn rather than from the document, so it must not
         // reach the STATIC branch below — that one resolves a valueTemplate this
@@ -425,6 +425,10 @@ public class ConnectionResolver {
             return callerSuppliedCredential(connection);
         }
         return switch (connection.getAuthType()) {
+            // The two whose vault plaintext goes to targetUrl itself: the secrets
+            // behind them are held to their own allowedHosts as well as to the
+            // connection's baseUrlAllowlist. An OAuth access token is not a vault
+            // secret; its client secret goes to the token endpoint, not here.
             case STATIC -> staticCredential(connection, targetUrl);
             case BASIC -> basicCredential(connection, targetUrl);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
@@ -449,10 +453,7 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' is STATIC but has no staticAuth.valueTemplate, so there is no credential to "
                             + "send. Re-save the connection to apply the current validation rules.");
         }
-        // Only the field this auth type sends: a STATIC connection's username or
-        // passwordRef is not part of the request.
-        return new ResolvedCredential(staticAuth.getHeaderName(), credentialReferenceResolver.resolveRequiredFor(staticAuth.getValueTemplate(),
-                targetUrl.toString(), connection.getName(), "credential"));
+        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection, targetUrl));
     }
 
     private static StaticAuth requireStaticAuth(ConnectionConfiguration connection, String authType) {
@@ -543,12 +544,9 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
                             + "the current validation rules.");
         }
-        // Only the fields a BASIC login sends: not valueTemplate, which a BASIC
-        // document may still carry.
-        String destination = targetUrl.toString();
-        credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
-        String password = credentialReferenceResolver.resolveVaultBackedFor(staticAuth.getPasswordRef(), destination, connection.getName(),
-                "password");
+        credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), targetUrl.toString(), connection.getName(), "username");
+        String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password",
+                targetUrl);
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
         return new ResolvedCredential(staticAuth.getHeaderName(), "Basic " + encoded);
@@ -722,10 +720,11 @@ public class ConnectionResolver {
      * Resolves {@code ${vars:…}} then {@code ${vault:…}} inside a template.
      * <p>
      * Order matters and matches the rest of the codebase: a global variable may
-     * expand to a vault reference, and the reverse is never intended.
+     * expand to a vault reference, and the reverse is never intended. Every vault
+     * secret the template names is checked against {@code targetUrl} first.
      */
-    private String resolveReferences(String template, ConnectionConfiguration connection) {
-        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential");
+    private String resolveReferences(String template, ConnectionConfiguration connection, URI targetUrl) {
+        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential", targetUrl);
     }
 
     /**

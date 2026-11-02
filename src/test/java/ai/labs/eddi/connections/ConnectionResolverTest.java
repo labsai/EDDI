@@ -125,11 +125,10 @@ class ConnectionResolverTest {
     @DisplayName("a STATIC connection's vault secret is held to its own allowedHosts, not only the connection's allowlist")
     void secretAllowedHostsApplyThroughAConnection() {
         register(staticConnection());
-        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver);
         VaultHostAllowlist allowlist = mock(VaultHostAllowlist.class);
         doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist)
                 .requireAllowed(eq(Set.of("${vault:jira-token}")), eq("https://api.atlassian.com/rest"), anyString());
-        credentialResolver.vaultHostAllowlist = allowlist;
+        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver, allowlist);
         var resolver = new ConnectionResolver(registry, credentialResolver, callerIdentityContext, new SimpleMeterRegistry(),
                 accessTokenSupplier, true);
 
@@ -148,12 +147,11 @@ class ConnectionResolverTest {
         connection.getStaticAuth().setUsername("svc-eddi");
         connection.getStaticAuth().setPasswordRef("${vault:jira-password}");
         register(connection);
-        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver);
         VaultHostAllowlist allowlist = mock(VaultHostAllowlist.class);
         // The leftover template's secret does not allow this host; the password's does.
         doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist)
                 .requireAllowed(eq(Set.of("${vault:jira-token}")), anyString(), anyString());
-        credentialResolver.vaultHostAllowlist = allowlist;
+        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver, allowlist);
         var resolver = new ConnectionResolver(registry, credentialResolver, callerIdentityContext, new SimpleMeterRegistry(),
                 accessTokenSupplier, true);
 

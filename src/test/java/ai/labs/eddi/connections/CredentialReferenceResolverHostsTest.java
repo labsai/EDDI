@@ -44,8 +44,7 @@ class CredentialReferenceResolverHostsTest {
         secretResolver = mock(SecretResolver.class);
         when(secretResolver.resolveValue(anyString())).thenReturn("plaintext");
         allowlist = mock(VaultHostAllowlist.class);
-        resolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver);
-        resolver.vaultHostAllowlist = allowlist;
+        resolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver, allowlist);
     }
 
     @Test

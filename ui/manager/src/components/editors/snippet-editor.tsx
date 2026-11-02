@@ -214,7 +214,7 @@ export function SnippetEditor({
       <EditorSection
         label={t("snippetEditor.content", "Prompt Content")}
         icon={FileText}
-        accent="text-amber-500"
+        accent="text-ochre-500"
       >
         <div className="space-y-3">
           <ContentEditor
