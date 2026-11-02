@@ -25,6 +25,8 @@ This is the operator's allow-list, and the browser enforces it before the widget
 
 The display parameters (`theme`, `title`, `hideUndo`, the colour parameters) are listed in the [Chat UI README](../ui/chat/README.md). `theme` accepts only `dark`, `light` or `system`. Every colour parameter must be a plain colour: hex, `rgb()`/`hsl()` with numeric arguments, or a named colour. `fontFamily` must be a plain font list. The widget ignores any other value and logs a warning in the console.
 
+These parameters beat the deployment's [brand](white-labeling.md#the-chat-ui): with a brand set, the widget's default title, logo and accent come from it, and a `title` or `accentColor` parameter still overrides them.
+
 ## 2. Hand the widget a token (authentication on)
 
 With OIDC enabled, every API call the widget makes needs a bearer token. The widget has no login flow of its own; the host page, which has already signed the user in, passes it an access token by `postMessage`.

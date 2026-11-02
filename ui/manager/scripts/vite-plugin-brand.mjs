@@ -26,7 +26,7 @@ import { basename, extname } from "node:path";
  * (BrandDelivery.script). BrandDeliveryTest reads this line to keep the two equal.
  */
 export const DEFAULT_BRAND_SCRIPT =
-  'window.__EDDI_BRAND__={branded:false,revision:0,productName:"EDDI",shortName:"EDDI",tagline:null,poweredBy:true,showUpdateCheck:false,chat:{accent:null}};';
+  'window.__EDDI_BRAND__={branded:false,revision:0,productName:"EDDI",shortName:"EDDI",tagline:null,poweredBy:true,showUpdateCheck:false,chat:{accent:null},assets:{logo:false,logoDark:false,icon:false,favicon:false,ogImage:false}};';
 
 /** Per shell, what an unbranded EDDI substitutes (BrandedShell). */
 const SHELL_DEFAULTS = {

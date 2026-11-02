@@ -85,6 +85,7 @@ const ROUTE_TABLE: readonly RouteEntry[] = [
   { pattern: "/manage/sync", screen: "sync" },
   { pattern: "/manage/approvals", screen: "approvals" },
   { pattern: "/manage/updates", screen: "updates" },
+  { pattern: "/manage/branding", screen: "branding" },
   { pattern: "/manage/chat", screen: "chat" },
   { pattern: "/manage", screen: "dashboard" },
 

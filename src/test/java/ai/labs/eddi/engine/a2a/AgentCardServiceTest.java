@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -551,6 +552,61 @@ class AgentCardServiceTest {
             desc.setResource(URI.create("eddi://ai.labs.agent"));
             when(documentDescriptorStore.readDescriptors("ai.labs.agent", "", 0, 100, false)).thenReturn(List.of(desc));
             assertTrue(service.listA2AAgents().isEmpty());
+        }
+    }
+
+    /**
+     * White-labeling: a card names the deployment's product where it used to say
+     * EDDI — the provider, the fallback name and description, the default skill and
+     * the token description — and reads the brand per card, so a rebrand needs no
+     * restart.
+     */
+    @Nested
+    class Branded {
+
+        private AgentCardService branded(boolean auth, Supplier<String> productName) {
+            return new AgentCardService(restAgentStore, documentDescriptorStore, "http://localhost:7070", auth,
+                    Optional.of("http://kc:8080/realms/eddi"), Optional.empty(), Optional.empty(), "6.6.0", productName);
+        }
+
+        @Test
+        void namesTheProductInsteadOfEddi() {
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+
+            var card = branded(true, () -> "Acme Assist").buildAgentCard("agent-9", config, 1);
+
+            assertEquals("Acme Assist", card.provider().organization());
+            assertEquals("http://localhost:7070", card.provider().url());
+            assertEquals("Acme Assist Agent agent-9", card.name());
+            assertEquals("Acme Assist conversational AI agent", card.description());
+            assertEquals("General conversational AI agent powered by Acme Assist", card.skills().getFirst().description());
+            @SuppressWarnings("unchecked")
+            var bearer = (Map<String, Object>) ((Map<String, Object>) card.securitySchemes().get(AgentCardService.BEARER_SCHEME))
+                    .get("httpAuthSecurityScheme");
+            assertTrue(String.valueOf(bearer.get("description")).startsWith("An OIDC access token for this Acme Assist deployment"));
+        }
+
+        @Test
+        void followsARebrandWithoutARestart() {
+            var name = new String[]{"Acme Assist"};
+            var service = branded(false, () -> name[0]);
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+            assertEquals("Acme Assist", service.buildAgentCard("a", config, 1).provider().organization());
+            name[0] = "Zebra Labs";
+            assertEquals("Zebra Labs", service.buildAgentCard("a", config, 1).provider().organization());
+        }
+
+        @Test
+        void anUnreadableBrandStillServesTheCardUnderTheEddiName() {
+            var config = new AgentConfiguration();
+            config.setA2aEnabled(true);
+            var card = branded(false, () -> {
+                throw new IllegalStateException("store down");
+            }).buildAgentCard("a", config, 1);
+            assertEquals("EDDI", card.provider().organization());
+            assertEquals("EDDI Agent a", card.name());
         }
     }
 }

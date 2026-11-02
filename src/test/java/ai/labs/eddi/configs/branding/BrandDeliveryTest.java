@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.branding;
 
+import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
 import ai.labs.eddi.configs.branding.model.BrandAssets;
 import ai.labs.eddi.configs.branding.model.BrandColors;
 import ai.labs.eddi.configs.branding.model.BrandSource;
@@ -32,7 +33,8 @@ class BrandDeliveryTest {
     void unbrandedScriptIsWhatTheDevServerServes() throws IOException {
         String script = BrandDelivery.script(ResolvedBrand.defaults(false));
         assertEquals("window.__EDDI_BRAND__={branded:false,revision:0,productName:\"EDDI\",shortName:\"EDDI\",tagline:null,"
-                + "poweredBy:true,showUpdateCheck:false,chat:{accent:null}};", script);
+                + "poweredBy:true,showUpdateCheck:false,chat:{accent:null},"
+                + "assets:{logo:false,logoDark:false,icon:false,favicon:false,ogImage:false}};", script);
         // Both UIs' dev-server plugin must answer exactly this, or `npm run dev`
         // drifts from what an unbranded EDDI serves.
         for (String ui : new String[]{"manager", "chat"}) {
@@ -153,5 +155,31 @@ class BrandDeliveryTest {
         BrandColors colors = new BrandColors(hostile, hostile, hostile, hostile, hostile);
         assertEquals("", BrandDelivery.stylesheet(brand("Acme", colors)));
         assertTrue(BrandDelivery.script(brand("Acme", colors)).contains("chat:{accent:null}"));
+    }
+
+    /**
+     * Which slots have an image of their own reaches the UIs, as booleans only, so
+     * the Manager can show the product name instead of the bundled EDDI wordmark.
+     */
+    @Test
+    void scriptSaysWhichSlotsHaveAnImage() {
+        BrandAssets assets = BrandAssets.EMPTY.with(BrandAssetSlot.LOGO, "sha256:aa").with(BrandAssetSlot.FAVICON, "sha256:bb");
+        ResolvedBrand withAssets = new ResolvedBrand(4, BrandSource.DATABASE, false, true, "Acme", "Acme", null, BrandColors.EMPTY, true,
+                false, assets);
+        String script = BrandDelivery.script(withAssets);
+        assertTrue(script.endsWith(",assets:{logo:true,logoDark:false,icon:false,favicon:true,ogImage:false}};"), script);
+        assertFalse(script.contains("sha256"), "the hashes stay on the admin API");
+    }
+
+    /**
+     * The Manager's settings page previews a brand with the same scale, and its MSW
+     * mock renders {@code brand.css} with it, so the formulas exist once in each
+     * language and this keeps the copies equal.
+     */
+    @Test
+    void managerPreviewUsesTheSameBrandScale() throws IOException {
+        Path source = Path.of("ui", "manager", "src", "lib", "brand-css.ts");
+        String ts = Files.readString(source, StandardCharsets.UTF_8);
+        assertTrue(ts.contains("\"" + BrandDelivery.BRAND_SCALE + "\""), source + " must carry BRAND_SCALE verbatim");
     }
 }
