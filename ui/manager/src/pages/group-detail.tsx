@@ -667,7 +667,16 @@ export function GroupDetailPage() {
       {
         onSuccess: () => {
           toast.success(t("groups.discussionDeleted", "Discussion deleted"));
-          if (selectedConvId === convId) setSelectedConvId(null);
+          if (selectedConvId === convId) {
+            // Hold the clear: the conversation list still contains the deleted
+            // discussion until its refetch lands, and the auto-select effect would
+            // otherwise put it straight back on screen.
+            userClearedRef.current = true;
+            setSelectedConvId(null);
+          }
+          // The retained stream of the deleted discussion: its terminal state would keep the page rendering
+          // the deleted transcript once the selection is cleared.
+          if (streamState.conversationId === convId) resetStream();
         },
         onError: (err) => toast.error(getErrorMessage(err)),
       }

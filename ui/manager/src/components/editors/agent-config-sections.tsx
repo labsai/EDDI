@@ -77,6 +77,18 @@ function DraftInput({
 }
 
 /**
+ * What a typed string means as a draft value: the number it parses to — 0
+ * included, since 0 is a real setting ("0 days" turns pruning off) — or
+ * `fallback` when it is empty or half-typed ("", "-", ".") and parses to NaN.
+ * `parseFloat(v) || fallback` conflated the two and turned a typed 0 into the
+ * fallback on save while the box kept showing 0.
+ */
+function parseDraftNumber(text: string, fallback: number): number {
+  const parsed = parseFloat(text);
+  return Number.isNaN(parsed) ? fallback : parsed;
+}
+
+/**
  * Number input that keeps what is typed (an empty or half-typed number stays
  * on screen) and writes the parsed value — or `fallback` — into the draft.
  */
@@ -95,7 +107,7 @@ function DraftNumberInput({
   // Follow the draft when it changes underneath (Discard, a save, a version
   // switch) — but not when it merely holds the number this field just parsed.
   useEffect(() => {
-    setLocal((prev) => ((parseFloat(prev) || fallback) === value ? prev : String(value)));
+    setLocal((prev) => (parseDraftNumber(prev, fallback) === value ? prev : String(value)));
   }, [value, fallback]);
 
   return (
@@ -105,7 +117,7 @@ function DraftNumberInput({
       value={local}
       onChange={(e) => {
         setLocal(e.target.value);
-        onCommit(parseFloat(e.target.value) || fallback);
+        onCommit(parseDraftNumber(e.target.value, fallback));
       }}
     />
   );
@@ -851,7 +863,7 @@ export const UserMemorySection = memo(function UserMemorySection({
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 *:min-w-0">
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamMaxCost", "Max Cost/Run ($)")}</label>
-                      <DraftNumberInput value={dream.maxCostPerRun ?? 5.00} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                      <DraftNumberInput value={dream.maxCostPerRun ?? 0.5} onCommit={(v) => patchDream({ maxCostPerRun: v })} fallback={0.5} step={0.01} className="h-7 w-full rounded border border-input bg-background px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
                     </div>
                     <div>
                       <label className="mb-0.5 block text-[10px] text-muted-foreground">{t("agentDetail.dreamPruneDays", "Prune After (days)")}</label>

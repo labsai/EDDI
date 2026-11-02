@@ -6,6 +6,18 @@ import { server } from "@/test/mocks/server";
 import { renderPage, userEvent } from "@/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
+const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
+vi.mock("@/hooks/use-unsaved-changes-guard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/hooks/use-unsaved-changes-guard")>();
+  return {
+    ...actual,
+    allowNextNavigation: () => {
+      guard.allowNextNavigation();
+      actual.allowNextNavigation();
+    },
+  };
+});
+
 function renderChannelDetail(id = "ch1", version = 1, withToaster = false) {
   return renderPage(
     `/manage/channels/${id}?version=${version}`,
@@ -376,6 +388,21 @@ describe("ChannelDetailPage", () => {
     await waitFor(() => {
       expect(saved?.defaultTargetName).toBe("renamed");
     });
+  });
+
+  it("lets the navigation after a delete through the unsaved-changes guard", async () => {
+    // The draft is still dirty when navigate() runs (setBaseline has not
+    // re-rendered), so without the bypass the blocker would hold the user on a
+    // page whose channel no longer exists.
+    guard.allowNextNavigation.mockClear();
+    server.use(
+      http.delete("*/channelstore/channels/:id", () => new HttpResponse(null, { status: 204 })),
+    );
+    renderChannelDetail("ch1", 1);
+    const user = userEvent.setup();
+    await user.click(await screen.findByTestId("delete-channel-btn"));
+    await user.click(await screen.findByTestId("alert-dialog-confirm"));
+    await waitFor(() => expect(guard.allowNextNavigation).toHaveBeenCalledTimes(1));
   });
 });
 

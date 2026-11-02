@@ -61,7 +61,7 @@ import {
 } from "@/hooks/use-agents";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
   applyChangedFields,
@@ -177,8 +177,30 @@ export function AgentDetailPage() {
    * the version being loaded.
    */
   const configPending = isPlaceholderData;
-  const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
-  const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
+  const {
+    data: deployment,
+    isPlaceholderData: deploymentIsPlaceholder,
+    isPending: deploymentIsPending,
+    isError: deploymentFailed,
+  } = useDeploymentStatus(id!, resolvedVersion);
+  const {
+    data: envStatuses,
+    isPlaceholderData: envStatusesArePlaceholder,
+    isPending: envStatusesArePending,
+    isError: envStatusesFailed,
+  } = useDeploymentStatuses(id!, resolvedVersion);
+  // Until the status of THIS version has arrived, what is on screen belongs to
+  // the one just left (placeholder), or to nothing at all yet (the first fetch),
+  // or the lookup failed: the deploy/undeploy button must not act on any of
+  // those. An unknown status is not "not deployed" - Deploy would be offered for
+  // a version that is already live.
+  const statusPending =
+    deploymentIsPlaceholder ||
+    envStatusesArePlaceholder ||
+    deploymentIsPending ||
+    envStatusesArePending ||
+    (deploymentFailed && !deployment) ||
+    (envStatusesFailed && !envStatuses);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
   // environment a reader assumes), otherwise the first live one — which is what
   // makes a test-only agent reachable at all.
@@ -223,7 +245,7 @@ export function AgentDetailPage() {
         })
       : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
-  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS";
+  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS" || statusPending;
   /** Why production is in ERROR, when the backend said (detailed status, EDIT holders only). */
   const deploymentFailure = status === "ERROR" ? deployment?.failure : undefined;
 
@@ -450,6 +472,8 @@ export function AgentDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // Gone: unsaved edits are moot, and `isDirty` has not re-rendered yet.
+          allowNextNavigation();
           navigate("/manage/agents");
         },
         onError: (err) => toast.error(getErrorMessage(err)),

@@ -26,6 +26,7 @@ import { GroupHitlEditor } from "./group-hitl-editor";
 import { GroupPhaseEditor } from "./group-phase-editor";
 import { Link, useNavigate } from "react-router-dom";
 import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
+import { allowNextNavigation } from "@/hooks/use-unsaved-changes-guard";
 
 interface GroupConfigPanelProps {
   config: AgentGroupConfiguration;
@@ -159,6 +160,8 @@ export function GroupConfigPanel({
       {
         onSuccess: () => {
           toast.success(t("groups.deleteGroupOnlySuccess", "Group deleted (agents kept)"));
+          // The group is gone; a dirty page must not hold back leaving it.
+          allowNextNavigation();
           navigate("/manage/groups");
         },
         onError: (err) => toast.error(t("common.error"), { description: getErrorMessage(err) }),
@@ -173,6 +176,8 @@ export function GroupConfigPanel({
       {
         onSuccess: () => {
           toast.success(t("groups.deleteWithMembersSuccess", "Group and all member agents deleted"));
+          // The group is gone; a dirty page must not hold back leaving it.
+          allowNextNavigation();
           navigate("/manage/groups");
         },
         onError: (err) => toast.error(t("common.error"), { description: describeGroupDeleteError(err, t) }),

@@ -210,7 +210,7 @@ export function VariablesPage() {
           <p className="text-xs text-muted-foreground">
             {t(
               "variables.infoLine1",
-              "Use {{vars.<key>}} in system prompts or ${vars:<key>} anywhere in agent configurations.",
+              "Use {vars.<key>} in system prompts or ${vars:<key>} anywhere in agent configurations.",
             )}
           </p>
           <p className="text-xs text-muted-foreground">

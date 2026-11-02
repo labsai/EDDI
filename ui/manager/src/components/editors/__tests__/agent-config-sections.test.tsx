@@ -449,6 +449,51 @@ describe("UserMemorySection", () => {
     expect(screen.getByText("Summarize interactions")).toBeInTheDocument();
   });
 
+  it("commits a typed 0 as 0, not as the field's fallback", async () => {
+    // "Prune After (days)" = 0 means "never prune"; it used to be saved as 90
+    // (`parseFloat("0") || fallback`) while the box kept showing 0.
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const agentWithDream: Agent = {
+      ...baseAgent,
+      enableMemoryTools: true,
+      userMemoryConfig: { dream: { enabled: true, schedule: "0 3 * * *", pruneStaleAfterDays: 45 } },
+    };
+    renderWithProviders(<UserMemorySection agent={agentWithDream} onChange={onChange} />);
+    const input = screen.getByText("Prune After (days)").parentElement!.querySelector("input")!;
+    await user.clear(input);
+    onChange.mockClear();
+    await user.type(input, "0");
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as Agent;
+    expect(last.userMemoryConfig?.dream?.pruneStaleAfterDays).toBe(0);
+  });
+
+  it("falls back only for an empty number field", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const agentWithDream: Agent = {
+      ...baseAgent,
+      enableMemoryTools: true,
+      userMemoryConfig: { dream: { enabled: true, schedule: "0 3 * * *", pruneStaleAfterDays: 45 } },
+    };
+    renderWithProviders(<UserMemorySection agent={agentWithDream} onChange={onChange} />);
+    const input = screen.getByText("Prune After (days)").parentElement!.querySelector("input")!;
+    await user.clear(input);
+    const last = onChange.mock.calls[onChange.mock.calls.length - 1]![0] as Agent;
+    expect(last.userMemoryConfig?.dream?.pruneStaleAfterDays).toBe(90);
+  });
+
+  it("defaults Max Cost/Run to the backend's 0.50, not 5", () => {
+    const agentWithDream: Agent = {
+      ...baseAgent,
+      enableMemoryTools: true,
+      userMemoryConfig: { dream: { enabled: true, schedule: "0 3 * * *" } },
+    };
+    renderWithProviders(<UserMemorySection agent={agentWithDream} onChange={mockOnChange} />);
+    const input = screen.getByText("Max Cost/Run ($)").parentElement!.querySelector("input")!;
+    expect(input).toHaveValue(0.5);
+  });
+
   it("shows guardrails fields when memory enabled", () => {
     const agentWithMemory: Agent = {
       ...baseAgent,
