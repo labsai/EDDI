@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Cable, Copy, Trash2, Users, Bot, Hash, Webhook } from "lucide-react";
+import { Cable, Copy, Trash2, Users, Bot, Hash, Webhook, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { EnrichedChannelDescriptor } from "@/lib/api/channels";
@@ -16,11 +16,13 @@ function SlackIcon({ className }: { className?: string }) {
 const TYPE_ICONS: Record<string, React.ReactNode> = {
   slack: <SlackIcon className="h-4 w-4" />,
   webhook: <Webhook className="h-4 w-4" />,
+  email: <Mail className="h-4 w-4" />,
 };
 
 const TYPE_COLORS: Record<string, string> = {
   slack: "bg-[#4A154B]/10 text-[#4A154B] dark:bg-[#E01E5A]/10 dark:text-[#E01E5A]",
   webhook: "bg-primary/10 text-primary",
+  email: "bg-primary/10 text-primary",
 };
 
 interface ChannelCardProps {
