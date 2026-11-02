@@ -43,7 +43,6 @@ export const TOOL_SOURCES = [
   "memory",
   "recall",
 ] as const;
-export type ToolSource = (typeof TOOL_SOURCES)[number];
 
 // ── Field limits (mirror the backend save-time validators) ────────
 

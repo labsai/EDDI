@@ -18,7 +18,6 @@ import {
   useCreateAgent,
   useDeleteAgent,
   useDuplicateAgent,
-  useDeployAgent,
   useUndeployAgent,
   groupAgentsByName,
 } from "@/hooks/use-agents";
@@ -542,34 +541,6 @@ describe("useDuplicateAgent", () => {
 
     await act(async () => {
       result.current.mutate({ id: "agent1", version: 3, deepCopy: true });
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-});
-
-describe("useDeployAgent", () => {
-  it("deploys an agent", async () => {
-    const { result } = renderHook(() => useDeployAgent(), {
-      wrapper: createWrapper(),
-    });
-
-    await act(async () => {
-      result.current.mutate({ agentId: "agent1", version: 3 });
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-
-  it("deploys with custom environment", async () => {
-    const { result } = renderHook(() => useDeployAgent(), {
-      wrapper: createWrapper(),
-    });
-
-    await act(async () => {
-      result.current.mutate({
-        agentId: "agent1",
-        version: 3,
-        environment: "test",
-      });
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
   });

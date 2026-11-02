@@ -954,7 +954,7 @@ function BackLink() {
         to={`/manage/agentview/${parentAgentId}`}
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         {t("packageDetail.backToAgent", "Back to Agent")}
       </Link>
     );
@@ -965,7 +965,7 @@ function BackLink() {
       to="/manage/workflows"
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
       {t("packageDetail.backToWorkflows", "Back to Workflows")}
     </Link>
   );

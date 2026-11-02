@@ -400,7 +400,7 @@ export function DashboardPage() {
             className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
             {t("nav.conversations")}
-            <ArrowRight className="h-3 w-3" />
+            <ArrowRight className="h-3 w-3 rtl:rotate-180" />
           </Link>
         </div>
 
@@ -481,7 +481,7 @@ export function DashboardPage() {
             className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
           >
             {t("nav.agents")}
-            <ArrowRight className="h-3 w-3" />
+            <ArrowRight className="h-3 w-3 rtl:rotate-180" />
           </Link>
         </div>
 

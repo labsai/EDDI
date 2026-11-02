@@ -596,7 +596,7 @@ function BackLink() {
       to={listPath}
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
       {t("conversationDetail.backToConversations", "Back to Conversations")}
     </Link>
   );
