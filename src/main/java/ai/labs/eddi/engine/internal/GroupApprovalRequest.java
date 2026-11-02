@@ -21,6 +21,21 @@ public class GroupApprovalRequest {
     private HitlDecision decision;
     /** taskId → "APPROVED" or "REJECTED" */
     private Map<String, String> taskApprovals;
+    /**
+     * taskId → verdict, note, edited result and reason code — the richer form of
+     * {@link #taskApprovals}; the two are mutually exclusive.
+     *
+     * @since 6.7.0
+     */
+    private Map<String, TaskDecision> taskDecisions;
+
+    public Map<String, TaskDecision> getTaskDecisions() {
+        return taskDecisions;
+    }
+
+    public void setTaskDecisions(Map<String, TaskDecision> taskDecisions) {
+        this.taskDecisions = taskDecisions;
+    }
 
     public HitlDecision getDecision() {
         return decision;

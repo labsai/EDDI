@@ -525,6 +525,7 @@ public class GroupHitlCoordinator {
         // task approvals and the bookmark clear below change it.
         final HitlDecisionRecords.GroupPause pauseFacts = groupPauseFacts(gc, gc.getPausedAt());
         AgentGroupConfiguration.HitlConfig groupHitlConfig = null;
+        AgentGroupConfiguration groupConfigAtDecision = null;
 
         // Apply task-level approvals if present
         // Phase 5a: Load rejection policy from config
@@ -534,6 +535,7 @@ public class GroupHitlCoordinator {
             if (resId != null) {
                 var config = groupStore.read(gc.getGroupId(), resId.getVersion());
                 groupHitlConfig = config.getHitlConfig();
+                groupConfigAtDecision = config;
                 if (config.getHitlConfig() != null) {
                     retryOnReject = config.getHitlConfig().getOnTaskRejection() == HitlRejectionPolicy.RETRY;
                 }
@@ -542,6 +544,13 @@ public class GroupHitlCoordinator {
             LOGGER.warnf("Could not load rejection policy for %s, defaulting to FAIL: %s",
                     groupConversationId, e.getMessage());
         }
+
+        // Review fields (taskDecisions, edits, reason codes) are validated before
+        // anything is mutated; taskDecisions become the equivalent taskApprovals so the
+        // validation and application below run unchanged.
+        final AgentGroupConfiguration phasesConfig = groupConfigAtDecision;
+        final GroupReviewEditor reviewEditor = GroupReviewEditor.prepare(gc, request, groupHitlConfig,
+                () -> phasesConfig != null ? groupConversationService.effectivePhases(gc, phasesConfig) : List.of());
 
         // An explicit empty map is treated exactly like an absent map (the
         // approve-all shortcut) — otherwise {} approves nothing and the resumed
@@ -589,15 +598,19 @@ public class GroupHitlCoordinator {
                     : "Rejected by human reviewer";
             for (var entry : request.getTaskApprovals().entrySet()) {
                 if ("APPROVED".equalsIgnoreCase(entry.getValue())) {
-                    gc.getTaskList().approveTask(entry.getKey());
+                    if (!reviewEditor.approveEdited(gc.getTaskList(), entry.getKey(), request.getDecision() != null
+                            ? request.getDecision().getDecidedBy()
+                            : null)) {
+                        gc.getTaskList().approveTask(entry.getKey());
+                    }
                 } else if (retryOnReject) {
                     // RETRY policy: reset to ASSIGNED with the reviewer's feedback so
                     // the re-executing agent knows what to fix (C-D)
-                    gc.getTaskList().resetFromAnyToAssigned(entry.getKey(), reviewerNote);
+                    gc.getTaskList().resetFromAnyToAssigned(entry.getKey(), reviewEditor.noteFor(entry.getKey(), reviewerNote));
                     LOGGER.infof("Task '%s' rejected with RETRY policy — reset to ASSIGNED", LogSanitizer.sanitize(entry.getKey()));
                 } else {
                     // FAIL policy (default): permanently reject the task
-                    gc.getTaskList().rejectTask(entry.getKey(), reviewerNote);
+                    gc.getTaskList().rejectTask(entry.getKey(), reviewEditor.noteFor(entry.getKey(), reviewerNote));
                 }
             }
         }
@@ -648,7 +661,7 @@ public class GroupHitlCoordinator {
             conversationStore.updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
             // Delete timeout schedule only after CAS succeeds (Phase 5e)
             deleteGroupHitlTimeoutSchedule(groupConversationId);
-            auditHitlDecision(gc, decision, pauseFacts, groupHitlConfig, request);
+            auditHitlDecision(gc, decision, pauseFacts, groupHitlConfig, reviewEditor);
             // A rejection is terminal: notify the (SSE) listener so streams close
             // instead of hanging, and release paused-state resources.
             if (listener != null) {
@@ -674,6 +687,10 @@ public class GroupHitlCoordinator {
         final HitlTimeoutPolicy savedTimeoutPolicy = gc.getHitlTimeoutPolicy();
         final String savedApprovalTimeout = gc.getHitlApprovalTimeout();
         final Instant originalPausedAt = gc.getPausedAt();
+
+        // An approved SYNTHESIS edit becomes the phase's latest synthesis — appended
+        // (unsigned, reviewer speaker) before the resume persists, never rewritten.
+        reviewEditor.appendSynthesisEdit(gc, decision != null ? decision.getDecidedBy() : null);
 
         // Clear pause state but preserve pausedTurnCount — it seeds turnCounter on
         // resume (M3)
@@ -912,7 +929,7 @@ public class GroupHitlCoordinator {
         // and write the audit entry, so a rolled-back submit does not pollute the
         // metric or the compliance trail (mirrors the regular surface).
         counterGroupHitlResume.increment();
-        auditHitlDecision(gc, decision, pauseFacts, groupHitlConfig, request);
+        auditHitlDecision(gc, decision, pauseFacts, groupHitlConfig, reviewEditor);
 
         // The live gc instance is being mutated by the background thread — hand
         // the HTTP layer a freshly-read copy instead (CME-safe serialization).
@@ -1402,18 +1419,13 @@ public class GroupHitlCoordinator {
      * for the phase, or one per decided task — see {@link HitlApprovalAudit}.
      */
     private void auditHitlDecision(GroupConversation gc, HitlDecision decision, HitlDecisionRecords.GroupPause pause,
-                                   AgentGroupConfiguration.HitlConfig hitlConfig, GroupApprovalRequest request) {
+                                   AgentGroupConfiguration.HitlConfig hitlConfig, GroupReviewEditor reviewEditor) {
         if (auditLedgerService == null || !auditLedgerService.isEnabled() || decision == null) {
             return;
         }
         try {
-            Map<String, HitlDecisionRecords.TaskOutcome> taskOutcomes = new LinkedHashMap<>();
-            if (request != null && request.getTaskApprovals() != null) {
-                request.getTaskApprovals().forEach((taskId, value) -> taskOutcomes.put(taskId,
-                        new HitlDecisionRecords.TaskOutcome(HitlDecision.HitlVerdict.fromString(value), null, null)));
-            }
             approvalAudit.write(HitlDecisionRecords.groupDecision(gc.getId(), gc.getGroupId(), gc.getUserId(), decision, hitlConfig, pause,
-                    taskOutcomes, null));
+                    reviewEditor != null ? reviewEditor.taskOutcomes() : Map.of(), reviewEditor != null ? reviewEditor.synthesisSummary() : null));
         } catch (Exception e) {
             LOGGER.warnf("Failed to submit HITL audit entry for group conversation %s: %s",
                     gc.getId(), e.getMessage());

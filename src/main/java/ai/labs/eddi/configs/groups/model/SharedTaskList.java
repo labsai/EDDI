@@ -647,6 +647,60 @@ public class SharedTaskList {
         }
     }
 
+    // ==================== 6.7 — reviewer edits of task results
+    // ====================
+
+    /**
+     * An approver replaced a task's result when approving it
+     * ({@code review.allowResultEdits}). The original is not repeated here: it
+     * stays in the signed {@code TASK_RESULT} transcript entry.
+     *
+     * @param decidedBy
+     *            who approved
+     * @param at
+     *            when (ISO-8601)
+     * @param originalSha256
+     *            digest of the result the agent submitted
+     * @param originalChars
+     *            its length in code points
+     */
+    public record ReviewerEdit(String decidedBy, String at, String originalSha256, int originalChars) {
+    }
+
+    /**
+     * taskId → the reviewer edit of its result; at most one per task. Absent on a
+     * document written before 6.7 (an older pod re-saving drops it; the edited
+     * result itself is kept either way).
+     */
+    private Map<String, ReviewerEdit> reviewerEdits = new ConcurrentHashMap<>();
+
+    public Map<String, ReviewerEdit> getReviewerEdits() {
+        return reviewerEdits;
+    }
+
+    public void setReviewerEdits(Map<String, ReviewerEdit> reviewerEdits) {
+        this.reviewerEdits = reviewerEdits != null ? new ConcurrentHashMap<>(reviewerEdits) : new ConcurrentHashMap<>();
+    }
+
+    /**
+     * AWAITING_APPROVAL → COMPLETED with the approver's {@code editedResult} in
+     * place of the agent's: dependents and the task summary read the edit.
+     */
+    public synchronized TaskItem approveTaskWithEditedResult(String taskId, String editedResult, ReviewerEdit edit) {
+        TaskItem t = requireTask(taskId);
+        if (t.status() != TaskStatus.AWAITING_APPROVAL)
+            throw new IllegalStateException(
+                    "approveTaskWithEditedResult '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
+        TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
+                t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), editedResult,
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId());
+        replaceTask(taskId, u);
+        if (edit != null) {
+            reviewerEdits.put(taskId, edit);
+        }
+        return u;
+    }
+
     // ==================== E2 — reworks within a run ====================
 
     /**

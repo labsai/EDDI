@@ -34,3 +34,10 @@ shape that analytics can rely on.
   `screenEdits: OUTPUT_GUARDRAILS` the task's output guardrails screen the edit (`reprompt` acts as `block`); a blocked
   edit or a changed configuration pauses the turn again on the unchanged draft, records `hitl.edit.refused` and shows
   `lastEditRefused` on the next pause. `approval-status` serves the redacted draft as `pauseDetails.editableAnswer`.
+- **Group edits** — `taskDecisions` on the group approve body (`{verdict, note, editedResult, reasonCode}` per task,
+  exclusive with `taskApprovals`) and `decision.editedAnswer` on a PHASE pause after a SYNTHESIS phase, for groups with
+  `review.allowResultEdits` ([`GroupReviewEditor`](../../src/main/java/ai/labs/eddi/engine/internal/groups/GroupReviewEditor.java)).
+  An edited result replaces `TaskItem.result` (dependents and the summary read it) and is noted in
+  `SharedTaskList.reviewerEdits`; a synthesis edit is appended as an unsigned `SYNTHESIS` entry (speaker
+  `hitl:<decidedBy>`, `errorReason: "reviewer-edit"`) — signed entries are never rewritten, and the signing guard skips
+  reviewer entries.
