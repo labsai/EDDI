@@ -23,7 +23,7 @@ copy of each page, the sidebar, and Astro's build output.
   result.
 - **Old URLs:** [`legacy-urls.txt`](legacy-urls.txt) lists every URL docs.labs.ai has served.
   [`scripts/redirects.mjs`](scripts/redirects.mjs) turns it into the `redirects` of
-  [`vercel.json`](vercel.json); the tests fail if a line resolves to nothing or `vercel.json`
+  the repository-root [`vercel.json`](../vercel.json); the tests fail if a line resolves to nothing or `vercel.json`
   is stale, and if any docs link in the backend, the UIs, README or the plugin does not land
   on a page.
 
@@ -52,10 +52,27 @@ when `docs/` or this directory changed.
 
 ## Deployment
 
-Vercel's Git integration deploys it, as it does the marketing site: a Vercel project on
-`labsai/EDDI` with **Root Directory `docs-site`**. Everything else — install and build command,
-output directory, headers, redirects, and the `ignoreCommand` that skips deployments for commits
-that do not touch the docs — is in [`vercel.json`](vercel.json). The project needs "Include
-source files outside of the Root Directory" enabled (the build reads `../docs`), and both
-domains: `docs.eddi.technology` and `docs.labs.ai`, whose requests the first redirect rule sends
-to the same path on the new domain.
+Vercel's Git integration deploys it, as it does the marketing site: the project **`eddi-docs`**
+in the `eddi` team, connected to `labsai/EDDI`, production branch `main`. Its configuration is
+the repository-root [`vercel.json`](../vercel.json) — install, build and output (`cd docs-site
+&& …`), headers, redirects, and the ignore step — because Vercel reads `vercel.json` from the
+project's Root Directory, and **the Root Directory is the repository root, not `docs-site/`**.
+
+**Only `main` deploys.** The ignore step skips every deployment that is not production
+(`[ "$VERCEL_ENV" != production ] || …`), so branches and pull requests get no Vercel build — no
+previews, and no failure emails when a branch carries a broken `main`. Pull requests are still
+validated by the `Docs Site` check (`docs-site.yml`), which builds the site and checks every link.
+
+The Root Directory is the repository root on purpose. Vercel checks that the Root Directory exists before it runs any ignore step,
+so with `docs-site` as the Root Directory every push to a branch without it failed: the orphan
+`metrics` data branch (written by `docker-pull-notify.yml` every 10–35 minutes) and every branch
+cut before the site existed, each with a failure email. The repository root exists everywhere,
+and the rest of the ignore step skips a commit on `main` only when nothing under `docs-site/`,
+`docs/`, `PRIVACY.md` or `vercel.json` changed since the **last successful deployment**
+(`$VERCEL_GIT_PREVIOUS_SHA`), not since the previous commit: if Vercel cancelled a queued docs
+build, the next commit still publishes it. With no previous deployment, or one outside the
+shallow clone, it builds. The project settings carry the
+same commands, for branches that have no root `vercel.json`.
+
+Domains: `docs.eddi.technology`, and `docs.labs.ai`, whose requests the first redirect rule
+answers with a 301 to the same path on the new domain.
