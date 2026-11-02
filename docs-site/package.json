@@ -18,10 +18,10 @@
     "test": "node --test \"scripts/**/*.test.mjs\" \"src/**/*.test.mjs\""
   },
   "dependencies": {
-    "@astrojs/starlight": "0.42.7",
+    "@astrojs/starlight": "0.42.8",
     "@fontsource-variable/outfit": "5.3.0",
     "@fontsource/jetbrains-mono": "5.3.0",
-    "astro": "7.4.2",
+    "astro": "7.4.4",
     "astro-mermaid": "2.2.0",
     "github-slugger": "2.0.0",
     "mermaid": "12.2.0",
