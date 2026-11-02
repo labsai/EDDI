@@ -28,7 +28,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
 | **State (server)** | TanStack Query v5 |
 | **State (UI)** | Zustand (chat/debug), `useState` / `useCallback` elsewhere |
-| **Routing** | React Router v7 (`react-router-dom` 7.x, declarative mode — no data router) |
+| **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
 | **i18n** | react-i18next (11 locales: en, de, fr, es, ar, zh, th, ja, ko, pt, hi) |
 | **Test (unit)** | Vitest + React Testing Library + MSW |
 | **Test (e2e)** | Playwright |

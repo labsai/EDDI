@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
@@ -17,20 +18,20 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
-import ai.labs.eddi.integrations.slack.SlackWebApiClient;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.*;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -62,6 +63,22 @@ public class ChannelTargetRouter {
     private static final long REFRESH_INTERVAL_MS = 60_000; // 1 minute
     private static final String CHANNEL_TYPE_SLACK = "slack";
     private static final String CHANNEL_TYPE_WEBHOOK = "webhook";
+    private static final String KEY_BOT_TOKEN = "botToken";
+    private static final String KEY_SIGNING_SECRET = "signingSecret";
+
+    /**
+     * The only platform settings whose {@code ${vault:...}} references the router
+     * resolves. Everything else in {@code platformConfig} is configuration or
+     * content (a webhook's {@code inputTemplate} becomes conversation input), and
+     * expanding a reference there would hand the plaintext of any secret the editor
+     * can name to whoever reads that conversation.
+     */
+    static final Set<String> CREDENTIAL_KEYS = Set.of(KEY_BOT_TOKEN, KEY_SIGNING_SECRET);
+
+    /**
+     * Where a Slack bot token is sent - checked against the secret's allowedHosts.
+     */
+    private static final String SLACK_API_DESTINATION = "https://slack.com/api/";
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -69,16 +86,6 @@ public class ChannelTargetRouter {
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
     private final VaultHostAllowlist vaultHostAllowlist;
-
-    /**
-     * Platform-config keys whose resolved value this deployment sends outbound, per
-     * channel type, and the destination it is sent to. A vaulted value under one of
-     * these keys is held to its secret's {@code allowedHosts} before it is
-     * resolved. Signing secrets are absent on purpose: they verify inbound requests
-     * and are never sent anywhere.
-     */
-    private static final Map<String, Map<String, String>> OUTBOUND_CREDENTIAL_DESTINATIONS = Map.of(CHANNEL_TYPE_SLACK,
-            Map.of("botToken", SlackWebApiClient.SLACK_API_BASE));
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
 
@@ -106,6 +113,28 @@ public class ChannelTargetRouter {
      * {@link #refreshIfNeeded}.
      */
     private final AtomicLong invalidationGeneration = new AtomicLong();
+
+    /**
+     * Shortest webhook signing secret the router will hand to the verifier: a floor
+     * below which the key is brute-forceable offline from one captured request (the
+     * endpoint is public), not a recommendation - use 32 random bytes.
+     */
+    public static final int MIN_WEBHOOK_SECRET_LENGTH = WebhookChannelSettings.MIN_SECRET_LENGTH;
+
+    /**
+     * Webhook integration versions already warned about, so a refresh does not
+     * repeat it; cleared when a vault secret changes, so a secret that is still
+     * wrong after a rotation is reported again.
+     */
+    private final Set<String> weakWebhookSecretWarned = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Credentials already warned about as unusable (an unresolved reference, or a
+     * bot token whose secret may not go to Slack), so a refresh does not repeat the
+     * warning every minute.
+     */
+    private final Set<String> unusableCredentialWarned = ConcurrentHashMap.newKeySet();
+    private final AtomicInteger weakWebhookSecretWarnings = new AtomicInteger();
 
     /**
      * Guards the pair {@code (invalidationGeneration, lastRefreshTime)}.
@@ -329,7 +358,7 @@ public class ChannelTargetRouter {
         if (a == null || b == null || a.isBlank() || b.isBlank()) {
             return false;
         }
-        return MessageDigest.isEqual(a.getBytes(StandardCharsets.UTF_8), b.getBytes(StandardCharsets.UTF_8));
+        return HmacSignatures.constantTimeEquals(a, b);
     }
 
     /**
@@ -825,6 +854,8 @@ public class ChannelTargetRouter {
                 invalidationGeneration.incrementAndGet();
                 lastRefreshTime = 0;
             }
+            weakWebhookSecretWarned.clear();
+            unusableCredentialWarned.clear();
             LOGGER.info("Channel integration cache marked stale after a vault secret change");
         });
     }
@@ -890,7 +921,12 @@ public class ChannelTargetRouter {
                         }
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
-                            resolvePlatformSecrets(copy);
+                            String integrationKey = resId.getId() + ":" + resId.getVersion();
+                            resolvePlatformSecrets(integrationKey, copy);
+                            if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
+                                vetWebhookSigningSecret(integrationKey, config, copy);
+                            }
+                            dropUnresolvedCredentials(integrationKey, copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
                             coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
@@ -940,12 +976,11 @@ public class ChannelTargetRouter {
                                 // connector)
                                 String coveredKey = CHANNEL_TYPE_SLACK + ":" + chId;
                                 if (chId != null && !coveredChannelKeys.contains(coveredKey)) {
-                                    String bt = resolveOutboundSecret(
-                                            connector.getConfig().get("botToken"),
-                                            SlackWebApiClient.SLACK_API_BASE,
-                                            "Legacy Slack channel connector of agent '" + agentId + "' (botToken)");
-                                    String ss = resolveSecret(
-                                            connector.getConfig().get("signingSecret"));
+                                    String legacyKey = "legacy:" + agentId + ":" + chId;
+                                    String bt = usableCredential(legacyKey, KEY_BOT_TOKEN,
+                                            connector.getConfig().get(KEY_BOT_TOKEN));
+                                    String ss = usableCredential(legacyKey, KEY_SIGNING_SECRET,
+                                            connector.getConfig().get(KEY_SIGNING_SECRET));
                                     String gid = connector.getConfig().get("groupId");
                                     newLegacyMap.put(chId,
                                             new LegacyTarget(agentId, bt, ss,
@@ -1007,40 +1042,132 @@ public class ChannelTargetRouter {
         return copy;
     }
 
-    private void resolvePlatformSecrets(ChannelIntegrationConfiguration config) {
-        Map<String, String> destinations = OUTBOUND_CREDENTIAL_DESTINATIONS.getOrDefault(config.getChannelType().toLowerCase(Locale.ROOT),
-                Map.of());
-        Map<String, String> resolved = new HashMap<>();
-        for (var entry : config.getPlatformConfig().entrySet()) {
-            String destination = destinations.get(entry.getKey());
-            resolved.put(entry.getKey(), destination == null
-                    ? resolveSecret(entry.getValue())
-                    : resolveOutboundSecret(entry.getValue(), destination,
-                            "Channel integration '" + config.getName() + "' (" + entry.getKey() + ")"));
+    /**
+     * Resolves the vault references of the {@link #CREDENTIAL_KEYS} only. Every
+     * other value is kept verbatim: a reference in one stays literal text. A Slack
+     * bot token whose secret may not be sent to Slack is removed rather than
+     * resolved.
+     */
+    private void resolvePlatformSecrets(String integrationKey, ChannelIntegrationConfiguration config) {
+        Map<String, String> resolved = new HashMap<>(config.getPlatformConfig());
+        for (String key : CREDENTIAL_KEYS) {
+            if (!resolved.containsKey(key)) {
+                continue;
+            }
+            String raw = resolved.get(key);
+            if (KEY_BOT_TOKEN.equals(key) && CHANNEL_TYPE_SLACK.equalsIgnoreCase(config.getChannelType())
+                    && !botTokenMayGoToSlack(integrationKey, raw)) {
+                resolved.remove(key);
+                continue;
+            }
+            resolved.put(key, resolveSecret(raw));
         }
         config.setPlatformConfig(resolved);
     }
 
     /**
-     * {@link #resolveSecret} for a value that is sent to {@code destination}: a
-     * {@code ${vault:…}} secret whose {@code allowedHosts} does not admit it is
-     * withheld (null — the integration cannot post) instead of resolved, so its
-     * plaintext never reaches the client that would send it there.
+     * Removes credentials whose vault reference did not resolve, for every channel
+     * type. The resolver passes such a reference through unchanged, and its text is
+     * public: kept as a signing secret it would let anyone who read the
+     * configuration sign requests. A Slack integration without a usable signing
+     * secret authenticates nothing, which is the point.
      */
-    private String resolveOutboundSecret(String value, String destination, String usedFor) {
-        if (value == null || value.isBlank()) {
-            return null;
-        }
-        if (vaultHostAllowlist != null) {
-            try {
-                vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(value)), destination, usedFor);
-            } catch (VaultHostAllowlist.HostNotAllowedException e) {
-                LOGGER.warnf("[SECURITY] %s The credential is withheld, so this channel cannot send until the secret's allowedHosts "
-                        + "admits that destination.", sanitize(e.getMessage()));
-                return null;
+    private void dropUnresolvedCredentials(String integrationKey, ChannelIntegrationConfiguration config) {
+        // getPlatformConfig() hands out a copy: edit it, then set it back.
+        Map<String, String> resolved = config.getPlatformConfig();
+        for (String key : CREDENTIAL_KEYS) {
+            String value = resolved.get(key);
+            if (value != null && SecretReference.isVaultReference(value)) {
+                resolved.remove(key);
+                warnUnusable(integrationKey, key, "does not resolve to a vault value");
             }
         }
-        return resolveSecret(value);
+        config.setPlatformConfig(resolved);
+    }
+
+    /**
+     * The resolved value of one legacy credential, or {@code null} when it is
+     * absent, unresolved, or a bot token that may not go to Slack.
+     */
+    private String usableCredential(String integrationKey, String key, String raw) {
+        if (KEY_BOT_TOKEN.equals(key) && !botTokenMayGoToSlack(integrationKey, raw)) {
+            return null;
+        }
+        String value = resolveSecret(raw);
+        if (value != null && SecretReference.isVaultReference(value)) {
+            warnUnusable(integrationKey, key, "does not resolve to a vault value");
+            return null;
+        }
+        return value;
+    }
+
+    /**
+     * Whether the secret behind a Slack bot token reference may be sent to Slack's
+     * API under its {@code allowedHosts}. A plaintext token is not the vault's
+     * business and passes.
+     */
+    private boolean botTokenMayGoToSlack(String integrationKey, String raw) {
+        if (raw == null || !SecretReference.isVaultReference(raw)) {
+            return true;
+        }
+        try {
+            vaultHostAllowlist.requireAllowed(List.of(raw), SLACK_API_DESTINATION, "Slack integration " + integrationKey + " bot token");
+            return true;
+        } catch (VaultHostAllowlist.HostNotAllowedException e) {
+            warnUnusable(integrationKey, KEY_BOT_TOKEN, "may not be sent to slack.com (" + e.getMessage() + ")");
+            return false;
+        }
+    }
+
+    private void warnUnusable(String integrationKey, String key, String problem) {
+        if (unusableCredentialWarned.add(integrationKey + "/" + key)) {
+            LOGGER.warnf("Channel integration %s: its %s %s - it is not used until that is fixed", sanitize(integrationKey), key, problem);
+        }
+    }
+
+    /**
+     * Strips a webhook signing secret the endpoint must not trust: one stored in
+     * plaintext (save-time validation refuses it, but a ZIP import or a direct
+     * store write does not pass through that) or shorter than
+     * {@link #MIN_WEBHOOK_SECRET_LENGTH} once resolved. With no secret the verifier
+     * answers 401 to every request, so the integration fails closed instead of
+     * authenticating with a guessable key. Warned about once per integration
+     * version (and again after a vault secret changes).
+     */
+    private void vetWebhookSigningSecret(String integrationKey, ChannelIntegrationConfiguration stored,
+                                         ChannelIntegrationConfiguration resolved) {
+        String raw = stored.getPlatformConfig() == null ? null : stored.getPlatformConfig().get("signingSecret");
+        String secret = resolved.getPlatformConfig().get("signingSecret");
+        if (raw == null || raw.isBlank()) {
+            return;
+        }
+        String problem = null;
+        if (!raw.trim().startsWith("${vault:")) {
+            problem = "is stored in plaintext (it must be a ${vault:...} reference)";
+        } else if (secret != null && (secret.equals(raw) || secret.strip().equals(raw.strip()) || secret.contains("${vault:"))) {
+            // Resolution leaves a reference it cannot resolve unchanged (also one with
+            // surrounding whitespace). It is long enough to pass the length check, and
+            // it is public knowledge - never a key.
+            problem = "does not resolve to a vault value";
+        } else if (secret != null && secret.length() < MIN_WEBHOOK_SECRET_LENGTH) {
+            problem = "is shorter than " + MIN_WEBHOOK_SECRET_LENGTH + " characters";
+        }
+        if (problem == null) {
+            return;
+        }
+        Map<String, String> without = resolved.getPlatformConfig();
+        without.remove("signingSecret");
+        resolved.setPlatformConfig(without);
+        if (weakWebhookSecretWarned.add(integrationKey)) {
+            weakWebhookSecretWarnings.incrementAndGet();
+            LOGGER.warnf("Webhook integration %s: its signing secret %s - every request to it is refused (401) until it is fixed",
+                    sanitize(integrationKey), problem);
+        }
+    }
+
+    /** Test seam: weak-secret warnings logged so far. */
+    int weakWebhookSecretWarningsLogged() {
+        return weakWebhookSecretWarnings.get();
     }
 
     private String resolveSecret(String value) {

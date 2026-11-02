@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.integrations.channels.HmacSignatures;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
@@ -15,8 +16,6 @@ import jakarta.ws.rs.ext.Provider;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.List;
 
 /**
@@ -56,8 +55,11 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
 
     private static final Logger LOGGER = Logger.getLogger(OpenAiAuthFilter.class);
 
-    /** Path prefix this filter guards. Everything else passes untouched. */
-    private static final String GUARDED_PREFIX = "v1/";
+    /**
+     * First path segment this filter guards ({@code /v1} and everything below).
+     * Everything else passes untouched.
+     */
+    private static final String GUARDED_SEGMENT = "v1";
 
     private static final String BEARER_PREFIX = "Bearer ";
 
@@ -158,7 +160,7 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
         }
 
         String presented = bearerToken(requestContext.getHeaderString(HttpHeaders.AUTHORIZATION));
-        if (presented == null || !constantTimeEquals(presented, config.getApiKey())) {
+        if (presented == null || !HmacSignatures.constantTimeEquals(presented, config.getApiKey())) {
             LOGGER.debugf("Rejected /v1 request with %s API key",
                     presented == null ? "missing" : "invalid");
             abort(requestContext, Response.Status.UNAUTHORIZED.getStatusCode(),
@@ -230,9 +232,21 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
      * declining is the safe branch. Narrowing it would only mean applying an
      * OpenAI-specific key check to endpoints that are not the OpenAI adapter.
      */
-    private static boolean isGuarded(String path) {
-        String normalized = path.startsWith("/") ? path.substring(1) : path;
-        return normalized.equals("v1") || normalized.startsWith(GUARDED_PREFIX);
+    static boolean isGuarded(String path) {
+        int start = 0;
+        while (start < path.length() && path.charAt(start) == '/') {
+            start++;
+        }
+        int end = path.indexOf('/', start);
+        String firstSegment = end < 0 ? path.substring(start) : path.substring(start, end);
+        // JAX-RS routes on segments with their matrix parameters removed, so
+        // "v1;x/chat/completions" reaches the adapter's resource. Compare the same
+        // matrix-free segment here, or that spelling would skip the key check.
+        int matrix = firstSegment.indexOf(';');
+        if (matrix >= 0) {
+            firstSegment = firstSegment.substring(0, matrix);
+        }
+        return GUARDED_SEGMENT.equals(firstSegment);
     }
 
     private static String bearerToken(String authorizationHeader) {
@@ -245,15 +259,6 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
             return null;
         }
         return value.substring(BEARER_PREFIX.length()).trim();
-    }
-
-    /**
-     * Compare secrets without leaking their length relationship through timing.
-     * {@code String.equals} short-circuits on the first differing character.
-     */
-    private static boolean constantTimeEquals(String presented, String expected) {
-        return MessageDigest.isEqual(presented.getBytes(StandardCharsets.UTF_8),
-                expected.getBytes(StandardCharsets.UTF_8));
     }
 
     private static void abort(ContainerRequestContext requestContext, int status, String message) {

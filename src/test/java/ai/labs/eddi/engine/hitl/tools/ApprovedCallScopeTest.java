@@ -44,4 +44,25 @@ class ApprovedCallScopeTest {
             executor.shutdownNow();
         }
     }
+
+    /**
+     * A preRequest instruction can point the final URI at the agent's own
+     * conversation after the preview was checked; the request as sent is held to
+     * the self-conversation rule too.
+     */
+    @Test
+    void refusesARequestAimedAtTheRunningConversation() {
+        String conversationId = "0123456789abcdef01234567";
+        var refused = assertThrows(IllegalArgumentException.class,
+                () -> ApprovedCallScope.run(SelfUngatingGuard.Protection.ofAgent("aaaabbbbccccddddeeeeffff"), conversationId, () -> {
+                    ApprovedCallScope.checkOutgoing("POST", "http://eddi/agents/" + conversationId.toUpperCase(), "{\"input\":\"hi\"}");
+                    return null;
+                }));
+        assertTrue(refused.getMessage().contains(ApprovedCallScope.OWN_CONVERSATION_REASON), refused.getMessage());
+
+        assertDoesNotThrow(() -> ApprovedCallScope.run(SelfUngatingGuard.Protection.ofAgent("aaaabbbbccccddddeeeeffff"), conversationId, () -> {
+            ApprovedCallScope.checkOutgoing("POST", "http://eddi/agents/ffffeeeeddddccccbbbbaaaa", null);
+            return null;
+        }));
+    }
 }

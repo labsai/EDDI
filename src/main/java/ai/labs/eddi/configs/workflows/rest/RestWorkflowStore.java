@@ -188,20 +188,37 @@ public class RestWorkflowStore implements IRestWorkflowStore {
      *             naming the first reference the caller may not use
      */
     private void requireAccessToReferences(WorkflowConfiguration workflowConfiguration, Set<String> alreadyReferenced) {
-        if (!enforcesReferences()) {
+        requireAccessToReferences(resourceAccessGuard, workflowConfiguration, alreadyReferenced);
+    }
+
+    /**
+     * The one implementation of the reference rule, shared with the backup paths
+     * that write a workflow straight to its store (import, sync) so the two cannot
+     * drift apart.
+     *
+     * @param guard
+     *            the access guard; a {@code null} guard, or one that sees
+     *            everything, makes this a no-op
+     * @param exempt
+     *            references, keyed as {@link #referencedResources} keys them, that
+     *            need no check
+     */
+    public static void requireAccessToReferences(ResourceAccessGuard guard, WorkflowConfiguration workflowConfiguration,
+                                                 Set<String> exempt) {
+        if (guard == null || guard.seesEverything()) {
             return;
         }
         for (Map.Entry<String, URI> reference : referencedResources(workflowConfiguration).entrySet()) {
-            if (alreadyReferenced.contains(reference.getKey())) {
+            if (exempt.contains(reference.getKey())) {
                 continue;
             }
             URI uri = reference.getValue();
             String resourceId = RestUtilities.extractResourceId(uri).getId();
             String label = "configuration referenced by this workflow (" + withoutQuery(uri) + ")";
             if (USE_ONLY_REFERENCE_TYPES.contains(uri.getHost())) {
-                resourceAccessGuard.requireUseAccess(resourceId, label);
+                guard.requireUseAccess(resourceId, label);
             } else {
-                resourceAccessGuard.requireAccess(resourceId, AccessLevel.VIEW, label);
+                guard.requireAccess(resourceId, AccessLevel.VIEW, label);
             }
         }
     }
@@ -231,7 +248,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
      * anything that is not a parseable {@code eddi://} reference with an id is
      * skipped, since the engine cannot resolve it either.
      */
-    static Map<String, URI> referencedResources(WorkflowConfiguration workflowConfiguration) {
+    public static Map<String, URI> referencedResources(WorkflowConfiguration workflowConfiguration) {
         Map<String, URI> references = new LinkedHashMap<>();
         if (workflowConfiguration == null || workflowConfiguration.getWorkflowSteps() == null) {
             return references;
@@ -811,6 +828,11 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     @Override
     public String getResourceURI() {
         return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
     }
 
     @Override

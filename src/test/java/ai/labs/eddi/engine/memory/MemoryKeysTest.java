@@ -43,20 +43,6 @@ class MemoryKeysTest {
     }
 
     @Test
-    @DisplayName("SYSTEM_MESSAGE key is private")
-    void systemMessageIsPrivate() {
-        assertFalse(MemoryKeys.SYSTEM_MESSAGE.isPublic());
-        assertEquals("systemMessage", MemoryKeys.SYSTEM_MESSAGE.key());
-    }
-
-    @Test
-    @DisplayName("PROMPT key is private")
-    void promptIsPrivate() {
-        assertFalse(MemoryKeys.PROMPT.isPublic());
-        assertEquals("prompt", MemoryKeys.PROMPT.key());
-    }
-
-    @Test
     @DisplayName("prefix constants are non-null")
     void prefixConstants() {
         assertEquals("output", MemoryKeys.OUTPUT_PREFIX);

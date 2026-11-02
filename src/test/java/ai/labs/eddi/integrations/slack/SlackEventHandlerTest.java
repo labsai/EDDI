@@ -45,6 +45,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Tests for {@link SlackEventHandler} — static/utility methods and pattern
@@ -324,6 +325,32 @@ class SlackEventHandlerTest {
         verify(slackApi, never()).postBlocksMessage(anyString(), anyString(), any(), any(), anyString());
     }
 
+    /**
+     * A token-less integration must not borrow the bot token of whichever
+     * integration serves its (editor-chosen) approval channel.
+     */
+    @Test
+    void notifyApprovers_tokenlessIntegration_neverBorrowsTheApprovalChannelsToken() {
+        var slackApi = mock(SlackWebApiClient.class);
+        var router = mock(ChannelTargetRouter.class);
+        when(router.getBotToken("slack", "C_VICTIM")).thenReturn("xoxb-victim");
+        var handler = newHandler(slackApi, router);
+
+        var cfg = new ChannelIntegrationConfiguration();
+        cfg.setName("tokenless");
+        cfg.setChannelType("slack");
+        var pc = new HashMap<String, String>();
+        pc.put(SlackHitlSupport.CFG_HITL_APPROVAL_CHANNEL, "C_VICTIM");
+        pc.put(SlackHitlSupport.CFG_HITL_APPROVER_USER_IDS, "U_APPROVER");
+        cfg.setPlatformConfig(pc);
+
+        handler.notifyApprovers(new ResolvedTarget(null, null, cfg, null, null), "conv-1", "agent-1",
+                bookmarkPausedAt(Instant.ofEpochMilli(1_000L)));
+
+        verify(slackApi, never()).postBlocksMessage(anyString(), anyString(), any(), any(), anyString());
+        verify(router, never()).getBotToken(anyString(), anyString());
+    }
+
     // ─── Helpers ───
 
     /**
@@ -333,10 +360,14 @@ class SlackEventHandlerTest {
      * {@code notifyApprovers} and are plain mocks.
      */
     private static SlackEventHandler newHandler(SlackWebApiClient slackApi) {
+        return newHandler(slackApi, mock(ChannelTargetRouter.class));
+    }
+
+    private static SlackEventHandler newHandler(SlackWebApiClient slackApi, ChannelTargetRouter router) {
         var cacheFactory = mock(ICacheFactory.class);
         doReturn(new FakeCache<>()).when(cacheFactory).getCache(anyString(), any(Duration.class));
         return new SlackEventHandler(
-                mock(ChannelTargetRouter.class),
+                router,
                 mock(ObserveGate.class),
                 mock(ToolCostTracker.class),
                 slackApi,

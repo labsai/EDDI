@@ -21,10 +21,16 @@
  *
  * ## Hierarchy
  *
- * TanStack matches keys by PREFIX, so nesting is the invalidation API:
- * `invalidateQueries({ queryKey: agentKeys.all })` clears every agent query,
- * while `agentKeys.descriptor(id)` clears one. Keep the general-to-specific
- * ordering when adding keys — a key that puts its id first cannot be swept.
+ * TanStack matches keys by PREFIX, so nesting is the invalidation API: a key
+ * that sits under a prefix is swept when that prefix is invalidated. Keep the
+ * general-to-specific ordering when adding keys — a key that puts its id first
+ * cannot be swept.
+ *
+ * `agentKeys.all` covers the agent LISTS and the deployment, impact and version
+ * entries (`useAgent` itself caches under `[...agentKeys.all, id, version]`).
+ * It does NOT cover `agentKeys.detail`, `agentKeys.descriptor` or
+ * `agentKeys.prompt`, which have their own roots — so a write that changes an
+ * agent invalidates `agentWriteInvalidations(id)`, not `agentKeys.all` alone.
  *
  * Only keys with more than one call site, or with an invalidator somewhere other
  * than the file that reads them, need to live here. A query read and invalidated
@@ -110,6 +116,18 @@ export function agentDeploymentQueries(agentIds: readonly string[]) {
   };
 }
 
+/**
+ * The chat surface's queries. `deployedAgents` is the list of agents the chat
+ * pickers offer: every deploy, undeploy and save-and-deploy invalidates it, from
+ * nine call sites in seven files that each typed the literal.
+ */
+export const chatKeys = {
+  all: ["chat"] as const,
+  deployedAgents: ["chat", "deployedAgents"] as const,
+  history: (agentId?: string | null) =>
+    agentId === undefined ? (["chat", "history"] as const) : (["chat", "history", agentId] as const),
+} as const;
+
 export const groupKeys = {
   all: ["groups"] as const,
   conversations: ["groupConversations"] as const,
@@ -128,3 +146,31 @@ export const groupKeys = {
 export function agentWriteInvalidations(agentId: AgentId) {
   return [agentKeys.detail(agentId), agentKeys.descriptor(agentId), agentKeys.all];
 }
+
+/**
+ * Conversation ratings. Everything sits under `ratingKeys.all`, so a triage
+ * change (one row, or a bulk review) refreshes the list, the summaries, the
+ * conversation view and the sidebar's attention badge at once.
+ */
+export const ratingKeys = {
+  all: ["ratings"] as const,
+  list: (query: object, sort: string, index: number, limit: number) =>
+    [...ratingKeys.all, "list", query, sort, index, limit] as const,
+  summary: (query: object, groupBy: string) => [...ratingKeys.all, "summary", query, groupBy] as const,
+  /** The sidebar badge and the dashboard tile share this one entry. */
+  attention: (agentId?: string) => [...ratingKeys.all, "attention", agentId ?? null] as const,
+  conversation: (conversationId: string | undefined, agentId: string | undefined) =>
+    [...ratingKeys.all, "conversation", conversationId, agentId ?? null] as const,
+} as const;
+
+/**
+ * Alerts. Everything sits under `alertKeys.all`, so an acknowledgement, a retry
+ * or a rule save refreshes the inbox, the rule list and the sidebar badge.
+ */
+export const alertKeys = {
+  all: ["alerts"] as const,
+  events: (query: object, index: number, limit: number) => [...alertKeys.all, "events", query, index, limit] as const,
+  /** The sidebar badge. */
+  unacknowledged: (agentId?: string) => [...alertKeys.all, "unacknowledged", agentId ?? null] as const,
+  rules: (agentId?: string) => [...alertKeys.all, "rules", agentId ?? null] as const,
+} as const;

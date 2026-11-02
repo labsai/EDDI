@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
 import dev.langchain4j.data.message.ChatMessage;
@@ -115,6 +116,47 @@ public class ToolResponseTruncator {
      */
     public String truncateIfNeeded(String conversationId, String toolName, String result, ToolResponseLimits limits,
                                    String taskType, Map<String, String> taskParameters) {
+        return truncateIfNeeded(conversationId, toolName, result, limits, taskType, taskParameters, SummarizerSpend.UNMETERED);
+    }
+
+    /**
+     * The spend side of the {@code summarize} strategy: its summarizer call is a
+     * paid model call like any other of the turn.
+     */
+    interface SummarizerSpend {
+
+        /** Neither checked nor charged — a caller outside a conversation turn. */
+        SummarizerSpend UNMETERED = new SummarizerSpend() {
+            @Override
+            public boolean admit() {
+                return true;
+            }
+
+            @Override
+            public void charge(Map<String, Object> tokenUsage) {
+                // nothing to charge
+            }
+        };
+
+        /**
+         * Whether the summarizer may be called: false when the conversation's cost
+         * ceiling or the tenant budget is reached — the result is then truncated
+         * instead.
+         */
+        boolean admit();
+
+        /** Charges the summarizer call's token usage to the conversation. */
+        void charge(Map<String, Object> tokenUsage);
+    }
+
+    /**
+     * As
+     * {@link #truncateIfNeeded(String, String, String, ToolResponseLimits, String, Map)},
+     * with the {@code summarize} strategy's call checked and charged through
+     * {@code spend}.
+     */
+    public String truncateIfNeeded(String conversationId, String toolName, String result, ToolResponseLimits limits,
+                                   String taskType, Map<String, String> taskParameters, SummarizerSpend spend) {
         if (limits == null || result == null) {
             return result;
         }
@@ -129,7 +171,8 @@ public class ToolResponseTruncator {
 
         return switch (strategy.toLowerCase()) {
             case "paginate" -> paginateResponse(conversationId, toolName, result, maxChars);
-            case "summarize" -> summarizeResponse(toolName, result, maxChars, limits, taskType, taskParameters);
+            case "summarize" -> summarizeResponse(toolName, result, maxChars, limits, taskType, taskParameters,
+                    spend != null ? spend : SummarizerSpend.UNMETERED);
             default -> truncateResponse(toolName, result, maxChars);
         };
     }
@@ -203,6 +246,8 @@ public class ToolResponseTruncator {
      * <li>No {@code summarizerModel} configured → truncate</li>
      * <li>No {@code taskType} or {@code taskParameters} → truncate</li>
      * <li>Response exceeds cost ceiling (200K chars) → truncate</li>
+     * <li>The spend check refuses the call (conversation cost ceiling, tenant
+     * budget) → truncate; an admitted call is charged whatever happens next</li>
      * <li>Model creation or LLM call fails → truncate</li>
      * <li>Summary is longer than {@code maxChars} → truncate</li>
      * <li>Summary is empty → truncate</li>
@@ -210,7 +255,7 @@ public class ToolResponseTruncator {
      */
     private String summarizeResponse(String toolName, String result, int maxChars,
                                      ToolResponseLimits limits, String taskType,
-                                     Map<String, String> taskParameters) {
+                                     Map<String, String> taskParameters, SummarizerSpend spend) {
         String summarizerModel = limits.getSummarizerModel();
 
         // Guard 1: no summarizer model configured
@@ -236,6 +281,15 @@ public class ToolResponseTruncator {
             return truncateResponse(toolName, result, maxChars);
         }
 
+        // Spend guard: a summarizer call is paid like every other model
+        // call of the turn and must not start once the conversation's ceiling or the
+        // tenant budget is reached.
+        if (!spend.admit()) {
+            LOGGER.debugf("Spend check refused summarizing tool '%s'; falling back to truncation", sanitize(toolName));
+            incrementCounter(toolName, "summarize_fallback");
+            return truncateResponse(toolName, result, maxChars);
+        }
+
         try {
             // Build summarizer params: inherit parent task's params, override modelName
             // (every provider's model key — see ModelParameterKeys#withModel)
@@ -253,6 +307,10 @@ public class ToolResponseTruncator {
 
             var response = RetryConfiguration.executeWithDefaultRetry(() -> model.chat(ChatRequest.builder().messages(messages).build()),
                     "Tool response summarization");
+            // Paid whatever happens to the summary below.
+            if (response.tokenUsage() != null) {
+                spend.charge(ToolContextBudget.tokenUsageMap(response.tokenUsage()));
+            }
             String summary = response.aiMessage().text();
 
             // Guard 4: empty summary

@@ -19,6 +19,28 @@ import ai.labs.eddi.ui.JsGlobalScript;
  */
 public final class BrandDelivery {
 
+    /**
+     * The Manager's {@code brand-50…950} scale, derived in the browser from
+     * {@code --color-primary}: 500 is the primary itself, lighter steps mix it with
+     * white and darker ones with black, in OKLCH so the hue holds. The percentages
+     * put each step at about the lightness of the Tailwind amber step it replaces
+     * (amber 500 sits at L≈77%). The server only ever writes this fixed text; it
+     * never computes a shade. {@code --color-warn-*} (warnings, fixed amber) and
+     * {@code --color-ochre-*} (a fixed categorical amber hue) are deliberately
+     * never touched.
+     */
+    static final String BRAND_SCALE = "--color-brand-50:color-mix(in oklch,var(--color-primary) 6%,white);"
+            + "--color-brand-100:color-mix(in oklch,var(--color-primary) 16%,white);"
+            + "--color-brand-200:color-mix(in oklch,var(--color-primary) 33%,white);"
+            + "--color-brand-300:color-mix(in oklch,var(--color-primary) 52%,white);"
+            + "--color-brand-400:color-mix(in oklch,var(--color-primary) 75%,white);"
+            + "--color-brand-500:var(--color-primary);"
+            + "--color-brand-600:color-mix(in oklch,var(--color-primary) 85%,black);"
+            + "--color-brand-700:color-mix(in oklch,var(--color-primary) 70%,black);"
+            + "--color-brand-800:color-mix(in oklch,var(--color-primary) 60%,black);"
+            + "--color-brand-900:color-mix(in oklch,var(--color-primary) 54%,black);"
+            + "--color-brand-950:color-mix(in oklch,var(--color-primary) 36%,black);";
+
     private BrandDelivery() {
     }
 
@@ -51,6 +73,12 @@ public final class BrandDelivery {
      * when a colour is set, because it comes after {@code :root} with the same
      * specificity as the bundle's own {@code .dark} block and would otherwise lose
      * to it.
+     * <p>
+     * With a primary colour, each block also carries {@link #BRAND_SCALE}, so the
+     * scale is recomputed against that mode's primary wherever the {@code dark}
+     * class sits, and {@code :root} sets {@code --brand-loader-accent} for the HTML
+     * shells' loading spinner. The spinner always sits on a dark background, so it
+     * takes the dark primary.
      */
     public static String stylesheet(ResolvedBrand brand) {
         BrandColors colors = brand.colors();
@@ -65,6 +93,9 @@ public final class BrandDelivery {
         StringBuilder css = new StringBuilder("/* brand revision ").append(brand.revision()).append(" */\n");
         css.append(":root{");
         managerTokens(css, primary, foreground);
+        if (primary != null || darkPrimary != null) {
+            css.append("--brand-loader-accent:").append(darkPrimary != null ? darkPrimary : primary).append(';');
+        }
         if (accent != null) {
             css.append("--chat-accent:").append(accent).append(';');
         }
@@ -86,6 +117,9 @@ public final class BrandDelivery {
         if (foreground != null) {
             css.append("--color-primary-foreground:").append(foreground).append(';');
             css.append("--color-sidebar-accent-foreground:").append(foreground).append(';');
+        }
+        if (primary != null) {
+            css.append(BRAND_SCALE);
         }
     }
 

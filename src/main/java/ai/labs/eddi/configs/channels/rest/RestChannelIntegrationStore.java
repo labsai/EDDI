@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -16,13 +18,19 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.utils.RestUtilities;
+import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -32,6 +40,7 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -52,9 +61,20 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * <p>
      * {@code webhook} is the signed inbound webhook channel ({@code POST
      * /integrations/webhook/{id}}); its {@code platformConfig} is validated by
-     * {@link WebhookChannelSettings#validate}.
+     * {@link WebhookChannelSettings#validate}. {@code email} is the mailbox channel
+     * (trigger mode: a polled IMAP mailbox starts turns, nothing is sent back),
+     * validated by {@link EmailChannelSettings#validate} and, against the
+     * deployment, by {@link EmailChannelSupport}.
      */
-    private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE);
+    private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE,
+            EmailChannelSettings.CHANNEL_TYPE);
+
+    /**
+     * Response header carrying save-time warnings: comma-separated stable codes
+     * (see {@link EmailChannelSettings#WARNING_OPEN_TRIGGER}), absent when there
+     * are none. A warning never refuses a save.
+     */
+    public static final String WARNINGS_HEADER = "X-Eddi-Warnings";
 
     /**
      * Trigger keywords that are reserved by the router and must not be configured.
@@ -65,15 +85,111 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final IDocumentDescriptorStore documentDescriptorStore;
     private final ResourceAccessGuard resourceAccessGuard;
     private final RestVersionInfo<ChannelIntegrationConfiguration> restVersionInfo;
+    private final Instance<EmailChannelSupport> emailSupport;
+    private final SecretResolver secretResolver;
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, (Instance<EmailChannelSupport>) null, (SecretResolver) null);
+    }
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            Instance<EmailChannelSupport> emailSupport) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, emailSupport, null);
+    }
+
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            SecretResolver secretResolver) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, null, secretResolver);
+    }
 
     @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
-            ResourceAccessGuard resourceAccessGuard) {
+            ResourceAccessGuard resourceAccessGuard,
+            Instance<EmailChannelSupport> emailSupport,
+            SecretResolver secretResolver) {
+        this.secretResolver = secretResolver;
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
         this.channelStore = channelStore;
         this.documentDescriptorStore = documentDescriptorStore;
         this.resourceAccessGuard = resourceAccessGuard;
+        this.emailSupport = emailSupport;
+    }
+
+    private static boolean isEmail(ChannelIntegrationConfiguration configuration) {
+        return configuration != null && EmailChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(configuration.getChannelType());
+    }
+
+    private EmailChannelSupport emailSupport() {
+        if (emailSupport == null || !emailSupport.isResolvable()) {
+            throw new ServiceUnavailableException("Email channel support is not available on this node.");
+        }
+        return emailSupport.get();
+    }
+
+    /**
+     * The deployment checks and, after the write, the poll schedule and the
+     * warnings header of an email integration.
+     */
+    private Response withEmailFollowUp(String id, ChannelIntegrationConfiguration configuration, Response response) {
+        if (!isEmail(configuration) || id == null || response.getStatus() >= 300) {
+            return response;
+        }
+        EmailChannelSupport support = emailSupport();
+        support.afterSave(id, configuration);
+        List<String> warnings;
+        try {
+            warnings = support.warnings(configuration);
+        } catch (RuntimeException e) {
+            LOG.debugf("Email warnings skipped: %s", e.getMessage());
+            warnings = List.of();
+        }
+        if (warnings.isEmpty()) {
+            return response;
+        }
+        return Response.fromResponse(response).header(WARNINGS_HEADER, String.join(",", warnings)).build();
+    }
+
+    /**
+     * Refuses a webhook whose vault secret already exists but is shorter than
+     * {@link WebhookChannelSettings#MIN_SECRET_LENGTH}: the endpoint would answer
+     * 401 to every request. A secret that is not in the vault yet (or cannot be
+     * read) cannot be judged here - the vault reference alone is checked by
+     * {@link WebhookChannelSettings#validate}, and the router re-checks the
+     * resolved value on every refresh.
+     */
+    private void requireUsableWebhookSecret(Map<String, String> platformConfig) {
+        String reference = platformConfig == null ? null : platformConfig.get(WebhookChannelSettings.KEY_SIGNING_SECRET);
+        if (secretResolver == null || reference == null) {
+            return;
+        }
+        try {
+            // Only the default tenant's vault is read at save time: resolving another
+            // tenant's reference for any editor would tell them whether that secret
+            // exists and whether it is short. Such references are left to the router's
+            // runtime check.
+            if (!SecretReference.DEFAULT_TENANT.equals(SecretReference.parse(reference.trim()).tenantId())) {
+                return;
+            }
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        String resolved;
+        try {
+            resolved = secretResolver.resolveValue(reference.trim());
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (resolved != null && !resolved.equals(reference.trim()) && resolved.length() < WebhookChannelSettings.MIN_SECRET_LENGTH) {
+            throw new BadRequestException("The vault secret behind platformConfig.signingSecret is shorter than "
+                    + WebhookChannelSettings.MIN_SECRET_LENGTH + " characters - use 32 random bytes.");
+        }
     }
 
     /**
@@ -130,9 +246,12 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, id);
         validateUniqueName(channelConfiguration, id);
+        if (isEmail(channelConfiguration)) {
+            emailSupport().validateAgainstDeployment(channelConfiguration, id);
+        }
         Response response = restVersionInfo.update(id, version, channelConfiguration);
         syncDescriptor(id, channelConfiguration);
-        return response;
+        return withEmailFollowUp(id, channelConfiguration, response);
     }
 
     @Override
@@ -141,17 +260,22 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         requireUseOnTargets(channelConfiguration);
         validateUniqueChannelId(channelConfiguration, null);
         validateUniqueName(channelConfiguration, null);
+        if (isEmail(channelConfiguration)) {
+            emailSupport().validateAgainstDeployment(channelConfiguration, null);
+        }
         Response response = restVersionInfo.create(channelConfiguration);
         URI location = response.getLocation();
+        String createdId = null;
         if (location != null) {
             try {
                 var resourceId = RestUtilities.extractResourceId(location);
+                createdId = resourceId.getId();
                 syncDescriptor(resourceId.getId(), channelConfiguration);
             } catch (Exception e) {
                 LOG.warn("Failed to sync channel descriptor on create", e);
             }
         }
-        return response;
+        return withEmailFollowUp(createdId, channelConfiguration, response);
     }
 
     @Override
@@ -172,27 +296,86 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
         validateConfiguration(config);
         validateUniqueName(config, null);
+        if (isEmail(config)) {
+            // Refused for an email integration: the copy would poll the same mailbox.
+            emailSupport().validateAgainstDeployment(config, null);
+        }
         Response response = restVersionInfo.create(config);
         URI location = response.getLocation();
+        String createdId = null;
         if (location != null) {
             try {
                 var resourceId = RestUtilities.extractResourceId(location);
+                createdId = resourceId.getId();
                 syncDescriptor(resourceId.getId(), config);
             } catch (Exception e) {
                 LOG.warn("Failed to sync channel descriptor on duplicate", e);
             }
         }
-        return response;
+        return withEmailFollowUp(createdId, config, response);
     }
 
     @Override
     public Response deleteChannel(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+        boolean email = false;
+        try {
+            email = isEmail(channelStore.read(id, version));
+        } catch (Exception e) {
+            LOG.debugf("Channel %s could not be read before deletion: %s", sanitize(id), e.getMessage());
+        }
+        Response response = restVersionInfo.delete(id, version, permanent);
+        if (email && response.getStatus() < 300 && emailSupport != null && emailSupport.isResolvable()) {
+            emailSupport.get().afterDelete(id);
+        }
+        return response;
+    }
+
+    @Override
+    public List<EmailSuppressionView> readEmailSuppressions(String id, Integer limit) {
+        requireEmailIntegrationForEdit(id);
+        return emailSupport().suppressions(id, limit == null ? 100 : limit).stream()
+                .map(s -> new EmailSuppressionView(s.addressHash(), s.domain(), s.reason(), s.createdAt() == null ? null : s.createdAt().toString()))
+                .toList();
+    }
+
+    @Override
+    public Response clearEmailSuppression(String id, EmailSuppressionView.ClearRequest request) {
+        requireEmailIntegrationForEdit(id);
+        if (request == null || request.address() == null || request.address().isBlank()) {
+            throw new BadRequestException("The body must name the address to clear: {\"address\": \"...\"}.");
+        }
+        return emailSupport().clearSuppression(id, request.address())
+                ? Response.noContent().build()
+                : Response.status(Response.Status.NOT_FOUND).build();
+    }
+
+    /**
+     * The suppression list belongs to the integration: whoever may edit it may read
+     * and clear it. A channel that is not an email integration has none (404).
+     */
+    private void requireEmailIntegrationForEdit(String id) {
+        restVersionInfo.requireEditAccess(id);
+        ChannelIntegrationConfiguration current;
+        try {
+            current = channelStore.read(id, channelStore.getCurrentResourceId(id).getVersion());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("No channel integration " + id + ".");
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("The channel store could not be read.");
+        }
+        if (!isEmail(current)) {
+            throw new NotFoundException("Channel integration " + id + " is not an email integration.");
+        }
     }
 
     @Override
     public String getResourceURI() {
         return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
     }
 
     @Override
@@ -288,6 +471,14 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             if (!webhookErrors.isEmpty()) {
                 throw new BadRequestException(String.join(" ", webhookErrors));
             }
+            requireUsableWebhookSecret(config.getPlatformConfig());
+        }
+        boolean email = EmailChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(channelType);
+        if (email) {
+            List<String> emailErrors = EmailChannelSettings.validate(config.getPlatformConfig());
+            if (!emailErrors.isEmpty()) {
+                throw new BadRequestException(String.join(" ", emailErrors));
+            }
         }
 
         // Default target must reference an existing target
@@ -319,6 +510,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             if (target.getTargetId() == null || target.getTargetId().isBlank()) {
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
+            }
+            if (email && target.isObserveMode()) {
+                // Every mail is addressed to the mailbox; there is no traffic to observe.
+                throw new BadRequestException(
+                        "Target '" + target.getName() + "': observeMode is not supported for email integrations.");
             }
             if (webhook && target.isObserveMode()) {
                 // An observer watches chat traffic it was not addressed in. A webhook

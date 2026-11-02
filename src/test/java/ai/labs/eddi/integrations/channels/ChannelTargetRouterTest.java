@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.api.IDeploymentStatusReader;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -62,7 +63,7 @@ class ChannelTargetRouterTest {
         when(agentAdmin.readAllDeploymentStatuses(any())).thenReturn(Collections.emptyList());
 
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore,
-                secretResolver, cacheFactory);
+                secretResolver, mock(VaultHostAllowlist.class), cacheFactory);
     }
 
     // ==================== resolveFromIntegration ====================

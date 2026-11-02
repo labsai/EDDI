@@ -440,10 +440,10 @@ public class SecretScrubber {
             String path = textValue.substring(0, queryStart);
             String fragment = fragmentStart < 0 ? "" : textValue.substring(fragmentStart);
             String redactedPath = redactFreeText(path);
-            return (redactedPath != null ? redactedPath : path) + "?" + scrubPairs(query) + fragment;
+            return (redactedPath != null ? redactedPath : path) + "?" + scrubPairs(query, true) + fragment;
         }
         if (isFormEncoded(textValue)) {
-            return scrubPairs(textValue);
+            return scrubPairs(textValue, false);
         }
         return null;
     }
@@ -485,8 +485,13 @@ public class SecretScrubber {
      * Each {@code name=value} pair judged on its own: a credential-named key, or a
      * value {@link SecretRedactionFilter} recognises, loses its value; a value that
      * is a vault reference or a template expression is a pointer and stays.
+     *
+     * @param queryString
+     *            the pairs are a URI's query, whose credential parameter names
+     *            ({@code key}, {@code sig}, …) the editor read redacts too — not a
+     *            form body, where such a name is ordinary data
      */
-    private static String scrubPairs(String pairs) {
+    private static String scrubPairs(String pairs, boolean queryString) {
         var out = new StringBuilder(pairs.length());
         for (String pair : pairs.split("&", -1)) {
             if (!out.isEmpty()) {
@@ -508,7 +513,8 @@ public class SecretScrubber {
             }
             boolean pointer = WHOLE_POINTER.matcher(decoded).matches();
             boolean credential = !decoded.isEmpty() && !pointer
-                    && (isSecretFieldName(name, null) || UriRedactor.isSensitiveHeaderName(name) || redactFreeText(decoded) != null);
+                    && (isSecretFieldName(name, null) || UriRedactor.isSensitiveHeaderName(name)
+                            || (queryString && ConfigSecretRedactor.isCredentialQueryName(name)) || redactFreeText(decoded) != null);
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return out.toString();
@@ -618,7 +624,7 @@ public class SecretScrubber {
             // value goes into an exported config, where the angle brackets are not
             // URI characters and a vault placeholder is both legible and what the
             // importer expects an operator to replace.
-            String redactedUrl = UriRedactor.redactUri(textValue, REDACTED);
+            String redactedUrl = redactCredentialQueryValues(UriRedactor.redactUri(textValue, REDACTED));
             return redactedUrl.equals(textValue) ? null : redactedUrl;
         }
 
@@ -630,6 +636,52 @@ public class SecretScrubber {
         }
 
         return null;
+    }
+
+    /**
+     * The URL with the value of every query parameter whose NAME marks a credential
+     * — by the rule editor reads apply
+     * ({@link ConfigSecretRedactor#isCredentialQueryName}: {@code key},
+     * {@code sig}, {@code signature}, {@code accessKey} …) — replaced by
+     * {@link #REDACTED}.
+     * <p>
+     * {@link UriRedactor} judges a parameter by its value's shape and by the header
+     * words, which an opaque signed-URL signature under {@code sig} passes. An
+     * editor's GET hid that value while the export carried it, so the archive was
+     * the way to read it back. A pointer (a vault reference or a template
+     * expression) stays, as it does everywhere else.
+     */
+    private static String redactCredentialQueryValues(String url) {
+        int queryStart = url.indexOf('?');
+        if (queryStart < 0) {
+            return url;
+        }
+        int fragmentStart = url.indexOf('#', queryStart);
+        String query = fragmentStart < 0 ? url.substring(queryStart + 1) : url.substring(queryStart + 1, fragmentStart);
+        String fragment = fragmentStart < 0 ? "" : url.substring(fragmentStart);
+        var out = new StringBuilder(query.length());
+        for (String pair : query.split("&", -1)) {
+            if (!out.isEmpty()) {
+                out.append('&');
+            }
+            int eq = pair.indexOf('=');
+            if (eq < 0) {
+                out.append(pair);
+                continue;
+            }
+            String name = pair.substring(0, eq);
+            String rawValue = pair.substring(eq + 1);
+            String decoded;
+            try {
+                decoded = URLDecoder.decode(rawValue, StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException malformedEscape) {
+                decoded = rawValue;
+            }
+            boolean credential = !decoded.isEmpty() && !WHOLE_POINTER.matcher(decoded).matches()
+                    && ConfigSecretRedactor.isCredentialQueryName(name);
+            out.append(name).append('=').append(credential ? REDACTED : rawValue);
+        }
+        return url.substring(0, queryStart) + "?" + out + fragment;
     }
 
     /** An http(s) URL — the only shape {@link UriRedactor} is meant to be given. */

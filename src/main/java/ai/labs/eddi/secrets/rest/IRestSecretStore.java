@@ -40,7 +40,8 @@ public interface IRestSecretStore {
      * @param body
      *            the request body containing the plaintext value, description, and
      *            optional agent access list
-     * @return 201 Created or 200 OK if updated
+     * @return 201 Created or 200 OK if updated; 409 when a create's grant leaves
+     *         out a deployed agent that already references the secret
      */
     @PUT
     @Path("/{tenantId}/{keyName}")
@@ -50,7 +51,9 @@ public interface IRestSecretStore {
                        + "allowedAgents — the agent ids that may use it, or [\"*\"] to grant every agent explicitly; a create without one is a "
                        + "400. The same create must carry allowedHosts — the exact host or host:port entries the secret may be sent to, "
                        + "enforced when a ${vault:…} reference is resolved for an outbound request — or [\"*\"] to allow any host "
-                       + "explicitly. A rotation may omit either list and keeps the stored one.")
+                       + "explicitly. A rotation may omit either list and keeps the stored one. A create whose allowedAgents leaves out an "
+                       + "agent already deployed with a reference to the secret is a 409 naming those agents: add them, or undeploy them "
+                       + "first.")
     Response storeSecret(@PathParam("tenantId") String tenantId, @PathParam("keyName") String keyName, SecretRequest body);
 
     /**

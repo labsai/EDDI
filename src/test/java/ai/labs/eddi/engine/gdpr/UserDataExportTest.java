@@ -91,4 +91,13 @@ class UserDataExportTest {
         assertEquals(0, export.totalConversations());
         assertFalse(export.conversationsTruncated());
     }
+
+    @Test
+    void sectionTruncated_onlyWhenAParticipantSectionSaysSo() {
+        assertTrue(UserDataExport.isSectionTruncated(Map.of(UserDataExport.SECTION_TRUNCATED, true, "counters", List.of())));
+        assertFalse(UserDataExport.isSectionTruncated(Map.of(UserDataExport.SECTION_TRUNCATED, false)));
+        assertFalse(UserDataExport.isSectionTruncated(Map.of("counters", List.of())));
+        assertFalse(UserDataExport.isSectionTruncated(List.of()));
+        assertFalse(UserDataExport.isSectionTruncated(null));
+    }
 }

@@ -560,7 +560,8 @@ not already in the cache, so an empty cache with no egress fails rather than deg
 **Note**: Jlama runs models locally in Java without requiring external services like
 Ollama. It is CPU inference — there is no GPU path — so it suits small quantized models
 (1B–8B) rather than large ones. For a GPU or a larger model, serve it with vLLM or
-`llama-server` and point the `openai` provider at it via `baseUrl`.
+`llama-server` and reach it with type `openai-compatible`
+([Self-hosted OpenAI-compatible servers](#self-hosted-openai-compatible-servers)).
 
 **`modelName` must be a Hugging Face repository id in `owner/name` form** — for
 example `tjake/Llama-3.2-1B-Instruct-JQ4` or
@@ -867,7 +868,9 @@ still not a boolean counts as `false` with one WARN per distinct value. It never
 still win over the endpoint's flags; then the flags; then, for vision only, the deployment
 override `eddi.multimodal.openai-compatible.vision`; then the default, which is off. In a
 [model cascade](model-cascade.md) each `openai-compatible` step is judged by its **own**
-parameters (merged over the task's, as every step's are), not by the task's type.
+parameters (merged over the task's, as every step's are), not by the task's type. That covers
+the JSON response format and the **image attachments**: a step whose own endpoint declares
+`vision=true` gets the images, and a step that does not is not handed the task's.
 
 **Not yet.** Native `json_schema` structured output stays off for this type: schemaless JSON is
 sent when `jsonMode` allows it, and the prompt block carries the schema. Model discovery through
@@ -925,6 +928,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
+| `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
@@ -1058,6 +1062,7 @@ A task can screen the **user's message before the model is called** (`inputGuard
 | `type` | The guardrail (table below). An unknown type is skipped with a WARN in the log — never an error, so a config written for a newer EDDI still runs. | — |
 | `action` | `block`, `redact`, `reprompt` or `warn` (below). An unknown value is treated as `block`. | `block` |
 | `maxRetries` | `reprompt` only: how many times the model may be asked again. Clamped to 0–5. | `2` |
+| `onExhausted` | `reprompt` on output only: what happens once the retries are spent — `block`, or `deliver-best` to deliver the attempt this guardrail rated best, still screened by the guardrails after it. See [When the retries run out](#when-the-retries-run-out-onexhausted). | `block` |
 | `blockMessage` | The answer the user gets when this guardrail blocks. Used as-is — it is never run through the template engine. | `Request blocked by guardrail '<type>'.` / `Response withheld by guardrail '<type>'.` |
 | `parameters` | Per-type settings, plain strings (never templated). Two work for every type: `repromptMessage` overrides the corrective message of a reprompt (`{reason}` is replaced by the guardrail's reason), and `failMode` (`closed`/`open`) decides what a failing guardrail does — see below. | — |
 
@@ -1067,7 +1072,7 @@ A task can screen the **user's message before the model is called** (`inputGuard
 |---|---|---|
 | `block` | The model is **not called** and `preRequest` does not run; the block message is the turn's answer, and `postResponse` runs as after any other fallback. | The answer is replaced by the block message (not parsed as JSON, not recorded as the model's response). |
 | `redact` | The message the model sees is rewritten. Conversation memory keeps what the user sent. | The answer is rewritten before it is stored, parsed or delivered. A guardrail with no rewrite (a pure violation) is replaced by the block message. |
-| `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked. |
+| `reprompt` | Behaves as `block` — there is nothing to re-ask. | The **same model** is asked again: the original request, the rejected answer as the assistant's turn, then a corrective message. The new answer is screened again from the first guardrail. When `maxRetries` is spent, or the turn has less than `responseValidation.minAttemptMs` left, the answer is blocked — or, with `onExhausted: "deliver-best"`, the best attempt is delivered. |
 | `warn` | Recorded (audit, metric, SSE) — nothing else. | Same. |
 
 A block message is served the way an [`onError` fallback](#fallback-answers-and-onerror) is: the turn is flagged as a fallback, so later turns' history leaves the block message out, and a `convertToObject` task with `responseValidation.fallbackField` gets it wrapped as `{"<fallbackField>": "<block message>"}`. `postResponse` runs with that shape — on an input block exactly as on an output block, a spend refusal or an `onError` fallback — so a task with `addToOutput: false` whose `postResponse` builds the reply still answers the user.
@@ -1083,7 +1088,7 @@ Three limits. **The current turn** is not withheld by its own flag: a second LLM
 | `closed` | Treated as a finding that blocks: the turn is answered with the guardrail's `blockMessage` (an earlier history message is withheld). | `block`, `reprompt` — a guardrail that exists to keep something out must not let it through because it could not look (a `reprompt` cannot verify any answer either, so it blocks without re-asking) |
 | `open` | Recorded as a `warn`; the text passes. | `redact`, `warn` |
 
-Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) that could not decide, `classifier_unavailable` / `classifier_unparseable`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
+Either way the audit record and the `guardrail_triggered` event carry reason `guardrail_error` (action `block` or `warn`) — or, for a [`classifier`](#the-classifier-type-a-safety-classifier-model) or [`judge`](#the-judge-type-grading-the-answer-with-issue-codes) that could not decide, `classifier_unavailable` / `classifier_unparseable` or `judge_unavailable` / `judge_unparseable`, and for an [`expression`](#the-expression-type-a-deterministic-check-over-a-json-answer), `expression_unparseable` / `expression_undecided:<cause>`. Set `"parameters": { "failMode": "open" }` on a blocking guardrail only when availability matters more than screening for it.
 
 A `block` is a returned value, never an exception, so a block message can never be mistaken for a transient provider error and retried.
 
@@ -1092,10 +1097,12 @@ A `block` is a returned value, never an exception, so a block message can never 
 | Type | Phases | Finds | Parameters |
 |---|---|---|---|
 | `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
-| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers; rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked; a card followed by its CVV or expiry, `4111 1111 1111 1111 123`, is found by checking the digit groups of the run, never by splitting an unseparated number), phone numbers (grouped, or unspaced with a leading `+`, e.g. `+15551234567`; an unspaced number without `+` is not treated as a phone number); rewrites each to `[REDACTED:<kind>]`. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone`; `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
+| `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
 | `json-object` | output | An answer that is not one JSON object (a Markdown code fence is tolerated). It checks the shape only — for a schema use [`responseSchema` with `onSchemaMismatch`](#shape-validation-responseschema-and-nonblankfields). | — |
+| `expression` | output | A JSON answer for which your boolean expression is false — arithmetic and cross-field rules such as `sum(lines[*].amount) == total`. See [below](#the-expression-type-a-deterministic-check-over-a-json-answer). | `expr`, `issue`, `fix` (all required) |
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
 
@@ -1121,7 +1128,7 @@ Patterns in `parameters` are author configuration evaluated against untrusted te
 } ]
 ```
 
-The classifier is called the way an LLM task calls its model: `provider` is an EDDI provider type (`openai` for any OpenAI-compatible server such as vLLM, `ollama`, `azure-openai`, …), and **every parameter that is not one of the classifier's own is passed to that provider unchanged**, in the same vocabulary as a task's `parameters` — `baseUrl`, `apiKey`, `modelName` (`openai`) or `model` (`ollama`), `maxTokens`, `customParameters`, and so on. `apiKey` should be a `${vault:…}` reference; vault and `${vars.…}` references are resolved as they are for a task, and the vault grant check covers them. The endpoint is reached through the provider client, not through EDDI's SSRF-guarded HTTP client, because a classifier is normally an in-cluster service on a private address: it is the same trust class as a task's own `baseUrl`, so only people who may edit agent configuration can point it anywhere.
+The classifier is called the way an LLM task calls its model: `provider` is an EDDI provider type (`openai-compatible` for a self-hosted OpenAI-compatible server such as vLLM or `llama-server`, `ollama`, `openai`, `azure-openai`, …), and **every parameter that is not one of the classifier's own is passed to that provider unchanged**, in the same vocabulary as a task's `parameters` — `baseUrl`, `apiKey`, `modelName` (`openai-compatible`, `openai`) or `model` (`ollama`), `maxTokens`, `customParameters`, and so on. `apiKey` should be a `${vault:…}` reference; vault and `${vars.…}` references are resolved as they are for a task, and the vault grant check covers them. The endpoint is reached through the provider client, not through EDDI's SSRF-guarded HTTP client, because a classifier is normally an in-cluster service on a private address: it is the same trust class as a task's own `baseUrl`, so only people who may edit agent configuration can point it anywhere.
 
 | Parameter | Meaning | Default |
 |---|---|---|
@@ -1138,13 +1145,13 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
 
 **Template data, never template source.** `promptTemplate` is your configuration. The text being screened reaches it only as data — `{input}` (the user's message; in the output phase, the user message the model answered), `{output}` (the answer, output phase), `{context}` and `{risk}` — so a user who types `{risk}` or `{#for …}` sends exactly those characters to the classifier; they are never evaluated.
 
-**Could not decide.** Safe is a positive finding, never a default (Pillar 4). A classifier that names an unsupported provider, cannot be reached, times out, has a `promptTemplate` that does not render, or answers something that is not a label has not checked the text. Its `failMode` decides, exactly as for a failing built-in guardrail — but the audit reason says why: `classifier_unavailable` (no answer) or `classifier_unparseable` (an answer that is neither label). A flagged text carries reason `classifier_flagged` (or `classifier_flagged:<risk>`).
+**Could not decide.** Safe is a positive finding, never a default (Pillar 4). A classifier that names an unsupported provider, cannot be reached, times out, has a `promptTemplate` that does not render, or answers something that is not a label has not checked the text. Its `failMode` decides, exactly as for a failing built-in guardrail — but the audit reason says why: `classifier_unavailable` (no answer) or `classifier_unparseable` (an answer that is neither label). A flagged text carries reason `classifier_flagged` (or `classifier_flagged:<risk>`). A call the spend checks refuse — the conversation reached its [`maxCostPerConversationUsd`](#per-conversation-llm-cost-ceiling), or the tenant its monthly budget — is not made and could not decide either, with reason `spend_refused`: `closed` withholds the text, `open` lets it through with a warning.
 
-**Cost and latency.** Each screened text is one classifier call — on the input side the typed text plus one call per attachment text part of the turn (an extract, or the note naming files shared earlier), all before the main model, so it adds its latency to every turn; keep `timeoutMs` short and the classifier close. The call's price is added to the turn's cost (`audit:cost`), so it is metered and counted against cost ceilings like any other model call — including the call whose answer could not be parsed. The task's [spend gate](#per-conversation-llm-cost-ceiling) is asked **before** the input classifier — a turn refused for the tenant budget or the conversation ceiling pays no classifier call (nor a retrieval query) and is answered with the fallback — and again after the input guardrails, so the classifier's own price cannot carry the main model call past a ceiling it reached. The classifier does **not** screen the earlier user messages of the history window (each was classified on its own turn): one model call per history message on every turn would multiply its cost by the window size. A message it blocked or redacted is withheld from later history instead (above). It is timed by `eddi.guardrail.classifier.duration{provider, outcome}` (outcome `safe`, `unsafe`, `unparseable`, `unavailable` or `timeout`), and its provider calls appear in the LLM telemetry like a task's.
+**Cost and latency.** Each screened text is one classifier call — on the input side the typed text plus one call per attachment text part of the turn (an extract, or the note naming files shared earlier), all before the main model, so it adds its latency to every turn; keep `timeoutMs` short and the classifier close. The call's price is added to the turn's cost (`audit:cost`), so it is metered and counted against cost ceilings like any other model call — including the call whose answer could not be parsed. The task's [spend gate](#per-conversation-llm-cost-ceiling) is asked **before** the input classifier — a turn refused for the tenant budget or the conversation ceiling pays no classifier call (nor a retrieval query) and is answered with the fallback — and again after the input guardrails, so the classifier's own price cannot carry the main model call past a ceiling it reached. The classifier does **not** screen the earlier user messages of the history window (each was classified on its own turn): one model call per history message on every turn would multiply its cost by the window size. A message it blocked or redacted is withheld from later history instead (above). It is timed by `eddi.guardrail.classifier.duration{provider, outcome}` (outcome `safe`, `unsafe`, `unparseable`, `unavailable`, `timeout` or `spend_refused`), and its provider calls appear in the LLM telemetry like a task's.
 
 #### Example: Granite Guardian 3.3 on vLLM
 
-[Granite Guardian 3.3](https://huggingface.co/ibm-granite/granite-guardian-3.3-8b) (Apache 2.0) takes the risk to check as a chat-template argument and answers in a `<score> yes </score>` / `<score> no </score>` tag (`yes` = the risk is present). Served with `vllm serve ibm-granite/granite-guardian-3.3-8b`, it is reached through the `openai` provider; the risk goes in through vLLM's `chat_template_kwargs` request field, set with `customParameters`, and no `promptTemplate` is needed:
+[Granite Guardian 3.3](https://huggingface.co/ibm-granite/granite-guardian-3.3-8b) (Apache 2.0) takes the risk to check as a chat-template argument and answers in a `<score> yes </score>` / `<score> no </score>` tag (`yes` = the risk is present). Served with `vllm serve ibm-granite/granite-guardian-3.3-8b`, it is reached through the [`openai-compatible`](#self-hosted-openai-compatible-servers) provider (`baseUrl` and `modelName` are required; `serverName` names it in the LLM telemetry); the risk goes in through vLLM's `chat_template_kwargs` request field, set with `customParameters`, and no `promptTemplate` is needed:
 
 ```json
 {
@@ -1152,9 +1159,10 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
   "action": "block",
   "blockMessage": "I can't help with that request.",
   "parameters": {
-    "provider": "openai",
+    "provider": "openai-compatible",
     "baseUrl": "http://vllm.guardrails.svc:8000/v1",
     "modelName": "ibm-granite/granite-guardian-3.3-8b",
+    "serverName": "vllm",
     "customParameters": "{\"chat_template_kwargs\": {\"guardian_config\": {\"criteria_id\": \"jailbreak\"}, \"think\": false}}",
     "maxTokens": "20",
     "labelPattern": "<score>\\s*(\\w+)\\s*</score>",
@@ -1199,15 +1207,146 @@ To check against your own policy instead of the model's default one, write the p
 
 > **Llama Guard.** Llama Guard 3 (`llama-guard3` on Ollama) works the same way with `"unsafeLabel": "unsafe"` and `"safeLabel": "safe"` (both required — the deploy refuses a custom `unsafeLabel` alone) (it answers `safe`, or `unsafe` followed by category codes on the next line). Its licence needs checking before you deploy it: Meta's Llama 3.2, 3.3 and 4 acceptable-use policies withhold the licence rights for their **multimodal** models from individuals domiciled in, and companies with their principal place of business in, the European Union — which covers Llama Guard 4 and Llama Guard 3 Vision. EDDI documents no Llama Guard example for that reason; whether a model's terms allow your deployment is your call, not EDDI's.
 
+### The `judge` type: grading the answer with issue codes
+
+`judge` (output only) asks a model whether the answer is **right**, not just whether it is safe or well-formed — grounded in the retrieved sources, complete, on topic, whatever your prompt asks it to check. It answers in a **closed vocabulary**: the issue codes you declare in `issues`, each with the text that tells the producing model how to fix it. Paired with `reprompt`, a flagged answer is re-asked with exactly your fix texts for the codes the judge found.
+
+```json
+"outputGuardrails": [ {
+  "type": "judge",
+  "action": "reprompt",
+  "maxRetries": 1,
+  "onExhausted": "deliver-best",
+  "parameters": {
+    "provider": "gemini",
+    "modelName": "gemini-3.7-flash",
+    "apiKey": "${vault:gemini-key}",
+    "thinkingLevel": "low",
+    "promptTemplate": "Sources:\n{context}\n\nQuestion:\n{input}\n\nAnswer:\n{output}\n\nCheck the answer against the sources.",
+    "includeRetrievedContext": "true",
+    "issues": "{\"UNSUPPORTED_CLAIM\": \"Remove every claim the sources do not state.\", \"MISSING_CITATION\": \"Cite the source of each fact you state.\"}",
+    "timeoutMs": "5000",
+    "inputPricePer1M": "0.15",
+    "outputPricePer1M": "0.60"
+  }
+} ]
+```
+
+The judge is called exactly like a [`classifier`](#the-classifier-type-a-safety-classifier-model) — the same machinery, not a copy of it: `provider` names an EDDI provider type, every parameter that is not the judge's own passes to that provider unchanged (`modelName`, `apiKey`, `baseUrl`, `thinkingLevel`, …), vault and `${vars.…}` references are resolved, `timeoutMs` is bounded by the turn's deadline, the call is priced, and `failMode` decides what "could not decide" does.
+
+| Parameter | Meaning | Default |
+|---|---|---|
+| `provider` | The EDDI provider type to call. Required — the deploy is refused without it. | — |
+| `promptTemplate` | A Qute template saying what to check, rendered with `{input}` (the user message the model answered), `{output}` (the answer) and `{context}` (with `includeRetrievedContext`). Required. The screened text is template **data**, never template source. | — |
+| `issues` | A JSON object (as a string) of **issue code → fix text**: 1–20 codes matching `[A-Z][A-Z0-9_]{0,39}`, each with non-blank fix text of at most 1000 characters. Required; the deploy is refused when it is malformed. | — |
+| `includeRetrievedContext` | Make this turn's retrieved RAG context (vector store and `httpCallRag`) available as `{context}`, for a groundedness check. | `false` |
+| `timeoutMs` | How long the call may take; the provider client is built with the same timeout. Capped at 60000; the turn's [deadline](#turn-deadline) wins when it is closer. | `5000` |
+| `failMode` | `closed` or `open` — what *could not decide* does. | `closed` for `block`/`reprompt` |
+| `jsonResponseFormat` | `on`, `off` or `auto`: whether the request asks the provider for JSON. `auto` follows the same provider matrix as a task's [`jsonResponseFormat`](#structured-output-json-mode); `on` forces it for a provider or gateway the matrix does not know. | `auto` |
+| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the judge reports. A judge without prices is logged at deploy time: its calls would be invisible to cost ceilings. | unpriced (free) |
+
+**The answer format is EDDI's, not yours.** After your rendered template EDDI appends a fixed instruction that lists the declared codes (with their fix texts, so the judge knows what each one means) and asks for exactly `{"issues": ["CODE", ...]}` — an empty list when nothing applies. The request asks for JSON where the provider takes it per request, with the codes as an `enum` where the provider enforces a schema (`openai`, `azure-openai`, `mistral`, `gemini`); nothing is baked into the cached model. The reply is read tolerantly — a Markdown code fence or prose around the object is fine, and a code is matched case-insensitively.
+
+**Safe is a positive finding.** Only a parsed `{"issues": []}` passes. A reply that is not that shape, or names a code you did not declare, is **could not decide** (`judge_unparseable`), as is an unreachable or slow judge (`judge_unavailable`); `failMode` applies, exactly as for a classifier.
+
+**Feedback without injection.** A finding carries reason `judge_failed:<CODE>[,<CODE>…]` — your codes, so they are safe in audit records and metrics — and the reprompt's corrective message is EDDI's frame around **your fix texts** for those codes:
+
+```text
+Your previous reply needs these corrections:
+- Remove every claim the sources do not state.
+Write a new reply that applies them. Reply with the answer only.
+```
+
+Nothing the judge wrote other than the codes — no critique, no reasoning — reaches the producing model, and the corrective message contains no text from the judge, the user or the model. The re-ask itself still carries the original request and the rejected answer, as every [`reprompt`](#actions) does; the closed vocabulary keeps the *judge* from adding to them. The judge reads untrusted content (retrieved documents, tool results, user input); its free text would be an injection path into the producer. `repromptMessage` still overrides the corrective message, as for every type.
+
+**Cost and latency.** Each screened answer is one judge call after the model answered, and any action but `warn` makes the task [buffer](#streaming) its answer. Keep `timeoutMs` short and the judge model small; each reprompt is one more model call **and** one more judge call. A model judging its own answers is biased — the deploy logs a note when the judge's provider and model equal the task's. The call is timed by `eddi.guardrail.judge.duration{provider, outcome}` (outcome `pass`, `fail`, `unparseable`, `unavailable` or `timeout`); watch `unparseable` and `unavailable`, which under `failMode: open` switch the check off silently.
+
+### When the retries run out: `onExhausted`
+
+A `reprompt` guardrail whose `maxRetries` are spent — or that cannot re-ask at all (the turn is out of time, the model's circuit is open, a resumed turn has no transcript) — blocks the answer. For a quality check that is often the wrong trade: an answer that is not perfect is still better than "Response withheld". `onExhausted` decides:
+
+| `onExhausted` | Effect |
+|---|---|
+| `block` (default) | The answer is replaced by the block message, as before. |
+| `deliver-best` | The attempt **this guardrail rated best** is delivered: fewest issue codes for a `judge` (a tie goes to the later attempt), the last attempt for a guardrail without codes. It is recorded as a `warn` with reason `<reason>:delivered_best` and the number of reprompts sent as `retryCount`. |
+
+**A quality check giving up does not override the guardrails around it, except itself.** The guardrails *before* the exhausted one already screened the delivered attempt in the pass that rated it (their redactions are in it, their findings recorded, and a blocking finding would have ended that pass). The guardrails *after* it had not, so they screen it once more, with no further reprompts: a `redact` (PII) still rewrites it, a `warn` is still recorded, and a `block` — or a `reprompt` finding, which may not re-ask now — blocks it. Each other guardrail therefore sees the delivered attempt exactly once, and a model-backed one is called once for it. A guardrail that *could not decide* is not "exhausted": its `failMode` applies as always.
+
+`onExhausted: "deliver-best"` is refused at deploy time on any action but `reprompt`, and on input guardrails (an input `reprompt` blocks). On a `classifier` it is allowed but logged as a warning — a safety check that delivers what it flagged defeats its purpose.
+
+### The `expression` type: a deterministic check over a JSON answer
+
+`expression` (output only) parses the answer as JSON and evaluates a boolean expression you write over it. It catches answers that are well-formed but wrong — a total that is not the sum of its lines, an end date before the start date — without calling another model, and reprompts with a fix you wrote.
+
+```json
+"outputGuardrails": [ {
+  "type": "expression",
+  "action": "reprompt",
+  "maxRetries": 1,
+  "blockMessage": "I could not produce a consistent invoice.",
+  "parameters": {
+    "expr": "sum(lines[*].amount) == total",
+    "issue": "LINE_SUM",
+    "fix": "Make total equal the sum of the line amounts, to the cent."
+  }
+} ]
+```
+
+Given the answer `{"total": 31.00, "lines": [{"amount": 10.10}, {"amount": 20.20}]}`, the expression is false: the model is asked again with exactly
+
+```
+Your previous reply needs these corrections:
+- Make total equal the sum of the line amounts, to the cent.
+Write a new reply that applies them. Reply with the answer only.
+```
+
+and a corrected answer (`"total": 30.30`) is delivered. With `action: "block"` a wrong total is never delivered. Pair it with a task's [`responseSchema`](#shape-validation-responseschema-and-nonblankfields) for the shape; `expression` checks the content.
+
+| Parameter | Meaning |
+|---|---|
+| `expr` | The expression (grammar below), at most 2000 characters. Required. |
+| `issue` | The issue code reported when the expression is false: upper-case letters, digits and underscores, starting with a letter, at most 40 characters. The audit reason is `expression_failed:<issue>`. Required. |
+| `fix` | The sentence a reprompt tells the model, at most 1000 characters. Required. |
+
+All three are checked at deploy time: a missing parameter, a bad issue code or an expression that does not parse is refused with a message naming the problem and its position (`parameter 'expr' is not valid at position 21: '=' is not an operator; compare with '=='`).
+
+**Grammar.** Literals: numbers (`12`, `12.50`), strings in single or double quotes (a backslash escapes only a backslash or a quote), `true`, `false`, `null`. Paths into the answer: `total`, `invoice.total`, `lines[0].amount`, `invoice['due-date']`, and the wildcard `lines[*].amount`, which yields the list of every line's amount (`orders[*].lines[*].amount` flattens). `$` is the answer itself — for an answer that is a JSON array, `count($) > 0` or `sum($[*].amount)`. Operators, from tightest to loosest: `!` and unary `-`; `*` `/` `%`; `+` `-`; `<` `<=` `>` `>=`; `==` `!=`; `&&`; `||`, with parentheses for grouping. Comparisons do not chain (`a < b < c` is refused; write `a < b && b < c`). Functions — no others exist:
+
+| Function | Result |
+|---|---|
+| `sum(list)`, `count(list)` | The sum of a list of numbers (0 for an empty list); the number of elements |
+| `min(list)`, `max(list)`, `min(a, b, …)`, `max(a, b, …)` | The smallest / largest number |
+| `len(x)` | Characters of a string, elements of a list, keys of an object |
+| `abs(x)`, `round(x, n)` | Absolute value; `x` rounded half-up to `n` decimals (0–20; default 0) |
+| `exists(path)` | Whether every step of the path is present — a key holding `null` is present. A path without `[*]` |
+| `approx(a, b, tolerance)` | `abs(a - b) <= tolerance` |
+
+**Numbers are decimal, not floating point.** `0.1 + 0.2 == 0.3` is true and money sums are exact; `1.0 == 1.00` is true. Arithmetic keeps 34 significant digits (division rounds half-even there). The answer's numbers are read exactly as written.
+
+**Null and missing values.** A path that does not exist is `null`, as is a JSON `null`; so is a wildcard over something that is not an array, and after a wildcard an element without the rest of the path contributes `null` to the list.
+
+- `x == null` and `x != null` test for it; any other comparison with `null` (`discount > 0` when there is no discount) is **false**.
+- Arithmetic, `&&`/`||`/`!`, or a function given `null` cannot decide — `sum(lines[*].amount)` over a line without an amount is not quietly skipped.
+- `&&` and `||` short-circuit, so `!exists(discount) || discount <= total` never looks at a missing discount.
+
+**Could not decide.** Safe is a positive finding: only an expression that evaluates to `true` passes. These are *could not decide*, and `failMode` applies (closed — the answer is withheld without a reprompt — by default for `block` and `reprompt`):
+
+- `expression_unparseable` — the answer is not JSON (a Markdown code fence and prose around one object are tolerated), is longer than 262,144 characters, or repeats a key (the check and a downstream reader must not see two different totals) — also in an earlier object of the reply that extraction would otherwise skip for a later one;
+- `expression_undecided:<cause>` — evaluation failed: `null_operand`, `type_mismatch` (a number compared with a string, `sum` over text), `division_by_zero`, `empty_aggregate` (`min`/`max` of nothing), `bad_argument`, `number_out_of_range` (more than 1000 digits or a scale beyond ±1000), `fan_out`, `step_budget`, or `not_boolean` (the expression produced a number, a string or a list).
+
+**Bounds.** An expression has at most 2000 characters, 32 levels of nesting, 500 parts and 32 segments per path. Evaluating it reads at most 10,000 values per path and takes at most 200,000 steps; past either, it cannot decide. Each distinct expression is compiled once and kept in a bounded cache (512 entries).
+
+**Feedback without injection.** The corrective message is EDDI's fixed frame around your `fix` text, and nothing else: no value from the answer, no computed sum, nothing the user wrote. A model cannot use the check to put words into its own next prompt. `repromptMessage` still overrides the whole message, as for every type.
+
 ### Where guardrails run
 
-- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn.
+- **Input** guardrails screen the user's message **before retrieval**: a blocked message issues no RAG query and no `httpCallRag` call, and a redacted one is what the retrieval query sees (the `userInput` value of an `httpCallRag` call; a call template that reads `memory.current.input` itself still gets the text as stored). After the prompt is assembled (RAG context, counterweight, identity masking, history window, attachments), and before the model is built, `preRequest` runs or the circuit breaker is consulted, the **text the user typed** is checked again only if it differs from what the first pass saw (a `prompt` template); otherwise the first result is reused, so a finding is recorded once and a redaction lands on the text the model sees. **Text added for this turn's attachments** (extracts, notes about earlier files) follows the typed text in the same message; each such part is screened as this turn's input too — recorded, able to block, redacted in place. The history builder merges the question of a turn answered by a fallback into the next user message, so text parts *before* the typed text are earlier turns, and are history. The **earlier user messages** in the history window are screened again, silently, by every type except the `classifier`: conversation memory keeps every message as the user sent it, and a message that would be blocked is replaced by `[earlier message withheld by a guardrail]`. A message that *was* blocked on its own turn — by any type — is already withheld by the history builder before this runs (see [A refused message never reaches a model on a later turn](#actions)). The [`classifier`](#the-classifier-type-a-safety-classifier-model) does not re-screen history (one model call per history message on every turn would multiply its cost by the window size), so a classifier added later, or a message it let through, is not caught on a later turn. The same re-screening applies to the earlier turns that reach a model **outside** the window: the turns the [rolling summary](#rolling-conversation-summary) condenses are screened before they are sent to the summarizer, and the turns the recall tool returns before they are returned — so a `pii-redaction` that rewrote a message for its own turn's model call also applies to the summarizer (possibly another vendor) and to the summary that every later system prompt carries. The summary itself is placed in the system prompt inside the same provenance envelope as retrieved context (`[retrieved context — source 'conversation-summary' …]`, switched off with `markRagProvenance: false`): it is a model's condensation of user and tool text, not the designer's instructions.
 - **Output** guardrails run on the answer after [`responseValidation`](#recovery-policies-retry-where-it-helps), in every execution mode — plain chat, streaming, the tool loop, the model cascade and a HITL-resumed tool loop. A reprompt never re-runs a tool: in the tool loop only the final model call is re-asked, over the transcript that already holds the tool results; under the cascade the step whose answer was accepted is re-asked. Each reprompt asks the spend gate and that model's [circuit breaker](#circuit-breaker-skip-a-model-that-keeps-failing) first, like the primary call, and settles its own outcome; a reached spend limit or an open circuit stops the reprompts and the answer is blocked. (A HITL-resumed turn neither consults nor settles a circuit, so neither do its reprompts.) A reprompted answer is screened by the output guardrails again from the first one, but it is **not** run through `responseValidation` a second time — a guardrail that must enforce the answer's shape belongs in `outputGuardrails` (`json-object`) itself.
 - An `onError` fallback is the author's own text and is not screened.
 
 ### Streaming
 
-Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
+Tokens already streamed to a client cannot be taken back. A task with an output guardrail whose action is `block`, `redact` or `reprompt` therefore **buffers** its answer — exactly like a task with a `retry` response-validation policy — and the client receives the screened answer once. `warn`-only output guardrails do not change the text and keep streaming — unless their `failMode` is `closed`: a `warn` guardrail that fails closed withholds the answer when it cannot check it, so it buffers too. If live streaming matters more than output screening for a task, use `warn`, or screen at the input side only.
 
 ### Audit, events and metrics
 
@@ -1217,7 +1356,7 @@ Every guardrail that fires produces:
 - an SSE event `guardrail_triggered` with `{type, phase, action, taskId}` (`phase`: `input`/`output`; `action`: `block`/`redact`/`reprompt`/`warn`), before the answer;
 - the counter `eddi.guardrail.triggered{phase, type, action}` ([metrics](metrics.md)).
 
-Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` call (`audit:cost`).
+Reprompts are model calls: their tokens are added to the turn's token usage and cost. So is the price of every `classifier` and `judge` call (`audit:cost`). Reprompts and every `classifier` / `judge` call are checked against the conversation's cost ceiling and the tenant budget before they start, like the task's own call — see [Per-conversation LLM cost ceiling](#per-conversation-llm-cost-ceiling). A `deliver-best` delivery is a `warn` record of the exhausted guardrail (reason `<reason>:delivered_best`), followed by the records of the re-screen. When the re-screen blocks the attempt, there is no `delivered_best` record: only the re-screen's records, ending in the block.
 
 ### Compatibility
 
@@ -1728,7 +1867,7 @@ back into the full text through the `conversationRecall` built-in tool.
 | Parameter                      | Type    | Description                                                                                     | Default |
 | ------------------------------ | ------- | ----------------------------------------------------------------------------------------------- | ------- |
 | `enabled`                      | boolean | Master switch. Nothing is summarized while this is false                                         | false   |
-| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset              | (inherit) |
+| `llmProvider`                  | string  | Provider for the summarization call. Inherits the parent task's provider when unset. When it names a different provider, the task's credentials, endpoint and account settings, model keys, `customHeaders`, `customQueryParams` and `customParameters` are not inherited; only vendor-neutral tuning (temperature, maxTokens, timeout, ...) carries over | (inherit) |
 | `llmModel`                     | string  | Model for the summarization call. Inherits the parent task's model when unset                    | (inherit) |
 | `maxSummaryTokens`             | int     | Token ceiling on the generated summary                                                           | 800     |
 | `excludePropertiesFromSummary` | boolean | Tell the summarizer to skip facts already captured as persistent properties                      | true    |
@@ -1847,7 +1986,7 @@ The Langchain task configurations can be managed via REST API endpoints.
 All tool invocations—both built-in tools and custom HTTP call tools—are routed through a unified **Tool Execution Service** that applies enterprise-grade controls:
 
 ```
-Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
+Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Quota (toolQuotas) ──▶ Execute Tool (timeout) ──▶ Cost Tracker ──▶ Result
 ```
 
 ### Controls
@@ -1855,6 +1994,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Execute Tool (t
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
 | **Rate Limiting** | Token-bucket per tool, configurable limits                             | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Per-subject quotas** | Caps per user (or other subject) per time window, across conversations and nodes; counts real executions only; fails closed | `toolQuotas` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
 | **Execution Timeout** | Wall-clock ceiling on a single tool call; on expiry the model gets an error result and the turn continues | `defaultToolTimeoutMs`, `toolTimeoutsMs` |
@@ -1877,6 +2017,7 @@ difference between a rule that binds and one that is silently ignored:
 | `toolPricing`                | slug **or** dispatch name — dispatch name wins       |
 | `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
 | `toolTimeoutsMs`             | slug **or** dispatch name — dispatch name wins       |
+| `toolQuotas.tools`           | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -1908,6 +2049,87 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Per-subject tool quotas (`toolQuotas`)
+
+`toolRateLimits` is a per-minute allowance **per conversation**, `maxBudgetPerConversation` is reset by
+starting a new conversation, and a [tenant quota](tenant-quotas.md) is shared by everyone. None of them
+says "this *user* may make at most 100 content improvements a day". `toolQuotas` does: it caps how often
+one **subject** (normally the end user) may make a tool run within a fixed time window, counted **across
+conversations and across EDDI nodes**.
+
+```json
+"toolQuotas": {
+  "subject": "{context.personId}",
+  "tools": {
+    "updateAction":        { "limit": 100, "window": "P1D", "pool": "improvements" },
+    "updateSession":       { "limit": 100, "window": "P1D", "pool": "improvements" },
+    "generateActionImage": { "limit": 30,  "window": "P1D" }
+  }
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `tools` | Rules keyed by tool name, **exactly like `toolRateLimits`**: the dispatch name the model invoked, or the built-in slug; the dispatch name wins. Works for every tool source, **HTTP-call tools** (`httpcalls` exposed as tools) included. A rule keyed by a slug is one counter for all of that tool's operations |
+| `limit` | Calls permitted per window; a positive integer |
+| `window` | ISO-8601 duration, from `PT1M` to `P31D` (`P1D`, `PT12H`, `PT90M`). Windows are **fixed and aligned to the UTC epoch**: `P1D` resets at 00:00 UTC, `PT1H` on the hour. Weeks and months (`P1W`, `P1M`) are not accepted |
+| `pool` | Optional. Rules naming the same pool **share one counter** (above, 100 improvements per day across `updateAction` and `updateSession` together). All rules of a pool must state the same `limit` and `window` — anything else is a `400` at save time |
+| `subject` | Optional template, rendered with the turn's template data (the same syntax as a system prompt). Default: the conversation's user id. A template that renders blank falls back to the user id; a rendered subject longer than 256 characters is shortened to a prefix plus a digest. Without any user id (an unauthenticated caller) the conversation id is used, so an anonymous caller is capped per conversation |
+
+**Choosing the subject.** A [managed conversation](mcp-server.md) uses a composite user id
+(`<user>-<company>-<program>`), so the default counts **per program**. To count **per person**, render a
+subject that is the same across their programs, as above. Counters are keyed by (agent, tool or pool,
+subject, window), so two agents never share a count and a new agent *version* continues the old one.
+
+With `{context.personId}` the value is a per-turn context variable of type `string` named `personId`
+(stored in the step as `context:personId`).
+
+> **Security: the subject must be a value the end user cannot choose**, for example context set by a
+> trusted backend. A value a browser client sends directly is not enough: a user who changes it gets a
+> fresh quota. The anonymous fallback (`conversation:<id>`, used when there is no user id) is reset by
+> starting a new conversation, so it does **not** give fair use for unauthenticated users.
+
+**What counts.** A call is counted only when its tool **really runs**. The reservation is made at one
+point in the pipeline — after the rate limit and the cache, immediately before the tool executes — so a
+cache hit, a rate-limited call, a call refused by the conversation budget or the tenant cost budget, a
+call a human rejected, and a call that never ran are **never counted**. If the execution then fails, the
+reservation is **given back**: an exception, a tool-reported error, and for an HTTP tool a non-2xx
+status or a transport failure. A call that **times out** keeps its count: the abandoned worker cannot be
+stopped and may still complete the tool's side effect. The reservation is an atomic
+increment-if-below-limit in the datastore (MongoDB and PostgreSQL), so with three calls left a batch of
+five parallel calls runs exactly three, from one node or from several.
+
+**The refusal.** An exhausted call is not run and the model is handed a final result, not an error to
+retry; the turn does not fail:
+
+```json
+{"status":"NOT_EXECUTED","reason":"Not run: the daily limit for this tool (100) is reached; it resets at 2026-11-03T00:00:00Z. This is final: do not call this tool again in this conversation until then, and tell the user the limit is reached."}
+```
+
+**Human approval ([`toolApprovals`](hitl.md#tool-level-approval-gating)).** Approved calls run later, on
+the resume path, through the *same* execution pipeline — so the quota is applied there, at execution
+time, and a call approved while the allowance was spent elsewhere is refused. And a gated call proposed
+while its quota is **already exhausted** is refused straight away, instead of pausing the conversation
+for an approval that would then be refused. That pre-check is a read: nothing is counted while a call
+waits for approval. With one slot left and two gated calls proposed, both go to the human (the first may
+be rejected), and the second is refused at execution if the first took the slot.
+
+**Fails closed.** If the counter store cannot answer — or a stored rule cannot be applied, or the subject
+template fails to render — the call is **not run** and the model is told the limit could not be checked
+(`Not run: the usage limit for this tool could not be checked right now…`). A failure is logged at WARN
+with the agent, conversation and a short digest of the user id (never the raw subject), at most once a
+minute, and always counted in `eddi_tool_quota_store_failures_total`. Decisions are counted in
+`eddi_tool_quota_decisions_total{tool, outcome}` (see [metrics](metrics.md)).
+
+**Absent means unchanged.** A task without `toolQuotas`, or a tool no rule names, reads no store and takes
+exactly the path it always took.
+
+**Data protection.** Counters hold a subject identifier and a count, never content. They are removed by
+the [GDPR erasure cascade](gdpr-compliance.md) (deleted by subject), are part of the data export, and
+expire on their own an hour after their window ends. If your `subject` template derives an identifier
+that differs from the conversation's user id, erasure deletes the counters whose subject equals the
+**erased user id**; erase by the derived identifier too, or let them expire.
 
 #### Repeated failing tool calls
 
@@ -2013,6 +2235,17 @@ prices of the tools a conversation invokes. LLM token spend is a separate,
 run-scoped concern governed by the model cascade's `maxCostPerRun`; the two are
 not added together.
 
+A call that **times out** is charged like one that returned: the abandoned tool
+keeps running and its upstream request is normally already under way. A call the
+tool itself reports as failed is not charged, nor is a rate-limited or cached one.
+A `toolPricing` value that is not a finite number is ignored for the default price.
+The running total is held in memory per process (shared across a NATS cluster);
+when the tracker trims its oldest entries, a conversation already found over its
+budget is kept until every under-budget one has gone. It does not survive a
+restart — for a durable per-conversation bound use the agent-level
+`maxCostPerConversationUsd`, which is computed from the conversation's stored
+`audit:cost` and includes tool cost.
+
 Enforcement is the **default** (since 6.6.0): a configured ceiling refuses the
 tool call after the one that crosses it. To keep a ceiling advisory, opt out with
 `enforceBudget: false` on the task, or `eddi.tools.budget.enforce-by-default=false`
@@ -2070,12 +2303,78 @@ tool cost. It is checked
   records `llm:spend_refused:<taskId>` with `reason: conversation_ceiling`, and
   `eddi_llm_spend_refused_total{reason="conversation_ceiling"}` counts it;
 - **between the rounds of a tool loop**: the loop adds what it has spent so far (its tokens at the
-  task's prices, its tool cost) and, once that reaches the ceiling, stops issuing model calls and
-  answers that the conversation reached its cost limit — the tool calls already made have taken
-  effect. A cascade's tool loop prices its rounds at the task-level prices for this check; the
-  cascade's own step prices apply at the next task-level check.
+  prices of the model it runs on — a cascade step's own prices, else the cascade's defaults, when a
+  cascade runs it — and its tool cost) and, once that reaches the ceiling, stops issuing model calls
+  and answers that the conversation reached its cost limit — the tool calls already made have taken
+  effect;
+- **when a tool-call approval resumes the turn**: the same check runs before the approved calls
+  execute, so a conversation spent while it waited serves the fallback answer and the approved
+  calls do not run; and the resumed loop checks again before its first model request, counting
+  what the approved calls charged. What the turn spent *before* the pause counts too: when a tool
+  loop pauses, its model rounds so far (priced as in the loop check above, and any earlier cascade
+  steps at theirs) and its tool cost are added to the step's `audit:cost` and `audit:token_usage`
+  right away, so the resume's checks and its final total include them exactly once. A model phase
+  that **fails** is treated the same way: the rounds the model answered, the tools that ran and the
+  cascade steps that were tried before the failure (a provider error after retries, a context-length
+  rejection, a cascade step timeout, every step of a cascade failing) are added to the step's
+  `audit:cost` and `audit:token_usage` whether the failure ends the turn or `onError: fallback`
+  absorbs it — so the tenant budget is charged for them and the next turn's checks count them.
+- **before every further paid call of the task** — a same-model re-ask (`responseValidation`
+  `retry`), a cascade's escalation to its next step and that step's re-asks, an output guardrail's
+  `reprompt`, and a [`classifier`](#the-classifier-type-a-safety-classifier-model) or
+  `judge` guardrail's own call (input and output). A task writes its cost into `audit:cost` only once it has finished, so
+  each of these checks adds what the task has already spent in this turn: the earlier attempts at
+  their prices, the primary answer before a reprompt, the earlier cascade steps before an
+  escalation. A refused call is not made:
 
-The call that crosses the ceiling completes, so a conversation can end slightly above it. Unset
+  | Call | What happens instead |
+  | --- | --- |
+  | Re-ask | Skipped, counted as `eddi_llm_recovery_total{action="retry",outcome="skipped_spend"}`; the reply stays unresolved and `fallbackAction` applies, as when `maxRetries` is spent |
+  | Cascade escalation | Not started; the cascade returns its best answer so far (`eddi_llm_cascade_ceiling_exceeded_total{kind="spend"}`), as at its own `maxCostPerRun` |
+  | Guardrail reprompt | Not sent; the answer is blocked with the guardrail's `blockMessage`, as when the turn is out of time |
+  | `classifier` or `judge` call | Not made; the guardrail could not decide, with the audit reason `spend_refused`, and its `failMode` applies |
+
+  Each refusal is also counted by `eddi_llm_spend_refused_total{reason}` with the same reasons as the
+  primary call (`conversation_ceiling`, `tenant_budget`, `tenant_accounting_unavailable`): the
+  tenant's monthly budget is checked before these calls too.
+- **before a rolling-summary call and a tool result's `summarize` truncation**: both are paid model
+  calls. A refused summary is skipped (the turns keep reaching the model verbatim and the next turn
+  tries again); a refused tool-result summary falls back to plain truncation. Both are priced at the
+  task's own `inputPricePer1M` / `outputPricePer1M` (no separate price is configured for the
+  summarizer) and recorded: the summary on the step's `audit:cost`, the tool-result summary as a
+  priced tool call (`summarizeToolResponse`).
+
+The tenant's monthly budget checked before each **tool call** counts the turn's unsettled spend as
+well — the step's not-yet-metered `audit:cost` and what the running tool loop has spent — exactly as
+the checks before a model call do; it used to compare against the counter as it stood before the
+turn.
+
+  A refusal is a safety stop: a refused guardrail reprompt blocks the answer even when that
+  guardrail's `onExhausted` is `deliver-best`, because delivering a "best" attempt after the spend
+  checks said stop would defeat the ceiling. `deliver-best` applies only to a guardrail that ran out
+  of retries, or whose reprompt could not start for lack of time or a model.
+
+**The call that crosses the ceiling completes.** A call is admitted while the conversation's spend
+so far — recorded `audit:cost`, plus what the running task has spent and not yet recorded, plus the
+expected cost of paid calls of the same conversation still in flight — is *below* the ceiling. The
+call's own price is not part of the comparison (it is not known before the call), so the last
+admitted call runs to completion and a conversation can end above the ceiling by about that one
+call's cost; the next call is refused. A call in flight holds its expected cost until it is over —
+a re-ask the previous attempt's price, a reprompt the previous reprompt's (nothing for the first),
+a classifier or judge its prompt at its input price, nothing when unpriced — so calls that run at the same time
+see each other's expected cost when they are checked. That is an estimate-based limit, not an exact guarantee:
+an estimate can be zero (an unpriced call) or lower than the actual cost, and a check compares only the
+amounts already held, so concurrent calls admitted together can still end above the ceiling by more than one
+call. The reservation is per conversation and lives with the conversation on the node that runs its
+turn — a conversation's turns are serialized, by the coordinator and in a cluster by the
+conversation lease — so no other conversation or node competes for it. The tenant budget is shared by every
+conversation and node and is only read, never reserved. Its monthly counter is charged when a turn
+settles, so the check adds what the current turn has spent and the counter has not seen yet (the
+step's `audit:cost` not yet metered, plus the running task's unrecorded spend): later paid calls of
+the same turn see the turn's own spend. What it cannot see is another conversation's unsettled
+turn: while that turn is unsettled, a conversation can keep making calls after the combined tenant spend has
+crossed the budget, as long as its own visible spend stays below it, so concurrent conversations can overshoot
+the budget by more than one call each. Unset
 (the default) means unlimited; `0` allows no priced spend; a negative value is treated as
 unlimited. An unpriced model adds $0, so a positive ceiling never stops it by itself — but `0`
 refuses every model call, priced or not, since the spend so far already equals it. This is
@@ -2528,7 +2827,7 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 | `maxRetries` | Same-model re-asks **per model** (per cascade step), shared by every `retry` policy. Clamped to `0..3`. `0` sends no re-ask (a cascade still escalates on invalid output). A cascade step overrides it with `steps[i].maxFormatRetries`, e.g. `0` for an expensive last-resort model | `1` |
 | `truncationRetryFactor` | The truncation re-ask runs **once** with the output-token cap multiplied by this (`maxTokens`, or `maxOutputTokens` for Gemini; Anthropic's built-in default counts). Clamped to `1..4` and never above 32768 tokens. If the cap is not configured (and the provider has no known default) there is nothing to raise and the re-ask is skipped | `2` |
 | `correctiveMessage` | The user message of an invalid-JSON re-ask. `{reason}` is replaced **literally** with EDDI's own reason (`not JSON`, `truncated JSON`, `no JSON object`, `unbalanced braces`, `invalid JSON syntax`). It is not a template and never receives model or user text | "Your previous reply could not be used: {reason}. Reply again with only the JSON object described in the instructions." (a neutral sentence for a task that does not return JSON) |
-| `maxRetryCostUsd` | Optional dollar cap on what the re-asks of one model may cost in total; a re-ask that would start at or above it is skipped. It is priced from the task's / step's `inputPricePer1M` / `outputPricePer1M`: **without prices it cannot fire**. Per-conversation cost ceilings (`ToolCostTracker`) are not consulted | (none) |
+| `maxRetryCostUsd` | Optional dollar cap on what the re-asks of one model may cost in total; a re-ask that would start at or above it is skipped. It is priced from the task's / step's `inputPricePer1M` / `outputPricePer1M`: **without prices it cannot fire**. Independently of it, every re-ask is also checked against the agent's [`maxCostPerConversationUsd`](#per-conversation-llm-cost-ceiling) and the tenant's monthly budget, counting the attempts already made (outcome `skipped_spend`) | (none) |
 | `minAttemptMs` | A re-ask only starts if the model's remaining time (the cascade step's `timeoutMs`; the turn deadline once there is one) is at least this. Otherwise the cascade escalates at once: serving the user in time beats insisting on the same model | `3000` |
 | `fallbackAction` | What happens when the re-asks (and every cascade step) did not help: `fallback` serves the [fallback](#fallback-answers-and-onerror), `error` fails the turn, `warn` keeps the reply | `fallback` |
 

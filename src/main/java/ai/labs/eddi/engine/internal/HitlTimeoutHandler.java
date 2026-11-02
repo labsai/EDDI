@@ -223,12 +223,35 @@ public class HitlTimeoutHandler {
         }
     }
 
+    /**
+     * ABORT cancels the PAUSE the timeout was armed for, and nothing else. It used
+     * to be the full cancel: a fire claimed just before an approver resumed then
+     * signalled the resumed turn to stop (the cancel signals in-flight work and
+     * accepts IN_PROGRESS), or — after a resume and a new pause — aborted a pause
+     * whose own timeout had not expired. Paused-only and bound to the pause id, a
+     * late fire finds nothing of its own to cancel and completes.
+     */
     private void cancelRegular(Map<String, Object> metadata) {
         String conversationId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
+        Object pauseId = metadata.get(HitlSchedules.METADATA_PAUSE_ID_KEY);
         try {
-            conversationService.cancelConversation(conversationId,
-                    ControlSignal.CANCEL_GRACEFUL, "system:timeout");
-            LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
+            var outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout",
+                    pauseId != null ? pauseId.toString() : null);
+            if (outcome == IConversationService.CancelOutcome.CANCELLED) {
+                LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
+            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
+                    && conversationService.getConversationState(conversationId) == ConversationState.IN_PROGRESS) {
+                // A decision on this pause is in flight (a resume's AWAITING_HUMAN ->
+                // IN_PROGRESS CAS). If it fails before running it restores the pause and
+                // counts on this timeout, whose row it has not deleted yet; if it succeeds
+                // it deletes the row and the retry never fires. Completing here would
+                // consume the one-shot fire and leave a restored pause with no timeout at
+                // all — the rule resumeRegular applies through regularPauseStillWaiting.
+                throw new IllegalStateException("a decision on the pause is still in flight");
+            } else {
+                LOGGER.infof("HITL timeout ABORT for conversation %s skipped — the pause it was armed for is no longer waiting (%s)",
+                        conversationId, outcome);
+            }
         } catch (Exception e) {
             if (!regularPauseStillWaiting(conversationId)) {
                 LOGGER.infof("HITL timeout ABORT for conversation %s skipped — it is no longer awaiting a decision (%s)",

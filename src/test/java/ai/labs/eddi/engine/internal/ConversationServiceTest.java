@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
@@ -57,6 +58,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.InputData;
@@ -434,6 +436,57 @@ class ConversationServiceTest {
             verify(conversationMemoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
             verify(conversationStateCache).remove(CONVERSATION_ID);
         }
+
+        @SuppressWarnings("unchecked")
+        private Event<HitlPauseCommittedEvent> stubPausedStart(boolean descriptorFails) throws Exception {
+            Event<HitlPauseCommittedEvent> pauseCommitted = mock(Event.class);
+            conversationService.hitlPauseCommittedEvent = pauseCommitted;
+            IAgent agent = mock(IAgent.class);
+            IConversation conversation = mock(IConversation.class);
+            IConversationMemory memory = mock(IConversationMemory.class);
+
+            doReturn(USER_ID).when(conversationSetup).computeAnonymousUserIdIfEmpty(eq(USER_ID), isNull());
+            doReturn(false).when(gdprComplianceService).isProcessingRestricted(USER_ID);
+            doReturn(agent).when(agentFactory).getLatestReadyAgent(ENV, AGENT_ID);
+            doReturn(new QuotaCheckResult(true, null)).when(tenantQuotaService).acquireConversationSlot();
+            doReturn(conversation).when(agent).startConversation(eq(USER_ID), any(), any(), isNull());
+            doReturn(memory).when(conversation).getConversationMemory();
+            doReturn(ConversationState.AWAITING_HUMAN).when(memory).getConversationState();
+            doReturn(Instant.parse("2026-10-25T10:00:00Z")).when(memory).getHitlPausedAt();
+            doReturn(new Stack<>()).when(memory).getRedoCache();
+            doReturn(mock(IConversationMemory.IConversationStepStack.class)).when(memory).getAllSteps();
+            doReturn(new ConversationProperties(memory)).when(memory).getConversationProperties();
+            doReturn(CONVERSATION_ID).when(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            if (descriptorFails) {
+                doThrow(new ResourceStoreException("descriptor write failed"))
+                        .when(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+            }
+            return pauseCommitted;
+        }
+
+        @Test
+        @DisplayName("a pause on the start turn is announced once the descriptor is written")
+        void startPause_isAnnouncedAfterDescriptor() throws Exception {
+            Event<HitlPauseCommittedEvent> pauseCommitted = stubPausedStart(false);
+
+            conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>());
+
+            var order = inOrder(conversationSetup, pauseCommitted);
+            order.verify(conversationSetup).createConversationDescriptor(any(), any(), any(), any(), any());
+            order.verify(pauseCommitted).fireAsync(any());
+        }
+
+        @Test
+        @DisplayName("a start-turn pause whose conversation is discarded for a failed descriptor is never announced")
+        void startPause_isNotAnnouncedWhenDescriptorFails() throws Exception {
+            Event<HitlPauseCommittedEvent> pauseCommitted = stubPausedStart(true);
+
+            assertThrows(ResourceStoreException.class,
+                    () -> conversationService.startConversation(ENV, AGENT_ID, USER_ID, new LinkedHashMap<>()));
+
+            verify(conversationMemoryStore).deleteConversationMemorySnapshot(CONVERSATION_ID);
+            verify(pauseCommitted, never()).fireAsync(any());
+        }
     }
 
     // =========================================================================
@@ -652,6 +705,53 @@ class ConversationServiceTest {
 
             assertNotNull(result);
             assertEquals(AGENT_ID, result.getAgentId());
+        }
+
+        @Test
+        @DisplayName("current step only → the history-free tail read, never the full document")
+        void currentStepOnlyReadsTheTail() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            doReturn(ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationMemoryStore).loadConversationMemoryTail(CONVERSATION_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+
+            SimpleConversationMemorySnapshot result = conversationService.readConversation(CONVERSATION_ID, false, true,
+                    List.of("conversationOutputs"));
+
+            assertEquals(AGENT_ID, result.getAgentId());
+            assertEquals(1, result.getConversationOutputs().size());
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("current step only, env-qualified → tail read, agent still checked")
+        void currentStepOnlyEnvQualifiedReadsTheTail() throws Exception {
+            var snapshot = createMinimalSnapshot("different-agent", USER_ID);
+            doReturn(ConversationMemoryTail.ofFullSnapshot(snapshot)).when(conversationMemoryStore).loadConversationMemoryTail(CONVERSATION_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+
+            assertThrows(AgentMismatchException.class,
+                    () -> conversationService.readConversation(ENV, AGENT_ID, CONVERSATION_ID, false, true, null));
+            verify(conversationMemoryStore, never()).loadConversationMemorySnapshot(anyString());
+        }
+
+        @Test
+        @DisplayName("current step only, unknown conversation → 404 as before")
+        void currentStepOnlyUnknownConversation() throws Exception {
+            doReturn(null).when(conversationMemoryStore).loadConversationMemoryTail(CONVERSATION_ID);
+
+            assertThrows(ConversationNotFoundException.class, () -> conversationService.readConversation(CONVERSATION_ID, false, true, null));
+        }
+
+        @Test
+        @DisplayName("whole history (returnCurrentStepOnly=false) → the full read, as before")
+        void wholeHistoryReadsTheFullDocument() throws Exception {
+            var snapshot = createMinimalSnapshot(AGENT_ID, USER_ID);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(new HashMap<>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+
+            conversationService.readConversation(CONVERSATION_ID, false, false, null);
+
+            verify(conversationMemoryStore, never()).loadConversationMemoryTail(anyString());
         }
     }
 

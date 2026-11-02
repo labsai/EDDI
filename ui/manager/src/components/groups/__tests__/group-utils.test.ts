@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey } from "@/components/groups/group-utils";
+import { parseTranscriptContent, parseEmojiVerification, parseVerdictJson, truncateContent, safeFormatDate, humanizeJsonKey, formatMarkdownText, formatJsonSafely } from "@/components/groups/group-utils";
+
+describe("emoji verification: a long detail is still a verdict", () => {
+  it("parses a header whose detail after the colon is very long", () => {
+    const items = parseEmojiVerification("\u2705 **Write the report**: " + "detail ".repeat(600));
+    expect(items).not.toBeNull();
+    expect(items![0]!.subject).toBe("Write the report");
+    expect(items![0]!.passed).toBe(true);
+  });
+});
 
 describe("group-utils", () => {
   describe("parseTranscriptContent", () => {
@@ -442,5 +451,78 @@ describe("parseTranscriptContent — JSON that is somebody's answer", () => {
     it("returns an unusable key unchanged rather than an empty label", () => {
       expect(humanizeJsonKey("")).toBe("");
     });
+  });
+});
+
+describe("group-utils — bounded work on hostile input", () => {
+  it("formats a long run of unterminated link destinations in linear-ish time", () => {
+    // `](` with no closing paren used to rescan the rest of the text from every
+    // opener: 100k chars took ~5s.
+    const hostile = "](".repeat(50_000);
+    const start = performance.now();
+    formatMarkdownText(hostile);
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  it("still protects an ordinary link destination from rewriting", () => {
+    const text = "see [docs](https://example.com/a,B?x=1) now";
+    expect(formatMarkdownText(text)).toContain("(https://example.com/a,B?x=1)");
+  });
+
+  it("classifies many separated indented runs without re-splitting the prefix each time", () => {
+    const hostile = "    x\n\n".repeat(12_000);
+    const start = performance.now();
+    formatMarkdownText(hostile);
+    expect(performance.now() - start).toBeLessThan(2000);
+  });
+
+  it("keeps indented code after a blank line as code", () => {
+    const text = "intro\n\n    foo(a,B);\n\n    bar(c,D);\n";
+    expect(formatMarkdownText(text)).toContain("    bar(c,D);");
+  });
+
+  it("parses a verification header with a very long whitespace line quickly", () => {
+    const hostile = "✅" + " ".repeat(200_000) + "x";
+    const start = performance.now();
+    expect(parseEmojiVerification(hostile)).toBeNull();
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+
+  it.each([
+    ["✅ **Subject**: fine", "Subject", true],
+    ["❌ Subject: broken", "Subject", false],
+    ["✅   Plain subject  : detail", "Plain subject", true],
+  ])("parses %s", (line, subject, passed) => {
+    expect(parseEmojiVerification(line)).toEqual([{ subject, passed }]);
+  });
+
+  it("rejects a header with no separating whitespace or no detail", () => {
+    expect(parseEmojiVerification("✅Subject: x")).toBeNull();
+    expect(parseEmojiVerification("✅ Subject:")).toBeNull();
+  });
+});
+
+describe("formatJsonSafely", () => {
+  it("pretty-prints ordinary JSON", () => {
+    expect(formatJsonSafely('{"a":1}')).toBe('{\n  "a": 1\n}');
+  });
+
+  it("returns invalid JSON as written", () => {
+    expect(formatJsonSafely("{not json")).toBe("{not json");
+  });
+
+  it("returns deeply nested content as written instead of expanding the indentation", () => {
+    const deep = "[".repeat(200) + "]".repeat(200);
+    expect(formatJsonSafely(deep)).toBe(deep);
+  });
+
+  it("returns oversized content as written", () => {
+    const big = JSON.stringify({ k: "x".repeat(70_000) });
+    expect(formatJsonSafely(big)).toBe(big);
+  });
+
+  it("does not count brackets inside strings as nesting", () => {
+    const text = JSON.stringify({ k: "[".repeat(100) });
+    expect(formatJsonSafely(text)).toBe(JSON.stringify({ k: "[".repeat(100) }, null, 2));
   });
 });

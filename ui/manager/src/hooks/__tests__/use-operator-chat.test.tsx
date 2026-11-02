@@ -398,7 +398,16 @@ describe("resolveApproval — reconciling the resumed turn", () => {
 
     expect(result.current.isPaused).toBe(false);
     expect(h.resumeCalls).toEqual([
-      { conversationId: "conv-1", decision: { verdict: "APPROVED", note: undefined, toolDecisions: { "call-1": { verdict: "APPROVED" } } } },
+      {
+        conversationId: "conv-1",
+        decision: {
+          verdict: "APPROVED",
+          note: undefined,
+          toolDecisions: { "call-1": { verdict: "APPROVED" } },
+          // Bound to the pause on screen: its start (hitlPausedAt) in epoch ms.
+          pauseId: String(Date.parse("2026-08-01T10:00:00Z")),
+        },
+      },
     ]);
     expect(result.current.messages.map((m) => [m.role, m.content])).toEqual([
       ["user", "do a thing"],
@@ -406,6 +415,23 @@ describe("resolveApproval — reconciling the resumed turn", () => {
       ["system", "You approved this request."],
       ["agent", "Done — the agent was created."],
     ]);
+  });
+
+  it("keys the approval status to the pause that is paused NOW after the card says the pause changed", async () => {
+    // Shown pause: 10:00. By the time of the decision the conversation is paused on a different one (10:05).
+    const { result } = await pausedHook();
+    // The baseline (detailed) read the hook makes right before the resume.
+    h.detailedLogs = [{ conversationState: "AWAITING_HUMAN", hitlPausedAt: "2026-08-01T10:05:00Z" }];
+
+    await act(async () => {
+      await result.current.resolveApproval("APPROVED");
+    });
+
+    expect(h.resumeCalls).toEqual([]); // nothing was submitted for a pause nobody reviewed
+    expect(result.current.resolveError).toBeTruthy();
+    expect(result.current.isPaused).toBe(true);
+    // Without this the approval page keeps its status keyed to 10:00 and the new pause stays hidden.
+    expect(useOperatorChatStore.getState().decidedPausedAt).toBe("2026-08-01T10:05:00Z");
   });
 
   it("keeps the ask bubble's message id, so its pipeline trace stays attached", async () => {
@@ -1112,6 +1138,34 @@ describe("resolveApproval — reconciling the resumed turn", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("sends the pauseId the reviewer was shown, in preference to the displayed start", async () => {
+    const { result } = await pausedHook();
+    h.conversationLogs = [{ conversationState: "READY", conversationOutputs: [textOutput("ok")] }];
+
+    await act(async () => {
+      await result.current.resolveApproval("REJECTED", undefined, undefined, { pauseId: "1785581400000" });
+    });
+
+    expect(h.resumeCalls).toHaveLength(1);
+    expect(h.resumeCalls[0]!.decision).toMatchObject({ verdict: "REJECTED", pauseId: "1785581400000" });
+  });
+
+  it("refuses a decision when the conversation is now paused on a different pause", async () => {
+    // The card showed the 10:00 pause; by the time the reviewer clicks, another
+    // window resolved it and the turn paused again at 11:00. A bare REJECTED
+    // would have been applied to the 11:00 batch nobody reviewed.
+    const { result } = await pausedHook();
+    h.detailedLogs = [{ hitlPausedAt: "2026-08-01T11:00:00Z" } as never];
+
+    await act(async () => {
+      await result.current.resolveApproval("REJECTED");
+    });
+
+    expect(h.resumeCalls).toEqual([]);
+    expect(result.current.resolveError).toMatch(/changed/i);
+    expect(result.current.isPaused).toBe(true);
   });
 
   it("reports resumeConversation failing as resolveError, without polling", async () => {

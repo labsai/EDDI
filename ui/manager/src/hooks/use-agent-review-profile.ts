@@ -20,6 +20,8 @@ export function useAgentReviewProfile(agentId: string | null, environment?: stri
   });
   return {
     reviewNotice: query.data?.reviewNotice ?? null,
+    /** How the deployed version asks for ratings, or null when it does not. */
+    rating: query.data?.rating ?? null,
     // A disabled query also reports isPending, so it counts only with an agent.
     pending: !!agentId && query.isPending,
   };

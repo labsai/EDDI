@@ -176,9 +176,10 @@ public class ConnectionResolver {
      * {@code targetUrl}, {@link Binding#PER_USER} still needs a verified principal
      * bound to the turn, and the token comes from the same
      * {@link AccessTokenSupplier}, so refresh and caching are shared with the HTTP
-     * paths. The allowlist only holds http(s) origins today, so a mail target such
-     * as {@code imaps://host:993} is refused until the connection model learns mail
-     * origins — fail closed, never "no check".
+     * paths. The allowlist must name the mail origin itself
+     * ({@code smtps://smtp.office365.com}, {@code imaps://outlook.office365.com}):
+     * an https origin of the same host does not cover it, so a token allowed to
+     * reach an HTTP API is not thereby allowed to log in to a mailbox.
      *
      * @param reference
      *            a value containing {@code ${connection:name}}
@@ -220,6 +221,97 @@ public class ConnectionResolver {
             record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
             throw e;
         }
+    }
+
+    /**
+     * A username and password for a protocol login — SMTP {@code AUTH PLAIN/LOGIN},
+     * IMAP {@code LOGIN} — where the client library takes the two values, not an
+     * HTTP {@code Basic} header. {@link #toString()} never prints the password.
+     */
+    public record BasicLogin(String username, String password) {
+        @Override
+        public String toString() {
+            return "BasicLogin[username=" + username + "]";
+        }
+    }
+
+    /**
+     * Resolves the username and vault-backed password of a {@code BASIC}
+     * connection, for a mail login (the app-password case of email plan §7.1).
+     * <p>
+     * The same checks as {@link #resolve}: the target must be on the connection's
+     * {@code baseUrlAllowlist} (a mail origin such as
+     * {@code smtp://relay.example.com:587}), and a document that lost its username
+     * or password reference is refused. Any other auth type is
+     * {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT}: an OAuth connection
+     * goes through {@link #resolveAccessToken}, and a STATIC value is a header
+     * whose shape cannot be split into two fields.
+     *
+     * @throws ConnectionException
+     *             on every failure; never returns null
+     */
+    public BasicLogin resolveBasicLogin(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            if (connection.getAuthType() != AuthType.BASIC || connection.getBinding() == Binding.CALLER_SUPPLIED) {
+                throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                        "Connection '" + connection.getName() + "' is " + connection.getAuthType()
+                                + ", which has no username and password to log in with. A mail login needs a BASIC connection, "
+                                + "or an OAuth connection for XOAUTH2.");
+            }
+            requireTargetAllowed(connection, targetUrl);
+            StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
+            if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank() || staticAuth.getPasswordRef() == null
+                    || staticAuth.getPasswordRef().isBlank()) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Connection '" + connection.getName() + "' is BASIC but lacks staticAuth.username or staticAuth.passwordRef. "
+                                + "Re-save the connection to apply the current validation rules.");
+            }
+            String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+            record(connection, "success", sample);
+            return new BasicLogin(staticAuth.getUsername(), password);
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    /**
+     * Save-time check of a mail login, without resolving any credential: the
+     * connection exists, can log in to a mailbox ({@code BASIC} for an app
+     * password, an OAuth type for {@code XOAUTH2}; never {@code CALLER_SUPPLIED})
+     * and its {@code baseUrlAllowlist} names {@code targetUrl} (a mail origin such
+     * as {@code imaps://outlook.office365.com}). The same rules
+     * {@link #resolveBasicLogin} and {@link #resolveAccessToken} apply when the
+     * login happens, checked where the author is waiting for an answer.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed
+     */
+    public void requireMailLoginTarget(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection = connectionRegistry.require(parsed);
+        if (connection.getAuthType() != AuthType.BASIC) {
+            requireBareTokenAvailable(connection);
+        } else if (connection.getBinding() == Binding.CALLER_SUPPLIED) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, which has no username and password to log in with.");
+        }
+        if (connection.getBinding() == Binding.PER_USER) {
+            // A poll runs as no verified person, so a per-user grant could never be used.
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is bound PER_USER, but a mailbox poll runs as no verified user. Use a "
+                            + "SERVICE-bound connection for a mailbox.");
+        }
+        requireTargetAllowed(connection, targetUrl);
     }
 
     private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
@@ -298,6 +390,23 @@ public class ConnectionResolver {
         ConnectionReference parsed = ConnectionReference.parse(reference);
         try {
             return connectionRegistry.find(parsed).map(ConnectionConfiguration::getBinding);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+    }
+
+    /**
+     * The auth type a reference names, without resolving anything — so a mail
+     * client can choose between {@link #resolveBasicLogin} and
+     * {@link #resolveAccessToken} without provoking a refusal first.
+     *
+     * @return the auth type, or empty when no connection of that name exists
+     */
+    public Optional<AuthType> authTypeOf(String reference) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        try {
+            return connectionRegistry.find(parsed).map(ConnectionConfiguration::getAuthType);
         } catch (ConnectionException e) {
             countLookupFailure(e);
             throw e;
@@ -592,7 +701,7 @@ public class ConnectionResolver {
 
     private static String canonicalise(String allowedOrigin, ConnectionConfiguration connection) {
         try {
-            return ConnectionConfiguration.requireCanonicalOrigin(allowedOrigin, "baseUrlAllowlist");
+            return ConnectionConfiguration.requireCanonicalAllowlistOrigin(allowedOrigin, "baseUrlAllowlist");
         } catch (IllegalArgumentException e) {
             // Stored documents predate, or bypass, the write-time validator (import,
             // a direct database write). A malformed entry must not silently match

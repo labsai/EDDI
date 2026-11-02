@@ -181,9 +181,15 @@ public class McpHitlTools {
         }
         try {
             String ownerId = hitlAccessGuard.requireConversationHitlAccess(conversationId);
-            ConversationMemorySnapshot snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            // Same reads as the REST surface: the full snapshot (less the resume-only
+            // batch fields the projection strips anyway) for detail=full, the history-free
+            // tail for the summary, which reads only the header.
+            boolean full = "full".equals(detail);
+            ConversationMemorySnapshot snapshot = full
+                    ? conversationService.getConversationMemorySnapshotForApprover(conversationId)
+                    : conversationService.getConversationMemoryTail(conversationId).snapshot();
             boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
-            if ("full".equals(detail)) {
+            if (full) {
                 if (!paused && !ownershipValidator.isAdmin(identity) && !ownershipValidator.isOwner(identity, ownerId)) {
                     return errorJson("Full approval status is available to approvers only while awaiting approval — "
                             + "use the summary view", "FORBIDDEN", null);
@@ -438,7 +444,10 @@ public class McpHitlTools {
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                // Same rule as the REST summary — see HitlAccessGuard.
+                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                    summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
+                }
             }
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
@@ -589,7 +598,18 @@ public class McpHitlTools {
             GroupConversation result = groupConversationService.submitHumanInput(
                     conversationId, memberId, content, principalWithMcpPrefix());
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", "HUMAN_INPUT").increment();
-            return jsonSerialization.serialize(result);
+            // Submitting a turn is not reading the discussion: the pending member is
+            // refused the full view by get_group_approval_status, so the response to
+            // their submission must not hand it over either. Owner and admins get
+            // the conversation; everyone else an acknowledgement.
+            if (hitlAccessGuard.mayReadResumedDiscussion(result.getUserId())) {
+                return jsonSerialization.serialize(result);
+            }
+            var acknowledgement = new LinkedHashMap<String, Object>();
+            acknowledgement.put("groupConversationId", conversationId);
+            acknowledgement.put("accepted", true);
+            acknowledgement.put("state", result.getState() != null ? result.getState().name() : "");
+            return jsonSerialization.serialize(acknowledgement);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
         } catch (NotFoundException e) {

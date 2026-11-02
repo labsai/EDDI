@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStep;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -24,6 +25,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.*;
 import static ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
@@ -305,12 +307,36 @@ public class ConversationMemoryUtilities {
      * carried a cost.
      */
     static Double conversationCost(List<ConversationStepSnapshot> steps, List<ConversationStepSnapshot> redoCache) {
-        Double live = conversationCost(steps);
-        Double undone = conversationCost(redoCache);
+        return combineCost(conversationCost(steps), conversationCost(redoCache));
+    }
+
+    /** The live and the undone spend added up — {@code null} only when both are. */
+    static Double combineCost(Double live, Double undone) {
         if (live == null) {
             return undone;
         }
         return undone == null ? live : live + undone;
+    }
+
+    /**
+     * {@link #conversationCost(List)} over values a store already extracted from
+     * the spend entries, in document order: the same filter (a finite, non-negative
+     * number) and the same left-to-right summation, so the total is bit-identical
+     * to the one computed from the steps themselves.
+     */
+    static Double sumSpend(List<?> spendValues) {
+        if (spendValues == null) {
+            return null;
+        }
+        double total = 0.0;
+        boolean found = false;
+        for (Object value : spendValues) {
+            if (value instanceof Number cost && Double.isFinite(cost.doubleValue()) && cost.doubleValue() >= 0.0) {
+                total += cost.doubleValue();
+                found = true;
+            }
+        }
+        return found ? total : null;
     }
 
     private static boolean isSpendKey(String key) {
@@ -327,7 +353,11 @@ public class ConversationMemoryUtilities {
         if (MemoryKeys.AUDIT_TOKEN_USAGE.equals(key)) {
             return false;
         }
-        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error");
+        // The kept revision candidate is the frozen request of a model answer (system
+        // prompt, history, tool results) — resume machinery, like a tool pause's
+        // transcript, which never reaches this view either.
+        return key.startsWith("audit:") || key.contains(":trace:") || key.endsWith("Error")
+                || key.equals(HitlRevisionCandidate.STEP_KEY);
     }
 
     /**
@@ -423,24 +453,63 @@ public class ConversationMemoryUtilities {
     public static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
                                                                                    boolean returnDetailed, boolean returnCurrentStepOnly) {
 
-        var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot);
-        newSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
-
         var allOutputs = conversationMemorySnapshot.getConversationOutputs();
         var allSteps = conversationMemorySnapshot.getConversationSteps();
         // A secret turn is masked with the forms found in its output AND its step, so
         // each side can be paired with the other — but only when the two lists agree:
         // on a drifted document an index names different turns on each side.
         boolean paired = allOutputs.size() == allSteps.size();
-
         var conversationOutputs = returnCurrentStepOnly ? List.of(allOutputs.getLast()) : allOutputs;
-        int outputOffset = returnCurrentStepOnly ? allOutputs.size() - 1 : 0;
+        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
+        return convertSimpleConversationMemory(conversationMemorySnapshot, conversationOutputs, conversationSteps, paired, allSteps.size() > 1,
+                !conversationMemorySnapshot.getRedoCache().isEmpty(), conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()),
+                returnDetailed);
+    }
+
+    /**
+     * The simple projection of the current step from a
+     * {@link ConversationMemoryTail} — the same result
+     * {@link #convertSimpleConversationMemory(ConversationMemorySnapshot, boolean, boolean)}
+     * gives with {@code returnCurrentStepOnly} for the full snapshot of the same
+     * conversation, built from its last step and output plus the totals the tail
+     * carries. An empty conversation fails exactly as the full projection does
+     * ({@link NoSuchElementException} from {@code getLast()}).
+     */
+    static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemoryTail tail, boolean returnDetailed) {
+        var snapshot = tail.snapshot();
+        var lastOutput = List.of(snapshot.getConversationOutputs().getLast());
+        var lastStep = List.of(snapshot.getConversationSteps().getLast());
+        return convertSimpleConversationMemory(snapshot, lastOutput, lastStep, tail.outputCount() == tail.stepCount(), tail.stepCount() > 1,
+                tail.redoCount() > 0, tail.conversationCost(), returnDetailed);
+    }
+
+    /**
+     * Shared body of both simple projections.
+     *
+     * @param conversationOutputs
+     *            the outputs to render — all of them, or only the last
+     * @param conversationSteps
+     *            the steps to render, index-aligned with
+     *            {@code conversationOutputs} whenever {@code paired}
+     * @param paired
+     *            whether the STORED outputs and steps have the same length, so an
+     *            index names the same turn on both sides
+     */
+    private static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemorySnapshot conversationMemorySnapshot,
+                                                                                    List<ConversationOutput> conversationOutputs,
+                                                                                    List<ConversationStepSnapshot> conversationSteps,
+                                                                                    boolean paired, boolean undoAvailable, boolean redoAvailable,
+                                                                                    Double conversationCost, boolean returnDetailed) {
+
+        var newSnapshot = getSimpleMemorySnapshot(conversationMemorySnapshot, undoAvailable, redoAvailable);
+        newSnapshot.getConversationProperties().putAll(conversationMemorySnapshot.getConversationProperties());
+
         var newConversationOutputs = newSnapshot.getConversationOutputs();
         for (int index = 0; index < conversationOutputs.size(); index++) {
             var conversationOutput = conversationOutputs.get(index);
             boolean secretTurn = isSecretTurnOutput(conversationOutput);
             List<String> needles = secretTurn
-                    ? secretTurnNeedles(conversationOutput, paired ? allSteps.get(outputOffset + index) : null)
+                    ? secretTurnNeedles(conversationOutput, paired ? conversationSteps.get(index) : null)
                     : List.of();
             if (returnDetailed) {
                 // returnDetailed is caller-controlled and reachable by any chatting user, so
@@ -481,11 +550,11 @@ public class ConversationMemoryUtilities {
             }
         }
 
-        newSnapshot.setError(turnError(newSnapshot.getConversationState(), allOutputs));
-        newSnapshot.setConversationCost(conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()));
+        // turnError reads only the last output, which the rendered list always ends
+        // with.
+        newSnapshot.setError(turnError(newSnapshot.getConversationState(), conversationOutputs));
+        newSnapshot.setConversationCost(conversationCost);
 
-        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
-        int stepOffset = returnCurrentStepOnly ? allSteps.size() - 1 : 0;
         for (int index = 0; index < conversationSteps.size(); index++) {
             var conversationStepSnapshot = conversationSteps.get(index);
             var simpleConversationStep = new SimpleConversationStep();
@@ -495,7 +564,7 @@ public class ConversationMemoryUtilities {
             // of another turn's output.
             boolean secretTurn = isSecretTurnStep(conversationStepSnapshot);
             List<String> needles = secretTurn
-                    ? secretTurnNeedles(paired ? allOutputs.get(stepOffset + index) : null, conversationStepSnapshot)
+                    ? secretTurnNeedles(paired ? conversationOutputs.get(index) : null, conversationStepSnapshot)
                     : List.of();
             for (var packageRunSnapshot : conversationStepSnapshot.getWorkflows()) {
                 for (var resultSnapshot : packageRunSnapshot.getLifecycleTasks()) {
@@ -693,7 +762,8 @@ public class ConversationMemoryUtilities {
         return current;
     }
 
-    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot) {
+    private static SimpleConversationMemorySnapshot getSimpleMemorySnapshot(ConversationMemorySnapshot conversationMemorySnapshot,
+                                                                            boolean undoAvailable, boolean redoAvailable) {
 
         var simpleSnapshot = new SimpleConversationMemorySnapshot();
 
@@ -723,8 +793,8 @@ public class ConversationMemoryUtilities {
         simpleSnapshot.setHitlPauseType(conversationMemorySnapshot.getHitlPauseType());
         simpleSnapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(conversationMemorySnapshot.getHitlPendingToolCalls()));
         simpleSnapshot.setEnvironment(conversationMemorySnapshot.getEnvironment());
-        simpleSnapshot.setUndoAvailable(conversationMemorySnapshot.getConversationSteps().size() > 1);
-        simpleSnapshot.setRedoAvailable(!conversationMemorySnapshot.getRedoCache().isEmpty());
+        simpleSnapshot.setUndoAvailable(undoAvailable);
+        simpleSnapshot.setRedoAvailable(redoAvailable);
         return simpleSnapshot;
     }
 
@@ -801,23 +871,101 @@ public class ConversationMemoryUtilities {
     }
 
     /**
-     * Fix (security): projects the raw {@link PendingToolCallBatch} on a snapshot
-     * returned by the GENERIC raw-read surface ({@code readRawConversationLog})
-     * down to the same names-only view the Simple projection uses — stripping
+     * Fix (security): the one redaction point of the GENERIC raw-read surface
+     * ({@code readRawConversationLog}), for the two pieces of pause machinery a
+     * paused conversation carries that hold frozen model input:
+     * <ol>
+     * <li>a TOOL_CALL pause's {@link PendingToolCallBatch} is projected down to the
+     * same names-only view the Simple projection uses — stripping
      * {@code argumentsRaw}, {@code argumentsRedacted}, {@code chatTranscriptJson},
-     * {@code traceSoFar}, {@code fingerprint} and {@code effectiveToolApprovals}.
-     * Without this, the raw endpoint leaks unredacted tool arguments and the frozen
-     * LLM transcript of a paused conversation to any authenticated caller,
-     * defeating the approver-only {@code detail=full} gate. The persisted document
-     * is untouched; {@code loadConversationMemorySnapshot} returns a
-     * freshly-deserialized, caller-owned snapshot per call, so mutating its batch
-     * field here is safe.
+     * {@code traceSoFar}, {@code fingerprint} and
+     * {@code effectiveToolApprovals};</li>
+     * <li>a RULE pause's revision candidate
+     * ({@code hitlConfig.onRejection: REVISE}, step data
+     * {@link HitlRevisionCandidate#STEP_KEY}) loses its {@code transcriptJson} —
+     * the frozen request of the answer under review, including the compiled system
+     * prompt and every tool result. The draft and the bookkeeping (ids, position,
+     * output marks, {@code roundsUsed}) stay, so the owner still sees what is under
+     * review.</li>
+     * </ol>
+     * Without this, the raw endpoint leaks unredacted tool arguments, the frozen
+     * LLM transcript of a paused conversation and the system prompt to any caller
+     * that may read the conversation, defeating the approver-only
+     * {@code detail=full} gate (which drops both). The persisted document is
+     * untouched; {@code loadConversationMemorySnapshot} returns a
+     * freshly-deserialized, caller-owned snapshot per call, so mutating it here is
+     * safe — resume reads the store, never this projection.
      */
     public static ConversationMemorySnapshot redactRawPendingToolCallsForRead(ConversationMemorySnapshot snapshot) {
-        if (snapshot != null && snapshot.getHitlPendingToolCalls() != null) {
+        if (snapshot == null) {
+            return null;
+        }
+        if (snapshot.getHitlPendingToolCalls() != null) {
             snapshot.setHitlPendingToolCalls(namesOnlyPendingToolCalls(snapshot.getHitlPendingToolCalls()));
         }
+        redactRevisionCandidateTranscripts(snapshot.getConversationSteps());
+        redactRevisionCandidateTranscripts(snapshot.getRedoCache());
         return snapshot;
+    }
+
+    /**
+     * Fields of a persisted {@link HitlRevisionCandidate} that carry frozen model
+     * input, withheld by the raw read. Every other field is bookkeeping or the
+     * draft, which the step's output shows anyway.
+     */
+    static final Set<String> REVISION_CANDIDATE_FROZEN_INPUT_FIELDS = Set.of("transcriptJson");
+
+    /**
+     * Second half of {@link #redactRawPendingToolCallsForRead}: replaces each kept
+     * revision candidate — its {@code result} and every copy in
+     * {@code possibleResults}, which {@code Data} fills with the result by default
+     * — with a copy that omits {@link #REVISION_CANDIDATE_FROZEN_INPUT_FIELDS}.
+     */
+    private static void redactRevisionCandidateTranscripts(Collection<ConversationStepSnapshot> steps) {
+        if (steps == null) {
+            return;
+        }
+        for (var step : steps) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow == null || workflow.getLifecycleTasks() == null) {
+                    continue;
+                }
+                for (var result : workflow.getLifecycleTasks()) {
+                    if (result == null || !HitlRevisionCandidate.STEP_KEY.equals(result.getKey())) {
+                        continue;
+                    }
+                    result.setResult(withoutFrozenInput(result.getResult()));
+                    if (result.getPossibleResults() != null) {
+                        var redacted = new ArrayList<Object>(result.getPossibleResults().size());
+                        for (Object possible : result.getPossibleResults()) {
+                            redacted.add(withoutFrozenInput(possible));
+                        }
+                        result.setPossibleResults(redacted);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * A copy of a stored candidate map without its frozen model input; anything
+     * that is not a map carries no candidate fields and is dropped to null, since a
+     * candidate is only ever stored as a map.
+     */
+    private static Object withoutFrozenInput(Object stored) {
+        if (!(stored instanceof Map<?, ?> map)) {
+            return null;
+        }
+        var copy = new LinkedHashMap<Object, Object>();
+        map.forEach((field, value) -> {
+            if (!REVISION_CANDIDATE_FROZEN_INPUT_FIELDS.contains(String.valueOf(field))) {
+                copy.put(field, value);
+            }
+        });
+        return copy;
     }
 
     /**
@@ -918,6 +1066,7 @@ public class ConversationMemoryUtilities {
      */
     public static ConversationMemorySnapshot sanitizePendingToolCallsForApprover(ConversationMemorySnapshot snapshot) {
         stripRequestFingerprintsForRead(snapshot);
+        stripRevisionCandidates(snapshot);
         if (snapshot == null || snapshot.getHitlPendingToolCalls() == null) {
             return snapshot;
         }
@@ -950,6 +1099,68 @@ public class ConversationMemoryUtilities {
             }
         }
         return snapshot;
+    }
+
+    /**
+     * Removes the revision candidate a RULE pause keeps ({@code onRejection:
+     * REVISE}) from every step of a snapshot served to an approver: it is the
+     * frozen request of the answer under review — the compiled system prompt and
+     * every tool result — which is resume machinery like
+     * {@code chatTranscriptJson}. The answer itself stays visible in the step's
+     * output.
+     */
+    private static void stripRevisionCandidates(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        // The redo cache too: an undo moves the candidate-bearing step there, and it is
+        // serialized with the rest of the snapshot.
+        removeStepData(snapshot.getConversationSteps(), HitlRevisionCandidate.STEP_KEY::equals);
+        removeStepData(snapshot.getRedoCache(), HitlRevisionCandidate.STEP_KEY::equals);
+    }
+
+    /**
+     * Removes the {@code audit:*} step data — above all
+     * {@code audit:compiled_prompt}, the agent's rendered system prompt with every
+     * variable, snippet and retrieved document templated into it — from every step
+     * of a snapshot, the redo cache included. {@code audit:token_usage} stays: it
+     * is three numbers, no prompt text, and the one audit entry meant for the
+     * caller (the detailed view keeps it for the same reason).
+     * <p>
+     * For the full-snapshot reads served to a caller who may use the agent but not
+     * read its configuration: owning a conversation is not VIEW on the agent, and
+     * the compiled prompt IS its configuration. The detailed view and MCP
+     * {@code read_audit_trail} already withhold it; the raw read and the full
+     * approval status did not. Mutates the freshly-deserialized, caller-owned
+     * snapshot only — the same contract as the projections above.
+     */
+    public static ConversationMemorySnapshot stripAuditData(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        removeStepData(snapshot.getConversationSteps(), ConversationMemoryUtilities::isWithheldAuditKey);
+        removeStepData(snapshot.getRedoCache(), ConversationMemoryUtilities::isWithheldAuditKey);
+        return snapshot;
+    }
+
+    private static boolean isWithheldAuditKey(String key) {
+        return key != null && key.startsWith("audit:") && !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key);
+    }
+
+    private static void removeStepData(Collection<ConversationStepSnapshot> steps, Predicate<String> key) {
+        if (steps == null) {
+            return;
+        }
+        for (var step : steps) {
+            if (step == null || step.getWorkflows() == null) {
+                continue;
+            }
+            for (var workflow : step.getWorkflows()) {
+                if (workflow != null && workflow.getLifecycleTasks() != null) {
+                    workflow.getLifecycleTasks().removeIf(result -> result != null && key.test(result.getKey()));
+                }
+            }
+        }
     }
 
     /**
@@ -1063,7 +1274,23 @@ public class ConversationMemoryUtilities {
                                                                                            List<String> returningFields) {
 
         var memorySnapshot = convertSimpleConversationMemory(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly);
+        return applyReturningFields(memorySnapshot, returnCurrentStepOnly, returningFields);
+    }
 
+    /**
+     * {@link #convertSimpleConversationMemorySnapshot(ConversationMemorySnapshot, Boolean, Boolean, List)}
+     * with {@code returnCurrentStepOnly=true}, from a
+     * {@link ConversationMemoryTail} instead of the full snapshot — same fields,
+     * same values, without the history ever having been loaded.
+     */
+    public static SimpleConversationMemorySnapshot convertSimpleConversationMemorySnapshot(ConversationMemoryTail tail, Boolean returnDetailed,
+                                                                                           List<String> returningFields) {
+        var memorySnapshot = convertSimpleConversationMemory(tail, returnDetailed);
+        return applyReturningFields(memorySnapshot, true, returningFields);
+    }
+
+    private static SimpleConversationMemorySnapshot applyReturningFields(SimpleConversationMemorySnapshot memorySnapshot,
+                                                                         Boolean returnCurrentStepOnly, List<String> returningFields) {
         // Blank entries mean NO filter, not "select nothing". A present-but-empty
         // query parameter (?returningFields=) binds as [""], and LLM-generated
         // tools make that shape routine: every generated parameter is required,
@@ -1114,6 +1341,11 @@ public class ConversationMemoryUtilities {
             String key = dataKey.substring(dataKey.indexOf(":") + 1);
             if (context != null) {
                 var contextType = context.getType();
+                if (contextType == null) {
+                    // The REST surfaces refuse an untyped entry with a 400; any other
+                    // producer's is skipped like an unknown type, never a crash.
+                    return;
+                }
                 switch (contextType) {
                     case object, array, string, expressions -> dynamicAttributesMap.put(key, context.getValue());
                     default -> {
