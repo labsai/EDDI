@@ -237,6 +237,22 @@ class CascadingModelExecutorToolReplayTest {
                 "the resumed turn's trace must include the escalated step's tools, ahead of the pausing step's");
     }
 
+    @Test
+    @DisplayName("a tool pause inside a later cascade step carries the earlier steps' spend too")
+    void pauseCarriesEarlierStepsSpend() throws Exception {
+        var pause = new ToolApprovalRequiredException("needs approval", new PendingToolCallBatch());
+        pause.addSpend(Map.of("inputTokens", 10), 0.01); // the pausing step's own loop segment
+        when(orchestrator.executeIfToolsEnabled(any(), any(), anyList(), any(), any(), any(), anyInt(), anyInt(), any(), any()))
+                .thenReturn(stepResult("ok", placedOrderExchange(), 0.05))
+                .thenThrow(pause);
+
+        var thrown = assertThrows(ToolApprovalRequiredException.class, () -> executor().execute(twoStepCascade(), messages(), "sys", Map.of(),
+                agentTask(), memory, orchestrator, Map.of(), false, false, false));
+
+        // Step 0's $0.05 of tools returned no result that LlmTask could record.
+        assertEquals(0.06, thrown.getCostSoFarUsd(), 1e-12);
+    }
+
     /**
      * M2: a carried exchange crosses providers. Ollama/Gemini bindings can hand
      * over tool calls with null ids, which OpenAI/Anthropic reject with a 400.

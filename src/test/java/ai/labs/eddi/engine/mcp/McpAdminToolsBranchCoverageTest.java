@@ -889,6 +889,18 @@ class McpAdminToolsBranchCoverageTest {
             String result = tools.deleteSchedule("sched1");
             verify(scheduleStore).deleteSchedule("sched1");
         }
+
+        @Test
+        @DisplayName("the alerts-maintenance system schedule is refused with SYSTEM_SCHEDULE")
+        void systemScheduleRefused() throws Exception {
+            var system = new ScheduleConfiguration();
+            system.setName("alerts-maintenance");
+            system.setMetadata(Map.of("alertType", "alert_maintenance"));
+            when(scheduleStore.readSchedule("sys")).thenReturn(system);
+            String result = tools.deleteSchedule("sys");
+            assertTrue(result.contains("SYSTEM_SCHEDULE"), result);
+            verify(scheduleStore, never()).deleteSchedule("sys");
+        }
     }
 
     @Nested

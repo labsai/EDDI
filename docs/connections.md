@@ -210,7 +210,7 @@ as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` for a service account.
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
 | `oauth` | Endpoints, client id, a **vaulted** client secret, scopes |
-| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`). `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment allows it — `allowPlaintextRemoteOrigins` in the [connection settings](#enabling-connections), or the `eddi.connections.allow-plaintext-remote-origins` property; see [Plaintext origins](#plaintext-origins) |
+| `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`) with an `http`/`https` scheme, or a mail scheme (`smtps://`, `smtp://`, `imaps://`, `imap://`) for a credential that logs in to a mail server — the system mailer's XOAUTH2 or BASIC login (`eddi.mail.smtp.connection`). A mail origin folds the port its TLS mode implies (`smtps` 465, `smtp` 587, `imaps` 993, `imap` 143), and an `https` entry for the same host does not cover it. `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment allows it — `allowPlaintextRemoteOrigins` in the [connection settings](#enabling-connections), or the `eddi.connections.allow-plaintext-remote-origins` property; see [Plaintext origins](#plaintext-origins) |
 | `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
 `binding` is the field that makes Amplitude and Google Drive the same system.
@@ -647,7 +647,7 @@ So a conversation records **how** its user id came to be, once, at creation:
 | Provenance | Means |
 | --- | --- |
 | `VERIFIED` | The id matched the principal of the authenticated request that created the conversation. |
-| `SELF_ASSERTED` | Nobody authenticated it — the caller asserted it, a trusted-proxy header supplied it, it was generated for an anonymous session, or the conversation predates provenance being recorded. |
+| `SELF_ASSERTED` | Nobody authenticated it — the caller asserted it, a trusted-proxy header supplied it, it was generated for an anonymous session, it came from an inbound mail (`email:` and `email-anon:` identities of an [email integration](email-integration.md#identity), even with an aligned DKIM pass), or the conversation predates provenance being recorded. |
 
 `PER_USER` resolution requires `VERIFIED`. Anything else is refused, by name, with
 the advice that applies: enable OIDC, make the connection `SERVICE`-bound, or opt

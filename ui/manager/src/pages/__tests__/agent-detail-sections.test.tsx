@@ -250,4 +250,37 @@ describe("Agent Detail — Config Sections (Phase 15.4)", () => {
       expect(updateCalled).toBe(true);
     });
   });
+
+  it("refuses to save while the approval-email recipients box is invalid, then saves the list it shows", async () => {
+    const user = userEvent.setup();
+    const saved: unknown[] = [];
+    server.use(
+      http.get("*/agentstore/agents/:id", () =>
+        HttpResponse.json({
+          description: "Test agent",
+          identity: {},
+          hitlConfig: { timeoutPolicy: "WAIT_INDEFINITELY", notify: { email: { recipients: ["ops@example.com"] } } },
+        }),
+      ),
+      http.put("*/agentstore/agents/:id", async ({ request }) => {
+        saved.push(await request.json());
+        return new HttpResponse(null, { status: 200, headers: { Location: "/agentstore/agents/agent-hitl?version=2" } });
+      }),
+    );
+
+    renderPage("agent-hitl");
+
+    const field = await screen.findByTestId("hitl-notify-email-recipients");
+    // A valid edit enters the draft; the invalid one after it does not.
+    await user.clear(field);
+    await user.type(field, "ops@example.com, lead@example.com, not-an-address");
+    await user.click(screen.getByTestId("save-btn"));
+    expect(saved).toHaveLength(0);
+
+    await user.clear(field);
+    await user.type(field, "lead@example.com");
+    await user.click(screen.getByTestId("save-btn"));
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toMatchObject({ hitlConfig: { notify: { email: { recipients: ["lead@example.com"] } } } });
+  });
 });
