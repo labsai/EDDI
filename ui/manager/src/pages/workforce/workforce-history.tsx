@@ -390,7 +390,7 @@ function WorkforceHistory() {
           asChild
         >
           <Link to={`/workforce/${boardId}`}>
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
             {t("Workforce.history.backToBoard", "Back to Task Force")}
           </Link>
         </Button>
@@ -507,7 +507,7 @@ function WorkforceHistory() {
                 className="gap-1.5 text-muted-foreground"
                 onClick={() => setShowViewer(false)}
               >
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
                 {t("Workforce.history.backToList", "Back to list")}
               </Button>
             </div>

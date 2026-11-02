@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { detectEscalationFlags } from "../escalation-flags";
 
+/** A requireApproval list gating every write method, as buildToolApprovals writes it. */
+const FULL_GATE = ["http.post:*", "http.put:*", "http.patch:*", "http.delete:*"];
+
 /** A minimal group config body, with dynamic agents off. */
 function groupBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -16,7 +19,7 @@ function setupAgentBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
     agentName: "Refund helper",
     systemPrompt: "You help customers request refunds.",
-    hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["http.get:*"] } },
+    hitlConfig: { toolApprovals: { requireApproval: FULL_GATE, exempt: ["http.get:*"] } },
     ...overrides,
   });
 }
@@ -28,7 +31,7 @@ function createApiAgentBody(overrides: Record<string, unknown> = {}): string {
     systemPrompt: "You file and look up support tickets.",
     openApiSpec: "https://tickets.example.com/openapi.json",
     endpoints: "GET /tickets,GET /tickets/{id}",
-    hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["http.get:*"] } },
+    hitlConfig: { toolApprovals: { requireApproval: FULL_GATE, exempt: ["http.get:*"] } },
     ...overrides,
   });
 }
@@ -133,7 +136,7 @@ describe("detectEscalationFlags", () => {
       // passed it.
       const flags = detectEscalationFlags(
         setupAgentBody({
-          hitlConfig: { toolApprovals: { requireApproval: ["http.post:*"], exempt: ["*"] } },
+          hitlConfig: { toolApprovals: { requireApproval: FULL_GATE, exempt: ["*"] } },
         }),
       );
       expect(flags.map((f) => f.id)).toContain("agentCreatedWithoutGate");
@@ -152,7 +155,7 @@ describe("detectEscalationFlags", () => {
       const flags = detectEscalationFlags(
         setupAgentBody({
           hitlConfig: {
-            toolApprovals: { requireApproval: ["http.post:*"], timeoutPolicy: "AUTO_APPROVE" },
+            toolApprovals: { requireApproval: FULL_GATE, timeoutPolicy: "AUTO_APPROVE" },
           },
         }),
       );
@@ -164,7 +167,7 @@ describe("detectEscalationFlags", () => {
         setupAgentBody({
           hitlConfig: {
             toolApprovals: {
-              requireApproval: ["http.post:*"],
+              requireApproval: FULL_GATE,
               rules: [{ match: "http.post:/agentstore/agents", timeoutPolicy: "AUTO_APPROVE" }],
             },
           },
@@ -196,9 +199,9 @@ describe("detectEscalationFlags", () => {
       ["requireApproval as a string", { toolApprovals: { requireApproval: "http.post:*" } }],
       ["requireApproval of numbers", { toolApprovals: { requireApproval: [1, 2] } }],
       ["requireApproval containing null", { toolApprovals: { requireApproval: [null] } }],
-      ["exempt as a string", { toolApprovals: { requireApproval: ["http.post:*"], exempt: "http.get:*" } }],
-      ["a rule with no match", { toolApprovals: { requireApproval: ["http.post:*"], rules: [{ timeoutPolicy: "AUTO_APPROVE" }] }}],
-      ["rules as a string", { toolApprovals: { requireApproval: ["http.post:*"], rules: "none" } }],
+      ["exempt as a string", { toolApprovals: { requireApproval: FULL_GATE, exempt: "http.get:*" } }],
+      ["a rule with no match", { toolApprovals: { requireApproval: FULL_GATE, rules: [{ timeoutPolicy: "AUTO_APPROVE" }] }}],
+      ["rules as a string", { toolApprovals: { requireApproval: FULL_GATE, rules: "none" } }],
       ["toolApprovals as an array", { toolApprovals: [] }],
       ["hitlConfig as a string", "nope"],
       ["hitlConfig as an array", []],

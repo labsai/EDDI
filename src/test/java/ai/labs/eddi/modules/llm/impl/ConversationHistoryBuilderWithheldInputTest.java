@@ -214,10 +214,10 @@ class ConversationHistoryBuilderWithheldInputTest {
         when(memory.getConversationProperties()).thenReturn(properties);
         var summarizationService = mock(SummarizationService.class);
         var content = new String[1];
-        when(summarizationService.summarize(anyString(), anyString(), anyString(), anyString(), any()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
                 .thenAnswer(inv -> {
                     content[0] = inv.getArgument(0);
-                    return "summary";
+                    return new SummarizationService.SummarizationResult("summary", 0, 0);
                 });
         var config = new ConversationSummaryConfig();
         config.setEnabled(true);

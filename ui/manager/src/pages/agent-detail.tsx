@@ -1,4 +1,6 @@
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
+import { RatingConfigSection } from "@/components/editors/rating-config-section";
+import { AgentFeedbackStrip } from "@/components/feedback/agent-feedback-strip";
 import { isImeComposing } from "@/lib/ime";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
@@ -59,7 +61,7 @@ import {
 } from "@/hooks/use-agents";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import {
   agentJson,
   applyChangedFields,
@@ -68,7 +70,8 @@ import {
   type AgentEdit,
 } from "@/lib/agent-draft";
 import { parseVersionFromLocation } from "@/lib/api/location-version";
-import { agentKeys } from "@/lib/query-keys";
+import { agentKeys, chatKeys } from "@/lib/query-keys";
+import { MAX_CONTINUATIONS } from "@/lib/continuation";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
 import { ResourceDiffViewer } from "@/components/agents/resource-diff-viewer";
@@ -89,6 +92,7 @@ import {
   MemoryPolicySection,
   SessionManagementSection,
   LimitsSection,
+  ContinuationSection,
   HitlConfigSection,
   ChannelsSection,
 } from "@/components/editors/agent-config-sections";
@@ -173,8 +177,30 @@ export function AgentDetailPage() {
    * the version being loaded.
    */
   const configPending = isPlaceholderData;
-  const { data: deployment } = useDeploymentStatus(id!, resolvedVersion);
-  const { data: envStatuses } = useDeploymentStatuses(id!, resolvedVersion);
+  const {
+    data: deployment,
+    isPlaceholderData: deploymentIsPlaceholder,
+    isPending: deploymentIsPending,
+    isError: deploymentFailed,
+  } = useDeploymentStatus(id!, resolvedVersion);
+  const {
+    data: envStatuses,
+    isPlaceholderData: envStatusesArePlaceholder,
+    isPending: envStatusesArePending,
+    isError: envStatusesFailed,
+  } = useDeploymentStatuses(id!, resolvedVersion);
+  // Until the status of THIS version has arrived, what is on screen belongs to
+  // the one just left (placeholder), or to nothing at all yet (the first fetch),
+  // or the lookup failed: the deploy/undeploy button must not act on any of
+  // those. An unknown status is not "not deployed" - Deploy would be offered for
+  // a version that is already live.
+  const statusPending =
+    deploymentIsPlaceholder ||
+    envStatusesArePlaceholder ||
+    deploymentIsPending ||
+    envStatusesArePending ||
+    (deploymentFailed && !deployment) ||
+    (envStatusesFailed && !envStatuses);
   // Chat where the agent is ACTUALLY live. Production wins when it is live (the
   // environment a reader assumes), otherwise the first live one — which is what
   // makes a test-only agent reachable at all.
@@ -219,7 +245,7 @@ export function AgentDetailPage() {
         })
       : (statusLabels[status] ?? status);
   const isDeployed = status === "READY";
-  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS";
+  const isBusy = isDeploying || undeployMutation.isPending || status === "IN_PROGRESS" || statusPending;
   /** Why production is in ERROR, when the backend said (detailed status, EDIT holders only). */
   const deploymentFailure = status === "ERROR" ? deployment?.failure : undefined;
 
@@ -269,6 +295,12 @@ export function AgentDetailPage() {
 
   /** Whether the max-cost box holds an amount that cannot be saved (see `LimitsSection`). */
   const [ceilingInvalid, setCeilingInvalid] = useState(false);
+  /** Whether the max-continuations box holds a count that cannot be saved (see `ContinuationSection`). */
+  const [continuationInvalid, setContinuationInvalid] = useState(false);
+  /** Whether the approval-email recipients box holds a list that cannot be saved (see `HitlConfigSection`). */
+  const [hitlNotifyInvalid, setHitlNotifyInvalid] = useState(false);
+  /** Whether the Ratings section holds a value the backend would refuse (see `RatingConfigSection`). */
+  const [ratingInvalid, setRatingInvalid] = useState(false);
 
   /** Writes the draft as one new version. Resolves whether it landed. */
   const saveDraft = useCallback(async (): Promise<boolean> => {
@@ -277,6 +309,27 @@ export function AgentDetailPage() {
     // leave-page guard — so this is the one place that can refuse them all.
     if (ceilingInvalid) {
       toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
+      return false;
+    }
+    if (continuationInvalid) {
+      toast.error(
+        t("agentDetail.maxContinuationsInvalid", "Enter a whole number from 0 to {{max}}, or leave empty for off.", {
+          max: MAX_CONTINUATIONS,
+        }),
+      );
+      return false;
+    }
+    if (hitlNotifyInvalid) {
+      toast.error(
+        t(
+          "agentDetail.hitlNotifyFixBeforeSave",
+          "Fix the approval email recipients, or switch email notifications off, before saving.",
+        ),
+      );
+      return false;
+    }
+    if (ratingInvalid) {
+      toast.error(t("agentDetail.rating.invalid", "Fix the highlighted fields in Ratings before saving."));
       return false;
     }
     const sent = draft;
@@ -311,7 +364,20 @@ export function AgentDetailPage() {
       }
       return false;
     }
-  }, [draft, isDirty, agent, updateAgentMutation, id, resolvedVersion, queryClient, t, ceilingInvalid]);
+  }, [
+    draft,
+    isDirty,
+    agent,
+    updateAgentMutation,
+    id,
+    resolvedVersion,
+    queryClient,
+    t,
+    ceilingInvalid,
+    continuationInvalid,
+    hitlNotifyInvalid,
+    ratingInvalid,
+  ]);
 
   useEffect(() => {
     if (!rebaseFrom || !agent || agent === rebaseFrom) return;
@@ -406,6 +472,8 @@ export function AgentDetailPage() {
         onSuccess: () => {
           toast.success(t("common.delete") + " ✓");
           setShowDeleteDialog(false);
+          // Gone: unsaved edits are moot, and `isDirty` has not re-rendered yet.
+          allowNextNavigation();
           navigate("/manage/agents");
         },
         onError: (err) => toast.error(getErrorMessage(err)),
@@ -507,7 +575,9 @@ export function AgentDetailPage() {
     touched("memoryPolicy"),
     touched("sessionManagement"),
     touched("maxCostPerConversationUsd"),
+    touched("maxContinuations", "continuationInput"),
     touched("conversationReview"),
+    touched("ratingConfig"),
     touched("hitlConfig"),
     touched("channels"),
   ].filter(Boolean).length;
@@ -672,7 +742,7 @@ export function AgentDetailPage() {
                     // Invalidate immediately after deployment is confirmed so
                     // caches are fresh even if the conversation start fails.
                     queryClient.invalidateQueries({ queryKey: ["agents"] });
-                    queryClient.invalidateQueries({ queryKey: ["chat", "deployedAgents"] });
+                    queryClient.invalidateQueries({ queryKey: chatKeys.deployedAgents });
                     drawerStore.setStep("starting");
                     chatStore.clearMessages();
                     chatStore.setSelectedAgent(id!, agentDisplayName);
@@ -830,6 +900,9 @@ export function AgentDetailPage() {
           )}
         </div>
       )}
+
+      {/* Feedback over the last 30 days, when the agent asks for ratings or has some */}
+      <AgentFeedbackStrip agentId={id!} ratingsEnabled={agent.ratingConfig?.enabled === true} />
 
       {/* Environment Status Badges */}
       {envStatuses && envStatuses.length > 0 && (
@@ -1009,11 +1082,37 @@ export function AgentDetailPage() {
         modified={touched("conversationReview")}
       />
 
+      {/* Conversation ratings */}
+      <RatingConfigSection
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("ratingConfig")}
+        onValidityChange={setRatingInvalid}
+      />
+
       {/* Spend limits */}
       <LimitsSection key={`${id}-${resolvedVersion}`} agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("maxCostPerConversationUsd")} onValidityChange={setCeilingInvalid} />
 
+      {/* Self-continuation */}
+      <ContinuationSection
+        key={`continuation-${id}-${resolvedVersion}`}
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("maxContinuations", "continuationInput")}
+        onValidityChange={setContinuationInvalid}
+      />
+
       {/* Human-in-the-Loop */}
-      <HitlConfigSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("hitlConfig")} />
+      <HitlConfigSection
+        key={`${id}-${resolvedVersion}`}
+        agent={doc}
+        onChange={editAgent}
+        disabled={isSaving}
+        modified={touched("hitlConfig")}
+        onValidityChange={setHitlNotifyInvalid}
+      />
 
       {/* Channel Connectors */}
       <ChannelsSection agent={doc} onChange={editAgent} disabled={isSaving} modified={touched("channels")} />
@@ -1256,7 +1355,7 @@ function BackLink() {
       to="/manage/agents"
       className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
     >
-      <ArrowLeft className="h-4 w-4" />
+      <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
       {t("agentDetail.backToAgents", "Back to Agents")}
     </Link>
   );
@@ -1571,7 +1670,7 @@ function RawConfigSection({ agent }: { agent: Agent }) {
         {expanded ? (
           <ChevronDown className="h-4 w-4 text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" />
         )}
       </button>
       {expanded && (
@@ -1692,7 +1791,7 @@ function A2ASection({
           {isOpen ? (
             <ChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
           ) : (
-            <ChevronRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+            <ChevronRight className="h-4 w-4 text-muted-foreground rtl:rotate-180" aria-hidden="true" />
           )}
           <Handshake className="h-5 w-5 text-primary" aria-hidden="true" />
           {t("agentDetail.a2aSection", "Agent-to-Agent (A2A)")}
@@ -1853,7 +1952,7 @@ function A2ASection({
                 className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                 data-testid="a2a-card-toggle"
               >
-                {showCard ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                {showCard ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3 rtl:rotate-180" />}
                 {t("agentDetail.agentCardPreview", "Agent Card Preview")}
               </button>
               {showCard && (

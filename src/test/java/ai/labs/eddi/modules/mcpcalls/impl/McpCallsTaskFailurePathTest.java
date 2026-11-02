@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.mcpcalls.model.McpCall;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.time.Clock;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -230,6 +232,36 @@ class McpCallsTaskFailurePathTest {
             assertTrue(capturedMemoryEntry(ERROR_OBJECT).contains("insufficient funds"));
             verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq(RESPONSE_OBJECT), any());
             verify(prePostUtils).runPostResponse(eq(memory), any(), anyMap(), eq(500), eq(true));
+        }
+
+        @Test
+        @DisplayName("an interrupted turn is not a failed call: no error entry, no postResponse, continueOnError ignored")
+        void interruptedTurnIsNotARecoverableFailure() throws Exception {
+            meteringSwallowsExceptions();
+            // The call runs on a worker thread and the caller waits on its Future. A Future
+            // that
+            // has already completed returns its result without looking at the caller's
+            // interrupt
+            // flag, so a call that answers at once makes this test pass or fail on thread
+            // scheduling. A call still running when the caller waits always sees the
+            // interrupt.
+            when(executor.execute(any(), any())).thenAnswer(invocation -> {
+                Thread.sleep(500);
+                return "{\"status\":\"sent\"}";
+            });
+            when(memory.getTurnDeadline())
+                    .thenReturn(TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 60_000, 1_000L));
+            var config = configWithOneCall(true, 1);
+
+            Thread.currentThread().interrupt();
+            try {
+                assertThrows(LifecycleException.LifecycleInterruptedException.class, () -> task.execute(memory, config));
+            } finally {
+                Thread.interrupted();
+            }
+
+            verify(prePostUtils, never()).createMemoryEntry(any(), any(), eq(ERROR_OBJECT), any());
+            verify(prePostUtils, never()).runPostResponse(any(), any(), anyMap(), anyInt(), anyBoolean());
         }
 
         @Test

@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -85,6 +86,9 @@ public final class SelfUngatingGuard {
      */
     private static final Pattern AGENT_STORE_TARGET = Pattern
             .compile("/(?:agentstore/agents|botstore/bots)/([0-9a-f]{24}|" + UUID_ID + ")(?:[/?#]|$)");
+    private static final Pattern LLM_STORE_TARGET = Pattern
+            .compile("/(?:llmstore/llms|langchainstore/langchains)/([0-9a-f]{24}|" + UUID_ID + ")(?:[/?#]|$)");
+    private static final Pattern VERSION_PARAM = Pattern.compile("[?&]version=([0-9]+)");
     /** Every configuration store answers under {@code /<name>store/}. */
     private static final Pattern CONFIG_STORE_PATH = Pattern.compile("/[a-z]+store/");
     private static final String TOOL_APPROVALS_KEY = "toolApprovals";
@@ -93,6 +97,8 @@ public final class SelfUngatingGuard {
     public static final String OWN_AGENT_REASON = "an agent may not modify, deploy or start itself";
     public static final String OWN_RESOURCE_REASON = "an agent may not modify the workflow or configuration resources it runs on";
     public static final String GATE_WRITE_REASON = "an agent may not write a tool-approval gate (toolApprovals) into an LLM configuration";
+    public static final String LLM_GATE_REMOVAL_REASON = "an agent may not remove or replace a tool-approval gate (toolApprovals) "
+            + "stored in an LLM configuration";
     public static final String GATE_REMOVAL_REASON = "an agent may not remove or change another agent's tool-approval gate (hitlConfig)";
     public static final String PATCH_OP_REASON = "a configuration patch may only use add, replace, remove and test operations";
     private static final Set<String> PATCH_OPS = Set.of("add", "replace", "remove", "test");
@@ -120,6 +126,22 @@ public final class SelfUngatingGuard {
     }
 
     /**
+     * Reads a stored LLM configuration, so a write to the LLM store can be checked
+     * for dropping a task gate by omission (a whole-document {@code PUT} without
+     * it) or by replacing an ancestor (a patch on {@code /tasks/0}).
+     */
+    @FunctionalInterface
+    public interface StoredLlmLookup {
+        /**
+         * @return the stored configuration as JSON, {@code null} when there is none
+         * @throws Exception
+         *             when it cannot be read — the write is then refused as
+         *             unverifiable, never admitted
+         */
+        JsonNode llmConfigOf(String llmId, Integer version) throws Exception;
+    }
+
+    /**
      * What the gate protects for one approved execution.
      *
      * @param actingAgentId
@@ -133,16 +155,24 @@ public final class SelfUngatingGuard {
      *            agent's own from another's
      * @param storedGates
      *            lookup of another agent's stored gate; nullable
+     * @param storedLlms
+     *            lookup of a stored LLM configuration; nullable — without one, an
+     *            LLM-store write is refused only when its body names the gate
      */
-    public record Protection(String actingAgentId, Set<String> ownResourceIds, boolean resourcesUnresolved, StoredGateLookup storedGates) {
+    public record Protection(String actingAgentId, Set<String> ownResourceIds, boolean resourcesUnresolved, StoredGateLookup storedGates,
+            StoredLlmLookup storedLlms) {
 
         public Protection {
             ownResourceIds = ownResourceIds == null ? Set.of() : Set.copyOf(ownResourceIds);
         }
 
+        public Protection(String actingAgentId, Set<String> ownResourceIds, boolean resourcesUnresolved, StoredGateLookup storedGates) {
+            this(actingAgentId, ownResourceIds, resourcesUnresolved, storedGates, null);
+        }
+
         /** The agent id alone — what the guard knew before L13. */
         public static Protection ofAgent(String actingAgentId) {
-            return new Protection(actingAgentId, Set.of(), false, null);
+            return new Protection(actingAgentId, Set.of(), false, null, null);
         }
     }
 
@@ -177,7 +207,8 @@ public final class SelfUngatingGuard {
             return UNRESOLVED_RESOURCES_REASON;
         }
         if (LLM_STORE_PATHS.stream().anyMatch(decodedUri::contains)) {
-            return llmStoreRefusal(method, body);
+            String refusal = llmStoreRefusal(method, body);
+            return refusal != null ? refusal : storedLlmGateRefusal(method, body, decodedUri, p.storedLlms());
         }
         Matcher agentTarget = AGENT_STORE_TARGET.matcher(decodedUri);
         if (agentTarget.find()) {
@@ -198,6 +229,85 @@ public final class SelfUngatingGuard {
             return containsKey(tree, TOOL_APPROVALS_KEY) ? GATE_WRITE_REASON : null;
         } catch (JsonProcessingException e) {
             return UNVERIFIABLE_REASON;
+        }
+    }
+
+    /**
+     * The half of the LLM-store rule the body alone cannot show: a write that drops
+     * a gate already stored. A whole document replaces every stored task, so it is
+     * refused whenever the stored document carries a gate (a body that re-states it
+     * was refused above for writing one); a patch is refused when one of its
+     * operations targets a stored gate or one of its ancestors.
+     */
+    private static String storedLlmGateRefusal(String method, String body, String decodedUri, StoredLlmLookup storedLlms) {
+        if (storedLlms == null || body == null || body.isBlank()) {
+            return null;
+        }
+        Matcher target = LLM_STORE_TARGET.matcher(decodedUri);
+        if (!target.find()) {
+            return null;
+        }
+        Matcher version = VERSION_PARAM.matcher(decodedUri);
+        Integer versionNumber;
+        try {
+            versionNumber = version.find() ? Integer.valueOf(version.group(1)) : null;
+        } catch (NumberFormatException e) {
+            // A digit run too long for an int names no version we could look up; the
+            // stored gate cannot be compared, so the write is refused like any other
+            // unverifiable one.
+            return UNVERIFIABLE_REASON;
+        }
+        List<String> gatePaths = new ArrayList<>();
+        try {
+            collectKeyPaths(storedLlms.llmConfigOf(target.group(1), versionNumber), TOOL_APPROVALS_KEY, "", gatePaths);
+        } catch (Exception e) {
+            return UNVERIFIABLE_REASON;
+        }
+        if (gatePaths.isEmpty()) {
+            return null;
+        }
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(body);
+        } catch (JsonProcessingException e) {
+            return UNVERIFIABLE_REASON;
+        }
+        if (!(tree.isArray() && isPatch(method))) {
+            return LLM_GATE_REMOVAL_REASON;
+        }
+        for (JsonNode operation : tree) {
+            String path = operation.path("path").asText("");
+            for (String gatePath : gatePaths) {
+                if (path.isEmpty() || gatePath.equals(path) || gatePath.startsWith(path + "/")) {
+                    return LLM_GATE_REMOVAL_REASON;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Adds the JSON pointer of every {@code key} member at any depth of
+     * {@code node}.
+     */
+    static void collectKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String child = pointer + "/" + field.getKey().replace("~", "~0").replace("/", "~1");
+                if (key.equals(field.getKey()) && !field.getValue().isNull()) {
+                    paths.add(child);
+                }
+                collectKeyPaths(field.getValue(), key, child, paths);
+            }
+        } else if (node.isArray()) {
+            for (int i = 0; i < node.size(); i++) {
+                collectKeyPaths(node.get(i), key, pointer + "/" + i, paths);
+            }
         }
     }
 
@@ -312,7 +422,7 @@ public final class SelfUngatingGuard {
      */
     public static String refusalFromArguments(String rawArguments, Protection protection) {
         Protection p = protection != null ? protection : Protection.ofAgent(null);
-        String decoded = decodeLower(rawArguments);
+        String decoded = argumentHaystack(rawArguments);
         if (containsId(decoded, p.actingAgentId())) {
             return OWN_AGENT_REASON;
         }
@@ -345,6 +455,87 @@ public final class SelfUngatingGuard {
             }
         }
         return false;
+    }
+
+    /**
+     * How deep {@link #argumentHaystack} follows a string value that is itself JSON
+     * (an MCP {@code update_resource} carries the document as a JSON string).
+     */
+    private static final int MAX_NESTED_JSON_DEPTH = 4;
+    private static final char SEPARATOR = ' ';
+
+    /**
+     * What the argument test searches: the raw arguments percent-decoded, followed
+     * by every key and string value of the arguments <em>parsed as JSON</em>.
+     * <p>
+     * The raw text alone was not enough. A JSON escape is invisible to a substring
+     * test: the key {@code toolApprovals} with its first letter written as a JSON
+     * unicode escape (backslash, {@code u0074}) does not contain
+     * {@code toolapprovals}, yet every JSON parser downstream (the MCP server,
+     * EDDI's own store) reads it as exactly that key, and an id can be spelt the
+     * same way. Parsing undoes the escapes; a string value that is itself JSON is
+     * parsed again, a few levels deep, because a document carried as a string is
+     * unescaped once per level. Each parsed text is percent-decoded too, so an
+     * escape that hides a {@code %} sequence does not get through either. Arguments
+     * that are not JSON keep the raw test, unchanged.
+     */
+    static String argumentHaystack(String rawArguments) {
+        StringBuilder haystack = new StringBuilder(decodeLower(rawArguments));
+        appendParsedText(rawArguments, haystack, 0);
+        if (rawArguments != null) {
+            String percentDecoded = percentDecode(rawArguments);
+            if (!percentDecoded.equals(rawArguments)) {
+                appendParsedText(percentDecoded, haystack, 0);
+            }
+        }
+        return haystack.toString();
+    }
+
+    private static void appendParsedText(String text, StringBuilder haystack, int depth) {
+        if (text == null || depth > MAX_NESTED_JSON_DEPTH) {
+            return;
+        }
+        String trimmed = text.strip();
+        if (trimmed.isEmpty() || "{[\"".indexOf(trimmed.charAt(0)) < 0) {
+            return;
+        }
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(trimmed);
+        } catch (JsonProcessingException e) {
+            return;
+        }
+        appendNode(tree, haystack, depth);
+    }
+
+    private static void appendNode(JsonNode node, StringBuilder haystack, int depth) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                haystack.append(SEPARATOR).append(decodeLower(field.getKey()));
+                appendNode(field.getValue(), haystack, depth);
+            }
+        } else if (node.isArray()) {
+            for (JsonNode element : node) {
+                appendNode(element, haystack, depth);
+            }
+        } else if (node.isTextual()) {
+            String value = node.asText();
+            haystack.append(SEPARATOR).append(decodeLower(value));
+            appendParsedText(value, haystack, depth + 1);
+        }
+    }
+
+    private static String percentDecode(String value) {
+        try {
+            return URLDecoder.decode(value, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return value;
+        }
     }
 
     private static String decodeLower(String value) {

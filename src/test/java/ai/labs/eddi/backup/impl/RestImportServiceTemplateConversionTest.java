@@ -23,12 +23,20 @@ import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -83,5 +91,69 @@ class RestImportServiceTemplateConversionTest {
         Map<String, Object> result = importJson("{\"prompt\":\"Hello [[${properties.name}]]\",\"bad\":\"" + UNSURE + "\"}");
         assertEquals("Hello [[${properties.name}]]", result.get("prompt"), "nothing of the resource is converted");
         assertEquals(UNSURE, result.get("bad"));
+    }
+
+    @Test
+    @DisplayName("nested JSON arrays elsewhere in the resource do not stop its templates from being converted")
+    void nestedJsonArraysDoNotBlockConversion() throws Exception {
+        StringBuilder json = new StringBuilder("{\"prompt\":\"Hello [[${properties.name}]]\"");
+        for (int i = 0; i < 20_000; i++) {
+            json.append(",\"m").append(i).append("\":[[").append(i).append("]]");
+        }
+        json.append('}');
+
+        Map<String, Object> result = importJson(json.toString());
+
+        assertEquals("Hello {properties.name}", result.get("prompt"));
+    }
+
+    /**
+     * Each value is small enough to convert, but the conversion runs on the whole
+     * resource as one text, and that text holds too many expressions for the work
+     * bound: migrate() returns it unchanged. That used to happen without a word.
+     */
+    @Test
+    @DisplayName("a resource the converter refuses as a whole is imported unconverted with a warning, not silently")
+    void wholeTextRefusalIsReported() throws Exception {
+        StringBuilder json = new StringBuilder("{\"p0\":\"[[${a}]]\"");
+        for (int i = 1; i < 3_000; i++) {
+            json.append(",\"p").append(i).append("\":\"[[${a}]]\"");
+        }
+        json.append('}');
+        List<String> records = new ArrayList<>();
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(String.valueOf(record.getMessage()) + " " + Arrays.toString(record.getParameters()));
+            }
+
+            @Override
+            public void flush() {
+                // nothing is buffered
+            }
+
+            @Override
+            public void close() {
+                // nothing to release
+            }
+        };
+        Logger logger = Logger.getLogger(RestImportService.class.getName());
+        Level previousLevel = logger.getLevel();
+        boolean previousUseParentHandlers = logger.getUseParentHandlers();
+        logger.setLevel(Level.ALL);
+        logger.setUseParentHandlers(false);
+        logger.addHandler(handler);
+        Map<String, Object> result;
+        try {
+            result = importJson(json.toString());
+        } finally {
+            logger.removeHandler(handler);
+            logger.setLevel(previousLevel);
+            logger.setUseParentHandlers(previousUseParentHandlers);
+        }
+
+        assertEquals("[[${a}]]", result.get("p0"), "the resource is imported as it was");
+        assertTrue(records.stream().anyMatch(r -> r.contains("unconverted") && r.contains("too many template expressions")),
+                "the refusal must be reported; saw: " + records);
     }
 }

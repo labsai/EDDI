@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
@@ -533,6 +534,10 @@ class GroupConversationServiceConcurrencyTest {
     @DisplayName("C2: a follow-up to one member publishes a transcript snapshot, never the live list")
     @SuppressWarnings("unchecked")
     void followUpWithMember_publishesTranscriptSnapshot_notTheLiveList() throws Exception {
+        var resourceId = mock(IResourceStore.IResourceId.class);
+        doReturn(1).when(resourceId).getVersion();
+        doReturn(resourceId).when(groupStore).getCurrentResourceId(any());
+        doReturn(new AgentGroupConfiguration()).when(groupStore).read(any(), any());
         var gc = groupConversation("gc-followup");
         gc.setState(GroupConversationState.COMPLETED);
         gc.setMemberConversationIds(Map.of("agent-0", "conv-followup"));

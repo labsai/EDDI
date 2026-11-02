@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.integrations.slack.hitl;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import ai.labs.eddi.integrations.channels.HmacSignatures;
+
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
@@ -93,8 +93,7 @@ public interface ISlackApprovalRecordStore {
             if (cardId == null || cardId.isEmpty() || presentedCardId == null || presentedCardId.isEmpty()) {
                 return false;
             }
-            return MessageDigest.isEqual(cardId.getBytes(StandardCharsets.UTF_8),
-                    presentedCardId.getBytes(StandardCharsets.UTF_8));
+            return HmacSignatures.constantTimeEquals(cardId, presentedCardId);
         }
 
         /**

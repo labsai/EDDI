@@ -6,6 +6,7 @@ import { http, HttpResponse } from "msw";
 import { renderPage } from "@/test/test-utils";
 import { server } from "@/test/mocks/server";
 import { WorkforceSettings } from "../workforce-settings";
+import { anyGuardDirty } from "@/hooks/use-unsaved-changes-guard";
 
 /**
  * Task force settings after a save.
@@ -182,5 +183,33 @@ describe("WorkforceSettings — after a save", () => {
 
     await user.click(screen.getByRole("button", { name: "open v1" }));
     await screen.findByDisplayValue("Board One");
+  });
+});
+
+describe("WorkforceSettings — opened without a version", () => {
+  it("reads the group's current version, not version 1", async () => {
+    current = 2;
+    docs[2] = { ...docs[1]!, name: "Board Two" };
+    server.use(http.get("*/groupstore/groups/wb1/currentversion", () => HttpResponse.json(2)));
+    renderPage("/workforce/wb1/settings", <WorkforceSettings />, "/workforce/:boardId/settings");
+    await screen.findByDisplayValue("Board Two");
+    expect(conflicts).toEqual([]);
+  });
+
+  it("says so, with a retry, when the current version cannot be looked up", async () => {
+    server.use(http.get("*/groupstore/groups/wb1/currentversion", () => new HttpResponse(null, { status: 500 })));
+    renderPage("/workforce/wb1/settings", <WorkforceSettings />, "/workforce/:boardId/settings");
+    expect(await screen.findByTestId("settings-retry-version")).toBeInTheDocument();
+  });
+});
+
+describe("WorkforceSettings — unsaved edits", () => {
+  it("registers with the in-app navigation guard while the form is dirty", async () => {
+    renderSettings();
+    const user = userEvent.setup();
+    const input = await screen.findByLabelText(/Task Force Name/i);
+    expect(anyGuardDirty()).toBe(false);
+    await user.type(input, " edited");
+    await waitFor(() => expect(anyGuardDirty()).toBe(true));
   });
 });

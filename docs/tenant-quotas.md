@@ -38,7 +38,9 @@ start of the month.
   priced calls directly.
 - **Gating (before the next spend).** Once the month's total reaches the limit, every LLM task
   skips its model call and serves its configured fallback answer (`responseValidation.fallbackMessage`,
-  or the default sentence), recording `llm:spend_refused:<taskId>` on the step; tool calls are
+  or the default sentence), recording `llm:spend_refused:<taskId>` on the step; a task already
+  running sends no further re-ask, cascade escalation or guardrail reprompt, and a `classifier`
+  guardrail does not call its model (reason `spend_refused`); tool calls are
   refused with an error result; and Dream stops consolidating. Nothing already running is cut
   short, so the turn that crosses the limit finishes and the total can end a little above it.
 
@@ -48,7 +50,11 @@ the turn's step records it as `audit:pending_cost`, and the conversation's next 
 together with its own cost (the pending amount carries forward until a charge succeeds). It is
 charged to the month that settle runs in: a charge lost to an outage across a month boundary lands
 in the new month, because the closed month's counter has already been reset and there is no
-window left to add it to. A store
+window left to add it to. Undo and redo do not lose it either: each copies the pending amount of
+the step it moves aside onto the step that becomes current, so a rerun or a next `say` after an
+undo charges what is really owed — not an amount already recovered, and not an older value. Dream consolidation has no conversation to carry
+it on, so a Dream charge lost to an outage is held in memory on the node and added to its next
+priced consolidation charge — a restart before the store recovers loses it. A store
 outage at the *gate* refuses the model call (fail closed), as below.
 
 ### Only priced spend counts
@@ -63,15 +69,14 @@ These calls are **not** metered today, priced or not:
 
 | Call | Why |
 |---|---|
-| Rolling conversation summary (`conversationSummary`) | The summarizer reports no token usage back to the task |
-| Tool-response summarization (`toolResponseLimits.summarizerModel`) | Same |
 | Group transcript window summaries and stance summaries | Group-level calls outside any member conversation |
 | Embeddings (RAG retrieval, knowledge-base ingestion) | Embedding calls are not priced anywhere |
-| The model calls of an LLM task before it paused for a **tool-call** approval | That segment's usage is lost when the pause unwinds the tool loop (the audit ledger has the same gap); calls of earlier tasks in the same turn are metered |
 | A turn stopped by **lease loss** in cluster mode | Nothing of the turn is stored; the node that took the conversation over runs it again and meters that run |
 
 A replayed idempotent turn (`Idempotency-Key`) is answered from the stored outcome and is not
-metered again.
+metered again. A turn whose model phase **failed** is metered for what it spent before the failure
+(the answered tool-loop rounds, the tools that ran, the cascade steps that were tried); the rolling
+summary and `toolResponseLimits` summarization are metered at the task's prices.
 
 To bound one conversation rather than the whole tenant, set the agent-level
 `maxCostPerConversationUsd` — see [LLM Configuration → Per-conversation LLM cost
@@ -84,6 +89,20 @@ request rather than letting it through. Both the MongoDB and the PostgreSQL stor
 same message, `Quota accounting unavailable — denying request for safety`, surfaced as `503`, so a
 caller cannot tell which backend refused and cannot get a different answer by retrying against
 another node.
+
+The agent gate (`maxAgentsPerTenant`) also counts the deployed agents, from the deployment records and every node's runtime registry (any `READY` version, not only the newest — a failed newer version does not hide a live older one). When that count cannot be read the deploy is refused with the same `503`, counted on `eddi_tenant_quota_unavailable_total{type="agent"}` — but only while an agent limit is in force; with no quota, a disabled one or `maxAgentsPerTenant: -1` the outage blocks nothing.
+
+The monthly cost gate is the exception to the `503`, because it runs inside a turn: when the
+month's spend cannot be read, an LLM task skips its model call and serves its fallback answer
+(`llm:spend_refused:<taskId>` with `reason: tenant_accounting_unavailable`), a tool call gets an
+error result, and Dream stops consolidating. The turn itself completes. Each refusal also counts on
+`eddi_tenant_quota_unavailable_total{type="cost"}`, the same on both backends.
+
+If the budget check itself throws instead of answering — a defect, not an outage — both gates
+still refuse (the model call serves its fallback answer, the tool call gets an error result), but
+under `reason: tenant_check_error`, counted on `eddi_llm_spend_refused_total{reason="tenant_check_error"}`
+and **not** on `eddi_tenant_quota_unavailable_total`. It is logged at ERROR, with the stack trace
+at most once a minute.
 
 ## Admin API
 
@@ -151,6 +170,13 @@ of `0` on a tenant that was busy yesterday is correct, not a lost write.
 
 Resetting is an operator escape hatch — it zeroes the stored counters for the current windows and
 does not change the limits.
+
+## Not to be confused with `toolQuotas`
+
+A tenant quota is shared by everyone in the tenant. To cap what **one user** may do with a **tool**
+within a time window — "100 content improvements per user per day", across conversations and nodes — use
+the agent designer's [`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas), which is configured
+per LLM task and counted per subject. The two stack: a call must pass both.
 
 ## See also
 

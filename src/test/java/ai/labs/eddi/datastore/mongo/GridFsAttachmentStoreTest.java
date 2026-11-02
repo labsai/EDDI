@@ -253,19 +253,17 @@ class GridFsAttachmentStoreTest {
     }
 
     @Test
-    void load_nullMetadata_allowsAccess() throws Exception {
+    void load_nullMetadata_failsClosed() throws Exception {
+        // a legacy blob with no recorded owner is not readable by whoever knows its
+        // reference - the PostgreSQL store already refused it
         ObjectId id = new ObjectId();
         GridFSFile f = mock(GridFSFile.class);
         when(f.getObjectId()).thenReturn(id);
         when(f.getMetadata()).thenReturn(null);
         whenFindFirst(f);
-        doAnswer(inv -> {
-            OutputStream out = inv.getArgument(1);
-            out.write("data".getBytes());
-            return null;
-        }).when(gridFSBucket).downloadToStream(eq(id), any(OutputStream.class));
 
-        assertArrayEquals("data".getBytes(), sut.load("any", "any-conv"));
+        assertThrows(AttachmentStoreException.class, () -> sut.load("any", "any-conv"));
+        verify(gridFSBucket, never()).downloadToStream(any(ObjectId.class), any(OutputStream.class));
     }
 
     @Test
@@ -284,17 +282,48 @@ class GridFsAttachmentStoreTest {
     }
 
     @Test
-    void load_nullOwnerMetadata_allowsAccess() throws Exception {
-        // metadata present but conversationId absent → owner check skipped
+    void load_nullOwnerMetadata_failsClosed() throws Exception {
+        // metadata present but conversationId absent: no owner, so nobody's to read
         ObjectId id = new ObjectId();
         whenFindFirst(mockFile(id, null, "text/plain", List.of(), "uuid-1"));
+
+        assertThrows(AttachmentStoreException.class, () -> sut.load("uuid-1", "any-conv"));
+    }
+
+    @Test
+    void load_nullOwnerButGranted_isReadable() throws Exception {
+        ObjectId id = new ObjectId();
+        whenFindFirst(mockFile(id, null, "text/plain", List.of("conv-guest"), "uuid-1"));
         doAnswer(inv -> {
             OutputStream out = inv.getArgument(1);
             out.write("ok".getBytes());
             return null;
         }).when(gridFSBucket).downloadToStream(eq(id), any(OutputStream.class));
 
-        assertArrayEquals("ok".getBytes(), sut.load("uuid-1", "any-conv"));
+        assertArrayEquals("ok".getBytes(), sut.load("uuid-1", "conv-guest"));
+    }
+
+    @Test
+    void delete_nullOwner_isAllowed() throws Exception {
+        // reads of an ownerless legacy blob are refused, but deleting discloses
+        // nothing and must stay possible, or erasure could never remove it
+        ObjectId id = new ObjectId();
+        whenFindFirst(mockFile(id, null, "text/plain", List.of(), "uuid-1"));
+
+        assertTrue(sut.delete("uuid-1", "any-conv"));
+        verify(gridFSBucket).delete(id);
+    }
+
+    @Test
+    void delete_nullMetadata_isAllowed() throws Exception {
+        ObjectId id = new ObjectId();
+        GridFSFile f = mock(GridFSFile.class);
+        when(f.getObjectId()).thenReturn(id);
+        when(f.getMetadata()).thenReturn(null);
+        whenFindFirst(f);
+
+        assertTrue(sut.delete("any", "any-conv"));
+        verify(gridFSBucket).delete(id);
     }
 
     // ─── getMetadata() ──────────────────────────────────────────
@@ -329,16 +358,15 @@ class GridFsAttachmentStoreTest {
     }
 
     @Test
-    void getMetadata_nullMetadataDefaults() throws Exception {
+    void getMetadata_nullMetadata_failsClosed() throws Exception {
         GridFSFile f = mock(GridFSFile.class);
         when(f.getFilename()).thenReturn("x.bin");
         when(f.getLength()).thenReturn(9L);
         when(f.getMetadata()).thenReturn(null);
         whenFindFirst(f);
 
-        Attachment meta = sut.getMetadata("uuid-1", "conv-1");
-        assertEquals("application/octet-stream", meta.mimeType());
-        assertEquals("uuid-1", meta.storageRef());
+        // no metadata means no recorded owner: refused, not defaulted
+        assertThrows(AttachmentStoreException.class, () -> sut.getMetadata("uuid-1", "conv-1"));
     }
 
     // ─── grantAccess() ──────────────────────────────────────────

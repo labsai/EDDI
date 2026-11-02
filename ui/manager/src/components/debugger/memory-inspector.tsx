@@ -444,7 +444,7 @@ function KeyValueRow({
           {expanded ? (
             <ChevronDown className="h-3.5 w-3.5 text-primary" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60" />
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 rtl:rotate-180" />
           )}
         </button>
 

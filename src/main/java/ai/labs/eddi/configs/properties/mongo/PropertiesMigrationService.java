@@ -269,7 +269,11 @@ public class PropertiesMigrationService {
      * propagate.
      */
     public void runIfNeeded() {
-        if (!"mongodb".equals(datastoreType)) {
+        // The same test every other datastore switch uses (DataStoreProducers, the
+        // V6 migrations): anything but "postgres" is MongoDB. Gating on "mongodb"
+        // instead skipped this migration on a deployment that spelled the type any
+        // other way while everything else ran against MongoDB.
+        if ("postgres".equals(datastoreType)) {
             LOGGER.debug("[MIGRATION] Skipping properties migration — not in MongoDB mode");
             return;
         }

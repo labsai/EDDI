@@ -139,7 +139,8 @@ Two things it deliberately will not do:
 
 - **It will not pass on access you were lent.** A referenced resource you can
   read but do not own is left alone and returned in the response's `skipped`
-  list.
+  list — with its name only if you may view it. A group's `HUMAN` members are
+  people, not configuration, and are never followed into the cascade.
 - **It will not share more than 500 resources from one root.** A cyclic or
   generated config cannot turn one share into unbounded write amplification; the
   cut-off is logged.
@@ -227,8 +228,9 @@ access** panel instead of an error; the request reaches the owner's
 notifications, and they grant it in one click.
 
 The request endpoint never reveals whether the resource exists or who owns it:
-an id matching nothing, and a repeat of a request still waiting for the owner,
-are both answered exactly like a delivered request (`SENT`). The only other
+an id matching nothing, an id that names something other than configuration (a
+conversation), and a repeat of a request still waiting for the owner, are all
+answered exactly like a delivered request (`SENT`). The only other
 answer, `ALREADY_HAS_ACCESS`, is given only to someone who can already open the
 resource. A person may make 20 requests a day, whether or not they reach
 anybody, so probing ids is bounded too.

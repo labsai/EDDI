@@ -77,6 +77,20 @@ export function isCascadeRequest(preview: ResolvedRequestPreview | null | undefi
   return CASCADE_PATH.test(pathOf(preview.uri));
 }
 
+/**
+ * Whether the backend would read this body field as `true`. The request is
+ * deserialized into a Boolean property, and Jackson's default coercion accepts
+ * far more than the JSON literal: the strings "true"/"True"/"TRUE" (trimmed)
+ * and any non-zero integer — so an LLM that quotes it or writes `1` still asks
+ * for a redeploy, and a preview that showed none would understate the write.
+ * Fractional numbers and other strings are refused by the backend (400).
+ */
+function isTrue(value: unknown): boolean {
+  if (value === true) return true;
+  if (typeof value === "string") return ["true", "True", "TRUE"].includes(value.trim());
+  return typeof value === "number" && Number.isInteger(value) && value !== 0;
+}
+
 function pathOf(uri: string): string {
   try {
     return new URL(uri, "http://placeholder.invalid").pathname;
@@ -126,8 +140,8 @@ export function parseCascadePreview(preview: ResolvedRequestPreview | null | und
     agentId,
     agentVersion: Number.isInteger(version) ? version : null,
     mappings,
-    redeploy: body.redeploy === true,
+    redeploy: isTrue(body.redeploy),
     environment,
-    compatible: body.compatible === true,
+    compatible: isTrue(body.compatible),
   };
 }

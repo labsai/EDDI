@@ -56,6 +56,7 @@ User sends message
 
 Human reviews → POST /agents/{conversationId}/resume with a decision
   └→ REJECTED → remaining pipeline tasks are skipped, state = READY
+       (onRejection: REVISE and a note → the model revises its answer instead, see below)
   └→ APPROVED → pipeline resumes from the bookmarked task + 1
        └→ Remaining tasks (output, templating, …) execute normally
 ```
@@ -81,6 +82,8 @@ Human reviews → POST /agents/{conversationId}/resume with a decision
 | `approvalTimeout` | ISO-8601 duration (`"PT30S"`, `"PT15M"`) | `null` | Time before the timeout policy fires. Required for finite policies. |
 | `timeoutPolicy` | `AUTO_APPROVE` \| `AUTO_REJECT` \| `ABORT` \| `WAIT_INDEFINITELY` | `WAIT_INDEFINITELY` | What happens when the timeout expires. |
 | `pauseReason` | string, ≤ 500 chars | `null` | Approver-facing text shown in pending-approval listings and approval-status — answers "what am I approving?". Falls back to a generic reason when absent. |
+| `onRejection` | `SKIP` \| `REVISE` (case-insensitive) | `SKIP` | What a `REJECTED` decision on a rule pause does. `SKIP` skips the remaining tasks and shows the note. `REVISE` has the model revise the answer it gave before the pause, with the note as feedback. See [Revise with the reviewer's note](#revise-with-the-reviewers-note). |
+| `maxRevisionsPerTurn` | integer, `1`..`10` | `3` | Under `REVISE`, how many revisions one turn may take. A rejection after that skips. |
 
 Validation happens at **save time** (and on ZIP import): a finite policy without a valid positive `approvalTimeout` (or a malformed duration like `"30m"`, or an overlong `pauseReason`) is rejected with an actionable 400 — it never degrades silently to wait-forever at runtime.
 
@@ -96,7 +99,9 @@ Validation happens at **save time** (and on ZIP import): a finite policy without
 }
 ```
 
-`PAUSE_CONVERSATION` is a **reserved action** (like `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`). Do not reuse it as a quick-reply expression.
+`PAUSE_CONVERSATION` is a **reserved action** (like `CONVERSATION_START`, `CONVERSATION_END`, `STOP_CONVERSATION`, `CONTINUE_CONVERSATION`). Do not reuse it as a quick-reply expression.
+
+**Pauses and self-continuation.** A turn that pauses never arms a [self-continuation](long-jobs.md): only a turn that settles is followed by its own next turn. A continuation that falls due while the conversation is `AWAITING_HUMAN` is not run; the turn resumed from the pause may emit `CONTINUE_CONVERSATION` again, and is followed like any settled turn.
 
 ### REST API
 
@@ -144,7 +149,45 @@ The listing has no offset parameter, so a caller sees at most `limit` entries. T
 | Properties (this + later turns) | `{properties.hitlVerdict}` | Conversation-scoped property — next-turn behavior rules can react via a property matcher |
 | Raw step data (pipeline tasks) | `hitl:decision_verdict`, `hitl:decision_note`, `hitl:decision_by` | Not template-accessible (colon keys) |
 
-On **REJECTED**, the remaining pipeline tasks are skipped (the actions that would have triggered API calls are still in the step — they must not run) and a public output message with the reviewer's note is emitted so UIs render feedback.
+On **REJECTED**, the remaining pipeline tasks are skipped (the actions that would have triggered API calls are still in the step — they must not run) and a public output message with the reviewer's note is emitted so UIs render feedback. Under `onRejection: REVISE` a rejection with a note revises the answer instead; see below.
+
+### Revise with the reviewer's note
+
+`hitlConfig.onRejection: "REVISE"` turns a rejection into a request for a better answer. It suits a workflow in which a rule pauses **after** the model answered so that a person reviews the draft:
+
+```json
+{
+  "hitlConfig": {
+    "onRejection": "REVISE",
+    "maxRevisionsPerTurn": 2,
+    "pauseReason": "Review the draft reply before it is sent"
+  }
+}
+```
+
+The approval API is unchanged: the reviewer rejects with a note, over REST `POST /agents/{conversationId}/resume` (`{"verdict": "REJECTED", "note": "Too formal; mention the refund date"}`), the MCP `resume_conversation` tool or the Manager's Approvals page.
+
+**What happens.** The same model is asked once more, over the exact request that produced the draft (system prompt, history, retrieved context and any tool results, kept with the pause), with the draft as the assistant's turn and the note as the user's next message. The revision replaces the draft, and the pipeline continues from the task after the model's. A rule that paused on the draft therefore pauses again on the revision, and the reviewer sees it before it goes out. Approve it, or reject it again with another note.
+
+- **The note is data.** It is human-written, so it may go in the user role, but it is never template source: it is put into the message by concatenation, not run through the template engine.
+- **No tool runs again.** The revision is one model call with no tools. A draft that came from a tool loop is re-asked over its tool results, the way an output guardrail re-asks a final answer.
+- **The same checks apply.** The revision passes `responseValidation` and the task's output guardrails, and the spend gate is asked first (`maxCostPerConversationUsd`, the tenant budget). The revision's tokens and cost are recorded on the step like any answer's.
+- **Tasks after the model's run again**, from the one after the model's task up to and past the pause. Output that the draft and those tasks wrote is cut back first, so nothing appears twice. Keep side effects (an `httpcall` that sends something) **after** the pause, which is the usual design anyway.
+- **Templates can tell.** `{memory.current.hitlRevision}` holds the revision's number. `{memory.current.hitlDecision}` reads `REJECTED` (the decision on the draft) while the revision runs and awaits review, and is overwritten by the next decision on the same turn: once the revision is approved, the step reads `APPROVED`.
+
+**When a rejection still skips.** In all of these cases the rejection behaves exactly as under `SKIP`:
+
+| Case | `hitl:revision:outcome` |
+|------|------|
+| The decision has no note (blank counts as none). A Slack Reject button counts as none too: the note it records is its own attribution, not a request | `no_note` |
+| The decision is automated: a timeout's `AUTO_REJECT`, a group's `system:group` | `automated` |
+| There is no answer to revise: the pause came before the model ran in this turn, the answer came from a later task or workflow, or its request was over `eddi.hitl.revision.transcript-max-bytes` (default 256 KB) | `no_answer` |
+| The turn has had `maxRevisionsPerTurn` revisions already | `exhausted` |
+| The revision could not be produced: the LLM configuration changed since the pause, a spend limit is reached, the model failed or returned nothing, or the revision failed `responseValidation` or was blocked by a guardrail | `failed` |
+
+**Which pauses.** Only behavior-rule (`RULE`) pauses. A rejected **tool call** (`TOOL_CALL` pause) is not a rejected answer: the model already receives the rejection, with the note, as that call's tool result and answers from there, under either policy. Group discussions are not affected either (a member's own pause is cancelled inside a group, see [Group members](#group-members)).
+
+**Records.** The step keeps `hitl:revision:outcome` (`{outcome, round}`) as part of the turn's HITL record, the `hitl.approval` audit entry carries `onRejection: REVISE` for a rejection under the policy, and the revision itself is an ordinary LLM task entry in the audit ledger (model, response, tokens, cost). The counter `eddi_hitl_revision_total{outcome}` counts the outcomes. The request kept with the pause (`hitl:revision:candidate`) is internal: it is withheld from `returnDetailed` and from an approver's `approval-status?detail=full`, the raw read `GET /conversationstore/conversations/{conversationId}` serves only its draft and bookkeeping (never `transcriptJson`, the frozen request with the compiled system prompt; the redo cache an undo fills is covered too), it is scrubbed of secret input and secret context like the rest of the step, and it is removed from the step when the pause is decided.
 
 ### Secret context on resume
 
@@ -218,12 +261,12 @@ re-evaluated against a newer version's configuration.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/groups/{groupId}/conversations/{gcId}/approve` | Approve/reject (optionally per-task) |
-| `POST` | `/groups/{groupId}/conversations/{gcId}/approve/stream` | Same, with SSE progress events |
-| `GET` | `/groups/{groupId}/conversations/{gcId}/approval-status` | Pause summary (state, pausedAt, pauseId, phase, pauseType, reason, timeoutPolicy, awaiting task ids); `?detail=full` returns the whole conversation incl. transcript — approver-only callers get `full` only while paused, `403` otherwise |
+| `POST` | `/groups/{groupId}/conversations/{gcId}/approve` | Approve/reject (optionally per-task). The owner and admins get the conversation back; an approver-only caller gets only `{"state": …}` — the conversation is re-read after the resume is enqueued and can already hold member turns from after the approval (the MCP `approve_group_phase` returns the same) |
+| `POST` | `/groups/{groupId}/conversations/{gcId}/approve/stream` | Same, with SSE progress events. The owner and admins follow the resumed discussion to its end; an approver-only caller (`eddi-approver`, neither owner nor admin) gets the outcome of their decision — `hitl_resume` once the resumed run is enqueued (a resume that cannot be enqueued keeps the pause and sends `group_error` instead), or for a rejection `group_complete` without the synthesized answer — and the stream then closes, because the member turns that run after the resume are outside the approver's review window |
+| `GET` | `/groups/{groupId}/conversations/{gcId}/approval-status` | Pause summary (state, pausedAt, pauseId, phase, pauseType, reason, timeoutPolicy, awaiting task ids; for a HUMAN-member turn `pendingMemberId`, `pendingMemberDisplayName` and `pendingHumanPrompt`); `?detail=full` returns the whole conversation incl. transcript — approver-only callers get `full` only while paused, `403` otherwise. `pendingHumanPrompt` is built from the discussion, so it goes only to the pending member, the owner, admins, and an approver while the conversation awaits approval; other approvers see who is up but not the prompt. The MCP `get_group_approval_status` applies the same rule |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals?limit=100` | This group's paused conversations as summaries (bounded, max 1000) |
 | `GET` | `/groups/pending-approvals?limit=100` | **Global approval inbox** across all groups (bounded, max 1000): admins/approvers see everything, other callers their own conversations |
-| `POST` | `/groups/{groupId}/conversations/{gcId}/cancel` | Cancel the discussion — `409` if it is already in a terminal state |
+| `POST` | `/groups/{groupId}/conversations/{gcId}/cancel` | Cancel the discussion — `409` if it is already in a terminal state. An approver-only caller may cancel only a paused discussion (`AWAITING_APPROVAL` or `AWAITING_HUMAN_INPUT`), receives `{"state": "CANCELLED"}` rather than the conversation, and gets `403` on a running one — see [Who May Decide](#who-may-decide) |
 
 The `{groupId}` path segment is validated: a conversation that does not belong to the given group returns `404` on read/delete/cancel/approve/approval-status. A discussion deleted concurrently with an approve/cancel also returns `404` (never a misleading `409` state conflict).
 
@@ -240,9 +283,9 @@ The `{groupId}` path segment is validated: a conversation that does not belong t
 // Task-level shortcut: verdict APPROVED with no taskApprovals approves ALL pending tasks
 ```
 
-Unknown task IDs, tasks not awaiting approval, and unknown decision values (anything other than case-insensitive `APPROVED`/`REJECTED`) are rejected with `400` **before anything is applied** — the pause and its timeout schedule survive a bad request. An explicit empty `taskApprovals` map (`{}`) behaves like the approve-all shortcut. Resume-vs-resume and cancel-vs-approve races are arbitrated by a DB-level compare-and-set; the loser gets `409`.
+Unknown task IDs, tasks not awaiting approval, and unknown decision values (anything other than case-insensitive `APPROVED`/`REJECTED`) are rejected with `400` **before anything is applied** — the pause and its timeout schedule survive a bad request. An explicit empty `taskApprovals` map (`{}`) behaves like the approve-all shortcut. Resume-vs-resume and cancel-vs-approve races are arbitrated by a DB-level compare-and-set; the loser gets `409`. For group discussions that compare-and-set covers **state and pause together**: the group conversation persists a `pauseId` (the same value `approval-status` reports) and approve, reject, cancel of a paused discussion and the human-turn timeout skip each write with *state AND pauseId* in one atomic conditional update (MongoDB filter / PostgreSQL `UPDATE ... WHERE`). A decision that was read against one pause therefore cannot land on a later pause of the same state — a resume followed by a re-pause between the read and the write makes it conflict (`409`, or a no-op for a timeout) instead of acting on a request the decider never saw. Discussions persisted before the field existed carry no `pauseId`; their write matches it as absent, which stays state-bound until the next write stamps the id.
 
-**SSE events:** `awaiting_approval` (stream closes; re-attach via `/approve/stream`), `hitl_resume` (emitted once the approve commits — the stream stays open for the resumed discussion's events), `cancelled` and `group_complete`/`group_error` (stream closes), plus the standard discussion events. Every terminal outcome — including REJECTED verdicts, config-drift aborts, and resume failures — emits a closing event, so `/approve/stream` clients never hang.
+**SSE events:** `awaiting_approval` (stream closes; re-attach via `/approve/stream`), `hitl_resume` (emitted once the approve commits — for the owner and admins the stream stays open for the resumed discussion's events; an approver-only caller's stream sends it once the resumed run is enqueued and then closes, see the `approve/stream` row above), `cancelled` and `group_complete`/`group_error` (stream closes), plus the standard discussion events. Every terminal outcome — including REJECTED verdicts, config-drift aborts, and resume failures — emits a closing event, so `/approve/stream` clients never hang.
 
 ### Config drift protection
 
@@ -259,6 +302,8 @@ A TASK-gate pause caused by turn-budget exhaustion could previously loop forever
 The two surfaces above pause **turns** (a behavior-rule `PAUSE_CONVERSATION`) or **phases** (`requiresApproval`). Tool-level HITL is a third, finer gate: it pauses when the LLM **invokes a matching tool**, before that tool executes. It works for **all seven tool sources** — built-in `@Tool`, `http` (httpcall), `mcp`, `a2a`, `dynamic` (dynamic agents), `memory`, and `recall`.
 
 The gate lives in the tool-execution loop (`AgentOrchestrator`), so it is **fail-safe**: a gated call is intercepted *before* execution. It reuses the existing pause machinery — same `AWAITING_HUMAN` state, same `POST /agents/{id}/resume` endpoint, same timeout/audit/Slack/crash-recovery paths — with `hitlPauseType = "TOOL_CALL"` distinguishing it from a `RULE` pause. A single resume verdict resolves either pause type.
+
+**Tool quotas ([`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas)).** A gated call whose per-subject quota is **already exhausted** is refused immediately — the model gets a final `NOT_EXECUTED` result and the conversation does not pause — so a human is never asked to approve a call that would then be refused. The check is a read; nothing is counted while a call waits. The quota is applied again, and the call counted, when the approved call actually runs on resume, through the same execution pipeline as a live call; a call approved after the allowance was spent elsewhere is refused then. A rejected call is never counted.
 
 ### Configuration
 
@@ -334,7 +379,7 @@ The fields above are single scalars for *every* gated tool, so "deploy an agent"
 Resolution (`ToolApprovalRules`):
 
 1. **Per call, most specific wins.** Rules are tried fewest-wildcards-first, then longest-pattern-first, so `http.post:/agentstore/agents` beats `http.post:*` **whatever order they are listed in**.
-2. **Per batch, strictest wins.** A model can emit several gated calls in one message and they pause *together*, under one policy — so the matched rules are reduced to one: the rule assuming the least human authority on timeout, ordered `WAIT_INDEFINITELY` > `ABORT` > `AUTO_REJECT` > `AUTO_APPROVE` > (no policy stated). Bundling a lenient call into a batch can therefore never soften a stricter rule. Ties break on specificity.
+2. **Per batch, strictest wins.** A model can emit several gated calls in one message and they pause *together*, under one policy — so the matched rules are reduced to one: the rule assuming the least human authority on timeout, ordered `WAIT_INDEFINITELY` > `ABORT` > `AUTO_REJECT` > `AUTO_APPROVE` > (no policy stated). Bundling a lenient call into a batch can therefore never soften a stricter rule. Ties break on specificity. A gated call that **no** policy-stating rule covers counts too: it carries the policy it would inherit on its own (`toolApprovals.timeoutPolicy`, else the outer `hitlConfig.timeoutPolicy` with `AUTO_APPROVE` demoted to `WAIT_INDEFINITELY`), and that joins the comparison — so an `AUTO_APPROVE` rule for one endpoint never auto-approves an unrelated call bundled into the same message.
 3. **Fields fall back individually** to the `toolApprovals` scalars, so a rule that sets only `pauseReason` keeps the configured timeout policy.
 
 The governing rule is resolved **at gate time** and persisted on the pending batch (`PendingToolCallBatch.effectiveRule`), because the persisted batch keeps tool names and sources but no endpoints — an endpoint-addressed rule could not be re-matched after the pause. Each gated call also records the rule that tuned it (`matchedRule`), so an approver can tell which call brought the batch's policy.
@@ -361,7 +406,7 @@ Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
 | **Exempt beats require** | If a call matches any `exempt` pattern, it runs — even if it also matches `requireApproval`. |
 | **Absent/empty `requireApproval` = gate off** | No `requireApproval` patterns → the gate is fully inactive; every call runs. |
 | **Any match suffices** | A call is gated if it matches *any* `requireApproval` pattern (and no `exempt` pattern). |
-| **An approval clears one call, not an id** | A call the human approved is pre-cleared for the continuation, so a model that reissues *that same call* once does not re-pause on it. The clearance binds to the call id **and** the tool name **and** a canonical fingerprint of the arguments (key order and whitespace ignored), and it is used up by the first match. A different call that merely reuses the approved id — some OpenAI-compatible servers number calls `call_1` on every turn — is gated like any other. While the gate is active, an empty-string id is treated as missing and a repeated id within one model message is replaced, so per-call verdicts can never apply to two calls at once. |
+| **An approval authorises one execution** | A call the human approved runs once. A model that reissues *that same call* in the continuation is asking to run it again, so the reissue pauses for a new decision, with the reason "repeat of an approved call that has already been executed" (it used to run a second time on the original approval). The match binds to the call id **and** the tool name **and** a canonical fingerprint of the arguments (key order and whitespace ignored), and it is used up by the first match. A different call that merely reuses the approved id — some OpenAI-compatible servers number calls `call_1` on every turn — is gated like any other. While the gate is active, an empty-string id is treated as missing and a repeated id within one model message is replaced, so per-call verdicts can never apply to two calls at once. |
 
 ### Effective timeout policy
 
@@ -406,7 +451,7 @@ Validation (all `400`, applied **before** any state changes, so a bad body never
 - Top-level `REJECTED` combined with any per-call `APPROVED` is contradictory — set the top-level verdict to `APPROVED` to mix outcomes.
 - `amendedArguments` is only valid on an `APPROVED` call, must be a **JSON object**, is size-capped, and cannot amend a call whose arguments were truncated at pause time (approve/reject it as-is).
 
-A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (`status: REJECTED_BY_REVIEWER`, the tool name and the reviewer's note) — rejection feeds *back into* the model rather than aborting the turn. What the result tells the model to do depends on who decided and whether a note came with it:
+A **REJECTED** call is not executed; instead the LLM receives a structured rejection tool-result (`status: REJECTED_BY_REVIEWER`, the tool name and the reviewer's note) — rejection feeds *back into* the model rather than aborting the turn. What the result tells the model to do depends on who decided and whether a note came with it (`hitlConfig.onRejection` does not change this: it applies to rule pauses only):
 
 - **A person left a note.** The result says the user did not approve the call and left a note: if the note asks for changes, call the tool again with exactly those changes and nothing else changed; if it declines or asks for something else, do not call it again and reply briefly. A note is therefore a way to ask for a revision. The re-proposed call is a new call: it is gated like any other, pauses again (a new `pauseId` and its own timeout) and needs its own approval. Nothing a note says changes a call that was approved.
 - **No note, or an automated decision.** The result keeps the plain "declined" text: do not retry this exact call, explain the situation and offer alternatives. An automated decision is one whose `decidedBy` starts with `system:` — the timeout auto-reject (`system:timeout`) and the group-conversation auto-reject (`system:group`, note "tool approval is not available during group discussions in this version"). The note on those is an explanation, not a request, and asking the model to revise would only make it retry a call that can never be approved.
@@ -478,6 +523,8 @@ Approved tool executions are protected by a write-ahead journal (`IHitlToolJourn
 3. On resume, an `EXECUTED` entry **replays its stored result** — the tool is never re-run.
 4. An `EXECUTING` entry (a crash *inside* the tool) yields an honest `EXECUTION_OUTCOME_UNKNOWN` result fed to the LLM: *"a previous execution attempt was interrupted; it may or may not have taken effect — verify externally before retrying."* This is logged with an alertable marker (`WARN hitl.tool.outcome_unknown`, not an audit-ledger entry — the orchestrator has no audit collector in scope here) and surfaced in `pauseDetails.outcomeUnknown`.
 
+**Retention (MongoDB).** `eddi.hitl.tool.journal-retention` is a TTL index on `claimedAt` that covers `EXECUTED` entries only (`idx_journal_ttl_completed`, a partial index), so a crash-orphaned `EXECUTING` claim is kept until its conversation is deleted. An older pod that is still running during a rolling update recreates the previous unfiltered index (`idx_journal_ttl_claimed`), which would expire those claims again. The store therefore reconciles at startup and every `eddi.hitl.tool.journal-reconcile-interval` (default `15m`): any unfiltered TTL index on `claimedAt` is dropped (one `WARN` per occurrence) and the partial index is re-created if missing. PostgreSQL keeps no such index.
+
 > **Outcome-unknown contract:** the framework **never silently re-executes** a tool that may have already run. A crash between "claimed" and "executed" is reported as genuinely unknown, not retried — the human (or a downstream check) decides what to do.
 
 ### Slack
@@ -509,12 +556,12 @@ The gate is guarded by a feature flag: `eddi.hitl.tool.enabled` (default `true`;
 |--------|-----------|------------------|
 | `WAIT_INDEFINITELY` | Nothing is scheduled; waits forever | Critical decisions (compliance, safety) |
 | `AUTO_APPROVE` | APPROVED decision (`decidedBy: system:timeout`), resumes | Progress monitoring, non-critical gates |
-| `AUTO_REJECT` | REJECTED decision → regular: turn skipped; group: `FAILED` | Strict SLA gates |
-| `ABORT` | Cancels the conversation/discussion | Safety-critical pipelines |
+| `AUTO_REJECT` | REJECTED decision → regular: turn skipped (never revised, even under `onRejection: REVISE`); group: `FAILED` | Strict SLA gates |
+| `ABORT` | Cancels the pending approval (regular surface: only the pause the timeout was armed for) / the discussion | Safety-critical pipelines |
 
 Timeouts are one-shot schedules on EDDI's cluster-aware `ScheduleFireExecutor` — exactly one pod owns each claim, and they route through the **same** resume/cancel machinery as human decisions. Delivery is at-least-once (a lease-expired claim can be re-stolen after a pod crash), so a timeout must be safe to fire twice — and against the wrong pause:
 
-- **A timeout decides only the pause it was armed for.** The schedule carries that pause's `pauseId`, and the `AUTO_APPROVE`/`AUTO_REJECT` decision names it, exactly like a reviewer's decision that passes `pauseId`. A fire that arrives after the conversation was resumed and paused again on a different request is refused as a pause mismatch and completes without deciding anything; the newer pause has its own timeout. (The resume/cancel state CAS alone did not cover this: a re-paused conversation is `AWAITING_HUMAN` again, so a stale fire's CAS succeeded and decided a request nobody had timed out on.) Timeouts armed by an older build carry no `pauseId` and decide whatever pause is current, as before. `ABORT` cancels through the cancel path, which is not pause-bound (a stale `ABORT` row can only exist after a crash re-arm, and it cancels the conversation as it stands).
+- **A timeout decides only the pause it was armed for.** The schedule carries that pause's `pauseId`, and the `AUTO_APPROVE`/`AUTO_REJECT` decision names it, exactly like a reviewer's decision that passes `pauseId`. A fire that arrives after the conversation was resumed and paused again on a different request is refused as a pause mismatch and completes without deciding anything; the newer pause has its own timeout. (The resume/cancel state CAS alone did not cover this: a re-paused conversation is `AWAITING_HUMAN` again, so a stale fire's CAS succeeded and decided a request nobody had timed out on.) Timeouts armed by an older build carry no `pauseId` and decide whatever pause is current, as before. On the regular surface `ABORT` is bound the same way: it is the paused-only cancel, applied only while the conversation is still paused on the timeout's `pauseId` — a fire claimed just before an approver resumed neither stops the resumed turn nor aborts a newer pause. While that resume is still in flight the fire stays armed and is retried (the resume may yet fail and restore the pause, which only this fire would then abort); once the pause is decided or replaced, it completes without effect. (It used to be the full cancel, which also signals a running turn.) The group surface's `ABORT` still cancels the discussion as it stands.
 - **A decision that cannot be applied yet keeps the timeout armed.** When the resume fails before anything runs — the conversation could not be loaded, the node is draining for shutdown, the agent cannot be resolved, or another decision on the same pause is still in flight (for `ABORT` and an expired human turn: the cancel or skip failed) — the pause is restored and the fire is recorded `FAILED` with the reason, and the schedule is re-armed after `eddi.schedule.hitl-timeout-retry-interval` (default `2m`). It is never dead-lettered: the usual cause is temporary and outside the schedule's control, and dropping it would turn a finite policy into wait-forever. A timeout whose conversation is gone, or no longer awaiting a decision, completes normally.
 
 ---
@@ -523,15 +570,15 @@ Timeouts are one-shot schedules on EDDI's cluster-aware `ScheduleFireExecutor` �
 
 Approve/reject/cancel/status require, in order: the **conversation owner**, the **`eddi-admin`** role, or the dedicated **`eddi-approver`** role. Ownerless (legacy/internal) conversations fail **closed** for non-admin/non-approver callers. `decidedBy` is set server-side from the authenticated identity — with an authenticated caller it cannot be spoofed via the request body. The one exception is a deployment where nobody is authenticated: there a body `decidedBy` is recorded as `unverified:<value>` (see [Reply and approver on resume](#reply-and-approver-on-resume)). Approvers and admins see all entries in the pending-approvals listings; other users only their own.
 
-**Approver cancel scope:** `POST /agents/{conversationId}/cancel` and the MCP `cancel_conversation` tool also stop a turn that is *executing*, and the approver role is not a licence to stop other users' running turns. An approver-only caller (not the owner, not an admin) may cancel a conversation only while it is `AWAITING_HUMAN` — the decision the role exists for. Their cancel is a single compare-and-set from that state, so the entitlement check and the cancel are one operation and a resume that lands in between cannot turn it into a stop of a running turn; on a conversation in any other state it is refused with `403` (`FORBIDDEN` over MCP), exactly as it would be without the role. The owner and admins are unchanged and can cancel an executing turn as before.
+**Approver cancel scope:** `POST /agents/{conversationId}/cancel` and the MCP `cancel_conversation` tool also stop a turn that is *executing*, and the approver role is not a licence to stop other users' running turns. An approver-only caller (not the owner, not an admin) may cancel a conversation only while it is `AWAITING_HUMAN` — the decision the role exists for. Their cancel is a single compare-and-set from that state, so the entitlement check and the cancel are one operation and a resume that lands in between cannot turn it into a stop of a running turn; on a conversation in any other state it is refused with `403` (`FORBIDDEN` over MCP), exactly as it would be without the role. The owner and admins are unchanged and can cancel an executing turn as before. Group discussions follow the same rule on `POST /groups/{groupId}/conversations/{gcId}/cancel` and the MCP `cancel_group_discussion` tool: an approver-only caller may cancel only a discussion that is `AWAITING_APPROVAL` or `AWAITING_HUMAN_INPUT` (one compare-and-set on that state), gets `403` / `FORBIDDEN` on a running one, and receives the resulting state rather than the transcript. The HITL timeouts of a group (approval `ABORT`, human-turn `ABORT` and `SKIP_TURN`) are bound the same way to the pause they were armed for: a late fire neither cancels a discussion that has moved on nor skips a newer human turn.
 
 **Approver read scope:** the approver role exists to *decide* pending approvals, not as a universal read grant. Approver-only callers (not owner, not admin) may read `approval-status?detail=full` — the full memory snapshot / transcript — only while the conversation is actually awaiting approval; outside a pause they get `403` and can use the summary view. The full snapshot is also **sanitized** for every caller, on REST and on the MCP `get_approval_status` tool alike: the pending batch's `argumentsRaw`, frozen LLM transcript (`chatTranscriptJson`), running trace (`traceSoFar`) and batch-level `fingerprint` (an unsalted digest over the raw arguments) are removed, the per-call request fingerprint is replaced by a constant marker, and `argumentsRedacted` and the request preview are re-redacted with the current filter. Both surfaces call the same method (`ConversationMemoryUtilities.sanitizePendingToolCallsForApprover`), so they cannot serve different fields.
 
-**Whose credentials a resumed turn carries.** When the approver *is* the conversation's owner, the resumed turn runs as them, exactly like a `say`. When somebody else decides — an admin or an `eddi-approver` — their identity covers only what they were shown: each tool call they explicitly approved in a `TOOL_CALL` pause runs with their caller identity (so a `${caller:token}` header on that call carries the approver's token), and the rest of the resumed turn runs with **no caller**. A `${caller:token}` / `${caller:userId}` reference elsewhere in that turn — including every call after a `RULE` pause, which previews nothing — therefore fails closed, as it does on a scheduled turn, instead of going out with the approver's credentials. A resumed group discussion follows the same rule: it runs as the approver only when the approver started the discussion. `PER_USER` connection credentials always resolve against the conversation's owner, never the approver.
+**Whose credentials a resumed turn carries.** When the approver *is* the conversation's owner, the resumed turn runs as them, exactly like a `say`. When somebody else decides — an admin or an `eddi-approver` — their identity covers only what they were shown: each tool call they explicitly approved in a `TOOL_CALL` pause runs with their caller identity (so a `${caller:token}` header on that call carries the approver's token), and the rest of the resumed turn runs with **no caller**. A `${caller:token}` / `${caller:userId}` reference elsewhere in that turn — including every call after a `RULE` pause, which previews nothing — therefore fails closed, as it does on a scheduled turn, instead of going out with the approver's credentials. A resumed group discussion follows the same rule: it runs as the approver only when the approver started the discussion. So does a discussion resumed by a HUMAN member's submission: it runs as the submitter only when the submitter started the discussion, otherwise with no caller. `PER_USER` connection credentials always resolve against the conversation's owner, never the approver.
 
 ## Auditing
 
-Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note), and the resumed pipeline leg records its task entries like any other turn. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED`, the cancel mode, and the **cancelling actor** (`decidedBy`: the authenticated principal, or a `system:*` identifier such as `system:timeout` for ABORT policies and `system:group` for auto-cancelled member pauses). This is the EU AI Act human-oversight trail.
+Every HITL decision — human or automated — writes an immutable `hitl.approval` entry to the audit ledger (verdict, decider, automated flag, note, and `onRejection: REVISE` for a rule-pause rejection under that policy), and the resumed pipeline leg records its task entries like any other turn — a revision included. Cancelling a pending approval is a decision too: it writes an `hitl.approval` entry with verdict `CANCELLED`, the cancel mode, and the **cancelling actor** (`decidedBy`: the authenticated principal, or a `system:*` identifier such as `system:timeout` for ABORT policies and `system:group` for auto-cancelled member pauses). This is the EU AI Act human-oversight trail.
 
 ## Crash Recovery
 
@@ -545,13 +592,13 @@ Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-re
 
 ## Operations
 
-- **Metrics** (`/q/metrics`): `eddi_hitl_pause_count`, `eddi_hitl_resume_count`, `eddi_hitl_timeout_count`, each tagged `surface=regular|group`; `eddi_group_member_pause_skipped_count` for auto-cancelled member pauses inside groups; `eddi.operator.write.approval{decision=approved|rejected|timeout}`, one per gated call the instant its verdict is resolved (`timeout` is a distinct bucket from `approved`/`rejected` — see [Request pinning](#request-pinning--approval-binds-to-a-request-not-a-tool-name) above; not operator-specific despite the name, it fires for any gated call regardless of which agent).
+- **Metrics** (`/q/metrics`): `eddi_hitl_pause_count`, `eddi_hitl_resume_count`, `eddi_hitl_timeout_count`, each tagged `surface=regular|group`; `eddi_hitl_revision_total{outcome}` for rejections under `onRejection: REVISE`; `eddi_group_member_pause_skipped_count` for auto-cancelled member pauses inside groups; `eddi.operator.write.approval{decision=approved|rejected|timeout}`, one per gated call the instant its verdict is resolved (`timeout` is a distinct bucket from `approved`/`rejected` — see [Request pinning](#request-pinning--approval-binds-to-a-request-not-a-tool-name) above; not operator-specific despite the name, it fires for any gated call regardless of which agent).
 - **Operator canary/gate metrics** (client-reported): the write canary and gate-installed check both run entirely client-side (there is no server-side notion of "the operator", just an agent with a particular `hitlConfig`), so the Manager reports outcomes via `POST /administration/operator/{canary-result,gate-status}` (`eddi-admin` only) purely so they show up on `/q/metrics` without a Manager tab open. This is a relay, not a verification — a report is trusted at face value. Produces `eddi.operator.canary{outcome=pass|fail|unknown}`, `eddi.operator.canary.duration`, and the gauge `eddi.operator.gate.verified` (1 only while every provisioned version last read back with a sound gate; defaults to 0, including on a deployment that has never activated an operator — that ambiguity is real and unresolved by this signal alone).
 - **Operator self-URL** (`GET /administration/operator/self-url`, `eddi-admin`): answers the address this deployment can reach *itself* at, which is what the operator's generated tools must target. `eddi.self.base-url` when set, otherwise `http://${quarkus.http.host}:${quarkus.http.port}` when the listener binds one specific address (loopback ones such as `127.0.0.5` or `::1` included; an IPv6 literal is bracketed, e.g. `http://[::1]:7070`), and `http://127.0.0.1:${quarkus.http.port}` for a wildcard, empty or `localhost` bind; the response is `{baseUrl, source}` with `source` one of `configured`, `loopback` or `unresolved`. `unresolved` (with `baseUrl: null`) means a random HTTP port (`quarkus.http.port=0`) and no override — the Manager then refuses to guess and asks for the base URL explicitly. It exists because the only other candidate a provisioning client has is its own browser origin, and the two coincide only when nothing sits between the browser and EDDI — a tunnelled staging instance was provisioned with `localhost:7080` in front of a container on `:7070`, and the operator reported itself deployed and gate-verified while all 22 of its tools failed on connect. Deliberately a GET with no arguments: the answer must not depend on a `Host` header or an `X-Forwarded-*` chain a proxy can rewrite. Note that pointing the tools at that address makes them cross-origin to `${caller:token}`'s same-origin rule, which is why `CallerIdentityResolver` also releases the token when the target is this very process — the same argument `LoopbackCallerAuthFilter` makes for the internal hop; the value comes from deployment configuration alone. It is not narrower than same-origin: the self address bypasses whatever sits in front of EDDI, so what the token reaches is what EDDI's own authorization allows. A deployment that also relies on its proxy's rules sets `eddi.caller-identity.self-release.enabled=false`; a caller whose origin could not be captured never gets the self release.
-- **Undeploy**: paused conversations do **not** count as active — an agent version with pending approvals can be undeployed. Resuming afterwards returns `409 agent not deployed` and the pause is restored (redeploy, then retry). Its approval timeouts stay armed through the undeploy (they are not among the schedules an undeploy disables) and fire at their due time; if the decision cannot be applied then, it is retried every `eddi.schedule.hitl-timeout-retry-interval` as described under timeouts. The idle-conversation cleanup sweep likewise **spares** `AWAITING_HUMAN` conversations — a pending approval is never silently force-ended by maintenance.
-- **Cancel semantics (regular)**: cancels a paused conversation, or signals a turn executing on the same pod to stop at the next task boundary. `CANCEL_IMMEDIATE` currently degrades to graceful on the regular surface. Cancelling an idle conversation returns `409` (use `endConversation`). An approver who is neither the owner nor an admin can only cancel a paused (`AWAITING_HUMAN`) conversation — see [Who May Decide](#who-may-decide).
+- **Undeploy**: paused conversations do **not** count as active — an agent version with pending approvals can be undeployed. A resume must finish on the version that paused it, so it deploys that version on demand on the node that runs it — whatever its deployment record says. That is deliberate: the automatic old-version cleanup undeploys a previous version as soon as its only open conversations are paused, and so does retiring a version whose conversations can move to a compatible one; refusing there would strand every pending approval at the next deploy. If the version cannot be deployed (its configuration is gone, say), the resume returns `409 agent not deployed` and the pause is restored. Its approval timeouts stay armed through the undeploy (they are not among the schedules an undeploy disables) and fire at their due time; if the decision cannot be applied then, it is retried every `eddi.schedule.hitl-timeout-retry-interval` as described under timeouts. The idle-conversation cleanup sweep likewise **spares** `AWAITING_HUMAN` conversations — a pending approval is never silently force-ended by maintenance.
+- **Cancel semantics (regular)**: cancels a paused conversation, or signals a turn executing on the same pod to stop at the next task boundary. `CANCEL_IMMEDIATE` currently degrades to graceful on the regular surface. Cancelling an idle conversation returns `409` (use `endConversation`) — unless it has a pending [self-continuation](long-jobs.md): a job between two of its turns is cancelled by withdrawing its next turn, and the answer is `200`. The full cancel withdraws a pending continuation in every case; the approver's paused-only cancel never does. An approver who is neither the owner nor an admin can only cancel a paused (`AWAITING_HUMAN`) conversation — see [Who May Decide](#who-may-decide).
 - **Timeout schedules are not manually operable**: HITL timeout schedules live in the schedule store but the schedule REST surface refuses to fire them manually (`409`, use `/resume` or `/cancel` — manual firing would bypass the approval authz), restricts update/delete/enable/disable to `eddi-admin` (`403` otherwise, so an editor cannot disarm an ABORT/AUTO_REJECT safety timeout), and redacts them from non-admin listings.
-- **Pause retention (optional)**: `eddi.hitl.pending.max-age` (ISO-8601 duration, default **off**) auto-cancels pauses older than the threshold — audited, schedule-disarmed, via the normal cancel path; `eddi.hitl.pending.sweep-interval` (default 6h) controls the sweep cadence. Under the default `WAIT_INDEFINITELY` policy, pauses otherwise accumulate until decided.
+- **Pause retention (optional)**: `eddi.hitl.pending.max-age` (ISO-8601 duration, default **off**) auto-cancels pauses older than the threshold — audited, schedule-disarmed, via the paused-only cancel bound to the pause the sweep saw (a pause resumed in between is left running, a newer pause is not the expired one); `eddi.hitl.pending.sweep-interval` (default 6h) controls the sweep cadence. Under the default `WAIT_INDEFINITELY` policy, pauses otherwise accumulate until decided.
 - **Mass-timeout drain**: due schedules are claimed in configurable batches (`eddi.schedule.poll-batch-size`, default 100) and fired concurrently on virtual threads with per-fire error isolation.
 
 ## Slack Integration
@@ -573,6 +620,110 @@ Behavior:
 - **Group discussions** — Slack-driven group discussions post pause/resume/cancel notices (and `member_pause_skipped` explanations) into their thread.
 
 **Delegated/managed conversations** (agent-to-agent tools, MCP `chat_managed`): when a nested conversation pauses, the calling tool receives a structured `PAUSED_FOR_APPROVAL` result naming the conversation and reason instead of hanging — the delegated approval stays pending (it is *not* auto-cancelled; a reviewer decides, then the tool can be re-invoked).
+
+## Email notifications
+
+An agent can name people to email when one of its conversations pauses for approval — whatever channel the
+conversation came from (Manager, REST, `/v1`, Slack, MCP). The mail says that something is waiting and links to the
+Manager's **Approvals** page; it decides nothing. Two settings, one per audience:
+
+1. **The operator** configures the deployment's system mailer once (`eddi.mail.smtp.*`, see
+   [configuration-reference.md → Email](configuration-reference.md#email)). Without `eddi.mail.smtp.host` nothing is
+   sent and the startup log says so.
+2. **The agent designer** opts the agent in with `hitlConfig.notify.email`:
+
+```json
+{
+  "hitlConfig": {
+    "approvalTimeout": "PT4H",
+    "timeoutPolicy": "AUTO_REJECT",
+    "pauseReason": "Refunds over 500 EUR need a manager",
+    "notify": {
+      "email": {
+        "recipients": ["refund-approvers@example.com", "ops-lead@example.com"]
+      }
+    }
+  }
+}
+```
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `notify` | absent — nobody is notified | Who is told when this agent pauses. A config without it behaves exactly as before |
+| `notify.email.recipients` | — (required when `email` is present) | 1–20 plain `local@domain` addresses (an ASCII local part; the domain may be written in Unicode and is converted to ASCII before it is checked, so the Unicode and punycode spellings of one domain count as duplicates; a domain with ß, ς or a zero-width joiner is refused: write it in punycode), no display names, no duplicates (compared case-insensitively), each in a domain the operator allows (below). Refused at save time (400) otherwise, naming the position, never the address. For more people, use a distribution list |
+
+**Which addresses — the operator decides.** Anyone who may edit an agent can set its recipients, but the mail goes out through the operator's relay, from the operator's sender address, carrying text an author (agent name, pause reason) and an end user (tool arguments) can influence. So the operator bounds it with `eddi.mail.notify.allowed-recipient-domains` (exact domains, `*.domain` for subdomains, `*` for any); **unset, only the domain of `eddi.mail.smtp.from` and its subdomains are allowed.** With a mailer configured, a recipient outside is refused at save time; without one it is accepted with a WARN, since the operator may configure the mailer later. Either way it is checked again at every send and never mailed: its ledger row ends `SUPPRESSED`.
+
+**Flood brake.** An end user can drive an agent into a pause every turn, or in many conversations at once. Each recipient gets at most `eddi.mail.notify.max-per-recipient-per-hour` (default 30) notifications in any hour, counted from the ledger across all instances; the rest are `SUPPRESSED` (`rate_limited`), and each instance logs one WARN per recipient per hour. Pending approvals stay on the Approvals page either way.
+
+
+**One mail per pause and recipient**, across every pod: each recipient's notification is a row in the email ledger
+under a unique key derived from the conversation, the pause and the address, so a pause observed twice — or on two
+pods — mails once. A new pause of the same conversation is a new notification. A resume that restores a pause after
+a failed attempt is the same pause and is not mailed again.
+
+**What the mail contains** follows the [Slack approval card](#slack-integration)'s data-minimisation rule: the agent's
+name, the pause type (approval rule or tool call), the designer's `pauseReason`, when it started, the deadline and
+what happens then, the conversation id, and for a `TOOL_CALL` pause each pending tool's name with its **redacted,
+300-character-truncated** arguments (at most 5 calls, then `+N more`) — the same lines the Slack card shows, from
+the same code. Never anything a user or the model wrote: no input, no output, no transcript. The subject is
+`[EDDI] Approval needed: <agent name>`, and nothing else. Mails are `text/plain` and carry `Auto-Submitted:
+auto-generated` and `X-Auto-Response-Suppress: All`, so out-of-office replies stay quiet.
+
+**What it does not do.** The link is `<public base URL>/manage/approvals` — no token, no conversation-specific
+action, nothing that happens on opening it (Safe Links and Proofpoint open every link in a mail). Replying does
+nothing either. Who may decide is unchanged: the Approvals page needs a sign-in, and the [rules above](#who-may-decide)
+apply. The base URL is the deployment's public origin, `eddi.connections.public-base-url` (the setting OAuth
+callbacks already use); without one the mail names the page instead of guessing a host.
+
+**Delivery and retries.** The first attempt happens as soon as the pause is committed. A failure that may be
+transient (relay unreachable, TLS or login trouble, a 4xx deferral) is retried by a sweeper on every instance
+(`eddi.email.ledger.sweep-interval`, default 30 s) with exponential backoff (`eddi.email.outbound.retry-backoff`,
+default 1 min, doubling, capped at 1 h), up to `eddi.email.outbound.max-attempts` (default 6); a 5xx refusal fails it
+at once. Each retry re-reads the pause and re-renders the mail — the ledger stores no body — and a pause decided in
+the meantime ends `SUPPRESSED` instead of being mailed. Rows are kept for `eddi.email.ledger-retention` (default
+`30d`).
+
+**Who is notified — recipients only, not "all approvers".** EDDI's approvers are the conversation's owner and
+holders of the `eddi-admin` / `eddi-approver` roles in the identity provider. The roles live in the identity
+provider, not in EDDI's user directory, so EDDI cannot list who holds them — and a list it built from past sign-ins
+would keep mailing a revoked approver forever. Name the approvers' shared mailbox or distribution list in
+`recipients` instead.
+
+**Observability and audit.** `eddi_email_outbound_total{kind="notify",outcome="sent|retry|failed|suppressed|not_allowed|rate_limited"}` and
+the `eddi_email_ledger_pending` gauge ([metrics.md](metrics.md#hitl-metrics)). Every sent or failed notification
+writes an `email.notify` audit-ledger entry with the conversation, the outcome, the Message-ID, the relay's reply and
+the recipient as `recipientPseudonym` (the GDPR pseudonym token: keyed with the audit ledger's key, or salted per deployment when the ledger has none, so it cannot be confirmed by hashing candidate addresses; only a deployment with neither a key nor a salt falls back to an unsalted hash) plus `recipientDomain` —
+the audit ledger is write-once, so the address itself is not written there. Ledger rows (which do hold the address) are erased and exported with the person's other data by
+`DELETE /admin/gdpr/{userId}` and the export, matched through the user id when it is an address and the email the
+user directory recorded for that principal.
+
+**Not yet:** group conversations (`AWAITING_APPROVAL` discussions) are not notified by email; their approvals
+appear on the Approvals page and in Slack as before.
+
+## Email conversations
+
+A conversation that an [email integration in conversation mode](email-integration.md#conversation-mode) runs answers
+its correspondent in the mail thread, and that includes pauses — the counterpart of Slack's in-thread notice and
+continuation push:
+
+- **In-thread pause notice.** When the turn of a mail pauses, the sender gets a reply in the thread: the agent's
+  output so far, a fixed sentence that a person must approve the next step, and the agent's `pauseReason`. Never the
+  tool's name or its arguments — the same data minimisation as Slack's in-thread notice; the approver sees those on
+  the Approvals page or in their [notification](#email-notifications). It is sent from `HitlPauseCommittedEvent`,
+  after the pause is durable, so it always carries the reason of the pause it is about.
+- **Continuation.** `EmailHitlResumeObserver` listens for `HitlResumeCompletedEvent`, as `SlackHitlResumeObserver`
+  does: after an approval the sender gets the resumed turn's output; after a rejection, a cancellation or a timeout a
+  plain notice that the step was not carried out; after a resume that failed, that it could not be completed. Who
+  decided is never named — approvers are staff, the correspondent is outside.
+- **One row, any node.** Both are reply rows in the email ledger, keyed by conversation and pause (or by the
+  continuation's verdict and text), retried like every reply and rebuilt from the conversation if a node dies; a
+  second observer of the event sends nothing. The ledger deduplicates rows, not deliveries: a node that dies after
+  the relay accepted a notice but before its row was marked `SENT` leaves a row whose lease runs out, and the retry
+  sends it again (same Message-ID, so most mail clients show it once). A pause decided before its notice went out
+  ends `SUPPRESSED`.
+- Mail the sender writes while the conversation is paused waits in the mailbox until the decision, then runs.
+- A pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn ran, sends no notice.
 
 ## MCP Surface
 

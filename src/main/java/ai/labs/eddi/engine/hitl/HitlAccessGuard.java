@@ -59,6 +59,29 @@ public class HitlAccessGuard {
     }
 
     /**
+     * Whether the caller may cancel a conversation that is <em>executing</em>, not
+     * only one awaiting a decision: the owner and admins may, a caller who is only
+     * an {@code eddi-approver} may not (L9 of the 2026-10-15 security review). The
+     * REST and MCP cancel surfaces of both the 1:1 and the group conversation
+     * decide with this, so an approver's cancel is the paused-only compare-and-set
+     * on all four.
+     */
+    public boolean mayCancelExecuting(String ownerId) {
+        return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
+    }
+
+    /**
+     * Whether the caller may follow a group discussion past the approval they just
+     * decided — the owner and admins may. An {@code eddi-approver} who is neither
+     * may decide the pause, and may read the conversation while it awaits approval,
+     * but the member turns that run after the resume are outside that window (the
+     * same boundary as the agent resume's "a reply is a read").
+     */
+    public boolean mayReadResumedDiscussion(String ownerId) {
+        return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
+    }
+
+    /**
      * Strict HITL ownership check (owner OR admin OR approver). Fail-closed when
      * the descriptor is absent and the caller is neither admin nor approver — a
      * conversation without a verifiable owner may only be decided by
@@ -70,17 +93,6 @@ public class HitlAccessGuard {
      * @throws ForbiddenException
      *             if the caller may not decide this conversation.
      */
-    /**
-     * Whether the caller may cancel a conversation that is <em>executing</em>, not
-     * only one awaiting a decision: the owner and admins may, a caller who is only
-     * an {@code eddi-approver} may not (L9 of the 2026-10-15 security review). The
-     * REST and MCP cancel surfaces both decide with this, so the approver's cancel
-     * is the paused-only compare-and-set on either.
-     */
-    public boolean mayCancelExecuting(String ownerId) {
-        return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
-    }
-
     public String requireConversationHitlAccess(String conversationId) {
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
@@ -128,16 +140,18 @@ public class HitlAccessGuard {
      * conversation's existence or owner. A missing conversation is left for the
      * actual operation to 404.
      *
+     * @return the group conversation owner's userId, or {@code null} if the
+     *         conversation was not found (the actual operation then 404s).
      * @throws ForbiddenException
      *             if the caller may not decide this group conversation.
      */
-    public void requireGroupConversationHitlAccess(String groupId, String groupConversationId) {
+    public String requireGroupConversationHitlAccess(String groupId, String groupConversationId) {
         GroupConversation gc;
         try {
             gc = groupConversationService.readGroupConversation(groupConversationId);
         } catch (ResourceNotFoundException e) {
             LOGGER.debugf("Group conversation not found for HITL ownership check: %s", sanitize(groupConversationId));
-            return;
+            return null;
         } catch (Exception e) {
             throw new ForbiddenException("Access denied: unable to verify group conversation ownership");
         }
@@ -147,6 +161,7 @@ public class HitlAccessGuard {
             throw new NotFoundException("Group conversation not found.");
         }
         ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+        return gc.getUserId();
     }
 
     /**
@@ -204,6 +219,29 @@ public class HitlAccessGuard {
             return;
         }
         ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+    }
+
+    /**
+     * Whether the caller may see a pending HUMAN turn's rendered prompt in the
+     * approval-status summary. The read guard admits every {@code eddi-approver},
+     * but the prompt is built from the discussion (peer responses, the question) —
+     * transcript content that the full view withholds from an approver outside an
+     * APPROVAL pause. So the prompt goes only to the member it is addressed to, the
+     * owner and admins, plus an approver while the conversation is actually
+     * awaiting approval (the same window the full view grants). Everybody else
+     * still sees who is up and when — the pause metadata.
+     */
+    public boolean mayReadPendingHumanPrompt(GroupConversation gc) {
+        if (ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, gc.getUserId())) {
+            return true;
+        }
+        String callerId = OwnershipValidator.principalName(identity);
+        if (gc.getPendingHumanInput() != null && callerId != null
+                && callerId.equals(gc.getPendingHumanInput().memberId())) {
+            return true;
+        }
+        return gc.getState() == GroupConversation.GroupConversationState.AWAITING_APPROVAL
+                && ownershipValidator.isApprover(identity);
     }
 
     /**

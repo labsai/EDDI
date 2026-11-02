@@ -149,7 +149,7 @@ public class ConnectionResolver {
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
-            ResolvedCredential credential = resolveCredential(connection, principalOverride);
+            ResolvedCredential credential = resolveCredential(connection, principalOverride, targetUrl);
             record(connection, "success", sample);
             return credential;
         } catch (ConnectionException e) {
@@ -176,9 +176,10 @@ public class ConnectionResolver {
      * {@code targetUrl}, {@link Binding#PER_USER} still needs a verified principal
      * bound to the turn, and the token comes from the same
      * {@link AccessTokenSupplier}, so refresh and caching are shared with the HTTP
-     * paths. The allowlist only holds http(s) origins today, so a mail target such
-     * as {@code imaps://host:993} is refused until the connection model learns mail
-     * origins — fail closed, never "no check".
+     * paths. The allowlist must name the mail origin itself
+     * ({@code smtps://smtp.office365.com}, {@code imaps://outlook.office365.com}):
+     * an https origin of the same host does not cover it, so a token allowed to
+     * reach an HTTP API is not thereby allowed to log in to a mailbox.
      *
      * @param reference
      *            a value containing {@code ${connection:name}}
@@ -220,6 +221,97 @@ public class ConnectionResolver {
             record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
             throw e;
         }
+    }
+
+    /**
+     * A username and password for a protocol login — SMTP {@code AUTH PLAIN/LOGIN},
+     * IMAP {@code LOGIN} — where the client library takes the two values, not an
+     * HTTP {@code Basic} header. {@link #toString()} never prints the password.
+     */
+    public record BasicLogin(String username, String password) {
+        @Override
+        public String toString() {
+            return "BasicLogin[username=" + username + "]";
+        }
+    }
+
+    /**
+     * Resolves the username and vault-backed password of a {@code BASIC}
+     * connection, for a mail login (the app-password case of email plan §7.1).
+     * <p>
+     * The same checks as {@link #resolve}: the target must be on the connection's
+     * {@code baseUrlAllowlist} (a mail origin such as
+     * {@code smtp://relay.example.com:587}), and a document that lost its username
+     * or password reference is refused. Any other auth type is
+     * {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT}: an OAuth connection
+     * goes through {@link #resolveAccessToken}, and a STATIC value is a header
+     * whose shape cannot be split into two fields.
+     *
+     * @throws ConnectionException
+     *             on every failure; never returns null
+     */
+    public BasicLogin resolveBasicLogin(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            if (connection.getAuthType() != AuthType.BASIC || connection.getBinding() == Binding.CALLER_SUPPLIED) {
+                throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                        "Connection '" + connection.getName() + "' is " + connection.getAuthType()
+                                + ", which has no username and password to log in with. A mail login needs a BASIC connection, "
+                                + "or an OAuth connection for XOAUTH2.");
+            }
+            requireTargetAllowed(connection, targetUrl);
+            StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
+            if (staticAuth.getUsername() == null || staticAuth.getUsername().isBlank() || staticAuth.getPasswordRef() == null
+                    || staticAuth.getPasswordRef().isBlank()) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Connection '" + connection.getName() + "' is BASIC but lacks staticAuth.username or staticAuth.passwordRef. "
+                                + "Re-save the connection to apply the current validation rules.");
+            }
+            String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+            record(connection, "success", sample);
+            return new BasicLogin(staticAuth.getUsername(), password);
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    /**
+     * Save-time check of a mail login, without resolving any credential: the
+     * connection exists, can log in to a mailbox ({@code BASIC} for an app
+     * password, an OAuth type for {@code XOAUTH2}; never {@code CALLER_SUPPLIED})
+     * and its {@code baseUrlAllowlist} names {@code targetUrl} (a mail origin such
+     * as {@code imaps://outlook.office365.com}). The same rules
+     * {@link #resolveBasicLogin} and {@link #resolveAccessToken} apply when the
+     * login happens, checked where the author is waiting for an answer.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed
+     */
+    public void requireMailLoginTarget(String reference, URI targetUrl) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection = connectionRegistry.require(parsed);
+        if (connection.getAuthType() != AuthType.BASIC) {
+            requireBareTokenAvailable(connection);
+        } else if (connection.getBinding() == Binding.CALLER_SUPPLIED) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is CALLER_SUPPLIED, which has no username and password to log in with.");
+        }
+        if (connection.getBinding() == Binding.PER_USER) {
+            // A poll runs as no verified person, so a per-user grant could never be used.
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is bound PER_USER, but a mailbox poll runs as no verified user. Use a "
+                            + "SERVICE-bound connection for a mailbox.");
+        }
+        requireTargetAllowed(connection, targetUrl);
     }
 
     private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
@@ -304,7 +396,24 @@ public class ConnectionResolver {
         }
     }
 
-    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride) {
+    /**
+     * The auth type a reference names, without resolving anything — so a mail
+     * client can choose between {@link #resolveBasicLogin} and
+     * {@link #resolveAccessToken} without provoking a refusal first.
+     *
+     * @return the auth type, or empty when no connection of that name exists
+     */
+    public Optional<AuthType> authTypeOf(String reference) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        try {
+            return connectionRegistry.find(parsed).map(ConnectionConfiguration::getAuthType);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+    }
+
+    private ResolvedCredential resolveCredential(ConnectionConfiguration connection, String principalOverride, URI targetUrl) {
         // Binding decides before authType does: CALLER_SUPPLIED is always STATIC, but
         // its value comes from the turn rather than from the document, so it must not
         // reach the STATIC branch below — that one resolves a valueTemplate this
@@ -313,8 +422,12 @@ public class ConnectionResolver {
             return callerSuppliedCredential(connection);
         }
         return switch (connection.getAuthType()) {
-            case STATIC -> staticCredential(connection);
-            case BASIC -> basicCredential(connection);
+            // The two whose vault plaintext goes to targetUrl itself: the secrets
+            // behind them are held to their own allowedHosts as well as to the
+            // connection's baseUrlAllowlist. An OAuth access token is not a vault
+            // secret; its client secret goes to the token endpoint, not here.
+            case STATIC -> staticCredential(connection, targetUrl);
+            case BASIC -> basicCredential(connection, targetUrl);
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE -> oauthCredential(connection, principalOverride);
         };
     }
@@ -330,14 +443,14 @@ public class ConnectionResolver {
      * circuit breaker, which then told the operator the server was down and
      * suppressed discovery for everybody configured against it.
      */
-    private ResolvedCredential staticCredential(ConnectionConfiguration connection) {
+    private ResolvedCredential staticCredential(ConnectionConfiguration connection, URI targetUrl) {
         StaticAuth staticAuth = requireStaticAuth(connection, "STATIC");
         if (staticAuth.getValueTemplate() == null || staticAuth.getValueTemplate().isBlank()) {
             throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                     "Connection '" + connection.getName() + "' is STATIC but has no staticAuth.valueTemplate, so there is no credential to "
                             + "send. Re-save the connection to apply the current validation rules.");
         }
-        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection));
+        return new ResolvedCredential(staticAuth.getHeaderName(), resolveReferences(staticAuth.getValueTemplate(), connection, targetUrl));
     }
 
     private static StaticAuth requireStaticAuth(ConnectionConfiguration connection, String authType) {
@@ -414,7 +527,7 @@ public class ConnectionResolver {
      * read back to check which account it belongs to, and hides a password inside
      * something that does not look like one.
      */
-    private ResolvedCredential basicCredential(ConnectionConfiguration connection) {
+    private ResolvedCredential basicCredential(ConnectionConfiguration connection, URI targetUrl) {
         StaticAuth staticAuth = requireStaticAuth(connection, "BASIC");
         // A null username would be sent as the literal "null:password" — an
         // authentication failure with no visible cause. Refused instead.
@@ -428,7 +541,8 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
                             + "the current validation rules.");
         }
-        String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+        String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password",
+                targetUrl);
         String encoded = Base64.getEncoder()
                 .encodeToString((staticAuth.getUsername() + ":" + password).getBytes(StandardCharsets.UTF_8));
         return new ResolvedCredential(staticAuth.getHeaderName(), "Basic " + encoded);
@@ -587,7 +701,7 @@ public class ConnectionResolver {
 
     private static String canonicalise(String allowedOrigin, ConnectionConfiguration connection) {
         try {
-            return ConnectionConfiguration.requireCanonicalOrigin(allowedOrigin, "baseUrlAllowlist");
+            return ConnectionConfiguration.requireCanonicalAllowlistOrigin(allowedOrigin, "baseUrlAllowlist");
         } catch (IllegalArgumentException e) {
             // Stored documents predate, or bypass, the write-time validator (import,
             // a direct database write). A malformed entry must not silently match
@@ -602,10 +716,11 @@ public class ConnectionResolver {
      * Resolves {@code ${vars:…}} then {@code ${vault:…}} inside a template.
      * <p>
      * Order matters and matches the rest of the codebase: a global variable may
-     * expand to a vault reference, and the reverse is never intended.
+     * expand to a vault reference, and the reverse is never intended. Every vault
+     * secret the template names is checked against {@code targetUrl} first.
      */
-    private String resolveReferences(String template, ConnectionConfiguration connection) {
-        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential");
+    private String resolveReferences(String template, ConnectionConfiguration connection, URI targetUrl) {
+        return credentialReferenceResolver.resolveRequired(template, connection.getName(), "credential", targetUrl);
     }
 
     /**

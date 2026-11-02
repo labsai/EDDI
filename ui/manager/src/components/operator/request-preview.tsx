@@ -20,7 +20,7 @@ const ESCALATION_TEXT: Record<string, string> = {
   autoApproveOnTimeout:
     "Approvals for this resource are granted automatically when they time out, with nobody watching.",
   agentCreatedWithoutGate:
-    "This agent is being created with no approval gate. Every write it later makes will execute unsupervised.",
+    "This agent is being created without an approval gate on every write method. Writes it does not gate will execute unsupervised.",
   agentCreatedWithBroadEndpoints:
     "This agent is being created with write access to its API — not limited to reads.",
   agentCreatedWithExternalTools:

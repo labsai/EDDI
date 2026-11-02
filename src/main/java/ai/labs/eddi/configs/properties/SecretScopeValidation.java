@@ -59,6 +59,10 @@ public final class SecretScopeValidation {
                 throw new IllegalArgumentException(location + " has scope 'secret' but sets valueObject, valueList, valueInt, valueLong, "
                         + "valueFloat, valueDouble or valueBoolean. Only a string value can be vaulted — use valueString or fromObjectPath.");
             }
+            if (instruction.getToObjectPath() != null && !instruction.getToObjectPath().isEmpty()) {
+                throw new IllegalArgumentException(location + " has scope 'secret' and a toObjectPath. Copying a value to a path would "
+                        + "bypass the vault — remove toObjectPath.");
+            }
             String name = instruction.getName();
             if (name != null && !name.contains("{") && !AutoVaultedSecrets.isEmbeddable(name)) {
                 throw new IllegalArgumentException(location + " has scope 'secret' but its name cannot be part of a vault reference: it "

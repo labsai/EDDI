@@ -227,7 +227,7 @@ function TriggerCard({
           aria-controls={`trigger-content-${trigger.intent}`}
         >
           <span className="text-muted-foreground" aria-hidden="true">
-            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4 rtl:rotate-180" />}
           </span>
           <Zap className="h-4 w-4 text-ochre-500 shrink-0" aria-hidden="true" />
           <span className="flex-1 font-semibold text-sm text-foreground font-mono">{trigger.intent}</span>

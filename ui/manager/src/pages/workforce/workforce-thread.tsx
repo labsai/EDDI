@@ -1195,7 +1195,7 @@ function WorkforceThread() {
             className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             aria-label={t("Workforce.back", "Back")}
           >
-            <ChevronLeft className="h-5 w-5" />
+            <ChevronLeft className="h-5 w-5 rtl:rotate-180" />
           </Link>
           <div className="flex flex-1 items-center gap-2 min-w-0">
             <AdvisorAvatar name={memberName} agentId={memberId} size="sm" />

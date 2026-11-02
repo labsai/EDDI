@@ -111,7 +111,7 @@ export function PipelineRailroad({
               {/* Arrow */}
               <ChevronRight
                 className={cn(
-                  "h-4 w-4 shrink-0 transition-colors",
+                  "h-4 w-4 shrink-0 transition-colors rtl:rotate-180",
                   isSelected ? "text-primary" : "text-muted-foreground/30 group-hover:text-muted-foreground",
                 )}
               />

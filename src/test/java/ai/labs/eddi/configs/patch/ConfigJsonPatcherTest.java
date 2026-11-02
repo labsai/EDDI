@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.io.StringReader;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -213,5 +214,96 @@ class ConfigJsonPatcherTest {
         assertNotNull(patched);
         assertEquals("renamed", patched.getName());
         assertEquals("${vault:mcp-key}", patched.getApiKey());
+    }
+
+    /** The plaintext credential {@link #STORED_PLAINTEXT} holds. */
+    private static final String PLAINTEXT_CREDENTIAL = "plain-test-credential-0123456789abcdef";
+    /**
+     * A stored LLM document holding a PLAINTEXT key, which a non-admin's reads
+     * redact.
+     */
+    private static final String STORED_PLAINTEXT = """
+            {"tasks":[{"actions":["help"],"type":"openai","description":"d",
+             "parameters":{"apiKey":"plain-test-credential-0123456789abcdef","modelName":"gpt-a"}}]}
+            """;
+
+    @Test
+    @DisplayName("a caller whose reads are redacted cannot copy a plaintext credential into a readable field")
+    void protectedCredentialCannotBeCopiedOut() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        var e = assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, """
+                [{"op":"copy","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/description"}]
+                """, LlmConfiguration.class, true));
+        String body = String.valueOf(e.getResponse().getEntity());
+        assertTrue(body.contains("/tasks/0/description"), body);
+        assertFalse(body.contains(PLAINTEXT_CREDENTIAL), body);
+    }
+
+    @Test
+    @DisplayName("a caller whose reads are redacted cannot move a plaintext credential, and a test cannot probe it")
+    void protectedCredentialCannotBeMovedOrProbed() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, """
+                [{"op":"move","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/parameters/modelName"}]
+                """, LlmConfiguration.class, true));
+        assertThrows(BadRequestException.class, () -> patcher.apply(plaintext, """
+                [{"op":"test","path":"/tasks/0/parameters/apiKey","value":"plain-test-credential-0123456789abcdef"}]
+                """, LlmConfiguration.class, true));
+    }
+
+    @Test
+    @DisplayName("an unrelated edit by a caller whose reads are redacted keeps the stored credential intact")
+    void protectedCredentialSurvivesOrdinaryEdit() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        var patched = patcher.apply(plaintext, "[{\"op\":\"replace\",\"path\":\"/tasks/0/parameters/modelName\",\"value\":\"gpt-b\"}]",
+                LlmConfiguration.class, true);
+        assertEquals("gpt-b", patched.tasks().get(0).getParameters().get("modelName"));
+        assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("removing an earlier array element shifts a protected credential's index without refusing the patch")
+    void protectedCredentialSurvivesIndexShift() throws Exception {
+        var plaintext = mapper.readValue("""
+                {"tasks":[{"actions":["a"],"type":"openai","description":"first","parameters":{"modelName":"gpt-a"}},
+                 {"actions":["b"],"type":"openai","description":"second",
+                  "parameters":{"apiKey":"plain-test-credential-0123456789abcdef","modelName":"gpt-b"}}]}
+                """, LlmConfiguration.class);
+        var patched = patcher.apply(plaintext, "[{\"op\":\"remove\",\"path\":\"/tasks/0\"}]", LlmConfiguration.class, true);
+        assertEquals(1, patched.tasks().size());
+        assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("apiKey"));
+    }
+
+    @Test
+    @DisplayName("an administrator may still copy a credential: nothing is hidden from them")
+    void adminPatchIsUnrestricted() throws Exception {
+        var plaintext = mapper.readValue(STORED_PLAINTEXT, LlmConfiguration.class);
+        var patched = patcher.apply(plaintext, """
+                [{"op":"copy","from":"/tasks/0/parameters/apiKey","path":"/tasks/0/parameters/backupKey"}]
+                """, LlmConfiguration.class, false);
+        assertEquals("plain-test-credential-0123456789abcdef", patched.tasks().get(0).getParameters().get("backupKey"));
+    }
+
+    @Test
+    @DisplayName("copies that double a growing container are refused before the result is serialised")
+    void amplifyingCopiesAreRefused() {
+        StringBuilder patch = new StringBuilder("[");
+        for (int i = 0; i < 60; i++) {
+            if (i > 0) {
+                patch.append(',');
+            }
+            patch.append("{\"op\":\"copy\",\"from\":\"/tasks\",\"path\":\"/tasks/-\"}");
+        }
+        patch.append(']');
+        var e = refused(patch.toString());
+        assertTrue(String.valueOf(e.getResponse().getEntity()).contains("double"));
+    }
+
+    @Test
+    @DisplayName("weight stops counting once it passes the limit")
+    void weightIsBounded() {
+        var value = Json.createReader(new StringReader("{\"a\":[1,2,3,4,5,6,7,8,9,10]}")).read();
+        assertTrue(ConfigJsonPatcher.weight(value, 3) <= 5);
+        assertTrue(ConfigJsonPatcher.weight(value, Long.MAX_VALUE) > 10);
     }
 }

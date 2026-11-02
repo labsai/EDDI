@@ -680,7 +680,7 @@ function McpCallEditor({
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4 rtl:rotate-180" />
           )}
         </button>
         <Zap className="h-4 w-4 text-ochre-500" />
@@ -767,7 +767,7 @@ function McpCallEditor({
                   {showSchema ? (
                     <ChevronDown className="h-2.5 w-2.5" />
                   ) : (
-                    <ChevronRight className="h-2.5 w-2.5" />
+                    <ChevronRight className="h-2.5 w-2.5 rtl:rotate-180" />
                   )}
                   <Code2 className="h-2.5 w-2.5" />
                   {t("mcpcallsEditor.parameterSchema", "Parameter Schema")}

@@ -229,7 +229,7 @@ export function CascadeStepCard({
           className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
           data-testid={`cascade-step-advanced-toggle-${index}`}
         >
-          {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          {advancedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3 rtl:rotate-180" />}
           {t("llmEditor.cascadeStepAdvanced", "Advanced (pricing & parameters)")}
         </button>
 

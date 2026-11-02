@@ -375,7 +375,10 @@ roster like any agent, but their turn **pauses the discussion**
   own principal (or an admin) may submit** — an `eddi-approver` may decide
   approvals, but speaking as another human is impersonation, not review. The
   answer is recorded as the phase's natural entry type (a human OPINION is an
-  OPINION) and the discussion resumes from the next speaker.
+  OPINION) and the discussion resumes from the next speaker. The response is
+  the group conversation for its owner or an admin; any other submitter (the
+  member themselves) gets `{groupConversationId, accepted, state}` — submitting
+  a turn does not grant the full view the status endpoint withholds from them.
 - This is deliberately NOT the approval surface: approve/reject endpoints never
   accept free text, and the pending-approvals inbox marks these entries
   `pauseType: "HUMAN_TURN"` with the member's id, so a human sees their own
@@ -642,7 +645,7 @@ content. The failure mode is a retry, never a silent bad merge.
 contain a match), `MAX_LENGTH` (characters) — never code. Specs are checked at
 config save time; at write time a failing validator refuses the write with its
 message and stores nothing. Content is additionally capped at 256 KB per
-artifact. A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
+artifact, and `maxArtifactsPerDiscussion` at 1000 (a larger value is refused on save). A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
 the schema (`#/$defs/...`) or at a bundled JSON Schema meta-schema, never at an
 `http(s):`, `file:` or other external location — such a spec is refused at save
 time, and nothing is fetched or read.
@@ -651,7 +654,13 @@ Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own
 `enableBuiltInTools` switch still applies — a member whose LLM task does not
 set it takes part **without** the tools, and saving a group that enables
-artifacts, agent task creation or dynamic agents logs that prerequisite. Artifact,
+artifacts, agent task creation or dynamic agents logs that prerequisite. So does
+its explicit tool selection: a member whose `builtInToolsWhitelist` is non-empty
+receives the artifact tools only if the list names `artifacts`, and the task
+tools only if it names `group_tasks` — a group opt-in never widens a whitelist
+the member's own configuration narrowed. An omitted or empty whitelist admits
+both, as before. When upgrading, add the two slugs to any member whitelist that
+should keep these tools; the Manager's tool picker offers both. Artifact,
 task and dynamic-agent tool results are never served from the tool cache: every
 member runs as the same user, so a cached `listArtifacts()` would hide a peer's
 new artifact. `markFinal: true` freezes an
@@ -806,6 +815,29 @@ simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.
 
+**`convergence.mode`** selects what the judge decides. `"SIMILARITY"` (default) is the agreement score above.
+`"VERDICT"` (E2) has the moderator *review* the latest repeat's result against the discussion's question
+instead: the judge answers `{"passed": true|false, "feedback": "..."}` and the phase stops repeating as soon as
+it passes. `threshold` is not used, and because nothing is compared, `minRepeats` may be `1` (absent means 1:
+the check runs after every repeat). A refinement phase, where each repeat improves the draft on the table, is
+the case for it:
+
+```json
+{
+  "name": "Draft",
+  "type": "REVISION",
+  "repeats": 4,
+  "convergence": { "enabled": true, "mode": "VERDICT" }
+}
+```
+
+Either mode costs one moderator call per checked repeat, counted against `maxTurns` and stopped by the cost
+ceiling, and neither ends a phase on doubt: an unparseable reply or a judge failure keeps it going. What stops
+it differs. `SIMILARITY` stops once the agreement score reaches `threshold`. `VERDICT` stops only on a JSON
+boolean `"passed": true`; prose or a string `"true"` keeps it going. The verdict is recorded as a `CONVERGENCE` transcript entry
+(`Verdict: passed — …` or `Verdict: not passed — …`), which, like the similarity verdict, is not shown to the
+members. An unknown `mode` is refused at save time.
+
 **`allowAbstention` (I4)** appends an instruction telling members they may reply
 with the single token `PASS` when they have nothing to add. A passing member
 produces an `ABSTAINED` entry carrying no content: peers, the synthesizer and
@@ -865,9 +897,50 @@ a minority report exists to prevent.
 The TASK_FORCE style uses a 4-phase pipeline: **Plan → Execute → Verify → Synthesize**.
 
 1. **PLAN** — The moderator decomposes the goal into actionable tasks and assigns each to an agent
-2. **EXECUTE** — Agents execute their assigned tasks in parallel (each sees only `TASK_ONLY` or `TASK_WITH_DEPS` context)
+2. **EXECUTE** — Agents execute their assigned tasks in parallel (each sees only `TASK_ONLY` or `TASK_WITH_DEPS` context).
+   A member turn that produces no result — skipped (timed out, unavailable, paused) or errored under
+   `onAgentFailure: SKIP` — **fails** its task rather than completing it empty, so tasks that depend on it do not
+   run without its output. Under `ABORT` the member's remaining tasks in that wave are not started.
 3. **VERIFY** — The moderator reviews each task result against the original goal
 4. **SYNTHESIS** — The moderator combines all verified results into a coherent final deliverable
+
+#### Rework within a run (`maxReworks`)
+
+By default a task that fails VERIFY is `FAILED`, which is final. With `maxReworks` on the group, the verifier's
+verdict becomes a request for another attempt:
+
+```json
+{ "style": "TASK_FORCE", "maxReworks": 2, "protocol": { "maxTurns": 40 } }
+```
+
+Inside the VERIFY phase, every task that failed goes back to `ASSIGNED` with the verifier's `feedback` as its
+`verificationNote`. The EXECUTE phase before VERIFY runs it again, and the member's input ends with
+*"Reviewer feedback on the previous attempt (address this): …"*, the same channel `onTaskRejection: RETRY` uses
+for a human reviewer's note. VERIFY then checks the new result. Each task is reworked at most `maxReworks`
+times in a run; after that it stays `FAILED`. A dependent task that was waiting on a reworked one runs in the
+same wave once its dependency completes, and is verified with it.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `maxReworks` | integer, `0`..`5` | `0` | Reworks per task within one run. `0` keeps a failed verification final, the behaviour before 6.6 |
+
+- **Budgets.** A rework round needs one turn per reworked task plus one for the verifier. When
+  `protocol.maxTurns` has no room for that, or the cost ceiling is reached, the tasks stay `FAILED` and the
+  transcript says *"Rework stopped: …"*. A rework that was scheduled but could not run ends `FAILED` too, never
+  stranded `ASSIGNED`.
+- **Human approval wins.** When the EXECUTE phase gates tasks for approval (`hitlConfig.granularity: TASK` and
+  `requiresApproval`), `maxReworks` is not applied (a warning is logged): the human's decision on each task is
+  the check, and `onTaskRejection: RETRY` is how a person asks for another attempt.
+- **Records.** Every return is a `VERIFICATION` transcript entry, *"Returned for rework (1/2): <subject> —
+  <feedback>"*, and is counted by `eddi_group_task_reworks_total`. The per-task counts are stored with the
+  discussion (`taskList.reworkCounts`), so the bound holds across a pause.
+- **Feedback is model text.** The verifier's feedback reaches the member as part of its input, as every group
+  member already reads its peers' contributions. It is never template source.
+
+**An unparseable verdict** (the verifier did not return the JSON array) still auto-verifies every task of that
+pass, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
+including bracketed asides such as `Checked [details]: [...]` — no longer makes it unparseable. It is no longer silent: it is logged as a warning naming the group and counted by
+`eddi_group_verify_unparseable_total`. A steady rate means the moderator's model ignores the verdict format.
 
 #### Pre-Configured Tasks
 
@@ -1036,7 +1109,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
-| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused |
+| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused. The ceiling travels with the chain: each hop applies the stricter of its own limit and the one it was handed, so a delegate with a higher limit cannot extend a chain the originator capped |
 | `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
 | `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
@@ -1123,7 +1196,7 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `onAgentFailure` | `SKIP`, `RETRY`, `ABORT` | `SKIP` |
 | `maxRetries` | 0+ | 2 |
 | `onMemberUnavailable` | `SKIP`, `FAIL` | `SKIP` |
-| `maxTurns` | Any positive integer (0 or negative → default) | 50 |
+| `maxTurns` | A positive integer up to 1000 (0 → default; negative or above 1000 is refused on save). A phase's `repeats` is capped at 1000 too | 50 |
 | `maxCostPerDiscussion` | Dollars, or `null` for unlimited | `null` |
 | `onCostExceeded` | `SYNTHESIZE_NOW`, `ABORT` | `SYNTHESIZE_NOW` |
 
@@ -1158,14 +1231,14 @@ summarizer's.
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
-| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up |
+| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up. Like a continuation it needs the transcript's owner (or an admin) **and** current USE on the group: owning the transcript does not keep a member runnable after the group was unshared (`403`; the MCP `followup_with_member` refuses the same way). A follow-up is a paid member turn: it is refused (`409`) once the discussion has spent its `maxCostPerDiscussion`, its cost is added to the discussion's total, and sub-agents it creates are cleaned up with the discussion |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
-| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running discussion |
+| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion. A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
-| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`) |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{"state": …}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
 | `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |

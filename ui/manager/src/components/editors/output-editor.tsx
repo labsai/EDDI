@@ -299,7 +299,7 @@ function OutputConfigEditor({
           aria-expanded={expanded}
           aria-label={t("outputEditor.toggleOutput", "Show or hide output details")}
           className="rounded p-0.5 text-muted-foreground hover:text-foreground transition-colors">
-          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4 rtl:rotate-180" />}
         </button>
         <span className="inline-flex rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold tracking-wider text-primary">
           {config.action || "—"}

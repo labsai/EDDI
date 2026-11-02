@@ -604,4 +604,47 @@ class GroupContextBuilderTest {
         verify(templatingEngine).processTemplate(any(), captor.capture(), eq(ITemplatingEngine.TemplateMode.TEXT));
         assertEquals("FOR", captor.getValue().get("teamSide"));
     }
+
+    // ==================== groupTranscript scoping ====================
+
+    private List<TranscriptEntry> scopingTranscript() {
+        return List.of(
+                new TranscriptEntry("a1", "Alice", "phase-0 opinion", 0, "P0", TranscriptEntryType.OPINION, Instant.now(), null, null),
+                new TranscriptEntry("a2", "Bob", "phase-2 critique of Alice", 2, "P2", TranscriptEntryType.CRITIQUE, Instant.now(), null,
+                        "a1"),
+                new TranscriptEntry("a2", "Bob", "blind ballot", 3, "P3", TranscriptEntryType.VOTE, Instant.now(), null, null));
+    }
+
+    @Test
+    @DisplayName("groupTranscript under NONE is empty — the scope hides the transcript from the member's templates too")
+    void scopedTranscript_none_isEmpty() {
+        var member = new GroupMember("a1", "Alice", 1, null);
+        assertTrue(builder.scopedTranscript(scopingTranscript(), phase(PhaseType.OPINION, ContextScope.NONE), 3, member).isEmpty());
+    }
+
+    @Test
+    @DisplayName("groupTranscript under LAST_PHASE drops older phases; a running phase's ballot stays blind")
+    void scopedTranscript_lastPhase_dropsOlderPhasesAndBlindBallots() {
+        var member = new GroupMember("a1", "Alice", 1, null);
+        var scoped = builder.scopedTranscript(scopingTranscript(), phase(PhaseType.OPINION, ContextScope.LAST_PHASE), 3, member);
+        assertEquals(List.of("phase-2 critique of Alice"), scoped.stream().map(TranscriptEntry::content).toList());
+    }
+
+    @Test
+    @DisplayName("groupTranscript under ANONYMOUS strips attribution")
+    void scopedTranscript_anonymous_stripsAttribution() {
+        var member = new GroupMember("a3", "Carol", 1, null);
+        var scoped = builder.scopedTranscript(scopingTranscript(), phase(PhaseType.OPINION, ContextScope.ANONYMOUS), 3, member);
+        assertEquals(2, scoped.size());
+        assertTrue(scoped.stream().allMatch(e -> e.speakerAgentId() == null && e.speakerDisplayName() == null && e.targetAgentId() == null),
+                String.valueOf(scoped));
+    }
+
+    @Test
+    @DisplayName("groupTranscript under FULL keeps everything peers may see; SYNTHESIS keeps everything")
+    void scopedTranscript_fullAndSynthesis() {
+        var member = new GroupMember("a1", "Alice", 1, null);
+        assertEquals(2, builder.scopedTranscript(scopingTranscript(), phase(PhaseType.OPINION, ContextScope.FULL), 3, member).size());
+        assertEquals(3, builder.scopedTranscript(scopingTranscript(), phase(PhaseType.SYNTHESIS, ContextScope.NONE), 3, member).size());
+    }
 }

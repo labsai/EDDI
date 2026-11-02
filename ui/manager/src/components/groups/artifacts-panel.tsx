@@ -5,6 +5,7 @@ import remarkGfm from "remark-gfm";
 import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { FileStack, ChevronDown, ChevronUp, History } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatJsonSafely } from "./group-utils";
 import { Badge } from "@/components/ui/badge";
 import type { SharedArtifact } from "@/lib/api/groups";
 
@@ -126,13 +127,4 @@ export function ArtifactsPanel({ artifacts, className }: ArtifactsPanelProps) {
       </div>
     </div>
   );
-}
-
-/** A stale/corrupt artifact must still render — never let a JSON.parse failure blank the panel. */
-function formatJsonSafely(content: string): string {
-  try {
-    return JSON.stringify(JSON.parse(content), null, 2);
-  } catch {
-    return content;
-  }
 }

@@ -40,10 +40,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Locale;
 import java.util.Set;
 
-import java.net.URLDecoder;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -301,7 +299,7 @@ class ToolLoopResumer {
                 // ApprovedCallScope: the self-ungating rule is also applied to the request
                 // as finally built and sent (ApiCallExecutor), not only to the preview
                 // checked above, which preRequest property instructions can change.
-                String result = ApprovedCallScope.run(protection,
+                String result = ApprovedCallScope.run(protection, conversationId,
                         () -> CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
                                 toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)));
@@ -338,10 +336,12 @@ class ToolLoopResumer {
         // eddi.hitl.tool.task-approvals.mode (TaskToolApprovalsResolver — strict
         // merge by default, wholesale replace as the legacy escape hatch), so NEW
         // calls in the continuation re-gate → re-pause under the same effective
-        // gate the live path would compute. Approved calls are pre-cleared so an
-        // identical reissue is not re-gated — bound to (id, tool, canonical args) and
-        // usable once: a DIFFERENT call that merely reuses an approved id (providers
-        // that repeat call_1, or send "") is gated like any other. Threading
+        // gate the live path would compute. Approved calls are recorded once they ran
+        // so an identical reissue — bound to (id, tool, canonical args) — is gated
+        // again as a repeat (ToolApprovalGate.REPEAT_REASON) instead of executing a
+        // second time on one approval; a DIFFERENT call that merely reuses an approved
+        // id (providers that repeat call_1, or send "") is gated like any other.
+        // Threading
         // toolHitlEnabled
         // here keeps the resume path from re-arming an approval flow an operator
         // disabled.
@@ -362,9 +362,13 @@ class ToolLoopResumer {
         TokenUsage[] tokenHolder = new TokenUsage[1];
         List<ChatMessage> finalTranscript = new ArrayList<>();
         String response = toolLoopRunner.runToolCallLoop(chatModel, currentMessages, activeSpecs, trace, batch.getIterationIndex() + 1,
+                toolCostBefore,
                 setup, isLazy, task, memory, effectiveToolApprovals, llmTaskIndex, clearedCalls, AgentOrchestrator.DEFAULT_TRANSCRIPT_MAX_BYTES,
                 tokenHolder,
-                jsonPolicy, finalTranscript, null);
+                // Priced at the model the paused run was on: a paused cascade step resumes on
+                // that step's model, so its mid-loop ceiling, a re-pause and a failure price
+                // the continuation at the step's rates, as the live cascade does.
+                jsonPolicy, finalTranscript, new ToolExchangeRecorder(ModelPrices.forRun(task, batch.getCascadeStepIndex())));
 
         Map<String, Object> responseMetadata = new HashMap<>();
         if (tokenHolder[0] != null) {
@@ -689,12 +693,11 @@ class ToolLoopResumer {
      */
     String targetsOwnConversation(PendingToolCallBatch.PendingToolCall c, String amendedArguments,
                                   Map<String, ToolRequestResolver> resolvers, String conversationId) {
+        var resolver = resolvers != null ? resolvers.get(c.getToolName()) : null;
         return targetsOwnConversation(c.getToolName(),
                 amendedArguments != null ? amendedArguments : c.getArgumentsRaw(),
-                req -> {
-                    var resolver = resolvers.get(c.getToolName());
-                    return resolver != null ? resolver.resolve(rebuiltRequest(c, req)) : null;
-                },
+                req -> resolver != null ? resolver.resolve(rebuiltRequest(c, req)) : null,
+                resolver instanceof RemoteToolRequestResolvers.Envelope,
                 conversationId);
     }
 
@@ -721,20 +724,24 @@ class ToolLoopResumer {
      */
     static String targetsOwnConversationLive(ToolExecutionRequest toolRequest,
                                              Map<String, ToolRequestResolver> resolvers, String conversationId) {
+        var resolver = resolvers != null ? resolvers.get(toolRequest.name()) : null;
         return targetsOwnConversation(toolRequest.name(), toolRequest.arguments(),
-                args -> {
-                    var resolver = resolvers != null ? resolvers.get(toolRequest.name()) : null;
-                    return resolver != null ? resolver.resolve(toolRequest) : null;
-                },
+                args -> resolver != null ? resolver.resolve(toolRequest) : null,
+                resolver instanceof RemoteToolRequestResolvers.Envelope,
                 conversationId);
     }
 
     /**
      * The shared core: resolve if possible and check the URI; otherwise check the
      * raw arguments (the coarser test, and the safe direction to err in).
+     * <p>
+     * For an {@linkplain RemoteToolRequestResolvers.Envelope envelope} (MCP, A2A)
+     * the resolved URI is only the server's address — the conversation an MCP
+     * {@code talk_to_agent} call writes to is one of its arguments — so the
+     * arguments are checked as well, resolved or not.
      */
     private static String targetsOwnConversation(String toolName, String rawArguments,
-                                                 ResolutionAttempt resolution, String conversationId) {
+                                                 ResolutionAttempt resolution, boolean envelope, String conversationId) {
         if (conversationId == null || conversationId.isBlank()) {
             return null;
         }
@@ -742,8 +749,9 @@ class ToolLoopResumer {
             ResolvedRequest current = resolution.resolve(rawArguments);
             if (current != null) {
                 return uriTargetsConversation(current.uri(), conversationId)
-                        ? "the request targets the conversation the agent is running in"
-                        : null;
+                        || (envelope && uriTargetsConversation(rawArguments, conversationId))
+                                ? "the request targets the conversation the agent is running in"
+                                : null;
             }
         } catch (Exception e) {
             // Type only, never the throwable: a request-build failure quotes the
@@ -782,7 +790,15 @@ class ToolLoopResumer {
             try {
                 ResolvedRequest resolved = resolver.resolve(rebuiltRequest(c, args));
                 if (resolved != null) {
-                    return SelfUngatingGuard.refusal(resolved.method(), resolved.uri(), resolved.body(), protection);
+                    String refusal = SelfUngatingGuard.refusal(resolved.method(), resolved.uri(), resolved.body(), protection);
+                    // An MCP or A2A envelope's URI is the server, not the resource: an
+                    // update_resource aimed at an EDDI management server names the agent
+                    // and carries the toolApprovals inside its arguments, which the URI
+                    // check never sees. The argument check covers it.
+                    if (refusal == null && resolver instanceof RemoteToolRequestResolvers.Envelope) {
+                        refusal = SelfUngatingGuard.refusalFromArguments(args, protection);
+                    }
+                    return refusal;
                 }
             } catch (Exception e) {
                 LOGGER.warnf("Could not resolve the request for tool '%s' (%s); "
@@ -800,17 +816,7 @@ class ToolLoopResumer {
 
     /** Case-insensitive containment, tolerating percent-encoding. */
     static boolean uriTargetsConversation(String candidate, String conversationId) {
-        if (candidate == null || conversationId == null || conversationId.isBlank()) {
-            return false;
-        }
-        String decoded = candidate;
-        try {
-            decoded = URLDecoder.decode(candidate, java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // A malformed escape is not a reason to stop checking — fall back to the
-            // raw string rather than returning false and allowing the write.
-        }
-        return decoded.toLowerCase(Locale.ROOT).contains(conversationId.trim().toLowerCase(Locale.ROOT));
+        return ApprovedCallScope.targetsConversation(candidate, conversationId);
     }
 
     /**

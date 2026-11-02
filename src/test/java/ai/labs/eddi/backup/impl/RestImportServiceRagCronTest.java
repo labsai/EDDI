@@ -23,7 +23,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -102,5 +104,34 @@ class RestImportServiceRagCronTest {
     @DisplayName("a source with no cron is untouched — it runs only when asked")
     void acceptsNoCron() {
         assertDoesNotThrow(() -> importService.prepareImportedRag(knowledgeBaseWithCron(null)));
+    }
+
+    @Test
+    @DisplayName("chunk settings an earlier release accepted are clamped, not refused, on import")
+    void clampsChunkSettingsFromAnEarlierRelease() {
+        // A chunk size of 64 with the default overlap of 64 was valid before the
+        // overlap was bounded at half the size; refusing it would make such an
+        // export impossible to import, since an archive cannot be edited first.
+        var config = knowledgeBaseWithCron(null);
+        config.setChunkSize(64);
+        config.setChunkOverlap(64);
+
+        assertDoesNotThrow(() -> importService.prepareImportedRag(config));
+
+        assertEquals(64, config.getChunkSize());
+        assertEquals(32, config.getChunkOverlap());
+    }
+
+    @Test
+    @DisplayName("a knowledge base without sources has its chunk settings clamped too")
+    void clampsChunkSettingsWithoutSources() {
+        var config = new RagConfiguration();
+        config.setChunkSize(50_000);
+        config.setChunkOverlap(null);
+
+        importService.prepareImportedRag(config);
+
+        assertEquals(RagConfiguration.MAX_CHUNK_SIZE, config.getChunkSize());
+        assertNull(config.getChunkOverlap());
     }
 }

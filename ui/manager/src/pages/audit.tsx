@@ -149,7 +149,7 @@ function JsonBlock({ data, label }: { data: Record<string, unknown> | unknown[] 
         className="flex items-center gap-1.5 text-xs font-medium text-foreground/60 hover:text-foreground/80 transition-colors"
         data-testid={`expand-${label}`}
       >
-        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />}
         {label}
       </button>
       {open && (

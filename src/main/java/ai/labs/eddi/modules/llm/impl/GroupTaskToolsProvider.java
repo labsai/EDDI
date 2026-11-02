@@ -18,6 +18,8 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Contributes {@code addGroupTask} / {@code listGroupTasks} when — and only
  * when — the turn belongs to a group discussion whose config asks for them
@@ -41,6 +43,12 @@ import java.util.Map;
 class GroupTaskToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(GroupTaskToolsProvider.class);
+
+    /**
+     * The {@code builtInToolsWhitelist} slug that admits these tools for a member
+     * with a non-empty whitelist.
+     */
+    public static final String WHITELIST_SLUG = "group_tasks";
 
     private final LiveDiscussionRegistry liveDiscussionRegistry;
     private final IAgentGroupStore groupStore;
@@ -67,6 +75,16 @@ class GroupTaskToolsProvider implements ToolSourceProvider {
         // zero-tool member out of legacy chat mode into a tool loop.
         Boolean enableBuiltInTools = ctx.task() != null ? ctx.task().getEnableBuiltInTools() : null;
         if (enableBuiltInTools == null || !enableBuiltInTools) {
+            return ToolContribution.empty();
+        }
+        // So does its explicit tool selection: a member whose builtInToolsWhitelist
+        // is non-empty gets the group-task tools only when the list names
+        // "group_tasks".
+        // Otherwise the group's opt-in widened a policy the member's own config
+        // had narrowed.
+        if (!ctx.hasNoWhitelist() && !ctx.isWhitelisted(WHITELIST_SLUG)) {
+            LOGGER.debugf("Group group-task tools withheld from agent '%s': its builtInToolsWhitelist does not name 'group_tasks'",
+                    sanitize(ctx.agentId()));
             return ToolContribution.empty();
         }
         // Membership, not existence. groupConversationId arrives as a caller-supplied

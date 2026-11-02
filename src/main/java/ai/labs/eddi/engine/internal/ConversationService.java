@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.alerts.OutputMatchHook;
+import ai.labs.eddi.engine.alerts.TurnOutcome;
 import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
@@ -11,6 +13,7 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -24,6 +27,9 @@ import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
+import ai.labs.eddi.engine.events.HitlPauseCommittedEvent;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
@@ -73,9 +79,9 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
-import ai.labs.eddi.engine.runtime.ITurnAbandonment;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
@@ -118,7 +124,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
  * @author ginccc
  */
 @ApplicationScoped
-public class ConversationService implements IConversationService, UserErasureParticipant, ITurnAbandonment {
+public class ConversationService implements IConversationService, UserErasureParticipant {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
 
@@ -235,6 +241,24 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     TurnCostMeter turnCostMeter;
+
+    /**
+     * Self-continuation ({@code CONTINUE_CONVERSATION}): decides before a turn is
+     * persisted and arms the next turn after it was committed. Field-injected like
+     * {@link #turnCostMeter}; {@code null} (a directly constructed instance)
+     * continues nothing.
+     */
+    @Inject
+    ConversationContinuations conversationContinuations;
+
+    /**
+     * {@link HitlPauseCommittedEvent}, fired once a pause is durable (see
+     * {@link #firePauseCommitted}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} (a directly constructed instance)
+     * fires nothing.
+     */
+    @Inject
+    Event<HitlPauseCommittedEvent> hitlPauseCommittedEvent;
 
     /**
      * Verifies a {@code groupId} found only on an earlier step before group memory
@@ -724,6 +748,10 @@ public class ConversationService implements IConversationService, UserErasurePar
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
                 conversationHitlService.populateHitlTimeoutBookmark(conversationMemory);
             }
+            // A CONVERSATION_START turn may ask to continue itself (a job that starts
+            // with the conversation): decided before the store, armed once the
+            // descriptor exists.
+            decideContinuation(conversationMemory);
             var conversationId = storeConversationMemory(conversationMemory, environment);
             cacheConversationState(conversationId, conversationMemory.getConversationState());
             if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -733,6 +761,13 @@ public class ConversationService implements IConversationService, UserErasurePar
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
             createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
+            armContinuation(conversationId, conversationMemory, environment);
+            // Announced only once the conversation is final: a failed descriptor write
+            // discards it again, and an observer (the email notifier) must not have
+            // been told about a pause that no longer exists.
+            if (conversationMemory.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                firePauseCommitted(conversationId, conversationMemory);
+            }
 
             return new ConversationResult(conversationId, conversationUri);
         } catch (AgentNotReadyException e) {
@@ -779,6 +814,27 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * Announces a pause that is now durable ({@link HitlPauseCommittedEvent}) to
+     * asynchronous observers — the HITL email notifier today. Called at each place
+     * a pause is committed, after the commit; never throws, since the pause is
+     * already persisted and an observer's trouble is not the turn's.
+     */
+    void firePauseCommitted(String conversationId, IConversationMemory memory) {
+        if (hitlPauseCommittedEvent == null) {
+            return;
+        }
+        try {
+            String pauseId = HitlDecision.pauseIdOf(memory.getHitlPausedAt());
+            if (pauseId == null) {
+                return; // no bookmark time: nothing an observer could match against
+            }
+            hitlPauseCommittedEvent.fireAsync(new HitlPauseCommittedEvent(conversationId, pauseId));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not announce the committed pause of conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
+
     @Override
     public String erasureStepName() {
         return "inFlightConversations";
@@ -799,6 +855,22 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     @Inject
     Instance<IAgentDeploymentManagement> deploymentManagement;
+
+    /**
+     * The alert hook: a turn that ended badly (see
+     * {@code ConversationStepRunner#reportTurnOutcome}). Observed synchronously by
+     * {@code AlertDispatcher}, which only enqueues. {@code null} in unit tests that
+     * build the service by hand.
+     */
+    @Inject
+    Event<TurnOutcome> turnOutcomeEvent;
+
+    /**
+     * The OUTPUT_MATCH half of the alert hook, for turns that finished cleanly;
+     * {@code null} in unit tests that build the service by hand.
+     */
+    @Inject
+    OutputMatchHook outputMatchHook;
 
     /** How long a request waits for an agent another node has just deployed. */
     static final Duration CLUSTER_DEPLOY_WAIT = Duration.ofSeconds(15);
@@ -892,21 +964,6 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
-     * {@inheritDoc} Signals the turn through
-     * {@link ConversationStepRunner#abandonTurn}.
-     */
-    @Override
-    public boolean abandonInFlightTurn(String conversationId) {
-        IConversationMemory memory = conversationId == null ? null : inFlightConversations.get(conversationId);
-        if (memory == null) {
-            return false;
-        }
-        ConversationStepRunner.abandonTurn(memory);
-        LOGGER.infof("Abandoned the in-flight turn of conversation %s", sanitize(conversationId));
-        return true;
-    }
-
-    /**
      * GDPR erasure: signals every turn running on this node for {@code userId} to
      * stop, through the same cooperative flag {@link #cancelConversation} sets. A
      * cancelled turn skips its longTerm write-back to user memory
@@ -980,6 +1037,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         // own schedule delete, so gating this on AWAITING_HUMAN would miss that window
         // and leave a stale one-shot timer armed against the now-ended conversation.
         conversationHitlService.deleteHitlTimeoutSchedule(conversationId);
+        // An ended conversation runs no more turns: withdraw a pending continuation
+        // (its fire would refuse an ENDED conversation anyway; this is the prompt
+        // stop).
+        disarmContinuations(conversationId);
         if (previousState == ConversationState.AWAITING_HUMAN) {
             // G4: an end that terminates a pending approval is an oversight decision
             // too — audit it with the actor (EU AI Act; parity with cancel) so every
@@ -1018,7 +1079,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            var conversationMemorySnapshot = requireSnapshot(conversationId);
+            // The current step needs no history: read only the tail (see readConversation
+            // below).
+            var tail = Boolean.TRUE.equals(returnCurrentStepOnly) ? requireTail(conversationId) : null;
+            var conversationMemorySnapshot = tail != null ? tail.snapshot() : requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
             contextLogger.setLoggingContext(loggingContext);
 
@@ -1029,7 +1093,9 @@ public class ConversationService implements IConversationService, UserErasurePar
                 throw new AgentMismatchException(message);
             }
 
-            return convertSimpleConversationMemorySnapshot(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly, returningFields);
+            return tail != null
+                    ? convertSimpleConversationMemorySnapshot(tail, returnDetailed, returningFields)
+                    : convertSimpleConversationMemorySnapshot(conversationMemorySnapshot, returnDetailed, returnCurrentStepOnly, returningFields);
         } finally {
             recordMetrics(timerConversationLoad, counterConversationLoad, startTime);
         }
@@ -1091,9 +1157,50 @@ public class ConversationService implements IConversationService, UserErasurePar
             return;
         }
         String key = inputData != null ? inputData.getIdempotencyKey() : null;
-        if (key != null && memory.getCurrentStep() != null && TurnIdempotencyService.isReplayable(snapshot)) {
-            memory.getCurrentStep().storeData(new Data<>(TurnIdempotencyService.STEP_KEY, key));
+        if (memory.getCurrentStep() != null && TurnIdempotencyService.isReplayable(snapshot)) {
+            if (key != null) {
+                memory.getCurrentStep().storeData(new Data<>(TurnIdempotencyService.STEP_KEY, key));
+            }
+            // Same moment, same rule: a continuation turn that settled is marked with its
+            // number, so a re-delivered continuation finds it and does not run again.
+            ConversationContinuations.recordContinuationTurn(memory.getCurrentStep(), inputData);
         }
+    }
+
+    /**
+     * Before a settled turn is persisted: whether it asked to continue and may (see
+     * {@link ConversationContinuations#decide}). The outcome is written to the
+     * step, so it is stored with the turn. Never throws.
+     */
+    void decideContinuation(IConversationMemory memory) {
+        if (conversationContinuations == null) {
+            return;
+        }
+        try {
+            conversationContinuations.decide(memory);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not decide the continuation of conversation %s: %s", sanitize(memory.getConversationId()),
+                    e.getMessage());
+        }
+    }
+
+    /**
+     * After the turn was committed: arms the continuation
+     * {@link #decideContinuation} recorded. Never throws.
+     */
+    void armContinuation(String conversationId, IConversationMemory memory, Environment environment) {
+        if (conversationContinuations != null) {
+            conversationContinuations.armIfDecided(conversationId, memory, environment);
+        }
+    }
+
+    /**
+     * Withdraws the conversation's pending continuations.
+     *
+     * @return how many were withdrawn
+     */
+    int disarmContinuations(String conversationId) {
+        return conversationContinuations != null ? conversationContinuations.disarm(conversationId) : 0;
     }
 
     /**
@@ -1449,6 +1556,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                         && turnIdempotency.isRecordedIn(convertConversationMemory(memory), idempotencyKey)) {
                     throw new TurnIdempotencyService.TurnAlreadyRecordedException(conversationId);
                 }
+                // The same check for a continuation turn, on its own marker: it holds with
+                // the Idempotency-Key feature switched off and never expires, so two
+                // deliveries of one continuation that met in the coordinator run it once.
+                if (memory != conversationMemory && inputData != null && inputData.getContinuationNumber() != null
+                        && ConversationContinuations.ranIn(convertConversationMemory(memory), inputData.getContinuationNumber())) {
+                    throw new TurnIdempotencyService.TurnAlreadyRecordedException(conversationId);
+                }
                 Integer storedVersion = memory == conversationMemory ? agentVersion : memory.getAgentVersion();
                 adoptResolvedAgentVersion(memory, agent);
                 applyTurnDeadline(memory, agent, inputData, Clock.systemUTC(), arrivalEpochMs);
@@ -1464,7 +1578,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                 // Set the audit collector on memory (if auditing is enabled)
                 if (auditLedgerService.isEnabled()) {
                     String envName = environment.toString();
-                    memory.setAuditCollector(entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
+                    memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> auditLedgerService.submit(entry.withEnvironment(envName)));
                 }
 
                 final IConversation conversation = agent.continueConversation(memory,
@@ -1485,6 +1599,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             // (and meters) it again. A replayed idempotent turn never gets
                             // here: it is answered from the stored outcome.
                             meterTurnCost(returnConversationMemory);
+                            reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -1783,6 +1898,18 @@ public class ConversationService implements IConversationService, UserErasurePar
         checkNotNull(conversationId, "conversationId");
 
         try {
+            // The current-step read (a chat reload) needs the last step and output and
+            // a few totals, not the history: on a slow database link the whole document
+            // of a tool-using agent took tens of seconds to arrive. The tail gives the
+            // same response — see ConversationMemoryTail. Anything else, including a
+            // null returnCurrentStepOnly, takes the full read exactly as before.
+            if (Boolean.TRUE.equals(returnCurrentStepOnly)) {
+                var tail = requireTail(conversationId);
+                var snapshot = tail.snapshot();
+                contextLogger.setLoggingContext(contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(),
+                        conversationId, snapshot.getUserId()));
+                return convertSimpleConversationMemorySnapshot(tail, returnDetailed, returningFields);
+            }
             var snapshot = requireSnapshot(conversationId);
             var loggingContext = contextLogger.createLoggingContext(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId,
                     snapshot.getUserId());
@@ -1822,6 +1949,15 @@ public class ConversationService implements IConversationService, UserErasurePar
             throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
         }
         return snapshot;
+    }
+
+    /** {@link #requireSnapshot}'s twin for the tail read — same 404. */
+    private ConversationMemoryTail requireTail(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
+        var tail = conversationMemoryStore.loadConversationMemoryTail(conversationId);
+        if (tail == null) {
+            throw new ConversationNotFoundException(String.format("No conversation found! (conversationId=%s)", sanitize(conversationId)));
+        }
+        return tail;
     }
 
     @Override
@@ -2246,7 +2382,8 @@ public class ConversationService implements IConversationService, UserErasurePar
     void syncLongTermChanges(IConversationMemory memory, IConversationMemory.IConversationStep step, boolean revert) {
         // Agent-test conversations never wrote user memory, so an undo has nothing to
         // revert.
-        if (userMemoryStore == null || step == null || AgentTestConversations.isTestUserId(memory.getUserId())) {
+        if (userMemoryStore == null || step == null || AgentTestConversations.isTestUserId(memory.getUserId())
+                || ReservedPrincipals.hasNoPersistentMemory(memory.getUserId())) {
             return;
         }
         var changes = ConversationMemory.propertyChanges(step);
@@ -2389,7 +2526,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         // without a store, Conversation skips loadUserProperties at init and
         // storePropertiesPermanently at every turn end. A test must not change what
         // real users have stored, nor pass or fail because of it.
-        final IUserMemoryStore memoryStore = AgentTestConversations.isTestUserId(userId) ? null : userMemoryStore;
+        // An unauthenticated email sender (email-anon:...) is treated the same way: its
+        // identity is a forgeable claim, so it must get no memory to read or write —
+        // neither through the properties lifecycle nor through the LLM memory tool.
+        final boolean noMemory = AgentTestConversations.isTestUserId(userId) || ReservedPrincipals.hasNoPersistentMemory(userId);
+        final IUserMemoryStore memoryStore = noMemory ? null : userMemoryStore;
+        final boolean toolsEnabled = memoryToolsEnabled && !ReservedPrincipals.hasNoPersistentMemory(userId);
         return new IPropertiesHandler() {
             @Override
             public IUserMemoryStore getUserMemoryStore() {
@@ -2403,7 +2545,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
             @Override
             public boolean isMemoryToolsEnabled() {
-                return memoryToolsEnabled;
+                return toolsEnabled;
             }
 
             @Override
@@ -2610,10 +2752,64 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * A turn whose persist failed: its answer must not be replayed to an
+     * {@code Idempotency-Key} retry — see
+     * {@link TurnIdempotencyService#forgetUnpersisted}.
+     */
+    void forgetUnpersistedTurn(String conversationId) {
+        if (turnIdempotency != null) {
+            turnIdempotency.forgetUnpersisted(conversationId);
+        }
+    }
+
+    /**
+     * GDPR Art. 18 — whether processing is restricted for {@code userId}; for the
+     * HITL resume, which applies the same admission rule as start and say.
+     *
+     * @throws ProcessingRestrictionUnavailableException
+     *             when the restriction cannot be read (fail closed)
+     */
+    boolean isProcessingRestricted(String userId) {
+        return gdprComplianceService != null && gdprComplianceService.isProcessingRestricted(userId);
+    }
+
+    /**
+     * A cancelled turn ends its pipeline through the same stop path as
+     * {@code STOP_CONVERSATION}, so its memory — and the snapshot the caller is
+     * about to receive — says {@code ENDED}. What the store records is
+     * {@code EXECUTION_INTERRUPTED}
+     * ({@code ConversationStepRunner.settleCancelledTurn}), unless the conversation
+     * really was ended (an end raises the same cancel flag). The caller was told
+     * the conversation had ended while the next turn was accepted. Report what the
+     * store will hold instead.
+     */
+    void reportCancelledTurnAsInterrupted(String conversationId, IConversationMemory memory, SimpleConversationMemorySnapshot snapshot) {
+        if (!memory.isCancelled() || snapshot.getConversationState() != ConversationState.ENDED) {
+            return;
+        }
+        ConversationState stored;
+        try {
+            stored = conversationMemoryStore.getConversationState(conversationId);
+        } catch (RuntimeException e) {
+            stored = null;
+        }
+        if (stored != ConversationState.ENDED) {
+            snapshot.setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+        }
+    }
+
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {
 
         IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
         if (agent == null) {
+            // Deployed on demand even when the deployment record says "undeployed". Only
+            // existing conversations get here, pinned to this version, and the version
+            // cleanup undeploys an old version whose only open conversations are paused
+            // (AWAITING_HUMAN does not count as active) — as does retiring a version whose
+            // conversations can move on, while a resume must still finish on the version
+            // that paused it. Refusing those would strand every pending approval of the
+            // previous version at the next deploy.
             agentFactory.deployAgent(environment, agentId, agentVersion, null);
             agent = agentFactory.getAgent(environment, agentId, agentVersion);
         }
@@ -2787,6 +2983,25 @@ public class ConversationService implements IConversationService, UserErasurePar
         meterRegistry.counter("eddi.cluster.fence.rejected").increment();
     }
 
+    /**
+     * Hands a clean turn to the OUTPUT_MATCH alert hook (a cache check, usually
+     * nothing more).
+     */
+    void reportCleanTurn(IConversationMemory memory) {
+        OutputMatchHook hook = outputMatchHook;
+        if (hook != null) {
+            hook.onCleanTurn(memory);
+        }
+    }
+
+    /** Hands a bad turn outcome to the alert hook; never throws. */
+    void reportTurnOutcome(TurnOutcome outcome) {
+        Event<TurnOutcome> event = turnOutcomeEvent;
+        if (event != null) {
+            event.fire(outcome);
+        }
+    }
+
     boolean waitForExecutionFinishOrTimeout(Map<String, String> loggingContext, String conversationId,
                                             IConversationMemory memory, Future<Void> future) {
         return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future);
@@ -2814,8 +3029,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     @Override
-    public void resetConversationState(String conversationId, ConversationState targetState) {
-        setConversationState(conversationId, targetState);
+    public boolean resetConversationState(String conversationId, ConversationState expectedState, ConversationState targetState)
+            throws ResourceStoreException {
+        if (conversationMemoryStore.compareAndSetState(conversationId, expectedState, targetState)) {
+            cacheConversationState(conversationId, targetState);
+            return true;
+        }
+        conversationStepRunner.refreshCachedState(conversationId);
+        return false;
     }
 
     /**
@@ -2920,6 +3141,11 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     @Override
+    public CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy, String pauseId) throws ResourceStoreException {
+        return conversationHitlService.cancelPausedConversation(conversationId, cancelledBy, pauseId);
+    }
+
+    @Override
     public void resumeConversation(String conversationId,
                                    HitlDecision decision,
                                    ConversationResponseHandler handler)
@@ -2942,6 +3168,26 @@ public class ConversationService implements IConversationService, UserErasurePar
     public ConversationMemorySnapshot getConversationMemorySnapshot(String conversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         return conversationHitlService.getConversationMemorySnapshot(conversationId);
+    }
+
+    @Override
+    public ConversationMemoryTail getConversationMemoryTail(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var tail = conversationMemoryStore.loadConversationMemoryTail(conversationId);
+        if (tail == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        return tail;
+    }
+
+    @Override
+    public ConversationMemorySnapshot getConversationMemorySnapshotForApprover(String conversationId)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = conversationMemoryStore.loadConversationMemorySnapshotForApprover(conversationId);
+        if (snapshot == null) {
+            throw new ResourceNotFoundException("Conversation not found: " + conversationId);
+        }
+        return snapshot;
     }
 
     @Override

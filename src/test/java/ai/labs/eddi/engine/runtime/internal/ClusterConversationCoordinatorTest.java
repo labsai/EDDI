@@ -4,8 +4,15 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.enterprise.inject.Instance;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.cluster.ClusterPresence;
 import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
+import ai.labs.eddi.engine.cluster.ErasureTombstones;
+import ai.labs.eddi.engine.cluster.InMemorySharedKv;
 import ai.labs.eddi.engine.cluster.IDeadLetterStore;
 import ai.labs.eddi.engine.cluster.NatsConnectionManager;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
@@ -48,6 +55,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -247,9 +256,13 @@ class ClusterConversationCoordinatorTest {
     }
 
     /** A dead-letter store kept in a list. */
-    static final class ListStore implements IDeadLetterStore {
+    static class ListStore implements IDeadLetterStore {
         final List<DeadLetterEntry> entries = new CopyOnWriteArrayList<>();
         volatile boolean down;
+        /**
+         * Runs after an entry was appended: the window a concurrent erasure can hit.
+         */
+        volatile Runnable afterAppend;
         final AtomicInteger seq = new AtomicInteger();
 
         @Override
@@ -260,6 +273,9 @@ class ClusterConversationCoordinatorTest {
             }
             String id = String.valueOf(seq.incrementAndGet());
             entries.add(new DeadLetterEntry(id, conversationId, error, timestamp, "{}", turn, reason, "node-under-test", fence));
+            if (afterAppend != null) {
+                afterAppend.run();
+            }
             return id;
         }
 
@@ -558,6 +574,216 @@ class ClusterConversationCoordinatorTest {
         List<DeadLetterEntry> listed = coordinator.getDeadLetters();
         assertEquals(1, listed.size(), "and no longer kept locally");
         assertFalse(listed.get(0).id().startsWith("local-"));
+    }
+
+    /**
+     * A node cut off from NATS during a GDPR erasure missed the stop and the shared
+     * purge; forwarding its local copy afterwards re-published the erased input.
+     */
+    @Test
+    @DisplayName("a local dead letter of a conversation that no longer exists is discarded, not forwarded")
+    @SuppressWarnings("unchecked")
+    void localDeadLetterOfAnErasedConversationIsDiscarded() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-erased", failing);
+        await(failing);
+        awaitIdle();
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-erased")).thenReturn(null);
+        // No document either: this is a missing conversation, not just a missing state.
+        when(memoryStore.loadConversationMemorySnapshot("conv-erased")).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        coordinator.memoryStore = memory;
+
+        store.down = false;
+        assertEquals(0, coordinator.forwardLocalDeadLetters());
+
+        assertTrue(store.entries.isEmpty(), "the erased turn must not reach the shared stream");
+        assertTrue(coordinator.getDeadLetters().isEmpty(), "nor stay on this node");
+    }
+
+    @Test
+    @DisplayName("a local dead letter whose conversation cannot be checked stays on this node, not published")
+    @SuppressWarnings("unchecked")
+    void localDeadLetterIsKeptWhenTheStoreCannotBeChecked() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-unknown", failing);
+        await(failing);
+        awaitIdle();
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-unknown")).thenThrow(new IllegalStateException("database not back yet"));
+        coordinator.memoryStore = memory;
+
+        store.down = false;
+        assertEquals(0, coordinator.forwardLocalDeadLetters());
+
+        assertTrue(store.entries.isEmpty(), "an erased turn may be among them: nothing is published while the store cannot say");
+        assertEquals(1, coordinator.getDeadLetters().size(), "and the entry is not lost");
+    }
+
+    // ---- the shared erasure marker ----
+
+    @SuppressWarnings("unchecked")
+    private static Instance<ErasureTombstones> instanceOf(ErasureTombstones tombstones) {
+        Instance<ErasureTombstones> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(tombstones);
+        return instance;
+    }
+
+    private static ErasureTombstones sharedTombstones() {
+        return new ErasureTombstones(new InMemorySharedKv("ERASED", Duration.ofDays(7)));
+    }
+
+    /**
+     * A dead letter kept on this node while NATS was down; NATS is back on return.
+     */
+    private void keepLocally(String conversationId) throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder(conversationId, failing);
+        await(failing);
+        awaitIdle();
+        store.down = false;
+    }
+
+    /**
+     * The erasure purges the shared stream and only later deletes the snapshot: in
+     * between, the conversation still "exists", which is when a reconnecting node
+     * used to publish its local copy of the erased turn.
+     */
+    @Test
+    @DisplayName("a local dead letter of a conversation marked as erased is discarded even while its snapshot still exists")
+    @SuppressWarnings("unchecked")
+    void markedConversationIsNotForwardedWhileItsSnapshotStillExists() throws Exception {
+        keepLocally("conv-condemned");
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-condemned")).thenReturn(ConversationState.READY);
+        coordinator.memoryStore = memory;
+        var tombstones = sharedTombstones();
+        tombstones.mark("conv-condemned");
+        coordinator.erasureTombstones = instanceOf(tombstones);
+
+        assertEquals(0, coordinator.forwardLocalDeadLetters());
+
+        assertTrue(store.entries.isEmpty(), "the erased turn must not reach the shared stream");
+        assertTrue(coordinator.getDeadLetters().isEmpty(), "nor stay on this node");
+    }
+
+    @Test
+    @DisplayName("a conversation that is not marked is forwarded as before")
+    void unmarkedConversationIsForwarded() throws Exception {
+        keepLocally("conv-fine");
+        coordinator.erasureTombstones = instanceOf(sharedTombstones());
+
+        assertEquals(1, coordinator.forwardLocalDeadLetters());
+
+        assertEquals(1, store.entries.size());
+    }
+
+    @Test
+    @DisplayName("a dead letter stays on the node while the erasure marker cannot be read")
+    void unreadableMarkerKeepsTheDeadLetter() throws Exception {
+        keepLocally("conv-unsure");
+        var tombstones = mock(ErasureTombstones.class);
+        when(tombstones.isMarked("conv-unsure")).thenThrow(new ClusterUnavailableException("kv down"));
+        coordinator.erasureTombstones = instanceOf(tombstones);
+
+        assertEquals(0, coordinator.forwardLocalDeadLetters());
+
+        assertTrue(store.entries.isEmpty(), "nothing is published while the marker cannot say");
+        assertEquals(1, coordinator.getDeadLetters().size(), "and the entry is not lost");
+    }
+
+    @Test
+    @DisplayName("an erasure that lands between the check and the publish purges the published copy again")
+    void erasureDuringPublishPurgesAgain() throws Exception {
+        keepLocally("conv-racing");
+        var tombstones = sharedTombstones();
+        coordinator.erasureTombstones = instanceOf(tombstones);
+        // The erasure's marker lands just after the forwarding node looked, and its
+        // shared purge had already run: only a second look after the publish catches
+        // it.
+        store.afterAppend = () -> tombstones.mark("conv-racing");
+
+        coordinator.forwardLocalDeadLetters();
+
+        assertTrue(store.entries.isEmpty(), "the published copy of an erased turn is purged again");
+        assertTrue(coordinator.getDeadLetters().isEmpty());
+    }
+
+    @Test
+    @DisplayName("erasing a conversation's dead letters writes the marker before it purges the shared stream")
+    void purgeMarksBeforePurging() throws Exception {
+        var order = new ArrayList<String>();
+        var tombstones = mock(ErasureTombstones.class);
+        doAnswer(inv -> order.add("mark")).when(tombstones).mark("conv-1");
+        store.entries.add(new DeadLetterEntry("1", "conv-1", "e", 1L, "{}", Map.of(), null, "n", null));
+        var recording = new ListStore() {
+            @Override
+            public int purgeConversation(String conversationId) {
+                order.add("purge");
+                return super.purgeConversation(conversationId);
+            }
+        };
+        recording.entries.addAll(store.entries);
+        var erasing = new ClusterConversationCoordinator(runtime, new SimpleMeterRegistry(), leases, recording, connections,
+                mock(ClusterPresence.class), 10_000, 1000, Duration.ofSeconds(45));
+        erasing.erasureTombstones = instanceOf(tombstones);
+
+        assertEquals(1, erasing.purgeDeadLetters("conv-1"));
+
+        assertEquals(List.of("mark", "purge"), order);
+    }
+
+    @Test
+    @DisplayName("if the marker cannot be written the shared stream is still purged, and the cascade is told")
+    void failedMarkerStillPurgesAndReports() throws Exception {
+        store.entries.add(new DeadLetterEntry("1", "conv-1", "e", 1L, "{}", Map.of(), null, "n", null));
+        var tombstones = mock(ErasureTombstones.class);
+        doThrow(new ClusterUnavailableException("kv down")).when(tombstones).mark("conv-1");
+        coordinator.erasureTombstones = instanceOf(tombstones);
+
+        assertThrows(ClusterUnavailableException.class, () -> coordinator.purgeDeadLetters("conv-1"));
+
+        assertTrue(store.entries.isEmpty(), "the purge ran regardless");
+    }
+
+    @Test
+    @DisplayName("a legacy conversation that stores no state still exists, so its dead letter is forwarded")
+    @SuppressWarnings("unchecked")
+    void stateLessLegacyConversationStillForwards() throws Exception {
+        store.down = true;
+        Turn failing = new Turn("boom", log);
+        failing.failWith = new IllegalStateException("x");
+        coordinator.submitInOrder("conv-legacy", failing);
+        await(failing);
+        awaitIdle();
+        Instance<IConversationMemoryStore> memory = mock(Instance.class);
+        IConversationMemoryStore memoryStore = mock(IConversationMemoryStore.class);
+        when(memory.isResolvable()).thenReturn(true);
+        when(memory.get()).thenReturn(memoryStore);
+        when(memoryStore.getConversationState("conv-legacy")).thenReturn(null); // no state stored
+        when(memoryStore.loadConversationMemorySnapshot("conv-legacy")).thenReturn(new ConversationMemorySnapshot());
+        coordinator.memoryStore = memory;
+
+        store.down = false;
+        assertEquals(1, coordinator.forwardLocalDeadLetters());
+
+        assertEquals(1, store.entries.size());
     }
 
     @Test

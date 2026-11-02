@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
@@ -112,6 +113,21 @@ class PostgresJournalExtraCoverageTest {
                     .thenReturn(1); // subsequent = the actual claim
 
             assertDoesNotThrow(() -> store.tryClaim("c", "e", "1", "t", "u"));
+        }
+
+        @Test
+        @DisplayName("the startup retention cleanup never deletes an orphaned EXECUTING claim")
+        void cleanupExpired_keepsExecutingClaims() throws Exception {
+            when(statement.execute(anyString())).thenReturn(false);
+            when(preparedStatement.executeUpdate()).thenReturn(0);
+
+            store.deleteByConversationId("c1");
+
+            ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+            verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+            String cleanup = sql.getAllValues().stream().filter(s -> s.contains("claimed_at <")).findFirst().orElseThrow();
+            assertTrue(cleanup.contains("status <> 'EXECUTING'"),
+                    "a claim the tool may already have run must outlive retention while its approval is pending: " + cleanup);
         }
 
         @Test
@@ -397,10 +413,10 @@ class PostgresJournalExtraCoverageTest {
         }
 
         @Test
-        @DisplayName("ABORT group: cancelDiscussion returns false → 'already terminal' skipped branch")
+        @DisplayName("ABORT group: paused-only cancel returns false → 'no longer awaiting' skipped branch")
         void abortGroup_alreadyTerminal() throws Exception {
-            when(groupConversationService.cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL))
-                    .thenReturn(false); // false → the "skipped — already terminal" branch
+            when(groupConversationService.cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, null))
+                    .thenReturn(false); // false → the "skipped — no longer awaiting" branch
             var metadata = Map.<String, Object>of(
                     "policy", "ABORT",
                     "surface", "group",
@@ -408,7 +424,7 @@ class PostgresJournalExtraCoverageTest {
 
             assertDoesNotThrow(() -> handler.handleTimeout(metadata));
 
-            verify(groupConversationService).cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, null);
         }
     }
 }

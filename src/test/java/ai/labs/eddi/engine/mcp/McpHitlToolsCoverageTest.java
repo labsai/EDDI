@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore.ResourceModifiedException;
@@ -74,6 +75,7 @@ class McpHitlToolsCoverageTest {
         guard = mock(HitlAccessGuard.class);
         // The default caller owns what it touches; the approver-only tests override it.
         when(guard.mayCancelExecuting(any())).thenReturn(true);
+        when(guard.mayReadResumedDiscussion(any())).thenReturn(true);
         ownershipValidator = mock(OwnershipValidator.class);
         json = mock(IJsonSerialization.class);
         identity = mock(SecurityIdentity.class);
@@ -130,7 +132,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void getApprovalStatus_notFound_returnsNotFound() throws Exception {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
-        when(conversationService.getConversationMemorySnapshot("c1"))
+        when(conversationService.getConversationMemoryTail("c1"))
                 .thenThrow(new ResourceNotFoundException("gone"));
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("\"errorCode\":\"NOT_FOUND\""), out);
@@ -139,7 +141,7 @@ class McpHitlToolsCoverageTest {
     @Test
     void getApprovalStatus_genericException_returnsInternal() throws Exception {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
-        when(conversationService.getConversationMemorySnapshot("c1"))
+        when(conversationService.getConversationMemoryTail("c1"))
                 .thenThrow(new RuntimeException("boom"));
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("\"errorCode\":\"INTERNAL\""), out);
@@ -150,7 +152,9 @@ class McpHitlToolsCoverageTest {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.READY); // not paused
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         when(ownershipValidator.isOwner(identity, "alice")).thenReturn(true); // owner => gate passes
         when(json.serialize(any())).thenReturn("{\"full\":true}");
         String out = tools.getApprovalStatus("c1", "full");
@@ -162,7 +166,9 @@ class McpHitlToolsCoverageTest {
         when(guard.requireConversationHitlAccess("c1")).thenReturn("alice");
         ConversationMemorySnapshot snapshot = new ConversationMemorySnapshot();
         // conversationState left null => the "" branch of state + not-paused fields
-        when(conversationService.getConversationMemorySnapshot("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemorySnapshotForApprover("c1")).thenReturn(snapshot);
+        lenient().when(conversationService.getConversationMemoryTail("c1"))
+                .thenAnswer(invocation -> ConversationMemoryTail.ofFullSnapshot(snapshot));
         when(json.serialize(any())).thenAnswer(inv -> inv.getArgument(0).toString());
         String out = tools.getApprovalStatus("c1", "summary");
         assertTrue(out.contains("conversationId=c1"), out);
@@ -568,5 +574,35 @@ class McpHitlToolsCoverageTest {
                 .thenThrow(new ResourceStoreException("db"));
         String out = tools.cancelGroupDiscussion("g1", "gc1");
         assertTrue(out.contains("\"errorCode\":\"INTERNAL\""), out);
+    }
+
+    @Test
+    void cancelGroup_approverOnly_runningDiscussion_forbidden_neverSignalsIt() throws Exception {
+        when(guard.mayCancelExecuting(any())).thenReturn(false);
+        when(groupConversationService.cancelPausedDiscussion(eq("gc1"), any())).thenReturn(false);
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+        assertTrue(out.contains("\"errorCode\":\"FORBIDDEN\""), out);
+        verify(groupConversationService, never()).cancelDiscussion(any(), any());
+    }
+
+    @Test
+    void cancelGroup_approverOnly_pausedDiscussion_cancelled() throws Exception {
+        when(guard.mayCancelExecuting(any())).thenReturn(false);
+        when(groupConversationService.cancelPausedDiscussion(eq("gc1"), any())).thenReturn(true);
+        String out = tools.cancelGroupDiscussion("g1", "gc1");
+        assertTrue(out.contains("CANCELLED"), out);
+        verify(groupConversationService, never()).cancelDiscussion(any(), any());
+    }
+
+    @Test
+    void approveGroup_approverOnly_getsStateReceiptNotTheConversation() throws Exception {
+        when(guard.mayReadResumedDiscussion(any())).thenReturn(false);
+        var resumed = new GroupConversation();
+        resumed.setUserId("owner");
+        resumed.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        when(groupConversationService.resumeDiscussion(eq("gc1"), any(), isNull())).thenReturn(resumed);
+        when(json.serialize(any())).thenAnswer(inv -> String.valueOf((Object) inv.getArgument(0)));
+        String out = tools.approveGroupPhase("g1", "gc1", "APPROVED", null, null);
+        assertTrue(out.equals("{state=IN_PROGRESS}"), out);
     }
 }
