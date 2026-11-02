@@ -103,7 +103,7 @@ public class TeamBudgetService {
         }
     }
 
-    ITeamBudgetStore store() {
+    public ITeamBudgetStore store() {
         return store;
     }
 
@@ -175,7 +175,7 @@ public class TeamBudgetService {
     /**
      * What is left of the tenant's monthly budget, or null when none is in force.
      */
-    Double tenantRemaining() {
+    public Double tenantRemaining() {
         if (tenantQuotaService == null) {
             return null;
         }
