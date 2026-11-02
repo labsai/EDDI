@@ -201,7 +201,11 @@ jobs:
               # files that a PR very often changes ALONE. A changelog-only PR is
               # the normal case for the nightly collation job, so without these
               # entries the one PR that rewrites the whole changelog is the one
-              # PR that never runs the tests guarding it.
+              # PR that never runs the tests guarding it. (The one exception is
+              # the collation PR itself, which "Resolve" below exempts when it
+              # carries only collator output: the collator already enforces the
+              # size cap and the Archive index, so rerunning the suite on it
+              # re-grades its own output.)
               - 'docs/changelog.md'
               - 'docs/changelog.d/**'
               - 'docs/changelog/**'
@@ -233,8 +237,41 @@ jobs:
               - 'ui/**'
               - '.github/workflows/ci.yml'
 
+      # The nightly collation PR rewrites the changelog and nothing else, so the
+      # Java suite has nothing to grade on it. Exempting the BRANCH NAME alone
+      # would let any branch called chore/collate-changelog skip the tests, so the
+      # exemption needs the diff to agree: this repository's own branch, and every
+      # changed file one the collator writes (the same set "Changelog Discipline"
+      # enforces). Anything else keeps the full gating.
+      - name: Collation PR carries only collator output
+        id: collation
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          echo "only=false" >> "$GITHUB_OUTPUT"
+          if [ "$HEAD_REF" != "chore/collate-changelog" ] || [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+            exit 0
+          fi
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          CHANGED=$(git diff --no-renames --name-only "origin/${BASE_REF}" HEAD)
+          OTHER=$(printf '%s\n' "$CHANGED" \
+            | grep -vE '^docs/(changelog\.md|changelog\.d/[^/]+|changelog/[^/]+\.md|SUMMARY\.md)$' || true)
+          # Register rows (Decision Log / Regression Notes) carry links that
+          # DocumentationLinksTest grades only once they sit in docs/changelog.md,
+          # so a collation that adds any keeps the Java suite.
+          ROWS=$(git diff --no-renames -U0 "origin/${BASE_REF}" HEAD -- docs/changelog.md             | grep -E '^\+\| [0-9]{4}-[0-9]{2}-[0-9]{2} \|' || true)
+          if [ -n "$CHANGED" ] && [ -z "$OTHER" ] && [ -z "$ROWS" ]; then
+            echo "only=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Resolve
         id: result
+        env:
+          COLLATION_ONLY: ${{ steps.collation.outputs.only }}
         run: |
           # A tag push always counts as a code change. The docker job used to
           # bypass its own gates with always() + a tag short-circuit so that a
@@ -256,6 +293,11 @@ jobs:
             echo "release_pointers=${{ steps.filter.outputs.release_pointers }}" >> "$GITHUB_OUTPUT"
             echo "ui=${{ steps.filter.outputs.ui }}" >> "$GITHUB_OUTPUT"
             echo "backend=${{ steps.filter.outputs.backend }}" >> "$GITHUB_OUTPUT"
+          fi
+          # Outside the tag/else split on purpose: DeploymentManifestsTest reads that
+          # split positionally. A later write to the same output key wins.
+          if [ "$COLLATION_ONLY" = "true" ]; then
+            echo "operator_docs=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Resolve E2E databases
