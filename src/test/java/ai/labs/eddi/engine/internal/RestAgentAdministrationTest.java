@@ -468,6 +468,9 @@ class RestAgentAdministrationTest {
                     .thenReturn(0L);
             when(runtime.submitCallable(any(Callable.class), any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
+            var currentId = mock(IResourceStore.IResourceId.class);
+            when(currentId.getVersion()).thenReturn(3);
+            when(documentDescriptorStore.getCurrentResourceId("agent-1")).thenReturn(currentId);
 
             Response response = restAgentAdmin.undeployAgent(
                     Deployment.Environment.test, "agent-1", 3, false, true);

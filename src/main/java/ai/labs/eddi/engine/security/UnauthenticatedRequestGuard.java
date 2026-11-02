@@ -54,10 +54,11 @@ import java.util.regex.PatternSyntaxException;
  * {@code host:port}, comma-separated; a bare host matches any port; {@code *}
  * turns the check off);</li>
  * <li>answers <b>403</b> to a
- * {@code POST}/{@code PUT}/{@code PATCH}/{@code DELETE} that a browser marks as
- * cross-site — an {@code Origin} that is neither this request's own origin nor
- * in {@code quarkus.http.cors.origins} ({@code null} included), or, without an
- * {@code Origin}, {@code Sec-Fetch-Site:
+ * {@code POST}/{@code PUT}/{@code PATCH}/{@code DELETE} — or a {@code GET} of a
+ * route that changes state ({@link #SIDE_EFFECTING_GET_PREFIXES}) — that a
+ * browser marks as cross-site — an {@code Origin} that is neither this
+ * request's own origin nor in {@code quarkus.http.cors.origins} ({@code null}
+ * included), or, without an {@code Origin}, {@code Sec-Fetch-Site:
  * cross-site}/{@code same-site}. A request with neither header comes from a
  * non-browser client (curl, an SDK) and passes.</li>
  * </ol>
@@ -294,19 +295,56 @@ public class UnauthenticatedRequestGuard {
         }
         // No Host at all: HTTP/1.0 without one. Browsers always send it, so this
         // is not the rebinding vector; the Origin check below still applies.
-        if (method != null && SAFE_METHODS.contains(method.toUpperCase(Locale.ROOT))) {
+        if (method != null && SAFE_METHODS.contains(method.toUpperCase(Locale.ROOT)) && !hasSideEffects(method, path)) {
             return Decision.ALLOW;
         }
+        return browserCrossSite(policy, origin, secFetchSite, requestHost) ? Decision.CROSS_SITE : Decision.ALLOW;
+    }
+
+    /**
+     * Whether a browser marked the request as coming from another site: an
+     * {@code Origin} that is not allowed, or, without one, {@code Sec-Fetch-Site:
+     * cross-site}/{@code same-site}. A request with neither is a non-browser
+     * client.
+     */
+    private static boolean browserCrossSite(Policy policy, String origin, String secFetchSite, HostPort requestHost) {
         if (origin != null) {
-            return originAllowed(policy, origin, requestHost) ? Decision.ALLOW : Decision.CROSS_SITE;
+            return !originAllowed(policy, origin, requestHost);
         }
         if (secFetchSite != null) {
             String site = secFetchSite.trim().toLowerCase(Locale.ROOT);
-            if (site.equals("cross-site") || site.equals("same-site")) {
-                return Decision.CROSS_SITE;
+            return site.equals("cross-site") || site.equals("same-site");
+        }
+        return false;
+    }
+
+    /**
+     * {@code GET} routes that change state despite the method, and so get the
+     * cross-site check a {@code POST} gets: loading a managed conversation creates
+     * it (and replaces an ended one). An {@code <img>} on any page could otherwise
+     * start conversations on this instance on the visitor's behalf.
+     */
+    static final List<String> SIDE_EFFECTING_GET_PREFIXES = List.of("/agents/managed/");
+
+    /**
+     * Whether a safe-method request reaches one of
+     * {@link #SIDE_EFFECTING_GET_PREFIXES}. {@code HEAD} counts as {@code GET}:
+     * JAX-RS answers it by running the {@code GET} method, and a cross-site
+     * {@code fetch(url, {method: 'HEAD', mode: 'no-cors'})} needs no preflight.
+     * Matrix parameters are removed first: JAX-RS routes without them, so
+     * {@code /agents;x=1/managed/...} reaches the same resource.
+     */
+    static boolean hasSideEffects(String method, String path) {
+        if (path == null || !("GET".equalsIgnoreCase(method) || "HEAD".equalsIgnoreCase(method))) {
+            return false;
+        }
+        String withoutMatrix = path.indexOf(';') < 0 ? path : path.replaceAll(";[^/]*", "");
+        for (String prefix : SIDE_EFFECTING_GET_PREFIXES) {
+            if (withoutMatrix.startsWith(prefix)) {
+                return true;
             }
         }
-        return Decision.ALLOW;
+        return false;
     }
 
     static boolean isHealthPath(String path) {

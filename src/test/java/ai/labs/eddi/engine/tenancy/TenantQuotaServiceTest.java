@@ -139,6 +139,20 @@ class TenantQuotaServiceTest {
     // --- Agent capacity ---
 
     @Test
+    @DisplayName("agentCountUnavailable — refuses (accounting unavailable) only while an agent limit is in force")
+    void agentCountUnavailableFailsClosedOnlyUnderALimit() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));
+        QuotaCheckResult limited = quotaService.agentCountUnavailable(TENANT_ID);
+        assertFalse(limited.allowed());
+        assertTrue(limited.accountingUnavailable());
+
+        quotaService.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, -1.0, true));
+        assertTrue(quotaService.agentCountUnavailable(TENANT_ID).allowed(), "unlimited agents");
+        quotaService.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, false));
+        assertTrue(quotaService.agentCountUnavailable(TENANT_ID).allowed(), "quota disabled");
+    }
+
+    @Test
     @DisplayName("checkAgentQuota — allows when below the agent limit")
     void shouldAllowBelowAgentLimit() {
         quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));

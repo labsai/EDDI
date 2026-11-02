@@ -520,8 +520,8 @@ class ConversationStepRunner {
                 conversationMemory.setFenceToken(lease.fence());
                 raiseFence(conversationId, lease.fence());
                 final IConversationMemory leasedMemory = conversationMemory;
-                // Abandoned through the same seam as a watchdog timeout (abandonTurn, which
-                // ITurnAbandonment.abandonInFlightTurn also uses), but aimed at THIS turn's
+                // Abandoned through the same seam as a watchdog timeout (abandonTurn), but
+                // aimed at THIS turn's
                 // memory rather than looked up by conversation id: the lease callback can
                 // fire late, and by then the id may name a newer turn of the conversation.
                 // The lease-lost mark goes first so the completion callback, which reads it
@@ -852,6 +852,7 @@ class ConversationStepRunner {
                             conversationService.contextLogger.setLoggingContext(loggingContext);
                             LOGGER.errorf("Turn of conversation %s was NOT persisted: %s", sanitize(conversationId), e.getMessage());
                             conversationService.counterFenceRejected();
+                            conversationService.forgetUnpersistedTurn(conversationId);
                             fencedTurns.put(conversationId, e);
                             refreshCachedState(conversationId);
                         } catch (ConcurrentConversationModificationException e) {
@@ -868,8 +869,10 @@ class ConversationStepRunner {
                             // conversation because THIS turn lost the race would trade one
                             // wrong outcome for another.
                             reportStoreConflict(loggingContext, conversationId, e);
+                            conversationService.forgetUnpersistedTurn(conversationId);
                             refreshCachedState(conversationId);
                         } catch (ResourceStoreException e) {
+                            conversationService.forgetUnpersistedTurn(conversationId);
                             logConversationError(loggingContext, conversationId, e);
                         } finally {
                             // Ordering contract: a turn that ended AWAITING_HUMAN tells its
@@ -1174,7 +1177,13 @@ class ConversationStepRunner {
                 if (currentState == ConversationState.AWAITING_HUMAN) {
                     return TurnWait.ABANDONED_WHILE_PAUSED;
                 }
-                setConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
+                // Compare-and-set, never a blind write: the conversation may have been
+                // ended while the turn hung (an end only raises the cooperative-cancel
+                // flag, which a blocked model call does not see). EXECUTION_INTERRUPTED
+                // is auto-recovered on the next say, so overwriting ENDED with it made an
+                // ended conversation drivable again — and invisible to the ENDED-only
+                // retention sweep.
+                transitionUnlessEnded(conversationId, currentState, ConversationState.EXECUTION_INTERRUPTED);
                 String errorMessage = "Execution of Workflows interrupted or timed out.";
                 conversationService.contextLogger.setLoggingContext(loggingContext);
                 LOGGER.error(errorMessage, e);
@@ -1225,7 +1234,17 @@ class ConversationStepRunner {
     }
 
     void logConversationError(Map<String, String> loggingContext, String conversationId, Throwable t) {
-        setConversationState(conversationId, ConversationState.ERROR);
+        // Not over an ENDED conversation, for the reason given in awaitTurn: ERROR is
+        // not
+        // terminal either, and a blind write resurrected a conversation ended
+        // meanwhile.
+        ConversationState currentState;
+        try {
+            currentState = conversationMemoryStore.getConversationState(conversationId);
+        } catch (RuntimeException readFailure) {
+            currentState = null;
+        }
+        transitionUnlessEnded(conversationId, currentState, ConversationState.ERROR);
         String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
         msg = String.format(msg, conversationId, ConversationState.ERROR);
         conversationService.contextLogger.setLoggingContext(loggingContext);
@@ -1247,6 +1266,26 @@ class ConversationStepRunner {
     IConversationMemory loadConversationMemory(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         var conversationMemorySnapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
         return convertConversationMemorySnapshot(conversationMemorySnapshot);
+    }
+
+    /**
+     * Moves the conversation from {@code observedState} to {@code target} with a
+     * compare-and-set, unless it is {@code ENDED} (or unknown). When the CAS loses
+     * — the state changed after it was read — the store's value stands and the
+     * cache is refreshed from it.
+     */
+    void transitionUnlessEnded(String conversationId, ConversationState observedState, ConversationState target) {
+        if (observedState != null && observedState != ConversationState.ENDED) {
+            try {
+                if (conversationMemoryStore.compareAndSetState(conversationId, observedState, target)) {
+                    cacheConversationState(conversationId, target);
+                    return;
+                }
+            } catch (ResourceStoreException | RuntimeException e) {
+                LOGGER.warnf("Could not record %s for conversation %s: %s", target, sanitize(conversationId), sanitize(e.getMessage()));
+            }
+        }
+        refreshCachedState(conversationId);
     }
 
     void setConversationState(String conversationId, ConversationState conversationState) {

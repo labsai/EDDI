@@ -40,6 +40,7 @@ import {
 import { RegisteredOperatorHealth, UnregisteredOperators } from "@/components/operator/unregistered-operators";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useApprovalStatus } from "@/hooks/use-hitl";
+import { shownPauseOf } from "@/lib/hitl-pause-binding";
 import { getErrorMessage } from "@/lib/api-client";
 import { fetchOpenApiSpec, type OperatorConfig } from "@/lib/api/operator";
 import { buildOperationIdIndex, reconstructEndpoint } from "@/lib/operator/reconstruct-endpoint";
@@ -211,7 +212,16 @@ export function OperatorPage() {
    * pause, observed live. The per-pause key already guarantees the fresh
    * fetch; there is nothing left for a removal to do.
    */
-  const handleDecide = chat.resolveApproval;
+  // The decision is bound to the pause this card shows (`pauseId`), so a pause
+  // resolved in another window — or a turn that paused again on a new batch —
+  // is refused by the backend instead of receiving a verdict nobody gave it.
+  const { resolveApproval } = chat;
+  const approvalData = approvalStatus.data;
+  const handleDecide = useCallback<typeof resolveApproval>(
+    (verdict, note, toolDecisions) =>
+      resolveApproval(verdict, note, toolDecisions, approvalData ? shownPauseOf(approvalData) : undefined),
+    [resolveApproval, approvalData],
+  );
 
   const renderCallExtra = useCallback(
     (call: PendingToolCallView) => {
@@ -647,7 +657,7 @@ export function OperatorPage() {
           here rather than letting a green status badge imply everything is fine. */}
       {canaryWarning && (
         <div
-          className="flex flex-wrap items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+          className="flex flex-wrap items-start gap-3 rounded-md border border-warn-500/40 bg-warn-500/10 p-3 text-sm text-warn-700 dark:text-warn-400"
           role="alert"
           data-testid="operator-canary-warning"
         >

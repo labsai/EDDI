@@ -150,7 +150,7 @@ final class ScriptedEngine {
         }).when(service).endConversation(anyString(), anyString());
     }
 
-    private static void apply(ConversationMemorySnapshot snapshot, Step step) {
+    static void apply(ConversationMemorySnapshot snapshot, Step step) {
         var results = new ArrayList<ResultSnapshot>();
         results.add(new ResultSnapshot(MemoryKeys.ACTIONS.key(), step.actions(), null, new Date(), null, true));
         if (step.cost() > 0) {

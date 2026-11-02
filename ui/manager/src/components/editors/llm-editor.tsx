@@ -311,7 +311,7 @@ function TaskEditor({
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4 rtl:rotate-180" />
           )}
         </button>
         {/* Mode badge */}
@@ -2150,8 +2150,6 @@ export interface LlmEditorProps {
   onChange: (data: LangchainConfig) => void;
   readOnly?: boolean;
 }
-/** @deprecated Use LlmEditorProps */
-export type LangchainEditorProps = LlmEditorProps;
 
 export function LlmEditor({
   data,

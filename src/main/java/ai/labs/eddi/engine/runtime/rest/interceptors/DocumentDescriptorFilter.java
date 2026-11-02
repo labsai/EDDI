@@ -133,9 +133,9 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
                 }
 
                 if (isDELETE(invokedHttpMethod) && addressesResourceItself(uriInfo.getPath())) {
-                    String currentResourceURI = uriInfo.getRequestUri().toString();
-                    var descriptorStore = getDescriptorStore(currentResourceURI);
-                    IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(URI.create(currentResourceURI));
+                    URI deletedResource = pathAndVersionOnly(uriInfo.getRequestUri());
+                    var descriptorStore = getDescriptorStore(deletedResource.getPath());
+                    IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(deletedResource);
                     if (isResourceIdValid(resourceId)) {
                         ResourceDescriptor resourceDescriptor = (ResourceDescriptor) descriptorStore.readDescriptor(resourceId.getId(),
                                 resourceId.getVersion());
@@ -153,6 +153,31 @@ public class DocumentDescriptorFilter implements ContainerResponseFilter {
         } catch (Exception e) {
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * Reduces a request URI to its path plus the {@code version} parameter — the
+     * only parts the resource handler authorized.
+     * <p>
+     * {@link RestUtilities#extractResourceId} reads the last {@code /}-segment of
+     * the whole string, query included, so {@code DELETE
+     * /outputstore/outputsets/{a}?x=/{b}&version=1} picked {@code b} — a resource
+     * the caller was never checked against — and marked <em>its</em> descriptor
+     * deleted.
+     */
+    static URI pathAndVersionOnly(URI requestUri) {
+        String version = null;
+        String query = requestUri.getRawQuery();
+        if (query != null) {
+            for (String pair : query.split("&")) {
+                if (pair.startsWith("version=")) {
+                    version = pair.substring("version=".length());
+                    break;
+                }
+            }
+        }
+        String path = requestUri.getRawPath();
+        return URI.create(version == null ? path : path + "?version=" + version);
     }
 
     @SuppressWarnings("rawtypes")

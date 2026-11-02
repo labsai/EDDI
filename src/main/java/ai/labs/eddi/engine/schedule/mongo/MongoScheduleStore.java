@@ -599,7 +599,9 @@ public class MongoScheduleStore implements IScheduleStore {
             // the last clause steals a crashed/wedged instance's claim and MUST mirror
             // findDueSchedules' leaseExpiredFilter, else expired CLAIMED rows are
             // returned every poll but never re-fired.
-            Bson filter = and(eq(ID, scheduleId),
+            // enabled is re-checked here, not only in findDueSchedules: a schedule
+            // disabled between the poll's read and this claim was fired anyway.
+            Bson filter = and(eq(ID, scheduleId), eq(ENABLED, true),
                     or(eq(FIRE_STATUS, FireStatus.PENDING.name()),
                             and(eq(FIRE_STATUS, FireStatus.FAILED.name()), lte(NEXT_RETRY_AT, nowMs)),
                             // Note: maxRetries guard is in findDueSchedules —

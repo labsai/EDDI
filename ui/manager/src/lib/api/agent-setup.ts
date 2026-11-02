@@ -165,7 +165,6 @@ export const LLM_PROVIDER_GROUPS: readonly { id: ProviderGroup; labelKey: string
   { id: "local", labelKey: "llmProviders.group.local", fallback: "Local / self-hosted" },
 ];
 
-export type ProviderId = (typeof LLM_PROVIDERS)[number]["id"];
 
 export function getProviderConfig(id: string) {
   return LLM_PROVIDERS.find((p) => p.id === id);

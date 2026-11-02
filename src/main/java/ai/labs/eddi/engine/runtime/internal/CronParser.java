@@ -361,11 +361,11 @@ public final class CronParser {
                         start = parseIntField(stepParts[0], field);
                     }
                 }
-                if (start > end) {
-                    throw new IllegalArgumentException("Range start must be <= end ('" + part + "') in field: " + field);
-                }
-                for (int i = start; i <= end; i += step) {
-                    values.add(i);
+                checkRange(start, end, min, max, part, field);
+                // long arithmetic: the endpoints are domain-bounded, but an int step near
+                // Integer.MAX_VALUE must not wrap the counter back into the domain
+                for (long i = start; i <= end; i += step) {
+                    values.add((int) i);
                 }
             } else if (part.contains("-")) {
                 // Range: 1-5
@@ -375,9 +375,7 @@ public final class CronParser {
                 }
                 int start = parseIntField(range[0], field);
                 int end = parseIntField(range[1], field);
-                if (start > end) {
-                    throw new IllegalArgumentException("Range start must be <= end ('" + part + "') in field: " + field);
-                }
+                checkRange(start, end, min, max, part, field);
                 for (int i = start; i <= end; i++) {
                     values.add(i);
                 }
@@ -395,6 +393,21 @@ public final class CronParser {
             }
         }
         return values;
+    }
+
+    /**
+     * Validates a range's endpoints against the field's domain <em>before</em> it
+     * is enumerated. Checking only the enumerated values afterwards let
+     * {@code 0-2000000000} allocate billions of boxed integers before the
+     * out-of-range value was reported.
+     */
+    private static void checkRange(int start, int end, int min, int max, String part, String field) {
+        if (start < min || start > max || end < min || end > max) {
+            throw new IllegalArgumentException(String.format("Range '%s' out of range [%d, %d] in field: %s", part, min, max, field));
+        }
+        if (start > end) {
+            throw new IllegalArgumentException("Range start must be <= end ('" + part + "') in field: " + field);
+        }
     }
 
     /**

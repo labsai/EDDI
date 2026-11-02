@@ -75,7 +75,7 @@ function TurnEditor({
             className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"
             data-testid="turn-expect-toggle"
           >
-            {open ? <ChevronDown className="h-3 w-3" aria-hidden="true" /> : <ChevronRight className="h-3 w-3" aria-hidden="true" />}
+            {open ? <ChevronDown className="h-3 w-3" aria-hidden="true" /> : <ChevronRight className="h-3 w-3 rtl:rotate-180" aria-hidden="true" />}
             {t("testSuiteEditor.expectations", "Expectations")}
             <span className="rounded-full bg-secondary px-1.5 text-[10px]">
               {count === 0 ? t("testSuiteEditor.noneSet", "none") : count}
@@ -145,7 +145,7 @@ function CaseEditor({
           aria-label={t("testSuiteEditor.toggleCase", "Show or hide case")}
           className="rounded p-1 text-muted-foreground hover:bg-secondary"
         >
-          {open ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4" aria-hidden="true" />}
+          {open ? <ChevronDown className="h-4 w-4" aria-hidden="true" /> : <ChevronRight className="h-4 w-4 rtl:rotate-180" aria-hidden="true" />}
         </button>
         <MessageSquare className="h-4 w-4 text-primary" aria-hidden="true" />
         <input
