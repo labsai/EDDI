@@ -3394,7 +3394,6 @@
     "convergenceJudge": "评审",
     "judgeModerator": "主持人",
     "judgeService": "服务",
-    "judgeServiceNote": "已接受但尚未接通 — 引擎将回退到主持人并记录一条警告。",
     "convergenceMode": "停止条件",
     "convergenceModeSimilarity": "成员达成一致",
     "convergenceModeVerdict": "主持人的审核通过",
@@ -4137,6 +4136,16 @@
     "presetsLink": "群组模板",
     "agentNotDeployed": "智能体已创建但未部署",
     "deployingAgents": "正在部署智能体..."
+  },
+  "groupServiceJudge": {
+    "provider": "提供商",
+    "model": "模型",
+    "apiKey": "API 密钥引用",
+    "timeoutMs": "超时 (毫秒)",
+    "inputPrice": "输入 $ / 百万 token",
+    "outputPrice": "输出 $ / 百万 token",
+    "noteConfigured": "每次检查直接调用一次模型，无需主持人。其费用计入讨论。失败或无法读取的回复不会结束该阶段。",
+    "noteFallback": "请指定提供商和模型，否则由主持人代理来判断。"
   },
   "groupTemplates": {
     "advisoryBoard": "顾问团",
