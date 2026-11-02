@@ -89,15 +89,37 @@ public record OutboundMail(MailAddress from, List<MailAddress> to, List<MailAddr
         if (original.from() == null) {
             throw new IllegalArgumentException("The original message has no single valid From address to reply to.");
         }
-        List<String> references = new ArrayList<>(original.references());
+        return replyInThread(from, original.from(), original.subject(), original.syntheticMessageId() ? null : original.messageId(),
+                original.references(), text, null);
+    }
+
+    /**
+     * A threaded reply from the facts a ledger and a conversation keep about the
+     * original — for a reply rebuilt after the parsed message is gone. To exactly
+     * one recipient, never a copy: who that is was decided by the caller's policy.
+     *
+     * @param originalMessageId
+     *            the RFC id being answered, or null when the original had none (a
+     *            synthetic id is never written into a header)
+     * @param originalReferences
+     *            the original's References, oldest first
+     * @param messageId
+     *            the reply's own Message-ID, or null to have the renderer mint one
+     */
+    public static OutboundMail replyInThread(MailAddress from, MailAddress to, String originalSubject, String originalMessageId,
+                                             List<String> originalReferences, String text, String messageId) {
+        if (to == null) {
+            throw new IllegalArgumentException("A reply needs its one recipient.");
+        }
+        List<String> references = new ArrayList<>(originalReferences == null ? List.of() : originalReferences);
         String inReplyTo = null;
-        if (!original.syntheticMessageId()) {
-            inReplyTo = original.messageId();
+        if (originalMessageId != null && !originalMessageId.isBlank()) {
+            inReplyTo = originalMessageId;
             references.remove(inReplyTo);
             references.add(inReplyTo);
         }
-        return new OutboundMail(from, List.of(original.from()), List.of(), PlainTextMailRenderer.replySubject(original.subject()), text,
-                null, inReplyTo, references, Kind.AUTO_REPLIED, null);
+        return new OutboundMail(from, List.of(to), List.of(), PlainTextMailRenderer.replySubject(originalSubject), text, messageId, inReplyTo,
+                references, Kind.AUTO_REPLIED, null);
     }
 
     /** No body, subject or addresses: this record ends up in log lines. */
