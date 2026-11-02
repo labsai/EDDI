@@ -1461,7 +1461,13 @@ public class Conversation implements IConversation {
     private void persistRevisionCandidate(ConversationPauseException e) {
         HitlRevisionCandidate candidate = conversationMemory.getHitlRevisionCandidate();
         HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
-        if (candidate == null || policy == null || !policy.revise() || candidate.getTranscriptJson() == null) {
+        if (candidate == null || policy == null) {
+            return;
+        }
+        // Kept for a revision (needs the frozen request) or for an approver's edit
+        // (needs only the draft).
+        boolean revisable = policy.revise() && candidate.getTranscriptJson() != null;
+        if (!revisable && !policy.captureDraft()) {
             return;
         }
         if (!answerPrecedesPause(candidate, e.getPausedWorkflowId(), e.getPausedAbsoluteTaskIndex())) {

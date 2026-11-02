@@ -2489,10 +2489,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                                          boolean toolTranscript, Integer cascadeStepIndex, String answer, boolean addedToOutput,
                                          int outputMark, int quickRepliesMark) {
         var policy = memory.getHitlRevisionPolicy();
-        if (policy == null || !policy.revise()) {
+        if (policy == null || !(policy.revise() || policy.captureDraft())) {
             return;
         }
         var candidate = new HitlRevisionCandidate();
+        // An approver's edit must keep the answer's shape: JSON for a convertToObject
+        // task.
+        candidate.setAnswerFormat(task.getParameters() != null && Boolean.parseBoolean(String.valueOf(task.getParameters().get(
+                KEY_CONVERT_TO_OBJECT)).trim()) ? HitlRevisionCandidate.FORMAT_JSON : HitlRevisionCandidate.FORMAT_TEXT);
         candidate.setLlmTaskId(task.getId());
         candidate.setLlmTaskIndex(llmTaskIndex);
         candidate.setCascadeStepIndex(cascadeStepIndex);
@@ -2501,7 +2505,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         candidate.setAddedToOutput(addedToOutput);
         candidate.setOutputMark(outputMark);
         candidate.setQuickRepliesMark(quickRepliesMark);
-        if (base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
+        // The request is frozen only for a revision; an edit needs the draft alone.
+        if (policy.revise() && base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
             var serialized = revisionTranscriptCodec.serialize(base, revisionTranscriptMaxBytes);
             candidate.setTranscriptJson(serialized.omitted() ? null : serialized.json());
         }

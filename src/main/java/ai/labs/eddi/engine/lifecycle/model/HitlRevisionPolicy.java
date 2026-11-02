@@ -11,15 +11,23 @@ import ai.labs.eddi.configs.hitl.HitlRejectionAction;
  * The agent's {@code hitlConfig.onRejection} policy, carried onto the live
  * memory for one turn (never persisted, re-read from the pinned agent version
  * each turn like the tool-approval config). {@code null} on memory means the
- * default, {@link HitlRejectionAction#SKIP}.
+ * default, {@link HitlRejectionAction#SKIP}, with no answer edits.
  *
  * @param onRejection
  *            what a rejected rule pause does
  * @param maxRevisionsPerTurn
  *            how many revisions one turn may take
+ * @param captureDraft
+ *            whether the answer before a rule pause is kept so an approver may
+ *            edit it ({@code hitlConfig.review.allowAnswerEdits}, since 6.7)
  * @since 6.6.0
  */
-public record HitlRevisionPolicy(HitlRejectionAction onRejection, int maxRevisionsPerTurn) {
+public record HitlRevisionPolicy(HitlRejectionAction onRejection, int maxRevisionsPerTurn, boolean captureDraft) {
+
+    /** A policy without answer edits — the 6.6 shape. */
+    public HitlRevisionPolicy(HitlRejectionAction onRejection, int maxRevisionsPerTurn) {
+        this(onRejection, maxRevisionsPerTurn, false);
+    }
 
     /** Whether a rejection with a note may revise the answer. */
     public boolean revise() {
@@ -28,12 +36,17 @@ public record HitlRevisionPolicy(HitlRejectionAction onRejection, int maxRevisio
 
     /**
      * The policy of an agent's HITL config, or {@code null} when it is the default
-     * (SKIP) — so nothing is captured for an agent that did not opt in.
+     * (SKIP, no answer edits) — so nothing is captured for an agent that did not
+     * opt in.
      */
     public static HitlRevisionPolicy of(AgentConfiguration.HitlConfig hitlConfig) {
-        if (hitlConfig == null || hitlConfig.getOnRejection() != HitlRejectionAction.REVISE) {
+        if (hitlConfig == null) {
             return null;
         }
-        return new HitlRevisionPolicy(HitlRejectionAction.REVISE, hitlConfig.effectiveMaxRevisionsPerTurn());
+        boolean captureDraft = hitlConfig.getReview() != null && hitlConfig.getReview().answerEditsAllowed();
+        if (hitlConfig.getOnRejection() != HitlRejectionAction.REVISE) {
+            return captureDraft ? new HitlRevisionPolicy(hitlConfig.getOnRejection(), 0, true) : null;
+        }
+        return new HitlRevisionPolicy(HitlRejectionAction.REVISE, hitlConfig.effectiveMaxRevisionsPerTurn(), captureDraft);
     }
 }
