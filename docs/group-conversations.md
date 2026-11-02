@@ -611,8 +611,9 @@ generated id and are still found by their `groupId`.
 
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
-a soft (versioned) delete keeps it, because the group can come back. Not in
-v1: cross-team handoff, Manager UI, reputation weighting.
+a soft (versioned) delete keeps it, because the group can come back. Another
+team or a standalone agent can file tasks into a workspace: see
+[Cross-Team Handoff](team-handoff.md). Not in v1: reputation weighting.
 
 ## Shared artifacts (blackboard-lite)
 

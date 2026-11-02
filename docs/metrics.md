@@ -309,6 +309,9 @@ eddi_team_cadence_runs_started_total        # Cadence fires that started a discu
 eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight, empty backlog, claim lost)
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
+eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
+eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
+eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```
 
 ### Scheduled Trigger Metrics
