@@ -44,7 +44,7 @@
 - [Conversations](conversations.md)
 - [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
-  - [Group Human Decisions: Tie-Breaks](group-human-decisions.md)
+  - [Group Human Decisions: Tie-Breaks and Tasks](group-human-decisions.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
 - [Long Jobs — the Conversation as the Job Log](long-jobs.md)
 - [Conversation Ratings](conversation-ratings.md)
