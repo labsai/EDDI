@@ -24,7 +24,7 @@ const ERROR_ANNOUNCE_MS = 3000;
 
 const LEVEL_COLORS: Record<string, string> = {
   ERROR: "text-destructive",
-  WARN: "text-amber-500",
+  WARN: "text-warn-500",
   INFO: "text-emerald-500",
   DEBUG: "text-muted-foreground",
   TRACE: "text-muted-foreground/50",
@@ -32,7 +32,7 @@ const LEVEL_COLORS: Record<string, string> = {
 
 const LEVEL_BG: Record<string, string> = {
   ERROR: "bg-destructive/10",
-  WARN: "bg-amber-500/10",
+  WARN: "bg-warn-500/10",
   INFO: "bg-emerald-500/10",
   DEBUG: "bg-muted/30",
   TRACE: "bg-muted/20",

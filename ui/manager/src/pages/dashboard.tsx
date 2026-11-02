@@ -598,10 +598,10 @@ function FeedbackAttentionCard() {
   if (!enabled || !count) return null;
 
   return (
-    <Card className="border-amber-500/30 bg-amber-500/5" data-testid="feedback-attention-card">
+    <Card className="border-warn-500/30 bg-warn-500/5" data-testid="feedback-attention-card">
       <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
         <div className="flex items-start gap-3">
-          <MessageSquareHeart className="mt-0.5 h-6 w-6 shrink-0 text-amber-500" />
+          <MessageSquareHeart className="mt-0.5 h-6 w-6 shrink-0 text-warn-500" />
           <div>
             <p className="font-medium">{t("feedback.dashboardTitle", "Feedback needing attention")}</p>
             <p className="text-sm text-muted-foreground" data-testid="feedback-attention-count">

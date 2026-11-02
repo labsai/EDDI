@@ -367,7 +367,7 @@ export function IngestionFilesPanel({
 
           {hasUnsavedChanges && (
             <p
-              className="text-xs text-amber-700 dark:text-amber-400"
+              className="text-xs text-warn-700 dark:text-warn-400"
               role="alert"
               data-testid={`${testId}-files-save-before-upload`}
             >
@@ -380,7 +380,7 @@ export function IngestionFilesPanel({
 
           {folderWarning && (
             <p
-              className="text-xs text-amber-700 dark:text-amber-400"
+              className="text-xs text-warn-700 dark:text-warn-400"
               role="alert"
               data-testid={`${testId}-folder-warning`}
             >
@@ -421,10 +421,10 @@ export function IngestionFilesPanel({
 
           {awaitingRun > 0 && !isBusy && (
             <div
-              className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs dark:border-amber-900/50 dark:bg-amber-900/20"
+              className="flex flex-wrap items-center gap-2 rounded-md border border-warn-300 bg-warn-50 px-3 py-2 text-xs dark:border-warn-900/50 dark:bg-warn-900/20"
               data-testid={`${testId}-awaiting-run`}
             >
-              <span className="flex-1 text-amber-900 dark:text-amber-200">
+              <span className="flex-1 text-warn-900 dark:text-warn-200">
                 {t(
                   'ragEditor.sources.filesAwaitingRun',
                   'Files are stored but not yet in the knowledge base. Run the source to index them.',
@@ -459,7 +459,7 @@ export function IngestionFilesPanel({
 
           {deleteWarning && (
             <p
-              className="text-xs text-amber-700 dark:text-amber-400"
+              className="text-xs text-warn-700 dark:text-warn-400"
               role="alert"
               data-testid={`${testId}-file-delete-warning`}
             >

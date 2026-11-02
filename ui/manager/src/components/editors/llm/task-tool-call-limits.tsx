@@ -120,7 +120,7 @@ export function TaskToolCallLimits({ task, onChange, readOnly }: TaskSectionProp
       </p>
       {uncapped && (
         <p
-          className="text-[10px] text-amber-700 dark:text-amber-400"
+          className="text-[10px] text-warn-700 dark:text-warn-400"
           role="status"
           data-testid="task-tool-calls-uncapped"
         >

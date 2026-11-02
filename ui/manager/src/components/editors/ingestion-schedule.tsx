@@ -295,7 +295,7 @@ function StatusRow({
     <p
       className={cn(
         "flex items-start gap-1.5 text-[11px]",
-        tone === "error" ? "text-destructive" : "text-amber-700 dark:text-amber-400",
+        tone === "error" ? "text-destructive" : "text-warn-700 dark:text-warn-400",
       )}
       role={tone === "error" ? "alert" : undefined}
       data-testid={testId}

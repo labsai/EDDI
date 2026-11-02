@@ -241,7 +241,7 @@ function GuardrailList({
         <p
           className={
             buffers
-              ? "text-[10px] leading-relaxed text-amber-700 dark:text-amber-400"
+              ? "text-[10px] leading-relaxed text-warn-700 dark:text-warn-400"
               : "text-[10px] leading-relaxed text-muted-foreground"
           }
           role={buffers ? "status" : undefined}

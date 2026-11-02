@@ -45,7 +45,7 @@ export function CascadeStepTrace({
                 {step.modelName ?? step.modelType ?? "—"}
               </span>
               {step.escalation && (
-                <span className="inline-flex items-center gap-0.5 text-amber-600 dark:text-amber-400">
+                <span className="inline-flex items-center gap-0.5 text-warn-600 dark:text-warn-400">
                   <ArrowUpRight className="h-2.5 w-2.5" />
                   {step.escalation.confidence != null && step.escalation.threshold != null
                     ? t("cascadeTrace.escalated", "conf {{c}} < {{th}}", {
