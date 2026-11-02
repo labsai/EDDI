@@ -321,6 +321,23 @@ class RestAgentTriggerStoreTest {
         verify(cache, never()).put(anyString(), any());
     }
 
+    /**
+     * A successful update invalidates instead of publishing what it wrote: an older
+     * operation finishing late used to put its routing back over a newer one.
+     */
+    @Test
+    void updateAgentTrigger_invalidatesTheCacheInsteadOfPublishingTheWrittenRouting() throws Exception {
+        var stored = triggerRouting("support", "teamagent0000000000000");
+        when(agentTriggerStore.readAgentTrigger("support")).thenReturn(stored);
+        when(agentTriggerStore.updateAgentTriggerIfUnchanged(eq("support"), eq(stored), any())).thenReturn(true);
+
+        assertEquals(200, restAgentTriggerStore.updateAgentTrigger("support", triggerRouting("support", "teamagent0000000000000"))
+                .getStatus());
+
+        verify(cache).remove("support");
+        verify(cache, never()).put(anyString(), any());
+    }
+
     @Test
     void deleteAgentTrigger_rePointedBetweenCheckAndWrite_isAConflict() throws Exception {
         var checked = triggerRouting("support", "teamagent0000000000000");

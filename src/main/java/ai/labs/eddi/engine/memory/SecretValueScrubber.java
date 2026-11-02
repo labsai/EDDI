@@ -88,16 +88,6 @@ public final class SecretValueScrubber {
     }
 
     /**
-     * A copy of {@code context} — type and secret flag kept — with the plaintext
-     * removed from its value, or {@code null} when it does not carry it.
-     */
-    public static Context scrubContext(Context context, String plaintext, String placeholder) {
-        return plaintext == null || plaintext.isEmpty()
-                ? null
-                : (Context) scrubSorted(context, List.of(plaintext), placeholder, false, Match.SUBSTRING);
-    }
-
-    /**
      * Like {@link #scrubAll}, but also reaches into objects the plain walk cannot
      * enter — output items, records, other POJOs — through their JSON form: such an
      * object that carries a plaintext is returned as the scrubbed JSON tree (maps,
@@ -236,8 +226,16 @@ public final class SecretValueScrubber {
      */
     private static Object scrubSorted(Object value, List<String> plaintexts, String placeholder, boolean deep, Match match) {
         if (value instanceof String text) {
-            if (match == Match.EXACT) {
-                return plaintexts.contains(text) ? placeholder : scrubEmbeddedJson(text, plaintexts, placeholder);
+            if (match == Match.EXACT && plaintexts.contains(text)) {
+                return placeholder;
+            }
+            // Serialized JSON (a paused tool call's arguments, a transcript) is decoded
+            // and its values matched in every mode: a secret holding a character JSON
+            // escapes — a quote, a backslash, a newline — does not occur verbatim in the
+            // encoded string, so matching only the raw text left it in place.
+            String embedded = scrubEmbeddedJson(text, plaintexts, placeholder, match);
+            if (embedded != null || match == Match.EXACT) {
+                return embedded;
             }
             String cleaned = match == Match.OUTSIDE_REFERENCES
                     ? replaceOutsideReferences(text, plaintexts, placeholder)
@@ -302,11 +300,12 @@ public final class SecretValueScrubber {
     }
 
     /**
-     * A string that holds serialized JSON, rewritten with every value that IS one
-     * of {@code exactValues} replaced, or {@code null} when it is not JSON or holds
-     * none — see {@link #scrubDeepExact}.
+     * A string that holds serialized JSON, rewritten with its decoded values (and,
+     * in substring mode, keys) scrubbed in the given {@code match} mode, or
+     * {@code null} when it is not JSON or carries none of the plaintexts — see
+     * {@link #scrubDeepExact}.
      */
-    private static String scrubEmbeddedJson(String text, List<String> exactValues, String placeholder) {
+    private static String scrubEmbeddedJson(String text, List<String> plaintexts, String placeholder, Match match) {
         String trimmed = text.strip();
         if (trimmed.length() < 2 || !(trimmed.startsWith("{") && trimmed.endsWith("}") || trimmed.startsWith("[") && trimmed.endsWith("]"))) {
             return null;
@@ -317,7 +316,7 @@ public final class SecretValueScrubber {
         } catch (JsonProcessingException e) {
             return null;
         }
-        Object cleaned = scrubSorted(tree, exactValues, placeholder, false, Match.EXACT);
+        Object cleaned = scrubSorted(tree, plaintexts, placeholder, false, match);
         if (cleaned == null) {
             return null;
         }

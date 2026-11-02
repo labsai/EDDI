@@ -29,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -167,6 +168,31 @@ class ResourceSharingServiceTest {
         assertTrue(result.updatedIds().contains(OWNED_CHILD),
                 "an agent shared without its config graph is a name pointing at documents the recipient cannot open");
         assertEquals(AccessLevel.VIEW, grantFor(descriptors.get(OWNED_CHILD), Subjects.user("carol")));
+    }
+
+    @Test
+    @DisplayName("a skipped resource the caller cannot even view is reported without its name")
+    void skippedUnreadableResourceHidesItsName() {
+        descriptors.get(BORROWED_CHILD).setName("Bob's private agent");
+        when(accessGuard.canAccess(any(), eq(AccessLevel.VIEW)))
+                .thenAnswer(i -> "alice".equals(i.<DocumentDescriptor>getArgument(0).getOwnerId()));
+
+        var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, true);
+
+        var skipped = result.skipped().stream().filter(t -> t.id().equals(BORROWED_CHILD)).findFirst().orElseThrow();
+        assertNull(skipped.name());
+    }
+
+    @Test
+    @DisplayName("a skipped resource the caller may view keeps its name")
+    void skippedViewableResourceKeepsItsName() {
+        descriptors.get(BORROWED_CHILD).setName("Shared with alice");
+        when(accessGuard.canAccess(any(), eq(AccessLevel.VIEW))).thenReturn(true);
+
+        var result = service.share(AGENT, Subjects.user("carol"), AccessLevel.VIEW, true);
+
+        var skipped = result.skipped().stream().filter(t -> t.id().equals(BORROWED_CHILD)).findFirst().orElseThrow();
+        assertEquals("Shared with alice", skipped.name());
     }
 
     @Test

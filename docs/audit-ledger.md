@@ -56,6 +56,15 @@ Each audit entry captures:
 | `timestamp`      | Instant | When the task completed                                    |
 | `hmac`           | String  | HMAC-SHA256 integrity hash                                 |
 
+### The ledger is the only copy of the prompt and the response
+
+While a turn runs, `LlmTask` keeps the compiled prompt (`audit:compiled_prompt`) and the model response (`audit:model_response`) on the conversation step, because `LifecycleManager` builds the entry from them. When the turn ends and the ledger has **accepted every entry** of the turn, both keys are removed from the step before the conversation is stored. A conversation document therefore does not repeat them: on a measured 20-step conversation the compiled prompt alone was a fifth of the document, and every read and write of the conversation paid for it.
+
+- **Read them from the ledger** — `GET /auditstore/{conversationId}`, `llmDetail.compiledPrompt` and `llmDetail.modelResponse` of the entry for that `stepIndex`. Nothing in the Manager, the Chat UI, the MCP tools or the GDPR export reads these two keys from conversation memory.
+- **Kept when the ledger did not take them** — a full queue (`eddi_audit_entries_dropped_total`) or a submit that throws leaves the keys in the stored step, so the evidence is not lost silently.
+- **Kept while a turn is paused** for human approval (`AWAITING_HUMAN`); the resume that completes the turn releases them.
+- **Not affected** — conversations stored before this change keep what they hold; `audit:tool_calls`, `audit:token_usage`, `audit:cost`, `audit:model_name` and the guardrail records stay on the step (agent tests, cost metering and the history replay read them); with `eddi.audit.enabled=false` the keys are never written and nothing changes.
+
 ## REST API
 
 The audit ledger exposes a **read-only** REST API. No create, update, or delete endpoints exist.
@@ -99,6 +108,8 @@ GET /auditstore/verify/{conversationId}?skip=0&limit=1000
 ```
 
 Recomputes every entry's HMAC and checks the per-conversation `sequence` for gaps. `limit` defaults to `1000` with a hard ceiling of `10000`; a non-positive value falls back to the default rather than meaning "unbounded". A non-zero `skip` makes the chain check report the range's own continuity only — the run can then not be anchored at sequence 0, so a deleted *first* entry is invisible on a paginated sweep.
+
+A window that also holds unsequenced rows is no longer simply `UNAVAILABLE`: a hole between its sequenced rows still proves a deletion and is reported `BROKEN`; only a window without such a hole is `UNAVAILABLE`, since its start cannot be anchored. With signing on, a position counts as present only when its row is signed by a form that covers the sequence (v3 and later) — a v1/v2 row's sequence is not signed and could be rewritten to close a hole. What the chain still cannot show is the deletion of the **newest** entries of a conversation, or of its whole trail: nothing outside the trail records where it ended.
 
 ### Verify an Agent's Integrity
 

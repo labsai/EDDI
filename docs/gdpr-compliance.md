@@ -159,6 +159,14 @@ principal, not a user: erasing or exporting it is refused with 400.
     other people's data and stay). Ratings deliberately outlive retention purges
     of transcripts, so no conversation sweep reaches them. See
     [Conversation Ratings](conversation-ratings.md)
+17. **Tool quota counters** (`toolQuotas`) — **permanently deleted** by the `toolQuotas`
+    participant: every counter whose subject equals the erased user id. A counter holds a subject
+    identifier and a count, no content, and expires on its own an hour after its window ends. When an
+    agent's `toolQuotas.subject` template derives an identifier other than the conversation's user id,
+    the counters sit under that identifier and are deleted when *that* identifier is erased. The export
+    carries the user's counters (tool or pool, window start, count) under `counters` in the
+    `toolQuotas` section of `additionalData`, at most 1,000; past that the section says
+    `"truncated": true` and the bundle reports `complete: false`
 
 ### 2. Right of Access (GDPR Art. 15) / Data Portability (Art. 20) / Right to Know (CCPA §1798.100)
 
@@ -332,6 +340,17 @@ default of 365 days, a conversation deleted this way can stay stored for up to a
 year. Use `deletePermanently=true` or a GDPR erasure when it has to go at once.
 (Earlier releases purged such a conversation at the next daily sweep if it had
 already ended, and never if it was still open.)
+
+**A deletion is all or nothing.** The retention sweep and `deletePermanently=true`
+remove the same things: the conversation's auto-vaulted secrets, attachments,
+memory checkpoints (copies of its properties) and HITL tool-journal entries, then
+its memory and descriptors. If any of the dependent deletes fails — or the secrets
+vault is unavailable while the conversation references auto-vaulted secrets — the
+memory and descriptors are kept: the permanent delete answers with an error and can
+simply be retried, and the sweep tries again on its next run. (The sweep used to
+skip checkpoints and tool-journal entries entirely, and both paths used to delete
+the memory after a failed attachment or checkpoint delete, which left those copies
+with nothing pointing at them.)
 
 **Ending idle conversations does not restart the retention clock.** Both the
 daily idle sweep and the admin bulk end

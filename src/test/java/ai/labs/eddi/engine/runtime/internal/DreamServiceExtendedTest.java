@@ -20,6 +20,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -298,6 +299,17 @@ class DreamServiceExtendedTest {
             var fits = DreamService
                     .mergeDuplicateKeys(List.of(new DreamService.ConsolidatedEntry("k", "a"), new DreamService.ConsolidatedEntry("k", "b")));
             assertEquals(List.of(new DreamService.ConsolidatedEntry("k", "a; b")), fits);
+        }
+
+        @Test
+        @DisplayName("a response full of duplicate keys is refused as soon as the merge passes the cap, not after copying it all")
+        void manyDuplicatesStopAtTheCap() {
+            var entries = new ArrayList<DreamService.ConsolidatedEntry>();
+            for (int i = 0; i < 200_000; i++) {
+                entries.add(new DreamService.ConsolidatedEntry("k", "value-" + i));
+            }
+            var merged = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> DreamService.mergeDuplicateKeys(entries));
+            assertTrue(merged.isEmpty());
         }
 
         @Test

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -14,6 +15,7 @@ import java.time.ZonedDateTime;
 import java.util.GregorianCalendar;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -172,6 +174,18 @@ class PdfReaderToolTest {
         private void mockThrow(Throwable t) throws Exception {
             org.mockito.Mockito.doThrow(t).when(mockedHttpClient).send(org.mockito.ArgumentMatchers.any(OutboundRequest.class),
                     org.mockito.ArgumentMatchers.any());
+        }
+
+        @Test
+        @org.junit.jupiter.api.DisplayName("the model-chosen PDF URL is sent STRICT, not HOPS_ONLY")
+        void download_isSentStrict() throws Exception {
+            mockStatus(404);
+
+            textOf(() -> mockedTool.extractTextFromPdf("https://example.com/doc.pdf"));
+
+            var request = ArgumentCaptor.forClass(OutboundRequest.class);
+            org.mockito.Mockito.verify(mockedHttpClient).send(request.capture(), org.mockito.ArgumentMatchers.any());
+            assertEquals(SsrfPolicy.STRICT, request.getValue().ssrfOverride());
         }
 
         @Test

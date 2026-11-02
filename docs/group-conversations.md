@@ -375,7 +375,10 @@ roster like any agent, but their turn **pauses the discussion**
   own principal (or an admin) may submit** — an `eddi-approver` may decide
   approvals, but speaking as another human is impersonation, not review. The
   answer is recorded as the phase's natural entry type (a human OPINION is an
-  OPINION) and the discussion resumes from the next speaker.
+  OPINION) and the discussion resumes from the next speaker. The response is
+  the group conversation for its owner or an admin; any other submitter (the
+  member themselves) gets `{groupConversationId, accepted, state}` — submitting
+  a turn does not grant the full view the status endpoint withholds from them.
 - This is deliberately NOT the approval surface: approve/reject endpoints never
   accept free text, and the pending-approvals inbox marks these entries
   `pauseType: "HUMAN_TURN"` with the member's id, so a human sees their own
@@ -642,7 +645,7 @@ content. The failure mode is a retry, never a silent bad merge.
 contain a match), `MAX_LENGTH` (characters) — never code. Specs are checked at
 config save time; at write time a failing validator refuses the write with its
 message and stores nothing. Content is additionally capped at 256 KB per
-artifact. A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
+artifact, and `maxArtifactsPerDiscussion` at 1000 (a larger value is refused on save). A `JSON_SCHEMA` spec must be self-contained: a `$ref` may point inside
 the schema (`#/$defs/...`) or at a bundled JSON Schema meta-schema, never at an
 `http(s):`, `file:` or other external location — such a spec is refused at save
 time, and nothing is fetched or read.
@@ -651,7 +654,13 @@ Off by default with the same absence discipline as the task tools: no opt-in
 means the tools are never assembled. The member agent's own
 `enableBuiltInTools` switch still applies — a member whose LLM task does not
 set it takes part **without** the tools, and saving a group that enables
-artifacts, agent task creation or dynamic agents logs that prerequisite. Artifact,
+artifacts, agent task creation or dynamic agents logs that prerequisite. So does
+its explicit tool selection: a member whose `builtInToolsWhitelist` is non-empty
+receives the artifact tools only if the list names `artifacts`, and the task
+tools only if it names `group_tasks` — a group opt-in never widens a whitelist
+the member's own configuration narrowed. An omitted or empty whitelist admits
+both, as before. When upgrading, add the two slugs to any member whitelist that
+should keep these tools; the Manager's tool picker offers both. Artifact,
 task and dynamic-agent tool results are never served from the tool cache: every
 member runs as the same user, so a cached `listArtifacts()` would hide a peer's
 new artifact. `markFinal: true` freezes an
@@ -1096,7 +1105,7 @@ Guardrails for dynamic agent creation are configured per-group via `AgentGroupCo
 | `maxRecruitedAgentsPerDiscussion` | `10` | Cap on recruited agents per discussion |
 | `delegationTimeoutSeconds` | `60` | How long a delegating agent waits for its delegate's turn. Non-positive falls back to the default |
 | `maxDelegationsPerTask` | `3` | Cap on delegations per task |
-| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused |
+| `maxDelegationDepth` | `3` | How deep a delegation chain may nest before it is refused. The ceiling travels with the chain: each hop applies the stricter of its own limit and the one it was handed, so a delegate with a higher limit cannot extend a chain the originator capped |
 | `allowedDelegationTargets` | `null` (any deployed agent) | Whitelist of agent ids a member may delegate to |
 | `lifecyclePolicy` | `EPHEMERAL` | `EPHEMERAL`, `KEEP_DEPLOYED`, `UNDEPLOY_ONLY`, or `AGENT_DECIDES` |
 | `inheritParentModel` | `true` | Created agents inherit the parent's provider, model and API-key **reference** — see below |
@@ -1183,7 +1192,7 @@ If tenant quotas are enabled, `QuotaExceededException` is propagated regardless 
 | `onAgentFailure` | `SKIP`, `RETRY`, `ABORT` | `SKIP` |
 | `maxRetries` | 0+ | 2 |
 | `onMemberUnavailable` | `SKIP`, `FAIL` | `SKIP` |
-| `maxTurns` | Any positive integer (0 or negative → default) | 50 |
+| `maxTurns` | A positive integer up to 1000 (0 → default; negative or above 1000 is refused on save). A phase's `repeats` is capped at 1000 too | 50 |
 | `maxCostPerDiscussion` | Dollars, or `null` for unlimited | `null` |
 | `onCostExceeded` | `SYNTHESIZE_NOW`, `ABORT` | `SYNTHESIZE_NOW` |
 

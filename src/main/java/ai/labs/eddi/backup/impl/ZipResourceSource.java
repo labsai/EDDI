@@ -123,6 +123,7 @@ public class ZipResourceSource implements IResourceSource {
         workflowDataList = new ArrayList<>();
 
         List<URI> workflowUris = agent.config().getWorkflows();
+        IResourceSource.requireWorkflowCountWithinLimit(workflowUris);
         for (int i = 0; i < workflowUris.size(); i++) {
             try {
                 WorkflowSourceData wfData = readSingleWorkflow(workflowUris.get(i), i);

@@ -126,6 +126,33 @@ class A2AWireFormatTest {
         }
 
         @Test
+        void overlongIdentifiersAreInvalidParams() {
+            String longId = "x".repeat(A2AWireFormat.MAX_ID_LENGTH + 1);
+            var parts = List.of(Map.of("kind", "text", "text", "hi"));
+
+            for (String key : List.of("contextId", "taskId", "messageId")) {
+                Map<String, Object> params = Map.of("message", Map.of("parts", parts, key, longId));
+                var e = assertThrows(InvalidA2ARequestException.class, () -> A2AWireFormat.parseSend(params, Dialect.V1_0), key);
+                assertEquals(A2AModels.ERROR_INVALID_PARAMS, e.getCode());
+            }
+            assertThrows(InvalidA2ARequestException.class,
+                    () -> A2AWireFormat.parseSend(Map.of("message", Map.of("parts", parts), "contextId", longId), Dialect.V0_3));
+            assertThrows(InvalidA2ARequestException.class, () -> A2AWireFormat.requireTaskId(Map.of("id", longId)));
+            String okId = "y".repeat(A2AWireFormat.MAX_ID_LENGTH);
+            assertEquals(okId, A2AWireFormat.parseSend(Map.of("message", Map.of("parts", parts, "contextId", okId)), Dialect.V1_0).contextId());
+        }
+
+        @Test
+        void requestIdShapes() {
+            assertTrue(A2AWireFormat.isAcceptableRequestId(null));
+            assertTrue(A2AWireFormat.isAcceptableRequestId(7));
+            assertTrue(A2AWireFormat.isAcceptableRequestId("req-1"));
+            assertFalse(A2AWireFormat.isAcceptableRequestId("x".repeat(A2AWireFormat.MAX_ID_LENGTH + 1)));
+            assertFalse(A2AWireFormat.isAcceptableRequestId(Map.of("a", "b")));
+            assertFalse(A2AWireFormat.isAcceptableRequestId(List.of(1)));
+        }
+
+        @Test
         void onlyFileParts_isContentTypeNotSupported() {
             Map<String, Object> params = Map.of("message",
                     Map.of("parts", List.of(Map.of("url", "https://x/y.pdf", "mediaType", "application/pdf"))));

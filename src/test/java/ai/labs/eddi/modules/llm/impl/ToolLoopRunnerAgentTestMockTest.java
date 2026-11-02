@@ -65,7 +65,7 @@ class ToolLoopRunnerAgentTestMockTest {
         service = mock(ToolExecutionService.class);
         var truncator = mock(ToolResponseTruncator.class);
         // The 6-argument overload (conversation id first) is what the loop calls.
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
         runner = new ToolLoopRunner(service, truncator, null, null, null, null, null, new ToolResultGuardrail(new SimpleMeterRegistry()));
         executors.put("getAvailability", (_, _) -> "real " + executed.incrementAndGet());
         executors.put("createBooking", (_, _) -> "real " + executed.incrementAndGet());
@@ -193,7 +193,7 @@ class ToolLoopRunnerAgentTestMockTest {
 
         var result = runner.executeToolCall(ToolExecutionRequest.builder().id("c1").name("getAvailability").arguments("{}").build(), memory,
                 new ArrayList<>(), executors, Map.of(), Map.of(), Map.of("getAvailability", "http"), 100, null, "conv-1", false, false,
-                false, task, false, List.of(), new ArrayList<>());
+                false, task, false, List.of(), new ArrayList<>(), ToolLoopRunner.NO_RUN_SPEND);
 
         assertTrue(result.notExecuted(), result.raw());
         assertEquals(0, executed.get());
@@ -259,10 +259,10 @@ class ToolLoopRunnerAgentTestMockTest {
 
         var mocked = runner.executeToolCall(ToolExecutionRequest.builder().id("c1").name("getAvailability").arguments("{}").build(), memory,
                 new ArrayList<>(), executors, Map.of(), Map.of(), Map.of("getAvailability", "http"), 100, null, "conv-1", false, false,
-                false, task, false, List.of(), new ArrayList<>());
+                false, task, false, List.of(), new ArrayList<>(), ToolLoopRunner.NO_RUN_SPEND);
         var refused = runner.executeToolCall(ToolExecutionRequest.builder().id("c2").name("createBooking").arguments("{}").build(), memory,
                 new ArrayList<>(), executors, Map.of(), Map.of(), Map.of("createBooking", "http"), 100, null, "conv-1", false, false,
-                false, task, false, List.of(), new ArrayList<>());
+                false, task, false, List.of(), new ArrayList<>(), ToolLoopRunner.NO_RUN_SPEND);
 
         assertFalse(mocked.notExecuted());
         assertTrue(refused.notExecuted());

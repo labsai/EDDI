@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -456,5 +457,40 @@ class LlmTaskSpendGateTest {
         assertThrows(ToolApprovalRequiredException.class, () -> run(task()));
 
         verify(dataFactory, times(1)).createData(eq(AUDIT_COST), any());
+    }
+
+    // === One spend point for every exit (review finding #2) ===
+
+    @Test
+    @DisplayName("a model phase that fails: what it spent before failing goes on the step's audit:cost and audit:token_usage")
+    void failureRecordsTheSpendSoFar() throws Exception {
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        when(agentOrchestrator.executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any()))
+                .thenThrow(UnrecordedSpend.attach(new LifecycleException("round 7 failed"), Map.of("inputTokens", 2000), 0.02, 0.01));
+
+        assertThrows(LifecycleException.class, () -> run(task()));
+
+        // TurnCostMeter charges the failed turn's step from this, and the next turn's
+        // maxCostPerConversationUsd check counts it.
+        verify(dataFactory).createData(eq(AUDIT_COST), doubleThat(d -> Math.abs(d - 0.03) < 1e-12));
+        verify(dataFactory).createData(eq(AUDIT_TOKEN_USAGE),
+                argThat(u -> u instanceof Map<?, ?> m && Long.valueOf(2000).equals(m.get("inputTokens"))));
+    }
+
+    @Test
+    @DisplayName("the rolling summary's call is priced and recorded like any other paid call")
+    void summaryCallIsPriced() throws Exception {
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(new CountingModel());
+        var task = task();
+        task.setInputPricePer1M(0.01);
+        var summary = new LlmConfiguration.ConversationSummaryConfig();
+        summary.setEnabled(true);
+        task.setConversationSummary(summary);
+        when(conversationSummarizer.updateIfNeeded(any(), any(), any(), any(), any(), any()))
+                .thenReturn(Map.of("inputTokens", 1_000_000, "outputTokens", 0));
+
+        run(task);
+
+        verify(dataFactory).createData(eq(AUDIT_COST), doubleThat(d -> Math.abs(d - 0.01) < 1e-12));
     }
 }

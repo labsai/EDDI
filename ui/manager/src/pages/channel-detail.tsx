@@ -20,7 +20,7 @@ import { SecretKeyPicker } from "@/components/shared/secret-key-picker";
 import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-secrets";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
-import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
@@ -341,6 +341,8 @@ export function ChannelDetailPage() {
       await deleteMutation.mutateAsync({ id, version });
       // Gone: nothing left to lose, so leaving must not ask.
       setBaseline(JSON.stringify(draft));
+      // `setBaseline` has not re-rendered yet, so the guard would still block.
+      allowNextNavigation();
       navigate("/manage/channels");
     } catch (err) {
       toast.error(getErrorMessage(err));

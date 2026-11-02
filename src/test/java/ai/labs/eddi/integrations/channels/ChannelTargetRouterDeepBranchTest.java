@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.LegacyTarget;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -54,7 +55,8 @@ class ChannelTargetRouterDeepBranchTest {
         doReturn(List.of()).when(descriptorStore).readDescriptors(anyString(), anyString(), anyInt(), anyInt(), anyBoolean());
         doReturn(List.of()).when(agentAdmin).readAllDeploymentStatuses(any());
 
-        router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, cacheFactory);
+        router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, mock(VaultHostAllowlist.class),
+                cacheFactory);
         // Prevent refresh from running during tests
         setField(router, "lastRefreshTime", Long.MAX_VALUE);
     }
@@ -615,5 +617,15 @@ class ChannelTargetRouterDeepBranchTest {
             assertEquals(2, secrets.size());
             assertTrue(secrets.contains("sec1"));
         }
+    }
+
+    @Test
+    @DisplayName("isServedByLegacyConnector never answers from a cached integration")
+    void legacyOnlyOwnership() throws Exception {
+        setField(router, "integrationMap", Map.of("slack:C0INT", new ChannelIntegrationConfiguration()));
+
+        assertFalse(router.isServedByLegacyConnector("slack", "C0INT"));
+        assertFalse(router.isServedByLegacyConnector("slack", " "));
+        assertTrue(router.isChannelOwned("slack", "C0INT"));
     }
 }

@@ -13,7 +13,6 @@ export const WEBHOOK_SIGNATURE_SCHEMES = ["eddi-v1", "github", "generic-hmac"] a
 export function webhookEndpointUrl(origin: string, integrationId: string): string {
   return `${origin}/integrations/webhook/${integrationId}`;
 }
-export type ChannelType = (typeof CHANNEL_TYPES)[number];
 
 export type TargetType = "AGENT" | "GROUP";
 

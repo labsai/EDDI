@@ -294,8 +294,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      * </p>
      *
      * <p>
-     * Fails <em>open</em>: a store outage must not block deployments. The denial is
-     * logged and metered either way.
+     * When the count cannot be read the gate fails <em>closed</em> — but only for a
+     * tenant whose agent quota actually applies: with no quota, a disabled one or
+     * an unlimited one a store outage blocks nothing. It used to fail open for
+     * everyone, so an outage was exactly when an exhausted quota stopped holding.
+     * The refusal is a 503 ({@link QuotaAccountingUnavailableException}), as for
+     * the conversation and API-call gates, and is metered on
+     * {@code eddi.tenant.quota.unavailable{type=agent}}.
      * </p>
      *
      * <p>
@@ -332,14 +337,23 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             }
 
             for (Deployment.Environment env : Deployment.Environment.values()) {
-                for (IAgent agent : agentFactory.getAllLatestAgents(env)) {
+                // Every runtime version, not only the latest: a newer version that failed
+                // to deploy must not hide an older one that is still live and serving.
+                for (IAgent agent : agentFactory.getAllDeployedAgents(env)) {
                     if (agent.getAgentId() != null && agent.getDeploymentStatus() == READY) {
                         deployedAgentIds.add(agent.getAgentId());
                     }
                 }
             }
         } catch (Exception e) {
-            log.warnf("Agent quota check: could not determine the deployed-agent count, allowing deploy of %s: %s", agentId, e.getMessage());
+            var unavailable = tenantQuotaService.agentCountUnavailable(tenantQuotaService.getDefaultTenantId());
+            if (!unavailable.allowed()) {
+                log.warnf("Agent quota check: could not determine the deployed-agent count, refusing deploy of %s: %s", sanitize(agentId),
+                        sanitize(e.getMessage()));
+                throw new QuotaAccountingUnavailableException(unavailable.reason(), e);
+            }
+            log.debugf("Agent quota check: could not determine the deployed-agent count; no agent quota applies, allowing deploy of %s",
+                    sanitize(agentId));
             return;
         }
 
@@ -449,8 +463,21 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // conversation moves to: the undeploys run asynchronously, so while the loop
         // checks v5 the record for v6 — undeployed a moment ago in this same call —
         // may still say "deployed".
+        final boolean thisAndAllPrevious = Boolean.TRUE.equals(undeployThisAndAllPreviousAgentVersions);
+        if (thisAndAllPrevious) {
+            // The range walks every version from `version` down to 1, one store read and
+            // one undeploy task each. It used to walk whatever integer the caller sent, so
+            // version=2147483647 tied up the request thread, the executor and the database
+            // for billions of iterations and wrote an "undeployed" record for every
+            // version that never existed. Versions are numbered 1..current, so the agent's
+            // current version is the highest one there can be anything to undeploy.
+            Response refusal = refuseVersionBeyondCurrent(environment, agentId, version);
+            if (refusal != null) {
+                return refusal;
+            }
+        }
         final int highestUndeployed = version;
-        final int lowestUndeployed = Boolean.TRUE.equals(undeployThisAndAllPreviousAgentVersions) ? 1 : version;
+        final int lowestUndeployed = thisAndAllPrevious ? 1 : version;
         try {
             // Schedules belong to the agent, not to a version, and a fire starts on
             // whatever version is deployed. They used to be disabled by ANY undeploy —
@@ -508,6 +535,59 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             log.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * The refusal of a bulk undeploy that starts above the agent's current version,
+     * or {@code null} when {@code version} is a version the agent has.
+     */
+    private Response refuseVersionBeyondCurrent(Deployment.Environment environment, String agentId, int version) {
+        Integer currentVersion;
+        // Whether the ceiling below is a version actually read, or only the highest one
+        // a lookup happened to find.
+        boolean ceilingIsAuthoritative = true;
+        try {
+            var currentId = documentDescriptorStore.getCurrentResourceId(agentId);
+            currentVersion = currentId != null ? currentId.getVersion() : null;
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            currentVersion = null;
+        } catch (RuntimeException e) {
+            log.errorf(e, "Could not read the current version of Agent %s", sanitize(agentId));
+            throw new InternalServerErrorException("Could not read the current version of the agent", e);
+        }
+        if (currentVersion == null) {
+            // The agent's documents are gone (deleted while still deployed): what is
+            // left to undeploy is what is still deployed.
+            var lookup = lookupDeployedVersions(environment, agentId);
+            var deployed = lookup.versions();
+            if (deployed.isEmpty() && !lookup.complete()) {
+                // "None found" and "could not look" are different answers: a 404 here would
+                // tell
+                // the operator the agent has nothing deployed while versions may still be.
+                throw new InternalServerErrorException("Could not read the deployed versions of Agent " + sanitize(agentId)
+                        + "; retry once the deployment records are readable");
+            }
+            if (deployed.isEmpty()) {
+                return Response.status(Response.Status.NOT_FOUND).entity("Agent " + sanitize(agentId) + " has no version to undeploy")
+                        .type(MediaType.TEXT_PLAIN).build();
+            }
+            currentVersion = deployed.first();
+            ceilingIsAuthoritative = lookup.complete();
+        }
+        if (version > currentVersion && !ceilingIsAuthoritative) {
+            // A partial lookup can only have missed versions: the requested one may exist,
+            // so this is the
+            // lookup's failure to report, not a 400 about the caller's input.
+            throw new InternalServerErrorException("Could not read every deployed version of Agent " + sanitize(agentId)
+                    + "; retry once the deployment records are readable");
+        }
+        if (version < 1 || version > currentVersion) {
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(String.format("Agent %s has versions 1 to %d; version %d does not exist", sanitize(agentId), currentVersion,
+                            version))
+                    .type(MediaType.TEXT_PLAIN).build();
+        }
+        return null;
     }
 
     private List<ConversationStatus> openConversationsOf(String agentId, int version) throws Exception {
@@ -606,7 +686,19 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      * Every deployed version of the agent in {@code environment}, highest first.
      */
     private SortedSet<Integer> deployedVersions(Deployment.Environment environment, String agentId) {
+        return lookupDeployedVersions(environment, agentId).versions();
+    }
+
+    /**
+     * The deployed versions found, and whether both lookups answered (an empty set
+     * is only "none" when they did).
+     */
+    private record DeployedVersions(SortedSet<Integer> versions, boolean complete) {
+    }
+
+    private DeployedVersions lookupDeployedVersions(Deployment.Environment environment, String agentId) {
         SortedSet<Integer> versions = new TreeSet<>(Comparator.reverseOrder());
+        boolean complete = true;
         try {
             for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed)) {
                 if (agentId.equals(info.getAgentId()) && info.getEnvironment() == environment && info.getAgentVersion() != null) {
@@ -614,6 +706,7 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 }
             }
         } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            complete = false;
             log.warnf("Could not read the deployment records of Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
         }
         try {
@@ -623,9 +716,10 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
                 }
             }
         } catch (ServiceException | RuntimeException e) {
+            complete = false;
             log.warnf("Could not list the running versions of Agent %s: %s", sanitize(agentId), sanitize(e.getMessage()));
         }
-        return versions;
+        return new DeployedVersions(versions, complete);
     }
 
     /**

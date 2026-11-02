@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   groupGroupsByName,
+  isHumanInputAcknowledgement,
   parseGroupResourceUri,
+  type GroupConversation,
   type GroupDescriptor,
 } from "../groups";
 
@@ -325,5 +327,18 @@ describe("deleteGroupWithMembers — failures are reported, and a permanent dele
     expect(err.groupDeleted).toBe(true);
     expect(err.failedAgentIds).toEqual(["agent-a"]);
     expect(calls()[0]).toBe("/groupstore/groups/grp1?version=3&permanent=false");
+  });
+});
+
+describe("isHumanInputAcknowledgement", () => {
+  it("recognises the pending member's acknowledgement", () => {
+    expect(
+      isHumanInputAcknowledgement({ groupConversationId: "gc-1", accepted: true, state: "IN_PROGRESS" }),
+    ).toBe(true);
+  });
+
+  it("does not mistake the full conversation for one", () => {
+    const conversation = { id: "gc-1", transcript: [], state: "IN_PROGRESS" } as unknown as GroupConversation;
+    expect(isHumanInputAcknowledgement(conversation)).toBe(false);
   });
 });

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.PropertyExpectation;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.TestCase;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.ToolMock;
 import ai.labs.eddi.configs.agenttests.model.AgentTestSuite.Turn;
+import ai.labs.eddi.engine.agenttests.BoundedRegex;
 
 import java.util.List;
 import java.util.Set;
@@ -64,7 +65,10 @@ public final class AgentTestSuiteValidator {
         if (suite == null) {
             throw new IllegalArgumentException("A test suite body is required.");
         }
-        if (suite.maxCostPerRun() != null && (suite.maxCostPerRun() < 0 || suite.maxCostPerRun() > MAX_COST_PER_RUN_CEILING)) {
+        // Written as "not inside the range" so NaN is refused too: every comparison
+        // with NaN is false, so "< 0 || > ceiling" let it through, and the runner's
+        // "spent > budget" check then never stopped a run.
+        if (suite.maxCostPerRun() != null && !(suite.maxCostPerRun() >= 0 && suite.maxCostPerRun() <= MAX_COST_PER_RUN_CEILING)) {
             throw new IllegalArgumentException("maxCostPerRun must be between 0 and " + MAX_COST_PER_RUN_CEILING + " (USD).");
         }
         validateDefaults(suite.defaults());
@@ -195,8 +199,8 @@ public final class AgentTestSuiteValidator {
         if (expect.maxToolCalls() != null && expect.maxToolCalls() < 0) {
             throw new IllegalArgumentException(where + ".maxToolCalls cannot be negative.");
         }
-        if (expect.maxCostUsd() != null && expect.maxCostUsd() < 0) {
-            throw new IllegalArgumentException(where + ".maxCostUsd cannot be negative.");
+        if (expect.maxCostUsd() != null && !(expect.maxCostUsd() >= 0 && Double.isFinite(expect.maxCostUsd()))) {
+            throw new IllegalArgumentException(where + ".maxCostUsd must be a finite, non-negative amount.");
         }
         if (expect.conversationState() != null && !CONVERSATION_STATES.contains(expect.conversationState())) {
             throw new IllegalArgumentException(where + ".conversationState must be one of " + CONVERSATION_STATES + ".");
@@ -215,6 +219,9 @@ public final class AgentTestSuiteValidator {
         } catch (PatternSyntaxException e) {
             throw new IllegalArgumentException(where + " is not a valid regular expression: " + e.getDescription());
         }
+        BoundedRegex.excessiveRepetition(regex).ifPresent(reason -> {
+            throw new IllegalArgumentException(where + " " + reason + ".");
+        });
     }
 
     private static boolean isBlank(String value) {

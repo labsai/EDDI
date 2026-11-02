@@ -230,6 +230,23 @@ class HttpClientModuleTest {
     }
 
     @Test
+    @DisplayName("a cross-origin hop drops a credential under any header name, keeping only content-negotiation headers")
+    void crossOriginHopDropsUnlistedHeaders() {
+        HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);
+        RequestOptions next = hopTo("evil.example.net", 443, true);
+        next.addHeader("X-Custom-Token", "literal-secret");
+        next.addHeader("Ocp-Apim-Subscription-Key", "another-secret");
+        next.addHeader("User-Agent", "EDDI");
+
+        HttpClientModule.stripCredentialsIfCrossOrigin(original, next);
+
+        assertNull(next.getHeaders().get("X-Custom-Token"));
+        assertNull(next.getHeaders().get("Ocp-Apim-Subscription-Key"));
+        assertTrue(next.getHeaders().contains("User-Agent"));
+        assertTrue(next.getHeaders().contains("Accept"));
+    }
+
+    @Test
     @DisplayName("a cross-origin redirect hop is stripped of the W3C trace context too")
     void crossOriginHopStripsTraceContext() {
         HttpClientRequest original = requestFrom("https://api.example.com/thing", "api.example.com", 443);

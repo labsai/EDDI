@@ -45,15 +45,46 @@ import java.util.concurrent.atomic.AtomicReference;
  * an {@code abandoned} gate plus lock so a timed-out attempt's late tokens can
  * never interleave with a retry's output on the shared sink.
  * <p>
- * <strong>Known limitation (documented, accepted):</strong> the tool loop
- * retries a failed model round. If a round fails after some tokens were already
- * forwarded, the retry streams that round again from its start, so the client
- * may see a repeated prefix of that one round during a provider flake. Earlier
- * rounds are never re-streamed (the loop no longer replays whole attempts), and
- * memory is unaffected — it stores only the final returned text.
+ * <strong>A round that fails after forwarding text is not retried.</strong> The
+ * tool loop retries a failed model round, and a retry streams the round again
+ * from its start into the same sink — the client rendered the failed attempt's
+ * fragment glued to the retry's full answer (the cascade solved the same
+ * problem for its steps by streaming only the last one, finding F9). Tokens
+ * cannot be taken back, so such a failure is raised as a
+ * {@link PartiallyStreamedRoundException}, which the retry classifies as
+ * non-retryable; a round that failed before forwarding anything is retried as
+ * before. Earlier rounds are never re-streamed (the loop no longer replays
+ * whole attempts), and memory is unaffected — it stores only the final returned
+ * text.
  */
 class ToolLoopStreamingChatModel implements ChatModel {
     private static final Logger LOGGER = Logger.getLogger(ToolLoopStreamingChatModel.class);
+
+    /**
+     * A model round that failed after part of its text had reached the client.
+     * Deliberately carries no cause and no provider wording: the retry classifies a
+     * failure by its cause chain and message, and this one must read as
+     * non-retryable whatever the provider said. The provider's failure is attached
+     * as a suppressed exception (not walked by the classifier) and logged.
+     * <p>
+     * The message is a fixed string for the same reason. It used to carry the
+     * number of characters forwarded, and the classifier's last-resort wording test
+     * reads a standalone {@code 429}, {@code 502}, {@code 503} or {@code 504} as a
+     * transient HTTP status: a round that failed after exactly 503 characters was
+     * retried into the same sink. The count and the model type go to the log, which
+     * {@link #partiallyStreamed} writes before raising this.
+     */
+    static final class PartiallyStreamedRoundException extends RuntimeException {
+        static final String MESSAGE = "Streaming model round failed after part of its text had been sent to the client; "
+                + "not retried, a retry would send that text again";
+
+        PartiallyStreamedRoundException(Throwable providerFailure) {
+            super(MESSAGE);
+            if (providerFailure != null) {
+                addSuppressed(providerFailure);
+            }
+        }
+    }
 
     private final StreamingChatModel delegate;
     private final ConversationEventSink eventSink;
@@ -177,8 +208,10 @@ class ToolLoopStreamingChatModel implements ChatModel {
             // .isRetryableError keys on. Without it a provider timeout on the
             // streaming transport would fail the turn immediately while the
             // synchronous path retries with backoff.
-            throw new RuntimeException(String.format("[%s] Chat request timed out after %dms", modelType, timeoutSeconds * 1000),
+            RuntimeException timeout = new RuntimeException(
+                    String.format("[%s] Chat request timed out after %dms", modelType, timeoutSeconds * 1000),
                     new TimeoutException("streaming chat exceeded " + timeoutSeconds + "s backstop"));
+            throw partiallyStreamed(forwarded, streamLock, timeout);
         }
 
         Throwable error = errorRef.get();
@@ -186,12 +219,30 @@ class ToolLoopStreamingChatModel implements ChatModel {
             synchronized (streamLock) {
                 abandoned.set(true);
             }
-            throw error instanceof RuntimeException re ? re : new RuntimeException(error);
+            throw partiallyStreamed(forwarded, streamLock, error instanceof RuntimeException re ? re : new RuntimeException(error));
         }
 
         synchronized (streamLock) {
             lastForwardedText = forwarded.toString();
         }
         return responseRef.get();
+    }
+
+    /**
+     * {@code failure} as it should leave this round: unchanged when nothing was
+     * forwarded (the retry may run the round again), otherwise a
+     * {@link PartiallyStreamedRoundException} the retry will not repeat.
+     */
+    private RuntimeException partiallyStreamed(StringBuilder forwarded, Object streamLock, RuntimeException failure) {
+        int forwardedChars;
+        synchronized (streamLock) {
+            forwardedChars = forwarded.length();
+        }
+        if (forwardedChars == 0) {
+            return failure;
+        }
+        LOGGER.warnf("[%s] Streaming model round failed after %d characters were sent to the client; not retrying it: %s", modelType,
+                forwardedChars, failure.getMessage());
+        return new PartiallyStreamedRoundException(failure);
     }
 }

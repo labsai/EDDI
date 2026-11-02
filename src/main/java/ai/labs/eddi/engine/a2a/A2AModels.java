@@ -120,8 +120,16 @@ public final class A2AModels {
     public record JsonRpcRequest(String jsonrpc, String method, Map<String, Object> params, Object id) {
     }
 
+    /**
+     * A JSON-RPC 2.0 response. {@code id} is written even when it is null: the
+     * specification requires the member on every response, and an answer to a
+     * request whose id could not be read carries {@code "id": null}. The other
+     * members keep the class-level NON_NULL rule, so exactly one of {@code result}
+     * and {@code error} appears.
+     */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record JsonRpcResponse(String jsonrpc, Object id, Object result, JsonRpcError error) {
+    public record JsonRpcResponse(String jsonrpc, @JsonInclude(JsonInclude.Include.ALWAYS) Object id, Object result,
+            JsonRpcError error) {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

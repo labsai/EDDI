@@ -126,4 +126,45 @@ class ChatModelRegistryAllowedHostsTest {
 
         verify(allowlist, never()).requireAllowed(anyMap(), anyString(), anyString());
     }
+
+    @Test
+    @DisplayName("Vertex's apiEndpoint is an endpoint key like any other")
+    void vertexApiEndpointIsChecked() throws Exception {
+        registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "apiEndpoint", "attacker.example:443"));
+
+        verify(allowlist).requireAllowed(anyMap(), eq("attacker.example:443"), eq("LLM provider 'openai'"));
+    }
+
+    @Test
+    @DisplayName("a builder whose default an editor can steer (a region) is checked against that default")
+    void steerableDefaultEndpointIsChecked() throws Exception {
+        Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+        builders.put("regional", () -> new ILanguageModelBuilder() {
+            @Override
+            public ChatModel build(Map<String, String> parameters) {
+                return new ChatModel() {
+                    @Override
+                    public ChatResponse doChat(ChatRequest chatRequest) {
+                        return ChatResponse.builder().aiMessage(AiMessage.from("ok")).build();
+                    }
+                };
+            }
+
+            @Override
+            public String defaultEndpoint(Map<String, String> parameters) {
+                return "https://" + parameters.getOrDefault("region", "us") + ".vendor.example/v1";
+            }
+        });
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        var regional = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, allowlist);
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist).requireAllowed(anyMap(),
+                eq("https://eu.vendor.example/v1"), anyString());
+
+        assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                () -> regional.getOrCreate("regional", Map.of("apiKey", "${vault:k}", "region", "eu")));
+        verify(secretResolver, never()).resolveSecrets(any());
+    }
 }
