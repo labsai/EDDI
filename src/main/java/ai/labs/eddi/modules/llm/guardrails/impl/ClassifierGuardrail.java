@@ -155,7 +155,7 @@ public class ClassifierGuardrail implements ContentGuardrail {
 
     @Override
     public Set<GuardrailPhase> phases() {
-        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT);
+        return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL);
     }
 
     /** A model call per earlier message on every turn is too expensive. */

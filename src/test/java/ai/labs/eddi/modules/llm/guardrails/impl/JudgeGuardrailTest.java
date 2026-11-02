@@ -525,7 +525,7 @@ class JudgeGuardrailTest {
         @Test
         @DisplayName("output only, no history screening")
         void phases() {
-            assertEquals(Set.of(GuardrailPhase.OUTPUT), judge.phases());
+            assertEquals(Set.of(GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL), judge.phases());
             assertFalse(judge.screensHistory());
         }
     }

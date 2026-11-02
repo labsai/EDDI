@@ -473,7 +473,7 @@ class ClassifierGuardrailTest {
     @DisplayName("history is not screened by the classifier")
     void noHistory() {
         assertFalse(classifier.screensHistory());
-        assertEquals(Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT), classifier.phases());
+        assertEquals(Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT, GuardrailPhase.TOOL_CALL), classifier.phases());
     }
 
     // === through the GuardrailService: failMode ===

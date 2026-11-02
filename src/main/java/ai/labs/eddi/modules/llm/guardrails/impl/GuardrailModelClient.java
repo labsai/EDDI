@@ -260,12 +260,13 @@ final class GuardrailModelClient {
     /**
      * The template data every model-backed guardrail offers: {@code input} (the
      * user's message; in the output phase, the user message the model answered),
-     * {@code output} (the answer, output phase) and {@code context} (the turn's
-     * retrieved context, output phase, only with {@code includeRetrievedContext}).
+     * {@code output} (the answer, output phase; the screened argument, tool-call
+     * phase) and {@code context} (the turn's retrieved context, output phase, only
+     * with {@code includeRetrievedContext}).
      */
     static Map<String, Object> templateData(String text, GuardrailContext context) {
         String screened = text != null ? text : "";
-        boolean output = context.phase() == GuardrailPhase.OUTPUT;
+        boolean output = context.phase() != GuardrailPhase.INPUT;
         Map<String, Object> data = new HashMap<>();
         data.put("input", output ? lastUserText(context.messages()) : screened);
         data.put("output", output ? screened : "");
