@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
+import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
@@ -3142,6 +3143,7 @@ export const handlers = [
   http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+  ...teamHandoffHandlers,
 
   // ── I10 — packaged group templates ──
 

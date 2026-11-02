@@ -10,10 +10,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { BackLink } from "@/components/shared/back-link";
 import { AlertDialog } from "@/components/ui/alert-dialog";
+import { HandoffInbox } from "@/components/groups/handoff-inbox";
+import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
 import { useGroup } from "@/hooks/use-groups";
 import { useSchedules } from "@/hooks/use-schedules";
+import { useAgentNames } from "@/hooks/use-agent-names";
+import { useDeleteWorkspaceBacklogTask } from "@/hooks/use-team-handoffs";
 import {
   describeCron,
   formatInstantInZone,
@@ -122,6 +126,8 @@ export function GroupWorkspacePage() {
   const addTask = useAddWorkspaceBacklogTask(groupId);
   const addCadence = useAddWorkspaceCadence(groupId);
   const deleteCadence = useDeleteWorkspaceCadence(groupId);
+  const deleteTask = useDeleteWorkspaceBacklogTask(groupId);
+  const { nameOf } = useAgentNames();
 
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
@@ -137,6 +143,7 @@ export function GroupWorkspacePage() {
   const [maxCostPerRun, setMaxCostPerRun] = useState("");
   const [cadenceError, setCadenceError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleteTaskTarget, setDeleteTaskTarget] = useState<string | null>(null);
 
   function handleAddTask() {
     setTaskError(null);
@@ -301,6 +308,9 @@ export function GroupWorkspacePage() {
         </div>
       )}
 
+      {/* Cross-team handoff: work other teams or agents want to hand to this one */}
+      <HandoffInbox groupId={groupId!} items={workspace.handoffs?.inbox ?? []} nameOf={nameOf} />
+
       {/* Backlog */}
       <div className="rounded-xl border border-border bg-card p-4" data-testid="workspace-backlog">
         <h3 className="mb-3 flex items-center justify-between text-sm font-semibold text-foreground">
@@ -309,7 +319,7 @@ export function GroupWorkspacePage() {
         <p className="mb-3 text-xs text-muted-foreground" data-testid="workspace-backlog-note">
           {t(
             "groupWorkspace.backlogNote",
-            "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited or removed once it is added; a run completes it.",
+            "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited once it is added; a run completes it, or you can delete it.",
           )}
         </p>
 
@@ -321,6 +331,7 @@ export function GroupWorkspacePage() {
               <div key={task.id} className="rounded-lg border border-border bg-secondary/20 p-2.5" data-testid={`backlog-task-${task.id}`}>
                 <div className="flex items-center gap-2">
                   <span className="flex-1 text-xs font-medium text-foreground">{task.subject}</span>
+                  <HandoffOriginBadge origin={workspace.handoffs?.origins?.[task.id]} nameOf={nameOf} />
                   <span className={cn("rounded-full px-1.5 py-0 text-[9px] font-medium", STATUS_BADGE[task.status] ?? "bg-muted")}>
                     {t(`groups.taskStatus.${task.status}`, STATUS_FALLBACK[task.status] ?? task.status)}
                   </span>
@@ -331,6 +342,16 @@ export function GroupWorkspacePage() {
                   >
                     P{task.priority}
                   </span>
+                  <button
+                    type="button"
+                    className="text-muted-foreground hover:text-destructive"
+                    title={t("teamHandoff.deleteTask", "Delete this task")}
+                    aria-label={t("teamHandoff.deleteTask", "Delete this task")}
+                    onClick={() => setDeleteTaskTarget(task.id)}
+                    data-testid={`backlog-task-delete-${task.id}`}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
                 </div>
                 {task.description && <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>}
               </div>
@@ -574,6 +595,29 @@ export function GroupWorkspacePage() {
           {cadenceError && <p className="text-xs text-destructive" data-testid="workspace-cadence-error">{cadenceError}</p>}
         </div>
       </div>
+
+      <AlertDialog
+        open={deleteTaskTarget !== null}
+        onOpenChange={(open) => !open && setDeleteTaskTarget(null)}
+        title={t("teamHandoff.deleteTaskTitle", "Delete this task?")}
+        description={t(
+          "teamHandoff.deleteTaskDesc",
+          "It leaves the backlog for good. A task a cadence run is working right now cannot be deleted.",
+        )}
+        confirmLabel={t("common.delete")}
+        cancelLabel={t("common.cancel")}
+        variant="destructive"
+        isPending={deleteTask.isPending}
+        onConfirm={() => {
+          if (deleteTaskTarget) {
+            deleteTask.mutate(deleteTaskTarget, {
+              onSuccess: () => toast.success(t("teamHandoff.taskDeleted", "Task deleted")),
+              onError: (err) => toast.error(getErrorMessage(err)),
+            });
+          }
+          setDeleteTaskTarget(null);
+        }}
+      />
 
       <AlertDialog
         open={deleteTarget !== null}
