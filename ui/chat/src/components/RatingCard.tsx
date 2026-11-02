@@ -30,6 +30,9 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
   const [tags, setTags] = useState<string[]>(current?.tags ?? []);
   const [comment, setComment] = useState(current?.comment ?? "");
   const [busy, setBusy] = useState(false);
+  // Set by the person's own interaction. A rating that arrives later (the restore
+  // read finished after the card opened) fills the card only while untouched.
+  const touched = useRef(false);
   const starRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const headingRef = useRef<HTMLParagraphElement | null>(null);
 
@@ -43,7 +46,16 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
     if (phase === "thanks") headingRef.current?.focus();
   }, [phase]);
 
+  useEffect(() => {
+    if (!current || touched.current) return;
+    setScore(current.score);
+    setTags(current.tags);
+    setComment(current.comment ?? "");
+    setPhase("thanks");
+  }, [current]);
+
   const pick = async (value: number) => {
+    touched.current = true;
     setBusy(true);
     setScore(value);
     const ok = await onSubmit({ score: value, tags, comment });
@@ -58,6 +70,7 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
 
   const send = async () => {
     if (score === null) return;
+    touched.current = true;
     setBusy(true);
     const ok = await onSubmit({ score, tags, comment });
     setBusy(false);
@@ -65,6 +78,7 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
   };
 
   const withdraw = async () => {
+    touched.current = true;
     setBusy(true);
     const ok = await onWithdraw();
     setBusy(false);
@@ -76,8 +90,10 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
     }
   };
 
-  const toggleTag = (tag: string) =>
+  const toggleTag = (tag: string) => {
+    touched.current = true;
     setTags((list) => (list.includes(tag) ? list.filter((x) => x !== tag) : [...list, tag]));
+  };
 
   // Arrow keys move between the stars (roving focus); Enter or Space rates.
   const onStarKey = (e: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -201,7 +217,10 @@ export function RatingCard({ profile, current, onSubmit, onWithdraw, onClose }: 
                   placeholder={t("rating.comment.placeholder")}
                   maxLength={profile.commentMaxLength}
                   value={comment}
-                  onChange={(e) => setComment(e.target.value)}
+                  onChange={(e) => {
+                    touched.current = true;
+                    setComment(e.target.value);
+                  }}
                   rows={3}
                   data-testid="rating-card-comment"
                 />
