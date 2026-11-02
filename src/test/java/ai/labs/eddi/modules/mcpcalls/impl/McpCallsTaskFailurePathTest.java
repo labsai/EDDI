@@ -238,7 +238,17 @@ class McpCallsTaskFailurePathTest {
         @DisplayName("an interrupted turn is not a failed call: no error entry, no postResponse, continueOnError ignored")
         void interruptedTurnIsNotARecoverableFailure() throws Exception {
             meteringSwallowsExceptions();
-            when(executor.execute(any(), any())).thenReturn("{\"status\":\"sent\"}");
+            // The call runs on a worker thread and the caller waits on its Future. A Future
+            // that
+            // has already completed returns its result without looking at the caller's
+            // interrupt
+            // flag, so a call that answers at once makes this test pass or fail on thread
+            // scheduling. A call still running when the caller waits always sees the
+            // interrupt.
+            when(executor.execute(any(), any())).thenAnswer(invocation -> {
+                Thread.sleep(500);
+                return "{\"status\":\"sent\"}";
+            });
             when(memory.getTurnDeadline())
                     .thenReturn(TurnDeadline.of(Clock.systemUTC(), System.currentTimeMillis(), 60_000, 1_000L));
             var config = configWithOneCall(true, 1);
