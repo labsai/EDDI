@@ -29,6 +29,8 @@ import {
   ArrowRightLeft,
   ShieldUser,
   Briefcase,
+  MessageSquareHeart,
+  BellRing,
   type LucideIcon,
 } from "lucide-react";
 
@@ -91,6 +93,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { path: "/manage/conversations/monitoring", icon: Radio, labelKey: "nav.activeConversations", fallback: "Active Conversations" },
       { path: "/manage/coordinator", icon: Network, labelKey: "nav.coordinator", fallback: "Coordinator" },
       { path: "/manage/approvals", icon: Hand, labelKey: "nav.approvals", fallback: "Approvals" },
+      { path: "/manage/feedback", icon: MessageSquareHeart, labelKey: "nav.feedback", fallback: "Feedback" },
+      { path: "/manage/alerts", icon: BellRing, labelKey: "nav.alerts", fallback: "Alerts" },
       { path: "/manage/audit", icon: ShieldCheck, labelKey: "nav.audit", fallback: "Audit Trail" },
     ],
   },
@@ -172,6 +176,8 @@ const SEGMENT_LABELS: Record<string, LabelRef> = {
   operator: ["nav.operator", "Platform Operator"],
   channels: ["nav.channels", "Channels"],
   approvals: ["nav.approvals", "Approvals"],
+  feedback: ["nav.feedback", "Feedback"],
+  alerts: ["nav.alerts", "Alerts"],
   variables: ["nav.variables", "Variables"],
   workspaces: ["nav.workspaces", "Workspaces"],
   memories: ["nav.memories", "User Memory"],

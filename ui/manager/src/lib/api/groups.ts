@@ -239,9 +239,21 @@ export interface ConvergenceConfig {
    * accepted but currently falls back to MODERATOR with a backend warning.
    */
   judge: ConvergenceJudge;
+  /**
+   * What the judge decides (E2). `"SIMILARITY"` (default, absent on configs saved
+   * before 6.6) scores agreement with the previous repeat against `threshold`.
+   * `"VERDICT"` reviews the latest repeat against the question and ends the phase
+   * once it passes; `threshold` is unused and `minRepeats` may be 1.
+   */
+  mode?: ConvergenceMode;
 }
 
 export type ConvergenceJudge = "MODERATOR" | "SERVICE";
+
+export type ConvergenceMode = "SIMILARITY" | "VERDICT";
+
+/** Backend `AgentGroupConfiguration.MAX_REWORKS_LIMIT`: the save-time bound of `maxReworks`. */
+export const MAX_REWORKS = 5;
 
 /** `VoteConfig.method` (I14). No SUPERMAJORITY exists — only these two. */
 export type VoteMethod = "MAJORITY" | "APPROVAL";
@@ -542,6 +554,12 @@ export interface AgentGroupConfiguration {
    * summary, which is the failure mode a minority report exists to prevent.
    */
   recordDissents?: boolean;
+  /**
+   * Reworks per task within one run (E2): a task that fails VERIFY goes back to
+   * its member with the verifier's feedback, up to this many times, then stays
+   * FAILED. `0`/absent keeps a failed verification final. Backend bound 0..5.
+   */
+  maxReworks?: number;
   /** Whether members may file their own tasks mid-discussion (I5). Absent = tools not assembled. */
   taskListConfig?: GroupTaskConfig | null;
   /** Bounds for RETRO-phase lesson harvesting (I8). `null` runs RETRO with defaults (3 per run / 50 stored). */
@@ -1380,6 +1398,25 @@ export function closeGroupConversation(
 }
 
 /**
+ * What `POST .../human-input` answers a pending member who is neither the
+ * discussion's owner nor an admin: an acknowledgement, not the conversation.
+ * `state` is the server's state name, or `""` when it has none.
+ */
+export interface HumanInputAcknowledgement {
+  groupConversationId: string;
+  accepted: true;
+  state: GroupConversationState | "";
+}
+
+/** Either shape `submitHumanInput` resolves to; narrow before reading fields. */
+export type HumanInputResult = GroupConversation | HumanInputAcknowledgement;
+
+/** Whether a `submitHumanInput` result is the acknowledgement, not the conversation. */
+export function isHumanInputAcknowledgement(result: HumanInputResult): result is HumanInputAcknowledgement {
+  return "accepted" in result && !("transcript" in result);
+}
+
+/**
  * Submit a HUMAN group member's turn (I6) — records their reply as the pending
  * transcript entry and resumes an AWAITING_HUMAN_INPUT discussion from the next
  * speaker. Only the pending member's own principal (or an admin) may call this;
@@ -1388,6 +1425,9 @@ export function closeGroupConversation(
  * discussion.
  * POST /groups/{groupId}/conversations/{groupConversationId}/human-input
  * Body: HumanInputRequest { memberId, content }.
+ * Response: the full GroupConversation only for its owner or an admin; the
+ * pending member gets `{ groupConversationId, accepted, state }` instead, so
+ * callers must not read conversation fields off the result.
  * Failures: 400 (blank content, unknown member, or memberId not matching the
  * pending turn), 403 (not the pending member/admin), 404, 409 (concurrent
  * modification or the discussion left AWAITING_HUMAN_INPUT some other way).
@@ -1397,8 +1437,8 @@ export function submitHumanInput(
   gcId: string,
   memberId: string,
   content: string,
-): Promise<GroupConversation> {
-  return api.post<GroupConversation>(
+): Promise<HumanInputResult> {
+  return api.post<HumanInputResult>(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/human-input`,
     { memberId, content },
   );

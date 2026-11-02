@@ -26,13 +26,16 @@ import {
   useDeleteGroup,
   useDeleteGroupWithMembers,
   useAvailableStyles,
+  useGroupVersionLookup,
 } from "@/hooks/use-groups";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { styleDisplay } from "@/lib/discussion-styles";
 import {
   MAX_DISCUSSION_ROUNDS,
   MAX_GROUP_MEMBERS,
   DEFAULT_MAX_DELEGATION_DEPTH,
   DEFAULT_DELEGATION_TIMEOUT_SECONDS,
+  MAX_REWORKS,
   normalizeLifecyclePolicy,
   type DiscussionStyle,
   type GroupMember,
@@ -90,7 +93,7 @@ function SectionHeader({
           <ChevronRight
             className={cn(
               "h-4 w-4 text-muted-foreground transition-transform duration-200",
-              expanded && "rotate-90"
+              expanded ? "rotate-90" : "rtl:rotate-180"
             )}
           />
         )}
@@ -266,10 +269,22 @@ function WorkforceSettings() {
   const navigate = useNavigate();
   const { boardId } = useParams<{ boardId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
-  const version = Number(searchParams.get("version")) || 1;
+  // This page edits and deletes, so it must read the group's CURRENT version
+  // when the URL names none: defaulting to 1 loaded a stale document whose save
+  // and delete both 409 on any group past its first version.
+  const {
+    version: resolvedVersion,
+    lookupFailed: versionLookupFailed,
+    retry: retryVersionLookup,
+  } = useGroupVersionLookup(boardId, searchParams.get("version"));
+  const version = resolvedVersion ?? 1;
 
   // ─── Data hooks ──────────────────────────────────────────────────
-  const { data: config, isLoading, isError } = useGroup(boardId ?? "", version);
+  const { data: config, isLoading: isConfigLoading, isError } = useGroup(
+    resolvedVersion !== undefined ? (boardId ?? "") : "",
+    resolvedVersion,
+  );
+  const isLoading = isConfigLoading || (resolvedVersion === undefined && !versionLookupFailed);
   const { mutateAsync: updateGroupAsync, isPending: isUpdatePending } = useUpdateGroup();
   const deleteMutation = useDeleteGroup();
   const deleteWithMembersMutation = useDeleteGroupWithMembers();
@@ -289,6 +304,8 @@ function WorkforceSettings() {
   const [dynamicAgents, setDynamicAgents] = useState<DynamicAgentConfig>(DEFAULT_DYNAMIC);
   const [tasks, setTasks] = useState<TaskDefinition[]>([]);
   const [recordDissents, setRecordDissents] = useState(false);
+  /** Reworks per task after a failed VERIFY (E2); 0 = a failed verification is final. */
+  const [maxReworks, setMaxReworks] = useState(0);
   const [taskListConfig, setTaskListConfig] = useState<GroupTaskConfig>(DEFAULT_GROUP_TASK_CONFIG);
   /** Raw text of the delegation allow-list; see the field for why it is separate. */
   const [delegationTargetsDraft, setDelegationTargetsDraft] = useState("");
@@ -328,6 +345,7 @@ function WorkforceSettings() {
     );
     setTasks(cfg.tasks ?? []);
     setRecordDissents(!!cfg.recordDissents);
+    setMaxReworks(cfg.maxReworks ?? 0);
     setTaskListConfig(
       cfg.taskListConfig ? normalizeGroupTaskConfig(cfg.taskListConfig) : DEFAULT_GROUP_TASK_CONFIG,
     );
@@ -364,6 +382,7 @@ function WorkforceSettings() {
     ) return true;
     if (JSON.stringify(tasks) !== JSON.stringify(cfg.tasks ?? [])) return true;
     if (recordDissents !== !!cfg.recordDissents) return true;
+    if (maxReworks !== (cfg.maxReworks ?? 0)) return true;
     if (
       JSON.stringify(taskListConfig) !==
       JSON.stringify(
@@ -373,7 +392,7 @@ function WorkforceSettings() {
       )
     ) return true;
     return false;
-  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, taskListConfig]);
+  }, [name, description, style, maxRounds, moderatorAgentId, members, protocol, hitlConfig, dynamicAgents, tasks, recordDissents, maxReworks, taskListConfig]);
 
   const isDirty = useMemo(() => (config ? formDiffersFrom(config) : false), [config, formDiffersFrom]);
 
@@ -410,19 +429,15 @@ function WorkforceSettings() {
     }
   }, [config, version, baseline, formDiffersFrom, initFrom]);
 
-  // ─── Beforeunload guard ─────────────────────────────────────────
-  useEffect(() => {
-    if (!isDirty) return;
-    const h = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-    };
-    window.addEventListener('beforeunload', h);
-    return () => window.removeEventListener('beforeunload', h);
-  }, [isDirty]);
+  // ─── Unsaved-changes guard ──────────────────────────────────────
+  // The browser prompt on close/reload AND the in-app prompt for links, Back and
+  // navigate() — the page used to register only the former, so a sidebar click
+  // dropped the edits silently.
+  useUnsavedChangesGuard(isDirty);
 
   // ─── Save handler ───────────────────────────────────────────────
   const handleSave = useCallback(async () => {
-    if (!boardId || !config) return;
+    if (!boardId || !config || resolvedVersion === undefined) return;
     if (!name.trim()) {
       toast.error(t("Workforce.settings.nameRequired", "Task force name is required"));
       return;
@@ -457,6 +472,8 @@ function WorkforceSettings() {
       dynamicAgents,
       tasks: style === "TASK_FORCE" ? tasks : config.tasks,
       recordDissents,
+      // 0 is the default: keep a group that never set it free of the field.
+      ...(maxReworks > 0 || config.maxReworks ? { maxReworks } : {}),
       // Absent means the addGroupTask/listGroupTasks tools are never assembled.
       // Writing a disabled block instead would be equivalent for the engine but
       // is noise in the stored document, so only persist it once it is on — or
@@ -504,8 +521,10 @@ function WorkforceSettings() {
     dynamicAgents,
     tasks,
     recordDissents,
+    maxReworks,
     taskListConfig,
     version,
+    resolvedVersion,
     updateGroupAsync,
     setSearchParams,
     t,
@@ -513,7 +532,7 @@ function WorkforceSettings() {
 
   // ─── Delete handler ─────────────────────────────────────────────
   const handleDelete = useCallback(() => {
-    if (!boardId || !config) return;
+    if (!boardId || !config || resolvedVersion === undefined) return;
 
     if (deleteMode === "all") {
       deleteWithMembersMutation.mutate(
@@ -526,6 +545,9 @@ function WorkforceSettings() {
                 "Task force and all agents deleted"
               )
             );
+            // The group is gone: its edits are moot, and `isDirty` has not
+            // re-rendered yet, so the navigation guard would still block this.
+            allowNextNavigation();
             navigate("/workforce");
           },
           onError: (err) => {
@@ -544,6 +566,9 @@ function WorkforceSettings() {
             toast.success(
               t("Workforce.settings.deleteSuccess", "Task force deleted")
             );
+            // The group is gone: its edits are moot, and `isDirty` has not
+            // re-rendered yet, so the navigation guard would still block this.
+            allowNextNavigation();
             navigate("/workforce");
           },
           onError: () => {
@@ -560,6 +585,7 @@ function WorkforceSettings() {
     deleteMode,
     deletePermanently,
     version,
+    resolvedVersion,
     deleteMutation,
     deleteWithMembersMutation,
     navigate,
@@ -655,13 +681,20 @@ function WorkforceSettings() {
   }
 
   // ─── Error state ───────────────────────────────────────────────
-  if (isError || (!isLoading && !config)) {
+  if (versionLookupFailed || isError || (!isLoading && !config)) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8">
         <p>{t("Workforce.settings.loadError", "Failed to load settings")}</p>
-        <Button onClick={() => navigate('/workforce')}>
-          {t('Workforce.back', 'Back')}
-        </Button>
+        <div className="flex gap-2">
+          {versionLookupFailed && (
+            <Button variant="outline" onClick={retryVersionLookup} data-testid="settings-retry-version">
+              {t("common.retry", "Retry")}
+            </Button>
+          )}
+          <Button onClick={() => navigate('/workforce')}>
+            {t('Workforce.back', 'Back')}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -676,7 +709,7 @@ function WorkforceSettings() {
         to={`/workforce/${boardId}?version=${version}`}
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         {t("Workforce.settings.backToBoard", "Back to Task Force")}
       </Link>
 
@@ -852,10 +885,10 @@ function WorkforceSettings() {
               one the backend only ever wrote to its own log. */}
           {moderatorlessPhases.length > 0 && (
             <div
-              className="flex items-start gap-2.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+              className="flex items-start gap-2.5 rounded-lg border border-warn-500/30 bg-warn-500/5 px-3 py-2.5"
               data-testid="moderatorless-phase-warning"
             >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-500" />
               <p className="text-xs text-muted-foreground">
                 {t(
                   "Workforce.settings.moderatorlessWarning",
@@ -871,12 +904,12 @@ function WorkforceSettings() {
               says so until the transcript comes back hollow. */}
           {roleGaps.length > 0 && (
             <div
-              className="flex flex-col gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2.5"
+              className="flex flex-col gap-1.5 rounded-lg border border-warn-500/30 bg-warn-500/5 px-3 py-2.5"
               data-testid="role-coverage-warning"
             >
               {roleGaps.map((gap) => (
                 <div key={gap.role} className="flex items-start gap-2.5">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warn-500" />
                   <p className="text-xs text-muted-foreground">
                     {t(
                       "groups.roleCoverageWarning",
@@ -1097,6 +1130,20 @@ function WorkforceSettings() {
               <input id="settings-max-turns" type="number" min={0} max={100} step={1} value={protocol.maxTurns ?? 0}
                 onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setProtocol((p) => ({ ...p, maxTurns: Math.max(0, Math.min(100, v)) })); }}
                 className="h-10 w-full sm:w-1/2 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+            </FormField>
+            {/* maxReworks (E2) — a task that fails VERIFY goes back to its member
+                with the verifier's feedback. Bounded by maxTurns and the ceiling. */}
+            <FormField label={t("Workforce.settings.maxReworks", "Reworks after a failed verification (0–5)")} htmlFor="settings-max-reworks">
+              <input id="settings-max-reworks" type="number" min={0} max={MAX_REWORKS} step={1} value={maxReworks}
+                onChange={(e) => { const v = Number(e.target.value); if (!isNaN(v)) setMaxReworks(Math.max(0, Math.min(MAX_REWORKS, Math.trunc(v)))); }}
+                data-testid="settings-max-reworks"
+                className="h-10 w-full sm:w-1/2 rounded-lg border border-input bg-background ps-3 pe-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring transition-shadow" />
+              <p className="mt-1 text-xs text-muted-foreground">
+                {t(
+                  "Workforce.settings.maxReworksDesc",
+                  "A task the verifier fails goes back to its member with the feedback, up to this many times. 0 keeps a failed verification final.",
+                )}
+              </p>
             </FormField>
 
             {/* Cost ceiling (EDDI I1) — a dollar bound on the whole discussion,
@@ -1701,7 +1748,7 @@ function WorkforceSettings() {
             className={cn(
               "text-xs transition-opacity duration-200",
               isDirty
-                ? "text-amber-500 opacity-100"
+                ? "text-warn-500 opacity-100"
                 : "text-muted-foreground opacity-0"
             )}
           >

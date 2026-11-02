@@ -267,6 +267,30 @@ describe("AgentDetailPage", () => {
     });
   });
 
+  it("does not offer Deploy while the status of this version is unknown (first fetch pending)", async () => {
+    // The status never answers: an unknown status must not read as "not deployed".
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => new Promise<Response>(() => {})),
+    );
+
+    renderAgentDetail();
+    const button = await screen.findByTestId("deploy-btn");
+
+    expect(button).toBeDisabled();
+    expect(button).not.toHaveTextContent(/^Deploy$/i);
+  });
+
+  it("does not offer Deploy when the status lookup failed", async () => {
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", () => HttpResponse.json({ error: "down" }, { status: 500 })),
+    );
+
+    renderAgentDetail();
+    const button = await screen.findByTestId("deploy-btn");
+
+    await waitFor(() => expect(button).toBeDisabled(), { timeout: 5000 });
+  });
+
   // ─── Undeploy flow — now gated behind a confirmation dialog ─────────────
   it("undeploy button opens a confirmation dialog and only fires on confirm", async () => {
     let undeployCalled = false;

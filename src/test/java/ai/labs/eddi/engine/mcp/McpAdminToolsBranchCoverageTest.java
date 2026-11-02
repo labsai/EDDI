@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import java.time.Duration;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.AgentCascadeService;
@@ -889,6 +890,18 @@ class McpAdminToolsBranchCoverageTest {
             String result = tools.deleteSchedule("sched1");
             verify(scheduleStore).deleteSchedule("sched1");
         }
+
+        @Test
+        @DisplayName("the alerts-maintenance system schedule is refused with SYSTEM_SCHEDULE")
+        void systemScheduleRefused() throws Exception {
+            var system = new ScheduleConfiguration();
+            system.setName("alerts-maintenance");
+            system.setMetadata(Map.of("alertType", "alert_maintenance"));
+            when(scheduleStore.readSchedule("sys")).thenReturn(system);
+            String result = tools.deleteSchedule("sys");
+            assertTrue(result.contains("SYSTEM_SCHEDULE"), result);
+            verify(scheduleStore, never()).deleteSchedule("sys");
+        }
     }
 
     @Nested
@@ -948,6 +961,25 @@ class McpAdminToolsBranchCoverageTest {
             // schedule on its third failure logged as "attempt 1" and hid the history.
             inOrder.verify(scheduleFireExecutor).fire(schedule, "inst1", 3);
             inOrder.verify(schedulePollerService).recordManualFireOutcome(schedule, fireLog);
+        }
+
+        @Test
+        @DisplayName("a fire past its deadline answers a timeout and leaves the claim to expire")
+        void deadlineAnswersATimeoutAndKeepsTheClaim() throws Exception {
+            var schedule = new ScheduleConfiguration();
+            schedule.setName("test");
+            when(scheduleStore.readSchedule("sched1")).thenReturn(schedule);
+            when(schedulePollerService.getInstanceId()).thenReturn("inst1");
+            when(schedulePollerService.manualFireDeadline()).thenReturn(Duration.ofMillis(100));
+            when(scheduleFireExecutor.fire(any(), anyString(), anyInt())).thenAnswer(inv -> {
+                Thread.sleep(10_000);
+                return null;
+            });
+
+            String result = tools.fireScheduleNow("sched1");
+
+            assertTrue(result.contains("did not finish within its bound"), result);
+            verify(schedulePollerService, never()).recordManualFireOutcome(any(), any());
         }
 
         @Test

@@ -139,6 +139,20 @@ class TenantQuotaServiceTest {
     // --- Agent capacity ---
 
     @Test
+    @DisplayName("agentCountUnavailable — refuses (accounting unavailable) only while an agent limit is in force")
+    void agentCountUnavailableFailsClosedOnlyUnderALimit() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));
+        QuotaCheckResult limited = quotaService.agentCountUnavailable(TENANT_ID);
+        assertFalse(limited.allowed());
+        assertTrue(limited.accountingUnavailable());
+
+        quotaService.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, -1.0, true));
+        assertTrue(quotaService.agentCountUnavailable(TENANT_ID).allowed(), "unlimited agents");
+        quotaService.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, false));
+        assertTrue(quotaService.agentCountUnavailable(TENANT_ID).allowed(), "quota disabled");
+    }
+
+    @Test
     @DisplayName("checkAgentQuota — allows when below the agent limit")
     void shouldAllowBelowAgentLimit() {
         quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, 3, -1, -1.0, true));
@@ -205,6 +219,19 @@ class TenantQuotaServiceTest {
         QuotaCheckResult result = quotaService.checkCostBudget(TENANT_ID);
         assertFalse(result.allowed());
         assertTrue(result.reason().contains("Monthly cost budget"));
+    }
+
+    @Test
+    @DisplayName("unsettled spend counts toward the cost budget; a negative or non-finite amount counts as none")
+    void unsettledSpendCounts() {
+        quotaStore.setQuota(new TenantQuota(TENANT_ID, -1, -1, -1, 100.0, true));
+        quotaService.recordCost(TENANT_ID, 99.0);
+
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, 0.5).allowed());
+        assertFalse(quotaService.checkCostBudget(TENANT_ID, 1.0).allowed(), "99 recorded + 1 unsettled reaches the 100 budget");
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, -5.0).allowed());
+        assertTrue(quotaService.checkCostBudget(TENANT_ID, Double.NaN).allowed());
+        assertTrue(quotaService.checkCostBudget(TENANT_ID).allowed(), "the one-argument form is unchanged");
     }
 
     @Test

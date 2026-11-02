@@ -76,6 +76,8 @@ const LinkedAccountsPage = lazyPage(
 );
 const ChannelDetailPage = lazyPage(() => import("@/pages/channel-detail"), "ChannelDetailPage");
 const ApprovalsPage = lazyPage(() => import("@/pages/approvals"), "ApprovalsPage");
+const FeedbackPage = lazyPage(() => import("@/pages/feedback"), "FeedbackPage");
+const AlertsPage = lazyPage(() => import("@/pages/alerts"), "AlertsPage");
 const OperatorPage = lazyPage(() => import("@/pages/operator"), "OperatorPage");
 const UpdatesPage = lazyPage(() => import("@/pages/updates"), "UpdatesPage");
 
@@ -198,6 +200,8 @@ export function App() {
                 suggest otherwise to anyone reading the route table. */}
             <Route path="/manage/linked-accounts" element={<LinkedAccountsPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
+            <Route path="/manage/feedback" element={<FeedbackPage />} />
+            <Route path="/manage/alerts" element={<AlertsPage />} />
             <Route path="/manage/updates" element={<UpdatesPage />} />
             {/* Redirects from old standalone user-data pages */}
             <Route

@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.schedule.rest;
 
+import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.exception.ErrorResponses;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
@@ -18,9 +21,11 @@ import ai.labs.eddi.engine.runtime.internal.DreamService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import io.quarkus.security.ForbiddenException;
@@ -195,9 +200,19 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            Response continuationGuard = rejectContinuationBody(schedule, "create");
+            if (continuationGuard != null) {
+                return continuationGuard;
+            }
+
             Response ingestionGuard = rejectIngestionBody(schedule, "create");
             if (ingestionGuard != null) {
                 return ingestionGuard;
+            }
+
+            Response alertGuard = rejectAlertBody(schedule, "create");
+            if (alertGuard != null) {
+                return alertGuard;
             }
 
             Response cadenceGuard = rejectTeamCadenceBody(schedule, null, "create");
@@ -280,9 +295,19 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return bodyGuard;
             }
 
+            Response continuationGuard = rejectContinuationBody(schedule, "update");
+            if (continuationGuard != null) {
+                return continuationGuard;
+            }
+
             Response ingestionGuard = rejectIngestionBody(schedule, "update");
             if (ingestionGuard != null) {
                 return ingestionGuard;
+            }
+
+            Response alertGuard = rejectAlertBody(schedule, "update");
+            if (alertGuard != null) {
+                return alertGuard;
             }
 
             // ONE read of the stored row, shared by every guard below and by the
@@ -311,6 +336,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             // be able to mutate it (e.g. push its nextFire far out to defeat an
             // ABORT/AUTO_REJECT deadline). Detect via the STORED schedule so a
             // request body that omits the metadata cannot bypass the check.
+            Response systemGuard = rejectSystemSchedule(stored, "update");
+            if (systemGuard != null) {
+                return systemGuard;
+            }
+
             Response guard = requireAdminForHitl(stored, "update");
             if (guard != null) {
                 return guard;
@@ -477,6 +507,16 @@ public class RestScheduleStore implements IRestScheduleStore {
                 }
                 resourceAccessGuard.requireAccess(ragConfigId, AccessLevel.EDIT, "RAG configuration");
             }
+            if (EmailPollSchedules.isEmailPollSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // Polling now reads the mailbox and starts turns: the authority of
+                // editing the integration.
+                String integrationId = EmailPollSchedules.integrationId(schedule.getMetadata());
+                if (integrationId == null || integrationId.isBlank()) {
+                    return Response.status(Response.Status.BAD_REQUEST)
+                            .entity("This email poll schedule names no integration and cannot be fired.").build();
+                }
+                resourceAccessGuard.requireAccess(integrationId, AccessLevel.EDIT, "channel integration");
+            }
             if (TeamCadenceService.isTeamCadenceSchedule(schedule != null ? schedule.getMetadata() : null)) {
                 // A cadence fire pulls the group's backlog and runs a discussion as the
                 // cadence's creator: the same authority as editing the group's cadences,
@@ -491,6 +531,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                         .entity("This schedule is a human-in-the-loop approval timeout and cannot be fired manually. "
                                 + "Approve or reject via POST /agents/{conversationId}/resume, "
                                 + "or terminate via POST /agents/{conversationId}/cancel.")
+                        .build();
+            }
+            if (ConversationContinuations.isContinuationSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // The next turn of a self-continuing conversation: the engine armed it
+                // after a committed turn and runs it once, with its own input and
+                // once-only check. Firing it by hand would run another user's job early,
+                // on the request's identity rather than none.
+                LOGGER.warnf("Refused manual fire of continuation schedule %s (name=%s)", sanitize(scheduleId),
+                        sanitize(schedule.getName()));
+                return Response.status(Response.Status.CONFLICT)
+                        .entity("This schedule is the next turn of a self-continuing conversation and cannot be fired manually. "
+                                + "It runs on its own; end or cancel the conversation to stop it.")
                         .build();
             }
             // Checked on the STORED schedule: firing one that acts as another user is
@@ -523,8 +575,22 @@ public class RestScheduleStore implements IRestScheduleStore {
             // fire log read as a fresh first try and hid the failure history.
             int attemptNumber = schedule.getFailCount() + 1;
             ScheduleFireLog fireLog = null;
+            boolean abandoned = false;
             try {
-                fireLog = fireExecutor.fire(schedule, pollerService.getInstanceId(), attemptNumber);
+                // Bounded like a polled fire: unbounded, a long run outlived its claim's
+                // lease and the poller started the same schedule a second time.
+                String instanceId = pollerService.getInstanceId();
+                fireLog = SchedulePollerService.runWithinDeadline(() -> fireExecutor.fire(schedule, instanceId, attemptNumber),
+                        pollerService.manualFireDeadline());
+            } catch (SchedulePollerService.FireAbandonedException e) {
+                // Not released: a worker that ignores the interrupt is still acting, and
+                // releasing the
+                // claim would let the poller start another attempt alongside it. The lease
+                // expiry
+                // counts it as a failed attempt.
+                abandoned = true;
+                LOGGER.warnf("Manual fire of schedule %s was abandoned (%s); its claim is left to expire", sanitize(scheduleId),
+                        e.getMessage());
             } finally {
                 // Always release the claim, whatever happened — a manual fire that left
                 // the row CLAIMED would block the poller until the lease expired.
@@ -542,12 +608,20 @@ public class RestScheduleStore implements IRestScheduleStore {
                 // still reaches the caller.
                 boolean wasInterrupted = Thread.interrupted();
                 try {
-                    pollerService.recordManualFireOutcome(schedule, fireLog);
+                    if (!abandoned) {
+                        pollerService.recordManualFireOutcome(schedule, fireLog);
+                    }
                 } finally {
                     if (wasInterrupted) {
                         Thread.currentThread().interrupt();
                     }
                 }
+            }
+            if (abandoned) {
+                return Response.status(Response.Status.GATEWAY_TIMEOUT)
+                        .entity("The fire did not finish within its bound and was interrupted; it may still be running. The schedule stays claimed "
+                                + "until its lease expires, then counts as a failed attempt.")
+                        .build();
             }
             return Response.ok(fireLog).build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -731,6 +805,10 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private static String manualFireRefusalReason(ScheduleConfiguration schedule) {
         FireStatus status = schedule != null ? schedule.getFireStatus() : null;
+        if (schedule != null && !schedule.isEnabled()) {
+            return "This schedule is disabled, and a disabled schedule cannot be claimed or fired. "
+                    + "Use POST /schedulestore/schedules/{id}/enable first.";
+        }
         if (FireStatus.DEAD_LETTERED == status) {
             return "This schedule is dead-lettered after " + schedule.getFailCount()
                     + " failed attempt(s) and will not fire until it is requeued. "
@@ -868,6 +946,24 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private Response guardManagedSchedule(ScheduleConfiguration stored) {
         Map<String, Object> md = stored != null ? stored.getMetadata() : null;
+        if (EmailPollSchedules.isEmailPollSchedule(md)) {
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is managed by email channel integration '" + EmailPollSchedules.integrationId(md)
+                            + "'. Change pollSeconds on the integration instead; it re-creates this schedule when saved.")
+                    .build();
+        }
+        // A continuation schedule is the engine's own next turn of a conversation:
+        // changing its input or timing, or clearing its marker with an empty metadata
+        // object, would let an editor steer or orphan another user's job. Judged on the
+        // STORED row, since the request body can omit or blank the marker.
+        if (ConversationContinuations.isContinuationSchedule(md)) {
+            LOGGER.warnf("Refused update of continuation schedule %s — it is managed by the conversation engine",
+                    sanitize(stored.getId()));
+            return Response.status(Response.Status.CONFLICT)
+                    .entity("This schedule is the next turn of a self-continuing conversation and cannot be updated. "
+                            + "End or cancel the conversation to stop it.")
+                    .build();
+        }
         if (RagIngestionSchedules.isIngestionSchedule(md)) {
             LOGGER.warnf("Refused update of ingestion schedule %s — it is managed by knowledge base %s",
                     sanitize(stored.getId()), sanitize(RagIngestionSchedules.ragConfigId(md)));
@@ -935,6 +1031,16 @@ public class RestScheduleStore implements IRestScheduleStore {
      * they have no access to. The ids needed are readable by anyone with VIEW.
      */
     private Response rejectIngestionBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && EmailPollSchedules.declaresEmailPoll(schedule.getMetadata())) {
+            // A poll fire reads a mailbox with its integration's credentials and starts
+            // turns; a forged body naming someone's integration would do that on demand.
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — email poll schedules are minted internally only",
+                    sanitize(operation), EmailPollSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as email polls (metadata " + EmailPollSchedules.METADATA_TYPE_KEY + ") cannot be created or "
+                            + "updated via this API. They are managed automatically when an email channel integration is saved.")
+                    .build();
+        }
         if (schedule != null && RagIngestionSchedules.isIngestionSchedule(schedule.getMetadata())) {
             LOGGER.warnf("Refused %s of a schedule whose body declares %s — ingestion schedules are minted "
                     + "internally only", operation, RagIngestionSchedules.METADATA_TYPE_KEY);
@@ -946,6 +1052,79 @@ public class RestScheduleStore implements IRestScheduleStore {
                     .build();
         }
         return null;
+    }
+
+    /**
+     * Refuses a schedule body that claims an alert role ({@code alertType}) or the
+     * reserved name {@code alerts-maintenance}. That schedule is created by the
+     * server itself: a second one made by hand would only run the same job twice,
+     * and a same-named row without the marker would pass for the real one by name.
+     */
+    private Response rejectAlertBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata()) || AlertSchedules.isReservedName(schedule.getName()))) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — alert schedules are minted internally only", operation,
+                    AlertSchedules.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules named " + AlertSchedules.SCHEDULE_NAME + " or marked as alert maintenance (metadata "
+                            + AlertSchedules.METADATA_TYPE_KEY + ") cannot be created or updated via this API. The server manages the "
+                            + AlertSchedules.SCHEDULE_NAME + " schedule itself.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * Continuation schedules are minted only by {@code ConversationContinuations}
+     * after a committed turn, carrying that conversation and its owner. A fire of
+     * one runs a turn in the named conversation, so accepting the marker from a
+     * client would let anyone who may create a schedule inject a turn into another
+     * user's conversation. Refused for everyone, as the HITL timeout and ingestion
+     * markers are; ZIP import goes through this same method.
+     */
+    private Response rejectContinuationBody(ScheduleConfiguration schedule, String operation) {
+        if (schedule != null && ConversationContinuations.isContinuationSchedule(schedule.getMetadata())) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares %s — continuation schedules are minted "
+                    + "internally only", operation, ConversationContinuations.METADATA_TYPE_KEY);
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("Schedules marked as conversation continuations (metadata "
+                            + ConversationContinuations.METADATA_TYPE_KEY + "=" + ConversationContinuations.METADATA_TYPE_VALUE
+                            + ") cannot be created or updated via this API. The engine arms them after a turn that "
+                            + "emits CONTINUE_CONVERSATION.")
+                    .build();
+        }
+        return null;
+    }
+
+    /**
+     * Refuses changing a system schedule — the {@code alerts-maintenance} schedule,
+     * or any schedule carrying the {@code alertType} metadata — for everyone,
+     * administrators included: 409 {@code SYSTEM_SCHEDULE}. Judged on the STORED
+     * row. The server recreates the schedule on startup and on every alert-rule
+     * save as a backstop, but deleting or disabling it would silently stop alert
+     * retries and digests until then. Firing it manually stays allowed (it only
+     * runs the maintenance pass), and so does recovery — retry, enable and dismiss
+     * (see {@code requireMutableSchedule}) — so an exhausted schedule can be
+     * re-armed over REST.
+     */
+    private static Response rejectSystemSchedule(ScheduleConfiguration stored, String operation) {
+        if (stored == null || !isSystemSchedule(stored)) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of the system schedule %s", operation, sanitize(stored.getName()));
+        return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(ErrorResponses.body(SYSTEM_SCHEDULE,
+                        "The " + stored.getName() + " schedule is managed by the server and cannot be changed or deleted (" + operation
+                                + "). It runs alert retries, digests and retention."))
+                .build();
+    }
+
+    /** Error code of a refused change to a system-managed schedule. */
+    public static final String SYSTEM_SCHEDULE = "SYSTEM_SCHEDULE";
+
+    /** Whether the schedule is managed by the server itself. */
+    public static boolean isSystemSchedule(ScheduleConfiguration schedule) {
+        return schedule != null && (AlertSchedules.claimsAlertType(schedule.getMetadata())
+                || AlertSchedules.SCHEDULE_NAME.equals(schedule.getName()) && schedule.getAgentId() == null);
     }
 
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
@@ -1122,6 +1301,9 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (RagIngestionSchedules.isIngestionSchedule(metadata)) {
             return RagIngestionSchedules.ragConfigId(metadata);
         }
+        if (EmailPollSchedules.isEmailPollSchedule(metadata)) {
+            return EmailPollSchedules.integrationId(metadata);
+        }
         if (TeamCadenceService.isTeamCadenceSchedule(metadata)) {
             Object groupId = metadata.get(TeamCadenceService.METADATA_GROUP_ID_KEY);
             return groupId != null ? groupId.toString() : null;
@@ -1201,6 +1383,15 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (stored == null) {
             return null; // absent — let the downstream operation surface its own 404/no-op
+        }
+        // Recovery (retry, enable, dismiss) stays open for the system schedule: after
+        // its retries are exhausted nothing else re-arms it. Only removing or stopping
+        // it is refused.
+        if ("delete".equals(operation) || "disable".equals(operation)) {
+            Response systemGuard = rejectSystemSchedule(stored, operation);
+            if (systemGuard != null) {
+                return systemGuard;
+            }
         }
         Response hitlGuard = requireAdminForHitl(stored, operation);
         if (hitlGuard != null) {
@@ -1434,6 +1625,10 @@ public class RestScheduleStore implements IRestScheduleStore {
         }
         if (schedule.getAgentId() == null || schedule.getAgentId().isBlank()) {
             throw new IllegalArgumentException("agentId is required");
+        }
+        if (AgentTestConversations.isReservedUserId(schedule.getUserId())) {
+            throw new IllegalArgumentException("userId may not start with '" + AgentTestConversations.USER_ID_PREFIX
+                    + "': that namespace is reserved for agent test runs");
         }
 
         // Validate time zone early — before cron parsing which also uses ZoneId.of()

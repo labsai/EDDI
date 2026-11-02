@@ -779,6 +779,19 @@ public class McpConversationTools {
             var userConversation = getOrCreateManagedConversation(intent, userId, env);
             var conversationId = userConversation.getConversationId();
 
+            // The trigger check above looks at the trigger's CURRENT targets, but a
+            // retained conversation runs on the agent it was started with. After a
+            // retarget or a revoked share that agent may no longer be usable by this
+            // caller — re-check the conversation's own agent, as send_message and the
+            // REST say() do. The guard refuses a non-owner and an owner without USE
+            // on the agent alike, so the answer is the neutral one, not the
+            // "you do not own" message below.
+            try {
+                conversationAccessGuard.requireConversationTurnAccess(conversationId);
+            } catch (ForbiddenException e) {
+                return turnDenied("chat_managed", conversationId);
+            }
+
             // Step 2: Send the message using the existing sendMessageAndWait helper.
             // Finding 25: a managed conversation already paused for human approval
             // throws synchronously — report the pending approval instead of hanging

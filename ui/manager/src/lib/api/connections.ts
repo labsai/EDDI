@@ -72,7 +72,6 @@ export const CLIENT_AUTH_METHODS = [
   "client_secret_basic",
   "client_secret_post",
 ] as const;
-export type ClientAuthMethod = (typeof CLIENT_AUTH_METHODS)[number];
 
 export interface StaticAuth {
   /**

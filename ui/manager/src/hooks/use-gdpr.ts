@@ -31,6 +31,9 @@ export function gdprErasureInvalidations(userId: string): QueryKey[] {
     ["schedules"],
     ["audit"],
     ["dashboard", "recent-conversations"],
+    // The Workforce analytics screen caches each group's conversations (and the
+    // questions derived from them) under its own prefix.
+    ["workforce-analytics"],
     gdprRestrictedKey(userId),
   ];
 }

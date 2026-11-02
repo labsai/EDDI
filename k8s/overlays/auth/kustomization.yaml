@@ -58,6 +58,11 @@
 # https://eddi.example.com):
 #   4. redirectUris / webOrigins of the eddi-frontend client in eddi-realm.json
 #      (shipped with a https://eddi.example.com/* placeholder — replace it)
+#      Also delete the http(s)://localhost:* entries from redirectUris (and the
+#      "+" / localhost webOrigins) for any cluster other than a local dev one: a
+#      wildcard loopback redirect lets another local user's listener receive
+#      the authorization code of a browser logged in on that machine. Helm's
+#      keycloak.publicOrigin strips them automatically; this overlay does not.
 #
 # Behind an ingress those two hosts differ, because the Ingress fronts EDDI and
 # not Keycloak. Putting the Keycloak host into redirectUris is what makes

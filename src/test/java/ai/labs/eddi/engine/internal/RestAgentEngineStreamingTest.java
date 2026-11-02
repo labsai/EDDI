@@ -622,7 +622,7 @@ class RestAgentEngineStreamingTest {
         @DisplayName("the disconnect cancel is bound to eddi.streaming.cancel-on-client-disconnect, defaulting to on")
         void disconnectCancelIsBoundToAConfigProperty() throws Exception {
             var constructor = RestAgentEngineStreaming.class.getDeclaredConstructor(
-                    IConversationService.class, ConversationAccessGuard.class, boolean.class);
+                    IConversationService.class, ConversationAccessGuard.class, boolean.class, int.class);
 
             String defaultValue = null;
             for (Annotation[] parameterAnnotations : constructor.getParameterAnnotations()) {

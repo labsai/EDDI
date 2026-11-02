@@ -90,6 +90,17 @@ public class SlackHitlResumeObserver {
             return;
         }
 
+        // The intent is a general-purpose string: an editor can create a trigger
+        // named "channel:slack:<someone else's channel>:..." for an agent of their
+        // own. A conversation Slack started is owned by a Slack principal, which no
+        // other identity source can produce, so that is what admits the post with
+        // the channel's bot token.
+        if (!SlackUserIdentity.isSlackPrincipal(mapping.getUserId())) {
+            LOGGER.warnf("Conversation %s has a Slack-shaped intent but is not owned by a Slack user — not posting its HITL outcome",
+                    sanitize(conversationId));
+            return;
+        }
+
         SlackRoute route = parseIntent(intent);
         if (route == null) {
             LOGGER.debugf("Could not parse Slack intent for HITL resume delivery: %s", sanitize(intent));

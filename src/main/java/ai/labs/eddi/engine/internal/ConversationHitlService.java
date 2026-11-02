@@ -17,7 +17,9 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
+import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
@@ -150,7 +152,7 @@ class ConversationHitlService {
                                                                  ControlSignal mode,
                                                                  String cancelledBy)
             throws ResourceStoreException {
-        return cancel(conversationId, mode, cancelledBy, false);
+        return cancel(conversationId, mode, cancelledBy, false, null);
     }
 
     /**
@@ -162,10 +164,31 @@ class ConversationHitlService {
      */
     public IConversationService.CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy)
             throws ResourceStoreException {
-        return cancel(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy, true);
+        return cancel(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy, true, null);
     }
 
-    private IConversationService.CancelOutcome cancel(String conversationId, ControlSignal mode, String cancelledBy, boolean pausedOnly)
+    /**
+     * {@link #cancelPausedConversation(String, String)} bound to one pause: the
+     * cancel applies only while the conversation is still paused on the pause that
+     * started at {@code pauseId} ({@link HitlDecision#pauseIdOf}). For the system's
+     * own cancels — an ABORT timeout, the pending-approval retention sweep — that
+     * were decided for a specific pause and may be applied late: a timeout claimed
+     * before an approver resumed must neither stop the resumed turn nor abort the
+     * next pause. A {@code null} pauseId binds to nothing (the unbound cancel).
+     *
+     * @return {@link IConversationService.CancelOutcome#NOTHING_TO_CANCEL} as well
+     *         when the conversation is paused on a different pause
+     * @throws ResourceStoreException
+     *             also when the pause could not be read — nothing is cancelled
+     *             then, so a timeout can retry
+     */
+    public IConversationService.CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy, String pauseId)
+            throws ResourceStoreException {
+        return cancel(conversationId, ControlSignal.CANCEL_GRACEFUL, cancelledBy, true, isNullOrEmpty(pauseId) ? null : pauseId.trim());
+    }
+
+    private IConversationService.CancelOutcome cancel(String conversationId, ControlSignal mode, String cancelledBy, boolean pausedOnly,
+                                                      String expectedPauseId)
             throws ResourceStoreException {
         ConversationState currentState = conversationMemoryStore.getConversationState(conversationId);
         if (currentState == null) {
@@ -186,8 +209,31 @@ class ConversationHitlService {
         // ask that node to signal it. Always false on a single node.
         boolean remoteSignalled = !pausedOnly && inFlightMemory == null && conversationService.signalRemoteInFlight(conversationId);
 
+        if (expectedPauseId != null && currentState == ConversationState.AWAITING_HUMAN && !isCurrentPause(conversationId, expectedPauseId)) {
+            // Paused, but on another pause than the one this cancel was decided for.
+            return IConversationService.CancelOutcome.NOTHING_TO_CANCEL;
+        }
         boolean pauseCancelled = conversationMemoryStore.compareAndSetState(conversationId,
                 ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
+        if (pauseCancelled && expectedPauseId != null) {
+            boolean samePause;
+            try {
+                samePause = isCurrentPause(conversationId, expectedPauseId);
+            } catch (ResourceStoreException e) {
+                putPauseBack(conversationId);
+                throw e;
+            }
+            if (!samePause) {
+                // The pause changed between the check and the compare-and-set (resumed
+                // and paused again): the CAS consumed a pause this cancel was not decided
+                // for. Put it back before anything else — schedule, audit, bookmark — is
+                // touched.
+                putPauseBack(conversationId);
+                LOGGER.infof("Pause-bound cancel of conversation %s skipped: it names a pause that is no longer current",
+                        sanitize(conversationId));
+                return IConversationService.CancelOutcome.NOTHING_TO_CANCEL;
+            }
+        }
         boolean changed = pauseCancelled;
         if (!changed && !pausedOnly) {
             changed = conversationMemoryStore.compareAndSetState(conversationId,
@@ -204,6 +250,9 @@ class ConversationHitlService {
             // finished pause is harmless: its fire finds nothing awaiting a decision
             // and completes.
             deleteHitlTimeoutSchedule(conversationId);
+            if (!pausedOnly) {
+                conversationService.disarmContinuations(conversationId);
+            }
             conversationService.cacheConversationState(conversationId, ConversationState.EXECUTION_INTERRUPTED);
             if (pauseCancelled) {
                 // A pending human approval was terminally resolved outside resume:
@@ -227,11 +276,48 @@ class ConversationHitlService {
         if (inFlightMemory != null || remoteSignalled) {
             // Nothing persisted to flip, but a running pipeline was signalled —
             // it will stop at the next task boundary and persist its own state.
+            // A cancelled job must not start its next turn either.
+            if (!pausedOnly) {
+                conversationService.disarmContinuations(conversationId);
+            }
+            return IConversationService.CancelOutcome.CANCELLED;
+        }
+        // Between two turns of a self-continuing job nothing runs and nothing is
+        // paused, but the job is still live: its next turn is queued. Withdrawing it
+        // is what cancelling that job means. Never on the approver's paused-only
+        // cancel, which may stop a pending approval and nothing else.
+        if (!pausedOnly && conversationService.disarmContinuations(conversationId) > 0) {
             return IConversationService.CancelOutcome.CANCELLED;
         }
         // READY / ENDED / ERROR / EXECUTION_INTERRUPTED: nothing paused, nothing
         // running. Use endConversation to close a READY conversation.
         return IConversationService.CancelOutcome.NOTHING_TO_CANCEL;
+    }
+
+    /**
+     * Whether the conversation's stored pause is the one that started at
+     * {@code pauseId}. A conversation that is gone counts as a different pause; a
+     * snapshot that cannot be read throws, so a bound cancel does nothing rather
+     * than risk the wrong pause, and a timeout retries.
+     */
+    private boolean isCurrentPause(String conversationId, String pauseId) throws ResourceStoreException {
+        try {
+            var snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            return snapshot != null && pauseId.equals(HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()));
+        } catch (ResourceNotFoundException e) {
+            return false;
+        } catch (ResourceStoreException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new ResourceStoreException("Could not read the pause of conversation " + conversationId, e);
+        }
+    }
+
+    /** Undoes a pause-bound cancel's compare-and-set that took the wrong pause. */
+    private void putPauseBack(String conversationId) throws ResourceStoreException {
+        if (conversationMemoryStore.compareAndSetState(conversationId, ConversationState.EXECUTION_INTERRUPTED, ConversationState.AWAITING_HUMAN)) {
+            conversationService.cacheConversationState(conversationId, ConversationState.AWAITING_HUMAN);
+        }
     }
 
     /**
@@ -386,6 +472,18 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw pauseMismatch(conversationId);
             }
+            // GDPR Art. 18 — the same admission rule as start and say. A resume runs the
+            // rest of the turn (tools, a model call, a rejection-note revision) for the
+            // conversation's OWNER, so an owner whose processing an administrator has
+            // restricted must not get it through the approval door. Checked against the
+            // persisted owner, before anything runs; the pause is put back untouched (its
+            // timeout is still armed) so the approval can be decided once the restriction
+            // is lifted. A restriction that cannot be read fails closed through the
+            // catch below, which restores the pause as well.
+            if (snapshot.getUserId() != null && conversationService.isProcessingRestricted(snapshot.getUserId())) {
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw new ProcessingRestrictedException("Processing is restricted for this user (GDPR Art. 18)");
+            }
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
             agentId = snapshot.getAgentId();
@@ -395,7 +493,7 @@ class ConversationHitlService {
             prePauseBatch = memory.getHitlPendingToolCalls();
             prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
             prePauseAutoApproveCount = prePauseBatch != null ? prePauseBatch.getAutoApproveCount() : 0;
-        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException e) {
+        } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -603,6 +701,11 @@ class ConversationHitlService {
                         // atomic
                         // compare-and-store lets the terminal writer win; when it does,
                         // discard the resumed outcome (no persist, no schedule/notify).
+                        // A resumed turn that settled may ask to continue, like any turn:
+                        // decided before the store, armed below once it is committed.
+                        if (!rePaused) {
+                            conversationService.decideContinuation(memory);
+                        }
                         boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
                         if (!persisted) {
                             LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
@@ -627,6 +730,7 @@ class ConversationHitlService {
                             counterHitlPause.increment();
                             counterToolPause(prePauseWasToolCall);
                             scheduleHitlTimeout(conversationId, memory);
+                            conversationService.firePauseCommitted(conversationId, memory);
                         } else {
                             // Resume settled to a non-paused outcome — notify channel
                             // observers (Slack, …) so the originating surface can push
@@ -634,6 +738,7 @@ class ConversationHitlService {
                             // best-effort: a failing observer must never affect the
                             // persisted resume above.
                             fireHitlResumeCompleted(conversationId, environment, memory, decision);
+                            conversationService.armContinuation(conversationId, memory, environment);
                         }
                     } catch (ResourceStoreException e) {
                         conversationService.logConversationError(loggingContext, conversationId, e);
@@ -761,7 +866,7 @@ class ConversationHitlService {
             // trail or the counter.
             counterHitlResume.increment();
             auditHitlDecision(conversationId, agentId, agentVersion, memory.getUserId(), environment, decision,
-                    prePauseWasToolCall, prePauseBatch);
+                    prePauseWasToolCall, prePauseBatch, memory.getHitlRevisionPolicy());
             // Task 10 — tool-resume metric, tagged by aggregate verdict.
             if (prePauseWasToolCall) {
                 recordToolResumeMetric(decision, prePauseBatch);
@@ -1239,6 +1344,21 @@ class ConversationHitlService {
                            String userId, Environment environment,
                            HitlDecision decision,
                            boolean toolCallPause, PendingToolCallBatch pendingBatch) {
+        auditHitlDecision(conversationId, agentId, agentVersion, userId, environment, decision, toolCallPause, pendingBatch, null);
+    }
+
+    /**
+     * As above; {@code revisionPolicy} is the agent's {@code onRejection} policy. A
+     * rejected RULE pause under {@code REVISE} records it as
+     * {@code onRejection: REVISE}, so the ledger shows the note was a revision
+     * request — what the revision then did is the {@code hitl:revision:outcome} of
+     * the step and the LLM task's own entry.
+     */
+    void auditHitlDecision(String conversationId, String agentId, Integer agentVersion,
+                           String userId, Environment environment,
+                           HitlDecision decision,
+                           boolean toolCallPause, PendingToolCallBatch pendingBatch,
+                           HitlRevisionPolicy revisionPolicy) {
         if (!auditLedgerService.isEnabled()) {
             return;
         }
@@ -1258,6 +1378,8 @@ class ConversationHitlService {
             if (toolCallPause) {
                 detail.put("pauseType", ConversationPauseException.PauseOrigin.TOOL_CALL.name());
                 detail.put("toolDecisions", buildToolDecisionSummary(decision, pendingBatch));
+            } else if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && revisionPolicy != null && revisionPolicy.revise()) {
+                detail.put("onRejection", revisionPolicy.onRejection().name());
             }
             auditLedgerService.submit(new AuditEntry(
                     UUID.randomUUID().toString(), conversationId, agentId, agentVersion, userId,
@@ -1575,27 +1697,84 @@ class ConversationHitlService {
                 toolApprovals != null ? toolApprovals.getApprovalTimeout() : null,
                 hitlConfig.getApprovalTimeout());
 
+        // What a gated call that no rule speaks for gets: an explicit tool-level
+        // override verbatim (AUTO_APPROVE included), else the outer policy with an
+        // inherited AUTO_APPROVE demoted to WAIT_INDEFINITELY; nothing at all waits.
+        HitlTimeoutPolicy inheritedPolicy;
+        if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
+            inheritedPolicy = toolApprovals.getTimeoutPolicy();
+        } else {
+            inheritedPolicy = hitlConfig.getTimeoutPolicy();
+            if (inheritedPolicy == HitlTimeoutPolicy.AUTO_APPROVE) {
+                inheritedPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+            }
+        }
+        if (inheritedPolicy == null) {
+            inheritedPolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        }
+
         HitlTimeoutPolicy effectivePolicy;
         if (rule != null && rule.getTimeoutPolicy() != null) {
             // Most specific statement in the config — honored verbatim, AUTO_APPROVE
             // included: naming one endpoint and giving it a policy is as explicit as a
             // designer can be.
             effectivePolicy = rule.getTimeoutPolicy();
-        } else if (toolApprovals != null && toolApprovals.getTimeoutPolicy() != null) {
-            // Explicit tool-level override — honored verbatim (AUTO_APPROVE included).
-            effectivePolicy = toolApprovals.getTimeoutPolicy();
-        } else {
-            // Inherit the outer policy, demoting AUTO_APPROVE to WAIT_INDEFINITELY.
-            effectivePolicy = hitlConfig.getTimeoutPolicy();
-            if (effectivePolicy == HitlTimeoutPolicy.AUTO_APPROVE) {
-                effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+            // But the governing rule is reduced from the MATCHED calls only. A batch
+            // that also carries a gated call no rule (or no policy-stating rule) covers
+            // pauses together with it, and that call's own policy is the inherited one:
+            // an AUTO_APPROVE rule for one endpoint must not auto-execute an unrelated
+            // call bundled into the same model message. Strictest wins, as between
+            // rules (ToolApprovalRules).
+            if (anyCallInheritsPolicy(pendingBatch, rule, toolApprovals) && strictness(inheritedPolicy) > strictness(effectivePolicy)) {
+                effectivePolicy = inheritedPolicy;
             }
-        }
-        if (effectivePolicy == null) {
-            effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        } else {
+            effectivePolicy = inheritedPolicy;
         }
         memory.setHitlTimeoutPolicy(effectivePolicy);
         memory.setHitlApprovalTimeout(effectiveTimeout);
+    }
+
+    /**
+     * Whether some gated call of the batch is governed by no rule that states a
+     * timeout policy — so it inherits the scalar policy. A call whose recorded rule
+     * can no longer be found in the config counts as inheriting.
+     */
+    private static boolean anyCallInheritsPolicy(PendingToolCallBatch batch, ToolApprovalsConfig.ApprovalRule governing,
+                                                 ToolApprovalsConfig toolApprovals) {
+        if (batch == null || batch.getCalls() == null) {
+            return false;
+        }
+        for (var call : batch.getCalls()) {
+            if (call == null) {
+                continue;
+            }
+            String matched = call.getMatchedRule();
+            if (matched == null) {
+                return true;
+            }
+            boolean statesPolicy = matched.equals(governing.getMatch())
+                    || toolApprovals != null && toolApprovals.getRules() != null && toolApprovals.getRules().stream()
+                            .anyMatch(r -> r != null && matched.equals(r.getMatch()) && r.getTimeoutPolicy() != null);
+            if (!statesPolicy) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * How much of the human's decision a timeout policy takes, ascending — the
+     * order {@code ToolApprovalRules} reduces a batch's rules by. Only AUTO_APPROVE
+     * produces an unreviewed side effect, so it is the least strict.
+     */
+    private static int strictness(HitlTimeoutPolicy policy) {
+        return switch (policy) {
+            case AUTO_APPROVE -> 1;
+            case AUTO_REJECT -> 2;
+            case ABORT -> 3;
+            case WAIT_INDEFINITELY -> 4;
+        };
     }
 
     /**
@@ -1654,9 +1833,13 @@ class ConversationHitlService {
             AgentConfiguration agentConfig = lookup.config();
             if (agentConfig == null || agentConfig.getHitlConfig() == null) {
                 memory.setAgentToolApprovalsConfig(null);
+                memory.setHitlRevisionPolicy(null);
                 return;
             }
             memory.setAgentToolApprovalsConfig(agentConfig.getHitlConfig().getToolApprovals());
+            // onRejection rides on the same pinned read; null (the default SKIP)
+            // captures nothing, so an agent that did not opt in is unchanged.
+            memory.setHitlRevisionPolicy(HitlRevisionPolicy.of(agentConfig.getHitlConfig()));
         } catch (Exception e) {
             // Same reasoning: this catch used to leave the carrier untouched (null on
             // a fresh memory), which is the fail-open again by a different route.

@@ -44,7 +44,7 @@ public class RestLlmStore implements IRestLlmStore {
      * Maps keyed by tool names rather than parameter names: a tool called
      * {@code get_token} is not a credential field.
      */
-    public static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes");
+    public static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes", "tasks[].toolQuotas.tools");
 
     private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -209,6 +209,11 @@ public class RestLlmStore implements IRestLlmStore {
     @Override
     public String getResourceURI() {
         return restVersionInfo.getResourceURI();
+    }
+
+    @Override
+    public void requireCurrentVersionAccess(String id) {
+        restVersionInfo.requireViewAccess(id);
     }
 
     @Override

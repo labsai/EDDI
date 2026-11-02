@@ -12,6 +12,7 @@ import jakarta.enterprise.inject.Vetoed;
 import org.jboss.logging.Logger;
 
 import java.util.List;
+import java.util.function.UnaryOperator;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -54,6 +55,7 @@ public class ConversationRecallTool {
     private final List<ConversationOutput> conversationOutputs;
     private final int summaryThroughStep;
     private final int maxRecallTurns;
+    private final UnaryOperator<String> inputScreen;
 
     /**
      * @param conversationOutputs
@@ -64,9 +66,22 @@ public class ConversationRecallTool {
      *            maximum number of turns to return per invocation
      */
     public ConversationRecallTool(List<ConversationOutput> conversationOutputs, int summaryThroughStep, int maxRecallTurns) {
+        this(conversationOutputs, summaryThroughStep, maxRecallTurns, null);
+    }
+
+    /**
+     * @param inputScreen
+     *            applied to each returned user text — the task's input guardrails
+     *            re-applied, so a turn a guardrail redacted for the model does not
+     *            come back verbatim; null returns the stored text. Applied only to
+     *            the turns a call returns, not to the whole conversation up front
+     */
+    public ConversationRecallTool(List<ConversationOutput> conversationOutputs, int summaryThroughStep, int maxRecallTurns,
+            UnaryOperator<String> inputScreen) {
         this.conversationOutputs = conversationOutputs;
         this.summaryThroughStep = summaryThroughStep;
         this.maxRecallTurns = maxRecallTurns;
+        this.inputScreen = inputScreen;
     }
 
     /**
@@ -148,6 +163,9 @@ public class ConversationRecallTool {
             var output = conversationOutputs.get(i);
             var input = output.get("input", String.class);
             var outputText = ConversationOutputUtils.extractOutputText(output);
+            if (input != null && !input.isBlank() && inputScreen != null) {
+                input = inputScreen.apply(input);
+            }
 
             if (input != null && !input.isBlank()) {
                 sb.append("**Turn ").append(i).append(" — User:** ").append(input).append('\n');

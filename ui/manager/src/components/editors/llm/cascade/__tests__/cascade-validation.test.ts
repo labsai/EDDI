@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
   validateCascade,
-  cascadeHasErrors,
   type CascadeIssue,
 } from "../cascade-validation";
 import type { LlmTask, ModelCascadeConfig } from "../../types";
@@ -63,7 +62,7 @@ describe("validateCascade", () => {
     const issues = validateCascade(mk({ inputPricePer1M: -0.1, outputPricePer1M: -1, steps: [{ confidenceThreshold: null }] }));
     expect(codes(issues)).toContain("CASCADE_INPUT_PRICE_NEGATIVE");
     expect(codes(issues)).toContain("CASCADE_OUTPUT_PRICE_NEGATIVE");
-    expect(cascadeHasErrors(issues)).toBe(true);
+    expect(issues.some((i) => i.level === "error")).toBe(true);
   });
 
   it("errors on negative per-step pricing and tags the step index", () => {
@@ -239,12 +238,5 @@ describe("validateCascade", () => {
     expect(codes(validateCascade(mk({ evaluationStrategy: "vibes", steps: [{ confidenceThreshold: null }] })))).toContain(
       "UNKNOWN_EVAL_STRATEGY",
     );
-  });
-
-  it("cascadeHasErrors is true only when an error-level issue is present", () => {
-    const warnOnly = validateCascade(mk({ strategy: "parallel", steps: [{ confidenceThreshold: null }] }));
-    expect(cascadeHasErrors(warnOnly)).toBe(false);
-    const withErr = validateCascade(mk({ maxCostPerRun: -1, steps: [{ confidenceThreshold: null }] }));
-    expect(cascadeHasErrors(withErr)).toBe(true);
   });
 });

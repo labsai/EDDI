@@ -4,8 +4,13 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.alerts.AlertMaintenanceService;
+import ai.labs.eddi.engine.alerts.AlertSchedules;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
+import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -13,12 +18,18 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.integrations.email.EmailMailboxPoller;
+import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.ConversationMemory;
+import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -46,16 +57,22 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Executes a scheduled fire by resolving the conversation strategy and calling
  * {@link IConversationService#say}.
  * <p>
- * Two schedule kinds are recognised by their metadata and bypass the
- * conversation path entirely, because neither is a conversation turn:
+ * These schedule kinds are recognised by their metadata and bypass the
+ * strategy-based conversation path:
  * <ul>
  * <li>{@code hitlType=hitl_timeout} — HITL approval deadlines
  * ({@code HitlTimeoutHandler})</li>
  * <li>{@code dreamType=dream_consolidation} — background user-memory
  * maintenance ({@link DreamService})</li>
+ * <li>{@code alertType=alert_maintenance} — alert delivery retries, digests and
+ * retention ({@link AlertMaintenanceService})</li>
+ * <li>{@code continuationType=conversation_continuation} — the next turn of a
+ * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
+ * one whose input, identity and once-only check are the engine's, not a
+ * schedule's</li>
  * </ul>
- * Both still run under the poller's cluster-wide claim, lease, retry/backoff
- * and fire-log machinery.
+ * All of them still run under the poller's cluster-wide claim, lease,
+ * retry/backoff and fire-log machinery.
  * <p>
  * All existing guards apply automatically:
  * <ul>
@@ -90,10 +107,23 @@ public class ScheduleFireExecutor {
     TeamCadenceService teamCadenceService;
 
     @Inject
+    AlertMaintenanceService alertMaintenanceService;
+
+    @Inject
+    ContinuationFireHandler continuationFireHandler;
+
+    @Inject
     RagSourceIngestionService ragSourceIngestionService;
 
     @Inject
     ToolCostTracker toolCostTracker;
+
+    /**
+     * Polls an email integration's mailbox; null only in unit tests that never fire
+     * one.
+     */
+    @Inject
+    EmailMailboxPoller emailMailboxPoller;
 
     /**
      * Re-checks, on every agent fire, that the schedule's creator may still use the
@@ -101,6 +131,14 @@ public class ScheduleFireExecutor {
      */
     @Inject
     ResourceAccessGuard resourceAccessGuard;
+
+    /**
+     * The freshest server-side record of the creator's teams, used to narrow the
+     * create-time snapshot — see {@link #currentCreatorTeams}. Null only in unit
+     * tests that do not exercise it.
+     */
+    @Inject
+    UserDirectory userDirectory;
 
     /**
      * How long a single conversation fire may take before it is abandoned as
@@ -182,17 +220,29 @@ public class ScheduleFireExecutor {
                 hitlError = e.getClass().getSimpleName() + ": " + e.getMessage();
                 LOGGER.warnf(e, "[SCHEDULE] HITL timeout handling failed for schedule %s", schedule.getId());
             }
-            var hitlFireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(),
-                    schedule.getFireId(), schedule.getNextFire(), hitlStartedAt, Instant.now(),
-                    hitlStatus, instanceId,
-                    (String) md.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY),
-                    hitlError, attemptNumber, 0.0);
-            try {
-                scheduleStore.logFire(hitlFireLog);
-            } catch (Exception e) {
-                LOGGER.errorf(e, "[SCHEDULE] Failed to log HITL timeout fire for schedule %s", schedule.getId());
-            }
-            return hitlFireLog;
+            return recordFire(null, schedule, hitlStartedAt, hitlStatus, instanceId,
+                    (String) md.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY), hitlError, attemptNumber, 0.0, "HITL timeout", false);
+        }
+
+        if (EmailPollSchedules.isEmailPollSchedule(md)) {
+            // Mailbox poll fast-path — governed by its channel integration, not by an
+            // agent's USE grant, so it runs before the creator check. Same machinery
+            // (claim, lease, fire log) as the ingestion fast-path.
+            return fireEmailPoll(schedule, instanceId, attemptNumber);
+        }
+        if (AlertSchedules.isMaintenanceSchedule(md)) {
+            // Alert maintenance fast-path — a system job (delivery retries, digests,
+            // retention), not a conversation turn and not anybody's schedule, so it
+            // runs before the creator check. The poller's claim and lease make one
+            // node run it at a time.
+            return fireAlertMaintenance(schedule, instanceId, attemptNumber);
+        }
+        if (ConversationContinuations.isContinuationSchedule(md)) {
+            // Self-continuation fast-path: the next turn of one conversation, armed by
+            // the engine after the previous turn committed. Before the creator check
+            // for the same reason as the HITL timeout: the engine minted it, there is
+            // no creator, and the conversation's own owner and agent govern the turn.
+            return fireContinuation(schedule, instanceId, attemptNumber);
         }
 
         ResourceAccessGuard.UseCheck creatorAccess = creatorUseCheck(schedule);
@@ -239,7 +289,8 @@ public class ScheduleFireExecutor {
             Environment env = resolveEnvironment(schedule.getEnvironment());
 
             // 1. Resolve conversation
-            conversationId = resolveConversation(schedule, env);
+            ResolvedConversation resolved = resolveConversation(schedule, env);
+            conversationId = resolved.id();
 
             // The fire log's cost column was hard-wired to 0.0 on this path, so the
             // number operators (and Dream) read for a scheduled agent was meaningless.
@@ -251,6 +302,12 @@ public class ScheduleFireExecutor {
 
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
+            // A conversation this fire started already ran its startup workflow under
+            // the allowance (createNewConversation); the turn gets what is left, so
+            // startup and turn share ONE maxCostPerFire instead of each getting it.
+            addMaxCostPerFire(inputData, resolved.created()
+                    ? remainingAllowance(schedule.getMaxCostPerFire(), startupSpend(conversationId))
+                    : schedule.getMaxCostPerFire());
 
             // 3. Execute via ConversationService.say()
             // This enforces tenant quotas, audit trail, conversation ordering
@@ -367,18 +424,23 @@ public class ScheduleFireExecutor {
         cost = Math.max(0.0, conversationCost(conversationId) - costBefore);
 
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
-        ScheduleFireLog fireLog = new ScheduleFireLog(fireLogId, schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
-                Instant.now(), status, instanceId, conversationId, errorMessage, attemptNumber, cost);
+        return recordFire(fireLogId, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, cost, "conversation",
+                interrupted);
+    }
 
-        try {
-            scheduleStore.logFire(fireLog);
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to log fire for schedule %s", schedule.getId());
-        } finally {
-            restoreInterrupt(interrupted);
-        }
-
-        return fireLog;
+    private ScheduleFireLog fireContinuation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        Map<String, Object> md = schedule.getMetadata();
+        String conversationId = (String) md.get(ConversationContinuations.METADATA_CONVERSATION_ID_KEY);
+        Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
+        ContinuationFireHandler.Result result = continuationFireHandler != null
+                ? continuationFireHandler.fire(md, schedule.getUserId(), schedule.getMessage(), timeout)
+                : new ContinuationFireHandler.Result(ScheduleConfiguration.FireStatus.FAILED.name(), "continuations are not available");
+        // The handler re-asserts an interrupt it caught; park it across the fire-log
+        // write (a set flag can fail the store's connection checkout), as fire() does.
+        boolean interrupted = Thread.interrupted();
+        return recordFire(null, schedule, startedAt, result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0,
+                "continuation", interrupted);
     }
 
     /**
@@ -419,7 +481,50 @@ public class ScheduleFireExecutor {
         if (schedule.getCreatorTeams() == null) {
             return null;
         }
-        return resourceAccessGuard.checkPrincipalUse(agentId, creator, schedule.getCreatorTeams(), schedule.isCreatorAdmin());
+        return resourceAccessGuard.checkPrincipalUse(agentId, creator, currentCreatorTeams(schedule), schedule.isCreatorAdmin());
+    }
+
+    /**
+     * The creator's team subjects as far as the server knows them now: the snapshot
+     * taken at create time, narrowed to the teams their most recent sign-in still
+     * listed.
+     * <p>
+     * The snapshot alone is historical authority — a creator removed from a team
+     * kept firing a schedule on an agent shared only with that team. EDDI has no
+     * live directory of anybody's groups outside their own request, but the user
+     * directory records the team subjects each signed-in token carried, refreshed
+     * every few minutes while the person is active. When that record is newer than
+     * the snapshot, a team it no longer lists is dropped. Only ever narrowing: a
+     * team the person joined later never widens what the schedule was authorized
+     * with. With no directory, no entry, or no entry newer than the snapshot (the
+     * creator has not signed in since), the snapshot stands — there is nothing
+     * fresher to go on.
+     */
+    List<String> currentCreatorTeams(ScheduleConfiguration schedule) {
+        List<String> snapshot = schedule.getCreatorTeams();
+        if (snapshot == null || snapshot.isEmpty() || userDirectory == null || schedule.getCreatedAt() == null) {
+            return snapshot;
+        }
+        try {
+            if (!userDirectory.isActive()) {
+                return snapshot;
+            }
+            DirectoryUser seen = userDirectory.lookup(List.of(schedule.getCreatedBy())).get(schedule.getCreatedBy());
+            if (seen == null || seen.lastSeen() == null || seen.lastSeen().isBefore(schedule.getCreatedAt())) {
+                return snapshot;
+            }
+            Set<String> current = new HashSet<>(seen.teams());
+            List<String> narrowed = snapshot.stream().filter(current::contains).toList();
+            if (narrowed.size() < snapshot.size()) {
+                LOGGER.infof("[SCHEDULE] Creator of schedule %s no longer lists team(s) %s at their last sign-in — not counted",
+                        sanitize(schedule.getId()),
+                        sanitize(String.valueOf(snapshot.stream().filter(t -> !current.contains(t)).toList())));
+            }
+            return narrowed;
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "[SCHEDULE] Could not read the user directory for schedule %s", sanitize(schedule.getId()));
+            return snapshot;
+        }
     }
 
     private static String revokedReason(ScheduleConfiguration schedule) {
@@ -440,14 +545,8 @@ public class ScheduleFireExecutor {
         LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) not run: %s", sanitize(schedule.getName()), sanitize(schedule.getId()),
                 reason);
         Instant now = Instant.now();
-        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), now,
-                Instant.now(), ScheduleConfiguration.FireStatus.FAILED.name(), instanceId, null, reason, attemptNumber, 0.0);
-        try {
-            scheduleStore.logFire(fireLog);
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to log unverified fire for schedule %s", sanitize(schedule.getId()));
-        }
-        return fireLog;
+        return recordFire(null, schedule, now, ScheduleConfiguration.FireStatus.FAILED.name(), instanceId, null, reason, attemptNumber, 0.0,
+                "unverified", false);
     }
 
     /**
@@ -465,12 +564,36 @@ public class ScheduleFireExecutor {
         } catch (Exception e) {
             LOGGER.errorf(e, "[SCHEDULE] Could not disable schedule %s after its creator lost access", sanitize(schedule.getId()));
         }
-        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), now,
-                Instant.now(), ScheduleConfiguration.FireStatus.FAILED.name(), instanceId, null, reason, attemptNumber, 0.0);
+        return recordFire(null, schedule, now, ScheduleConfiguration.FireStatus.FAILED.name(), instanceId, null, reason, attemptNumber, 0.0,
+                "refused", false);
+    }
+
+    /**
+     * The fire log of one attempt; {@code fireLogId} null for a fresh id. The
+     * schedule's id, fire id and due time come from the schedule; the end time is
+     * now.
+     */
+    private static ScheduleFireLog fireLogOf(String fireLogId, ScheduleConfiguration schedule, Instant startedAt, String status,
+                                             String instanceId, String conversationId, String error, int attemptNumber, double cost) {
+        return new ScheduleFireLog(fireLogId != null ? fireLogId : UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
+                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, conversationId, error, attemptNumber, cost);
+    }
+
+    /**
+     * Builds and writes the fire log of one attempt, and returns it. A failed write
+     * is logged, never thrown: the fire already happened. {@code interrupted}
+     * re-asserts an interrupt the fire consumed - only after the write, see
+     * {@link #restoreInterrupt}.
+     */
+    private ScheduleFireLog recordFire(String fireLogId, ScheduleConfiguration schedule, Instant startedAt, String status, String instanceId,
+                                       String conversationId, String error, int attemptNumber, double cost, String kind, boolean interrupted) {
+        ScheduleFireLog fireLog = fireLogOf(fireLogId, schedule, startedAt, status, instanceId, conversationId, error, attemptNumber, cost);
         try {
             scheduleStore.logFire(fireLog);
         } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to log refused fire for schedule %s", sanitize(schedule.getId()));
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log %s fire for schedule %s", kind, sanitize(schedule.getId()));
+        } finally {
+            restoreInterrupt(interrupted);
         }
         return fireLog;
     }
@@ -494,18 +617,6 @@ public class ScheduleFireExecutor {
     }
 
     /**
-     * Re-assert an interrupt that was consumed by a blocking call inside this fire,
-     * so the cancellation signal still reaches the caller.
-     * <p>
-     * Ordering matters: this MUST run only after the store round trips this method
-     * owns. The synchronous MongoDB driver checks out a connection with
-     * {@code lockInterruptibly()} and aborts with {@code MongoInterruptedException}
-     * when the calling thread's flag is already set, so restoring the flag before
-     * {@code logFire} would destroy the FAILED fire log that the interrupt path
-     * exists to write — leaving the attempt invisible on exactly the path where it
-     * matters most.
-     */
-    /**
      * The fire log's error text. An interrupt is named for what it almost always is
      * — the poller cutting the fire off at {@code eddi.schedule.fire-timeout} — so
      * a run that was too long is not mistaken for one that broke.
@@ -518,20 +629,24 @@ public class ScheduleFireExecutor {
         return e.getClass().getSimpleName() + ": " + e.getMessage();
     }
 
+    /**
+     * Re-assert an interrupt that was consumed by a blocking call inside this fire,
+     * so the cancellation signal still reaches the caller.
+     * <p>
+     * Ordering matters: this MUST run only after the store round trips this method
+     * owns. The synchronous MongoDB driver checks out a connection with
+     * {@code lockInterruptibly()} and aborts with {@code MongoInterruptedException}
+     * when the calling thread's flag is already set, so restoring the flag before
+     * {@code logFire} would destroy the FAILED fire log that the interrupt path
+     * exists to write — leaving the attempt invisible on exactly the path where it
+     * matters most.
+     */
     private static void restoreInterrupt(boolean interrupted) {
         if (interrupted) {
             Thread.currentThread().interrupt();
         }
     }
 
-    /**
-     * Run one Dream memory-consolidation cycle for the schedule's user and record
-     * the fire.
-     * <p>
-     * A rejected or failed cycle is logged FAILED rather than swallowed, so a
-     * misconfigured dream schedule surfaces in the fire log, retries with backoff
-     * and eventually dead-letters instead of appearing to run while doing nothing.
-     */
     /**
      * Runs one ingestion source. Mirrors {@link #fireDreamConsolidation}: the
      * failure is recorded in the fire log rather than thrown, so the schedule's
@@ -613,6 +728,43 @@ public class ScheduleFireExecutor {
     }
 
     /**
+     * Polls one mailbox. A mail server outage is recorded in the fire log's error
+     * text but the fire counts as COMPLETED: the poller backs off on its own (see
+     * {@code EmailMailboxPoller}), and the retry ladder here would dead-letter a
+     * mailbox after a few minutes of outage.
+     */
+    private ScheduleFireLog fireEmailPoll(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        Map<String, Object> md = schedule.getMetadata();
+        String integrationId = EmailPollSchedules.integrationId(md);
+        if (integrationId == null || schedule.getName() == null || !schedule.getName().equals(EmailPollSchedules.scheduleName(integrationId))) {
+            // Minted only by EmailPollScheduler; a row whose name does not match its
+            // metadata was not, and must not make this node read someone's mailbox.
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = "This email poll schedule's name does not match the integration in its metadata";
+        } else if (emailMailboxPoller == null) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = "Email polling is not available on this node";
+        } else {
+            var report = emailMailboxPoller.poll(integrationId);
+            if (report.failed()) {
+                errorMessage = report.message();
+            }
+            LOGGER.debugf("[SCHEDULE] Email poll for schedule '%s': %s", schedule.getName(), report.message());
+        }
+        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
+                Instant.now(), status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        try {
+            scheduleStore.logFire(fireLog);
+        } catch (Exception e) {
+            LOGGER.errorf(e, "[SCHEDULE] Failed to log email poll fire for schedule %s", schedule.getId());
+        }
+        return fireLog;
+    }
+
+    /**
      * A second fire-log entry, written by the run's worker when the run it started
      * fails — so a crawl that fails every night shows up in the schedule's fire log
      * as a failure, not only in the source's run history. It does not raise the
@@ -632,17 +784,7 @@ public class ScheduleFireExecutor {
     private ScheduleFireLog logIngestionFire(ScheduleConfiguration schedule, String instanceId, int attemptNumber,
                                              Instant startedAt, String status, String errorMessage, double cost,
                                              boolean interrupted) {
-        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
-                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, null, errorMessage,
-                attemptNumber, cost);
-        try {
-            scheduleStore.logFire(fireLog);
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to log ingestion fire for schedule %s", schedule.getId());
-        } finally {
-            restoreInterrupt(interrupted);
-        }
-        return fireLog;
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, cost, "ingestion", interrupted);
     }
 
     /**
@@ -653,6 +795,43 @@ public class ScheduleFireExecutor {
         return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED;
     }
 
+    /**
+     * One pass of the alert maintenance job. A pass that did nothing writes no fire
+     * log: the job runs every minute, and a log row per idle minute would bury the
+     * schedule's history (and the fire-log collection) in noise.
+     */
+    private ScheduleFireLog fireAlertMaintenance(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        Instant startedAt = Instant.now();
+        String status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+        String errorMessage = null;
+        boolean worthLogging;
+        try {
+            AlertMaintenanceService.Result result = alertMaintenanceService.run();
+            worthLogging = !result.isEmpty();
+            if (worthLogging) {
+                LOGGER.debugf("[SCHEDULE] Alert maintenance: retried=%d, digests=%d, deleted=%d", result.retried(), result.digests(),
+                        result.deleted());
+            }
+        } catch (Exception e) {
+            status = ScheduleConfiguration.FireStatus.FAILED.name();
+            errorMessage = failureMessage(e);
+            worthLogging = true;
+            LOGGER.warnf(e, "[SCHEDULE] Alert maintenance failed (schedule %s)", schedule.getId());
+        }
+        if (!worthLogging) {
+            return fireLogOf(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0);
+        }
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, 0.0, "alert maintenance", false);
+    }
+
+    /**
+     * Run one Dream memory-consolidation cycle for the schedule's user and record
+     * the fire.
+     * <p>
+     * A rejected or failed cycle is logged FAILED rather than swallowed, so a
+     * misconfigured dream schedule surfaces in the fire log, retries with backoff
+     * and eventually dead-letters instead of appearing to run while doing nothing.
+     */
     private ScheduleFireLog fireDreamConsolidation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
         String status;
@@ -661,6 +840,7 @@ public class ScheduleFireExecutor {
         boolean interrupted = false;
 
         try {
+            requireUnreservedUserId(schedule);
             // userId is passed through unchanged — DreamService rejects a missing or
             // placeholder identity loudly; defaulting it here would silently
             // consolidate an empty memory set.
@@ -694,16 +874,7 @@ public class ScheduleFireExecutor {
             LOGGER.errorf(e, "[SCHEDULE] Dream consolidation threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
         }
 
-        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(), schedule.getNextFire(), startedAt,
-                Instant.now(), status, instanceId, null, errorMessage, attemptNumber, cost);
-        try {
-            scheduleStore.logFire(fireLog);
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to log dream fire for schedule %s", schedule.getId());
-        } finally {
-            restoreInterrupt(interrupted);
-        }
-        return fireLog;
+        return recordFire(null, schedule, startedAt, status, instanceId, null, errorMessage, attemptNumber, cost, "dream", interrupted);
     }
 
     /**
@@ -748,20 +919,15 @@ public class ScheduleFireExecutor {
             LOGGER.errorf(e, "[SCHEDULE] Team cadence threw for schedule '%s' (id=%s)", schedule.getName(), schedule.getId());
         }
 
-        var fireLog = new ScheduleFireLog(UUID.randomUUID().toString(), schedule.getId(), schedule.getFireId(),
-                schedule.getNextFire(), startedAt, Instant.now(), status, instanceId, conversationId, errorMessage,
-                attemptNumber, 0.0);
-        try {
-            scheduleStore.logFire(fireLog);
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to log team-cadence fire for schedule %s", schedule.getId());
-        } finally {
-            restoreInterrupt(interrupted);
-        }
-        return fireLog;
+        return recordFire(null, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, 0.0, "team-cadence",
+                interrupted);
     }
 
-    private String resolveConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    /** The conversation a fire runs in, and whether this fire started it. */
+    record ResolvedConversation(String id, boolean created) {
+    }
+
+    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
         String strategy = schedule.getConversationStrategy();
         if (strategy == null) {
             // Default: heartbeats use persistent, cron uses new
@@ -770,16 +936,67 @@ public class ScheduleFireExecutor {
 
         return switch (strategy) {
             case "persistent" -> resolveOrCreatePersistent(schedule, env);
-            default -> createNewConversation(schedule, env); // "new" or unknown
+            default -> new ResolvedConversation(createNewConversation(schedule, env), true); // "new" or unknown
         };
     }
 
+    /**
+     * Starts the fire's conversation with {@code maxCostPerFire} already in its
+     * context: the agent's startup workflow (a CONVERSATION_START LLM task, say)
+     * runs here, and with an empty context it spent outside the fire's allowance.
+     */
     private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
         var userId = scheduleUserId(schedule);
+        Map<String, Context> context = new HashMap<>();
+        double allowance = schedule.getMaxCostPerFire();
+        if (allowance > 0 && Double.isFinite(allowance)) {
+            context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
+        }
 
-        var result = conversationService.startConversation(env, schedule.getAgentId(), userId, Collections.emptyMap());
+        var result = conversationService.startConversation(env, schedule.getAgentId(), userId, context);
 
         return result.conversationId();
+    }
+
+    /**
+     * The priced spend a conversation has recorded — for a conversation this fire
+     * just started, what its startup workflow cost. Never throws: unreadable
+     * accounting must not fail the fire, but it must not hand the turn the full
+     * allowance on top of what startup may already have spent either, so it counts
+     * as everything spent ({@link Double#POSITIVE_INFINITY}): the turn then runs
+     * under the smallest positive allowance and is refused by the cost ceiling.
+     */
+    double startupSpend(String conversationId) {
+        try {
+            ConversationMemorySnapshot snapshot = conversationMemoryStore.loadConversationMemorySnapshot(conversationId);
+            if (snapshot == null) {
+                return 0.0;
+            }
+            var memory = ConversationMemoryUtilities.convertConversationMemorySnapshot(snapshot);
+            double spent = 0.0;
+            var steps = memory.getAllSteps();
+            for (int i = 0; i < steps.size(); i++) {
+                spent += ConversationMemory.recordedSpend(steps.get(i));
+            }
+            return spent;
+        } catch (Exception e) {
+            LOGGER.warnf(e, "[SCHEDULE] Could not read the startup spend of conversation %s; the turn gets no allowance rather than "
+                    + "the full maxCostPerFire on top of an unknown startup spend", sanitize(conversationId));
+            return Double.POSITIVE_INFINITY;
+        }
+    }
+
+    /**
+     * What is left of {@code maxCostPerFire} after {@code spent}. An unlimited
+     * allowance stays unlimited; an exhausted one becomes the smallest positive
+     * amount rather than zero, because zero means "unlimited" on this field.
+     */
+    static double remainingAllowance(double allowance, double spent) {
+        if (!(allowance > 0) || Double.isInfinite(allowance)) {
+            return allowance;
+        }
+        double left = allowance - Math.max(0.0, spent);
+        return left > 0 ? left : Double.MIN_VALUE;
     }
 
     /**
@@ -794,11 +1011,28 @@ public class ScheduleFireExecutor {
     }
 
     /** The user a conversation this schedule starts belongs to. */
-    private static String scheduleUserId(ScheduleConfiguration schedule) {
+    static String scheduleUserId(ScheduleConfiguration schedule) {
+        requireUnreservedUserId(schedule);
         return schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
     }
 
-    private String resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+    /**
+     * A run's tool mocks and call record are keyed on its conversations' user ids;
+     * a fire acting as one would join a live run's session. Refused on every fire
+     * path — new, reused and rolled-over conversations, Dream — whatever path
+     * stored the schedule (a legacy row may predate the save-time check).
+     */
+    static void requireUnreservedUserId(ScheduleConfiguration schedule) {
+        if (AgentTestConversations.isReservedUserId(schedule.getUserId())) {
+            throw new IllegalStateException("Schedule " + schedule.getId() + " runs as a user id in the reserved '"
+                    + AgentTestConversations.USER_ID_PREFIX + "' namespace; it is not fired. Change its userId.");
+        }
+    }
+
+    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+        // Before the reuse path below, which returns an existing conversation without
+        // ever starting one.
+        requireUnreservedUserId(schedule);
         String conversationId = schedule.getPersistentConversationId();
         Map<String, Property> carriedProperties = Map.of();
 
@@ -819,7 +1053,7 @@ public class ScheduleFireExecutor {
                     LOGGER.infof("[SCHEDULE] Persistent conversation %s of schedule %s has ended — starting a new one",
                             sanitize(conversationId), sanitize(schedule.getId()));
                 } else if (!rollOverIfDue(schedule, conversationId, existing)) {
-                    return conversationId;
+                    return new ResolvedConversation(conversationId, false);
                 } else if (Objects.equals(existing.getUserId(), scheduleUserId(schedule))) {
                     carriedProperties = conversationScopedProperties(existing);
                 } else {
@@ -850,7 +1084,7 @@ public class ScheduleFireExecutor {
         } catch (Exception e) {
             LOGGER.warnf(e, "[SCHEDULE] Failed to update persistent conversation ID on schedule %s", schedule.getId());
         }
-        return newConversationId;
+        return new ResolvedConversation(newConversationId, true);
     }
 
     /**
@@ -959,6 +1193,27 @@ public class ScheduleFireExecutor {
         } catch (Exception e) {
             LOGGER.warnf(e, "[SCHEDULE] Conversation properties not carried into %s (schedule %s)", newConversationId, schedule.getId());
         }
+    }
+
+    /**
+     * Carries {@code maxCostPerFire} into the fire's turn, where the LLM spend gate
+     * and the tool loop hold it to the conversation's spend before the turn plus
+     * this allowance — the ceiling machinery an agent's
+     * {@code maxCostPerConversationUsd} already uses, so a
+     * {@code conversationStrategy=persistent} schedule is capped per fire, not for
+     * its lifetime. It travels in the input, so it applies on whichever node runs
+     * the turn. Zero or below means unlimited, as it always has (Postgres stores
+     * {@code 0} as NULL, so the two cannot be told apart).
+     */
+    static void addMaxCostPerFire(InputData inputData, ScheduleConfiguration schedule) {
+        addMaxCostPerFire(inputData, schedule.getMaxCostPerFire());
+    }
+
+    static void addMaxCostPerFire(InputData inputData, double allowance) {
+        if (!(allowance > 0) || Double.isInfinite(allowance)) {
+            return;
+        }
+        inputData.getContext().put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {

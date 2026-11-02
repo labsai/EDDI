@@ -33,10 +33,10 @@ import { ErrorState } from "@/components/shared/error-state";
 
 const stateStyles: Record<ConversationState, { icon: typeof Circle; color: string; bg: string }> = {
   READY: { icon: Circle, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-  IN_PROGRESS: { icon: Clock, color: "text-amber-500", bg: "bg-amber-500/10" },
+  IN_PROGRESS: { icon: Clock, color: "text-warn-500", bg: "bg-warn-500/10" },
   ERROR: { icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10" },
   ENDED: { icon: CheckCircle2, color: "text-muted-foreground", bg: "bg-muted" },
-  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-amber-500", bg: "bg-amber-500/10" },
+  EXECUTION_INTERRUPTED: { icon: AlertTriangle, color: "text-warn-500", bg: "bg-warn-500/10" },
   AWAITING_HUMAN: { icon: Hand, color: "text-orange-500", bg: "bg-orange-500/10" },
 };
 
@@ -306,7 +306,7 @@ export function ConversationMonitoringPage() {
           to="/manage/conversations"
           className="inline-flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("conversations.backToList", "Back to conversations")}
         </Link>
       </div>

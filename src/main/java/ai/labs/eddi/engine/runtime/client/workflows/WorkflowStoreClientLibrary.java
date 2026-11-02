@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.runtime.client.workflows;
 
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
+import ai.labs.eddi.modules.properties.IPropertySetter;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.engine.lifecycle.IComponentCache;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
@@ -109,7 +110,7 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
                 var lifecycleTask = lifecycleExtensionsProvider.get(type).get();
                 var component = lifecycleTask.configure(workflowStep.getConfig(), workflowStep.getExtensions());
 
-                if (component instanceof PropertySetterConfiguration propertySetter && propertySetter.hasSecretInstructions()) {
+                if (hasSecretInstructions(component)) {
                     secretInstructions = true;
                 }
                 if (component != null) {
@@ -159,5 +160,25 @@ public class WorkflowStoreClientLibrary implements IWorkflowStoreClientLibrary {
         WorkflowInitializationException(String message, Throwable e) {
             super(message, e);
         }
+    }
+
+    /**
+     * Whether a configured component carries {@code scope: "secret"} property
+     * instructions. {@code PropertySetterTask.configure} returns the executable
+     * {@link IPropertySetter}, not the stored {@link PropertySetterConfiguration},
+     * so testing only for the latter never matched and the agent was never flagged
+     * — failed turns of a secret-collecting agent then kept their input in dead
+     * letters.
+     */
+    static boolean hasSecretInstructions(Object component) {
+        if (component instanceof PropertySetterConfiguration configuration) {
+            return configuration.hasSecretInstructions();
+        }
+        if (component instanceof IPropertySetter propertySetter) {
+            var configuration = new PropertySetterConfiguration();
+            configuration.setSetOnActions(propertySetter.getSetOnActionsList());
+            return configuration.hasSecretInstructions();
+        }
+        return false;
     }
 }
