@@ -809,8 +809,8 @@ public class ScheduleFireExecutor {
             AlertMaintenanceService.Result result = alertMaintenanceService.run();
             worthLogging = !result.isEmpty();
             if (worthLogging) {
-                LOGGER.debugf("[SCHEDULE] Alert maintenance: retried=%d, digests=%d, deleted=%d", result.retried(), result.digests(),
-                        result.deleted());
+                LOGGER.debugf("[SCHEDULE] Alert maintenance: retried=%d, digests=%d, deleted=%d, released=%d", result.retried(),
+                        result.digests(), result.deleted(), result.released());
             }
         } catch (Exception e) {
             status = ScheduleConfiguration.FireStatus.FAILED.name();

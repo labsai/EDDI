@@ -388,6 +388,7 @@ public class SharedTaskList {
     public synchronized TaskItem completeTask(String taskId, String result) {
         TaskItem existing = requireTask(taskId);
         requireStatus(existing, TaskStatus.IN_PROGRESS, "complete");
+        requireResult(taskId, result, "complete");
         TaskItem updated = new TaskItem(
                 existing.id(), existing.subject(), existing.description(),
                 TaskStatus.COMPLETED, existing.assignedAgentId(), existing.assignedDisplayName(),
@@ -436,6 +437,18 @@ public class SharedTaskList {
         return updated;
     }
 
+    /**
+     * A task cannot complete (or go to review) without a result: dependents read
+     * it, and VERIFY judges it. A member turn that produced nothing fails the task
+     * instead ({@link #failTask}).
+     */
+    private static void requireResult(String taskId, String result, String operation) {
+        if (result == null) {
+            throw new IllegalStateException("%s '%s': a task cannot complete without a result — fail it instead"
+                    .formatted(operation, taskId));
+        }
+    }
+
     // --- HITL task lifecycle ---
 
     /** IN_PROGRESS → AWAITING_APPROVAL, preserving the agent's answer in result. */
@@ -443,6 +456,7 @@ public class SharedTaskList {
         TaskItem t = requireTask(taskId);
         if (t.status() != TaskStatus.IN_PROGRESS)
             throw new IllegalStateException("submitForApproval '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
+        requireResult(taskId, result, "submitForApproval");
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId());

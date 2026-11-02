@@ -59,23 +59,12 @@ public class HitlAccessGuard {
     }
 
     /**
-     * Strict HITL ownership check (owner OR admin OR approver). Fail-closed when
-     * the descriptor is absent and the caller is neither admin nor approver — a
-     * conversation without a verifiable owner may only be decided by
-     * admins/approvers.
-     *
-     * @return the conversation owner's userId, or {@code null} if the descriptor
-     *         was not found (the caller then handles the eventual 404 from the
-     *         actual operation).
-     * @throws ForbiddenException
-     *             if the caller may not decide this conversation.
-     */
-    /**
      * Whether the caller may cancel a conversation that is <em>executing</em>, not
      * only one awaiting a decision: the owner and admins may, a caller who is only
      * an {@code eddi-approver} may not (L9 of the 2026-10-15 security review). The
-     * REST and MCP cancel surfaces both decide with this, so the approver's cancel
-     * is the paused-only compare-and-set on either.
+     * REST and MCP cancel surfaces of both the 1:1 and the group conversation
+     * decide with this, so an approver's cancel is the paused-only compare-and-set
+     * on all four.
      */
     public boolean mayCancelExecuting(String ownerId) {
         return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
@@ -92,6 +81,18 @@ public class HitlAccessGuard {
         return ownershipValidator.isAdmin(identity) || ownershipValidator.isOwner(identity, ownerId);
     }
 
+    /**
+     * Strict HITL ownership check (owner OR admin OR approver). Fail-closed when
+     * the descriptor is absent and the caller is neither admin nor approver — a
+     * conversation without a verifiable owner may only be decided by
+     * admins/approvers.
+     *
+     * @return the conversation owner's userId, or {@code null} if the descriptor
+     *         was not found (the caller then handles the eventual 404 from the
+     *         actual operation).
+     * @throws ForbiddenException
+     *             if the caller may not decide this conversation.
+     */
     public String requireConversationHitlAccess(String conversationId) {
         try {
             var descriptor = conversationDescriptorStore.readDescriptor(conversationId, 0);
@@ -139,16 +140,18 @@ public class HitlAccessGuard {
      * conversation's existence or owner. A missing conversation is left for the
      * actual operation to 404.
      *
+     * @return the group conversation owner's userId, or {@code null} if the
+     *         conversation was not found (the actual operation then 404s).
      * @throws ForbiddenException
      *             if the caller may not decide this group conversation.
      */
-    public void requireGroupConversationHitlAccess(String groupId, String groupConversationId) {
+    public String requireGroupConversationHitlAccess(String groupId, String groupConversationId) {
         GroupConversation gc;
         try {
             gc = groupConversationService.readGroupConversation(groupConversationId);
         } catch (ResourceNotFoundException e) {
             LOGGER.debugf("Group conversation not found for HITL ownership check: %s", sanitize(groupConversationId));
-            return;
+            return null;
         } catch (Exception e) {
             throw new ForbiddenException("Access denied: unable to verify group conversation ownership");
         }
@@ -158,6 +161,7 @@ public class HitlAccessGuard {
             throw new NotFoundException("Group conversation not found.");
         }
         ownershipValidator.requireOwnerAdminOrApprover(identity, gc.getUserId(), "group conversation");
+        return gc.getUserId();
     }
 
     /**

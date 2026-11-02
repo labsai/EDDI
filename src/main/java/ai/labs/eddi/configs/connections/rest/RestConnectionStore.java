@@ -28,6 +28,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
@@ -209,6 +210,15 @@ public class RestConnectionStore implements IRestConnectionStore {
     @Override
     public Response createConnection(ConnectionConfiguration connectionConfiguration) {
         validateForWrite(connectionConfiguration);
+        // Admin-only here as well as on the interface. @RolesAllowed is enforced at
+        // HTTP dispatch only, and the archive import, which eddi-editor may run,
+        // calls this bean directly: an editor could create connections through an
+        // archive that the API refuses them. The import skips a refused connection
+        // and goes on with the rest.
+        if (!resourceAccessGuard.isAdmin()) {
+            throw new ForbiddenException("Creating a connection requires the eddi-admin role; connection '"
+                    + (connectionConfiguration == null ? null : connectionConfiguration.getName()) + "' was not created.");
+        }
         return createUnderNameLock(connectionConfiguration);
     }
 

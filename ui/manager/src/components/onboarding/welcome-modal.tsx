@@ -36,7 +36,7 @@ const CAPABILITIES = [
     icon: BarChart3,
     titleKey: "onboarding.welcome.monitorOperate",
     descKey: "onboarding.welcome.monitorOperateDesc",
-    gradient: "from-amber-500 to-orange-600",
+    gradient: "from-ochre-500 to-orange-600",
   },
 ];
 
@@ -153,7 +153,7 @@ export function WelcomeModal() {
               <p className="mt-4 max-w-sm text-sm leading-relaxed text-sidebar-foreground/50">
                 {t(
                   "onboarding.welcome.introText",
-                  "EDDI Manager is your command center for building, testing, and operating conversational AI agents."
+                  "{{productName}} Manager is your command center for building, testing, and operating conversational AI agents."
                 )}
               </p>
             </div>

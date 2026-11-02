@@ -23,6 +23,9 @@ public class MergedTermsCorrection implements ICorrection {
 
     @Override
     public List<IDictionary.IFoundWord> correctWord(String word, String userLanguage, List<IDictionary> temporaryDictionaries) {
+        if (word.length() > MAX_CORRECTABLE_LENGTH) {
+            return IDictionary.NO_WORDS_FOUND;
+        }
         List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
         String tmpWord = word;

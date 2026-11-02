@@ -215,7 +215,7 @@ class PostgresTenantQuotaStoreTest {
         }
 
         @Test
-        @DisplayName("should handle SQL exception gracefully")
+        @DisplayName("a failed write is reported, not acknowledged as the quota the admin asked for")
         void setQuota_sqlException() throws Exception {
             TenantQuota quota = new TenantQuota(TENANT_ID, 100, 5, 60, 500.0, true);
             // After schema init, the second getConnection call throws
@@ -223,7 +223,7 @@ class PostgresTenantQuotaStoreTest {
                     .thenReturn(connection) // schema init
                     .thenThrow(new SQLException("write error"));
 
-            assertDoesNotThrow(() -> sut.setQuota(quota));
+            assertThrows(QuotaAccountingUnavailableException.class, () -> sut.setQuota(quota));
         }
     }
 

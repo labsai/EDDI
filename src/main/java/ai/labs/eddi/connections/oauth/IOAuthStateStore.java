@@ -30,6 +30,15 @@ public interface IOAuthStateStore {
      */
     Optional<OAuthState> claim(String state);
 
+    /**
+     * Whether a row for {@code state} exists, claimed or not, expired or not.
+     * <p>
+     * The callback asks this after writing its grant: a principal's rows are
+     * deleted by erasure before its grants are, so a claimed row that has vanished
+     * means the erasure ran during the token exchange and the grant must go.
+     */
+    boolean exists(String state);
+
     /** Removes expired rows. */
     int deleteExpired();
 

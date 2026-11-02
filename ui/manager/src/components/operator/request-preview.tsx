@@ -143,7 +143,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           className={
             pinned
               ? "rounded bg-emerald-500/10 px-1 py-0.5 font-sans text-[10px] font-medium text-emerald-600"
-              : "rounded bg-amber-500/10 px-1 py-0.5 font-sans text-[10px] font-medium text-amber-600"
+              : "rounded bg-warn-500/10 px-1 py-0.5 font-sans text-[10px] font-medium text-warn-600"
           }
           title={
             pinned
@@ -196,7 +196,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
       )}
       {escalationCheckIncomplete && (
         <p
-          className="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] text-amber-700 dark:text-amber-400"
+          className="flex items-center gap-1 rounded border border-warn-500/40 bg-warn-500/10 p-2 text-[11px] text-warn-700 dark:text-warn-400"
           data-testid={`request-preview-escalation-unchecked-${callId}`}
           role="alert"
         >
@@ -218,16 +218,16 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           {bodyIssue === "trailingText"
             ? t(
                 "operator.approval.proposedTrailingText",
-                "The proposed document has extra text after its end. EDDI may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
+                "The proposed document has extra text after its end. {{productName}} may store only the document before it and silently drop the rest, and only that part was scanned for capability grants — reject it and ask for a corrected request.",
               )
             : bodyIssue === "notJsonRedacted"
               ? t(
                   "operator.approval.proposedNotJsonRedacted",
-                  "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so EDDI will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+                  "The proposed document is not valid JSON, even allowing for the credentials redacted in this preview, so {{productName}} will most likely reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
                 )
               : t(
                   "operator.approval.proposedNotJson",
-                  "The proposed document is not valid JSON, so EDDI will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
+                  "The proposed document is not valid JSON, so {{productName}} will reject this write. It could not be scanned for capability grants either — reject it and ask for a corrected request.",
                 )}
         </p>
       )}
@@ -290,7 +290,7 @@ export function RequestPreview({ preview, pinned, callId }: RequestPreviewProps)
           />
           {bodyHasRedactions(preview.body) && (
             <p
-              className="mt-1 text-[10px] text-amber-700 dark:text-amber-400"
+              className="mt-1 text-[10px] text-warn-700 dark:text-warn-400"
               data-testid={`request-preview-diff-redaction-note-${callId}`}
             >
               {t(

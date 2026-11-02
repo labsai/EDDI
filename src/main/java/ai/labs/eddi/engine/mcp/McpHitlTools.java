@@ -516,7 +516,8 @@ public class McpHitlTools {
     @Tool(name = "approve_group_phase",
           description = "Approve or reject a paused group discussion phase (or specific tasks for TASK-granularity). "
                   + "verdict=APPROVED or REJECTED (case-insensitive). taskApprovals is an optional JSON object mapping "
-                  + "task-id to APPROVED/REJECTED. Returns the resumed group conversation. The decision is attributed "
+                  + "task-id to APPROVED/REJECTED. Returns the resumed group conversation to its owner or an admin, "
+                  + "and only the resulting state to an approver-only caller. The decision is attributed "
                   + "to the authenticated caller. Pass pauseId (from get_group_approval_status) to bind the decision "
                   + "to the pause you reviewed: if the discussion has since paused again, the decision is refused "
                   + "with errorCode PAUSE_CHANGED. Optional (groups with hitlConfig.review.allowResultEdits): "
@@ -601,7 +602,7 @@ public class McpHitlTools {
             request.setTaskDecisions(McpReviewArguments.taskDecisions(jsonSerialization, taskDecisionsJson));
             GroupConversation result = groupConversationService.resumeDiscussion(conversationId, request, null);
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", parsed.name()).increment();
-            return jsonSerialization.serialize(result);
+            return readableGroupResult(result);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
         } catch (NotFoundException e) {
@@ -651,18 +652,7 @@ public class McpHitlTools {
             GroupConversation result = groupConversationService.submitHumanInput(
                     conversationId, memberId, content, principalWithMcpPrefix());
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", "HUMAN_INPUT").increment();
-            // Submitting a turn is not reading the discussion: the pending member is
-            // refused the full view by get_group_approval_status, so the response to
-            // their submission must not hand it over either. Owner and admins get
-            // the conversation; everyone else an acknowledgement.
-            if (hitlAccessGuard.mayReadResumedDiscussion(result.getUserId())) {
-                return jsonSerialization.serialize(result);
-            }
-            var acknowledgement = new LinkedHashMap<String, Object>();
-            acknowledgement.put("groupConversationId", conversationId);
-            acknowledgement.put("accepted", true);
-            acknowledgement.put("state", result.getState() != null ? result.getState().name() : "");
-            return jsonSerialization.serialize(acknowledgement);
+            return readableSubmission(result);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
         } catch (NotFoundException e) {
@@ -685,7 +675,9 @@ public class McpHitlTools {
     }
 
     @Tool(name = "cancel_group_discussion",
-          description = "Cancel an in-progress or paused group discussion. Attributed to the authenticated caller.")
+          description = "Cancel an in-progress or paused group discussion. Attributed to the authenticated caller. "
+                  + "A caller who is only an approver (neither the owner nor an admin) may cancel only a discussion "
+                  + "that is awaiting a decision.")
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {
@@ -698,8 +690,20 @@ public class McpHitlTools {
             return errorJson("groupId and conversationId are required", "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
-            boolean cancelled = groupConversationService.cancelDiscussion(conversationId, ControlSignal.CANCEL_GRACEFUL);
+            String ownerId = hitlAccessGuard.requireGroupConversationHitlAccess(groupId, conversationId);
+            boolean cancelled;
+            if (hitlAccessGuard.mayCancelExecuting(ownerId)) {
+                cancelled = groupConversationService.cancelDiscussion(conversationId, ControlSignal.CANCEL_GRACEFUL);
+            } else {
+                // Approver-only caller: the paused-only compare-and-set the REST
+                // surface uses, so an approver cannot stop another user's running
+                // discussion over MCP either.
+                if (!groupConversationService.cancelPausedDiscussion(conversationId, ControlSignal.CANCEL_GRACEFUL)) {
+                    return errorJson("Access denied: an approver may only cancel a group discussion that is awaiting "
+                            + "a decision", "FORBIDDEN", null);
+                }
+                cancelled = true;
+            }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "group").increment();
             return cancelled
                     ? "{\"status\":\"CANCELLED\"}"
@@ -716,5 +720,35 @@ public class McpHitlTools {
             LOGGER.warn("MCP cancel_group_discussion failed", e);
             return errorJson("Failed to cancel group discussion", "INTERNAL", null);
         }
+    }
+
+    /**
+     * The full group conversation for its owner or an admin; a state-only receipt
+     * for a caller whose action was authorized (an approver deciding, a pending
+     * HUMAN member speaking) but who may not read the discussion past it — the same
+     * projection the REST surface applies.
+     */
+    private String readableGroupResult(GroupConversation result) throws Exception {
+        if (result == null || hitlAccessGuard.mayReadResumedDiscussion(result.getUserId())) {
+            return jsonSerialization.serialize(result);
+        }
+        var receipt = new LinkedHashMap<String, Object>();
+        receipt.put("state", result.getState() != null ? result.getState().name() : null);
+        return jsonSerialization.serialize(receipt);
+    }
+
+    /**
+     * A submitted turn answers the owner or an admin with the conversation; anyone
+     * else gets the acknowledgement {@code {groupConversationId, accepted, state}}.
+     */
+    private String readableSubmission(GroupConversation result) throws Exception {
+        if (result == null || hitlAccessGuard.mayReadResumedDiscussion(result.getUserId())) {
+            return jsonSerialization.serialize(result);
+        }
+        var acknowledgement = new LinkedHashMap<String, Object>();
+        acknowledgement.put("groupConversationId", result.getId());
+        acknowledgement.put("accepted", true);
+        acknowledgement.put("state", result.getState() != null ? result.getState().name() : "");
+        return jsonSerialization.serialize(acknowledgement);
     }
 }

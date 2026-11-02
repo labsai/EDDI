@@ -2,7 +2,7 @@
 
 EDDI can run under your product name, logo, icon and colours. One image serves every brand, and a rebrand needs neither a rebuild nor a restart.
 
-> **Status.** This page describes what is built so far: the brand store, its admin API and its delivery to the browser. The shells (page titles, descriptions, favicons, link previews and the loading spinner) and the Manager's colours are branded today. The Manager's and the Chat UI's own screens, the Platform Operator, Swagger UI and the Keycloak login theme are not branded yet; the [white-labeling plan](../planning/white-label-ui-plan.md) lists what follows. With no brand set, EDDI looks exactly as it always has.
+> **Status.** This page describes what is built so far: the brand store, its admin API and its delivery to the browser. The shells (page titles, descriptions, favicons, link previews and the loading spinner) are branded, and so is the Manager: its colours, its strings, logos, page titles, update UI and About dialog. The Chat UI's own screens, the Platform Operator, Swagger UI and the Keycloak login theme are not branded yet; the [white-labeling plan](../planning/white-label-ui-plan.md) lists what follows. With no brand set, EDDI looks exactly as it always has.
 
 ## Where the brand comes from
 
@@ -184,13 +184,22 @@ The HTML pages are rendered with the brand before they are sent: `/manage`, `/we
 - Rendered pages are cached per brand revision.
 - Browsers revalidate images after at most five minutes, and an unchanged image costs one `304`.
 
+## The Manager
+
+Besides its colours (above), the Manager takes the brand from `window.__EDDI_BRAND__`, read once by `src/lib/brand.ts` with the EDDI defaults as a fallback for every field:
+
+- **Strings.** Every mention of the product in the 11 locales is `{{productName}}`, an i18next default variable set from the brand before the first render, so "Welcome to EDDI" reads "Welcome to Acme Assist". Engine-version notes say "server version 6.6" rather than naming EDDI. Technical names stay as they are: `EDDI_*` variables, `X-EDDI-*` headers, `eddi.*` properties, the `eddi-v1` webhook signature and the "EDDI Cluster" Grafana dashboard. A test (`no-eddi-brand-literal.test.ts`) fails on a literal "EDDI" in a locale value, a `t()` fallback, JSX text or an `alt`/`aria-label`/`title`/`placeholder`.
+- **Logos.** The sidebars show `/branding/logo` in light mode and `/branding/logo-dark` in dark mode. Unbranded, both are the white EDDI wordmark, which the light sidebar inverts to near-black as before; a branded logo is shown as uploaded and never inverted. **So upload a logo that reads on a light background, plus a dark-mode logo if it does not read on a dark one.** A brand that sets only its name keeps the white EDDI wordmark, which is then hard to see on the light sidebar. The collapsed sidebar shows `/branding/icon` when branded (EDDI's "E." monogram otherwise), and the landing and Workforce pages use the icon too. Alt texts and labels are the product name.
+- **Page titles** read `<page> — <product> Manager`.
+- **The update UI is hidden when branded**: the Updates page and its menu entry, the update banner, and the automatic check, which then never contacts GitHub even if an admin had ticked it before. `showUpdateCheck: true` brings it back.
+- **About.** The Help menu in the sidebar footer, and the version under it when the update UI is hidden, open an About dialog with the product name, tagline and version. While `poweredBy` is on (the default) it adds "Powered by EDDI" and the Apache 2.0 notice.
+
 ## Not branded yet
 
 These still show EDDI, whatever the brand:
 
-- The Manager's screens: sidebar logo, strings, the update UI and the About dialog. Its colours follow the brand (see above), except a few hard-coded third-party marks and the editor's syntax colours.
+- In the Manager: the Platform Operator (its persona, prompt and activation screen), the A2A agent-card defaults on the agent page, a few model-parameter notes from the parameter catalog, and the editor's syntax colours. The MSW demo data names EDDI too, but it only appears without a backend.
 - The Chat UI widget's default title, logo and accent.
-- The Platform Operator's persona.
 - Swagger UI, the OpenAPI document and the A2A agent cards.
 - The Keycloak login theme.
 
@@ -198,4 +207,4 @@ The [plan](../planning/white-label-ui-plan.md) schedules each of them. Technical
 
 ## Development
 
-Under `npm run dev` (and MSW mock mode), a small Vite plugin in each UI (`scripts/vite-plugin-brand.mjs`) fills in the EDDI defaults and serves `/branding/*`. The dev server therefore always shows the EDDI brand, even when the backend it proxies has a brand set. `vite build` leaves the `%BRAND_*%` placeholders in the shells for EDDI to fill in, and a test in each UI checks that.
+Under `npm run dev` (and MSW mock mode), a small Vite plugin in each UI (`scripts/vite-plugin-brand.mjs`) fills in the EDDI defaults and serves `/branding/*`. The dev server therefore always shows the EDDI brand, even when the backend it proxies has a brand set. `vite build` leaves the `%BRAND_*%` placeholders in the shells for EDDI to fill in, and a test in each UI checks that. The Manager's dev-only entry `index.html`, which serves deep links such as `/manage/agents` under `npm run dev`, loads the brand script and stylesheet like the built shells.

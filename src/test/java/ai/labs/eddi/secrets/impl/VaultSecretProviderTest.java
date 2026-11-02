@@ -325,11 +325,12 @@ class VaultSecretProviderTest {
 
         when(persistence.findDek(TENANT_ID)).thenReturn(Optional.of(encDek));
         when(persistence.findSecret(TENANT_ID, KEY_NAME)).thenReturn(Optional.of(existing));
+        when(persistence.updateSecretIfPresent(any())).thenReturn(true);
 
         provider.store(new SecretReference(TENANT_ID, KEY_NAME), plaintext, "Updated", null);
 
         ArgumentCaptor<EncryptedSecret> captor = ArgumentCaptor.forClass(EncryptedSecret.class);
-        verify(persistence).upsertSecret(captor.capture());
+        verify(persistence).updateSecretIfPresent(captor.capture());
         EncryptedSecret stored = captor.getValue();
 
         assertEquals("existing-id", stored.getId());

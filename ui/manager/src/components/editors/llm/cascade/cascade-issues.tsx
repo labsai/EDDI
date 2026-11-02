@@ -29,7 +29,7 @@ export function CascadeIssues({
             className={`flex items-start gap-2 rounded-md border p-2 ${
               isError
                 ? "border-red-400/40 bg-red-50 dark:border-red-700/40 dark:bg-red-900/15"
-                : "border-amber-400/30 bg-amber-50 dark:border-amber-700/30 dark:bg-amber-900/15"
+                : "border-warn-400/30 bg-warn-50 dark:border-warn-700/30 dark:bg-warn-900/15"
             }`}
             data-testid={`cascade-issue-${issue.code}`}
           >
@@ -37,14 +37,14 @@ export function CascadeIssues({
               className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
                 isError
                   ? "text-red-600 dark:text-red-400"
-                  : "text-amber-600 dark:text-amber-400"
+                  : "text-warn-600 dark:text-warn-400"
               }`}
             />
             <p
               className={`text-[10px] leading-relaxed ${
                 isError
                   ? "text-red-800 dark:text-red-300"
-                  : "text-amber-800 dark:text-amber-300"
+                  : "text-warn-800 dark:text-warn-300"
               }`}
             >
               {t(`llmEditor.cascadeIssues.${issue.code}`, issue.message, issue.params)}

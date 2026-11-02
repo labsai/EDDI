@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.oauth;
 
+import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
@@ -81,6 +82,7 @@ class OAuthTokenServiceRefreshTest {
     private static final String STORED_DEK = EncryptedDek.dekId(TENANT, 1);
 
     private InMemoryConnectionGrantStore grantStore;
+    private IConnectionStore connectionStore;
     private OAuthTokenClient tokenClient;
     private ISecretProvider secretProvider;
     private final AtomicInteger tokenRequests = new AtomicInteger();
@@ -89,6 +91,9 @@ class OAuthTokenServiceRefreshTest {
     void setUp() throws Exception {
         grantStore = new InMemoryConnectionGrantStore();
         tokenClient = mock(OAuthTokenClient.class);
+        connectionStore = mock(IConnectionStore.class);
+        // The connection a mint is for exists, under one id, throughout.
+        lenient().when(connectionStore.idOfName(anyString(), anyString())).thenReturn("connection-1");
         secretProvider = mock(ISecretProvider.class);
         tokenRequests.set(0);
 
@@ -138,7 +143,7 @@ class OAuthTokenServiceRefreshTest {
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
         return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
-                new SimpleMeterRegistry());
+                new SimpleMeterRegistry(), connectionStore);
     }
 
     private static ConnectionConfiguration connection() {
@@ -442,6 +447,25 @@ class OAuthTokenServiceRefreshTest {
     }
 
     @Test
+    @DisplayName("a connection deleted or re-created while its service token is minted: the grant just stored is discarded")
+    void mintDiscardsAGrantForAConnectionReplacedMeanwhile() throws Exception {
+        var connection = connection();
+        connection.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        connection.setBinding(Binding.SERVICE);
+        // Before the exchange the name resolves to the old connection, after the
+        // write to a new one of the same name.
+        when(connectionStore.idOfName(anyString(), anyString())).thenReturn("connection-1", "connection-2");
+        when(tokenClient.clientCredentials(any(), anyString()))
+                .thenReturn(new TokenResponse("service-access", null, Duration.ofHours(1), List.of()));
+
+        var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.NOT_FOUND, error.getReason());
+        assertTrue(grantStore.find(TENANT, CONNECTION, ConnectionResolver.SERVICE_PRINCIPAL).isEmpty(),
+                "a token minted with the old connection's credentials must not survive for the new one");
+    }
+
+    @Test
     @DisplayName("a PER_USER connection with no grant says 'not connected', not 'broken'")
     void reportsNotConnected() {
         var error = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
@@ -729,7 +753,7 @@ class OAuthTokenServiceRefreshTest {
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
         return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
-                registry);
+                registry, connectionStore);
     }
 
     /**

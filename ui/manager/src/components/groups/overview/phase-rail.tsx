@@ -88,7 +88,7 @@ function PhaseCard({
         </span>
         {phase.requiresApproval && (
           <ShieldQuestion
-            className="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400"
+            className="h-3.5 w-3.5 shrink-0 text-warn-600 dark:text-warn-400"
             aria-label={t("groups.overview.phaseNeedsApproval", "Needs human approval")}
           />
         )}

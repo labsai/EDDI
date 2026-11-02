@@ -73,7 +73,7 @@ function messageFor(
     case "paramReserved":
       return t(
         "connections.validation.paramReserved",
-        "One of these parameters is set by EDDI itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
+        "One of these parameters is set by {{productName}} itself (client_id, redirect_uri, response_type, state, code_challenge…). Overriding it would break the flow.",
       );
     case "paramValueReference":
       return t(

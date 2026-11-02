@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,6 +31,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -38,6 +40,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -116,6 +119,46 @@ class ConnectionResolverTest {
         auth.setValueTemplate("Bearer ${vault:jira-token}");
         connection.setStaticAuth(auth);
         return connection;
+    }
+
+    @Test
+    @DisplayName("a STATIC connection's vault secret is held to its own allowedHosts, not only the connection's allowlist")
+    void secretAllowedHostsApplyThroughAConnection() {
+        register(staticConnection());
+        VaultHostAllowlist allowlist = mock(VaultHostAllowlist.class);
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist)
+                .requireAllowed(eq(Set.of("${vault:jira-token}")), eq("https://api.atlassian.com/rest"), anyString());
+        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver, allowlist);
+        var resolver = new ConnectionResolver(registry, credentialResolver, callerIdentityContext, new SimpleMeterRegistry(),
+                accessTokenSupplier, true);
+
+        var error = assertThrows(ConnectionException.class,
+                () -> resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null));
+
+        assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
+        verify(secretResolver, never()).resolveValue(anyString());
+    }
+
+    @Test
+    @DisplayName("a BASIC connection is held only to the secrets it sends, not to a stale valueTemplate it still carries")
+    void basicIgnoresAnUnusedValueTemplate() {
+        var connection = staticConnection(); // carries valueTemplate "Bearer ${vault:jira-token}"
+        connection.setAuthType(AuthType.BASIC);
+        connection.getStaticAuth().setUsername("svc-eddi");
+        connection.getStaticAuth().setPasswordRef("${vault:jira-password}");
+        register(connection);
+        VaultHostAllowlist allowlist = mock(VaultHostAllowlist.class);
+        // The leftover template's secret does not allow this host; the password's does.
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist)
+                .requireAllowed(eq(Set.of("${vault:jira-token}")), anyString(), anyString());
+        var credentialResolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver, allowlist);
+        var resolver = new ConnectionResolver(registry, credentialResolver, callerIdentityContext, new SimpleMeterRegistry(),
+                accessTokenSupplier, true);
+
+        var credential = resolver.resolve("${connection:jira}", URI.create("https://api.atlassian.com/rest"), null);
+
+        assertEquals("Basic " + Base64.getEncoder().encodeToString("svc-eddi:hunter2".getBytes(StandardCharsets.UTF_8)),
+                credential.headerValue());
     }
 
     @Nested

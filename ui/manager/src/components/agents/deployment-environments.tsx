@@ -62,7 +62,7 @@ export function DeploymentEnvironmentBadge({
     // "Not deployed" while a deploy runs reads as a failure.
     if (busy) {
       return (
-        <span className={cn(pill, "bg-amber-500/15 text-amber-700 ring-amber-500/30 dark:text-amber-400", className)} data-testid={testId}>
+        <span className={cn(pill, "bg-warn-500/15 text-warn-700 ring-warn-500/30 dark:text-warn-400", className)} data-testid={testId}>
           <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
           {t("status.deploying", "Deploying...")}
         </span>

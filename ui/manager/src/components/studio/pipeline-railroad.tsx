@@ -81,7 +81,7 @@ export function PipelineRailroad({
                 <div
                   className={cn(
                     "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-                    status === "running" && "bg-amber-500/10 animate-pulse",
+                    status === "running" && "bg-warn-500/10 animate-pulse",
                     status === "complete" && "bg-emerald-500/10",
                     status === "idle" && "bg-muted/50",
                     isSelected && "bg-primary/15",
@@ -91,7 +91,7 @@ export function PipelineRailroad({
                 </div>
                 {/* Live indicator dot */}
                 {status === "running" && (
-                  <Circle className="absolute -inset-e-0.5 -top-0.5 h-2.5 w-2.5 fill-amber-500 text-amber-500 animate-pulse" />
+                  <Circle className="absolute -inset-e-0.5 -top-0.5 h-2.5 w-2.5 fill-warn-500 text-warn-500 animate-pulse" />
                 )}
                 {status === "complete" && (
                   <Circle className="absolute -inset-e-0.5 -top-0.5 h-2.5 w-2.5 fill-emerald-500 text-emerald-500" />

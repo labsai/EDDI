@@ -171,6 +171,16 @@ public class ChannelTargetRouter {
         this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
     }
 
+    /** Without the destination check — for tests that do not exercise it. */
+    public ChannelTargetRouter(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore descriptorStore,
+            IDeploymentStatusReader agentAdmin,
+            IAgentStore agentStore,
+            SecretResolver secretResolver,
+            ICacheFactory cacheFactory) {
+        this(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, null, cacheFactory);
+    }
+
     // ─── Public API ────────────────────────────────────────────────────────────
 
     /**

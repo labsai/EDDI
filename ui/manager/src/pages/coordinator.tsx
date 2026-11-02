@@ -214,7 +214,7 @@ function PageHeader({ right }: { right?: React.ReactNode }) {
           {t("cluster.title", "Cluster")}
         </h1>
         <p className="mt-1 text-muted-foreground">
-          {t("cluster.subtitle", "Health, nodes, leases and failed turns across every EDDI replica — and what you can safely do about them")}
+          {t("cluster.subtitle", "Health, nodes, leases and failed turns across every {{productName}} replica — and what you can safely do about them")}
         </p>
       </div>
       {right}
@@ -273,7 +273,7 @@ function SingleNodeExplainer() {
     <section className="rounded-xl border border-primary/20 bg-primary/5 p-4 text-sm" data-testid="cluster-single-node">
       <h2 className="font-semibold text-foreground">{t("cluster.single.title", "What cluster mode adds")}</h2>
       <ul className="mt-2 list-disc space-y-1 ps-5 text-foreground/90">
-        <li>{t("cluster.single.scale", "Any number of EDDI replicas behind a plain round-robin load balancer, sharing one database and a NATS JetStream cluster.")}</li>
+        <li>{t("cluster.single.scale", "Any number of {{productName}} replicas behind a plain round-robin load balancer, sharing one database and a NATS JetStream cluster.")}</li>
         <li>{t("cluster.single.leases", "Conversation leases with fencing tokens: turns of one conversation never overlap anywhere, and a node that lost its lease cannot overwrite newer turns.")}</li>
         <li>{t("cluster.single.failover", "Failover: a crashed node's conversations continue on another node within the lease TTL; dead letters, caches, deployments and cancel work cluster-wide.")}</li>
       </ul>

@@ -24,6 +24,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.secrets.ISecretProvider;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ClientErrorException;
+import jakarta.ws.rs.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -88,7 +89,7 @@ class RestConnectionStoreWriteGuardTest {
 
     private RestConnectionStore rest(IConnectionNameClaimStore nameClaimStore) {
         return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry, grantStore,
-                secretProvider, true, mock(ResourceAccessGuard.class), nameClaimStore, mock(CredentialReferenceResolver.class));
+                secretProvider, true, adminGuard(), nameClaimStore, mock(CredentialReferenceResolver.class));
     }
 
     /** A document that passes every OTHER check, so a refusal is attributable. */
@@ -422,7 +423,7 @@ class RestConnectionStoreWriteGuardTest {
 
         private RestConnectionStore restWithoutAuthorization() {
             return new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry,
-                    grantStore, secretProvider, false, mock(ResourceAccessGuard.class), claims, mock(CredentialReferenceResolver.class));
+                    grantStore, secretProvider, false, adminGuard(), claims, mock(CredentialReferenceResolver.class));
         }
 
         private ConnectionConfiguration callerSupplied() {
@@ -620,5 +621,25 @@ class RestConnectionStoreWriteGuardTest {
             verify(connectionStore).create(written.capture());
             assertEquals("jira-copy", written.getValue().getName(), "the copy must not keep the name the original's references point at");
         }
+    }
+
+    @Test
+    @DisplayName("a caller without eddi-admin, such as an editor running an archive import, cannot create a connection")
+    void nonAdminCannotCreate() throws Exception {
+        var rest = new RestConnectionStore(connectionStore, documentDescriptorStore, mock(IJsonSchemaCreator.class), connectionRegistry,
+                grantStore, secretProvider, true, mock(ResourceAccessGuard.class), claims, mock(CredentialReferenceResolver.class));
+
+        assertThrows(ForbiddenException.class, () -> rest.createConnection(connection("jira", null)));
+        verify(connectionStore, never()).create(any());
+    }
+
+    /**
+     * Creating a connection is admin-only in the implementation too, not only on
+     * the REST interface, so these fixtures act as an administrator.
+     */
+    private static ResourceAccessGuard adminGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.isAdmin()).thenReturn(true);
+        return guard;
     }
 }

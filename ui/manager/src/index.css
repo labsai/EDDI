@@ -141,6 +141,15 @@
   --color-scrollbar-thumb-hover: #52525b;
 }
 
+/* The prompt editor's template-variable colour (content-editor.tsx). Monaco
+   takes theme colours as hex, not CSS, so the editor reads these once at start
+   and falls back to the same values. Outside @theme on purpose: no utility uses
+   them, and Tailwind would tree-shake an unused theme token. */
+:root {
+  --editor-template-variable: #d4a843;
+  --editor-template-variable-light: #9c6b10;
+}
+
 /* Base styles */
 @layer base {
   * {

@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getEddiVersion, UNKNOWN_VERSION } from "@/lib/api/system";
+import { isUpdateUiVisible } from "@/lib/brand";
+import { useBrand } from "@/hooks/use-brand";
 import {
   dockerImageFor,
   fetchLatestEddiRelease,
@@ -129,12 +131,15 @@ export interface UpdateCheckResult {
  */
 export function useUpdateCheck(): UpdateCheckResult {
   const [autoCheck, setAutoCheck] = useAutoUpdateCheck();
+  const updateUi = isUpdateUiVisible(useBrand());
   const { data: installedVersion, isLoading: installedVersionLoading } = useEddiVersion();
 
   const query = useQuery({
     queryKey: UPDATE_CHECK_QUERY_KEY,
     queryFn: fetchLatestEddiRelease,
-    enabled: autoCheck,
+    // A stored auto-check preference must not reach GitHub on a deployment whose
+    // brand hides the update UI (white-label plan, R5): nothing would show it.
+    enabled: autoCheck && updateUi,
     staleTime: Infinity,
     gcTime: Infinity,
     refetchOnWindowFocus: false,

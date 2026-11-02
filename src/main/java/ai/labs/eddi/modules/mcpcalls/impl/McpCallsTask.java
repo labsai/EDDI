@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
+import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.apicalls.impl.PrePostUtils;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
@@ -40,6 +41,7 @@ import org.jboss.logging.Logger;
 import java.io.IOException;
 import java.net.URI;
 import java.util.*;
+import java.util.concurrent.Callable;
 
 /**
  * Lifecycle task for deterministic (action-triggered) MCP tool calls.
@@ -111,6 +113,16 @@ public class McpCallsTask implements ILifecycleTask {
     @Inject
     @ConfigProperty(name = "eddi.mcpcalls.default-rate-limit", defaultValue = "100")
     int defaultRateLimit;
+
+    /**
+     * Carries the turn's caller onto the attempt thread. Inside a turn deadline
+     * {@link RetryConfiguration#executeWithRetry} runs each attempt on its own
+     * executor, which carries tracing and the MDC but not the caller — and an MCP
+     * server's {@code apiKey: "${caller:token}"} is resolved per request from the
+     * caller bound to the sending thread. Null in hand-built tests.
+     */
+    @Inject
+    CallerIdentityContext callerIdentityContext;
 
     @Inject
     public McpCallsTask(IResourceClientLibrary resourceClientLibrary, IMemoryItemConverter memoryItemConverter, IJsonSerialization jsonSerialization,
@@ -259,9 +271,9 @@ public class McpCallsTask implements ILifecycleTask {
             String toolResult = mocked != null
                     ? mocked.bodyAsText()
                     : RetryConfiguration.executeWithRetry(
-                            () -> executeMetered(toolName, toolRequest, executor, conversationId),
-                            mcpCall.getRetry(),
-                            "MCP call '" + callName + "'");
+                            carryingCaller(() -> executeMetered(toolName, toolRequest, executor, conversationId)),
+                            effectiveRetry(mcpCall),
+                            "MCP call '" + callName + "'", new long[1], memory.getTurnDeadline());
             LOGGER.infof("MCP call '%s' result: %d chars", callName, toolResult != null ? toolResult.length() : 0);
 
             // 6. Store result in memory
@@ -304,6 +316,11 @@ public class McpCallsTask implements ILifecycleTask {
         } catch (ITemplatingEngine.TemplateEngineException | IOException e) {
             LOGGER.errorf(e, "MCP template error for '%s'", mcpCall.getName());
             throw new LifecycleException("MCP call template failed: " + e.getMessage(), e);
+        } catch (LifecycleException.LifecycleInterruptedException e) {
+            // The turn was interrupted (cancelled, or its deadline abandoned the attempt):
+            // that is not a failed call. No error entry, no postResponse, and no later
+            // call — continueOnError covers a tool failing, not the turn stopping.
+            throw e;
         } catch (LifecycleException e) {
             // Retry exhaustion or non-retryable error from RetryConfiguration
             // Store error data, then check continueOnError
@@ -508,5 +525,28 @@ public class McpCallsTask implements ILifecycleTask {
         descriptor.setDisplayName("MCP Calls");
         descriptor.getConfigs().put("uri", new ExtensionDescriptor.ConfigValue("Resource URI", ExtensionDescriptor.FieldType.URI, false, null));
         return descriptor;
+    }
+
+    /** {@code attempt} bound to the caller of the turn it is created in. */
+    Callable<String> carryingCaller(Callable<String> attempt) {
+        return callerIdentityContext == null ? attempt : callerIdentityContext.propagate(attempt);
+    }
+
+    /**
+     * The retry policy of a call: its own {@code retry} block, or a single attempt
+     * when it has none. A retry re-sends the tool call, and an MCP tool may well
+     * have a side effect (create, send, charge) that a timeout does not undo — so
+     * retrying is something a config asks for, not something a missing block
+     * implies. (A null policy used to fall through to the shared defaults: three
+     * attempts.)
+     */
+    static RetryConfiguration effectiveRetry(McpCall mcpCall) {
+        RetryConfiguration retry = mcpCall.getRetry();
+        if (retry != null) {
+            return retry;
+        }
+        RetryConfiguration singleAttempt = new RetryConfiguration();
+        singleAttempt.setMaxAttempts(1);
+        return singleAttempt;
     }
 }
