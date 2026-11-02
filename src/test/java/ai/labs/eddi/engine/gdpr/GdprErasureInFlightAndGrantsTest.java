@@ -249,4 +249,20 @@ class GdprErasureInFlightAndGrantsTest {
         assertEquals(List.of("clusterStop"), result.failedSteps());
         verify(userMemoryStore, atLeastOnce()).deleteAllForUser(USER_ID);
     }
+
+    @Test
+    void deleteUserData_aNodeThatDidNotAnswerTheStopMakesTheClusterStopAFailedStep() throws Exception {
+        // callAll returns the replies it got and says nothing about the rest; a node
+        // that never confirmed can still flush the user's audit entries after the
+        // sweep.
+        IClusterRpc rpc = mock(IClusterRpc.class);
+        when(rpc.isClustered()).thenReturn(true);
+        when(rpc.expectedPeers()).thenReturn(2);
+        when(rpc.callAll(eq(IClusterRpc.GDPR_STOP), anyMap())).thenReturn(Map.of("n2", Map.of("stopped", 0)));
+        service.clusterRpc = rpc;
+
+        var result = service.deleteUserData(USER_ID);
+
+        assertEquals(List.of("clusterStop"), result.failedSteps());
+    }
 }

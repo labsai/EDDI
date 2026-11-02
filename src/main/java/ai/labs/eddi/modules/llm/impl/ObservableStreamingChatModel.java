@@ -126,7 +126,8 @@ class ObservableStreamingChatModel implements StreamingChatModel {
 
             @Override
             public void onCompleteResponse(ChatResponse completeResponse) {
-                LOGGER.infof("[%s] Streaming chat response (%dms): \"%s\"", modelType,
+                // DEBUG, like the request line (model output about the user's conversation).
+                LOGGER.debugf("[%s] Streaming chat response (%dms): \"%s\"", modelType,
                         System.currentTimeMillis() - startMs, truncate(LogRecordRedactor.rewrite(snapshot()), 500));
                 handler.onCompleteResponse(completeResponse);
             }

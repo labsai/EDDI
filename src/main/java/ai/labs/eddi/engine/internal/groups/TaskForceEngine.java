@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
@@ -32,6 +33,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -445,6 +447,7 @@ public class TaskForceEngine {
                             // still live, again under the task-list monitor so the reset
                             // sweep cannot interleave. Lock order is always taskList →
                             // transcript.
+                            boolean producedNothing;
                             synchronized (taskList) {
                                 if (cancellation.isCancelled()) {
                                     break;
@@ -453,11 +456,25 @@ public class TaskForceEngine {
                                     gc.getTranscript().add(entry);
                                 }
 
-                                // HITL TASK-level: submit for approval only when BOTH
-                                // taskLevelHitl AND this phase requires approval. Otherwise
-                                // auto-complete. Without this check, TASK_FORCE phases
-                                // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
-                                if (taskLevelHitl && phase.requiresApproval()) {
+                                // A member that was skipped (timed out, unavailable, paused
+                                // for HITL under onAgentFailure=SKIP) or errored produced no
+                                // result: the task FAILS. Completing it with a null result
+                                // unblocked its dependents, which then ran without the output
+                                // they depend on, and sent a "(no result)" task to VERIFY.
+                                producedNothing = hasNoTaskResult(entry);
+                                if (producedNothing) {
+                                    taskList.failTask(task.id(), noResultReason(entry));
+                                    if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                                        // The wave controller only stops on a recorded error. Without
+                                        // one it re-queries the list and runs the still-ASSIGNED tasks
+                                        // in the next wave although the policy says ABORT.
+                                        errors.add(new GroupDiscussionException(noResultReason(entry)));
+                                    }
+                                } else if (taskLevelHitl && phase.requiresApproval()) {
+                                    // HITL TASK-level: submit for approval only when BOTH
+                                    // taskLevelHitl AND this phase requires approval. Otherwise
+                                    // auto-complete. Without this check, TASK_FORCE phases
+                                    // (requiresApproval=false) strand tasks in AWAITING_APPROVAL.
                                     taskList.submitForApproval(task.id(), entry.content());
                                 } else {
                                     taskList.completeTask(task.id(), entry.content());
@@ -467,6 +484,9 @@ public class TaskForceEngine {
                             if (listener != null) {
                                 listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
                                         member.agentId(), member.displayName(), entry.content(), phaseIdx, phase.name()));
+                            }
+                            if (producedNothing && protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
+                                break;
                             }
 
                         } catch (MemberTurnCancelledException e) {
@@ -761,6 +781,122 @@ public class TaskForceEngine {
         }
 
         GroupMember verifier = speakers.getFirst();
+        List<TaskItem> verified = completedTasks;
+        runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+
+        // E2 maxReworks: a task that failed this pass goes back to its member with the
+        // verifier's feedback and is checked again, up to maxReworks times per task.
+        // Bounded twice: by round (each round reworks at least one task) and per task.
+        int maxReworks = config.getMaxReworks();
+        for (int round = 1; round <= maxReworks; round++) {
+            List<TaskItem> toRework = failedThisPass(gc, verified, maxReworks);
+            if (toRework.isEmpty()) {
+                return;
+            }
+            DiscussionPhase executePhase = executePhaseBefore(gc, config, phaseIdx);
+            if (config.getHitlConfig() != null && config.getHitlConfig().getGranularity() == HitlGranularity.TASK
+                    && executePhase.requiresApproval()) {
+                LOGGER.warnf("VERIFY phase '%s': maxReworks is not applied — the EXECUTE phase '%s' gates each task for human approval",
+                        phase.name(), executePhase.name());
+                return;
+            }
+            // The rework needs a turn per task plus the verifier's; when either budget
+            // has no room left, the failed tasks stay FAILED rather than half-reworked.
+            if (GroupCostLedger.wouldExceedCeiling(gc, protocol) || (maxTurns > 0 && turnCounter.get() + toRework.size() + 1 > maxTurns)) {
+                addVerificationNote(gc, phase, phaseIdx,
+                        "Rework stopped: the turn budget or the cost ceiling leaves no room for another attempt");
+                return;
+            }
+            for (TaskItem failed : toRework) {
+                String feedback = failed.verificationNote() != null && !failed.verificationNote().isBlank()
+                        ? failed.verificationNote()
+                        : "The verifier did not accept this result.";
+                gc.getTaskList().reworkTask(failed.id(), feedback);
+                Metrics.counter(METER_TASK_REWORKS).increment();
+                addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — %s".formatted(
+                        gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject(), feedback));
+            }
+            executeTaskExecutionPhase(gc, config, speakers, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            // A rework that did not get to run (budget, cancel, a wave error) ends FAILED,
+            // never stranded ASSIGNED.
+            for (TaskItem failed : toRework) {
+                TaskItem live = gc.getTaskList().findById(failed.id());
+                if (live != null && (live.status() == TaskStatus.ASSIGNED || live.status() == TaskStatus.PENDING)) {
+                    gc.getTaskList().failTask(live.id(), live.verificationNote() + " (the rework did not run)");
+                }
+            }
+            verified = gc.getTaskList().all().stream().filter(t -> t.status() == TaskStatus.COMPLETED).toList();
+            if (verified.isEmpty() || GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)
+                    || (maxTurns > 0 && turnCounter.get() >= maxTurns)) {
+                return;
+            }
+            runVerificationPass(gc, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+        }
+    }
+
+    /** Micrometer name of the counter of tasks VERIFY sent back for rework (E2). */
+    static final String METER_TASK_REWORKS = "eddi.group.task.reworks";
+
+    /**
+     * Micrometer name of the counter of VERIFY verdicts that could not be parsed,
+     * on which every task was auto-verified (fail-open, as before E2).
+     */
+    static final String METER_VERIFY_UNPARSEABLE = "eddi.group.verify.unparseable";
+
+    /**
+     * The tasks of a verification pass that failed it and may still be reworked.
+     */
+    private static List<TaskItem> failedThisPass(GroupConversation gc, List<TaskItem> pass, int maxReworks) {
+        List<TaskItem> failed = new ArrayList<>();
+        for (TaskItem task : pass) {
+            TaskItem live = gc.getTaskList().findById(task.id());
+            if (live != null && live.status() == TaskStatus.FAILED && !live.verified()
+                    && gc.getTaskList().reworkCount(live.id()) < maxReworks) {
+                failed.add(live);
+            }
+        }
+        return failed;
+    }
+
+    /**
+     * The EXECUTE phase a rework runs again: the nearest one before this VERIFY in
+     * the list the discussion executes (a facilitator-diverged runtime list, the
+     * configured phases, or the style preset), or a default EXECUTE phase.
+     */
+    static DiscussionPhase executePhaseBefore(GroupConversation gc, AgentGroupConfiguration config, int phaseIdx) {
+        List<DiscussionPhase> phases;
+        if (gc.getRuntimePhases() != null && !gc.getRuntimePhases().isEmpty()) {
+            phases = gc.getRuntimePhases();
+        } else if (config.getPhases() != null && !config.getPhases().isEmpty()) {
+            phases = config.getPhases();
+        } else {
+            phases = DiscussionStylePresets.expand(config.getStyle() != null ? config.getStyle() : DiscussionStyle.TASK_FORCE,
+                    config.getMaxRounds());
+        }
+        for (int i = Math.min(phaseIdx - 1, phases.size() - 1); i >= 0; i--) {
+            DiscussionPhase candidate = phases.get(i);
+            if (candidate != null && candidate.type() == PhaseType.EXECUTE) {
+                return candidate;
+            }
+        }
+        return new DiscussionPhase("Rework", PhaseType.EXECUTE);
+    }
+
+    private static void addVerificationNote(GroupConversation gc, DiscussionPhase phase, int phaseIdx, String text) {
+        synchronized (gc.getTranscript()) {
+            gc.getTranscript().add(new TranscriptEntry("system", "System", text, phaseIdx, phase.name(), TranscriptEntryType.VERIFICATION,
+                    Instant.now(), null, null));
+        }
+    }
+
+    /**
+     * One verifier turn over {@code completedTasks}: the verdict is parsed and
+     * applied, and the transcript shows it in readable form.
+     */
+    private void runVerificationPass(GroupConversation gc, GroupMember verifier, List<TaskItem> completedTasks, DiscussionPhase phase,
+                                     String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
+                                     AtomicInteger turnCounter)
+            throws GroupDiscussionException {
         turnCounter.incrementAndGet();
 
         if (listener != null) {
@@ -872,6 +1008,11 @@ public class TaskForceEngine {
         }
 
         // Fallback: mark all still-completed tasks as verified (safe default).
+        // Fail-open
+        // as before E2, but no longer silent: counted, and warned with the group.
+        Metrics.counter(METER_VERIFY_UNPARSEABLE).increment();
+        LOGGER.warnf("VERIFY verdict for group %s could not be parsed — auto-verifying %d task(s)",
+                LogSanitizer.sanitize(gc.getGroupId()), completedTasks.size());
         //
         // Status is re-read live rather than taken from `completedTasks`, which is a
         // snapshot taken before the verification phase ran, and TaskItem is
@@ -907,15 +1048,11 @@ public class TaskForceEngine {
     public boolean tryParseVerificationJson(GroupConversation gc, List<TaskItem> completedTasks,
                                             String content, GroupDiscussionEventListener listener) {
         try {
-            // Extract JSON array from content (may be wrapped in markdown fences)
-            int jsonStart = content.indexOf('[');
-            int jsonEnd = content.lastIndexOf(']');
-            if (jsonStart < 0 || jsonEnd <= jsonStart) {
-                return false;
-            }
-            String json = content.substring(jsonStart, jsonEnd + 1);
-
-            var items = jsonSerialization.deserialize(json, List.class);
+            // The first balanced JSON array the reply contains (it may be wrapped in
+            // a markdown fence or prose). Not first '[' to last ']': a bracketed
+            // aside such as "Checked [details]: [...]" made that slice unparseable,
+            // which sent the whole phase down the fail-open auto-verify path.
+            List<?> items = EmbeddedJson.soleArray(content, this::readVerdictList);
             if (items == null || items.isEmpty()) {
                 return false;
             }
@@ -970,6 +1107,43 @@ public class TaskForceEngine {
     }
 
     /**
+     * Whether a decoded array element looks like a verification verdict: an object
+     * that names the task ({@code subject}); {@code passed} and {@code feedback}
+     * are optional ({@code passed} defaults to true). Decoding succeeding says
+     * nothing about shape - a {@code Sources: [{"title": ...}]} list in the same
+     * reply is a map too, and counting it made the reply ambiguous, which
+     * auto-verified every task instead of applying the failed verdict.
+     */
+    private static boolean isVerdictShaped(Object item) {
+        return item instanceof Map<?, ?> map && map.get("subject") != null;
+    }
+
+    /**
+     * As {@link #readJsonList}, but for applying verdicts: the array must hold an
+     * element shaped like a verdict, so an unrelated object array in the same reply
+     * is neither the verdict list nor a rival to it. (Display formatting keeps the
+     * lenient reader: it renders whatever the verifier wrote.)
+     */
+    private List<?> readVerdictList(String json) {
+        List<?> list = readJsonList(json);
+        return list != null && list.stream().anyMatch(TaskForceEngine::isVerdictShaped) ? list : null;
+    }
+
+    /**
+     * A JSON array span as a list of verdict objects, or {@code null} when it is
+     * not one - an array of plain values ({@code [1]}, a citation in the prose) is
+     * not a verdict and must not count as one.
+     */
+    private List<?> readJsonList(String json) {
+        try {
+            List<?> list = jsonSerialization.deserialize(json, List.class);
+            return list != null && list.stream().anyMatch(Map.class::isInstance) ? list : null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
      * A map value as a string, or {@code null} when the key is absent <em>or</em>
      * explicitly null.
      * <p>
@@ -998,13 +1172,8 @@ public class TaskForceEngine {
         }
 
         try {
-            int jsonStart = rawContent.indexOf('[');
-            int jsonEnd = rawContent.lastIndexOf(']');
-            if (jsonStart < 0 || jsonEnd <= jsonStart) {
-                return rawContent;
-            }
-            String json = rawContent.substring(jsonStart, jsonEnd + 1);
-            var items = jsonSerialization.deserialize(json, List.class);
+            var match = EmbeddedJson.soleArrayMatch(rawContent, this::readJsonList);
+            List<?> items = match != null ? match.value() : null;
             if (items == null || items.isEmpty()) {
                 return rawContent;
             }
@@ -1033,7 +1202,7 @@ public class TaskForceEngine {
             }
 
             // Append any text outside the JSON (e.g. "Overall Assessment: ...")
-            String afterJson = rawContent.substring(jsonEnd + 1).trim();
+            String afterJson = rawContent.substring(match.end()).trim();
             // Strip markdown code fence closing if present
             if (afterJson.startsWith("```")) {
                 afterJson = afterJson.substring(3).trim();
@@ -1285,6 +1454,19 @@ public class TaskForceEngine {
                     member.agentId(), member.displayName(),
                     "[ERROR] " + errorMessage, phaseIdx, phase.name()));
         }
+    }
+
+    /**
+     * A SKIPPED or ERROR turn — or one with no content at all — is no task result.
+     */
+    static boolean hasNoTaskResult(TranscriptEntry entry) {
+        return entry == null || entry.content() == null || entry.content().isBlank()
+                || entry.type() == TranscriptEntryType.SKIPPED || entry.type() == TranscriptEntryType.ERROR;
+    }
+
+    private static String noResultReason(TranscriptEntry entry) {
+        String why = entry != null && entry.errorReason() != null ? entry.errorReason() : "the member produced no result";
+        return "No result: " + why;
     }
 
     public GroupMember findMember(List<GroupMember> members, String agentId) {

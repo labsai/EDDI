@@ -79,6 +79,8 @@ const LinkedAccountsPage = lazyPage(
 );
 const ChannelDetailPage = lazyPage(() => import("@/pages/channel-detail"), "ChannelDetailPage");
 const ApprovalsPage = lazyPage(() => import("@/pages/approvals"), "ApprovalsPage");
+const FeedbackPage = lazyPage(() => import("@/pages/feedback"), "FeedbackPage");
+const AlertsPage = lazyPage(() => import("@/pages/alerts"), "AlertsPage");
 const OperatorPage = lazyPage(() => import("@/pages/operator"), "OperatorPage");
 const UpdatesPage = lazyPage(() => import("@/pages/updates"), "UpdatesPage");
 
@@ -203,6 +205,8 @@ export function App() {
                 suggest otherwise to anyone reading the route table. */}
             <Route path="/manage/linked-accounts" element={<LinkedAccountsPage />} />
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
+            <Route path="/manage/feedback" element={<FeedbackPage />} />
+            <Route path="/manage/alerts" element={<AlertsPage />} />
             {/* Hidden under a brand unless it opts in (white-label plan, R5).
                 A literal path, not UPDATES_PATH: route-integrity.test.ts reads
                 the route table as text. brand.test.ts pins the two equal. */}

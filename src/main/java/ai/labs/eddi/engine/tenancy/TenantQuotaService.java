@@ -333,6 +333,27 @@ public class TenantQuotaService {
         return QuotaCheckResult.OK;
     }
 
+    /**
+     * The agent gate's answer when the caller could not count the deployed agents:
+     * {@code OK} when no agent limit applies to the tenant (no quota, a disabled
+     * one, or an unlimited {@code maxAgentsPerTenant}), otherwise a refusal flagged
+     * {@code accountingUnavailable} and counted on
+     * {@code eddi.tenant.quota.unavailable{type=agent}} — an unknown count must not
+     * admit a deploy past a limit that is in force.
+     */
+    public QuotaCheckResult agentCountUnavailable(String tenantId) {
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "agent");
+        }
+        if (quota == null || !quota.enabled() || quota.maxAgentsPerTenant() < 0) {
+            return QuotaCheckResult.OK;
+        }
+        return quotaUnreadable(tenantId, "agent");
+    }
+
     // ─── Cost Budget ───
 
     /**
@@ -353,6 +374,19 @@ public class TenantQuotaService {
      * metered, so a deployment whose models carry no prices never reaches it.
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
+        return checkCostBudget(tenantId, 0.0);
+    }
+
+    /**
+     * {@link #checkCostBudget(String)} with spend the caller has made but the
+     * monthly counter has not seen yet. The counter is charged when a turn settles
+     * ({@code TurnCostMeter}), so a paid call later in the same turn — a re-ask, a
+     * reprompt, a second LLM task — compared against the counter alone would pass
+     * however much the turn has already spent. {@code pendingUsd} is that unsettled
+     * amount; a non-finite or negative value counts as none.
+     */
+    public QuotaCheckResult checkCostBudget(String tenantId, double pendingUsd) {
+        double pending = Double.isFinite(pendingUsd) && pendingUsd > 0.0 ? pendingUsd : 0.0;
         TenantQuota quota;
         try {
             quota = quotaFor(tenantId);
@@ -363,7 +397,15 @@ public class TenantQuotaService {
             return QuotaCheckResult.OK;
         }
 
-        double currentCost = quotaStore.getMonthlyCost(tenantId);
+        double currentCost;
+        try {
+            currentCost = quotaStore.getMonthlyCost(tenantId) + pending;
+        } catch (QuotaAccountingUnavailableException e) {
+            // Fail closed, as a result rather than an exception: every caller turns a
+            // refusal into a deterministic answer (the LLM task's fallback, a tool error
+            // result, Dream stopping), and none of them is inside a guard for a throw.
+            return quotaUnreadable(tenantId, "cost");
+        }
         double limit = quota.maxMonthlyCostUsd();
         if (limit >= 0 && currentCost >= limit) {
             meterRegistry.counter("eddi.tenant.quota.denied", "tenant", tenantId, "type", "cost").increment();

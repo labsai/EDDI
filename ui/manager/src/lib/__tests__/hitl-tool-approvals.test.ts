@@ -182,3 +182,33 @@ describe("toolApprovalsInheritsAutoApprove", () => {
     expect(toolApprovalsInheritsAutoApprove(undefined, undefined)).toBe(false);
   });
 });
+
+describe("validateToolPattern — endpoint patterns (mirrors ToolApprovalPatterns)", () => {
+  it.each([
+    "http.post:*",
+    "http.post:/agentstore/agents",
+    "http.put:/llmstore/llms/{id}",
+    "http.delete:/schedulestore/schedules/{scheduleId}",
+    "http.*:/agentstore/agents",
+    "http*:/x",
+  ])("accepts %s, which the backend accepts", (pattern) => {
+    expect(validateToolPattern(pattern)).toBeNull();
+  });
+
+  it("rejects a typo in the method, as the backend does", () => {
+    expect(validateToolPattern("http.pots:*")).toMatch(/unknown tool source prefix/);
+  });
+
+  it("rejects a method on a source that carries no endpoint", () => {
+    expect(validateToolPattern("mcp.post:*")).toMatch(/unknown tool source prefix/);
+  });
+
+  it("rejects an endpoint path under a prefix that can never match one", () => {
+    expect(validateToolPattern("mcp:/x")).toMatch(/matches nothing/);
+    expect(validateToolPattern("mcp*:/x")).toMatch(/matches nothing/);
+  });
+
+  it("rejects a method-qualified pattern whose target is not a path", () => {
+    expect(validateToolPattern("http.post:agents")).toMatch(/must begin with '\//);
+  });
+});

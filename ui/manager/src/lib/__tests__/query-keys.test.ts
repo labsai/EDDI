@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { agentKeys, agentWriteInvalidations, groupKeys } from "../query-keys";
+import { agentKeys, agentWriteInvalidations, chatKeys, groupKeys } from "../query-keys";
 
 describe("agentKeys", () => {
   it("nests under the agents root so a broad invalidate sweeps the lists", () => {
@@ -18,6 +18,27 @@ describe("agentKeys", () => {
     // The versionless key must PREFIX the versioned one, so invalidating the
     // former clears every version rather than missing them all.
     expect(agentKeys.prompt("abc", 3).slice(0, 2)).toEqual(agentKeys.prompt("abc"));
+  });
+});
+
+describe("agentKeys hierarchy", () => {
+  it("does not sweep the detail, descriptor or prompt entries — writes use agentWriteInvalidations", () => {
+    // The file header says exactly this; it once claimed the opposite.
+    const root = agentKeys.all[0];
+    expect(agentKeys.detail("abc")[0]).not.toBe(root);
+    expect(agentKeys.descriptor("abc")[0]).not.toBe(root);
+    expect(agentKeys.prompt("abc")[0]).not.toBe(root);
+    expect(agentWriteInvalidations("abc")).toContainEqual(agentKeys.detail("abc"));
+  });
+});
+
+describe("chatKeys", () => {
+  it("keeps the deployed-agents key under the chat root, as the history keys are", () => {
+    expect(chatKeys.deployedAgents).toEqual(["chat", "deployedAgents"]);
+    expect(chatKeys.history("a1")).toEqual(["chat", "history", "a1"]);
+    // The agent-less key must PREFIX every agent's history key.
+    expect(chatKeys.history("a1").slice(0, 2)).toEqual(chatKeys.history());
+    expect(chatKeys.history(null)).toEqual(["chat", "history", null]);
   });
 });
 

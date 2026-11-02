@@ -12,8 +12,10 @@ import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SchemaId;
 import com.networknt.schema.SchemaLocation;
+import com.networknt.schema.SchemaValidatorsConfig;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
+import com.networknt.schema.regex.RegularExpression;
 import com.networknt.schema.resource.AllowSchemaLoader;
 import org.jboss.logging.Logger;
 
@@ -280,7 +282,10 @@ public final class ArtifactValidators {
      * — the sampling counter is not thread-safe, matching a Matcher's own contract.
      */
     private static CharSequence deadlineGuarded(String content) {
-        long deadline = System.nanoTime() + REGEX_DEADLINE_NANOS;
+        return deadlineGuarded(content, System.nanoTime() + REGEX_DEADLINE_NANOS);
+    }
+
+    private static CharSequence deadlineGuarded(String content, long deadline) {
         return new CharSequence() {
             private int accesses;
 
@@ -309,10 +314,45 @@ public final class ArtifactValidators {
         };
     }
 
+    /**
+     * Deadline shared by every {@code pattern} / {@code patternProperties} match of
+     * one {@link #checkJsonSchema} call; set only while that call validates.
+     */
+    private static final ThreadLocal<Long> SCHEMA_REGEX_DEADLINE = new ThreadLocal<>();
+
+    /**
+     * The library's default evaluates schema regexes with an unbounded JDK
+     * {@code Matcher.find()}, so a backtracking {@code pattern} in a group author's
+     * schema could pin the member turn on model-written content, unlike the
+     * {@code REGEX} validator, which was always deadline-bound. This factory keeps
+     * the JDK dialect but reads the content through {@link #deadlineGuarded}, with
+     * one {@link #REGEX_DEADLINE_NANOS} budget for the whole schema validation.
+     */
+    private static final SchemaValidatorsConfig SCHEMA_CONFIG = SchemaValidatorsConfig.builder()
+            .regularExpressionFactory(ArtifactValidators::deadlineBoundRegex)
+            .build();
+
+    private static RegularExpression deadlineBoundRegex(String regex) {
+        Pattern pattern = Pattern.compile(regex);
+        return value -> {
+            Long deadline = SCHEMA_REGEX_DEADLINE.get();
+            // Checked before every match as well as during it: the guard inside a match
+            // samples every 1024th character read, and each match gets a fresh counter,
+            // so a schema evaluating many patterns against many short keys (the library
+            // runs every patternProperties pattern on every property name) never
+            // reached a sample and ran on long after the budget was spent.
+            if (deadline != null && System.nanoTime() > deadline) {
+                throw new MatchDeadlineExceededException();
+            }
+            CharSequence guarded = deadline != null ? deadlineGuarded(value, deadline) : deadlineGuarded(value);
+            return pattern.matcher(guarded).find();
+        };
+    }
+
     private static String checkJsonSchema(String spec, String content) {
         JsonSchema schema;
         try {
-            schema = SCHEMA_FACTORY.getSchema(spec);
+            schema = SCHEMA_FACTORY.getSchema(spec, SCHEMA_CONFIG);
             schema.initializeValidators();
         } catch (Exception e) {
             return "This discussion's artifact schema validator is misconfigured; the write was refused.";
@@ -324,12 +364,17 @@ public final class ArtifactValidators {
             return "The content must be valid JSON to pass this discussion's artifact schema, and it is not. Fix the JSON and retry.";
         }
         Set<ValidationMessage> violations;
+        SCHEMA_REGEX_DEADLINE.set(System.nanoTime() + REGEX_DEADLINE_NANOS);
         try {
             violations = schema.validate(node);
+        } catch (MatchDeadlineExceededException e) {
+            return "This discussion's artifact schema validator did not finish in time; the write was refused.";
         } catch (Exception e) {
             // a $ref first reached during validation (e.g. under a dynamic ref) that the
             // loader refused — fail closed, never admit the write
             return "This discussion's artifact schema validator is misconfigured; the write was refused.";
+        } finally {
+            SCHEMA_REGEX_DEADLINE.remove();
         }
         if (!violations.isEmpty()) {
             String quoted = violations.stream()

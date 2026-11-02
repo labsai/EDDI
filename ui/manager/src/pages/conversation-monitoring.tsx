@@ -306,7 +306,7 @@ export function ConversationMonitoringPage() {
           to="/manage/conversations"
           className="inline-flex items-center gap-2 rounded-lg border border-input bg-background px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-secondary/50"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
           {t("conversations.backToList", "Back to conversations")}
         </Link>
       </div>

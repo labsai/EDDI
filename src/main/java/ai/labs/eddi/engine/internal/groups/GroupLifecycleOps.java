@@ -20,6 +20,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupCostCeilingExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupExecutionException;
@@ -299,6 +300,13 @@ public class GroupLifecycleOps {
                                     .formatted(gc.getMemberDisplayNames()));
                 }
 
+                // A follow-up is a paid member turn like any other: it may not run a
+                // discussion past the budget its phases were held to.
+                if (GroupCostLedger.exceedsCeiling(gc, groupConversationService.resolveEffectiveCostCeiling(gc))) {
+                    throw new GroupCostCeilingExceededException(
+                            "Cannot follow up: the discussion has already reached its cost ceiling");
+                }
+
                 // Resolve display name
                 String displayName = gc.getMemberDisplayNames().getOrDefault(resolvedAgentId, resolvedAgentId);
 
@@ -324,8 +332,16 @@ public class GroupLifecycleOps {
                 inputData.setContext(context);
 
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
+                final GroupConversation followUpGc = gc;
+                final String costKey = resolvedAgentId;
                 try {
                     conversationService.say(DEFAULT_ENV, resolvedAgentId, privateConvId, true, true, null, inputData, false, snapshot -> {
+                        // The same bookkeeping as a phase turn (MemberTurnExecutor): the
+                        // tracking propagation is the only writer of createdAgentIds,
+                        // which close/delete cleanup undeploys from, and the cost harvest
+                        // keeps totalCost — and so the ceiling — honest.
+                        propagateDynamicAgentTracking(snapshot, followUpGc);
+                        GroupCostLedger.accumulateMemberCost(followUpGc, costKey, snapshot);
                         String response = groupConversationService.extractResponse(snapshot);
                         if ((response == null || response.isEmpty()) && snapshot != null
                                 && snapshot.getConversationState() == ConversationState.ERROR) {

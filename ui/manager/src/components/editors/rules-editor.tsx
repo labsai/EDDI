@@ -454,7 +454,7 @@ function ConditionEditor({
           {expanded ? (
             <ChevronDown className="h-3.5 w-3.5" />
           ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
+            <ChevronRight className="h-3.5 w-3.5 rtl:rotate-180" />
           )}
         </button>
         <select
@@ -636,7 +636,7 @@ function RuleEditor({
           {expanded ? (
             <ChevronDown className="h-4 w-4" />
           ) : (
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-4 w-4 rtl:rotate-180" />
           )}
         </button>
         <input
@@ -963,7 +963,7 @@ export function RulesEditor({
                 {expandedGroups[gi] !== false ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-4 w-4 rtl:rotate-180" />
                 )}
               </button>
               <input

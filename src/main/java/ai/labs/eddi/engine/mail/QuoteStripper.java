@@ -63,8 +63,15 @@ public final class QuoteStripper {
             Pattern.compile("^il\\s.{3,300}\\sha\\sscritto\\s?:$", Pattern.CASE_INSENSITIVE),
             Pattern.compile("^op\\s.{3,300}\\sschreef.{0,300}:$", Pattern.CASE_INSENSITIVE));
 
-    private static final String LABEL_PREFIX = "^\\**\\s*";
-    private static final String LABEL_SUFFIX = "\\s*\\**\\s*:";
+    /*
+     * Possessive, so a failed match cannot re-split a run of blanks: with the old
+     * "\s*\**\s*:" the two \s* could divide the same whitespace run in
+     * quadratically many ways when no colon followed ("from" + 50,000 spaces + "x"
+     * took seconds). Neither blanks nor stars can be the ':' or letter that
+     * follows, so giving no characters back loses no match.
+     */
+    private static final String LABEL_PREFIX = "^\\**+\\s*+";
+    private static final String LABEL_SUFFIX = "\\s*+(?:\\*\\s*+)*+:";
 
     private static final Pattern FROM_LABEL = Pattern.compile(LABEL_PREFIX + "(from|von|de)" + LABEL_SUFFIX + "\\s*\\S.*",
             Pattern.CASE_INSENSITIVE);

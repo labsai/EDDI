@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.DataFactory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
@@ -93,12 +94,16 @@ class PropertySetterTaskSecretScopePathsTest {
     }
 
     private static IPropertySetter setterFor(PropertyInstruction instruction) {
+        return setterFor(instruction, new LinkedList<>());
+    }
+
+    private static IPropertySetter setterFor(PropertyInstruction instruction, List<Property> extracted) {
         var setOnActions = new SetOnActions();
         setOnActions.setActions(List.of("store_secret"));
         setOnActions.setSetProperties(List.of(instruction));
         var propertySetter = mock(IPropertySetter.class);
         when(propertySetter.getSetOnActionsList()).thenReturn(List.of(setOnActions));
-        when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+        when(propertySetter.extractProperties(any())).thenReturn(extracted);
         return propertySetter;
     }
 
@@ -178,5 +183,94 @@ class PropertySetterTaskSecretScopePathsTest {
 
         assertEquals(Map.of("sub", "user-1"), memory.getConversationProperties().get("claims").getValueObject());
         verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+    }
+
+    @Test
+    @DisplayName("fromObjectPath + toObjectPath + scope secret: refused, the value is not copied in plaintext")
+    void toObjectPathIsRefusedForSecrets() throws Exception {
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        instruction.setToObjectPath("copy.token");
+        templateData.put("copy", new HashMap<String, Object>());
+
+        var e = assertThrows(LifecycleException.class, () -> task.execute(memory, setterFor(instruction)));
+
+        assertTrue(e.getMessage().contains("toObjectPath"), e.getMessage());
+        assertNull(((Map<?, ?>) templateData.get("copy")).get("token"));
+        verify(secretProvider, never()).store(any(), anyString(), anyString(), anyList());
+    }
+
+    @Test
+    @DisplayName("secret + convertToObject on a JSON input: refused, and the raw input is scrubbed before the turn fails")
+    void convertedSecretIsScrubbedBeforeRefusal() throws Exception {
+        String json = "{\"apiKey\":\"" + TOKEN + "\"}";
+        memory.getCurrentStep().storeData(new Data<>("input:initial", json));
+        var instruction = secretInstruction("creds");
+        instruction.setValueString(json);
+        instruction.setConvertToObject(true);
+
+        assertThrows(LifecycleException.class, () -> task.execute(memory, setterFor(instruction)));
+
+        assertFalse(String.valueOf(memory.getCurrentStep().getLatestData("input:initial").getResult()).contains(TOKEN));
+        assertNull(memory.getConversationProperties().get("creds"));
+    }
+
+    @Test
+    @DisplayName("an extracted property cannot put the vaulted plaintext back or replace the vault reference")
+    void extractedPropertiesDoNotRestoreTheSecret() throws Exception {
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        var sameName = new Property("accessToken", TOKEN, Scope.conversation);
+        var otherName = new Property("echo", "token=" + TOKEN, Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(sameName, otherName))));
+
+        String reference = memory.getConversationProperties().get("accessToken").getValueString();
+        assertTrue(reference.startsWith("${vault:"), "the vault reference survives: " + reference);
+        assertFalse(memory.getConversationProperties().get("echo").getValueString().contains(TOKEN));
+    }
+
+    @Test
+    @DisplayName("an extracted property holding a normalized copy of the vaulted plaintext is scrubbed too")
+    void normalizedCopyInExtractedPropertyIsScrubbed() throws Exception {
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        // What a punctuation normalizer leaves of the token: no verbatim occurrence.
+        String normalized = TOKEN.replace('-', ' ');
+        var echo = new Property("echo", normalized, Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(echo))));
+
+        assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, memory.getConversationProperties().get("echo").getValueString());
+        List<Property> extracted = memory.getCurrentStep().<List<Property>>getLatestData("properties:extracted").getResult();
+        assertEquals(MemoryKeys.SECRET_INPUT_PLACEHOLDER, extracted.getFirst().getValueString());
+    }
+
+    @Test
+    @DisplayName("an extracted property shorter than the normalized-match minimum is left alone")
+    void shortExtractedValueIsNotScrubbed() throws Exception {
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        var shortValue = new Property("echo", "tok", Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(shortValue))));
+
+        assertEquals("tok", memory.getConversationProperties().get("echo").getValueString());
+    }
+
+    @Test
+    @DisplayName("a vault reference from an earlier turn stays replaceable by an extracted property")
+    void earlierVaultReferenceIsNotFrozen() throws Exception {
+        var earlier = new Property("previousKey", "${vault:previousKey}", Scope.conversation);
+        earlier.setAutoVaulted(Boolean.TRUE);
+        memory.getConversationProperties().put("previousKey", earlier);
+        var instruction = secretInstruction("accessToken");
+        instruction.setFromObjectPath("tokenResponse.access_token");
+        var replacement = new Property("previousKey", "replacement", Scope.conversation);
+
+        task.execute(memory, setterFor(instruction, new LinkedList<>(List.of(replacement))));
+
+        assertEquals("replacement", memory.getConversationProperties().get("previousKey").getValueString());
+        assertTrue(memory.getConversationProperties().get("accessToken").getValueString().startsWith("${vault:"));
     }
 }

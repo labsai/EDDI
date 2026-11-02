@@ -55,7 +55,7 @@ one node. NATS adds:
 | Exported agent archives download through any node | The archive is also copied to the `<prefix>_ARCHIVES` object store for the export retention; a node without the file fetches it from there. |
 | Cancel/end/GDPR stop reach the running turn | Node-addressed RPC to the lease holder; GDPR stop is a scatter to every node (the user travels as a hash). Group-discussion cancel is forwarded to the node holding the discussion's `g.<id>` lease. |
 | Security and tool state is cluster-wide | KV buckets: replay nonces (`NONCES`), tool rate limits (`RATELIMIT`), per-conversation cost totals (`COSTS`), A2A task mappings (`A2A_*`), paginated tool responses (`TOOL_PAGES`), Slack event de-duplication (`DEDUP`), channel thread locks (`CHANNEL`), audit chain positions (`AUDIT_SEQ`). |
-| Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. |
+| Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. A locally kept entry is never forwarded for a conversation that a GDPR erasure marked (`ERASED` bucket) or that no longer exists; if the marker cannot be read (NATS dropped again) the entry stays on the node and is retried. |
 | A retried request is still one turn | An `Idempotency-Key` duplicate that reaches another node while the first request runs queues for the lease and, holding it, finds the key already recorded by the turn that just committed: it is answered 409 + `Retry-After` instead of running again, and its retry gets the stored answer. |
 | HITL crash recovery does not hit live turns | No recovery at boot; a leader-elected sweep recovers only conversations without a lease that stayed unchanged for `hitl-recovery.min-age`. A drained node hands its leader lease over at once. |
 | A busy node does not lose its leases | Lease heartbeats run on a scheduler thread of their own, and renew all held leases side by side: reconnect work (outbox flush, bucket provisioning, stale-lease sweep runs on separate threads) or a NATS that answers slowly can no longer push a renewal past `lease.ttl`. |
@@ -176,7 +176,7 @@ API behind it, and why each action is safe, is in
 The JetStream objects are all named `<prefix>_<NAME>`, where the prefix is
 `eddi.nats.prefix` (`EDDI` by default). KV buckets: `LEASES`, `NODES`, `ADMIN` (console
 replay claims and drain state), `NONCES`, `RATELIMIT`, `COSTS`, `AUDIT_SEQ`, `A2A_TASKS`,
-`A2A_CONTEXTS`, `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
+`A2A_CONTEXTS`, `ERASED` (the GDPR erasure marker of a conversation: written before its dead letters are purged, and checked by a node that forwards a dead letter it kept locally; it expires after `eddi.cluster.erasure-marker-ttl`, `P7D`), `A2A_ERASING` (the GDPR erasure marker that closes the A2A task store to a
 principal's writes on every node), `A2A_INDEX` (per principal, the task and context ids it
 holds — how a GDPR sweep or export on one node reaches records another node wrote, since
 bucket keys are hashed and cannot be enumerated by principal), `TOOL_PAGES`, `DEDUP` and
@@ -204,6 +204,17 @@ event (undeploy an agent everywhere), a cancel or GDPR-stop request, or write th
 rate-limit and audit-position buckets. Keep the NATS credentials in a Secret, restrict
 NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and turn on
 `nats.tls` when pod traffic is not already encrypted.
+
+**NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
+`true`). Before this check existed, any certificate the trust store accepted was
+accepted for any host. On upgrade, the broker certificate must name every host in
+`eddi.nats.url` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. With
+the Helm chart's in-cluster NATS those hosts are `<fullname>-nats-<n>.<fullname>-nats` (the chart's full name), so a
+`*.<fullname>-nats` SAN covers them, while a certificate issued only for the fully qualified
+`…svc.cluster.local` names does not. A node whose broker certificate does not match cannot connect
+and stays in degraded mode; the TLS cause itself is logged at DEBUG by the NATS client, so look for
+the node's repeated "could not connect" warnings and raise the `io.nats` logger to DEBUG to see it. Reissue the certificate, or set
+`EDDI_NATS_TLS_VERIFY_HOSTNAME=false` to go back to the old behaviour.
 
 ### Upgrading from the build-profile NATS coordinator
 

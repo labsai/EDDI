@@ -810,46 +810,8 @@ class GroupConversationServiceHitlCoverage2Test {
         assertNull(result);
     }
 
-    // =================================================================
-    // findMember() / findMemberIncludingDynamic() branches
-    // =================================================================
-
-    @Test
-    @DisplayName("findMember: null agentId → null")
-    void findMemberNullAgentId() throws Exception {
-        var m = method("findMember", List.class, String.class);
-        Object result = invoke(m, List.of(member()), null);
-        assertNull(result);
-    }
-
-    @Test
-    @DisplayName("findMember: no match → null; match → member")
-    void findMemberMatchOrNull() throws Exception {
-        var m = method("findMember", List.class, String.class);
-        assertNull(invoke(m, List.of(member()), "nope"));
-        assertNotNull(invoke(m, List.of(member()), AGENT_A));
-    }
-
-    @Test
-    @DisplayName("findMemberIncludingDynamic: not in config, present in dynamic members → found")
-    void findMemberIncludingDynamicFromDynamic() throws Exception {
-        var gc = pausedPhaseGc("gc-dyn-member");
-        var dyn = new GroupMember("dyn-1", "Dyn", 0, null);
-        gc.getDynamicMembers().add(dyn);
-        var m = method("findMemberIncludingDynamic", List.class, GroupConversation.class, String.class);
-
-        Object result = invoke(m, List.of(member()), gc, "dyn-1");
-
-        assertNotNull(result, "dynamic member should be found");
-    }
-
-    @Test
-    @DisplayName("findMemberIncludingDynamic: not found anywhere → null")
-    void findMemberIncludingDynamicNotFound() throws Exception {
-        var gc = pausedPhaseGc("gc-dyn-missing");
-        var m = method("findMemberIncludingDynamic", List.class, GroupConversation.class, String.class);
-        assertNull(invoke(m, List.of(member()), gc, "ghost"));
-    }
+    // findMember() / findMemberIncludingDynamic(): the facade's reflective
+    // delegators are gone — TaskForceEngineTest covers both directly.
 
     // =================================================================
     // resolvePhases() / resolveProtocol() branches

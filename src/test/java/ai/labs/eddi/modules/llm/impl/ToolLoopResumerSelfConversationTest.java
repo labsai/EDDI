@@ -205,4 +205,18 @@ class ToolLoopResumerSelfConversationTest {
         assertNull(ToolLoopResumer.targetsOwnConversationLive(request, null, null));
         assertNull(ToolLoopResumer.targetsOwnConversationLive(request, null, " "));
     }
+
+    @Test
+    @DisplayName("an MCP call is judged by its arguments too: the server URL is not the conversation it writes to")
+    void mcpEnvelopeArgumentsAreChecked() {
+        var request = ToolExecutionRequest.builder().name("talk_to_agent")
+                .arguments("{\"conversationId\":\"" + CONVERSATION_ID + "\",\"message\":\"hi\"}").build();
+        var mcp = Map.of("talk_to_agent", RemoteToolRequestResolvers.forMcp("https://eddi.example/mcp", "talk_to_agent", false));
+
+        assertNotNull(ToolLoopResumer.targetsOwnConversationLive(request, mcp, CONVERSATION_ID));
+
+        var other = ToolExecutionRequest.builder().name("talk_to_agent")
+                .arguments("{\"conversationId\":\"" + OTHER_CONVERSATION_ID + "\"}").build();
+        assertNull(ToolLoopResumer.targetsOwnConversationLive(other, mcp, CONVERSATION_ID));
+    }
 }

@@ -16,6 +16,8 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
@@ -100,6 +102,23 @@ class GroupTaskToolsProviderTest {
         assertEquals(2, contribution.specs().size(), "addGroupTask and listGroupTasks");
         assertTrue(contribution.specs().stream().anyMatch(spec -> spec.name().equals("addGroupTask")));
         assertTrue(contribution.specs().stream().anyMatch(spec -> spec.name().equals("listGroupTasks")));
+    }
+
+    @Test
+    void memberWhitelistWithoutTheSlug_withholdsTheTools() throws Exception {
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(groupWith(new GroupTaskConfig(true, 20, 3)));
+
+        assertTrue(provider().contribute(ctxWithWhitelist(List.of("calculator"))).specs().isEmpty(),
+                "a group opt-in must not widen a member's explicit tool selection");
+        assertEquals(2, provider().contribute(ctxWithWhitelist(List.of("calculator", "group_tasks"))).specs().size());
+    }
+
+    private ToolAssemblyContext ctxWithWhitelist(List<String> whitelist) {
+        var memory = mock(IConversationMemory.class);
+        lenient().when(memory.getConversationId()).thenReturn(MEMBER_CONV);
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        return new ToolAssemblyContext(memory, task, whitelist, null, "user-1", "agent-a", GC_ID);
     }
 
     @Test

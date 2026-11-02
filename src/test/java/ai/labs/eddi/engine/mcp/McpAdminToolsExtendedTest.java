@@ -265,7 +265,8 @@ class McpAdminToolsExtendedTest {
         String result = tools.undeployAgent(AGENT_ID, 1, null, false);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Undeploy failed"));
+        assertFalse(result.contains("Undeploy failed"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // ==================== getDeploymentStatus — edge cases ====================
@@ -278,7 +279,8 @@ class McpAdminToolsExtendedTest {
         String result = tools.getDeploymentStatus(AGENT_ID, 1, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Status check failed"));
+        assertFalse(result.contains("Status check failed"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     @Test
@@ -302,7 +304,8 @@ class McpAdminToolsExtendedTest {
         String result = tools.listWorkflows(null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("DB error"));
+        assertFalse(result.contains("DB error"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // ==================== readWorkflow ====================
@@ -366,7 +369,8 @@ class McpAdminToolsExtendedTest {
         String result = tools.readWorkflow("wf1", 1);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Read failed"));
+        assertFalse(result.contains("Read failed"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // ==================== readResource ====================
@@ -571,7 +575,8 @@ class McpAdminToolsExtendedTest {
         String result = tools.updateAgent(AGENT_ID, 1, "Name", null, false, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("DB error"));
+        assertFalse(result.contains("DB error"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // ==================== createAgent — edge cases ====================
@@ -669,7 +674,8 @@ class McpAdminToolsExtendedTest {
         String result = tools.deleteResource("behavior", RESOURCE_ID, 1, false);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Delete failed"));
+        assertFalse(result.contains("Delete failed"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // ==================== createResource — additional types ====================
@@ -1005,7 +1011,8 @@ class McpAdminToolsExtendedTest {
                 "msg", "name", null, null, null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("DB error"));
+        assertFalse(result.contains("DB error"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // ==================== listSchedules ====================

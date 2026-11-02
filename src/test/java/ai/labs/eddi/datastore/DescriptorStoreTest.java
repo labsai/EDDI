@@ -529,4 +529,13 @@ class DescriptorStoreTest {
         }
         throw new AssertionError("no filter on " + field);
     }
+    @Test
+    @DisplayName("findByOriginId asks for every match, not the first ten: callers filter by workspace and EDIT afterwards")
+    void findByOriginIdIsNotCappedAtTen() throws Exception {
+        when(resourceStorage.findResources(any(), anyString(), anyInt(), anyInt())).thenReturn(List.of());
+
+        store.findByOriginId("origin-1");
+
+        verify(resourceStorage).findResources(any(), eq(DescriptorStore.FIELD_LAST_MODIFIED), eq(0), eq(IResourceStorage.MAX_RESULT_LIMIT));
+    }
 }

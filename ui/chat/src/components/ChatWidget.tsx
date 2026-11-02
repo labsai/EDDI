@@ -4,7 +4,7 @@
    and composes all sub-components.
    ────────────────────────────────────────────── */
 
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useCallback } from "react";
 import { MessageSquarePlus, MessagesSquare, Redo2, Square, Undo2 } from "lucide-react";
 import { useParams, useSearchParams } from "react-router-dom";
 
@@ -40,9 +40,15 @@ import {
   demoStartConversation,
   demoSendMessageStreaming,
   demoGetQuickReplies,
+  demoRatingClient,
+  DEMO_RATING_PROFILE,
 } from "@/api/demo-api";
+import { httpRatingClient, parseRatingProfile } from "@/api/rating-api";
+import { useRatings } from "@/hooks/useRatings";
+import { lastStepIndex, ratableSteps } from "@/rating-steps";
+import { RatingCard } from "./RatingCard";
 import { buildAttachmentContext } from "@/api/attachments-api";
-import { stepsToMessages } from "@/api/snapshot";
+import { outputsCarryStepIndexes, stepsToMessages } from "@/api/snapshot";
 import { cancelConversation, type ApprovalStatus } from "@/api/hitl-api";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
 import { PausedCard } from "./PausedCard";
@@ -107,13 +113,14 @@ function newTurn(
   return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false, doneUnreadable: false };
 }
 
-function makeAgentMessage(content: string, images?: OutputImage[]): ChatMessage {
+function makeAgentMessage(content: string, images?: OutputImage[], stepIndex?: number): ChatMessage {
   return {
     id: `agent-${Date.now()}-${Math.random()}`,
     role: "agent",
     content,
     timestamp: Date.now(),
     ...(images?.length ? { images } : {}),
+    ...(stepIndex !== undefined ? { stepIndex } : {}),
   };
 }
 
@@ -786,7 +793,10 @@ export function ChatWidget() {
      *   at index 0, so the key degenerates to the reply text and a repeated
      *   utterance (a fallback, a re-prompt) would be silently swallowed.
      */
-    (snapshot: Partial<ConversationSnapshot>, { dedupe = false }: { dedupe?: boolean } = {}) => {
+    (
+      snapshot: Partial<ConversationSnapshot>,
+      { dedupe = false, fullHistory = false }: { dedupe?: boolean; fullHistory?: boolean } = {},
+    ) => {
       // Managed-agent mode never calls startConversation, so without this the
       // widget has no conversationId — disabling HITL polling, cancel, retry
       // and attachments for the entire managed route.
@@ -808,8 +818,19 @@ export function ChatWidget() {
         redoAvailable: snapshot.redoAvailable ?? false,
       });
 
-      // Handle the "conversationOutputs" format (from POST /agents responses)
-      if (snapshot.conversationOutputs?.length) {
+      // Handle the "conversationOutputs" format (from POST /agents responses).
+      // On a full read their positions are the server's step indexes — but only
+      // when they agree with conversationSteps. When the lists disagree, the
+      // transcript is rebuilt from the steps instead (below), which carry the
+      // person's turns and the real indexes: output-only agent messages left
+      // unstamped would all count as step 0 and key every reply rating to the
+      // greeting.
+      const outputsList = snapshot.conversationOutputs;
+      const useOutputs =
+        !!outputsList?.length &&
+        (!fullHistory || !snapshot.conversationSteps?.length || outputsCarryStepIndexes(outputsList, snapshot.conversationSteps));
+      if (useOutputs && snapshot.conversationOutputs) {
+        const stampSteps = fullHistory;
         snapshot.conversationOutputs.forEach((output, index, outputs) => {
           // Extract agent replies and detect input field requests
           const agentReplies: unknown[] = output.output ?? [];
@@ -826,7 +847,10 @@ export function ChatWidget() {
           // Handles bare-string entries too — HITL's pending-approval
           // placeholder and reviewer-rejection message arrive as raw strings.
           extractOutputTexts(agentReplies).forEach((text) => {
-            const message = makeAgentMessage(text);
+            // A full read lists every step, so the position is the server's
+            // step index (reply ratings are keyed by it). A turn response
+            // carries only its own step, at index 0, and is counted instead.
+            const message = makeAgentMessage(text, undefined, stampSteps ? index : undefined);
             dispatch({
               type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
               message,
@@ -834,7 +858,10 @@ export function ChatWidget() {
           });
           const images = extractOutputImages(agentReplies);
           if (images.length && !dedupe) {
-            dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage("", images) });
+            dispatch({
+              type: "ADD_MESSAGE",
+              message: makeAgentMessage("", images, stampSteps ? index : undefined),
+            });
           }
         });
 
@@ -861,11 +888,20 @@ export function ChatWidget() {
           snapshot.conversationSteps,
           secretTextsRef.current,
           snapshot.conversationOutputs,
+          fullHistory,
         )) {
           dispatch({
             type: dedupe ? "ADD_SNAPSHOT_MESSAGE" : "ADD_MESSAGE",
             message,
           });
+        }
+        // Rebuilt from the steps although outputs exist: the latest output still
+        // carries the open input-field request and the quick replies.
+        const lastOutput = outputsList?.length ? outputsList[outputsList.length - 1] : null;
+        if (lastOutput) {
+          const field = findInputField(lastOutput.output ?? []);
+          if (field) dispatch({ type: "SET_INPUT_FIELD", field });
+          dispatch({ type: "SET_QUICK_REPLIES", replies: lastOutput.quickReplies ?? [] });
         }
       }
     },
@@ -923,7 +959,7 @@ export function ChatWidget() {
           // The route names an intent; the snapshot names the agent, whose review
           // notice must be shown like any other's.
           setManagedAgentId(snapshot.agentId || null);
-          processSnapshot(snapshot);
+          processSnapshot(snapshot, { fullHistory: true });
           loadAgentName(snapshot, gen);
         } else if (environment && agentId) {
           // Direct agent: POST to create conversation
@@ -934,7 +970,7 @@ export function ChatWidget() {
           // GET to pick up welcome message
           const snapshot = await readConversation(environment, agentId, convId);
           if (gen !== generationRef.current) return;
-          processSnapshot(snapshot);
+          processSnapshot(snapshot, { fullHistory: true });
           loadAgentName(snapshot, gen);
         }
       } catch (err) {
@@ -1000,6 +1036,7 @@ export function ChatWidget() {
     // A new target starts without the previous one's notice, and a slower answer
     // for the previous target cannot overwrite the new one's.
     dispatch({ type: "SET_REVIEW_NOTICE", notice: null });
+    dispatch({ type: "SET_RATING_PROFILE", profile: isDemo ? DEMO_RATING_PROFILE : null });
     if (!tokenReady) {
       // The lookup is authenticated; asked before the token arrived it would
       // fail and read as "no notice".
@@ -1019,9 +1056,13 @@ export function ChatWidget() {
     let cancelled = false;
     fetchAgentProfile(profileAgentId, environment ?? "production")
       .then((profile) => {
-        if (!cancelled) dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
+        if (cancelled) return;
+        dispatch({ type: "SET_REVIEW_NOTICE", notice: profile?.reviewNotice ?? null });
+        // Absent on an older server, or when the deployed version asks for no
+        // ratings: no rating control is shown.
+        dispatch({ type: "SET_RATING_PROFILE", profile: parseRatingProfile(profile?.rating) });
       })
-      .catch(() => { /* no profile endpoint: no notice */ })
+      .catch(() => { /* no profile endpoint: no notice, no ratings */ })
       .finally(() => {
         if (!cancelled) setProfileSettled(true);
       });
@@ -1029,6 +1070,18 @@ export function ChatWidget() {
       cancelled = true;
     };
   }, [profileAgentId, environment, isDemo, dispatch, tokenReady]);
+
+  /* ─── Ratings ───────────────────────────────── */
+  // Nothing renders unless the agent's profile asks for ratings.
+  const ratings = useRatings({
+    client: isDemo ? demoRatingClient : httpRatingClient,
+    conversationId: state.conversationId,
+    profile: state.ratingProfile,
+    messages: state.messages,
+    conversationState: state.conversationState,
+  });
+  const ratableByPosition = useMemo(() => ratableSteps(state.messages), [state.messages]);
+  const clearRatedStep = ratings.clearStep;
 
   /* ─── Send message ──────────────────────────── */
   const handleSend = useCallback(
@@ -1518,6 +1571,7 @@ export function ChatWidget() {
         snapshot.conversationSteps,
         secretTextsRef.current,
         snapshot.conversationOutputs,
+        true,
       );
       if (msgs.length) {
         dispatch({ type: "REPLACE_MESSAGES", messages: msgs });
@@ -1770,8 +1824,13 @@ export function ChatWidget() {
     const gen = generationRef.current;
     dispatch({ type: "SET_PROCESSING", value: true });
     setHistoryBusy(true);
+    // A rerun replaces the last step's reply, so a thumb given to the old one
+    // no longer applies. The server keeps it (no hook in the rerun path); the
+    // widget forgets it.
+    const rerunStep = lastStepIndex(state.messages);
     try {
       await rerunLastStep(state.conversationId);
+      if (gen === generationRef.current && rerunStep !== null) clearRatedStep(rerunStep);
       const snapshot = await readConversation("", "", state.conversationId, true);
       if (gen !== generationRef.current) return;
       if (snapshot.conversationState) {
@@ -1799,7 +1858,7 @@ export function ChatWidget() {
         dispatch({ type: "SET_PROCESSING", value: false });
       }
     }
-  }, [dispatch, state.conversationId, processSnapshot]);
+  }, [dispatch, state.conversationId, state.messages, processSnapshot, clearRatedStep]);
 
   /* ─── Stop generating ───────────────────────── */
   const handleStop = useCallback(async () => {
@@ -1935,10 +1994,27 @@ export function ChatWidget() {
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
   const showStartRetry = startFailed && !state.conversationId && !isEnded;
+  // Shown in the empty state too: an agent with no greeting has no messages yet,
+  // and the header's "Rate this conversation" has to open the card for it.
+  const ratingCard =
+    ratings.cardOpen && ratings.profile && !isPaused ? (
+      <RatingCard
+        key={state.conversationId ?? "none"}
+        profile={ratings.profile}
+        current={ratings.conversationRating}
+        onSubmit={ratings.rateConversation}
+        onWithdraw={ratings.withdrawConversation}
+        onClose={ratings.closeCard}
+      />
+    ) : null;
 
   return (
     <div className="chat-root">
-      <ChatHeader />
+      <ChatHeader
+        onRateConversation={
+          ratings.profile?.conversationRating && state.conversationId ? ratings.openCard : undefined
+        }
+      />
       {state.reviewNotice && (
         <div className="chat-review-notice" role="note" data-testid="chat-review-notice">
           {state.reviewNotice}
@@ -1959,28 +2035,40 @@ export function ChatWidget() {
         data-testid="chat-transcript"
       >
         {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
-          <div className="chat-empty">
-            <MessagesSquare className="chat-empty__icon" size="1em" />
-            {/* Keyed on whether a conversation exists, not on whether it has
-                messages: an agent with no greeting is READY, not "starting". */}
-            <p className="chat-empty__text">
-              {state.conversationId
-                ? t("transcript.ready")
-                : t("transcript.starting")}
-            </p>
-          </div>
+          <>
+            <div className="chat-empty">
+              <MessagesSquare className="chat-empty__icon" size="1em" />
+              {/* Keyed on whether a conversation exists, not on whether it has
+                  messages: an agent with no greeting is READY, not "starting". */}
+              <p className="chat-empty__text">
+                {state.conversationId
+                  ? t("transcript.ready")
+                  : t("transcript.starting")}
+              </p>
+            </div>
+            {ratingCard}
+          </>
         ) : (
           <>
-            {state.messages.map((msg) => (
-              <MessageBubble
-                key={msg.id}
-                message={msg}
-                enableMarkdown={state.config.enableMarkdown !== false}
-                enableMath={state.config.enableMath !== false}
-                enableCodeHighlight={state.config.enableCodeHighlight !== false}
-                agentName={state.agentName}
-              />
-            ))}
+            {state.messages.map((msg, i) => {
+              const ratingStep = ratings.profile?.messageRating ? ratableByPosition[i] : null;
+              return (
+                <MessageBubble
+                  key={msg.id}
+                  message={msg}
+                  enableMarkdown={state.config.enableMarkdown !== false}
+                  enableMath={state.config.enableMath !== false}
+                  enableCodeHighlight={state.config.enableCodeHighlight !== false}
+                  agentName={state.agentName}
+                  ratingStep={ratingStep}
+                  rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
+                  ratingProfile={ratings.profile}
+                  onRateStep={ratings.rateStep}
+                />
+              );
+            })}
+
+            {ratingCard}
 
             {isPaused ? (
               // From the stream's own news, at once: approval-status may not have
@@ -2026,6 +2114,16 @@ export function ChatWidget() {
         {!isPaused && (state.isThinking || state.isEscalating || state.activeTool)
           ? indicatorStatusText(state.isEscalating, state.activeTool)
           : ""}
+      </div>
+
+      {/* A refused rating (rolled back) says why. Always mounted, so the
+          message is announced when it appears. */}
+      <div className="chat-toast-region" role="status" aria-live="polite" data-testid="rating-toast-region">
+        {ratings.toast && (
+          <div className="chat-toast" data-testid="rating-toast">
+            {ratings.toast}
+          </div>
+        )}
       </div>
 
       <div style={{ position: "relative" }}>

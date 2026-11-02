@@ -22,17 +22,24 @@ export class ApiClientError extends Error implements ApiError {
   readonly status: number;
   readonly url?: string;
   /**
+   * The stable machine code of an `{"error": "<CODE>", "message": "…"}` body
+   * (e.g. the rating endpoints' `RATING_CHANGED`), when the body had both
+   * fields. `message` holds the sentence; this is what a caller branches on.
+   */
+  readonly code?: string;
+  /**
    * The error body, parsed, when it was JSON — for the endpoints whose refusal
    * carries more than a sentence: per-field `violations`, or the
    * `currentRevision` of a 409 the caller should offer to reload.
    */
   readonly body?: unknown;
 
-  constructor(status: number, message: string, url?: string, body?: unknown) {
+  constructor(status: number, message: string, url?: string, code?: string, body?: unknown) {
     super(message);
     this.name = "ApiClientError";
     this.status = status;
     if (url !== undefined) this.url = url;
+    if (code !== undefined) this.code = code;
     if (body !== undefined) this.body = body;
   }
 }
@@ -58,10 +65,12 @@ export async function apiErrorFromResponse(
 ): Promise<ApiClientError> {
   let message = fallbackMessage;
   let body: unknown;
+  let code: string | undefined;
   try {
     const text = await response.text();
     const extracted = extractErrorMessage(text);
     if (extracted) message = extracted;
+    code = extractErrorCode(text);
     try {
       body = text.trim() ? JSON.parse(text) : undefined;
     } catch {
@@ -70,7 +79,24 @@ export async function apiErrorFromResponse(
   } catch {
     // Body unreadable — keep the fallback.
   }
-  return new ApiClientError(response.status, message, url, body);
+  return new ApiClientError(response.status, message, url, code, body);
+}
+
+/**
+ * The `error` code of EDDI's `{"error": "<code>", "message": "…"}` envelope —
+ * only when BOTH are strings, because a body with just `error` uses it as the
+ * message (see `extractErrorMessage`).
+ */
+function extractErrorCode(body: string): string | undefined {
+  try {
+    const parsed = JSON.parse(body.trim()) as Record<string, unknown> | null;
+    if (parsed && typeof parsed === "object" && typeof parsed.error === "string" && typeof parsed.message === "string") {
+      return parsed.error;
+    }
+  } catch {
+    // Not JSON: no code.
+  }
+  return undefined;
 }
 
 /** Type guard to check if an error is an ApiError from our client */
@@ -197,15 +223,16 @@ function truncateMessage(message: string): string {
  * 2xx, so `response.ok` cannot tell them apart and the Manager reported every
  * one of them as a clean success.
  *
- * Deliberately just the status. A header accessor would round the shape out,
- * and nothing needs one: the only header-carried signal in this family,
- * `X-Schedules-Skipped`, is read by `backup.ts`, which bypasses `ApiClient`
- * entirely because it posts zip bodies. Adding an accessor with no caller is
- * the same defect as an endpoint wrapper nobody renders.
+ * The response headers ride along because a save can now carry advice that is
+ * not an error: a channel-integration create or update answers 201 / 200 with
+ * `X-Eddi-Warnings` (stable codes such as `email.open-trigger`), and the save
+ * itself succeeded. (`X-Schedules-Skipped` is read by `backup.ts`, which
+ * bypasses `ApiClient` entirely because it posts zip bodies.)
  */
 export interface ApiResponse<T> {
   data: T;
   status: number;
+  headers: Headers;
 }
 
 /** Extract a human-readable message from any caught error */
@@ -410,6 +437,7 @@ class ApiClient {
     const envelope = (data: T): ApiResponse<T> => ({
       data,
       status: response.status,
+      headers: response.headers,
     });
 
     // 204 No Content has no body. 202 Accepted usually has none either, but
@@ -483,11 +511,18 @@ class ApiClient {
   /**
    * The `*WithResponse` family, for the endpoints where a 2xx is not yet an
    * answer — see {@link ApiResponse}. Prefer the plain verb everywhere else:
-   * an envelope at a call site that ignores it only adds a `.data`. There is no
-   * `postWithResponse` because nothing posts to such an endpoint yet.
+   * an envelope at a call site that ignores it only adds a `.data`.
    */
   getWithResponse<T>(path: string): Promise<ApiResponse<T>> {
     return this.requestWithResponse<T>("GET", path);
+  }
+
+  postWithResponse<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<ApiResponse<T>> {
+    return this.requestWithResponse<T>("POST", path, body, headers);
+  }
+
+  putWithResponse<T>(path: string, body?: unknown, headers?: Record<string, string>): Promise<ApiResponse<T>> {
+    return this.requestWithResponse<T>("PUT", path, body, headers);
   }
 
   deleteWithResponse<T>(path: string): Promise<ApiResponse<T>> {

@@ -388,6 +388,7 @@ public class SharedTaskList {
     public synchronized TaskItem completeTask(String taskId, String result) {
         TaskItem existing = requireTask(taskId);
         requireStatus(existing, TaskStatus.IN_PROGRESS, "complete");
+        requireResult(taskId, result, "complete");
         TaskItem updated = new TaskItem(
                 existing.id(), existing.subject(), existing.description(),
                 TaskStatus.COMPLETED, existing.assignedAgentId(), existing.assignedDisplayName(),
@@ -436,6 +437,18 @@ public class SharedTaskList {
         return updated;
     }
 
+    /**
+     * A task cannot complete (or go to review) without a result: dependents read
+     * it, and VERIFY judges it. A member turn that produced nothing fails the task
+     * instead ({@link #failTask}).
+     */
+    private static void requireResult(String taskId, String result, String operation) {
+        if (result == null) {
+            throw new IllegalStateException("%s '%s': a task cannot complete without a result — fail it instead"
+                    .formatted(operation, taskId));
+        }
+    }
+
     // --- HITL task lifecycle ---
 
     /** IN_PROGRESS → AWAITING_APPROVAL, preserving the agent's answer in result. */
@@ -443,6 +456,7 @@ public class SharedTaskList {
         TaskItem t = requireTask(taskId);
         if (t.status() != TaskStatus.IN_PROGRESS)
             throw new IllegalStateException("submitForApproval '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
+        requireResult(taskId, result, "submitForApproval");
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId());
@@ -645,5 +659,47 @@ public class SharedTaskList {
         if (taskId != null && bid != null) {
             awardedBids.put(taskId, bid);
         }
+    }
+
+    // ==================== E2 — reworks within a run ====================
+
+    /**
+     * taskId → how many times VERIFY sent the task back for rework in this run
+     * ({@code maxReworks}). Absent = 0. Persisted with the discussion, so the bound
+     * holds across a pause; a document written before 6.6 has none (identity hop,
+     * no schema bump: an older pod re-saving drops the counts, after which a task
+     * can at worst be reworked up to {@code maxReworks} more times, still inside
+     * {@code maxTurns} and the cost ceiling).
+     */
+    private Map<String, Integer> reworkCounts = new ConcurrentHashMap<>();
+
+    public Map<String, Integer> getReworkCounts() {
+        return reworkCounts;
+    }
+
+    public void setReworkCounts(Map<String, Integer> reworkCounts) {
+        this.reworkCounts = reworkCounts != null ? new ConcurrentHashMap<>(reworkCounts) : new ConcurrentHashMap<>();
+    }
+
+    /** Reworks the task has had in this run. */
+    public synchronized int reworkCount(String taskId) {
+        Integer count = taskId != null ? reworkCounts.get(taskId) : null;
+        return count != null ? count : 0;
+    }
+
+    /**
+     * FAILED → ASSIGNED for another attempt, with the verifier's feedback as the
+     * {@code verificationNote} the member's next input carries (the same transition
+     * and the same feedback channel as {@code onTaskRejection: RETRY}), and the
+     * rework counted.
+     *
+     * @return the task as reset, with the count already incremented
+     */
+    public synchronized TaskItem reworkTask(String taskId, String verifierFeedback) {
+        TaskItem existing = requireTask(taskId);
+        requireStatus(existing, TaskStatus.FAILED, "rework");
+        TaskItem reset = resetFromAnyToAssigned(taskId, verifierFeedback);
+        reworkCounts.merge(taskId, 1, Integer::sum);
+        return reset;
     }
 }

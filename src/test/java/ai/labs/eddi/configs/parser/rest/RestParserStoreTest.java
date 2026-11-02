@@ -8,10 +8,17 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
+import jakarta.ws.rs.ForbiddenException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -82,5 +89,49 @@ class RestParserStoreTest {
         when(resourceId.getVersion()).thenReturn(2);
         when(parserStore.getCurrentResourceId("p-1")).thenReturn(resourceId);
         assertEquals(2, restStore.getCurrentResourceId("p-1").getVersion());
+    }
+    private static ParserConfiguration parserWithDictionary(String dictionaryId) {
+        var config = new ParserConfiguration();
+        List<Object> dictionaries = new ArrayList<>();
+        dictionaries.add(Map.of("type", "eddi://ai.labs.parser.dictionaries.regular", "config",
+                Map.of("uri", "eddi://ai.labs.dictionary/dictionarystore/dictionaries/" + dictionaryId + "?version=1")));
+        config.setExtensions(new HashMap<>(Map.of("dictionaries", dictionaries)));
+        return config;
+    }
+
+    @Test
+    @DisplayName("a parser naming another space's private dictionary is refused on create, update and duplicate")
+    void foreignDictionaryReferenceIsRefused() throws Exception {
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("denied")).when(guard).requireAccess(eq("ffeeddccbbaa998877665544"), eq(AccessLevel.VIEW), anyString());
+        var sut = new RestParserStore(parserStore, mock(IDocumentDescriptorStore.class), guard);
+        var current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(parserStore.getCurrentResourceId("p-1")).thenReturn(current);
+        when(parserStore.read("p-1", 1)).thenReturn(new ParserConfiguration());
+
+        assertThrows(ForbiddenException.class, () -> sut.createParser(parserWithDictionary("ffeeddccbbaa998877665544")));
+        assertThrows(ForbiddenException.class, () -> sut.updateParser("p-1", 1, parserWithDictionary("ffeeddccbbaa998877665544")));
+        when(parserStore.read("p-1", 1)).thenReturn(parserWithDictionary("ffeeddccbbaa998877665544"));
+        assertThrows(ForbiddenException.class, () -> sut.duplicateParser("p-1", 1));
+        verify(parserStore, never()).create(any());
+        verify(parserStore, never()).update(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("an update may keep a dictionary reference the stored version already had")
+    void keptReferenceNeedsNothingNew() throws Exception {
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("denied")).when(guard).requireAccess(eq("ffeeddccbbaa998877665544"), eq(AccessLevel.VIEW), anyString());
+        var sut = new RestParserStore(parserStore, mock(IDocumentDescriptorStore.class), guard);
+        var current = mock(IResourceStore.IResourceId.class);
+        when(current.getVersion()).thenReturn(1);
+        when(parserStore.getCurrentResourceId("p-1")).thenReturn(current);
+        when(parserStore.read("p-1", 1)).thenReturn(parserWithDictionary("ffeeddccbbaa998877665544"));
+        when(parserStore.update(eq("p-1"), eq(1), any())).thenReturn(2);
+
+        sut.updateParser("p-1", 1, parserWithDictionary("ffeeddccbbaa998877665544"));
+
+        verify(guard, never()).requireAccess(eq("ffeeddccbbaa998877665544"), any(), anyString());
     }
 }

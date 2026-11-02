@@ -10,6 +10,8 @@ import ai.labs.eddi.engine.httpclient.impl.VertxHttpClient;
 import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import io.vertx.core.Future;
+import io.vertx.core.Handler;
+import io.vertx.core.MultiMap;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpClient;
 import io.vertx.core.http.HttpClientOptions;
@@ -21,6 +23,9 @@ import io.vertx.core.net.SocketAddress;
 import io.vertx.core.tracing.TracingPolicy;
 import io.vertx.ext.web.client.WebClient;
 import io.vertx.ext.web.client.WebClientOptions;
+import io.vertx.ext.web.client.impl.ClientPhase;
+import io.vertx.ext.web.client.impl.HttpContext;
+import io.vertx.ext.web.client.impl.WebClientInternal;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
@@ -29,6 +34,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.Set;
@@ -76,10 +82,174 @@ public class HttpClientModule {
         // live jar that was the actual replay vector. If a future feature needs
         // cookies, scope a WebClientSession per conversation/principal rather than
         // sharing one here.
-        WebClient webClient = WebClient.wrap(
-                guardedHttpClient(vertx, options, OutboundTargetPolicy.parseAllowedHosts(allowedHosts.orElse(""))), options);
+        Set<String> allowList = OutboundTargetPolicy.parseAllowedHosts(allowedHosts.orElse(""));
+        WebClient webClient = WebClient.wrap(guardedHttpClient(vertx, options, allowList), options);
+        ((WebClientInternal) webClient).addInterceptor(refusingConnectedPeers(ssrfProtectionEnabled, allowList));
 
         return new VertxHttpClient(vertx, webClient, webClient);
+    }
+
+    /**
+     * Whether {@value OutboundTargetPolicy#CONFIG_KEY} is on. Field-injected so the
+     * tests that build this module by hand get the shipped default.
+     */
+    @ConfigProperty(name = OutboundTargetPolicy.CONFIG_KEY, defaultValue = "false")
+    boolean ssrfProtectionEnabled;
+
+    /**
+     * A web-client interceptor that checks the address each request is <em>actually
+     * connected to</em>, before a byte of the request is written (DNS rebinding).
+     * <p>
+     * {@code ApiCallExecutor} validates the target by resolving its host through
+     * {@link InetAddress}; the client then resolves the host again when it opens a
+     * connection. Both lookups normally hit the JVM's positive DNS cache
+     * ({@code quarkus.vertx.use-async-dns} is off, so Vert.x resolves through the
+     * JDK), but a cache entry expiring between the two lets a rebinding name pass
+     * the check as a public address and connect to a private one. In the
+     * {@code SEND_REQUEST} phase the connection exists — pooled or fresh, first
+     * request or redirect hop — and nothing has been sent yet, so its remote
+     * address is the one fact the check can no longer be raced on:
+     * <ul>
+     * <li>a cloud-metadata or link-local peer is refused always, allow-list or not,
+     * as {@link UrlValidationUtils#rejectCloudMetadataTarget} refuses it by
+     * name;</li>
+     * <li>with protection on, a loopback, private or otherwise internal peer is
+     * refused unless the request's host is on
+     * {@value OutboundTargetPolicy#ALLOWED_HOSTS_KEY} — the rule
+     * {@code ApiCallExecutor} applies to the URL.</li>
+     * </ul>
+     * A request whose peer cannot be read is refused with protection on (it cannot
+     * be vouched for) and let through with it off.
+     * <p>
+     * With protection off, a redirect hop is also held to the rule the redirect
+     * handler applied to its host name ({@link #refusingPrivateHops}): it may land
+     * on a private or loopback peer only when the hop before it connected to that
+     * same class. The handler judged the name by a DNS answer of its own; without
+     * this, a name that resolved publicly then and privately at connect time would
+     * carry a public redirect into the internal network.
+     */
+    static Handler<HttpContext<?>> refusingConnectedPeers(boolean ssrfProtectionEnabled, Set<String> allowedHosts) {
+        return context -> {
+            if (context.phase() == ClientPhase.SEND_REQUEST) {
+                HttpClientRequest request = context.clientRequest();
+                String peerAddress = connectedAddress(request);
+                AddressClass previousHopClass = context.redirects() > 0 ? context.get(PREVIOUS_PEER_CLASS) : null;
+                String refusal = connectedPeerRefusal(peerAddress, request != null ? request.getHost() : null,
+                        request != null ? request.getPort() : -1, request != null && isHttps(request), ssrfProtectionEnabled,
+                        allowedHosts, context.redirects() > 0, previousHopClass);
+                if (refusal != null) {
+                    context.fail(new IllegalArgumentException(refusal));
+                    return;
+                }
+                context.set(PREVIOUS_PEER_CLASS, peerClass(peerAddress));
+            }
+            context.next();
+        };
+    }
+
+    /**
+     * Context attribute: the address class the previous hop of this exchange
+     * connected to.
+     */
+    private static final String PREVIOUS_PEER_CLASS = "eddi.previousPeerClass";
+
+    /**
+     * The class of a connected peer's IP literal, or {@code null} when it cannot be
+     * parsed.
+     */
+    static AddressClass peerClass(String peerAddress) {
+        InetAddress peer = parsePeer(peerAddress);
+        if (peer == null) {
+            return null;
+        }
+        if (peer.isLoopbackAddress()) {
+            return AddressClass.LOOPBACK;
+        }
+        return UrlValidationUtils.isPrivateAddress(peer) ? AddressClass.PRIVATE : AddressClass.PUBLIC;
+    }
+
+    private static InetAddress parsePeer(String peerAddress) {
+        if (peerAddress == null || peerAddress.isBlank()) {
+            return null;
+        }
+        String bare = peerAddress.startsWith("[") && peerAddress.endsWith("]") ? peerAddress.substring(1, peerAddress.length() - 1) : peerAddress;
+        int zone = bare.indexOf('%');
+        if (zone > 0) {
+            bare = bare.substring(0, zone);
+        }
+        try {
+            return InetAddress.ofLiteral(bare);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static boolean isHttps(HttpClientRequest request) {
+        String uri = request.absoluteURI();
+        return uri != null && uri.toLowerCase(Locale.ROOT).startsWith("https");
+    }
+
+    /**
+     * Why a request to {@code host} that connected to {@code peerAddress} must not
+     * be sent, or {@code null} when it may.
+     *
+     * @param peerAddress
+     *            the IP literal the connection's remote end has, or {@code null}
+     *            when unknown
+     */
+    static String connectedPeerRefusal(String peerAddress, String host, int port, boolean https, boolean ssrfProtectionEnabled,
+                                       Set<String> allowedHosts) {
+        return connectedPeerRefusal(peerAddress, host, port, https, ssrfProtectionEnabled, allowedHosts, false, null);
+    }
+
+    /**
+     * As above, for a request that may be a redirect hop.
+     *
+     * @param redirectHop
+     *            whether the request follows a redirect
+     * @param previousHopClass
+     *            the class of the peer the previous hop connected to, or
+     *            {@code null} when unknown (a redirect hop from an unknown class
+     *            may then only reach a public peer)
+     */
+    static String connectedPeerRefusal(String peerAddress, String host, int port, boolean https, boolean ssrfProtectionEnabled,
+                                       Set<String> allowedHosts, boolean redirectHop, AddressClass previousHopClass) {
+        if (peerAddress == null || peerAddress.isBlank()) {
+            return ssrfProtectionEnabled ? "Request refused: the address the connection reached cannot be read, so it cannot be checked" : null;
+        }
+        String bare = peerAddress.startsWith("[") && peerAddress.endsWith("]") ? peerAddress.substring(1, peerAddress.length() - 1) : peerAddress;
+        // An IPv6 link-local peer carries its zone ("fe80::1%eth0"); the zone says
+        // nothing about where the address sits, and would only stop the parse.
+        int zone = bare.indexOf('%');
+        if (zone > 0) {
+            bare = bare.substring(0, zone);
+        }
+        InetAddress peer;
+        try {
+            peer = InetAddress.ofLiteral(bare);
+        } catch (IllegalArgumentException e) {
+            return ssrfProtectionEnabled ? "Request refused: the connection's remote address is not an IP address: " + bare : null;
+        }
+        if (UrlValidationUtils.isMetadataAddress(peer)) {
+            return "Request refused: " + host + " connected to " + bare + ", a cloud instance-metadata or link-local address";
+        }
+        if (isAllowListed(host, port, https, allowedHosts)) {
+            return null;
+        }
+        if (!ssrfProtectionEnabled) {
+            AddressClass connected = peerClass(bare);
+            if (redirectHop && connected != AddressClass.PUBLIC && connected != previousHopClass) {
+                return "Request refused: the redirect to " + host + " connected to " + bare + ", a " + describe(connected)
+                        + " address, from a " + describe(previousHopClass) + " one (the name resolved differently when the redirect was "
+                        + "checked); list the host in " + OutboundTargetPolicy.ALLOWED_HOSTS_KEY + " if it is meant to be reachable";
+            }
+            return null;
+        }
+        if (UrlValidationUtils.isPrivateAddress(peer)) {
+            return "Request refused: " + host + " connected to " + bare + ", a private/internal address, which "
+                    + OutboundTargetPolicy.CONFIG_KEY + "=true refuses (the name resolved differently when it was validated)";
+        }
+        return null;
     }
 
     /**
@@ -256,14 +426,23 @@ public class HttpClientModule {
     }
 
     private static boolean isAllowListed(String bareHost, RequestOptions next, Set<String> allowedHosts) {
-        if (allowedHosts == null || allowedHosts.isEmpty()) {
+        Integer port = next.getPort();
+        return isAllowListed(bareHost, port != null ? port : -1, Boolean.TRUE.equals(next.isSsl()), allowedHosts);
+    }
+
+    /**
+     * Whether {@code host} — bare or in IPv6 brackets — or {@code host:port} (a
+     * missing port meaning the scheme's default) is on the allow-list.
+     */
+    static boolean isAllowListed(String host, int port, boolean https, Set<String> allowedHosts) {
+        if (host == null || allowedHosts == null || allowedHosts.isEmpty()) {
             return false;
         }
-        String host = bareHost.toLowerCase(Locale.ROOT);
-        Integer port = next.getPort();
-        int effective = port != null && port > 0 ? port : Boolean.TRUE.equals(next.isSsl()) ? 443 : 80;
-        return allowedHosts.contains(host) || allowedHosts.contains(host + ":" + effective)
-                || allowedHosts.contains("[" + host + "]:" + effective);
+        String lower = host.toLowerCase(Locale.ROOT);
+        String bare = lower.startsWith("[") && lower.endsWith("]") ? lower.substring(1, lower.length() - 1) : lower;
+        int effective = port > 0 ? port : https ? 443 : 80;
+        return allowedHosts.contains(bare) || allowedHosts.contains(bare + ":" + effective)
+                || allowedHosts.contains("[" + bare + "]:" + effective);
     }
 
     /**
@@ -305,10 +484,10 @@ public class HttpClientModule {
      * another host replayed whatever credential the httpcall carried — a static
      * {@code Bearer}/{@code X-Api-Key}/{@code Cookie} in the config just as much as
      * a resolved
-     * {@code ${vault:…}}/{@code ${connection:…}}/{@code ${caller:token}}. This
-     * scrubs {@link OutboundHttp#SENSITIVE_HEADERS} on every hop whose origin
-     * differs from the request that produced it, so the fix does not depend on
-     * knowing where the credential came from.
+     * {@code ${vault:…}}/{@code ${connection:…}}/{@code ${caller:token}}. On every
+     * hop whose origin differs from the request that produced it, this keeps only
+     * {@link #CROSS_ORIGIN_SAFE_HEADERS} - a credential can sit in any header name
+     * an httpcall configures, so the fix does not depend on knowing which one.
      */
     static Function<HttpClientResponse, Future<RequestOptions>> strippingCrossOriginCredentials(
                                                                                                 Function<HttpClientResponse, Future<RequestOptions>> delegate) {
@@ -327,11 +506,11 @@ public class HttpClientModule {
     }
 
     /**
-     * Removes every {@link OutboundHttp#SENSITIVE_HEADERS} entry (and the
-     * {@link TracePropagation#HEADERS trace context}) from {@code next} when it
-     * targets a different origin (scheme, host or effective port) than
-     * {@code original}. Same-origin hops keep their headers, so an in-service
-     * redirect still authenticates.
+     * Removes every header but {@link #CROSS_ORIGIN_SAFE_HEADERS} from {@code next}
+     * when it targets a different origin (scheme, host or effective port) than
+     * {@code original} - {@link OutboundHttp#SENSITIVE_HEADERS} and the
+     * {@link TracePropagation#HEADERS trace context} included. Same-origin hops
+     * keep their headers, so an in-service redirect still authenticates.
      */
     static void stripCredentialsIfCrossOrigin(HttpClientRequest original, RequestOptions next) {
         if (original == null || !sameOrigin(original, next)) {
@@ -340,8 +519,28 @@ public class HttpClientModule {
             // The W3C trace context goes too, as in OutboundHttp: the caller vouched
             // for one origin, and the trace id names this deployment's trace.
             TracePropagation.HEADERS.forEach(next::removeHeader);
+            // A fixed list cannot name every credential: an httpcall may carry its key
+            // in any header it likes (X-Custom-Token, Ocp-Apim-Subscription-Key...).
+            // So a cross-origin hop keeps only headers that describe the request and
+            // never carry a secret; everything the configuration added stays behind.
+            MultiMap headers = next.getHeaders();
+            if (headers != null) {
+                for (String name : new ArrayList<>(headers.names())) {
+                    if (!CROSS_ORIGIN_SAFE_HEADERS.contains(name.toLowerCase(Locale.ROOT))) {
+                        next.removeHeader(name);
+                    }
+                }
+            }
         }
     }
+
+    /**
+     * The request headers a cross-origin redirect hop keeps (lower case). Content
+     * negotiation and the client's identity only: none of them carries a
+     * credential.
+     */
+    static final Set<String> CROSS_ORIGIN_SAFE_HEADERS = Set.of("accept", "accept-encoding", "accept-language", "user-agent",
+            "content-type", "content-language", "cache-control", "pragma");
 
     private static boolean sameOrigin(HttpClientRequest original, RequestOptions next) {
         String originalUri = original.absoluteURI();

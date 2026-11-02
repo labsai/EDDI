@@ -583,6 +583,78 @@ class RestScheduleStoreExpandedTest {
     class ValidationEdgeCases {
 
         @Test
+        @DisplayName("should refuse a schedule that claims the alert maintenance role, on create and update")
+        void alertMaintenanceIsServerMinted() throws Exception {
+            var s = new ScheduleConfiguration();
+            s.setAgentId("agent-1");
+            s.setCronExpression("0 9 * * *");
+            s.setMessage("hello");
+            s.setMetadata(Map.of("alertType", "alert_maintenance"));
+
+            Response create = sut.createSchedule(s);
+            Response update = sut.updateSchedule("s1", s);
+
+            assertEquals(400, create.getStatus());
+            assertEquals(400, update.getStatus());
+            assertTrue(String.valueOf(create.getEntity()).contains("alerts-maintenance"));
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("should refuse the reserved name alerts-maintenance without the marker, on create and on a rename")
+        void alertMaintenanceNameIsReserved() throws Exception {
+            var s = new ScheduleConfiguration();
+            s.setAgentId("agent-1");
+            s.setCronExpression("0 9 * * *");
+            s.setMessage("hello");
+            s.setName(" Alerts-Maintenance ");
+
+            Response create = sut.createSchedule(s);
+            Response update = sut.updateSchedule("s1", s);
+
+            assertEquals(400, create.getStatus());
+            assertEquals(400, update.getStatus());
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).updateSchedule(eq("s1"), any());
+        }
+
+        @Test
+        @DisplayName("the stored alerts-maintenance schedule cannot be updated, deleted or disabled — 409 SYSTEM_SCHEDULE")
+        @SuppressWarnings("unchecked")
+        void systemScheduleIsProtected() throws Exception {
+            var stored = makeHeartbeatSchedule("sys");
+            stored.setName("alerts-maintenance");
+            stored.setAgentId(null);
+            stored.setMetadata(Map.of("alertType", "alert_maintenance"));
+            when(scheduleStore.readSchedule("sys")).thenReturn(stored);
+            var body = makeHeartbeatSchedule("sys");
+
+            for (Response response : List.of(sut.updateSchedule("sys", body), sut.deleteSchedule("sys"), sut.disableSchedule("sys"))) {
+                assertEquals(409, response.getStatus());
+                assertEquals("SYSTEM_SCHEDULE", ((Map<String, String>) response.getEntity()).get("error"));
+            }
+            verify(scheduleStore, never()).deleteSchedule("sys");
+            verify(scheduleStore, never()).updateSchedule(eq("sys"), any());
+        }
+
+        @Test
+        @DisplayName("the system schedule can still be recovered — retry, enable and dismiss are not refused as SYSTEM_SCHEDULE")
+        void systemScheduleRecoveryStaysOpen() throws Exception {
+            var stored = makeHeartbeatSchedule("sys");
+            stored.setName("alerts-maintenance");
+            stored.setAgentId(null);
+            stored.setMetadata(Map.of("alertType", "alert_maintenance"));
+            stored.setFireStatus(FireStatus.DEAD_LETTERED);
+            when(scheduleStore.readSchedule("sys")).thenReturn(stored);
+
+            assertEquals(200, sut.retryDeadLetter("sys").getStatus());
+            assertEquals(200, sut.dismissDeadLetter("sys").getStatus());
+            assertEquals(200, sut.enableSchedule("sys").getStatus());
+            verify(scheduleStore).requeueDeadLetter("sys");
+            verify(scheduleStore).dismissDeadLetter(eq("sys"), any());
+        }
+
+        @Test
         @DisplayName("should reject both cronExpression and oneTimeAt")
         void cronAndOneTime() {
             var s = new ScheduleConfiguration();

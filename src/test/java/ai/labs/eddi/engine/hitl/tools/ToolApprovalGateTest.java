@@ -165,11 +165,24 @@ class ToolApprovalGateTest {
     }
 
     @Test
-    void clearedCallIds_neverReGated() {
+    void clearedCall_reissued_goesBackToAHuman() {
+        // The clearance is granted only AFTER the resumer executed (or replayed) the
+        // approved call: letting the identical reissue through ran it twice on one
+        // approval. It is gated again, saying why.
         var gate = new ToolApprovalGate();
         var batch = List.of(req("1", "delete_account"));
         var result = gate.classify(batch, Map.of("delete_account", "http"), cfg(List.of("delete_*"), null), cleared("1", "delete_account", "{}"));
-        assertTrue(result.gated().isEmpty());
+        assertEquals(1, result.gated().size());
+        assertTrue(result.allowed().isEmpty());
+        assertEquals(ToolApprovalGate.REPEAT_REASON, result.gateReasonByCallId().get("1"));
+    }
+
+    @Test
+    void clearedCall_reissued_isGatedEvenWhenTheConfigWouldExemptIt() {
+        var gate = new ToolApprovalGate();
+        var batch = List.of(req("1", "delete_account"));
+        var result = gate.classify(batch, Map.of(), cfg(List.of("delete_*"), List.of("delete_account")), cleared("1", "delete_account", "{}"));
+        assertEquals(1, result.gated().size());
     }
 
     @Test
@@ -197,9 +210,11 @@ class ToolApprovalGateTest {
         var cleared = cleared("call_1", "delete_account", "{\"a\":1,\"b\":2}");
         var reissue = ToolExecutionRequest.builder().id("call_1").name("delete_account").arguments("{ \"b\": 2, \"a\": 1 }").build();
         var first = gate.classify(List.of(reissue), Map.of(), cfg(List.of("delete_*"), null), cleared);
-        assertTrue(first.gated().isEmpty(), "key order and whitespace do not make a call different");
+        assertEquals(ToolApprovalGate.REPEAT_REASON, first.gateReasonByCallId().get("call_1"),
+                "key order and whitespace do not make a call different: it is recognised as the repeat");
         var second = gate.classify(List.of(reissue), Map.of(), cfg(List.of("delete_*"), null), cleared);
-        assertEquals(1, second.gated().size(), "an approval covers one execution, not every later iteration");
+        assertEquals(1, second.gated().size());
+        assertEquals("delete_*", second.gateReasonByCallId().get("call_1"), "the clearance is used up by the first repeat");
     }
 
     @Test

@@ -54,7 +54,12 @@ import java.io.IOException;
 public class SlackWebApiClient {
 
     private static final Logger LOGGER = Logger.getLogger(SlackWebApiClient.class);
-    private static final String SLACK_API_BASE = "https://slack.com/api/";
+    /**
+     * Where every bot token is sent. Public so the channel router can check a
+     * vaulted token's {@code allowedHosts} against this destination before it
+     * resolves it.
+     */
+    public static final String SLACK_API_BASE = "https://slack.com/api/";
 
     /** HTTP status codes that are worth retrying. */
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);

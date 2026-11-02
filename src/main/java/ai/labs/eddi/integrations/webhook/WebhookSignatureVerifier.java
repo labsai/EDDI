@@ -124,7 +124,7 @@ public class WebhookSignatureVerifier {
 
     private Result check(WebhookChannelSettings settings, byte[] rawBody, UnaryOperator<String> headers) {
         String secret = settings == null ? null : settings.signingSecret();
-        if (secret == null || secret.isBlank() || secret.startsWith("${vault:")) {
+        if (secret == null || secret.isBlank() || secret.strip().startsWith("${vault:") || secret.contains("${vault:")) {
             // An unresolvable vault reference reads back as null — or, defensively,
             // as the literal reference. Neither may ever be used as a key.
             return Result.NO_SECRET;

@@ -134,6 +134,12 @@ public class ConfigGraphResolver {
     }
 
     private void seedFromRoot(String rootId, Deque<String> queue, Set<String> seededRoots, int depth) {
+        if (seededRoots.size() >= MAX_GRAPH_SIZE) {
+            // The resource ceiling bounds the result, but each seed costs store reads
+            // before the capped loop runs: a broad stored group must not buy reads far
+            // beyond the budget with one small preview request.
+            return;
+        }
         if (!seededRoots.add(rootId)) {
             // Already seeded — a group that (directly or indirectly) contains itself.
             return;
@@ -164,6 +170,15 @@ public class ConfigGraphResolver {
                 for (var member : group.getMembers()) {
                     if (member == null || member.agentId() == null || member.agentId().isBlank()) {
                         continue;
+                    }
+                    if (member.memberType() == AgentGroupConfiguration.MemberType.HUMAN) {
+                        // A human member's id is a principal, not a configuration
+                        // reference. Followed as one, an editor could put any private
+                        // resource id there and have it shared along with the group.
+                        continue;
+                    }
+                    if (queue.size() >= MAX_GRAPH_SIZE) {
+                        break;
                     }
                     queue.addLast(member.agentId());
                     if (depth < MAX_GROUP_NESTING) {

@@ -52,8 +52,8 @@
              as [ERROR] - their warnings included - so read BUILD SUCCESS/FAILURE, not
              the [ERROR] count. -->
         <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
-        <!-- Node 24 (LTS "Krypton") matches CI (ci.yml NODE_VERSION) and mise.toml;
-             change all three together, and ci.yml's NODE_SHA256_LINUX_X64 with them. Node 24 is LTS until 2028-04-30,
+        <!-- Node 26 (LTS "Lithium") matches CI (ci.yml NODE_VERSION) and mise.toml;
+             change all three together, and ci.yml's NODE_SHA256_LINUX_X64 with them. Node 26 is Active LTS since 2026-10-28,
              Node 22 only until 2027-04-30. The UIs' own floor is lower - 22.18: Vitest 5
              needs 22.12, and Stryker 10's Babel 8 declares `^22.18.0 || >=24.11.0` -
              so a contributor still on Node 22 can run `npm run dev`.
@@ -62,7 +62,7 @@
              NODE_SHA256_LINUX_X64 in ci.yml, whose NODE_VERSION must equal this value
              (BuildQualityGatesTest). A local build, and src/main/docker/Dockerfile.demo, still
              download it unverified and trust nodejs.org over TLS alone. -->
-        <node.version>v24.22.0</node.version>
+        <node.version>v26.13.0</node.version>
         <!-- Pinned: Maven only warns when a declared plugin carries no version, then
              takes whatever its default lifecycle binding says, which moves with the
              Maven wrapper. -->
@@ -413,6 +413,20 @@
             <artifactId>angus-mail</artifactId>
             <version>2.0.5</version>
         </dependency>
+        <!-- DKIM/DMARC TXT lookups (engine/mail MailDnsResolver). dnsjava,
+             BSD-3-Clause; its only runtime dependency is slf4j-api, which the
+             Quarkus BOM manages. Known advisories (CVE-2024-25638, the KeyTrap
+             pair) are all fixed in 3.6.0 and concern the DNSSEC validator, which
+             EDDI does not use. The jar registers a
+             java.net.spi.InetAddressResolverProvider, but that provider hands
+             back the JDK's built-in resolver unless the system property
+             org.dnsjava.spi.enable=true is set, so the JVM's own host-name
+             resolution (and SafeSocketConnector's) is unchanged; never set it. -->
+        <dependency>
+            <groupId>dnsjava</groupId>
+            <artifactId>dnsjava</artifactId>
+            <version>3.6.5</version>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-csv</artifactId>
@@ -566,6 +580,28 @@
             <groupId>org.testcontainers</groupId>
             <artifactId>testcontainers-postgresql</artifactId>
             <scope>test</scope>
+        </dependency>
+        <!-- GreenMail: an in-process SMTP server for the system mailer's tests
+             (STARTTLS, implicit TLS, AUTH, refused submissions). Apache-2.0.
+             Test scope only. Its aggregate org.eclipse.angus:jakarta.mail is
+             excluded so the angus-mail declared above stays the one copy of the
+             mail implementation on the classpath, and its JUnit 4 dependency is
+             excluded because only the server classes are used. -->
+        <dependency>
+            <groupId>com.icegreen</groupId>
+            <artifactId>greenmail</artifactId>
+            <version>2.1.14</version>
+            <scope>test</scope>
+            <exclusions>
+                <exclusion>
+                    <groupId>org.eclipse.angus</groupId>
+                    <artifactId>jakarta.mail</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>junit</groupId>
+                    <artifactId>junit</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <!-- NATS JetStream client for async conversation processing (Phase 5) -->
         <dependency>

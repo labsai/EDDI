@@ -110,10 +110,11 @@ behalf, and the engine trusts them to decide what a turn may do:
 | `groupId` | Group conversations | Which group's `group`-visible [user memories](user-memory.md#group-memory) the conversation sees and writes |
 | `groupConversationId` | Group conversations | Which live discussion the member's group tools act on |
 | `groupDepth` | Group conversations | Nesting depth of the discussion |
-| `groupTranscript` | Group conversations | The discussion transcript shown to a member |
+| `groupTranscript` | Group conversations | The discussion transcript shown to a member — scoped by the phase's `contextScope` like the rendered prompt: nothing under `NONE` or the task scopes, the previous and current phase under `LAST_PHASE`, entries stripped of speaker and target under `ANONYMOUS`, own-targeted feedback under `OWN_FEEDBACK`; `FULL` the whole transcript minus process bookkeeping (abstentions, convergence, facilitation) and the ballots and bids of a phase still running; `SYNTHESIS` and `RETRO` phases everything |
 | `dynamicAgentConfig` | Group conversations | The group's [dynamic-agent policy](group-conversations.md) for the turn |
 | `dynamicCreatedAgentIds` | Group conversations | The agents the discussion has created (and may tear down) |
 | `delegationDepth` | `converse_with_agent` | How many delegation hops led to this conversation |
+| `selfContinuation` | [Self-continuation](long-jobs.md) | Marks a turn the agent started itself with `CONTINUE_CONVERSATION`, with its `number` and `max` |
 
 A client cannot set them. EDDI drops these keys from the context of every externally
 supplied request — `POST /agents/{agentId}/start`, `POST /agents/{conversationId}`

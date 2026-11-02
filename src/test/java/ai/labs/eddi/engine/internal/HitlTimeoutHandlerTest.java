@@ -155,22 +155,48 @@ class HitlTimeoutHandlerTest {
     class Abort {
 
         @Test
-        @DisplayName("regular surface → calls cancelConversation with CANCEL_GRACEFUL")
-        void regularSurface_callsCancelConversation() throws Exception {
-            var metadata = Map.<String, Object>of(
-                    "policy", "ABORT",
-                    "surface", "regular",
-                    "conversationId", "conv-123");
+        @DisplayName("regular surface → cancels only the pause the timeout was armed for, never a running turn")
+        void regularSurface_cancelsItsPauseOnly() throws Exception {
+            var metadata = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_REGULAR, "conv-123", "1700000000000");
+            when(conversationService.cancelPausedConversation("conv-123", "system:timeout", "1700000000000"))
+                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
 
             handler.handleTimeout(metadata);
 
-            // system-attributed so the cancellation audit entry names the actor
-            verify(conversationService).cancelConversation("conv-123", ControlSignal.CANCEL_GRACEFUL, "system:timeout");
+            // system-attributed so the cancellation audit entry names the actor; the
+            // paused-only cancel bound to the pause id, so a fire claimed just before a
+            // resume cannot stop the resumed turn or abort a newer pause
+            verify(conversationService).cancelPausedConversation("conv-123", "system:timeout", "1700000000000");
+            verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
             verifyNoInteractions(groupConversationService);
         }
 
         @Test
-        @DisplayName("group surface → calls cancelDiscussion with CANCEL_GRACEFUL")
+        @DisplayName("regular surface → a late fire that finds its pause gone completes without retrying")
+        void regularSurface_lateFireCompletes() throws Exception {
+            var metadata = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_REGULAR, "conv-123", "1700000000000");
+            when(conversationService.cancelPausedConversation("conv-123", "system:timeout", "1700000000000"))
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(metadata));
+        }
+
+        @Test
+        @DisplayName("regular surface → a fire that meets a resume still in flight stays armed")
+        void regularSurface_resumeInFlightIsRetried() throws Exception {
+            // The paused-only cancel finds nothing to cancel because a resume holds the
+            // pause (IN_PROGRESS). That resume may still fail and restore the pause, and
+            // only this fire would then apply the ABORT.
+            var metadata = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_REGULAR, "conv-123", "1700000000000");
+            when(conversationService.cancelPausedConversation("conv-123", "system:timeout", "1700000000000"))
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+            when(conversationService.getConversationState("conv-123")).thenReturn(ConversationState.IN_PROGRESS);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(metadata));
+        }
+
+        @Test
+        @DisplayName("group surface → paused-only cancel bound to the pause, CANCEL_GRACEFUL")
         void groupSurface_callsCancelDiscussion() throws Exception {
             var metadata = Map.<String, Object>of(
                     "policy", "ABORT",
@@ -179,7 +205,8 @@ class HitlTimeoutHandlerTest {
 
             handler.handleTimeout(metadata);
 
-            verify(groupConversationService).cancelDiscussion("gc-123", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-123", ControlSignal.CANCEL_GRACEFUL, null);
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
             verifyNoInteractions(conversationService);
         }
     }
@@ -248,7 +275,7 @@ class HitlTimeoutHandlerTest {
 
             handler.handleTimeout(metadata);
 
-            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1", null);
             verifyNoMoreInteractions(groupConversationService);
             verifyNoInteractions(conversationService);
         }
@@ -263,7 +290,7 @@ class HitlTimeoutHandlerTest {
 
             handler.handleTimeout(metadata);
 
-            verify(groupConversationService).cancelDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL);
+            verify(groupConversationService).cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, null);
             verifyNoMoreInteractions(groupConversationService);
         }
 
@@ -277,7 +304,20 @@ class HitlTimeoutHandlerTest {
 
             assertDoesNotThrow(() -> handler.handleTimeout(metadata));
 
-            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1", null);
+        }
+
+        @Test
+        @DisplayName("the scheduled pauseId binds the skip and the abort to the pause the timeout was armed for")
+        void pauseIdIsPassedThrough() throws Exception {
+            handler.handleTimeout(HitlSchedules.timeoutMetadata("SKIP_TURN", HitlSchedules.SURFACE_GROUP_HUMAN, "gc-1", "42"));
+            handler.handleTimeout(HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP_HUMAN, "gc-2", "43"));
+            handler.handleTimeout(HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP, "gc-3", "44"));
+
+            verify(groupConversationService).skipHumanTurnOnTimeout("gc-1", "42");
+            verify(groupConversationService).cancelPausedDiscussion("gc-2", ControlSignal.CANCEL_GRACEFUL, "43");
+            verify(groupConversationService).cancelPausedDiscussion("gc-3", ControlSignal.CANCEL_GRACEFUL, "44");
+            verify(groupConversationService, never()).cancelDiscussion(any(), any());
         }
     }
 
@@ -364,7 +404,7 @@ class HitlTimeoutHandlerTest {
         @DisplayName("ABORT whose cancel fails while still paused is retried, not dropped")
         void abortRegular_isRetried() throws Exception {
             doThrow(new IllegalStateException("store blip"))
-                    .when(conversationService).cancelConversation(eq("conv-1"), any(), anyString());
+                    .when(conversationService).cancelPausedConversation(eq("conv-1"), anyString(), any());
             when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
             assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("ABORT")));
 
@@ -376,14 +416,15 @@ class HitlTimeoutHandlerTest {
         @DisplayName("group ABORT and an expired human turn are retried while their pause is still waiting")
         void abortGroupAndHumanTurn_areRetried() throws Exception {
             var abort = HitlSchedules.timeoutMetadata("ABORT", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
-            doThrow(new IllegalStateException("store blip")).when(groupConversationService).cancelDiscussion(eq("gc-1"), any());
+            doThrow(new IllegalStateException("store blip")).when(groupConversationService)
+                    .cancelPausedDiscussion(eq("gc-1"), any(), eq("42"));
             var gc = new GroupConversation();
             gc.setState(GroupConversation.GroupConversationState.AWAITING_APPROVAL);
             when(groupConversationService.readGroupConversation("gc-1")).thenReturn(gc);
             assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(abort));
 
             var human = HitlSchedules.timeoutMetadata("SKIP_TURN", HitlSchedules.SURFACE_GROUP_HUMAN, "gc-1", "42");
-            doThrow(new IllegalStateException("store blip")).when(groupConversationService).skipHumanTurnOnTimeout("gc-1");
+            doThrow(new IllegalStateException("store blip")).when(groupConversationService).skipHumanTurnOnTimeout("gc-1", "42");
             gc.setState(GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT);
             assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(human));
 

@@ -24,28 +24,40 @@ import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.modules.llm.impl.LlmSpendGate;
+import com.mongodb.MongoTimeoutException;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
+import org.mockito.AdditionalAnswers;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import javax.sql.DataSource;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.when;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -213,6 +225,140 @@ class TenantCostMeteringIT extends MongoTestBase {
         memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(second));
 
         assertEquals(0.006, quotaStore.getMonthlyCost(tenant), 1e-9, storeName + ": the lost $0.004 is charged with the next turn");
+    }
+
+    /**
+     * say → undo → say through the real conversation store: the undo is persisted
+     * as a full replace (the step moves into the stored redo cache), and the next
+     * say discards it. The spend the discarded step carried — and a tenant charge
+     * still pending on it — must reach the store on the new step, or a public
+     * {@code /undo} resets the conversation's cost ceiling and loses the charge.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("storePairs")
+    @DisplayName("say -> undo -> say, persisted between each: the spend and a pending charge survive on the new step")
+    void undoThenSayKeepsSpendThroughTheStore(String storeName, Supplier<ITenantQuotaStore> quotaFactory,
+                                              Supplier<IConversationMemoryStore> memoryFactory)
+            throws Exception {
+        String tenant = "metering-" + storeName + "-" + TENANT_SEQ.incrementAndGet();
+        ITenantQuotaStore quotaStore = spy(quotaFactory.get());
+        // The priced turn's charge hits an outage; the store answers normally
+        // afterwards.
+        doReturn(ITenantQuotaStore.accountingUnavailable()).doCallRealMethod().when(quotaStore).tryAddCost(eq(tenant), anyDouble(),
+                anyDouble());
+        var quotaService = new TenantQuotaService(quotaStore, new SimpleMeterRegistry(), tenant);
+        quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 1.0, true));
+        var meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
+        IConversationMemoryStore memoryStore = memoryFactory.get();
+
+        // Turn 1 (unpriced), then turn 2 spends $0.004 and its charge is left pending.
+        IConversationMemory memory = new ConversationMemory("0123456789abcdef01234567", 1, "user");
+        memory.setConversationState(ConversationState.READY);
+        String conversationId = memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+        memory = reload(memoryStore, conversationId);
+        ((ConversationMemory) memory).startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.004));
+        meter.meterSettledStep(memory);
+        memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        // Undo, persisted.
+        memory = reload(memoryStore, conversationId);
+        memory.undoLastStep();
+        memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        // The next say discards the undone step; an unpriced turn, the quota store is
+        // back.
+        memory = reload(memoryStore, conversationId);
+        ((ConversationMemory) memory).startNextStep();
+        meter.meterSettledStep(memory);
+        memoryStore.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        IConversationMemory stored = reload(memoryStore, conversationId);
+        stored.setConversationCostCeilingUsd(0.004);
+        LlmSpendGate.Refusal refusal = new LlmSpendGate(quotaService, new SimpleMeterRegistry()).check(stored);
+        assertNotNull(refusal, storeName + ": the undone turn's spend still counts against the ceiling");
+        assertEquals("conversation_ceiling", refusal.reason(), storeName);
+        assertEquals(0.004, quotaStore.getMonthlyCost(tenant), 1e-9, storeName + ": the charge pending on the undone step was recorded");
+    }
+
+    private static IConversationMemory reload(IConversationMemoryStore memoryStore, String conversationId) throws Exception {
+        IConversationMemory memory = ConversationMemoryUtilities
+                .convertConversationMemorySnapshot(memoryStore.loadConversationMemorySnapshot(conversationId));
+        memory.setRevision(memoryStore.getRevision(conversationId));
+        return memory;
+    }
+
+    /**
+     * A store that works until {@code down} is set, then fails the way its driver
+     * does when the database goes away — after the schema is initialised and the
+     * tenant's quota row is cached, which is the state a running deployment is in.
+     */
+    record BreakableStore(ITenantQuotaStore store, AtomicBoolean down) {
+    }
+
+    static Stream<Arguments> breakableStores() {
+        Supplier<BreakableStore> mongo = () -> {
+            AtomicBoolean down = new AtomicBoolean();
+            MongoDatabase real = getDatabase();
+            MongoDatabase database = mock(MongoDatabase.class, invocation -> {
+                Object result = AdditionalAnswers.delegatesTo(real).answer(invocation);
+                if (result instanceof MongoCollection<?> collection) {
+                    return mock(MongoCollection.class, call -> {
+                        if (down.get()) {
+                            throw new MongoTimeoutException("Timed out while waiting for a server");
+                        }
+                        return AdditionalAnswers.delegatesTo(collection).answer(call);
+                    });
+                }
+                return result;
+            });
+            return new BreakableStore(new MongoTenantQuotaStore(database, FIXED_CLOCK), down);
+        };
+        Supplier<BreakableStore> postgres = () -> {
+            AtomicBoolean down = new AtomicBoolean();
+            DataSource real = PostgresTestBase.createDataSourceInstance().get();
+            DataSource dataSource = mock(DataSource.class, invocation -> {
+                if (down.get() && "getConnection".equals(invocation.getMethod().getName())) {
+                    throw new SQLException("Connection refused", "08001");
+                }
+                return AdditionalAnswers.delegatesTo(real).answer(invocation);
+            });
+            @SuppressWarnings("unchecked")
+            Instance<DataSource> instance = mock(Instance.class);
+            when(instance.get()).thenReturn(dataSource);
+            return new BreakableStore(new PostgresTenantQuotaStore(instance, FIXED_CLOCK), down);
+        };
+        return Stream.of(Arguments.of("mongo", mongo), Arguments.of("postgres", postgres));
+    }
+
+    /**
+     * The pre-call cost gate on a store that has lost its database. Both backends
+     * must refuse as an accounting outage: PostgreSQL used to read it as $0 spent
+     * and allow the call (fail open), MongoDB let the driver exception escape from
+     * the gate, which LlmTask asks outside its guarded model phase — the turn
+     * failed instead of serving the fallback answer.
+     */
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("breakableStores")
+    @DisplayName("a monthly-cost read that fails refuses the call as accounting-unavailable on both backends — no bypass, no throw")
+    void lostDatabaseAtTheGateFailsClosed(String storeName, Supplier<BreakableStore> factory) {
+        String tenant = "metering-" + storeName + "-" + TENANT_SEQ.incrementAndGet();
+        BreakableStore breakable = factory.get();
+        var quotaService = new TenantQuotaService(breakable.store(), new SimpleMeterRegistry(), tenant);
+        quotaService.setQuota(new TenantQuota(tenant, -1, -1, -1, 1.0, true));
+        var gate = new LlmSpendGate(quotaService, new SimpleMeterRegistry());
+        assertTrue(quotaService.checkCostBudget(tenant).allowed(), storeName + ": healthy, and the quota row is now cached");
+
+        breakable.down().set(true);
+
+        QuotaCheckResult result = assertDoesNotThrow(() -> quotaService.checkCostBudget(tenant), storeName);
+        assertFalse(result.allowed(), storeName + ": fail closed, not $0 spent");
+        assertTrue(result.accountingUnavailable(), storeName + ": refused as an outage, not as a spent budget");
+        assertEquals(ITenantQuotaStore.ACCOUNTING_UNAVAILABLE, result.reason(), storeName + ": the same answer on both backends");
+
+        LlmSpendGate.Refusal refusal = assertDoesNotThrow(() -> gate.check(pricedTurn(0.0)), storeName);
+        assertNotNull(refusal, storeName + ": the model call is refused");
+        assertEquals("tenant_accounting_unavailable", refusal.reason(), storeName + ": and LlmTask serves its fallback answer");
     }
 
     private static double meteredCostOn(ConversationMemorySnapshot snapshot) {

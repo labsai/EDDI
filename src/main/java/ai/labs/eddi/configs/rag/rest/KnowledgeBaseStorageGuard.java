@@ -111,10 +111,17 @@ public class KnowledgeBaseStorageGuard {
             throw new BadRequestException("This knowledge base is addressed by its id; it cannot be switched back to storeNamespace '"
                     + KnowledgeBaseStorage.NAMESPACE_NAME + "', which would point it at whatever store its name maps to.");
         }
+        // A name-layout knowledge base without an explicit location is stored where
+        // its name maps. That location changes - unchecked - when it is renamed, and
+        // also when an explicit location is dropped: renaming while keeping the
+        // explicit location and then removing it reached the default store of a
+        // different name. Either way it moves to a store of its own, keyed by its id.
+        boolean losesExplicitLocation = previous != null && KnowledgeBaseStorage.explicitPhysicalName(previous) != null;
         if (previous != null && !KnowledgeBaseStorage.usesIdNamespace(updated)
-                && !Objects.equals(previous.getName(), updated.getName())
+                && (!Objects.equals(previous.getName(), updated.getName()) || losesExplicitLocation)
                 && KnowledgeBaseStorage.explicitPhysicalName(updated) == null) {
-            LOGGER.warnf("Knowledge base %s was renamed from '%s' to '%s' while still in the 6.5.0 name layout. It now uses "
+            LOGGER.warnf("Knowledge base %s (was '%s', now '%s') changed its name or dropped its explicit location while still in "
+                    + "the 6.5.0 name layout. It now uses "
                     + "storeNamespace '%s': a store of its own, keyed by its id, rather than the one named after '%s'.",
                     LogSanitizer.sanitize(id), LogSanitizer.sanitize(previous.getName()), LogSanitizer.sanitize(updated.getName()),
                     KnowledgeBaseStorage.NAMESPACE_ID, LogSanitizer.sanitize(updated.getName()));
@@ -145,6 +152,11 @@ public class KnowledgeBaseStorageGuard {
             throw new BadRequestException("storeParameters." + parameter + " must be a literal name, not a ${...} reference: "
                     + "the location decides which knowledge base's documents an agent reads, so it is checked when it is saved.");
         }
+        if ("elasticsearch".equals(config.getStoreType()) && !KnowledgeBaseStorage.isPlainElasticsearchIndex(explicit)) {
+            throw new BadRequestException("storeParameters." + parameter + " must name one index (lower-case letters, digits, "
+                    + "'_', '-' and '.'): Elasticsearch reads it as an index expression, so wildcards, lists and exclusions "
+                    + "would search other indexes.");
+        }
         if ("pgvector".equals(config.getStoreType()) && !KnowledgeBaseStorage.isPlainPgIdentifier(explicit)) {
             throw new BadRequestException("storeParameters." + parameter + " must be a plain table name, optionally qualified "
                     + "with a schema (letters, digits, '_' and '$'): the pgvector store puts it into SQL as it is, so quotes, "
@@ -170,6 +182,7 @@ public class KnowledgeBaseStorageGuard {
     /** Ids of the other knowledge bases whose explicit location matches. */
     private List<String> idsUsing(String collisionKey, String selfId) {
         List<String> matches = new ArrayList<>();
+        boolean complete = false;
         for (int page = 0; page < MAX_PAGES; page++) {
             List<DocumentDescriptor> descriptors;
             try {
@@ -180,6 +193,7 @@ public class KnowledgeBaseStorageGuard {
                 throw new IllegalStateException("Could not list knowledge bases to check the storage location", e);
             }
             if (descriptors == null || descriptors.isEmpty()) {
+                complete = true;
                 break;
             }
             for (DocumentDescriptor descriptor : descriptors) {
@@ -189,8 +203,15 @@ public class KnowledgeBaseStorageGuard {
                 }
             }
             if (descriptors.size() < PAGE_SIZE) {
+                complete = true;
                 break;
             }
+        }
+        if (!complete) {
+            // Fail closed: a collision with a knowledge base past the scan budget is
+            // exactly as unauthorized as one inside it.
+            throw new BadRequestException("The explicit storage location could not be checked against every knowledge base (more than "
+                    + MAX_PAGES * PAGE_SIZE + " exist). Omit it to get a location of this knowledge base's own.");
         }
         return matches;
     }

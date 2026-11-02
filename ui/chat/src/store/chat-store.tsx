@@ -16,6 +16,7 @@ import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField
 import type { AttachmentResult } from "@/api/attachments-api";
 import type { ApprovalStatus } from "@/api/hitl-api";
 import { agentAppearanceLayer, brandConfigLayer } from "@/api/brand";
+import type { RatingProfile } from "@/api/rating-api";
 
 /* ─── State ───────────────────────────────────── */
 
@@ -55,6 +56,11 @@ export interface ChatState {
    * conversation. Null when they may not.
    */
   reviewNotice: string | null;
+  /**
+   * How the agent asks for ratings (profile `rating`), or null when it does
+   * not — then no rating control is rendered at all.
+   */
+  ratingProfile: RatingProfile | null;
   config: ChatConfig;
   /** Set when the backend requests a specific input field (e.g. password). */
   activeInputField: InputField | null;
@@ -123,6 +129,7 @@ export const initialState: ChatState = {
   redoAvailable: false,
   agentName: null,
   reviewNotice: null,
+  ratingProfile: null,
   config: defaultConfig,
   activeInputField: null,
   isSecretMode: false,
@@ -159,6 +166,7 @@ export type ChatAction =
   | { type: "REPLACE_MESSAGES"; messages: ChatMessage[] }
   | { type: "SET_AGENT_NAME"; name: string | null }
   | { type: "SET_REVIEW_NOTICE"; notice: string | null }
+  | { type: "SET_RATING_PROFILE"; profile: RatingProfile | null }
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_CONFIG"; config: Partial<ChatConfig> }
   | { type: "SET_INPUT_FIELD"; field: InputField }
@@ -365,6 +373,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
     case "SET_REVIEW_NOTICE":
       return { ...state, reviewNotice: action.notice };
+
+    case "SET_RATING_PROFILE":
+      return { ...state, ratingProfile: action.profile };
 
     case "SET_CONFIG":
       return { ...state, config: { ...state.config, ...action.config } };

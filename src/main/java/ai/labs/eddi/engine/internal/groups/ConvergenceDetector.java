@@ -85,7 +85,69 @@ public final class ConvergenceDetector {
             {"agreementScore": <number between 0 and 1>, "converged": <true|false>, "summary": "<one sentence>"}
             """;
 
+    /**
+     * The VERDICT-mode judge's instruction (E2): a review of the current repeat's
+     * result against the question, not a comparison of rounds. Assembled by
+     * concatenation in {@link #buildVerdictInput}, never by a template engine: the
+     * question is user text and the round is member output.
+     */
+    static final String VERDICT_JUDGE_PREFIX = """
+            You are reviewing whether a group's latest round has produced a result that answers the question.
+
+            QUESTION:
+            """;
+
+    static final String VERDICT_JUDGE_MIDDLE = """
+
+
+            LATEST ROUND:
+            """;
+
+    static final String VERDICT_JUDGE_SUFFIX = """
+
+
+            Judge the substance only: does what the members produced answer the question completely and correctly?
+            Do not reward politeness, agreement or length. A result with a gap, an error or an open question has NOT passed.
+
+            Respond with ONLY this JSON, no other text:
+            {"passed": <true|false>, "feedback": "<one sentence: what is missing, or why it passes>"}
+            """;
+
     private ConvergenceDetector() {
+    }
+
+    /** The VERDICT-mode judge input for one repeat. */
+    public static String buildVerdictInput(String question, List<TranscriptEntry> currentRound) {
+        return VERDICT_JUDGE_PREFIX + (question != null && !question.isBlank() ? question : "(no question recorded)") + VERDICT_JUDGE_MIDDLE
+                + renderRound(currentRound) + VERDICT_JUDGE_SUFFIX;
+    }
+
+    /**
+     * Parses a VERDICT-mode judge's reply. Like the similarity parse it never ends
+     * the phase on doubt: only a JSON {@code "passed": true} (a boolean, not the
+     * string) passes; anything else — no output, prose, a missing or non-boolean
+     * {@code passed} — keeps the phase repeating. The score reported is 1 for a
+     * pass, 0 for a fail and -1 when there was no usable verdict.
+     */
+    public static ConvergenceVerdict parseVerdict(String judgeOutput) {
+        if (judgeOutput == null || judgeOutput.isBlank()) {
+            return ConvergenceVerdict.notConverged("Verdict judge returned no output");
+        }
+        JsonNode node = tryReadJson(judgeOutput);
+        if (node == null) {
+            node = EmbeddedJson.soleObjectWithAnyField(judgeOutput, ConvergenceDetector::tryReadJson, "passed");
+        }
+        if (node == null) {
+            return ConvergenceVerdict.notConverged("Verdict judge output was not parseable");
+        }
+        JsonNode passedNode = node.get("passed");
+        if (passedNode == null || !passedNode.isBoolean()) {
+            return ConvergenceVerdict.notConverged("Verdict judge returned no boolean 'passed'");
+        }
+        boolean passed = passedNode.asBoolean();
+        String feedback = node.hasNonNull("feedback") ? node.get("feedback").asText() : null;
+        String reason = (passed ? "Verdict: passed" : "Verdict: not passed") + (feedback != null && !feedback.isBlank() ? " — " + feedback : "");
+        return new ConvergenceVerdict(passed, passed ? 1.0 : 0.0, reason);
     }
 
     /**
@@ -189,7 +251,7 @@ public final class ConvergenceDetector {
 
         JsonNode node = tryReadJson(judgeOutput);
         if (node == null) {
-            node = tryReadJson(extractBraces(judgeOutput));
+            node = EmbeddedJson.soleObjectWithAnyField(judgeOutput, ConvergenceDetector::tryReadJson, "agreementScore");
         }
         if (node == null) {
             LOGGER.debugf("Convergence judge output was not parseable as JSON — treating as not converged");
@@ -230,10 +292,4 @@ public final class ConvergenceDetector {
         }
     }
 
-    /** Tier 2: the JSON object embedded in prose or a markdown fence. */
-    private static String extractBraces(String text) {
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        return start >= 0 && end > start ? text.substring(start, end + 1) : null;
-    }
 }

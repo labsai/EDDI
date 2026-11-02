@@ -586,7 +586,14 @@ public class McpGroupTools {
                                        @ToolArg(description = "The follow-up question") String question) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         try {
-            requireConversationOwner(groupConversationId);
+            GroupConversation owned = requireConversationOwner(groupConversationId);
+            // A follow-up runs a member agent, like a continuation: re-check USE on
+            // the group itself, not only ownership of the transcript.
+            try {
+                resourceAccessGuard.requireUseAccess(owned.getGroupId(), "group");
+            } catch (ForbiddenException e) {
+                return groupAccessDenied("followup_with_member", owned.getGroupId());
+            }
             GroupConversation gc = groupConversationService.followUpWithMember(
                     groupConversationId, targetAgentId, question);
             return jsonSerialization.serialize(gc);

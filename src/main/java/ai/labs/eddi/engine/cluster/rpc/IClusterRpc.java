@@ -45,6 +45,16 @@ public interface IClusterRpc {
     /** Serves {@code op} on this node. */
     void handle(String op, Function<Map<String, Object>, Map<String, Object>> handler);
 
+    /**
+     * How many OTHER nodes a {@link #callAll} is expected to reach, from the
+     * current presence view. A caller for which a missing answer matters (GDPR
+     * erasure) compares it with the replies it got: {@code callAll} itself returns
+     * a partial map without saying so.
+     */
+    default int expectedPeers() {
+        return 0;
+    }
+
     default boolean isClustered() {
         return false;
     }

@@ -1,5 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
+import { ratingHandlers } from "./rating-handlers";
+import { alertHandlers } from "./alert-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
@@ -892,6 +894,11 @@ function nextWeekday9amUtc(from: number = Date.now()): number {
 }
 
 export const handlers = [
+  // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
+  ...ratingHandlers,
+  // Alerts: /alerts/rules and /alerts/events (the inbox).
+  ...alertHandlers,
+
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
   // it never asked for.
@@ -6047,9 +6054,20 @@ export const connectionHandlers = [
 
 /** Runs started through the mock, by id. A RUNNING run turns PASSED after `MOCK_RUN_DURATION_MS`. */
 const startedMockRuns = new Map<string, ReturnType<typeof buildRunningRun>>();
+/** Started runs a cancel was asked for: they settle as CANCELLED. */
+const cancelledMockRuns = new Set<string>();
 export const MOCK_RUN_DURATION_MS = 4000;
 
 function settleMockRun(run: ReturnType<typeof buildRunningRun>) {
+  if (cancelledMockRuns.has(run.id)) {
+    return {
+      ...run,
+      status: "CANCELLED",
+      finishedAt: run.startedAt + 1000,
+      durationMs: 1000,
+      error: "Cancelled by mock-user before it finished; the cases that did not run to the end are failed.",
+    };
+  }
   if (Date.now() - run.startedAt < MOCK_RUN_DURATION_MS) return run;
   const [, passed] = buildMockRuns(run.agentId);
   return {
@@ -6080,6 +6098,7 @@ seedSuites();
 export function resetAgentTestMockState(): void {
   seedSuites();
   startedMockRuns.clear();
+  cancelledMockRuns.clear();
 }
 
 export const agentTestHandlers = [
@@ -6144,6 +6163,22 @@ export const agentTestHandlers = [
     // Fixture runs carry an agent id of their own; the id is all the lookup needs.
     const found = buildMockRuns("agent1").find((r) => r.id === runId);
     return found ? HttpResponse.json(found) : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+  }),
+  http.post("*/agenttests/runs/:runId/cancel", ({ params }) => {
+    const runId = String(params.runId);
+    const started = startedMockRuns.get(runId);
+    if (!started) {
+      const found = buildMockRuns("agent1").find((r) => r.id === runId);
+      return found
+        ? HttpResponse.json({ error: `Agent test run ${runId} has already finished (${found.status}).` }, { status: 409 })
+        : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+    const current = settleMockRun(started);
+    if (current.status !== "RUNNING") {
+      return HttpResponse.json({ error: `Agent test run ${runId} has already finished (${current.status}).` }, { status: 409 });
+    }
+    cancelledMockRuns.add(runId);
+    return HttpResponse.json(started, { status: 202 });
   }),
   http.post("*/agenttests/runs", async ({ request }) => {
     const body = (await request.json()) as {

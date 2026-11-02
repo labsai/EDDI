@@ -81,4 +81,13 @@ class MergedTermsCorrectionTest {
         var result = correction.correctWord("temp", null, List.of(tempDict));
         assertEquals(1, result.size());
     }
+
+    @Test
+    void correctWord_tokenOverTheLengthCapIsNotCorrected() {
+        var result = correction.correctWord("a".repeat(ICorrection.MAX_CORRECTABLE_LENGTH + 1), null, Collections.emptyList());
+
+        assertTrue(result.isEmpty());
+        // refused before a single substring was looked up
+        verify(dictionary, never()).lookupTerm(anyString());
+    }
 }

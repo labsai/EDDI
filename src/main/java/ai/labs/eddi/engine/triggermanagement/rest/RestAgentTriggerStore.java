@@ -33,6 +33,17 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
     private static final String CACHE_NAME = "agentTriggers";
     private final IAgentTriggerStore agentTriggerStore;
     private final ICache<String, AgentTriggerConfiguration> agentTriggersCache;
+
+    /**
+     * Orders a cache fill against a write's invalidation for the same intent. A
+     * write invalidates (never publishes) after its database change, and a fill
+     * reads the database and publishes under the same stripe lock — so a fill that
+     * read the old routing either publishes before the invalidation (and is removed
+     * by it) or reads the new routing. Publishing the written value directly, or
+     * filling without the lock, let an older operation put stale routing back after
+     * a newer replacement or deletion.
+     */
+    private final Object[] cacheLocks = new Object[32];
     private final ResourceAccessGuard resourceAccessGuard;
 
     @Inject
@@ -40,6 +51,9 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         this.agentTriggerStore = agentTriggerStore;
         this.resourceAccessGuard = resourceAccessGuard;
         agentTriggersCache = cacheFactory.getCache(CACHE_NAME);
+        for (int i = 0; i < cacheLocks.length; i++) {
+            cacheLocks[i] = new Object();
+        }
     }
 
     /**
@@ -69,8 +83,14 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
         try {
             AgentTriggerConfiguration agentTriggerConfiguration = agentTriggersCache.get(intent);
             if (agentTriggerConfiguration == null) {
-                agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
-                agentTriggersCache.put(intent, agentTriggerConfiguration);
+                synchronized (cacheLock(intent)) {
+                    // An earlier thread may have filled the entry while this one waited.
+                    agentTriggerConfiguration = agentTriggersCache.get(intent);
+                    if (agentTriggerConfiguration == null) {
+                        agentTriggerConfiguration = agentTriggerStore.readAgentTrigger(intent);
+                        agentTriggersCache.put(intent, agentTriggerConfiguration);
+                    }
+                }
             }
             // Same visibility rule as the listing, and answered like an absent intent so
             // the endpoint cannot be used to probe which intents another team routes.
@@ -220,7 +240,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             if (!agentTriggerStore.updateAgentTriggerIfUnchanged(intent, stored, agentTriggerConfiguration)) {
                 throw changedMeanwhile(intent);
             }
-            agentTriggersCache.put(intent, agentTriggerConfiguration);
+            invalidate(intent);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -238,7 +258,7 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             // create is not a way around the update check.
             requireEditOnReferencedAgents(agentTriggerConfiguration);
             agentTriggerStore.createAgentTrigger(agentTriggerConfiguration);
-            agentTriggersCache.put(agentTriggerConfiguration.getIntent(), agentTriggerConfiguration);
+            invalidate(agentTriggerConfiguration.getIntent());
             return Response.ok().build();
         } catch (IResourceStore.ResourceAlreadyExistsException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
@@ -256,10 +276,24 @@ public class RestAgentTriggerStore implements IRestAgentTriggerStore {
             if (!agentTriggerStore.deleteAgentTriggerIfUnchanged(intent, stored)) {
                 throw changedMeanwhile(intent);
             }
-            agentTriggersCache.remove(intent);
+            invalidate(intent);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
+        }
+    }
+
+    private Object cacheLock(String intent) {
+        return cacheLocks[Math.floorMod(intent == null ? 0 : intent.hashCode(), cacheLocks.length)];
+    }
+
+    /**
+     * Drops the cached routing after a write, ordered against fills (see
+     * {@link #cacheLocks}).
+     */
+    private void invalidate(String intent) {
+        synchronized (cacheLock(intent)) {
+            agentTriggersCache.remove(intent);
         }
     }
 }

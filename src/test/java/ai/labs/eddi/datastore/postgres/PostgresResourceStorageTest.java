@@ -417,6 +417,8 @@ class PostgresResourceStorageTest {
         verify(connection).prepareStatement(sql.capture());
         assertTrue(sql.getValue().contains("data -> 'meta' ->> 'owner'"), sql.getValue());
         assertTrue(sql.getValue().contains("ORDER BY data -> 'meta' ->> 'updatedAt' DESC NULLS LAST"), sql.getValue());
+        // a unique tiebreaker, so OFFSET paging over equal sort values is stable
+        assertTrue(sql.getValue().contains("DESC NULLS LAST, id DESC"), sql.getValue());
     }
 
     // ─── batch read ────────────────────────────────────────────
@@ -1277,6 +1279,20 @@ class PostgresResourceStorageTest {
         // IS NULL branch a document stored before the field existed never matches.
         assertTrue(sql.getValue().contains("(data ->> 'revision' = ? OR data ->> 'revision' IS NULL)"), sql.getValue());
         verify(preparedStatement).setString(5, "0");
+    }
+
+    @Test
+    void storeIfFieldEqualsOrMissing_nullExpectedValue_isBoundNotRejected() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 1, config);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        // List.of(null) throws before the statement runs; the single-field path must
+        // keep binding a null expected value the way setString(5, null) always did.
+        storage.storeIfFieldEqualsOrMissing(resource, "revision", null);
+
+        verify(preparedStatement).setString(5, null);
     }
 
     @Test

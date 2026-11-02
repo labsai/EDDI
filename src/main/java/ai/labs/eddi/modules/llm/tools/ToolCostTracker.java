@@ -156,8 +156,8 @@ public class ToolCostTracker {
 
         /**
          * When this conversation was last written to or read. Drives eviction order —
-         * see {@link ToolCostTracker#evictIfNeeded()}. {@code volatile} rather than
-         * atomic because it is only ever overwritten with "now", so a lost update
+         * see {@link ToolCostTracker#evictIfNeeded(String)}. {@code volatile} rather
+         * than atomic because it is only ever overwritten with "now", so a lost update
          * between two racing touches costs nanoseconds of accuracy.
          */
         private volatile long lastTouchedNanos = System.nanoTime();
@@ -172,6 +172,21 @@ public class ToolCostTracker {
 
         long lastTouchedNanos() {
             return lastTouchedNanos;
+        }
+
+        /**
+         * Set once a budget check found this conversation over its budget. Such an
+         * entry is the conversation's only enforcement record — evicting it would hand
+         * the conversation its whole budget again — so eviction takes it last.
+         */
+        private volatile boolean exhausted;
+
+        void markExhausted() {
+            exhausted = true;
+        }
+
+        boolean isExhausted() {
+            return exhausted;
         }
 
         public void addToolCost(String toolName, double cost) {
@@ -286,10 +301,17 @@ public class ToolCostTracker {
 
         // An operator-supplied price is clamped at zero: a negative double would
         // *credit* the conversation and let maxBudgetPerConversation be evaded
-        // outright.
-        double cost = priceOverride != null
+        // outright. A non-finite one (NaN, Infinity) is ignored for the default
+        // price: Math.max(0, NaN) is NaN, and one NaN added to a DoubleAdder makes
+        // every later total NaN — and "NaN <= maxBudget" is false, so the
+        // conversation (and the process-wide gauge) could never be judged again.
+        double cost = priceOverride != null && Double.isFinite(priceOverride)
                 ? Math.max(0.0, priceOverride)
                 : DEFAULT_TOOL_PRICES.getOrDefault(invocation.canonicalName(), 0.0);
+        if (priceOverride != null && !Double.isFinite(priceOverride)) {
+            LOGGER.warnf("Tool '%s' has a non-finite price override (%s); charging the default price instead", sanitize(toolName),
+                    priceOverride);
+        }
 
         // Track per-tool costs
         toolCosts.computeIfAbsent(toolName, ToolCostMetrics::new).addCost(cost);
@@ -301,8 +323,8 @@ public class ToolCostTracker {
         conversationCosts.computeIfAbsent(conversationId, ConversationCostMetrics::new).addToolCost(toolName, cost);
         addSharedCost(conversationId, cost);
 
-        // Evict oldest entries if map exceeds max size
-        evictIfNeeded();
+        // Evict oldest entries if map exceeds max size — never the one just charged
+        evictIfNeeded(conversationId);
 
         // Track total cost
         totalCost.add(cost);
@@ -361,6 +383,9 @@ public class ToolCostTracker {
             double total = Math.max(shared.getAsDouble(), local == null ? 0.0 : local.getTotalCost());
             boolean within = total <= maxBudget;
             if (!within) {
+                if (local != null) {
+                    local.markExhausted();
+                }
                 recordMeter(() -> meterRegistry.counter("eddi.tool.budget.exceeded").increment());
                 LOGGER.warn(String.format("Conversation %s exceeded budget (cluster-wide): $%.4f > $%.4f", sanitize(conversationId),
                         total, maxBudget));
@@ -376,6 +401,7 @@ public class ToolCostTracker {
         boolean withinBudget = metrics.getTotalCost() <= maxBudget;
 
         if (!withinBudget) {
+            metrics.markExhausted();
             // Record budget exceeded event
             recordMeter(() -> meterRegistry.counter("eddi.tool.budget.exceeded").increment());
 
@@ -400,15 +426,32 @@ public class ToolCostTracker {
      * <p>
      * {@link #getConversationCosts} and {@link #isWithinBudget} count as touches,
      * so a conversation that is only being budget-checked still looks alive.
+     * <p>
+     * A conversation already found over its budget ({@code exhausted}) is evicted
+     * only after every under-budget entry, however quiet it has been: dropping it
+     * would turn "over budget" into "never spent" for its next turn. The cap still
+     * holds — if exhausted entries alone exceed it, the oldest of them go.
+     * <p>
+     * The conversation being charged is never a victim. It is the most recently
+     * touched entry, so it normally sorts last anyway — but when exhausted entries
+     * fill nearly the whole map, every under-budget entry goes first, and that
+     * included the one this very call just charged: its next budget check then
+     * found no record and treated it as new.
+     *
+     * @param chargedConversationId
+     *            the conversation whose charge triggered this pass, kept whatever
+     *            the ordering says; {@code null} for none
      */
-    void evictIfNeeded() {
+    void evictIfNeeded(String chargedConversationId) {
         if (conversationCosts.size() <= MAX_CONVERSATION_ENTRIES) {
             return;
         }
         int toRemove = conversationCosts.size() - (int) (MAX_CONVERSATION_ENTRIES * 0.9);
         var oldestFirst = conversationCosts.entrySet().stream()
-                .sorted(Comparator.comparingLong(
-                        (Map.Entry<String, ConversationCostMetrics> entry) -> entry.getValue().lastTouchedNanos()))
+                .filter(entry -> !entry.getKey().equals(chargedConversationId))
+                .sorted(Comparator
+                        .comparing((Map.Entry<String, ConversationCostMetrics> entry) -> entry.getValue().isExhausted())
+                        .thenComparingLong(entry -> entry.getValue().lastTouchedNanos()))
                 .limit(toRemove)
                 .map(Map.Entry::getKey)
                 .toList();
@@ -420,13 +463,6 @@ public class ToolCostTracker {
             }
         }
         LOGGER.info("Evicted " + removed + " least-recently-used conversation cost entries (size is now " + conversationCosts.size() + ")");
-    }
-
-    /**
-     * Reset costs for a conversation
-     */
-    public void resetConversation(String conversationId) {
-        conversationCosts.remove(conversationId);
     }
 
     /**

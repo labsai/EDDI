@@ -103,6 +103,23 @@ class ArtifactToolsProviderTest {
     }
 
     @Test
+    void memberWhitelistWithoutTheSlug_withholdsTheTools() throws Exception {
+        when(groupStore.read(GROUP_ID, 1)).thenReturn(groupWith(new ArtifactConfig(true, 5, List.of())));
+
+        assertTrue(provider().contribute(ctxWithWhitelist(List.of("calculator"))).specs().isEmpty(),
+                "a group opt-in must not widen a member's explicit tool selection");
+        assertEquals(4, provider().contribute(ctxWithWhitelist(List.of("calculator", "artifacts"))).specs().size());
+    }
+
+    private ToolAssemblyContext ctxWithWhitelist(List<String> whitelist) {
+        var memory = mock(IConversationMemory.class);
+        lenient().when(memory.getConversationId()).thenReturn(MEMBER_CONV);
+        var task = new LlmConfiguration.Task();
+        task.setEnableBuiltInTools(true);
+        return new ToolAssemblyContext(memory, task, whitelist, null, "user-1", "agent-a", GC_ID);
+    }
+
+    @Test
     void notAGroupTurn_contributesNothing() {
         assertTrue(provider().contribute(ctx(null)).specs().isEmpty());
     }

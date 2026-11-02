@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -23,6 +24,7 @@ import dev.langchain4j.service.tool.ToolExecutor;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -465,6 +467,34 @@ class HttpCallToolsProviderBodyGuardTest {
         executor.execute(argumentsCarryingBody("[{\"a\":1},{\"a\":2}]"), "memory-1");
 
         verify(apiCallExecutor, times(1)).execute(any(), any(), any(), anyString());
+    }
+
+    /**
+     * An httpcall tool's executor accepts an agent-test mock, so the mock gets the
+     * response handling a live call gets; it hands the mock to ApiCallExecutor in
+     * the template data, next to the marker that stops a second interception. A
+     * plain call carries the marker only.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void anAgentTestMockIsHandedToTheApiCallExecutor() throws Exception {
+        when(apiCallExecutor.execute(any(), any(), any(), anyString())).thenReturn(Map.of("httpCode", 200));
+        // A fresh map per call, as the real converter builds one: the captor below
+        // compares the two calls' template data.
+        when(memoryItemConverter.convert(any())).thenAnswer(i -> new HashMap<>());
+        ToolExecutor executor = executorForJsonBodyTool();
+        assertTrue(executor instanceof MockAwareToolExecutor, "an httpcall tool must accept agent-test mocks");
+        var mock = new ToolMockRegistry.MockResult(200, "3 rooms", ToolMockRegistry.Outcome.MOCKED);
+
+        ((MockAwareToolExecutor) executor).executeMocked(toolCall("{}"), mock);
+        executor.execute(toolCall("{}"), "memory-1");
+
+        ArgumentCaptor<Map<String, Object>> templateData = ArgumentCaptor.forClass(Map.class);
+        verify(apiCallExecutor, times(2)).execute(any(), any(), templateData.capture(), anyString());
+        assertEquals(mock, templateData.getAllValues().get(0).get(ToolMockRegistry.TOOL_PATH_MOCK));
+        assertEquals(Boolean.TRUE, templateData.getAllValues().get(0).get(ToolMockRegistry.TOOL_PATH_MARKER));
+        assertFalse(templateData.getAllValues().get(1).containsKey(ToolMockRegistry.TOOL_PATH_MOCK));
+        assertEquals(Boolean.TRUE, templateData.getAllValues().get(1).get(ToolMockRegistry.TOOL_PATH_MARKER));
     }
 
     // =================================================================

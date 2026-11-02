@@ -18,7 +18,7 @@ while NATS is down, are not among them.
 
 The three EDDI nodes run the **published** `labsai/eddi` image with your locally built
 `target/quarkus-app` mounted over `/deployments`, so the demo exercises exactly one build inside
-the shipped runtime. Nothing is published beyond `127.0.0.1`.
+the shipped runtime. Nothing listens beyond `127.0.0.1` except, on Linux with Docker Engine, the mock LLM, which `demo.py` binds to the docker bridge gateway (what `host.docker.internal` resolves to there) so the nodes can reach it. Docker Desktop, on Linux as elsewhere, forwards `host.docker.internal` to the host's loopback, so there the mock stays on `127.0.0.1`. `demo.py` stops if the mock does not come up listening. When you start the mock by hand, set `MOCK_LLM_BIND` the same way — the `--external-mock` example below does.
 
 ## Run it
 
@@ -36,7 +36,11 @@ python scripts/cluster-demo/demo.py
 # the same on PostgreSQL
 python scripts/cluster-demo/demo.py --db postgres
 
-# a subset, keeping the stack up between runs
+# a subset, keeping the stack up between runs. With Docker Engine on Linux the
+# nodes reach the mock through the bridge gateway, so it has to listen there.
+if [ "$(uname -s)" = Linux ] && [ "$(docker info --format '{{.OperatingSystem}}')" != "Docker Desktop" ]; then
+  export MOCK_LLM_BIND="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')"
+fi
 python scripts/cluster-demo/mock_llm.py scripts/cluster-demo/mock-requests.jsonl 18210 &
 python scripts/cluster-demo/demo.py --external-mock --keep --only 1
 python scripts/cluster-demo/demo.py --reuse --only 2,3

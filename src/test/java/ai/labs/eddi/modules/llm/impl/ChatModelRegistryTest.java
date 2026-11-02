@@ -865,6 +865,19 @@ class ChatModelRegistryTest {
         }
 
         @Test
+        @DisplayName("invalidateForSecret also evicts models whose parameters go through a global variable")
+        void invalidateForSecret_evictsVariableIndirection() throws Exception {
+            // ${vars:key} may expand to the changed secret; the cache key cannot tell.
+            var viaVariable = new HashMap<String, String>();
+            viaVariable.put("apiKey", "${vars:openai-key-ref}");
+            ChatModel original = invalidationRegistry.getOrCreate("openai", viaVariable);
+
+            invalidationRegistry.invalidateForSecret(new SecretReference("default", "openai-key"));
+
+            assertNotSame(original, invalidationRegistry.getOrCreate("openai", viaVariable));
+        }
+
+        @Test
         @DisplayName("invalidateForSecret matches full vault reference form")
         void invalidateForSecret_fullForm_evicts() throws Exception {
             var params = new HashMap<String, String>();

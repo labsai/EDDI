@@ -109,6 +109,32 @@ public class GlobalVariableResolver {
     }
 
     /**
+     * The full-form references ({@code ${vars:tenantId/key}}) in {@code value}: the
+     * ones that select a workspace other than the caller's context.
+     * <p>
+     * A short-form reference resolves in the tenant the caller passes, so one that
+     * arrives through conversation data reveals nothing the agent's own
+     * configuration could not show. A full-form one names its tenant itself, with
+     * no membership check here (the resolver has no notion of who is asking), so a
+     * resolver fed rendered text must only expand the full-form references the
+     * configured template wrote. {@code ApiCallExecutor} enforces exactly that with
+     * this method.
+     */
+    public static Set<String> explicitTenantReferences(String value) {
+        Set<String> found = new HashSet<>();
+        if (!containsReference(value)) {
+            return found;
+        }
+        Matcher matcher = VARS_PATTERN.matcher(value);
+        while (matcher.find()) {
+            if (matcher.group(1) != null) {
+                found.add(matcher.group());
+            }
+        }
+        return found;
+    }
+
+    /**
      * Resolve all {@code ${vars:...}} references using the default tenant.
      *
      * @param value
@@ -174,9 +200,10 @@ public class GlobalVariableResolver {
 
     /**
      * Any {@code ${scheme:...}} reference — vault, eddivault, connection, caller,
-     * vars. What substitution must not be able to manufacture.
+     * vars. What substitution must not be able to manufacture. Documents the
+     * grammar {@link #referencesIn} implements; not matched directly, see there.
      */
-    private static final Pattern ANY_REFERENCE = Pattern.compile("\\$\\{[A-Za-z]+:[^}]*}");
+    static final Pattern ANY_REFERENCE = Pattern.compile("\\$\\{[A-Za-z]+:[^}]*}");
 
     /**
      * Refuses a reference that exists only because substitution joined text.
@@ -212,16 +239,47 @@ public class GlobalVariableResolver {
         }
     }
 
-    private static Set<String> referencesIn(String value) {
+    /**
+     * Every match of {@link #ANY_REFERENCE} in {@code value}, found in one forward
+     * pass. {@code Matcher.find()} retried the pattern at every opener and, with no
+     * closing brace after it, scanned the whole remaining text each time: a
+     * variable value full of unterminated openers cost time quadratic in its length
+     * on every expansion. Here the search for the closing brace never re-crosses
+     * text: once none follows, no later opener can close either.
+     */
+    static Set<String> referencesIn(String value) {
         Set<String> found = new HashSet<>();
         if (value == null) {
             return found;
         }
-        Matcher matcher = ANY_REFERENCE.matcher(value);
-        while (matcher.find()) {
-            found.add(matcher.group());
+        int length = value.length();
+        int from = 0;
+        while (true) {
+            int open = value.indexOf("${", from);
+            if (open < 0) {
+                break;
+            }
+            int scheme = open + 2;
+            int colon = scheme;
+            while (colon < length && isAsciiLetter(value.charAt(colon))) {
+                colon++;
+            }
+            if (colon == scheme || colon >= length || value.charAt(colon) != ':') {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', colon + 1);
+            if (close < 0) {
+                break;
+            }
+            found.add(value.substring(open, close + 1));
+            from = close + 1;
         }
         return found;
+    }
+
+    private static boolean isAsciiLetter(char c) {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
     }
 
     /**

@@ -125,18 +125,21 @@ public class HitlTimeoutHandler {
      */
     private void handleHumanTurnTimeout(Map<String, Object> metadata, String policyStr) {
         String gcId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
+        // Bound to the pause the timeout was armed for: a late fire must neither
+        // skip a newer human turn nor cancel a discussion that has moved on.
+        String pauseId = pauseIdOf(metadata);
         try {
             if ("ABORT".equals(policyStr)) {
-                boolean cancelled = groupConversationService.cancelDiscussion(gcId,
-                        ControlSignal.CANCEL_GRACEFUL);
+                boolean cancelled = groupConversationService.cancelPausedDiscussion(gcId,
+                        ControlSignal.CANCEL_GRACEFUL, pauseId);
                 LOGGER.infof("Human-turn timeout ABORT for group conversation %s%s", gcId,
-                        cancelled ? "" : " skipped — already terminal");
+                        cancelled ? "" : " skipped — no longer awaiting the turn it was armed for");
                 return;
             }
             if (!"SKIP_TURN".equals(policyStr)) {
                 LOGGER.errorf("Unknown human-turn timeout policy '%s' for %s — treating as SKIP_TURN", policyStr, gcId);
             }
-            groupConversationService.skipHumanTurnOnTimeout(gcId);
+            groupConversationService.skipHumanTurnOnTimeout(gcId, pauseId);
         } catch (Exception e) {
             if (!groupPauseStillWaiting(gcId, GroupConversation.GroupConversationState.AWAITING_HUMAN_INPUT)) {
                 LOGGER.infof("Human-turn timeout for group conversation %s skipped — it is no longer awaiting input (%s)", gcId,
@@ -223,12 +226,35 @@ public class HitlTimeoutHandler {
         }
     }
 
+    /**
+     * ABORT cancels the PAUSE the timeout was armed for, and nothing else. It used
+     * to be the full cancel: a fire claimed just before an approver resumed then
+     * signalled the resumed turn to stop (the cancel signals in-flight work and
+     * accepts IN_PROGRESS), or — after a resume and a new pause — aborted a pause
+     * whose own timeout had not expired. Paused-only and bound to the pause id, a
+     * late fire finds nothing of its own to cancel and completes.
+     */
     private void cancelRegular(Map<String, Object> metadata) {
         String conversationId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
+        Object pauseId = metadata.get(HitlSchedules.METADATA_PAUSE_ID_KEY);
         try {
-            conversationService.cancelConversation(conversationId,
-                    ControlSignal.CANCEL_GRACEFUL, "system:timeout");
-            LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
+            var outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout",
+                    pauseId != null ? pauseId.toString() : null);
+            if (outcome == IConversationService.CancelOutcome.CANCELLED) {
+                LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
+            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
+                    && conversationService.getConversationState(conversationId) == ConversationState.IN_PROGRESS) {
+                // A decision on this pause is in flight (a resume's AWAITING_HUMAN ->
+                // IN_PROGRESS CAS). If it fails before running it restores the pause and
+                // counts on this timeout, whose row it has not deleted yet; if it succeeds
+                // it deletes the row and the retry never fires. Completing here would
+                // consume the one-shot fire and leave a restored pause with no timeout at
+                // all — the rule resumeRegular applies through regularPauseStillWaiting.
+                throw new IllegalStateException("a decision on the pause is still in flight");
+            } else {
+                LOGGER.infof("HITL timeout ABORT for conversation %s skipped — the pause it was armed for is no longer waiting (%s)",
+                        conversationId, outcome);
+            }
         } catch (Exception e) {
             if (!regularPauseStillWaiting(conversationId)) {
                 LOGGER.infof("HITL timeout ABORT for conversation %s skipped — it is no longer awaiting a decision (%s)",
@@ -244,12 +270,13 @@ public class HitlTimeoutHandler {
     private void cancelGroup(Map<String, Object> metadata) {
         String gcId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
         try {
-            boolean cancelled = groupConversationService.cancelDiscussion(gcId,
-                    ControlSignal.CANCEL_GRACEFUL);
+            boolean cancelled = groupConversationService.cancelPausedDiscussion(gcId,
+                    ControlSignal.CANCEL_GRACEFUL, pauseIdOf(metadata));
             if (cancelled) {
                 LOGGER.infof("HITL timeout ABORT for group conversation %s", gcId);
             } else {
-                LOGGER.infof("HITL timeout ABORT for group conversation %s skipped — already terminal", gcId);
+                LOGGER.infof("HITL timeout ABORT for group conversation %s skipped — no longer awaiting the approval "
+                        + "it was armed for", gcId);
             }
         } catch (Exception e) {
             if (!groupPauseStillWaiting(gcId, GroupConversation.GroupConversationState.AWAITING_APPROVAL)) {
@@ -261,5 +288,10 @@ public class HitlTimeoutHandler {
                     + "the pause is kept and the timeout stays armed", gcId, e.getMessage());
             throw new RetryLaterException("HITL timeout abort could not be applied yet: " + e.getMessage(), e);
         }
+    }
+
+    private static String pauseIdOf(Map<String, Object> metadata) {
+        Object pauseId = metadata.get(HitlSchedules.METADATA_PAUSE_ID_KEY);
+        return pauseId != null ? pauseId.toString() : null;
     }
 }

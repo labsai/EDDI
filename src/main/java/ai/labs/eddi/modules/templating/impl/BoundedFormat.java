@@ -14,6 +14,7 @@ import io.quarkus.qute.ValueResolver;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -252,5 +253,88 @@ final class BoundedFormat {
             String format = (String) context.getBase();
             return evaluateAll(context, context.getParams()).thenApply(values -> format(format, values, maxChars));
         }
+    }
+
+    /**
+     * Checks {@code str:concat(...)} and {@code str:join(delimiter, ...)} BEFORE
+     * the generated implementation builds its result. It only measures: when the
+     * parts (and the delimiters between them) could exceed {@code maxChars} it
+     * throws, and otherwise it answers "not found" so the next resolver, the
+     * generated one, does the real work. Checking the result afterwards (what the
+     * resolver wrapper does) comes too late, because an editor can reuse one
+     * individually permitted value many times and the allocation has happened by
+     * then.
+     */
+    record ConcatenationPrecheck(int maxChars) implements NamespaceResolver {
+        @Override
+        public String getNamespace() {
+            return "str";
+        }
+
+        @Override
+        public int getPriority() {
+            return PRIORITY + 1;
+        }
+
+        @Override
+        public CompletionStage<Object> resolve(EvalContext context) {
+            boolean join = "join".equals(context.getName());
+            if (maxChars <= 0 || !(join || "concat".equals(context.getName())) || context.getParams().isEmpty()) {
+                return Results.notFound(context);
+            }
+            return evaluateAll(context, context.getParams()).thenApply(values -> {
+                requireConcatenationWithin(values, join, maxChars);
+                return Results.NotFound.from(context);
+            });
+        }
+    }
+
+    /**
+     * Measures the way the generated resolver will build the result. Each varargs
+     * value is one argument rendered with {@code toString()} — a {@code List}
+     * included, which renders with its brackets and separators. The one exception
+     * is Qute's: a SOLE varargs value that is an {@code Object[]} becomes the
+     * varargs array itself, so its elements are the arguments.
+     *
+     * @throws TemplateLimitExceededException
+     *             when the concatenation (or join, whose first value is the
+     *             delimiter) of {@code values} could exceed {@code maxChars}
+     */
+    static void requireConcatenationWithin(List<Object> values, boolean join, int maxChars) {
+        int first = join ? 1 : 0;
+        long delimiter = join && !values.isEmpty() ? lengthOf(values.getFirst(), maxChars) : 0;
+        List<?> arguments = values.subList(Math.min(first, values.size()), values.size());
+        if (arguments.size() == 1 && arguments.getFirst() != null && arguments.getFirst().getClass() == Object[].class) {
+            arguments = Arrays.asList((Object[]) arguments.getFirst());
+        }
+        long total = 0;
+        long parts = 0;
+        for (Object argument : arguments) {
+            total = saturatingAdd(total, lengthOf(argument, maxChars));
+            parts++;
+            if (total > maxChars) {
+                break;
+            }
+        }
+        if (join && parts > 1) {
+            total = saturatingAdd(total, saturatingMultiply(delimiter, parts - 1));
+        }
+        if (total > maxChars) {
+            throw new TemplateLimitExceededException("str:" + (join ? "join" : "concat") + " would produce up to " + total
+                    + " characters, more than the limit of " + maxChars + " (eddi.templating.max-output-chars)");
+        }
+    }
+
+    private static long lengthOf(Object value, int cap) {
+        if (value == null) {
+            return 4;
+        }
+        return value instanceof CharSequence text ? text.length() : Math.min(String.valueOf(value).length(), (long) cap + 1);
+    }
+
+    private static long saturatingMultiply(long a, long b) {
+        long high = Math.multiplyHigh(a, b);
+        long low = a * b;
+        return (high == 0 && low >= 0) || (high == -1 && low < 0) ? low : Long.MAX_VALUE;
     }
 }

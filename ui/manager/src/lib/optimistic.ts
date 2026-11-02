@@ -30,7 +30,3 @@ export function restoreQueries(qc: QueryClient, snapshot: QuerySnapshot | undefi
   for (const [key, data] of snapshot) qc.setQueryData(key, data);
 }
 
-/** Apply `fn` to `data` when it is an array, leave anything else untouched. */
-export function mapIfArray<T>(data: unknown, fn: (items: T[]) => T[]): unknown {
-  return Array.isArray(data) ? fn(data as T[]) : data;
-}

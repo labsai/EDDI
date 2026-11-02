@@ -11,7 +11,7 @@
     python scripts/loadtest/loadtest.py down
 
 `up` starts the database, the WireMock LLM and EDDI and creates one deployed LLM agent (`cluster-up`
-does the same for N replicas on NATS behind nginx, from docker-compose.cluster.yml); what it started is kept in results/.state.json. Every
+does the same for N replicas on NATS behind nginx, from docker-compose.cluster.yml); what it started is kept in .state/state.json (owner-only; not in results/, which is world-writable). Every
 measuring command snapshots /q/metrics and the database's operation counters, drives the load
 (k6 for turns and group discussions, drivers/stream_driver.py for SSE), samples the saturation
 gauges every second, snapshots again and writes results/<label>-<kind>-….json. `report` renders
@@ -29,6 +29,7 @@ import shlex
 # The driver's job is to run `docker compose`, `docker` and `git`: fixed argument lists, no shell.
 import subprocess  # nosec B404
 import sys
+import tempfile
 import threading
 import time
 import urllib.parse
@@ -36,7 +37,10 @@ import urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", ".."))
 RESULTS = os.path.join(HERE, "results")
-STATE = os.path.join(RESULTS, ".state.json")
+# Startup state decides which image and host path `docker compose` runs, so it lives in an owner-only
+# directory of its own, not in results/ (made world-writable for the k6 container).
+STATE_DIR = os.path.join(HERE, ".state")
+STATE = os.path.join(STATE_DIR, "state.json")
 PROJECT = os.environ.get("COMPOSE_PROJECT_NAME", "eddi-loadtest")
 EDDI_PORT = int(os.environ.get("LOADTEST_EDDI_PORT", "7370"))
 EDDI = f"http://127.0.0.1:{EDDI_PORT}"
@@ -159,6 +163,8 @@ def wait_until(fn, timeout, interval=1.0):
 
 def load_state():
     try:
+        if os.path.islink(STATE):
+            return {}
         with open(STATE, encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
@@ -176,8 +182,30 @@ def ensure_results():
 
 def save_state(state):
     ensure_results()
-    with open(STATE, "w", encoding="utf-8") as f:
-        json.dump(state, f, indent=2)
+    os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
+    # makedirs and chmod both follow a symlink, so one planted at STATE_DIR would move the state
+    # (and the chmod) somewhere else entirely.
+    if os.path.islink(STATE_DIR):
+        raise SystemExit(f"refusing to write state through a symlinked directory: {STATE_DIR}")
+    if os.name == "posix":
+        os.chmod(STATE_DIR, 0o700)
+    # A fresh, exclusively created temp file (mkstemp: O_CREAT|O_EXCL, mode 0600) per save, renamed
+    # over the target. Exclusive creation never follows or reuses an existing path, overlapping
+    # writers (two `up`s, even for different compose projects) never share one, and the target is
+    # replaced rather than opened, so a symlink planted at STATE is overwritten, not followed.
+    fd, tmp = tempfile.mkstemp(dir=STATE_DIR, prefix=".state-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp, STATE)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            # Best-effort cleanup: the temp file may already be gone (renamed, or never
+            # written). Swallowed so the original exception below is the one raised.
+            pass
+        raise
 
 
 def node_urls(state=None):
@@ -1106,7 +1134,7 @@ def cmd_report(args):
 # fresh stack up for every point so each starts from an empty database, warms it up, measures one
 # steady run and writes results/cluster-scaling-<date>.md.
 
-CLUSTER_STATE = os.path.join(RESULTS, ".cluster-state.json")
+CLUSTER_STATE = os.path.join(STATE_DIR, "cluster-state.json")
 CLUSTER_PROJECT = "eddi-loadtest-cluster"
 # Counters compared before/after a run on every node, on top of COUNTED.
 CLUSTER_COUNTED = re.compile(r"^(eddi_cluster_lease_acquire_seconds_(count|sum)|eddi_cluster_fence_rejected_total|"
