@@ -167,6 +167,15 @@ public final class ToolCallGuardrailScreener {
     }
 
     /**
+     * Refuses a call for a reason found outside any evaluation — a rewrite that
+     * could not be applied — recorded as a {@code block}.
+     */
+    public Result refuse(GuardrailConfig config, String reason, Consumer<GuardrailOutcome> onOutcome) {
+        service.emit(onOutcome, new GuardrailOutcome(config.getType(), GuardrailPhase.TOOL_CALL, GuardrailAction.BLOCK, reason, 0));
+        return new Result(Decision.BLOCK, null, reason, List.of(), blockMessage(config), 0.0, false);
+    }
+
+    /**
      * Screens {@code text} with one entry.
      *
      * @param repromptsSoFar

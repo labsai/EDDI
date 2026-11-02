@@ -283,9 +283,10 @@ public final class ArgumentFields {
     }
 
     /**
-     * One selected field: its text and the means to rewrite it. The pointer is the
-     * concrete one (wildcards resolved) — it names model-written keys, so it is for
-     * matching and debugging only and is never recorded.
+     * One selected field: its text and the means to rewrite it. Its pointer is the
+     * configured one (wildcards kept) when the field was selected by a pointer, and
+     * the concrete one when every string was selected — that one names keys the
+     * model wrote, so it is never recorded or shown.
      */
     public static final class Field {
         private final Document document;
@@ -303,7 +304,9 @@ public final class ArgumentFields {
             this.wholeDocument = wholeDocument;
         }
 
-        /** The concrete pointer of this field. */
+        /**
+         * The pointer this field was selected by; see the class comment.
+         */
         public String pointer() {
             return pointer;
         }
