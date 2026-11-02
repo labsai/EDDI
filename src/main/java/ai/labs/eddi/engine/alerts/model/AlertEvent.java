@@ -116,6 +116,16 @@ public record AlertEvent(String id, String ruleId, String ruleName, AlertSource 
                 version, subjectUserId, digestEventIds);
     }
 
+    /**
+     * This event with another match and conversation subject — used to blank erased
+     * content.
+     */
+    public AlertEvent withMatch(AlertMatch newMatch, String newSubjectUserId) {
+        return new AlertEvent(id, ruleId, ruleName, source, kind, agentId, agentVersion, conversationId, firedAt, summary, newMatch,
+                deliveries, state, nextAttemptAt, dedupeKey, duplicates, digestCount, digestItems, acknowledgedBy, acknowledgedAt, version,
+                newSubjectUserId, digestEventIds);
+    }
+
     public AlertEvent withId(String newId) {
         return new AlertEvent(newId, ruleId, ruleName, source, kind, agentId, agentVersion, conversationId, firedAt, summary, match,
                 deliveries, state, nextAttemptAt, dedupeKey, duplicates, digestCount, digestItems, acknowledgedBy, acknowledgedAt, version,

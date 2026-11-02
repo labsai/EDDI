@@ -402,6 +402,41 @@ class RestAuditStoreTest {
         assertFalse(report.intact(), "a chain with an ambiguous position must never report intact");
     }
 
+    /**
+     * One legacy row used to make the whole window UNAVAILABLE — hiding a deletion
+     * between two sequenced rows that is provable without any anchor.
+     */
+    @Test
+    @DisplayName("a hole between sequenced rows is BROKEN even when the window also holds unsequenced rows")
+    void mixedWindowStillShowsAHoleBetweenSequencedRows() {
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("legacy-1", -1), entryAt("id-6", 5), entryAt("id-8", 7)));
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertEquals(List.of(6L), report.missingSequences());
+    }
+
+    /**
+     * v1/v2 signatures do not cover the sequence: such a row's sequence can be
+     * rewritten to close a deletion's hole without failing its own HMAC.
+     */
+    @Test
+    @DisplayName("with signing on, a position claimed only by a v1/v2-signed row does not count as present")
+    void positionClaimedByASignatureThatDoesNotCoverItIsMissing() {
+        when(auditLedgerService.isSigningEnabled()).thenReturn(true);
+        when(auditLedgerService.verifyEntry(any(), any())).thenReturn(AuditVerificationStatus.VALID);
+        when(auditStore.getEntries("conv-1", 0, 1000))
+                .thenReturn(List.of(entryAt("id-1", 0), entryAt("forged", 1).withHmac("v2:" + "0".repeat(64)), entryAt("id-3", 2)));
+        when(auditStore.countByConversation("conv-1")).thenReturn(3L);
+
+        var report = restAuditStore.verifyConversation("conv-1", 0, 1000);
+
+        assertEquals(ChainStatus.BROKEN, report.chainStatus());
+        assertEquals(List.of(1L), report.missingSequences());
+    }
+
     @Test
     @DisplayName("unsequenced rows report the chain as unavailable, not broken")
     void unsequencedRowsReportUnavailable() {

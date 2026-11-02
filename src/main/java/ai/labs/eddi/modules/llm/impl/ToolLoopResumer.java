@@ -336,10 +336,12 @@ class ToolLoopResumer {
         // eddi.hitl.tool.task-approvals.mode (TaskToolApprovalsResolver — strict
         // merge by default, wholesale replace as the legacy escape hatch), so NEW
         // calls in the continuation re-gate → re-pause under the same effective
-        // gate the live path would compute. Approved calls are pre-cleared so an
-        // identical reissue is not re-gated — bound to (id, tool, canonical args) and
-        // usable once: a DIFFERENT call that merely reuses an approved id (providers
-        // that repeat call_1, or send "") is gated like any other. Threading
+        // gate the live path would compute. Approved calls are recorded once they ran
+        // so an identical reissue — bound to (id, tool, canonical args) — is gated
+        // again as a repeat (ToolApprovalGate.REPEAT_REASON) instead of executing a
+        // second time on one approval; a DIFFERENT call that merely reuses an approved
+        // id (providers that repeat call_1, or send "") is gated like any other.
+        // Threading
         // toolHitlEnabled
         // here keeps the resume path from re-arming an approval flow an operator
         // disabled.

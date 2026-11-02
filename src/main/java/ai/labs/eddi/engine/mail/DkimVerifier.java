@@ -754,6 +754,14 @@ public class DkimVerifier {
                     break;
                 }
                 String line = new String(bytes, pos, lineEnd - pos, StandardCharsets.ISO_8859_1);
+                if (line.indexOf('\r') >= 0 || line.indexOf('\n') >= 0) {
+                    // Only CRLF ends a line here, while the MIME parser (Angus) also
+                    // breaks a header at a bare CR or LF. Read two ways, one header
+                    // block could carry a From this verifier never sees inside a
+                    // signed field — so the message is not verified at all.
+                    message.failure = "the header block contains a bare CR or LF";
+                    return message;
+                }
                 char first = line.charAt(0);
                 if (first == ' ' || first == '\t') {
                     if (current == null) {
