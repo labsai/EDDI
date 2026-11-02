@@ -175,6 +175,19 @@ server cannot bounce a call onto `127.0.0.1` or an RFC 1918 host. A host listed 
 `eddi.security.ssrf-protection.allowed-hosts` is always followed. With protection
 on, redirects are not followed at all.
 
+The address class is checked twice: against the hop's host name when the
+redirect is read, and against the address the connection actually reached before
+the request is sent, so a name that resolves differently the second time (DNS
+rebinding) cannot carry a public redirect into the internal network.
+
+A hop to another origin (scheme, host or port) carries only `Accept`,
+`Accept-Encoding`, `Accept-Language`, `User-Agent`, `Content-Type`,
+`Content-Language`, `Cache-Control` and `Pragma`. Every other header the call
+configured stays behind — a credential can sit in any header name
+(`X-Custom-Token`, `Ocp-Apim-Subscription-Key`, ...), so no fixed list of
+credential names could be trusted to catch it. A same-origin hop keeps all
+headers.
+
 ### Values in a JSON body are not escaped
 
 A request body is a template, and the values it substitutes are written as they

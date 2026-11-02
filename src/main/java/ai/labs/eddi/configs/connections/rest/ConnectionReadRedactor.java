@@ -33,7 +33,7 @@ import java.util.function.Predicate;
  * Nothing else changes. The stored object is never touched: the copy is made
  * first, because the store may hand out a cached instance.
  */
-final class ConnectionReadRedactor {
+public final class ConnectionReadRedactor {
 
     /**
      * Carries no {@code ${}, so it can never be read as, or resolved as, a
@@ -50,7 +50,7 @@ final class ConnectionReadRedactor {
      * A copy of {@code stored} with every legacy literal redacted, or {@code null}
      * for {@code null}.
      */
-    static ConnectionConfiguration redactLegacyLiterals(ConnectionConfiguration stored) {
+    public static ConnectionConfiguration redactLegacyLiterals(ConnectionConfiguration stored) {
         if (stored == null) {
             return null;
         }

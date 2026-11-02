@@ -86,7 +86,7 @@ describe("statusConfig", () => {
 
   it("has IN_PROGRESS config", () => {
     expect(statusConfig.IN_PROGRESS!.label).toBe("Deploying");
-    expect(statusConfig.IN_PROGRESS!.color).toContain("amber");
+    expect(statusConfig.IN_PROGRESS!.color).toContain("warn");
   });
 
   it("has ERROR config", () => {

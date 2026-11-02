@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.channels;
 
 import ai.labs.eddi.configs.IRestVersionInfo;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import jakarta.annotation.security.RolesAllowed;
 import jakarta.ws.rs.*;
@@ -83,4 +84,20 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
                            @QueryParam("version") Integer version,
                            @QueryParam("permanent")
                            @DefaultValue("false") Boolean permanent);
+
+    @GET
+    @Path("/{id}/email-suppressions")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(description = "List the addresses an email integration no longer replies to because a reply to them bounced "
+            + "permanently: the SHA-256 of each address, its domain, the reason and when. Needs edit access to the integration.")
+    List<EmailSuppressionView> readEmailSuppressions(@PathParam("id") String id,
+                                                     @QueryParam("limit")
+                                                     @DefaultValue("100") Integer limit);
+
+    @POST
+    @Path("/{id}/email-suppressions/clear")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Operation(description = "Clear one suppressed address of an email integration, so replies to it are sent again. The body is "
+            + "{\"address\": \"...\"}; 204 when an entry was removed, 404 when the address was not suppressed. Needs edit access.")
+    Response clearEmailSuppression(@PathParam("id") String id, EmailSuppressionView.ClearRequest request);
 }

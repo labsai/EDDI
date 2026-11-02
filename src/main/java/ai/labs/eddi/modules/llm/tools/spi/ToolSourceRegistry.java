@@ -35,10 +35,11 @@ import java.util.Map;
  * WARN, because a silently-dropped tool reads to an agent designer as "the
  * model ignored my tool".
  * <p>
- * The drop rules are {@code AgentOrchestrator#mergeExternalTools}' rules,
- * carried over verbatim so the rewiring changed no behaviour: a spec with no
- * name, or with no executor to dispatch to, is skipped with a WARN rather than
- * offered to the model as a tool that cannot possibly run.
+ * The drop rules are those of the former
+ * {@code AgentOrchestrator.mergeExternalTools}, carried over verbatim so the
+ * rewiring changed no behaviour: a spec with no name, or with no executor to
+ * dispatch to, is skipped with a WARN rather than offered to the model as a
+ * tool that cannot possibly run.
  */
 public final class ToolSourceRegistry {
 

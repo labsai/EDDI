@@ -64,7 +64,7 @@ export const EXTENSION_TYPE_INFO: Record<
   "eddi://ai.labs.output.template": { label: "Templating", labelKey: "extensionTypes.templating", icon: ICONS.templating, order: 10, color: "text-cyan-400" },
   "eddi://ai.labs.mcpcalls": { label: "MCP Calls", labelKey: "extensionTypes.mcpcalls", icon: ICONS.mcpcalls, order: 11, color: "text-rose-400" },
   "eddi://ai.labs.workflow": { label: "Workflow", labelKey: "extensionTypes.workflow", icon: ICONS.workflow, order: 12, color: "text-indigo-400" },
-  "eddi://ai.labs.dictionary": { label: "Dictionary", labelKey: "extensionTypes.dictionary", icon: ICONS.dictionary, order: 13, color: "text-amber-400" },
+  "eddi://ai.labs.dictionary": { label: "Dictionary", labelKey: "extensionTypes.dictionary", icon: ICONS.dictionary, order: 13, color: "text-ochre-400" },
   "eddi://ai.labs.rag": { label: "RAG", labelKey: "extensionTypes.rag", icon: ICONS.rag, order: 14, color: "text-purple-400" },
 };
 

@@ -37,6 +37,8 @@ export const TOKEN_WAIT_MS = 10_000;
 export const REFRESH_LEAD_MS = 60_000;
 /** Never schedule a refresh sooner than this after receiving a token. */
 const MIN_REFRESH_DELAY_MS = 5_000;
+/** Ceiling for the back-off applied while the host keeps handing over expired tokens. */
+const MAX_STALE_BACKOFF_MS = 5 * 60_000;
 /**
  * The longest delay a browser timer holds: it is stored as a signed 32-bit
  * value, and anything above it overflows and fires at once (~24.8 days).
@@ -168,16 +170,34 @@ export function startEmbedAuth({
     }
   };
 
-  const scheduleRefresh = (token: string) => {
+  /**
+   * Consecutive tokens that were already expired (or about to be) when they
+   * arrived. An expired token — a host that hands back the token it still has,
+   * or a clock that runs ahead of the token issuer's — used to be re-requested
+   * every few seconds forever, a request/answer loop with the host.
+   */
+  let staleStreak = 0;
+
+  const scheduleRefresh = (token: string, fromTimer = false) => {
     if (refreshTimer) clearTimeout(refreshTimer);
     refreshTimer = null;
     const exp = tokenExpiryMs(token);
     if (exp === null) return;
     const remaining = exp - now();
-    // Ask a minute ahead; a token shorter-lived than that is renewed at
-    // roughly 80 % of its life, and never sooner than a few seconds.
-    const lead = Math.min(REFRESH_LEAD_MS, remaining * 0.2);
-    const wanted = Math.max(MIN_REFRESH_DELAY_MS, remaining - lead);
+    let wanted: number;
+    if (remaining <= MIN_REFRESH_DELAY_MS) {
+      // Already (nearly) expired by this window's clock. Asking again at once
+      // cannot help — the host has just answered — so back off, doubling up to
+      // a ceiling. A healthy token resets this.
+      if (!fromTimer) staleStreak++;
+      wanted = Math.min(MAX_STALE_BACKOFF_MS, MIN_REFRESH_DELAY_MS * 2 ** Math.min(staleStreak, 16));
+    } else {
+      if (!fromTimer) staleStreak = 0;
+      // Ask a minute ahead; a token shorter-lived than that is renewed at
+      // roughly 80 % of its life, and never sooner than a few seconds.
+      const lead = Math.min(REFRESH_LEAD_MS, remaining * 0.2);
+      wanted = Math.max(MIN_REFRESH_DELAY_MS, remaining - lead);
+    }
     // A token that lives longer than a timer can wait would overflow it: the
     // request went out at once, a host answering with the same token got the
     // same instant timer back, and the two looped. Wait in capped steps instead.
@@ -185,7 +205,7 @@ export function startEmbedAuth({
     refreshTimer = setTimeout(() => {
       refreshTimer = null;
       if (stopped) return;
-      if (wanted > delay) scheduleRefresh(token);
+      if (wanted > delay) scheduleRefresh(token, true);
       else post(MSG_TOKEN_REQUEST);
     }, delay);
   };

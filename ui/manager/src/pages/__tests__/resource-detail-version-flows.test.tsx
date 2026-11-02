@@ -139,6 +139,21 @@ describe("ResourceDetailPage — the version the link names", () => {
     expect(screen.queryByTestId("old-version-notice")).not.toBeInTheDocument();
   });
 
+  it("does not offer to switch while the editor holds unsaved edits", async () => {
+    // Switching reloads the editor on the newest version but the draft survives,
+    // so an edit made on the old version would be saved onto the latest one.
+    renderPage("/manage/resources/llm/res1?version=2", <ResourceDetailPage />, ROUTE);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("model-type-select")).toBeInTheDocument());
+    expect(screen.getByTestId("switch-to-latest")).toBeEnabled();
+
+    await user.selectOptions(screen.getByTestId("model-type-select"), "azure-openai");
+    await waitFor(() => expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument());
+
+    expect(screen.getByTestId("switch-to-latest")).toBeDisabled();
+    expect(screen.getByTestId("version-picker")).toHaveValue("2");
+  });
+
   it("opens the latest when the link names none", async () => {
     renderPage("/manage/resources/llm/res1", <ResourceDetailPage />, ROUTE);
     await waitFor(() => expect(screen.getByTestId("version-picker")).toHaveValue("3"));

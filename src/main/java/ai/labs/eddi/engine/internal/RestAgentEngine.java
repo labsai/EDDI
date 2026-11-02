@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.ConnectionWaitTimeouts;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
@@ -21,6 +22,7 @@ import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -49,6 +51,7 @@ import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -60,6 +63,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -164,6 +168,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // refused client comes back after Retry-After, so that work repeats per refusal
         // and takes the CPU the admitted turns need. admitTurn stays the real check.
         conversationService.refuseIfAtCapacity("(new conversation of agent " + agentId + ")");
+        requireTypedContext(context);
         try {
             // USE, not VIEW: talking to an agent is not reading how it was built. Checked
             // here rather than in ConversationService, because the system-initiated starts
@@ -291,6 +296,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // conversation's agent (L4): a revoked share stops the next turn, not only the
         // next conversation.
         conversationAccessGuard.requireConversationTurnAccess(conversationId);
+        requireTypedContext(inputData.getContext());
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
                 response);
@@ -559,6 +565,28 @@ public class RestAgentEngine implements IRestAgentEngine {
         return Map.of("error", error);
     }
 
+    /**
+     * Refuses client context with an entry that has no {@code type} (or a null
+     * entry): a {@code 400 INVALID_CONTEXT} naming the key, instead of the
+     * {@code 500} the pipeline produced when it switched on the missing type. The
+     * usual cause is a body shaped {@code {"context": {...}}} sent to an endpoint
+     * that takes the context map itself, which turns {@code context} into one
+     * untyped entry.
+     */
+    static void requireTypedContext(Map<String, Context> context) {
+        if (context == null) {
+            return;
+        }
+        for (var entry : context.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().getType() == null) {
+                String message = "Context entry '" + sanitize(entry.getKey()) + "' has no \"type\"; use one of "
+                        + Arrays.toString(Context.ContextType.values());
+                throw new BadRequestException(message, Response.status(Response.Status.BAD_REQUEST).type(MediaType.APPLICATION_JSON)
+                        .entity(errorBody(new TurnError("INVALID_CONTEXT", false, null, message))).build());
+            }
+        }
+    }
+
     @Override
     public Boolean isUndoAvailable(String conversationId) {
         validateConversationOwnership(conversationId);
@@ -825,9 +853,11 @@ public class RestAgentEngine implements IRestAgentEngine {
     public Response getApprovalStatus(String conversationId, String detail) {
         String ownerId = validateConversationOwnership(conversationId, true);
         try {
-            var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
-            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             if ("full".equals(detail)) {
+                // The whole snapshot is the response here, so only the pending batch's
+                // resume-only fields — stripped below anyway — are left on the server.
+                var snapshot = conversationService.getConversationMemorySnapshotForApprover(conversationId);
+                boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
                 // Approver-only callers (not owner, not admin) may read the full
                 // memory only while the conversation is actually awaiting approval —
                 // the approver role exists to decide pending approvals, not as a
@@ -846,8 +876,22 @@ public class RestAgentEngine implements IRestAgentEngine {
                 // and re-redacts the served fields through the CURRENT filter, so a
                 // pause stored before a filter improvement stops leaking.
                 // See ConversationMemoryUtilities#sanitizePendingToolCallsForApprover.
-                return Response.ok(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot)).build();
+                var sanitized = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot);
+                // The compiled system prompt is the agent's configuration: an owner or
+                // approver without VIEW on the agent gets the snapshot without it, as on
+                // the raw conversation read.
+                if (resourceAccessGuard != null
+                        && (snapshot.getAgentId() == null || !resourceAccessGuard.hasAccess(snapshot.getAgentId(), AccessLevel.VIEW))) {
+                    ConversationMemoryUtilities.stripAuditData(sanitized);
+                }
+                return Response.ok(sanitized).build();
             }
+            // The summary describes the pause, not the history: the tail read leaves the
+            // step history (0.5-3 MB for a tool-using agent) on the server. This card
+            // used to wait tens of seconds for it on a slow database link.
+            var tail = conversationService.getConversationMemoryTail(conversationId);
+            var snapshot = tail.snapshot();
+            boolean paused = snapshot.getConversationState() == ConversationState.AWAITING_HUMAN;
             // Bookmark fields describe the pause — suppress them once the
             // conversation left AWAITING_HUMAN so stale fields (e.g. after a
             // cancel that predates bookmark clearing) never mislead dashboards.
@@ -866,7 +910,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             // Structured pauseDetails (Task 11) — computed at read time, never
             // persisted. Absent entirely once the conversation is no longer
             // paused, same suppression rule as the bookmark fields above.
-            summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, snapshot) : null);
+            summary.put("pauseDetails", paused ? buildPauseDetails(conversationId, tail) : null);
             return Response.ok(summary).build();
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
@@ -885,12 +929,14 @@ public class RestAgentEngine implements IRestAgentEngine {
      * {@code argumentsRaw}); RULE pauses (and legacy null-pauseType snapshots)
      * expose the pause reason and the ACTIONS data of the paused step.
      */
-    private Map<String, Object> buildPauseDetails(String conversationId, ConversationMemorySnapshot snapshot) {
+    private Map<String, Object> buildPauseDetails(String conversationId, ConversationMemoryTail tail)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var snapshot = tail.snapshot();
         String pauseType = snapshot.getHitlPauseType();
         if ("TOOL_CALL".equals(pauseType)) {
             return buildToolCallPauseDetails(conversationId, snapshot);
         }
-        return buildRulePauseDetails(snapshot);
+        return buildRulePauseDetails(conversationId, tail);
     }
 
     private Map<String, Object> buildToolCallPauseDetails(String conversationId, ConversationMemorySnapshot snapshot) {
@@ -984,12 +1030,29 @@ public class RestAgentEngine implements IRestAgentEngine {
         return redacted;
     }
 
-    private Map<String, Object> buildRulePauseDetails(ConversationMemorySnapshot snapshot) {
+    private Map<String, Object> buildRulePauseDetails(String conversationId, ConversationMemoryTail tail)
+            throws ResourceStoreException, ResourceNotFoundException {
         var details = new LinkedHashMap<String, Object>();
         details.put("type", "RULE");
-        details.put("reason", snapshot.getHitlPauseReason());
-        details.put("actions", findPausedStepActions(snapshot));
+        details.put("reason", tail.snapshot().getHitlPauseReason());
+        details.put("actions", findPausedStepActions(conversationId, tail));
         return details;
+    }
+
+    /**
+     * {@link #findPausedStepActions(ConversationMemorySnapshot)} from the tail. A
+     * rule pause stores its actions in the paused (last) step, so the tail's one
+     * step answers it. Only when that step carries no actions does the search walk
+     * further back — and then over the full history, loaded for that case alone, so
+     * the answer is the one the full snapshot always gave.
+     */
+    private List<String> findPausedStepActions(String conversationId, ConversationMemoryTail tail)
+            throws ResourceStoreException, ResourceNotFoundException {
+        var actions = findPausedStepActions(tail.snapshot());
+        if (actions.isEmpty() && !tail.holdsAllSteps()) {
+            return findPausedStepActions(conversationService.getConversationMemorySnapshot(conversationId));
+        }
+        return actions;
     }
 
     /**
@@ -1107,7 +1170,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             if (currentState == ConversationState.READY) {
                 return Response.ok(Map.of("message", "Conversation already in READY state")).build();
             }
-            conversationService.resetConversationState(conversationId, ConversationState.READY);
+            if (!conversationService.resetConversationState(conversationId, currentState, ConversationState.READY)) {
+                // The state moved on between the read above and the reset — a turn
+                // started, the conversation was ended or resumed. Nothing was written.
+                return Response.status(Response.Status.CONFLICT)
+                        .entity(Map.of("error", "Conversation state changed while resetting it — read it again and retry"))
+                        .build();
+            }
             LOGGER.infof("Admin reset conversation %s from %s to READY", conversationId, currentState);
             return Response.ok(Map.of("message", "State reset from " + currentState + " to READY")).build();
         } catch (ResourceStoreException e) {

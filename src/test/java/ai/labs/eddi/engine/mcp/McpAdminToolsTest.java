@@ -304,7 +304,8 @@ class McpAdminToolsTest {
         String result = tools.deleteAgent(AGENT_ID, 1, null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Not found"));
+        assertFalse(result.contains("Not found"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // --- createAgent validation ---

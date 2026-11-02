@@ -88,6 +88,23 @@ class SlackToolPauseNotificationTest {
     }
 
     @Test
+    void toolCallPause_argumentsRenderAsLiteralText_neverAsMentionsOrLinks() {
+        // Model- or user-influenced argument text must not ping the channel or show
+        // a disguised link inside the trusted bot's approval card.
+        var batch = batchWithCalls(call("send_email", "{\"to\":\"<!channel> <https://evil.example|bank.example>\"}"));
+
+        var blocks = SlackHitlSupport.buildApprovalBlocks(
+                "title", "Conversation", "conv-1", "agent-1", "Pay <!here> now", null, "conv-1",
+                true, "TOOL_CALL", batch);
+
+        String rendered = renderBlocksToText(blocks);
+        assertFalse(rendered.contains("<!channel>"), rendered);
+        assertFalse(rendered.contains("<!here>"), rendered);
+        assertFalse(rendered.contains("<https://evil.example"), rendered);
+        assertTrue(rendered.contains("&lt;!channel&gt;"), rendered);
+    }
+
+    @Test
     void toolCallPause_truncatesArgumentsTo300Chars() {
         String longArgs = "{\"note\":\"" + "x".repeat(500) + "\"}";
         var batch = batchWithCalls(call("do_thing", longArgs));
@@ -148,7 +165,8 @@ class SlackToolPauseNotificationTest {
         String rendered = renderBlocksToText(blocks);
         assertFalse(rendered.contains("RAW_SECRET_VALUE_NEVER_SHOWN"),
                 "raw argument value must never reach the Slack approval card");
-        assertTrue(rendered.contains("<REDACTED>"), rendered);
+        // Escaped for mrkdwn, so it renders as the literal marker.
+        assertTrue(rendered.contains("&lt;REDACTED&gt;"), rendered);
     }
 
     @Test
@@ -263,7 +281,7 @@ class SlackToolPauseNotificationTest {
         var slackApi = mock(SlackWebApiClient.class);
         var observer = new SlackHitlResumeObserver(userConversationStore, router, slackApi);
 
-        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "U1",
+        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "slack:T1:U1",
                 Deployment.Environment.production, "agent-1", "conv-1");
         when(userConversationStore.readUserConversationByConversationId("conv-1")).thenReturn(mapping);
         when(router.getBotToken("slack", "C123")).thenReturn("xoxb-token");

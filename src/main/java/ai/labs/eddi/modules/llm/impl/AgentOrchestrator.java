@@ -42,11 +42,9 @@ import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
-import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.*;
-import dev.langchain4j.model.TokenCountEstimator;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -58,6 +56,7 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -103,12 +102,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
     // === Tool-level HITL (tool-approval gate) ===
     /** Step-data key holding this turn's cumulative gated-pause count (int). */
     static final String KEY_TOOL_PAUSE_COUNT = "hitl:tool_pause_count";
-    /** Default max pauses per turn when the config does not specify one. */
-    private static final int DEFAULT_MAX_PAUSES_PER_TURN = 3;
     /** Default transcript serialization cap (bytes). */
     static final int DEFAULT_TRANSCRIPT_MAX_BYTES = PendingToolCallBatch.TRANSCRIPT_MAX_BYTES_DEFAULT;
-    /** Approver-facing pause reason cap (chars). */
-    private static final int PAUSE_REASON_MAX_CHARS = 500;
 
     /**
      * Fallback for {@code LlmConfiguration.Task#getMaxToolContextTokens()} when a
@@ -315,6 +310,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     @Inject
     volatile CallerIdentityContext callerIdentityContext;
+
+    /**
+     * Re-applies a task's input guardrails to the earlier turns the recall tool
+     * returns ({@link ContextualToolsProvider}). Field-injected for the same reason
+     * as the fields above; null under direct construction, where recalled turns are
+     * returned as stored.
+     */
+    @Inject
+    volatile GuardrailService guardrailService;
 
     /**
      * Test seam for supplying the attachment services to a directly-constructed
@@ -813,49 +817,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
         return new A2AToolsProvider(a2aToolProviderManager);
     }
 
-    /**
-     * Merge one source of externally-discovered tools into the registry, refusing
-     * any name that is already taken.
-     * <p>
-     * Finding F15: the merge used to be {@code toolSpecs.addAll} +
-     * {@code toolExecutors.putAll}. Specs accumulated in a List, so a duplicate
-     * name reached the model TWICE, while executors went into a Map where the last
-     * write won — a remote MCP server advertising {@code calculator} silently
-     * replaced the built-in one for every call the model made.
-     * {@code toolsWhitelist} filters by name and cannot express "must not collide".
-     * <p>
-     * Precedence follows merge order: built-in beats http beats mcp beats a2a. The
-     * loser is dropped, never silently substituted, and every collision is logged.
-     */
-    static void mergeExternalTools(List<ToolSpecification> incomingSpecs, Map<String, ToolExecutor> incomingExecutors, String source,
-                                   List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors, Map<String, String> toolSources) {
-        if (incomingSpecs == null || incomingSpecs.isEmpty()) {
-            return;
-        }
-        for (ToolSpecification spec : incomingSpecs) {
-            String name = spec.name();
-            if (name == null) {
-                LOGGER.warnf("Skipping %s tool with no name", source);
-                continue;
-            }
-            if (toolExecutors.containsKey(name)) {
-                String incumbent = toolSources.getOrDefault(name, "builtin");
-                LOGGER.warnf("Tool name collision: %s tool '%s' clashes with the already-registered %s tool of the same name — "
-                        + "the %s tool is DROPPED and the %s tool keeps the name. Rename the remote tool or exclude it via "
-                        + "toolsBlacklist.", source, sanitize(name), incumbent, source, incumbent);
-                continue;
-            }
-            ToolExecutor executor = incomingExecutors != null ? incomingExecutors.get(name) : null;
-            if (executor == null) {
-                LOGGER.warnf("%s tool '%s' has a specification but no executor — skipping", source, sanitize(name));
-                continue;
-            }
-            toolSpecs.add(spec);
-            toolExecutors.put(name, executor);
-            toolSources.put(name, source);
-        }
-    }
-
     /** @see ToolLoopRunner#executeWithTools */
     private ExecutionResult executeWithTools(ChatModel chatModel, String systemMessage, List<ChatMessage> chatMessages, ToolSetup setup,
                                              LlmConfiguration.Task task, IConversationMemory memory,
@@ -873,38 +834,13 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     // ─── In-turn tool-context budget (D6b) — extracted to ToolContextBudget (R2
-    // step 3). Kept as declared delegators (not inlined) since they're reflected
-    // or referenced by class name in tests and, for sumTokens/tokenUsageMap, by
-    // LegacyChatExecutor/CascadingModelExecutor/LlmTask. ───
-
-    static void enforceToolContextBudget(List<ChatMessage> messages, int budgetTokens, TokenCountEstimator estimator,
-                                         Map<ChatMessage, Integer> tokenMemo, List<Map<String, Object>> trace,
-                                         String conversationId) {
-        ToolContextBudget.enforceToolContextBudget(messages, budgetTokens, estimator, tokenMemo, trace, conversationId);
-    }
-
-    static TokenUsage sumTokens(TokenUsage a, TokenUsage b) {
-        return ToolContextBudget.sumTokens(a, b);
-    }
+    // step 3). These two stay as aliases because LegacyChatExecutor,
+    // CascadingModelExecutor and LlmTask read them by this class name. ───
 
     static final List<String> TOKEN_USAGE_FIELDS = ToolContextBudget.TOKEN_USAGE_FIELDS;
 
     static Map<String, Object> tokenUsageMap(TokenUsage usage) {
         return ToolContextBudget.tokenUsageMap(usage);
-    }
-
-    /** @see ToolLoopRunner#executeSingleToolCallResult */
-    String executeSingleToolCallResult(ToolExecutionRequest toolRequest, IConversationMemory memory,
-                                       List<Map<String, Object>> trace,
-                                       Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
-                                       Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
-                                       int defaultRateLimit, Double maxBudget, String conversationId,
-                                       boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
-                                       LlmConfiguration.Task task, boolean isLazy,
-                                       List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs) {
-        return toolLoopRunner.executeSingleToolCallResult(toolRequest, memory, trace, toolExecutors, toolRateLimits,
-                toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching,
-                enableCostTracking, task, isLazy, builtInSpecs, activeSpecs);
     }
 
     /** @see ToolLoopRunner#resolveRateLimit */
@@ -1152,7 +1088,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * field-injected and still null when this class's constructor runs.
      */
     private ContextualToolsProvider contextualToolsProvider() {
-        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor, liveDiscussionRegistry);
+        return new ContextualToolsProvider(userMemoryStore, attachmentStore, attachmentTextExtractor, liveDiscussionRegistry, guardrailService);
     }
 
     // Kept as declared delegators (not inlined) — each has two call sites in

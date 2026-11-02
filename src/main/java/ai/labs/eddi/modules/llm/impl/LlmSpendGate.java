@@ -154,7 +154,9 @@ public class LlmSpendGate {
         private final transient Refusal refusal;
 
         SpendRefusedException(Refusal refusal) {
-            super(refusal.detail(), null, false, false);
+            // Suppression stays enabled: a cascade attaches the spend of the steps that
+            // ran before the refusal (UnrecordedSpend).
+            super(refusal.detail(), null, true, false);
             this.refusal = refusal;
         }
 
@@ -300,17 +302,6 @@ public class LlmSpendGate {
     }
 
     /**
-     * The conversation cost ceiling this turn is held to: the agent's
-     * {@code maxCostPerConversationUsd}, tightened by a scheduled fire's
-     * {@code maxCostPerFire} when the turn carries one (context
-     * {@value ScheduleConfiguration#CONTEXT_MAX_COST_PER_FIRE} on the current
-     * step). The fire's ceiling is what was spent before this step — the
-     * {@link #conversationCost} total, undone and discarded steps included, less
-     * the current step's own {@code audit:cost} — plus the allowance, so the
-     * allowance is per fire even on a persistent conversation; the tighter of the
-     * two wins. The tool loop asks the same question between rounds.
-     */
-    /**
      * The current step's priced spend not yet charged to the tenant's monthly
      * counter: its {@code audit:cost} less {@code audit:metered_cost}, the same
      * difference {@code TurnCostMeter} charges at settle. Exact-key lookups —
@@ -330,6 +321,17 @@ public class LlmSpendGate {
         return data != null && data.getResult() instanceof Number n && Double.isFinite(n.doubleValue()) ? n.doubleValue() : 0.0;
     }
 
+    /**
+     * The conversation cost ceiling this turn is held to: the agent's
+     * {@code maxCostPerConversationUsd}, tightened by a scheduled fire's
+     * {@code maxCostPerFire} when the turn carries one (context
+     * {@value ScheduleConfiguration#CONTEXT_MAX_COST_PER_FIRE} on the current
+     * step). The fire's ceiling is what was spent before this step — the
+     * {@link #conversationCost} total, undone and discarded steps included, less
+     * the current step's own {@code audit:cost} — plus the allowance, so the
+     * allowance is per fire even on a persistent conversation; the tighter of the
+     * two wins. The tool loop asks the same question between rounds.
+     */
     static OptionalDouble effectiveCeiling(IConversationMemory memory) {
         OptionalDouble agentCeiling = memory.getConversationCostCeilingUsd();
         double allowance = maxCostPerFire(memory);
@@ -373,6 +375,12 @@ public class LlmSpendGate {
     }
 
     /**
+     * The spend keys {@link #conversationCost} sums — the two {@code recordedSpend}
+     * sums.
+     */
+    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST);
+
+    /**
      * The conversation's priced spend so far — monotonic: an undo cannot lower it.
      * The sum of every step's {@code audit:cost}, the current step included (it
      * holds what earlier tasks of this turn already spent), plus
@@ -385,8 +393,6 @@ public class LlmSpendGate {
      * A redo moves a step back without changing the total. Memory holds every step,
      * so this is a walk over in-memory data, no I/O.
      */
-    private static final List<String> SPEND_KEYS = List.of(MemoryKeys.AUDIT_COST, MemoryKeys.AUDIT_DISCARDED_COST);
-
     static double conversationCost(IConversationMemory memory) {
         double total = 0.0;
         var steps = memory.getAllSteps();

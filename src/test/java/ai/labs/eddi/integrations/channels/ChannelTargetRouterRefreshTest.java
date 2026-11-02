@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.secrets.SecretResolver;
+import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -75,7 +76,7 @@ class ChannelTargetRouterRefreshTest {
                 .thenReturn(new MapCache<>());
 
         router = new ChannelTargetRouter(channelStore, descriptorStore, agentAdmin, agentStore,
-                secretResolver, cacheFactory);
+                secretResolver, mock(VaultHostAllowlist.class), cacheFactory);
 
         accumulatedDescriptors = new ArrayList<>();
 

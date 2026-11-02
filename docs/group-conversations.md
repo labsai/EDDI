@@ -375,7 +375,10 @@ roster like any agent, but their turn **pauses the discussion**
   own principal (or an admin) may submit** — an `eddi-approver` may decide
   approvals, but speaking as another human is impersonation, not review. The
   answer is recorded as the phase's natural entry type (a human OPINION is an
-  OPINION) and the discussion resumes from the next speaker.
+  OPINION) and the discussion resumes from the next speaker. The response is
+  the group conversation for its owner or an admin; any other submitter (the
+  member themselves) gets `{groupConversationId, accepted, state}` — submitting
+  a turn does not grant the full view the status endpoint withholds from them.
 - This is deliberately NOT the approval surface: approve/reject endpoints never
   accept free text, and the pending-approvals inbox marks these entries
   `pauseType: "HUMAN_TURN"` with the member's id, so a human sees their own
