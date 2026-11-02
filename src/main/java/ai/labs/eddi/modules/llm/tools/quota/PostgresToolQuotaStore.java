@@ -8,7 +8,6 @@ import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
-import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
@@ -38,8 +37,6 @@ import java.util.List;
 @ApplicationScoped
 @DefaultBean
 public class PostgresToolQuotaStore implements IToolQuotaStore {
-
-    private static final Logger LOGGER = Logger.getLogger(PostgresToolQuotaStore.class);
 
     static final String TABLE = "tool_quota_counters";
 
@@ -100,9 +97,10 @@ public class PostgresToolQuotaStore implements IToolQuotaStore {
             statement.execute(CREATE_EXPIRES_INDEX);
             schemaInitialized = true;
         } catch (SQLException e) {
-            // Not rethrown here: the statement that follows fails too, and it is the one
-            // that reports as a ToolQuotaStoreException the caller fails closed on.
-            LOGGER.errorf(e, "Failed to create the %s schema", TABLE);
+            // Thrown, not logged: while the database is down every call lands here, and
+            // logging per call would bypass the caller's rate-limited fail-closed report.
+            // schemaInitialized stays false, so the next call retries the DDL.
+            throw new ToolQuotaStoreException("Could not create the " + TABLE + " schema", e);
         }
     }
 

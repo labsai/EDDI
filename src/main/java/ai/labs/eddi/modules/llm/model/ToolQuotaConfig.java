@@ -41,9 +41,15 @@ public class ToolQuotaConfig {
 
     /**
      * Template (the same syntax and data model as a system prompt) that renders to
-     * the identifier counted against, for example
-     * {@code {context.userInfo.userIds[0]}}. Optional: the default is the
-     * conversation's user id.
+     * the identifier counted against, for example {@code {context.personId}}.
+     * Optional: the default is the conversation's user id.
+     * <p>
+     * <b>Security:</b> the subject must come from a value the end user cannot
+     * choose, for example context set by a trusted backend. A value a browser
+     * client sends directly is not enough: a user who changes it gets a fresh
+     * quota. The anonymous fallback ({@code conversation:<id>}, used when there is
+     * no user id) is reset by starting a new conversation, so it gives no fair use
+     * for unauthenticated users.
      * <p>
      * A managed conversation's user id is composite
      * ({@code <user>-<company>-<program>}), so the default counts per program; use

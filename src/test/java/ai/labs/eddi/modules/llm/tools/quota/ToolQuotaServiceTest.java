@@ -169,7 +169,7 @@ class ToolQuotaServiceTest {
     @DisplayName("a subject template counts per person across composite managed-conversation user ids")
     void subjectTemplateCountsPerPerson() throws Exception {
         var cfg = config("updateAction", rule(1, "P1D", null));
-        cfg.setSubject("{context.userInfo.userIds[0]}");
+        cfg.setSubject("{context.personId}");
         when(templating.processTemplate(anyString(), any())).thenReturn("person-9");
         // two programs of one person: composite ids differ, the rendered subject does
         // not

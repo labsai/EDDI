@@ -12,7 +12,7 @@ user per day.
 
 ```json
 "toolQuotas": {
-  "subject": "{context.userInfo.userIds[0]}",
+  "subject": "{context.personId}",
   "tools": {
     "updateAction":        { "limit": 100, "window": "P1D", "pool": "improvements" },
     "updateSession":       { "limit": 100, "window": "P1D", "pool": "improvements" },

@@ -2060,7 +2060,7 @@ conversations and across EDDI nodes**.
 
 ```json
 "toolQuotas": {
-  "subject": "{context.userInfo.userIds[0]}",
+  "subject": "{context.personId}",
   "tools": {
     "updateAction":        { "limit": 100, "window": "P1D", "pool": "improvements" },
     "updateSession":       { "limit": 100, "window": "P1D", "pool": "improvements" },
@@ -2081,6 +2081,14 @@ conversations and across EDDI nodes**.
 (`<user>-<company>-<program>`), so the default counts **per program**. To count **per person**, render a
 subject that is the same across their programs, as above. Counters are keyed by (agent, tool or pool,
 subject, window), so two agents never share a count and a new agent *version* continues the old one.
+
+With `{context.personId}` the value is a per-turn context variable of type `string` named `personId`
+(stored in the step as `context:personId`).
+
+> **Security: the subject must be a value the end user cannot choose**, for example context set by a
+> trusted backend. A value a browser client sends directly is not enough: a user who changes it gets a
+> fresh quota. The anonymous fallback (`conversation:<id>`, used when there is no user id) is reset by
+> starting a new conversation, so it does **not** give fair use for unauthenticated users.
 
 **What counts.** A call is counted only when its tool **really runs**. The reservation is made at one
 point in the pipeline — after the rate limit and the cache, immediately before the tool executes — so a
