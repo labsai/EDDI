@@ -4581,7 +4581,7 @@
     "cacheReadPrice": "Leitura de cache $ / 1M",
     "cacheWritePrice": "Escrita de cache $ / 1M",
     "asOf": "Em",
-    "longContextBadge": "> {{tokens}} tok",
+    "longContextBadge": "> {{tokens}} tokens",
     "stale": "desatualizado",
     "unpricedTitle": "Modelos sem preço vistos (este nó)",
     "unpricedDesc": "Chamadas a modelos sem preço no nó que serve esta página desde o seu arranque. Custam 0 $ face a qualquer orçamento.",
