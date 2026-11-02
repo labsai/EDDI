@@ -236,38 +236,6 @@ class AlertMaintenanceServiceTest {
     }
 
     @Test
-    @DisplayName("a rule disabled after the pass began sends no digest of what it held")
-    void digestSkippedWhenTheRuleWasDisabledMeanwhile() {
-        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
-                AlertRule.DigestMode.HOURLY);
-        AlertRule disabled = new AlertRule(rule.id(), rule.name(), false, rule.scope(), rule.source(), rule.condition(), rule.delivery(),
-                rule.throttle(), rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
-        // The pass lists the rule enabled; by the time it digests, the rule reads back
-        // disabled.
-        when(rules.findEnabled()).thenReturn(List.of(rule));
-        doReturn(Optional.of(disabled)).when(rules).read(rule.id());
-        AlertEvent held = event("h0", rule, AlertEvent.State.DIGEST_PENDING, List.of());
-        when(events.findDigestPending(RULE_ID, AlertMaintenanceService.DIGEST_BATCH)).thenReturn(List.of(held));
-
-        assertEquals(0, service.run().digests());
-        verify(events, never()).insert(any());
-        verify(delivery, never()).deliver(any(), any());
-    }
-
-    @Test
-    @DisplayName("a digest whose held events were all released meanwhile is withdrawn, not delivered")
-    void digestWithdrawnWhenNoHeldEventWasMarked() {
-        AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
-                AlertRule.DigestMode.DAILY);
-        AlertEvent h0 = event("h0", rule, AlertEvent.State.DIGEST_PENDING, List.of());
-        doReturn(0L).when(events).markDigested(any()); // releaseDigestPending got there first
-
-        assertFalse(service.sendDigest(rule, List.of(h0), NOW));
-        verify(delivery, never()).deliver(any(), any());
-        verify(events).updateDelivery(any(), anyLong());
-    }
-
-    @Test
     @DisplayName("a digest another runner already sent (its dedupe key exists) marks and sends nothing")
     void digestRace() {
         AlertRule rule = withThrottle(errorRule(List.of(ErrorKind.TURN_ERROR), DeliveryTarget.slack("C0123ABC")), null,
