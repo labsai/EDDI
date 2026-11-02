@@ -167,6 +167,25 @@ class RestAttachmentUploadTest {
         }
 
         @Test
+        void legacyConversationQuotaCountsAgainstTheOwnerTheGuardResolved() throws Exception {
+            // A pre-v5.1.6 descriptor records no owner; the guard resolves it from memory.
+            when(conversationAccessGuard.requireExistingConversationOwner("conv-1")).thenReturn("legacy-owner");
+            var attachment = new Attachment("ref-789", "data.bin", "application/octet-stream", 10, "conv-1");
+            when(attachmentStore.store(any(byte[].class), anyString(), anyString(), eq("conv-1"), any(), any())).thenReturn(attachment);
+            Path tempFile = Files.createTempFile("test-upload", ".bin");
+            Files.write(tempFile, new byte[10]);
+            FileUpload file = mock(FileUpload.class);
+            when(file.fileName()).thenReturn("data.bin");
+            when(file.uploadedFile()).thenReturn(tempFile);
+
+            Response response = captureAsync(ar -> endpoint.uploadAttachment("conv-1", file, null, ar));
+
+            assertEquals(201, response.getStatus());
+            verify(attachmentStore).store(any(byte[].class), anyString(), anyString(), eq("conv-1"), any(), eq("legacy-owner"));
+            Files.deleteIfExists(tempFile);
+        }
+
+        @Test
         void shouldDefaultMimeTypeToOctetStream() throws Exception {
             var attachment = new Attachment(
                     "ref-456", "data.bin",

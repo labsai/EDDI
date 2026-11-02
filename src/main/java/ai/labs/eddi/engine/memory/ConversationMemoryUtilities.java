@@ -25,6 +25,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import java.util.*;
+import java.util.function.Predicate;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.*;
 import static ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
@@ -1048,13 +1049,51 @@ public class ConversationMemoryUtilities {
         if (snapshot == null) {
             return;
         }
-        for (var step : snapshot.getConversationSteps()) {
+        // The redo cache too: an undo moves the candidate-bearing step there, and it is
+        // serialized with the rest of the snapshot.
+        removeStepData(snapshot.getConversationSteps(), HitlRevisionCandidate.STEP_KEY::equals);
+        removeStepData(snapshot.getRedoCache(), HitlRevisionCandidate.STEP_KEY::equals);
+    }
+
+    /**
+     * Removes the {@code audit:*} step data — above all
+     * {@code audit:compiled_prompt}, the agent's rendered system prompt with every
+     * variable, snippet and retrieved document templated into it — from every step
+     * of a snapshot, the redo cache included. {@code audit:token_usage} stays: it
+     * is three numbers, no prompt text, and the one audit entry meant for the
+     * caller (the detailed view keeps it for the same reason).
+     * <p>
+     * For the full-snapshot reads served to a caller who may use the agent but not
+     * read its configuration: owning a conversation is not VIEW on the agent, and
+     * the compiled prompt IS its configuration. The detailed view and MCP
+     * {@code read_audit_trail} already withhold it; the raw read and the full
+     * approval status did not. Mutates the freshly-deserialized, caller-owned
+     * snapshot only — the same contract as the projections above.
+     */
+    public static ConversationMemorySnapshot stripAuditData(ConversationMemorySnapshot snapshot) {
+        if (snapshot == null) {
+            return null;
+        }
+        removeStepData(snapshot.getConversationSteps(), ConversationMemoryUtilities::isWithheldAuditKey);
+        removeStepData(snapshot.getRedoCache(), ConversationMemoryUtilities::isWithheldAuditKey);
+        return snapshot;
+    }
+
+    private static boolean isWithheldAuditKey(String key) {
+        return key != null && key.startsWith("audit:") && !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key);
+    }
+
+    private static void removeStepData(Collection<ConversationStepSnapshot> steps, Predicate<String> key) {
+        if (steps == null) {
+            return;
+        }
+        for (var step : steps) {
             if (step == null || step.getWorkflows() == null) {
                 continue;
             }
             for (var workflow : step.getWorkflows()) {
                 if (workflow != null && workflow.getLifecycleTasks() != null) {
-                    workflow.getLifecycleTasks().removeIf(result -> result != null && HitlRevisionCandidate.STEP_KEY.equals(result.getKey()));
+                    workflow.getLifecycleTasks().removeIf(result -> result != null && key.test(result.getKey()));
                 }
             }
         }

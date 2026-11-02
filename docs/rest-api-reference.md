@@ -54,10 +54,10 @@ for anything this page does not cover.
 | `POST /agents/{conversationId}/resume` | Submit a human decision for a paused turn | `200` |
 | `GET /agents/{conversationId}/approval-status` | Pause details of a conversation | `200` |
 | `GET /agents/pending-approvals` | Conversations awaiting a human decision | `200` list |
-| `PATCH /agents/{conversationId}/state` | Admin: reset a stuck conversation to `READY` | `200` |
+| `PATCH /agents/{conversationId}/state` | Admin: reset a stuck conversation to `READY` (a compare-and-set from the state it read: `409` when the state changed meanwhile or cannot be reset) | `200` |
 | `GET /conversationstore/conversations` | List conversations (paged, filterable) | `200` list |
 | `GET /conversationstore/conversations/simple/{conversationId}` | Read a conversation (same shape as `GET /agents/{id}`) | `200` |
-| `GET /conversationstore/conversations/{conversationId}` | Read the raw stored conversation memory | `200` |
+| `GET /conversationstore/conversations/{conversationId}` | Read the raw stored conversation memory. The `audit:*` step data (the compiled system prompt above all; `audit:token_usage` stays) is withheld unless the caller has `VIEW` on the agent — the same rule `approval-status?detail=full` and MCP `read_audit_trail` apply | `200` |
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
 | `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor) | `200` list |
 | `POST /conversationstore/conversations/end` | End a list of conversations (admin, editor) | `200` |

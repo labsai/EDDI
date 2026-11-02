@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -15,6 +16,7 @@ import ai.labs.eddi.engine.memory.model.ConversationActivitySummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.rest.RestConversationStore;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.runtime.internal.IDeploymentListener;
@@ -68,6 +70,8 @@ class RestAgentAdministrationUndeployResilienceTest {
     private IConversationDescriptorStore conversationDescriptorStore;
     private IConversationService conversationService;
     private RestAgentAdministration admin;
+    private IDocumentDescriptorStore agentDescriptors;
+    private IDeploymentStore deploymentStore;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -76,7 +80,7 @@ class RestAgentAdministrationUndeployResilienceTest {
         conversationMemoryStore = mock(IConversationMemoryStore.class);
         conversationDescriptorStore = mock(IConversationDescriptorStore.class);
         conversationService = mock(IConversationService.class);
-        var deploymentStore = mock(IDeploymentStore.class);
+        deploymentStore = mock(IDeploymentStore.class);
         var runtime = mock(IRuntime.class);
         var accessGuard = mock(ConversationAccessGuard.class);
         when(accessGuard.callerActor(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -92,9 +96,47 @@ class RestAgentAdministrationUndeployResilienceTest {
         var restConversationStore = new RestConversationStore(mock(IDocumentDescriptorStore.class), conversationDescriptorStore,
                 conversationMemoryStore, conversationService, mock(IUserMemoryStore.class), runtime, accessGuard,
                 mock(ResourceAccessGuard.class), 365, 90, attachments);
+        agentDescriptors = mock(IDocumentDescriptorStore.class);
+        var currentId = mock(IResourceStore.IResourceId.class);
+        when(currentId.getVersion()).thenReturn(3);
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenReturn(currentId);
         admin = new RestAgentAdministration(runtime, agentFactory, mock(IAgentStore.class), deploymentStore, conversationMemoryStore,
-                restConversationStore, mock(IDocumentDescriptorStore.class), mock(IDeploymentListener.class), mock(IScheduleStore.class),
+                restConversationStore, agentDescriptors, mock(IDeploymentListener.class), mock(IScheduleStore.class),
                 mock(TenantQuotaService.class), mock(ResourceAccessGuard.class));
+    }
+
+    @Test
+    @DisplayName("a bulk undeploy of an agent whose documents are gone is a 404 only when the deployment records were actually read")
+    void unreadableDeploymentRecordsAreNotNotFound() throws Exception {
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        // Records readable and empty: nothing is deployed, so 404.
+        Response none = admin.undeployAgent(ENV, AGENT, 2, false, true);
+        assertEquals(404, none.getStatus());
+
+        // Records unreadable: "none found" is not what the lookup said.
+        when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 2, false, true));
+    }
+
+    @Test
+    @DisplayName("a version above the highest one a PARTIAL lookup found is the lookup's failure (500), above a complete one it is a 400")
+    void versionAboveAPartialCeilingIsNotABadRequest() throws Exception {
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        var running = mock(IAgent.class);
+        when(running.getAgentId()).thenReturn(AGENT);
+        when(running.getAgentVersion()).thenReturn(2);
+        when(running.getDeploymentStatus()).thenReturn(Deployment.Status.READY);
+        when(agentFactory.getAllDeployedAgents(any())).thenReturn(List.of(running));
+
+        // Both lookups answered: the highest deployed version is 2, so 5 does not
+        // exist.
+        assertEquals(400, admin.undeployAgent(ENV, AGENT, 5, false, true).getStatus());
+
+        // The deployment records could not be read: version 5 may exist, so it is not a
+        // 400.
+        when(deploymentStore.readDeploymentInfos(any())).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        assertThrows(InternalServerErrorException.class, () -> admin.undeployAgent(ENV, AGENT, 5, false, true));
     }
 
     private void openConversation(int version, String conversationId) throws Exception {
@@ -153,6 +195,27 @@ class RestAgentAdministrationUndeployResilienceTest {
         verify(agentFactory).undeployAgent(ENV, AGENT, 3);
         verify(agentFactory, never()).undeployAgent(ENV, AGENT, 2);
         verify(agentFactory).undeployAgent(ENV, AGENT, 1);
+    }
+
+    @Test
+    @DisplayName("undeployThisAndAllPreviousAgentVersions above the agent's current version is refused before any work")
+    void bulkUndeployBeyondCurrentVersionIsRefused() throws Exception {
+        Response response = admin.undeployAgent(ENV, AGENT, Integer.MAX_VALUE, false, true);
+
+        assertEquals(400, response.getStatus());
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
+        verify(conversationMemoryStore, never()).getActiveConversationCount(anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("undeployThisAndAllPreviousAgentVersions of an agent with no documents and nothing deployed is a 404")
+    void bulkUndeployOfUnknownAgentIsNotFound() throws Exception {
+        when(agentDescriptors.getCurrentResourceId(AGENT)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+
+        Response response = admin.undeployAgent(ENV, AGENT, 5, false, true);
+
+        assertEquals(404, response.getStatus());
+        verify(agentFactory, never()).undeployAgent(any(), anyString(), anyInt());
     }
 
     @Test

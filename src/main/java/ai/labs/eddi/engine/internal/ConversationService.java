@@ -80,7 +80,6 @@ import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
-import ai.labs.eddi.engine.runtime.ITurnAbandonment;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
@@ -123,7 +122,7 @@ import static jakarta.ws.rs.core.MediaType.TEXT_PLAIN;
  * @author ginccc
  */
 @ApplicationScoped
-public class ConversationService implements IConversationService, UserErasureParticipant, ITurnAbandonment {
+public class ConversationService implements IConversationService, UserErasureParticipant {
 
     private static final String RESOURCE_URI = "eddi://ai.labs.conversation/conversationstore/conversations/";
 
@@ -963,21 +962,6 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /**
-     * {@inheritDoc} Signals the turn through
-     * {@link ConversationStepRunner#abandonTurn}.
-     */
-    @Override
-    public boolean abandonInFlightTurn(String conversationId) {
-        IConversationMemory memory = conversationId == null ? null : inFlightConversations.get(conversationId);
-        if (memory == null) {
-            return false;
-        }
-        ConversationStepRunner.abandonTurn(memory);
-        LOGGER.infof("Abandoned the in-flight turn of conversation %s", sanitize(conversationId));
-        return true;
-    }
-
-    /**
      * GDPR erasure: signals every turn running on this node for {@code userId} to
      * stop, through the same cooperative flag {@link #cancelConversation} sets. A
      * cancelled turn skips its longTerm write-back to user memory
@@ -1608,6 +1592,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             // (and meters) it again. A replayed idempotent turn never gets
                             // here: it is answered from the stored outcome.
                             meterTurnCost(returnConversationMemory);
+                            reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
@@ -2739,10 +2724,64 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /**
+     * A turn whose persist failed: its answer must not be replayed to an
+     * {@code Idempotency-Key} retry — see
+     * {@link TurnIdempotencyService#forgetUnpersisted}.
+     */
+    void forgetUnpersistedTurn(String conversationId) {
+        if (turnIdempotency != null) {
+            turnIdempotency.forgetUnpersisted(conversationId);
+        }
+    }
+
+    /**
+     * GDPR Art. 18 — whether processing is restricted for {@code userId}; for the
+     * HITL resume, which applies the same admission rule as start and say.
+     *
+     * @throws ProcessingRestrictionUnavailableException
+     *             when the restriction cannot be read (fail closed)
+     */
+    boolean isProcessingRestricted(String userId) {
+        return gdprComplianceService != null && gdprComplianceService.isProcessingRestricted(userId);
+    }
+
+    /**
+     * A cancelled turn ends its pipeline through the same stop path as
+     * {@code STOP_CONVERSATION}, so its memory — and the snapshot the caller is
+     * about to receive — says {@code ENDED}. What the store records is
+     * {@code EXECUTION_INTERRUPTED}
+     * ({@code ConversationStepRunner.settleCancelledTurn}), unless the conversation
+     * really was ended (an end raises the same cancel flag). The caller was told
+     * the conversation had ended while the next turn was accepted. Report what the
+     * store will hold instead.
+     */
+    void reportCancelledTurnAsInterrupted(String conversationId, IConversationMemory memory, SimpleConversationMemorySnapshot snapshot) {
+        if (!memory.isCancelled() || snapshot.getConversationState() != ConversationState.ENDED) {
+            return;
+        }
+        ConversationState stored;
+        try {
+            stored = conversationMemoryStore.getConversationState(conversationId);
+        } catch (RuntimeException e) {
+            stored = null;
+        }
+        if (stored != ConversationState.ENDED) {
+            snapshot.setConversationState(ConversationState.EXECUTION_INTERRUPTED);
+        }
+    }
+
     IAgent getAgent(Environment environment, String agentId, Integer agentVersion) throws ServiceException, IllegalAccessException {
 
         IAgent agent = agentFactory.getAgent(environment, agentId, agentVersion);
         if (agent == null) {
+            // Deployed on demand even when the deployment record says "undeployed". Only
+            // existing conversations get here, pinned to this version, and the version
+            // cleanup undeploys an old version whose only open conversations are paused
+            // (AWAITING_HUMAN does not count as active) — as does retiring a version whose
+            // conversations can move on, while a resume must still finish on the version
+            // that paused it. Refusing those would strand every pending approval of the
+            // previous version at the next deploy.
             agentFactory.deployAgent(environment, agentId, agentVersion, null);
             agent = agentFactory.getAgent(environment, agentId, agentVersion);
         }
@@ -2962,8 +3001,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     @Override
-    public void resetConversationState(String conversationId, ConversationState targetState) {
-        setConversationState(conversationId, targetState);
+    public boolean resetConversationState(String conversationId, ConversationState expectedState, ConversationState targetState)
+            throws ResourceStoreException {
+        if (conversationMemoryStore.compareAndSetState(conversationId, expectedState, targetState)) {
+            cacheConversationState(conversationId, targetState);
+            return true;
+        }
+        conversationStepRunner.refreshCachedState(conversationId);
+        return false;
     }
 
     /**
@@ -3065,6 +3110,11 @@ public class ConversationService implements IConversationService, UserErasurePar
     @Override
     public CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException {
         return conversationHitlService.cancelPausedConversation(conversationId, cancelledBy);
+    }
+
+    @Override
+    public CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy, String pauseId) throws ResourceStoreException {
+        return conversationHitlService.cancelPausedConversation(conversationId, cancelledBy, pauseId);
     }
 
     @Override
