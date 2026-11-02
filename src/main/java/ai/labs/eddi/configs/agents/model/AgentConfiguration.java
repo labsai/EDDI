@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.crypto.AgentPublicKey;
 import ai.labs.eddi.configs.hitl.HitlRejectionAction;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.HitlNotifyConfig;
+import ai.labs.eddi.configs.hitl.model.HitlReviewConfig;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -1769,6 +1770,23 @@ public class AgentConfiguration {
         @JsonIgnore
         public int effectiveMaxRevisionsPerTurn() {
             return maxRevisionsPerTurn != null ? maxRevisionsPerTurn : DEFAULT_MAX_REVISIONS_PER_TURN;
+        }
+
+        /**
+         * Edit-on-approve and the audit taxonomy (approval category, reason codes) —
+         * see {@link HitlReviewConfig}. Absent = approve/reject only, derived category,
+         * built-in reason codes.
+         *
+         * @since 6.7.0
+         */
+        private HitlReviewConfig review;
+
+        public HitlReviewConfig getReview() {
+            return review;
+        }
+
+        public void setReview(HitlReviewConfig review) {
+            this.review = review;
         }
 
         /**
