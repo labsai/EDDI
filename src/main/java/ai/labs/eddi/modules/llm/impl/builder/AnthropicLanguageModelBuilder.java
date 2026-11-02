@@ -132,7 +132,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public ChatModel build(Map<String, String> parameters) {
-        return build(parameters, BoundedJdkHttpClient.builder());
+        return build(parameters, BoundedJdkHttpClient.builder(targetPolicy));
     }
 
     /**
@@ -203,7 +203,7 @@ public class AnthropicLanguageModelBuilder implements ILanguageModelBuilder {
 
     @Override
     public StreamingChatModel buildStreaming(Map<String, String> parameters) {
-        return buildStreaming(parameters, BoundedJdkHttpClient.builder());
+        return buildStreaming(parameters, BoundedJdkHttpClient.builder(targetPolicy));
     }
 
     /** Streaming counterpart of {@link #build(Map, HttpClientBuilder)}. */

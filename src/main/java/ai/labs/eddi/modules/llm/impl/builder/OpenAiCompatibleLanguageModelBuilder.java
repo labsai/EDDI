@@ -76,6 +76,26 @@ public class OpenAiCompatibleLanguageModelBuilder implements ILanguageModelBuild
         return recognised;
     }
 
+    /**
+     * The preset's URL for the configured {@code region} (or its default), when no
+     * {@code baseUrl} is set — the destination {@link #merged} will pick. The
+     * region is editor-controlled, so a secret restricted to one region's host must
+     * be checked against it rather than released to whichever region the
+     * configuration names.
+     */
+    @Override
+    public String defaultEndpoint(Map<String, String> parameters) {
+        Map<String, String> p = parameters == null ? Map.of() : parameters;
+        if (!isBlank(p.get(KEY_BASE_URL))) {
+            return null;
+        }
+        String presetBaseUrl = provider.parameterDefaults().get(KEY_BASE_URL);
+        if (!isBlank(presetBaseUrl)) {
+            return presetBaseUrl;
+        }
+        return provider.resolveBaseUrl(p.get(KEY_REGION));
+    }
+
     @Override
     public ChatModel build(Map<String, String> parameters) {
         Prepared prepared = prepare(parameters);

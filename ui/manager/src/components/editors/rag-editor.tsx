@@ -1256,7 +1256,14 @@ export function RagEditor({
               max={4096}
               step={64}
               value={data.chunkSize ?? 512}
-              onChange={(e) => onChange({ ...data, chunkSize: parseInt(e.target.value, 10) })}
+              onChange={(e) => {
+                const chunkSize = parseInt(e.target.value, 10);
+                // The backend refuses an overlap above half the chunk size, so a
+                // smaller chunk pulls the overlap down with it rather than leaving
+                // a value the save would reject (the default 64 with a size of 64).
+                const chunkOverlap = Math.min(data.chunkOverlap ?? 64, Math.floor(chunkSize / 2));
+                onChange({ ...data, chunkSize, chunkOverlap });
+              }}
               disabled={readOnly}
               className="w-full accent-primary"
               data-testid="chunk-size"

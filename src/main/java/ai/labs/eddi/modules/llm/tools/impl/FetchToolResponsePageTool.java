@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.ConversationBound;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -30,6 +31,7 @@ import java.util.Map;
  * @since 6.0.0
  */
 @ApplicationScoped
+@ConversationBound
 public class FetchToolResponsePageTool {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();

@@ -183,6 +183,59 @@ class ArtifactValidatorsTest {
     }
 
     @Test
+    @DisplayName("a backtracking pattern inside a JSON schema is deadline-bound too, not an unbounded JDK match")
+    void catastrophicSchemaPattern_abortsOnDeadline() {
+        var validators = List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA,
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"(a+)+$\"}}}"));
+        String content = "{\"x\":\"" + "a".repeat(60_000) + "b\"}";
+
+        long start = System.nanoTime();
+        String rejection = ArtifactValidators.firstRejection(validators, content);
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertNotNull(rejection, "a runaway schema match must refuse the write, not admit it");
+        assertTrue(rejection.contains("did not finish in time"), rejection);
+        assertTrue(elapsedMs < 5_000, "took " + elapsedMs + "ms");
+    }
+
+    /**
+     * Each match reads its input through a fresh guard that samples the clock every
+     * 1024th character, so short inputs never reached a sample: many
+     * patternProperties patterns times many short keys ran on long past the budget,
+     * one cheap match at a time.
+     */
+    @Test
+    @DisplayName("many short schema matches stop at the shared deadline, not only one long match")
+    void manyShortSchemaMatches_stopAtTheSharedDeadline() {
+        StringBuilder patterns = new StringBuilder();
+        for (int i = 0; i < 1_000; i++) {
+            patterns.append(i == 0 ? "" : ",").append("\"zq").append(i).append("x\":{}");
+        }
+        StringBuilder content = new StringBuilder("{");
+        String padding = "a".repeat(190);
+        for (int i = 0; i < 4_000; i++) {
+            content.append(i == 0 ? "" : ",").append("\"k").append(i).append('_').append(padding).append("\":1");
+        }
+        content.append('}');
+        var validators = List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA,
+                "{\"type\":\"object\",\"patternProperties\":{" + patterns + "}}"));
+
+        String rejection = ArtifactValidators.firstRejection(validators, content.toString());
+
+        assertNotNull(rejection, "millions of short matches must hit the shared budget and refuse the write");
+        assertTrue(rejection.contains("did not finish in time"), rejection);
+    }
+
+    @Test
+    @DisplayName("an ordinary schema pattern still matches and still rejects")
+    void schemaPatternStillWorks() {
+        var validators = List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA,
+                "{\"type\":\"object\",\"properties\":{\"x\":{\"type\":\"string\",\"pattern\":\"^ab+$\"}}}"));
+        assertNull(ArtifactValidators.firstRejection(validators, "{\"x\":\"abbb\"}"));
+        assertNotNull(ArtifactValidators.firstRejection(validators, "{\"x\":\"zzz\"}"));
+    }
+
+    @Test
     @DisplayName("a broken spec at write time fails closed — the write is refused, never admitted")
     void brokenSpecAtWriteTime_failsClosed() {
         assertNotNull(ArtifactValidators.firstRejection(

@@ -144,7 +144,7 @@ public class ToolCacheService {
         if (toolClass == null) {
             return false;
         }
-        if (toolClass.isAnnotationPresent(Vetoed.class)) {
+        if (toolClass.isAnnotationPresent(Vetoed.class) || toolClass.isAnnotationPresent(ConversationBound.class)) {
             return true;
         }
         for (Annotation annotation : toolClass.getAnnotations()) {

@@ -21,6 +21,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 
@@ -29,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -484,6 +486,14 @@ class StanceSummaryEngineTest {
             assertEquals("Adopt pgvector.", StanceSummaryEngine.leadSentence("Adopt pgvector. It is cheaper."));
             assertEquals("Why not?", StanceSummaryEngine.leadSentence("Why not? Because of cost."));
             assertEquals("No!", StanceSummaryEngine.leadSentence("No! Absolutely not."));
+        }
+
+        @Test
+        @DisplayName("a long letter-free run of terminators is scanned in linear time")
+        void letterFreeTerminatorRunIsLinear() {
+            String bangs = "!".repeat(200_000);
+            String result = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> StanceSummaryEngine.leadSentence(bangs));
+            assertEquals(bangs, result);
         }
 
         @Test

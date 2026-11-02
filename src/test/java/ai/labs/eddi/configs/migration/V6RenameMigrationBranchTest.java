@@ -15,6 +15,8 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.RenameCollectionOptions;
 import org.bson.BsonDocument;
 import org.bson.Document;
+import org.bson.conversions.Bson;
+import com.mongodb.client.result.UpdateResult;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -295,18 +297,37 @@ class V6RenameMigrationBranchTest {
 
         @SuppressWarnings("unchecked")
         @Test
-        @DisplayName("non-history document with String ID converts to ObjectId")
+        @DisplayName("non-history document with a String ID is addressed by that string, as stored")
         void nonHistoryDocWithStringId() throws Exception {
             var doc = new Document("_id", "aabbccddeeff112233445566").append("data", "test");
 
             MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(collection.replaceOne(any(), any())).thenReturn(UpdateResult.acknowledged(1, 1L, null));
 
             var method = V6RenameMigration.class.getDeclaredMethod(
                     "saveDocument", MongoCollection.class, Document.class, boolean.class);
             method.setAccessible(true);
-            method.invoke(migration, collection, doc, false);
+            assertEquals(true, method.invoke(migration, collection, doc, false));
 
-            verify(collection).replaceOne(any(), eq(doc));
+            ArgumentCaptor<Bson> query = ArgumentCaptor.forClass(Bson.class);
+            verify(collection).replaceOne(query.capture(), eq(doc));
+            // new ObjectId(string) can never equal a string _id
+            assertEquals("{\"_id\": \"aabbccddeeff112233445566\"}", query.getValue().toBsonDocument().toJson());
+        }
+
+        @SuppressWarnings("unchecked")
+        @Test
+        @DisplayName("a replace that matched nothing is a failure, not a migrated document")
+        void unmatchedReplaceIsNotCountedAsSaved() throws Exception {
+            var doc = new Document("_id", new ObjectId()).append("data", "test");
+
+            MongoCollection<Document> collection = mock(MongoCollection.class);
+            when(collection.replaceOne(any(), any())).thenReturn(UpdateResult.acknowledged(0, 0L, null));
+
+            var method = V6RenameMigration.class.getDeclaredMethod(
+                    "saveDocument", MongoCollection.class, Document.class, boolean.class);
+            method.setAccessible(true);
+            assertEquals(false, method.invoke(migration, collection, doc, false));
         }
 
         @SuppressWarnings("unchecked")

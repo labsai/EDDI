@@ -65,10 +65,27 @@ public class ConverseWithAgentTool {
      */
     public static final String CONTEXT_DELEGATION_DEPTH = "delegationDepth";
 
+    /**
+     * Context key carrying the chain's depth ceiling: the strictest
+     * {@code maxDelegationDepth} of every hop so far. Without it a delegate
+     * compared the hop count against its own (possibly larger, possibly default)
+     * limit, so a restrictive originator's cap applied to the first hop only. The
+     * name lies inside the reserved {@code delegationDepth*} namespace
+     * ({@code ClientContextGuard}), so a client cannot set it; and it can only
+     * lower a delegate's limit, never raise it.
+     */
+    public static final String CONTEXT_DELEGATION_DEPTH_MAX = "delegationDepthMax";
+
     private final IConversationService conversationService;
     private final String userId;
     private final DynamicAgentConfig config;
     private final int currentDepth;
+
+    /**
+     * The ceiling inherited from earlier hops, or {@code null} at the chain's
+     * start.
+     */
+    private final Integer inheritedMaxDepth;
 
     /**
      * Delegations performed by this tool instance. The instance is built per
@@ -101,6 +118,12 @@ public class ConverseWithAgentTool {
         return permissive;
     }
 
+    /** The stricter of this agent's limit and the one the chain carried in. */
+    private int effectiveMaxDepth() {
+        int own = config.getMaxDelegationDepth();
+        return inheritedMaxDepth == null ? own : Math.min(own, inheritedMaxDepth);
+    }
+
     /**
      * @param config
      *            dynamic-agent guardrails governing this delegation. {@code null}
@@ -127,6 +150,20 @@ public class ConverseWithAgentTool {
      */
     public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
             BiPredicate<String, String> useCheck) {
+        this(conversationService, userId, config, currentDepth, useCheck, null);
+    }
+
+    /**
+     * @param inheritedMaxDepth
+     *            the depth ceiling the delegation chain carried in
+     *            ({@link #CONTEXT_DELEGATION_DEPTH_MAX}), or {@code null} when this
+     *            conversation was not reached by delegation. The stricter of it and
+     *            this agent's own {@code maxDelegationDepth} applies, and is passed
+     *            on.
+     */
+    public ConverseWithAgentTool(IConversationService conversationService, String userId, DynamicAgentConfig config, int currentDepth,
+            BiPredicate<String, String> useCheck, Integer inheritedMaxDepth) {
+        this.inheritedMaxDepth = inheritedMaxDepth;
         this.useCheck = useCheck;
         this.conversationService = conversationService;
         this.userId = userId;
@@ -178,11 +215,12 @@ public class ConverseWithAgentTool {
             // --- Guardrail: delegation depth (finding F18) ---
             // Without this an A→B→A cycle recurses unbounded: each hop without a
             // conversationId starts a FRESH conversation, so the busy-guard never fires.
-            if (currentDepth >= config.getMaxDelegationDepth()) {
+            int maxDepth = effectiveMaxDepth();
+            if (currentDepth >= maxDepth) {
                 LOGGER.warnf("[CONVERSE] Delegation to agent '%s' refused: depth %d would exceed maxDelegationDepth=%d",
-                        agentId, currentDepth + 1, config.getMaxDelegationDepth());
+                        agentId, currentDepth + 1, maxDepth);
                 return ("⚠️ Maximum delegation depth (%d) reached — this conversation is already %d hop(s) deep. "
-                        + "Answer directly instead of delegating further.").formatted(config.getMaxDelegationDepth(), currentDepth);
+                        + "Answer directly instead of delegating further.").formatted(maxDepth, currentDepth);
             }
 
             // --- Guardrail: delegations per task (finding I4) ---
@@ -220,7 +258,8 @@ public class ConverseWithAgentTool {
             // can never fire. Continuing an existing conversation (conversationId supplied)
             // never goes through startConversation at all and needs it for the same reason.
             Map<String, Context> delegationContext = Map.of(CONTEXT_DELEGATION_DEPTH,
-                    new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)));
+                    new Context(Context.ContextType.string, String.valueOf(currentDepth + 1)),
+                    CONTEXT_DELEGATION_DEPTH_MAX, new Context(Context.ContextType.string, String.valueOf(maxDepth)));
 
             // --- Start new conversation if no conversationId provided ---
             if (conversationId == null || conversationId.isBlank()) {

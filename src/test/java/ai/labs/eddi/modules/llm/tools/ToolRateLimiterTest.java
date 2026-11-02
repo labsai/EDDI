@@ -10,6 +10,8 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
@@ -463,6 +465,29 @@ class ToolRateLimiterTest {
             int remaining = bucket.getRemaining();
             assertTrue(remaining >= 25 && remaining <= 35,
                     "half a window should restore about half the allowance, got " + remaining);
+        }
+    }
+
+    @Nested
+    class LimitValidation {
+
+        @Test
+        void negativeLimitsAreRefusedAtSaveTime() {
+            // max(0, -1) = 0 tokens: "-1" silently blocked the tool for good.
+            var e = assertThrows(IllegalArgumentException.class,
+                    () -> ToolRateLimiter.validateLimits(-1, null, "langchain.task[0]"));
+            assertTrue(e.getMessage().contains("langchain.task[0].defaultRateLimit"), e.getMessage());
+            assertTrue(e.getMessage().contains("enableRateLimiting"), e.getMessage());
+
+            var perTool = assertThrows(IllegalArgumentException.class,
+                    () -> ToolRateLimiter.validateLimits(100, Map.of("websearch", -1), "langchain.task[0]"));
+            assertTrue(perTool.getMessage().contains("toolRateLimits.websearch"), perTool.getMessage());
+        }
+
+        @Test
+        void zeroAndPositiveLimitsAreAccepted() {
+            assertDoesNotThrow(() -> ToolRateLimiter.validateLimits(0, Map.of("websearch", 0, "weather", 50), "t"));
+            assertDoesNotThrow(() -> ToolRateLimiter.validateLimits(null, null, "t"));
         }
     }
 }

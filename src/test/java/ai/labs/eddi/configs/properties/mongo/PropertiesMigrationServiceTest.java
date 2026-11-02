@@ -66,6 +66,18 @@ class PropertiesMigrationServiceTest {
     }
 
     @Test
+    void runsForEveryDatastoreTypeTheRestOfEddiTreatsAsMongo() {
+        // DataStoreProducers treats anything but "postgres" as MongoDB
+        var service = service("mongo");
+        var iterable = mockIterableOf("users");
+        when(database.listCollectionNames()).thenReturn(iterable);
+
+        service.runIfNeeded();
+
+        verify(database).listCollectionNames();
+    }
+
+    @Test
     void isRunningWhileMigratingAndNotBefore_orAfter() {
         PropertiesMigrationService service = service("mongodb");
         boolean[] runningDuringMigration = new boolean[1];
