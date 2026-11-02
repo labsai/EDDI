@@ -411,6 +411,8 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
+| `eddi.hitl.approval-context.max-total-chars` | `8000` | Cap on the text of all `approvalContext` blocks of one pause, summed; further blocks are dropped and the context is marked truncated. See [hitl-approval-context.md](hitl-approval-context.md) |
+| `eddi.hitl.approval-context.render-timeout-ms` | `500` | Wall-clock limit for rendering one `approvalContext` block. A block that exceeds it shows as `render_failed`; the pause is committed regardless |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
 | `eddi.hitl.pending.sweep-interval` | `6h` | How often the auto-cancel sweep runs |
 | `eddi.hitl.metrics.refresh-interval` | `60s` | How often `eddi_hitl_pending` and `eddi_hitl_pending_oldest_age_seconds` re-read the approval backlog from the conversation store (a bounded, projected read of at most 1000 rows, off the scrape thread). `off` disables it; both gauges then read `NaN` |
