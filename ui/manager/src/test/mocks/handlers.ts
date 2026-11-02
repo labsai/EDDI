@@ -1,6 +1,7 @@
 import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
+import { oversightHandlers } from "./oversight-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
@@ -893,6 +894,8 @@ function nextWeekday9amUtc(from: number = Date.now()): number {
 export const handlers = [
   // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
   ...ratingHandlers,
+  // HITL oversight: /hitl/analytics, /hitl/samples, /hitl/autonomy.
+  ...oversightHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).
   ...alertHandlers,
 

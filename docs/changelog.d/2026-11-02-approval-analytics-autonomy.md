@@ -35,6 +35,11 @@ it matters — see [HITL Oversight](../hitl-oversight.md).
 - **Maintenance** — `hitl-autonomy-maintenance` system schedule (fast path right after the alerts one in
   `ScheduleFireExecutor`, reserved in `RestScheduleStore`): sample expiry, round-robin evaluation, retention, the
   first-start rebuild. Gauges refreshed per node.
+- **Manager** — new `/manage/oversight` page (sidebar next to Approvals): analytics tiles and a per-category table with
+  tiers, the sample review queue (one sample at a time, a flag needs a reason code, no select-all), and recommendations
+  (evidence, change list, configuration preview, a second confirmation when the change leaves no gated tool) and
+  suspensions (lift needs a note). `oversight` i18n namespace in all 11 locales; MSW handlers in `oversight-handlers.ts`;
+  OpenAPI snapshot refreshed for the new endpoints.
 - **Docs** — new [`hitl-oversight.md`](../hitl-oversight.md); one-line links in `hitl.md`, `audit-ledger.md`,
   `gdpr-compliance.md`, `SUMMARY.md`; metrics in `metrics.md` and dashboard panels 400–405; properties in
   `configuration-reference.md`.
