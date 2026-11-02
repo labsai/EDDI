@@ -33,7 +33,7 @@ const CATEGORIES = ["all", "preference", "fact", "context"] as const;
 const categoryColors: Record<string, string> = {
   preference: "bg-purple-500/10 text-purple-600 dark:text-purple-400",
   fact: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  context: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  context: "bg-ochre-500/10 text-ochre-600 dark:text-ochre-400",
 };
 
 const visibilityColors: Record<string, string> = {
@@ -180,7 +180,7 @@ export function UserMemoryPage({
           <StatCard label={t("memories.totalEntries", "Total Entries")} value={counts.all} icon={Hash} />
           <StatCard label={t("memories.preferences", "Preferences")} value={counts.preference} icon={Brain} color="text-purple-500" />
           <StatCard label={t("memories.facts", "Facts")} value={counts.fact} icon={FileText} color="text-sky-500" />
-          <StatCard label={t("memories.conflicts", "Conflicted")} value={conflictCount} icon={AlertTriangle} color={conflictCount > 0 ? "text-amber-500" : "text-muted-foreground"} />
+          <StatCard label={t("memories.conflicts", "Conflicted")} value={conflictCount} icon={AlertTriangle} color={conflictCount > 0 ? "text-warn-500" : "text-muted-foreground"} />
         </div>
       )}
 
@@ -359,7 +359,7 @@ function MemoryRow({
     <div
       className={cn(
         "rounded-xl border bg-card transition-colors",
-        entry.conflicted && "border-amber-500/30 bg-amber-500/5",
+        entry.conflicted && "border-warn-500/30 bg-warn-500/5",
       )}
       data-testid={`memory-entry-${entry.id ?? entry.key}`}
     >
@@ -391,7 +391,7 @@ function MemoryRow({
           </span>
           {entry.conflicted && (
             <span title={t("memories.conflicted", "Conflicted")}>
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-warn-500" />
             </span>
           )}
 

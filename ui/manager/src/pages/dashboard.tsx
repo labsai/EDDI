@@ -130,7 +130,7 @@ export function DashboardPage() {
       value: stats?.agentCount ?? 0,
       capped: stats?.agentCountCapped ?? false,
       icon: Bot,
-      gradient: "from-amber-500/10 to-primary/5",
+      gradient: "from-brand-500/10 to-primary/5",
       iconColor: "text-primary bg-primary/10",
       to: "/manage/agents",
     },
@@ -241,7 +241,7 @@ export function DashboardPage() {
           ) : vaultHealth?.available ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
           ) : (
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+            <AlertTriangle className="h-3.5 w-3.5 text-warn-500" />
           )}
           <span className="text-muted-foreground" data-testid="health-vault">
             {vaultForbidden
@@ -316,7 +316,7 @@ export function DashboardPage() {
                       <p className="text-2xl font-bold text-foreground tabular-nums" data-testid={`stat-value-${stat.to.split("/").pop()}`}>
                         {stat.failed ? (
                           <span
-                            className="flex items-center gap-1 text-amber-500"
+                            className="flex items-center gap-1 text-warn-500"
                             title={t("dashboard.countUnavailable", "Could not be loaded")}
                           >
                             —
