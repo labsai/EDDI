@@ -57,3 +57,32 @@ shape that analytics can rely on.
   a JSON answer, the original one click away), a reason-code select for rejections and edits, and a notice when the
   engine refused the last edit; the group transcript marks a reviewer's SYNTHESIS entry. Every Manager decision sends
   `X-EDDI-Client: manager`. New keys under `hitlReview.*` in all 11 locales.
+- **Docs** — new page [HITL Review & Audit](../hitl-review-and-audit.md) (config, edit semantics per surface, Slack
+  modals, the full audit contract with the schema-1 mapping, the reason-code vocabulary, a worked GitHub-reply
+  example), linked from `hitl.md`, `group-conversations.md`, `mcp-server.md` and `SUMMARY.md`. The operator and MCP
+  follow-up is in [`planning/operator-followups/hitl-edit-on-approve.md`](../../planning/operator-followups/hitl-edit-on-approve.md).
+
+### Contract for the features built on this branch
+
+- **Approval analytics** reads `hitl.approval` entries only through `HitlApprovalAudit.parse(AuditEntry)` →
+  `List<HitlDecisionUnit>`, and observes `HitlDecisionRecorded(String auditEntryId, List<HitlDecisionUnit> units)`
+  with `@ObservesAsync`. Values of `DecisionOutcome`, `HitlChannel`, `UnitKind` and `EditSummary.Kind` are only ever
+  added. HUMAN_TURN resolutions have no units and no outcome.
+- **Approval card context** extends the Slack card through `SlackHitlSupport.buildApprovalBlocks`, whose signatures
+  stay as they are; the `actions` block stays the card's last block.
+
+### Not in this change
+
+- The Manager has no UI for group task-result or synthesis edits yet (REST and MCP have them); Slack cards of group
+  discussions keep Approve/Reject.
+- A note typed in a Slack modal is recorded but does not drive `onRejection: REVISE`.
+- The approval category of a rule or group pause is derived from the configuration at decision time (the pinned
+  agent version for agents; the current group version for groups) rather than stamped at pause time.
+
+```decision-log
+| 2026-11-02 | One `hitl.approval` entry per decision event with a `units[]` list (answer, tool call, phase, task) and `schema: 2`; legacy fields kept | Analytics needs per-unit outcomes, categories and edit sizes; existing readers need the old fields | One entry per unit (breaks the one-entry-per-decision shape, multiplies ledger sequence numbers); a separate store written alongside the ledger |
+| 2026-11-02 | An approved edit of a rule-pause answer replaces only the draft's own output item and data keys; nothing re-runs; a guardrail-refused edit re-pauses on the unchanged draft | Re-running later tasks would re-trigger the pause rule; a refused edit must not consume the human's pause | Truncating and re-running the rest of the turn (as REVISE does); screening before the CAS (model calls on the request thread and inside Slack's 3-second window) |
+| 2026-11-02 | A group SYNTHESIS edit is appended as an unsigned reviewer entry (`hitl:<decidedBy>`, `errorReason: reviewer-edit`), reusing the SYNTHESIS type | Signed transcript entries must never be rewritten; the existing "last synthesis" extraction then needs no change and older pods deserialize it | A new transcript entry type; rewriting the signed entry in place |
+| 2026-11-02 | Slack edits of tool arguments are merged server-side against the raw arguments; redacted values cannot be edited from Slack | Slack only ever sees redacted arguments; a value left as shown must keep its raw secret, and a marker must never become an argument | Sending raw arguments to Slack; refusing every edit of a call that has any redacted value |
+| 2026-11-02 | `HitlDecisionRecorded` is fired with `fireAsync` through `Arc.container()` from the plain audit writer | Nothing a consumer does may run on the decision's critical path; the HITL collaborators are plain classes built in their facades' constructors | A synchronous event; new CDI constructor parameters on the facades |
+```
