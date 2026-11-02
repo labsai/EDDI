@@ -128,7 +128,44 @@ public interface ISecretPersistence {
      *             if the write fails
      */
     default boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+        return resealSecretInPlace(tenantId, keyName, dekId, expectedIv, encryptedValue, iv, null);
+    }
+
+    /**
+     * {@link #resealSecretInPlace(String, String, String, String, String, String)},
+     * also replacing the row's checksum when {@code checksum} is not {@code null} —
+     * how a legacy bare SHA-256 checksum is retired in the same guarded write.
+     *
+     * @return whether the row was rewritten
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    default boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv,
+                                        String checksum) {
         return false;
+    }
+
+    /**
+     * {@link #upsertSecret}, but only for a row that exists: it never inserts.
+     * <p>
+     * A value rotation passes a {@code null} grant, meaning "keep the stored one".
+     * As an upsert, a rotation racing a delete re-created the row with the insert
+     * defaults, the wildcard grant among them. The caller learns the row is gone
+     * and treats the write as the create it has become.
+     * <p>
+     * The default reads and then writes, which is only as atomic as that; the
+     * production stores override it with one conditional statement.
+     *
+     * @return whether a row was updated
+     * @throws PersistenceException
+     *             if the write fails
+     */
+    default boolean updateSecretIfPresent(EncryptedSecret secret) {
+        if (findSecret(secret.getTenantId(), secret.getKeyName()).isEmpty()) {
+            return false;
+        }
+        upsertSecret(secret);
+        return true;
     }
 
     /**

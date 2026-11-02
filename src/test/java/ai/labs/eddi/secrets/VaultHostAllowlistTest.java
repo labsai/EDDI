@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -159,11 +161,21 @@ class VaultHostAllowlistTest {
         }
 
         @Test
-        @DisplayName("a missing secret and a non-reference are left to the resolver")
-        void missingSecretAndNonReferencesAreSkipped() throws Exception {
+        @DisplayName("a missing secret is refused: deleted after resolution, it must not leave unchecked; a non-reference is skipped")
+        void missingSecretIsRefusedAndNonReferencesAreSkipped() throws Exception {
             when(provider.getMetadata(OPENAI)).thenThrow(new ISecretProvider.SecretNotFoundException("missing"));
-            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF, "not-a-reference"), "https://anywhere.example/", "x"));
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://anywhere.example/", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of("not-a-reference"), "https://anywhere.example/", "x"));
             assertDoesNotThrow(() -> allowlist.requireAllowed((Iterable<String>) null, "https://anywhere.example/", "x"));
+        }
+
+        @Test
+        @DisplayName("referencesIn finds every reference, and stays linear on a run of unterminated openers")
+        void referencesInIsLinear() {
+            assertEquals(Set.of(OPENAI_REF), VaultHostAllowlist.referencesIn(List.of("Bearer " + OPENAI_REF, "plain")));
+            String attack = "${vault:".repeat(200_000);
+            assertTimeoutPreemptively(Duration.ofSeconds(20), () -> assertTrue(VaultHostAllowlist.referencesIn(List.of(attack)).isEmpty()));
         }
 
         @Test

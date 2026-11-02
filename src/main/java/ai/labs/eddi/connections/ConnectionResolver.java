@@ -275,7 +275,10 @@ public class ConnectionResolver {
                         "Connection '" + connection.getName() + "' is BASIC but lacks staticAuth.username or staticAuth.passwordRef. "
                                 + "Re-save the connection to apply the current validation rules.");
             }
-            String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password");
+            String destination = targetUrl.toString();
+            credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), destination, connection.getName(), "username");
+            String password = credentialReferenceResolver.resolveVaultBackedFor(staticAuth.getPasswordRef(), destination, connection.getName(),
+                    "password");
             record(connection, "success", sample);
             return new BasicLogin(staticAuth.getUsername(), password);
         } catch (ConnectionException e) {
@@ -541,6 +544,7 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' is BASIC but has no staticAuth.passwordRef. Re-save the connection to apply "
                             + "the current validation rules.");
         }
+        credentialReferenceResolver.requireHostsAllowed(staticAuth.getUsername(), targetUrl.toString(), connection.getName(), "username");
         String password = credentialReferenceResolver.resolveVaultBacked(staticAuth.getPasswordRef(), connection.getName(), "password",
                 targetUrl);
         String encoded = Base64.getEncoder()
