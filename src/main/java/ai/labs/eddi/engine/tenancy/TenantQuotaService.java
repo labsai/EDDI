@@ -333,6 +333,27 @@ public class TenantQuotaService {
         return QuotaCheckResult.OK;
     }
 
+    /**
+     * The agent gate's answer when the caller could not count the deployed agents:
+     * {@code OK} when no agent limit applies to the tenant (no quota, a disabled
+     * one, or an unlimited {@code maxAgentsPerTenant}), otherwise a refusal flagged
+     * {@code accountingUnavailable} and counted on
+     * {@code eddi.tenant.quota.unavailable{type=agent}} — an unknown count must not
+     * admit a deploy past a limit that is in force.
+     */
+    public QuotaCheckResult agentCountUnavailable(String tenantId) {
+        TenantQuota quota;
+        try {
+            quota = quotaFor(tenantId);
+        } catch (QuotaAccountingUnavailableException e) {
+            return quotaUnreadable(tenantId, "agent");
+        }
+        if (quota == null || !quota.enabled() || quota.maxAgentsPerTenant() < 0) {
+            return QuotaCheckResult.OK;
+        }
+        return quotaUnreadable(tenantId, "agent");
+    }
+
     // ─── Cost Budget ───
 
     /**

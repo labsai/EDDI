@@ -309,5 +309,5 @@ export function drainNode(nodeId: string, drain: boolean): Promise<ActionResult>
  * one cannot send the Authorization header.
  */
 export function createClusterActivitySource(): BearerEventSource {
-  return new BearerEventSource(`${window.location.origin}${BASE}/activity/stream`, api.getAuthHeader());
+  return new BearerEventSource(`${window.location.origin}${BASE}/activity/stream`, () => api.getAuthHeader());
 }

@@ -27,6 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * A remote OpenAPI spec is fetched by EDDI, not by swagger-parser: every
@@ -95,6 +100,20 @@ class OpenApiSpecFetcherTest {
 
     private OutboundTargetPolicy protectionOnExemptingThisServer() {
         return new OutboundTargetPolicy(true, new SelfUrlResolver(Optional.of(origin), 7070), InetAddress::getAllByName);
+    }
+
+    @Test
+    @DisplayName("a target that fails the policy after connecting (DNS rebinding) has its response discarded")
+    void responseIsDiscardedWhenTheTargetFailsThePolicyAfterConnecting() {
+        // Passes before the send, fails once the connection has resolved the host
+        // again: the second answer is the rebinding one.
+        OutboundTargetPolicy policy = mock(OutboundTargetPolicy.class);
+        doNothing().doThrow(new IllegalArgumentException("resolves to a private address")).when(policy).validateUrl(anyString());
+
+        var e = assertThrows(IllegalArgumentException.class, () -> fetcher(policy).fetchSpec(origin + "/openapi.json"));
+
+        assertTrue(e.getMessage().contains("discarded"), e.getMessage());
+        verify(policy, times(2)).validateUrl(origin + "/openapi.json");
     }
 
     @Test

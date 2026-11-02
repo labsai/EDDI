@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [October 2026](changelog/2026-10.md) | 197 | 867 KB |
+| [October 2026](changelog/2026-10.md) | 208 | 938 KB |
 | [September 2026](changelog/2026-09.md) | 223 | 1216 KB |
 | [August 2026](changelog/2026-08.md) | 213 | 845 KB |
 | [July 2026](changelog/2026-07.md) | 147 | 648 KB |
@@ -110,6 +110,30 @@ Once #1140 merged and #1141 was retargeted to `main`, the review bots saw the wh
 - **Dashboard:** the email panels collided with main's Conversation Ratings panels on ids 264 and 265; they are now 267 and 268.
 
 Files: [`HitlEmailNotifier.java`](../src/main/java/ai/labs/eddi/integrations/email/notify/HitlEmailNotifier.java), [`MimeMessageParser.java`](../src/main/java/ai/labs/eddi/engine/mail/MimeMessageParser.java), [`SystemMailer.java`](../src/main/java/ai/labs/eddi/engine/mail/SystemMailer.java), [`agent-config-sections.tsx`](../ui/manager/src/components/editors/agent-config-sections.tsx), [`agent-detail.tsx`](../ui/manager/src/pages/agent-detail.tsx), [`eddi-full-metrics-dashboard.json`](monitoring/eddi-full-metrics-dashboard.json), with tests for each; each new test fails with its fix reverted.
+
+---
+
+## fix(alerts): a per-event send claim closes the erasure-vs-delivery window (2026-10-26)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138)
+
+### What changed and why
+
+A delivery could read an event, an erasure redact it and finish, and the delivery then send what it had read. Now **no send starts with erased content after an erasure has completed**.
+
+- **Send claim.** `IAlertEventStore.claimSend(eventId, token, now, until)` is an atomic conditional write that succeeds only when no claim is live (none, or an expired one); `releaseSend(eventId, token)` clears it only for its own token. Both stores keep the claim in internal fields (`sendClaimToken` / `sendClaimUntil`; `send_claim_token` / `send_claim_until`) that no read maps into an event. `AlertDeliveryService` — the one path for first deliveries and retries — claims for `SEND_CLAIM_LEASE` (a fixed 30 s, three times the default 10 s webhook timeout; not tied to a configured `eddi.alerts.webhook-timeout`), reads the event, checks that more than the send timeout is left of the lease, sends, and releases in a `finally`. A claim it cannot take, or a lease too short to finish in, leaves the delivery pending, due again after one lease; the worker never blocks.
+- **Erasure waits for live claims.** The redactions erasure uses (`redactOutputValues`, `redactRatingComments`, and the engine's `redactRatingComment`) take `now` and skip an event whose claim is live. [`AlertErasureRedactor`](../src/main/java/ai/labs/eddi/engine/alerts/AlertErasureRedactor.java) — used by `AlertGdprParticipant` and `ConversationRatingGdprParticipant` — repeats the redaction with a short pause until `countOutputValues` / `countRatingComments` report nothing left, so the erasure completes only after every send that had read the content has finished or its claim has expired.
+- **The engine's own post-insert redactions cannot wait on themselves:** they run before the event's first delivery and before the maintenance pass may pick it up (its `nextAttemptAt` is a claim lease away), so no claim on it can exist yet (said in the code).
+- [Alerts → Privacy](alerts.md#privacy) states the guarantee and its one limit: a send that started before the erasure completed cannot be recalled.
+
+### Design decisions
+
+- **Claim per send, not per event delivery:** an event with five targets would otherwise hold one claim across up to five webhook timeouts.
+- **The erasure's wait is bounded** by ten leases (5 minutes). A claim always expires within one lease, so only a store that keeps failing the update — or deliveries re-claiming without pause, which the backoff rules out — reaches the bound; the step is then reported failed instead of hanging the erasure. This is the one place the implementation is stricter than "keep going until the claims expire".
+
+### Tests
+
+`AlertSendClaimTest` drives the races with latches, not sleeps: a send paused after its final read holds the erasure (asserted not complete after two redaction passes), the erasure completes once the send finishes, and a retry then sends the redacted event; erasure first, then delivery, sends the redacted event; a live claim makes the attempt skip, an expired one is taken over; a lease too short after the read releases and skips; the erasure's bound fails the step. Store contract (both ITs): conditional claim, token-checked release, expiry takeover, redaction skipping a claimed event until it is released or expired.
 
 ---
 
@@ -419,6 +443,280 @@ Mutation checks:
 
 ---
 
+## feat(alerts): masked webhook URLs, protected system schedule, OUTPUT_MATCH rules and e2e specs (2026-10-25)
+
+**Repo:** EDDI (`feat/conversation-ratings`) — review fixes to PR 5a and PR 5b of [`planning/conversation-rating-plan.md`](../planning/conversation-rating-plan.md) (§0.2)
+
+### What changed and why
+
+**Webhook URLs are treated as secrets.** A webhook URL often carries its own token, so no read returns it any more, for administrators either: REST (list, single read, create/update responses), MCP and the operator see `https://host/***` plus `urlConfigured: true` ([`DeliveryTarget.masked()`](../src/main/java/ai/labs/eddi/engine/alerts/model/DeliveryTarget.java), applied in `AlertAccess.redact`). On update an omitted or masked URL keeps the stored one (`RestAlertRules.restoreUrls`, matched by position and host, else the only stored webhook on that host); a new value replaces it; a masked URL in a create is refused. A `${vault:…}` reference is accepted as the URL itself and resolved only at send time (`AlertSenders`); unresolvable, or not http(s), means no delivery — the rule the signing secret already followed. "Send test alert" for a saved rule restores the stored URL server-side and requires write access to that rule. The Manager editor shows the masked URL with a "kept unless you replace it" hint.
+
+**The `alerts-maintenance` schedule cannot be changed through the schedule surfaces.** `RestScheduleStore` answers 409 `{"error":"SYSTEM_SCHEDULE"}` to update, delete, enable, disable, retry and dismiss of a schedule carrying the system `alertType`; MCP `delete_schedule` refuses with `errorCode: SYSTEM_SCHEDULE`. Self-healing on startup and rule save stays as the backstop. The Manager's schedule list marks it system-managed with no edit, toggle or delete.
+
+**`OUTPUT_MATCH` (§0.2).** A rule can now fire on what a clean turn produced:
+
+- [`OutputMatcher`](../src/main/java/ai/labs/eddi/engine/alerts/OutputMatcher.java) — paths `properties.<a.b>`, `output.json.<a.b.c>` (the agent's output parsed only when it starts with `{`/`[`, at most 64 KB, Jackson nesting capped) and `actions`; depth ≤ 8, segments `[A-Za-z0-9_-]`, no wildcards or indexes; ops `exists|eq|neq|in|gt|gte|lt|lte|contains`, comparisons type-strict (numbers by value, a string never equals a number). The value is the author's constant: no expression engine, no template evaluation of runtime data.
+- Save-time validation (`AlertRuleValidator` → `OutputMatcher.problems`): path grammar, op/value fit, `in` list 1–50 scalars, constants ≤ 1000 characters, `actions` only with `contains`/`exists`, and no field of another source.
+- [`OutputMatchHook`](../src/main/java/ai/labs/eddi/engine/alerts/OutputMatchHook.java) runs from `ConversationStepRunner` for a turn that completed cleanly (not failed, not timed out, not paused for a human). On the turn thread it does one `getIfPresent` on `AlertRuleCache.cachedOutputNeeds`; an agent without enabled `OUTPUT_MATCH` rules stops there. Otherwise it copies only what the rules read — the named top-level properties (detached copies), the output text, the action list — into a `TurnSnapshot` and hands it to the alert worker; the live memory never leaves the turn. A cache miss loads the needs on the worker and that one turn copies all three.
+- `includeValue` is honoured only when the agent version has conversation review enabled (`ConversationReviewPolicy`); the value goes to `match.value`, cut to 280 characters. Otherwise the alert names path, operator and constant only.
+- Manager: condition builder ([`output-match-builder.tsx`](../ui/manager/src/components/alerts/output-match-builder.tsx)) — path source dropdown, path input with inline validation, value type, operator filtered by type, value, and an includeValue toggle explaining the review requirement; `pathProblem`/`outputMatchProblems` in [`alert-rules.ts`](../ui/manager/src/lib/alert-rules.ts) mirror the server. 30 keys in all 11 locales; MSW fixture masks its webhook.
+- Operator prompt: masked URLs, the system schedule and `OUTPUT_MATCH`; revision 38 → 40.
+- Docs: [Alerts](alerts.md#matching-a-turns-result) with the three §0.2 examples, masking, the system schedule.
+
+**E2E specs.** `ui/manager/e2e/alerts.spec.ts` (MSW tier: inbox acknowledge, create rule, output-match builder, badge) and `e2e/fullstack/ratings-feedback.fullstack.spec.ts` (Chat UI rating → Feedback "Needs attention" + badge → mark reviewed → count back). Not run locally — Playwright browsers were not downloaded on purpose; CI runs them.
+
+### Design decisions
+
+- **A masked URL is restored by position and host, never by position alone.** A reordered target list still gets the right URL back when its host is unique among the stored webhooks; when it is not and the position does not match, nothing is restored and the masked URL is refused at validation rather than guessed.
+- **Only top-level property names are copied**, even for a nested path: the snapshot copies the property's value detached (`AlertJson`), so a later change to live memory cannot reach the worker.
+- **A cache miss copies everything once** instead of loading rules on the turn thread: the turn never waits on the store, and the first turn after a restart is not lost.
+
+### Tests
+
+- **Review fixes:** `RestAlertRulesTest.WebhookUrls` (list, single read, create/update response, restore by position and host, masked create refused, test send restores and needs write access), `AlertSendersTest` (vault URL resolved at send, unresolved → no delivery, labels), `RestScheduleStoreExpandedTest` and `McpAdminToolsBranchCoverageTest` (system schedule refused). Mutation check: 9 of 9 mutants killed (redaction, create and update responses, `masked()`, the label, `restoreUrls`, unresolved vault URL, the REST and the MCP system-schedule guards).
+- **OUTPUT_MATCH:** `OutputMatcherTest` (paths, JSON-only parsing, size and nesting caps, type-strict operators, grammar and op/value validation), `OutputMatchHookTest` (an agent without rules costs one cache lookup and touches nothing else — `verifyNoMoreInteractions` on memory and cache, nothing queued; only needed values copied, detached; cache miss copies everything; `includeValue` needs review; 280-character cut), `AlertRuleValidatorTest`, `ConversationStepRunnerTurnOutcomeTest` (only clean turns reach the hook), `AlertStoreContract.outputMatchRuleRoundTrips` (ITs 28/28, 14 MongoDB + 14 PostgreSQL). Mutation check: 6 of 6 killed — value without review, hook working for agents without rules, wildcard grammar, no truncation, type-mismatched equality, whole property map copied.
+- **Manager:** `alert-rules.test.ts` (path grammar, ops per type, problems), `alerts.test.tsx` (builder, inline path error, actions ops, masked URL hint), `schedules-regressions.test.tsx` (alerts-maintenance has no edit, toggle or delete); operator tests for revision 40.
+- **Live check** (dev mode on MongoDB 7 in Docker): an agent with `ratingConfig` and conversation review rated over REST (conversation + reply), `/ratings`, `/ratings/summary`, `/ratings/attention-count`, `PATCH /ratings/{id}` (count 2 → 1); a RATING rule with inbox-only delivery produced exactly one event when a 5-star rating was re-rated to 1, and a second low re-rating in the same window counted as `duplicates: 1`; acknowledged. An OUTPUT_MATCH rule on `actions contains handoff_requested` fired once over two turns with `match.value` present (review on). An agent whose LLM points at `127.0.0.1:9` produced one CONVERSATION_ERROR event (`TURN_ERROR`). A webhook rule read back as `https://hooks.example.com/***` everywhere while MongoDB kept the full URL across a PUT that sent the masked value; its delivery stayed PENDING with "signing secret could not be resolved"; `DELETE` and `disable` on `alerts-maintenance` returned 409 `SYSTEM_SCHEDULE`.
+- **Full runs:** backend `./mvnw test` 29,924 run, 3 failures, 8 skipped. Two failures (`PostgresIngestionStateStoreTest.recordedDeadlineGoverns`, `PostgresSecretPersistenceTest.timestampsRoundTrip`) are off by exactly one hour because the run fell in the night the clocks went back (Europe, 2026-10-25); both pass with the JVM in UTC (77/77) and neither class is touched here. The third is the known-flaky `DocumentExtractorsTest.honoursItsTimeBudget`. Manager vitest: 622 files, 8,961 tests passed; `npm run lint`, `npm run typecheck` and `npm run i18n:check` (6,333 keys) clean.
+
+---
+
+## ✨ feat(mail): EDDI verifies DKIM and DMARC alignment itself — email sender authentication (2026-10-25)
+
+**Repo:** EDDI (`feat/email-dkim`, on top of `feat/email-hitl-notifications` and `feat/email-mail-core`)
+
+The sender-authentication slice of [the email plan](../planning/email-channel-plan.md) (§8, the DKIM/DMARC part of
+§21), built ahead of Phase 2 so the IMAP poller can call it. No channel, transport or poller is part of this change.
+
+### The facade Phase 2 calls
+
+- **`SenderAuthenticator.authenticate(byte[] raw, InboundMail parsed)`** (`engine/mail`, `@ApplicationScoped`) →
+  `MailAuthentication`: verdict `ALIGNED_PASS` · `PASS_UNALIGNED` · `FAIL` · `NONE`, the signing domain, a fixed-text
+  reason (safe to log), a `temporary` flag (a DNS failure or the lookup budget kept a check from running — retrying
+  later may authenticate), and one `DkimResult` per evaluated signature (domain, selector, algorithm, `PASS` · `FAIL` ·
+  `TEMPERROR` · `TESTING`, reason). The caller passes the bytes it received and the parser's `InboundMail` of those
+  bytes (a size mismatch is refused), then attaches the verdict with `InboundMail.withAuthentication`. Never throws.
+- **Only an aligned pass authenticates**, and never when the message has anything but exactly one `From` field with
+  one mailbox (counted on the raw bytes and from the parser's `MULTIPLE_FROM`/`MISSING_FROM`) or a duplicated
+  singleton header (`DUPLICATE_SINGLETON_HEADER`): an unsigned second `From` or `Subject` added above a validly signed
+  one is not hashed, so the signature still verifies, while clients show the forged one.
+- `MailAuthentication` gains `reason`, `temporary` and `signatures` (the two-argument constructor stays).
+- **Judged as of delivery:** `authenticate(raw, parsed, Instant deliveredAt, fallback)` evaluates `x=` and the
+  future-`t=` check at the delivery instant — the transport passes the mailbox server's `INTERNALDATE`, the receiving
+  server's own clock, never a sender header — so a short `x=` does not expire while the mail waits for the poller or
+  the cost budget. The instant is clamped to `[now − eddi.email.dkim.max-delivery-age, now]` (new property, default
+  `7d`): a later value is now, an older one is the cap boundary, so a broken or forged value can neither revive an
+  ancient signature nor postdate one. Without it, signatures are judged at the current time, as before.
+  `DkimVerifier.verify(raw, budget, evaluatedAt)` takes the instant unclamped.
+- **Provider fallback**: `authenticate(raw, parsed, SignedProviderVerdict)`, an interface for a verdict delivered under
+  a signature the transport checked (SES over SNS). Consulted only when the local check could not run (no raw bytes,
+  or every key lookup failed temporarily); never over a local fail, none or pass; alignment is still EDDI's. No
+  provider is implemented.
+
+### DKIM (`DkimVerifier`)
+
+- RFC 6376 on the raw bytes: `simple`/`relaxed` header and body canonicalisation in all four combinations,
+  `rsa-sha256` (1024–8192-bit keys, exponent ≤ 64 bits; SPKI or bare PKCS#1 `p=`) and `ed25519-sha256` (RFC 8463,
+  the JDK's EdDSA). Refused as `FAIL`: `rsa-sha1` (RFC 8301) and other algorithms, `l=` (body-extension attack), a
+  signature not covering `From`, `i=` outside `d=`, expired `x=`, `x=` before `t=`, `t=` in the future (5 min skew),
+  revoked (`p=` empty) or missing keys, more than one key record, `k=`/`h=`/`s=` that do not admit the signature,
+  `t=s` with `i=` ≠ `d=`, malformed or duplicated tags. A `t=y` key gives `TESTING`, not a pass.
+- Bottom-up header-instance selection with over-signing semantics (a name in `h=` more often than present binds the
+  absence); the signature being verified is never one of its own `h=` instances. Bare-LF input is converted to CRLF.
+- Bounds: 5 signatures evaluated (rest counted), 256 KB header block, 100 `h=` names, 8 KB signature field, one body
+  hash per canonicalisation, the body checked before the key is fetched (a tampered mail spends no lookup).
+
+### DMARC alignment (`DmarcAlignment`) and the Public Suffix List
+
+- RFC 7489 §3.1.1: relaxed (same organisational domain) or strict (equal) per the `From` domain's `_dmarc` `adkim=`,
+  falling back to the organisational domain's record (§6.6.3); no record = relaxed; several `v=DMARC1` records = no
+  DMARC; a temporary lookup failure assumes strict and is flagged. `p=` is not applied. **SPF is not evaluated**
+  (EDDI never sees the connecting IP).
+- **`PublicSuffixList`**: the upstream file bundled unmodified as `src/main/resources/mail/public_suffix_list.dat`
+  (MPL-2.0, new `licenses/MPL-2.0.txt`; commit `8437e5262f13`, 2026-10-22), ICANN and private sections, wildcard and
+  exception rules, IDN rules in ASCII. `public_suffix_list.properties` records commit and SHA-256;
+  `PublicSuffixListTest` fails when the file is missing, small, or differs from that hash. Refresh with the new
+  `scripts/update-public-suffix-list.py`. The `.dat` is `-text` in `.gitattributes` so its hash is stable.
+
+### DNS (`MailDnsResolver`, `DnsjavaTxtSource`)
+
+- **dnsjava 3.6.5** (BSD-3-Clause; runtime dependency slf4j-api only, BOM-managed; CVE-2024-25638 and the KeyTrap
+  advisories fixed in 3.6.0 and confined to the DNSSEC validator, which is not used). Its jar registers a
+  `java.net.spi.InetAddressResolverProvider` that stays inert unless `org.dnsjava.spi.enable=true` — documented in
+  `pom.xml` and `security.md`, with a test that fails if the switch's constant disappears.
+- New properties `eddi.email.dns.servers` (empty = system resolvers), `.timeout` (5 s, one retry),
+  `.cache-max-entries` (10000), `.cache-max-ttl` (1 h; record TTLs and the SOA minimum for negative answers honoured,
+  temporary failures not cached), `.max-lookups-per-message` (10; cache hits free). Records over 4096 characters or
+  answers over 10 records are refused; multi-string TXT records are joined. No DNSSEC requirement. The `TxtSource`
+  seam keeps every test offline.
+
+### Metrics, docs
+
+- `eddi.email.auth{result}` and `eddi.email.dns.lookups{result,cached}`: two panels in the Full Metrics dashboard's
+  Integrations row (k8s copy re-synced), described in [`metrics.md`](metrics.md).
+- [`security.md` → Mail Sender Authentication](security.md#mail-sender-authentication--dkim-and-dmarc): the rules,
+  what an aligned pass proves and does not (the domain, not the person; forwarded and list mail; no ARC; no SPF), the
+  PSL refresh and the dnsjava resolver switch. [`configuration-reference.md` → Email](configuration-reference.md#email)
+  lists the six properties. [`compliance-data-flow.md` → Other outbound recipients](compliance-data-flow.md#other-outbound-recipients):
+  the DNS resolver learns the signing domains, selectors and `From` domains of received mail.
+
+### Tests
+
+- `DkimVerifierTest` (60): the RFC 8463 Appendix A message and key records stored as fixtures
+  (`src/test/resources/mail/dkim/`, byte exact) — both signatures pass, also with LF endings; body, header, second-`From`
+  tampering and re-folding. The RFC 6376 §3.4.6 canonicalisation example, signed over the canonical text the RFC
+  prints. Self-signed RSA-2048 and Ed25519 messages (`DkimTestSigner`, a regex-based signer written independently of
+  the verifier) in all canonicalisations, with folded headers, trailing whitespace, 8-bit text, empty and header-only
+  bodies; every refusal above; DNS outcomes; bounds.
+- `SenderAuthenticatorTest` (31): verdicts, DMARC through the facade (subdomain relaxed/strict, org-domain fallback,
+  `d=co.uk`, DMARC tempfail), header injection (second `From`, two mailboxes, no `From`, second `Subject`, mismatched
+  bytes, and each of the two From guards on its own against a parser that disagrees), judging as of delivery
+  (expired since delivery passes; a delivery instant older than the cap or in the future is clamped), provider fallback, 300 random inputs, and a hostile message (5000 header lines, 50 signatures × 100 `h=`
+  names, 10 MB body) within a 5 s budget.
+- `DmarcAlignmentTest` (9), `PublicSuffixListTest` (24), `MailDnsResolverTest` (13; three run dnsjava against a
+  loopback UDP server built in the test).
+- Every verdict path was mutation-checked: the check reverted, a test failed, the check restored.
+
+### For Phase 2
+
+- Call `authenticate` with the transport's bytes right after parsing; keep `temporary` in mind (leave the message
+  for the next poll rather than treating a DNS outage as an unauthenticated sender).
+- Pass the mailbox server's `INTERNALDATE` as `deliveredAt`; without it, `x=` is judged at processing time.
+- `eddi.email.auth` carries only `result`. Prometheus requires one tag set per meter name, so per-integration tags
+  mean moving the counter to the channel layer rather than adding tags here.
+- No real-world signed mail (Gmail, Outlook.com, Exchange Online, a list) is in the corpus yet (§21); add it with
+  its DNS records when a test mailbox is available.
+
+---
+
+## fix(manager): https-only webhook check, bulk-acknowledge mock, operator revision 41 (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-manager`, PR #1139) — the Manager side of the alerts backend review fixes (PR #1138)
+
+### What changed and why
+
+- **Rule editor:** `ruleProblems` ([`alert-rules.ts`](../ui/manager/src/lib/alert-rules.ts)) accepts only an `https://` webhook URL or a `${vault:…}` reference, as the server now requires; the masked `https://host/***` of a stored URL still passes.
+- **MSW:** the bulk-acknowledge handler answers 400 `INVALID_PARAMETER` to an empty `ids` list or an empty entry, as the server does; the Manager sends `{}` when it acknowledges by filter and a non-empty list otherwise, so its calls are unchanged.
+- **Platform Operator:** the prompt says webhooks must be https and corrects "no conversation text" — a rating comment, or an `OUTPUT_MATCH` value with `includeValue` and conversation review on, can appear, each at most 280 characters. Revision 40 → 41.
+
+### Review follow-ups
+
+- `AlertDeliveryService` derives the send claim lease as the longer of 30 s and three times `eddi.alerts.webhook-timeout`, and `AlertSettings` keeps that timeout between 1 s and 60 s, so a long timeout can no longer make every send skip.
+- Manager: test-result rows in the rule editor have unique keys; removing a chat rating clears its reasons and comment; the chat hook reads a conversation's own rating controls even when the current profile is null; the feedback list steps back to the last existing page when triage empties the current one.
+
+### Tests
+
+`npm run typecheck`, eslint on the changed files and `npm run i18n:check` pass; the alert and operator suites (19 files, 530 tests) pass.
+
+---
+
+## fix(manager): second round of alerts review findings — throttle bounds, bulk-acknowledge body, inbox paging (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-manager`, PR #1139)
+
+### What changed and why
+
+- **Throttle checked before saving:** `throttleProblems` in [`alert-rules.ts`](../ui/manager/src/lib/alert-rules.ts) uses `AlertRuleValidator`'s bounds exactly (whole numbers, 1–1440 minutes, 1–1000 per window); `ruleProblems` reports `throttle`, which disables Save and Send test, and the editor marks the field with an inline error (`alerts.throttleRange`, all 11 locales).
+- **Bulk acknowledge body:** `acknowledgeAlertEvents` sends `{}` only for `null`/`undefined` and `{ ids }` otherwise, so an empty list reaches the server, which refuses it, instead of being widened to everything matching. The page's only "all matching" caller passes `null`.
+- **Inbox:** keyed on the agent, so changing it starts from page 1 with nothing selected; the page moves back to the last one that exists when acknowledging empties the one it is on (instead of "No open alerts"); the selection clears when the source or the acknowledged filter changes.
+- **Schedules:** a dead-lettered server-owned schedule (`alerts-maintenance`) gets no Retry on its row and no Retry/Dismiss in Failed fires — the server answers 409 `SYSTEM_SCHEDULE` to both.
+- **Output-match builder:** switching the path source to `actions` turns the value into text (contains compares strings) and keeps `exists` without one.
+- **Full-stack e2e spec:** each resource is recorded as soon as it exists, and cleanup removes every recorded one even when setup failed midway.
+
+### Tests
+
+New: `output-match-builder.test.tsx` (5), `lib/api/__tests__/alerts.test.ts` (3), throttle cases in `alert-rules.test.ts`, four page tests in `alerts.test.tsx` (throttle error, page clamp, selection reset on filters, fresh inbox on agent change) and the server-owned case in `schedules-regressions.test.tsx`. The alerts, schedules, operator, mocks and i18n suites: 34 files, 770 tests. Mutation check: 10 of 10 mutants killed (throttle not reported, window bound off by one, fractions accepted, empty ids widened, no page clamp, selection kept on either filter, Inbox not keyed on the agent, row Retry and Failed-fires actions for a server-owned schedule). The Playwright spec is typechecked and linted, not run.
+
+---
+
+## fix(manager): carry each webhook target's targetId through the rule editor (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-manager`, PR #1139) — the Manager side of the backend's `targetId` restore (PR #1138)
+
+### What changed and why
+
+- **Types:** `DeliveryTarget.targetId` in [`lib/api/alerts.ts`](../ui/manager/src/lib/api/alerts.ts), documented as the server's id to send back unchanged.
+- **Editor** ([`alert-rule-editor.tsx`](../ui/manager/src/components/alerts/alert-rule-editor.tsx)): targets are edited, removed and — new — moved up or down as whole objects, so each keeps its own `targetId`; rows are keyed by it. A new target has none. Save and Send test send the ids as loaded. Two new strings (`alerts.moveTargetUp`, `alerts.moveTargetDown`) in all 11 locales.
+- **Validation:** `ruleProblems` accepts a masked URL only together with a `targetId`, so a masked URL is never sent without one.
+- **MSW** ([`alert-handlers.ts`](../ui/manager/src/test/mocks/alert-handlers.ts)) now mirrors the server: it stores full URLs and answers reads masked, assigns ids on create (replacing client ones), restores a masked or empty URL on update and test send only from the stored target with the same `targetId`, and refuses one without a known id with 400 `INVALID_RULE`.
+- **Platform Operator:** the masked-URL paragraph explains `targetId` and the `INVALID_RULE` refusal. Revision 41 → 42; it ships as **43**, because merging main (where the ratings work had moved the operator to 39) needed a revision above both.
+
+### Tests
+
+New page tests (`alerts.test.tsx`): removing one of two masked same-host webhooks sends the other with its own id, reordering moves ids with their targets, editing a masked target's secret keeps its id, a new target goes without one, a test send of a saved rule sends the ids, and saving the stored webhook rule round-trips through the mock. `alert-handlers.test.ts` (4) pins the mock's contract; `alert-rules.test.ts` covers the masked-URL check. `npm run typecheck`, the full `npm run lint` and `npm run i18n:check` (6,336 keys) pass; the alerts page, alert components, `src/lib` (operator included), `src/test/mocks` (OpenAPI contract included), schedules and i18n suites: 143 files, 2,518 tests. Mutation check: 5 of 5 killed (edit drops the id, removal re-pairs ids by position, reorder leaves ids behind, masked URL accepted without an id, mock restoring without matching the id).
+
+---
+
+## fix(alerts): review findings on the alerts backend — https-only webhooks, GDPR export, digest healing, bulk acknowledge (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138; Manager follow-ups on `feat/alerts-manager`, PR #1139)
+
+### What changed and why
+
+- **Webhook URLs must be https.** `AlertRuleValidator` refuses a plain `http` URL at save time; `AlertSenders` checks again at delivery, which is the only place a `${vault:…}` URL is known — one that resolves to `http` (or to no host) is not delivered to. STRICT SSRF and no redirects are unchanged. Docs: [Alerts → Delivery](alerts.md#delivery).
+- **GDPR export** (`AlertGdprParticipant.export` returned `null`): it now lists the rules the person created or last edited (id, name, created/updated time, `author` and/or `lastEditor`) and the events they acknowledged (id, rule name, source, agent, fired and acknowledged time), at most 10,000 of each, and no other person's identity or event content. New store reads `IAlertRuleStore.findByAuthor` and `IAlertEventStore.findAcknowledgedBy`, implemented for MongoDB and PostgreSQL and covered by `AlertStoreContract`. Docs: [Alerts → Privacy](alerts.md#privacy), [GDPR Compliance](gdpr-compliance.md).
+- **A digest could stay stuck.** When the digest's insert hit its dedupe key — another runner sent it, or this one crashed between the insert and marking the held events — the held events stayed `DIGEST_PENDING` and every pass retried a digest that never inserted. `AlertMaintenanceService.sendDigest` now marks them on a dedupe hit too, still without delivering.
+- **`actions exists` fired on every clean turn**: an empty action list is now absent (`OutputMatcher.resolve`); `contains` is unchanged.
+- **A cache miss copied the turn even when nothing would run it**: when submitting the output-needs loader fails (alerts off, queue full), `OutputMatchHook` returns before building a snapshot.
+- **Bulk acknowledge:** a present `ids` list is the selector. An empty list or an empty entry is a 400 `INVALID_PARAMETER` instead of falling through to "everything matching the filter"; the filter applies only when `ids` is left out. The MCP tool acknowledges one event by id and the Manager sends `{}` when acknowledging by filter, so both stay valid.
+- **Wording:** `OUTPUT_MATCH` added to the `source` tag of `eddi_alerts_fired_total` ([Metrics](metrics.md#alert-metrics)), to `AlertEventQueryParams.source` and to `list_alert_events`' description and `source` argument. "No conversation text" is corrected wherever it was repeated (REST Javadoc, MCP description, [Alerts](alerts.md), [MCP Server](mcp-server.md), the `eddi-admin` skill): a rating comment and, only with `includeValue` and conversation review on, an `OUTPUT_MATCH` value appear, each cut to 280 characters.
+
+### Design decisions
+
+- **On a digest dedupe hit every held event is marked**, including any held after the existing digest was written. They stay in the inbox but are not listed in a digest message. The alternative, reading the existing digest to mark only what it covered, needs the event ids on the digest, which it does not store.
+- The export re-checks each row against the user id, so a store returning a wider set cannot leak another person's rule or acknowledgement into it.
+
+### Tests
+
+448 unit tests across the alert, output-match, REST, MCP, step-runner and GDPR classes pass, among them the new `AlertGdprParticipantTest`, `RestAlertEventsTest.bulkEmptyIdsRefused`, `AlertMaintenanceServiceTest.digestCrashBetweenInsertAndMark`, `OutputMatchHookTest.cacheMissLoaderRefused`, `OutputMatcherTest.emptyActionsAreAbsent` and `AlertSendersTest.httpsOnly`. Store ITs: 32/32 (16 MongoDB + 16 PostgreSQL, with the two new contract cases). The doc and style guards pass. Mutation check: 9 of 9 mutants killed — http accepted at save, an http vault URL delivered to, an empty export, another person's acknowledgement exported, the lastEditor role lost, a dedupe hit leaving events pending, a refused loader submit still snapshotting, an empty ids list falling back to the filter, a blank id entry accepted.
+
+---
+
+## fix(alerts): erasable output values, queued rating alerts, exact digest recovery, targetId-based URL restore (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138) — the second round of review findings
+
+### What changed and why
+
+- **OUTPUT_MATCH values can be erased.** An event that stores a matched value (only with `includeValue` and conversation review on) also records the conversation owner in an internal field, `AlertEvent.subjectUserId`. It is `@JsonIgnore`d, written by both stores and never read back, so no REST row, MCP answer, operator answer, Slack message or webhook payload can carry it (asserted on the serialized row and on both payloads). Events without a stored value never get it. `AlertGdprParticipant.erase` blanks the value and the field (`IAlertEventStore.redactOutputValues`, partial index on both stores); the owner's export lists those values (value, conversation, time) under `outputMatchValues` — their own conversation content, as the ratings export lists their ratings.
+- **A rating alert queued across an erasure.** `AlertEngine.evaluateRating` re-reads the rating first and skips it when it is gone or its `updatedAt` changed (the newer save has its own alert). After the event is written it re-reads again; if the rating was erased in between, the event's excerpt is blanked (`redactRatingComment`) before anything is delivered. No per-user lock.
+- **Digest recovery marks exactly what the digest covers.** The digest records the held event ids it covers (`digestEventIds`, internal, at most the 500-event batch); on a dedupe hit the maintenance pass reads that digest (`findByDedupeKey`) and marks only those ids, so events held later stay `DIGEST_PENDING` for the next digest.
+- **Webhook URLs are restored by `targetId`, never by position or host.** Every delivery target gets a server-assigned `targetId`, kept across updates and returned by every read. An update or test send that sends a masked or empty URL keeps the stored URL of the target with the same `targetId` only; a masked or empty URL without a known id is a 400 `INVALID_RULE`; a new target must bring a real URL; ids the stored rule does not have (and all ids on a create) are replaced. Removing or reordering two masked targets on one host no longer hands one target the other's URL.
+- [Alerts → Privacy](alerts.md#privacy) now says what is stored: the acknowledger's id (shown in the inbox, never sent out) and the internal subject id of a stored output value, both until erasure or retention.
+
+### Design decisions
+
+- **Rules saved before ids existed need no migration.** A target without an id gets `t` + its existing hashed `key()` on every read — the same id each time — so the first update of such a rule matches the ids the client read, and that save stores them. Both stores already persist targets as JSON, so `targetId` is stored without a schema change.
+- **The subject id is write-only.** Erasure and the export query by it in the store; no read maps it back into an event, which is a stronger guarantee than hiding it at each serializer.
+- **A digest written before covered ids existed** would match nothing on a dedupe hit. Alerts have not shipped, so no such digest exists outside development databases.
+
+### Tests
+
+477 unit tests across the alert, output-match, REST, MCP, step-runner, GDPR and rating classes pass, including the new `AlertPrivacyRaceTest` (both race orderings, the subject recorded only with a value, never serialized or sent) and the `targetId` cases in `RestAlertRulesTest` (remove one of two same-host targets, reorder, new target, unknown id refused, client ids replaced, legacy rule). Store ITs: alert stores 20/20 on MongoDB and on PostgreSQL (new contract cases: erasable subject, covered ids and `findByDedupeKey`, one-event excerpt redaction, persisted `targetId`), rating stores 15/15 on each. Mutation check: 9 of 9 for the erasure, race and digest changes, 5 of 5 for the `targetId` match.
+
+---
+
+## fix(alerts): erasure fence for queued alert work, deliveries send the stored event (2026-10-25)
+
+**Repo:** EDDI (`feat/alerts-backend`, PR #1138) — two more review findings
+
+### What changed and why
+
+- **A queued OUTPUT_MATCH value could land after an erasure.** [`AlertErasureFence`](../src/main/java/ai/labs/eddi/engine/alerts/AlertErasureFence.java) is a `UserErasureParticipant`: the erasure's step 0 (`stopInFlightWork`, and `stopInFlightWorkByHash` on every other node through the existing cluster `gdpr-stop` broadcast, as `ConversationService` and `AuditLedgerService` receive it) records the time the erasure started, per user, keyed by the user id's hash. `TurnSnapshot` now carries its capture time. `AlertEngine.evaluateOutput` stores no value (and no subject) when the snapshot was captured before a live fence — the alert still fires — and after the insert re-checks the fence and blanks value and subject (`redactOutputValues`) before delivery when the fence went up meanwhile. Queued rating alerts use the same fence on top of the re-read: a fenced rating is not evaluated, and an excerpt written while the fence went up is blanked. Fences last 15 minutes (`AlertErasureFence.FENCE_TTL`).
+- **A hand-made schedule could pass for `alerts-maintenance`.** The schedule API refused only bodies carrying the alert marker, so a plain schedule named `alerts-maintenance` could be created, and `AlertMaintenanceSchedule.ensure` — which looked the schedule up by name — then took it for the installed one, leaving retries, digests and retention unprocessed. The API now also refuses the reserved name (trimmed, case-insensitive) on create and on a rename (`AlertSchedules.isReservedName`), and `ensure` counts only a row carrying the maintenance marker; a same-named row without it (possible on a deployment from before the name was reserved) triggers a bounded scan for the marked row, and the real schedule is created when none exists. `AlertMaintenanceScheduleTest` and a new `RestScheduleStoreExpandedTest` case cover it; the docs now say a rating alert captured before an erasure is dropped altogether, while an `OUTPUT_MATCH` alert fires without its value.
+- **Delivery could send a copy older than the store.** `AlertDeliveryService.deliver` skips an event that no longer exists and reads the event again right before each send, sending the stored (possibly redacted) version — first delivery and every retry, on any node. No cross-node lock: the remaining window is between that read and the send, and a send already on its way cannot be recalled (said in the code and in [Alerts → Privacy](alerts.md#privacy)).
+
+### Design decisions
+
+- **A dedicated fence bean**, not the dispatcher or the engine: it has one job, both the engine and the cluster handler reach it through CDI, and it keeps the engine free of erasure bookkeeping.
+- **The fence only holds back content captured before the erasure started**, so expiry is a matter of memory, not correctness: a later conversation of a reused id is never blocked, and 15 minutes is far longer than the alert queue takes to drain.
+
+### Tests
+
+486 unit tests across the alert, output-match, REST, MCP, step-runner, GDPR, rating and cluster-handler classes pass, including the fence cases in `AlertPrivacyRaceTest` (captured before the fence stores no value, fence up between check and insert blanks before delivery, captured after keeps the value, expiry, set by hash, fenced rating not evaluated) and `AlertDeliveryServiceTest` (first delivery and a retry send the redacted stored version, a deleted event is not sent). Mutation check: 7 of 7 killed.
+
+---
+
 ## 🐛 fix(email): HITL email notification review findings (2026-10-25)
 
 **Repo:** EDDI (`feat/email-hitl-notifications`)
@@ -460,437 +758,38 @@ unchanged.
 
 ---
 
-## chore(release): attest SHA256SUMS with SLSA provenance (2026-10-24)
+## feat(alerts): alert rules framework — ratings and failed turns to inbox, Slack and signed webhooks (2026-10-24)
 
-**Repo:** EDDI · **Branch:** `chore/release-provenance-attestation`
-
-The OpenSSF Scorecard Signed-Releases check reported 6.6.0 as signed (the cosign bundle
-`SHA256SUMS.sigstore.json`) but without provenance. The image job already attested its
-digest with `actions/attest-build-provenance`; the release job, which publishes the
-installer checksum list, did not attest anything.
-
-- [`ci.yml`](../.github/workflows/ci.yml) — the `release` job gets `attestations: write` and a
-  `Generate SLSA provenance attestation (SHA256SUMS)` step after the cosign signature, using the
-  same pinned action as the image job. It runs before the GitHub Release is created, so a failed
-  attestation publishes nothing.
-- Verify a release with `gh attestation verify SHA256SUMS --repo labsai/EDDI`.
-- Applies to tags cut after this merges. 6.6.0 stays without provenance; it cannot be attested
-  retroactively.
-- Open question: Scorecard's check may look for a `.intoto.jsonl` release asset rather than the
-  attestation store. Confirm on the next tag; if it still warns, the fallback is the
-  `slsa-framework/slsa-github-generator` generic generator, which emits that asset.
-
----
-
-## 📝 docs(planning): evaluated generation — checks and repair for every step that produces something (2026-10-24)
-
-**Repo:** EDDI (`docs/evaluated-generation-plan`)
+**Repo:** EDDI (`feat/conversation-ratings`) — PR 5a of [`planning/conversation-rating-plan.md`](../planning/conversation-rating-plan.md) (§0.2, §11)
 
 ### What changed and why
 
-New planning document [`planning/evaluated-generation-plan.md`](../planning/evaluated-generation-plan.md). No code changes.
+People running an agent can now be told when something needs them: a low rating or a comment, or a turn that failed, was interrupted, ran past its deadline or was stopped by a cost limit. One mechanism with sources, evaluated outside the pipeline — see [Alerts](alerts.md), whose top section is the design note.
 
-It started as an analysis of whether EDDI could host a production AI video-generation pipeline: about 150 model calls per job, best-of-N keyframes, multimodal judges, a repair ladder, a human cost gate, and ffmpeg assembly. The answer generalises beyond video. **Make → judge → repair** is the loop behind grounded RAG answers, extraction, text-to-SQL, output compliance, content production, group deliverables and media.
-
-Verified against `main` at `5028af0a3`, EDDI already runs that loop in seven places:
-- output guardrails (#1064, with the `classifier` type from #1112);
-- format recovery (R5);
-- the model cascade;
-- TASK_FORCE VERIFY, which has no rework within a run;
-- group task approval;
-- single-agent HITL;
-- team cadences.
-
-The plan builds on them instead of adding an eighth:
-
-| Item | What it adds |
-| --- | --- |
-| E1 | A `judge` output guardrail that answers with author-declared issue codes, so a reprompt says what to fix; `onExhausted: deliver-best` for quality checks, so the best attempt is delivered (still screened by every other guardrail) instead of a block message |
-| E1c | A deterministic `expression` guardrail |
-| E2 | Rework after a failed verdict, for humans and groups |
-| E4 | Spend checks that see every attempt, and reservations for parallel calls |
-| E5 | Checks and `forEach` on tool and HTTP steps |
-| E6 | Media groundwork |
-| E7 | Speech and image providers |
-| E8 | Long jobs through self-continuation and parked operations |
-| E9 | A fingerprinted DAG |
-| E10 | A composition service outside core |
+- **Model and stores** — `AlertRule` and `AlertEvent` ([`engine/alerts`](../src/main/java/ai/labs/eddi/engine/alerts/)), MongoDB (`alertrules`, `alertevents`, `alertwindows` with a TTL index) and PostgreSQL (`alert_rules`, `alert_events`, `alert_windows`) twins selected in `DataStoreProducers`. `OUTPUT_MATCH` is not accepted yet; its fields slot into `AlertCondition` and a constant into `AlertSource`.
+- **REST** — `/alerts/rules` (CRUD + `POST /alerts/rules/test`) and `/alerts/events` (list, unacknowledged count, read, acknowledge one / bulk, retry), save-time validation (`AlertRuleValidator`, every problem named), coded errors (`AlertErrors`).
+- **Hooks** — ratings: a CDI event after the rating is stored (`ConversationRatingSaved`). Turns: `ConversationStepRunner.waitForExecutionFinishOrTimeout`, the one method the say path and the HITL resume path both wait in, now classifies the outcome from in-memory data (ERROR, cancelled / EXECUTION_INTERRUPTED, watchdog timeout, an `llm:spend_refused:*` record) and fires `TurnOutcome` only for a bad one. `AlertDispatcher` observes both and only enqueues onto one worker with a bounded queue; a full queue drops with `eddi.alerts.dropped` and a rate-limited WARN.
+- **Cluster-safe spam control** — the dedupe is a unique index over `ruleId|agentId|conversationId|windowStart`; the per-rule cap an atomic window counter (`$inc` upsert / `INSERT … ON CONFLICT DO UPDATE RETURNING`); delivery updates and claims are conditional on a version (Postgres claims with `FOR UPDATE SKIP LOCKED`); digests mark only events still `DIGEST_PENDING` and carry a dedupe key of their own.
+- **Delivery** — Slack through the channel integration that serves the channel (`ChannelTargetRouter` bot token + `SlackWebApiClient`), mrkdwn-escaped; webhooks through `OutboundHttp` (STRICT SSRF, no redirects, timeout, 64 KB body cap, 16 KB answer read) signed `X-Eddi-Signature: t=…,v1=…` with `HmacSignatures` — the scheme EDDI's own inbound webhook channel verifies; the signing secret must be a `${vault:…}` reference and an unresolved one stops the delivery. The inbox always.
+- **Retries, digests, retention** — one `alerts-maintenance` system schedule (HEARTBEAT, 60 s) routed by a metadata fast-path in `ScheduleFireExecutor` to `AlertMaintenanceService`, so it runs under the poller's cluster-wide claim and lease. Backoff 30 s × 4ⁿ⁻¹, 5 attempts. An idle pass writes no fire log. User-created schedules claiming `alertType` are refused.
+- **Privacy** — no user id and no conversation text anywhere an alert goes; the payload is built field by field (`AlertPayloads`); the rating comment is cut to 280 characters, and GDPR erasure blanks it (`ConversationRatingGdprParticipant` redacts before deleting the ratings) and forgets acknowledgers and rule authors (`AlertGdprParticipant`).
+- **Manager** — Alerts page ([`pages/alerts.tsx`](../ui/manager/src/pages/alerts.tsx), `/manage/alerts`, admin + editor): inbox with source / acknowledged filters, per-target delivery status, Retry, acknowledge one / selected / everything here; rules list and editor (source picker, scope, condition, Slack and webhook targets, "Send test alert", throttle and digest, delete with confirmation). Sidebar badge of unacknowledged alerts, administrators only, polled every 30 s. 99 alert keys plus `nav.alerts` in all 11 locales; MSW handlers ([`alert-handlers.ts`](../ui/manager/src/test/mocks/alert-handlers.ts)); `openapi-operations.json` regenerated.
+- **MCP** — `list_alert_events`, `acknowledge_alert_event` (`McpAlertTools`, AUTHOR tier, in-process bean); `McpRatingTools`' coded-error mapping moved to `McpToolUtils.codedFailure` and shared. 95 tools.
+- **Operator** — reads `GET /alerts/events`, `/alerts/events/unacknowledged-count`, `/alerts/rules`, `/alerts/rules/{ruleId}`; prompt section on rules, states, retries and scoping; revision 37 → 38.
+- **Docs** — [Alerts](alerts.md) (new, in `SUMMARY.md`), [Metrics](metrics.md#alert-metrics), a Grafana alert-rule example in the [Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery), an Alerts row in the full metrics dashboard (synced to `k8s/overlays/monitoring`), the `eddi.alerts.*` properties in the [Configuration Reference](configuration-reference.md#alerts), [MCP Server](mcp-server.md#alert-tools-2), the `eddi-admin` skill.
 
 ### Design decisions
 
-- **Checks on meaning are output guardrails**, not a new block in `responseValidation`. Guardrails already run after it in every execution mode, with their own reprompt loop, cost metering and `failMode`.
-- **`judge` is a sibling of `classifier`, not a mode of it.** It shares the classifier's model-call machinery: provider pass-through, timeouts, deadline, pricing and `promptTemplate` data. Its contract differs: a structured list of codes rather than "safe is a positive label".
-- **Judge feedback uses a closed vocabulary.** `GuardrailService.correctiveMessage` never puts the user's or the model's text into a reprompt, so the judge returns only declared codes, and the producer is told only the designer's fix text for them.
-- **The pipeline stays a straight line.** Loops live inside a step, and repairs that must reach an earlier step leave as actions.
-- **ffmpeg, music and domain-specific logic stay outside core.**
-
----
-
-## feat(chat-ui): conversation and reply ratings (2026-10-24)
-
-**Repo:** EDDI (`feat/conversation-ratings`) — PR 2 of [`planning/conversation-rating-plan.md`](../planning/conversation-rating-plan.md) (§7 and §0.1 "User — UX rules")
-
-### What changed and why
-
-The Chat UI now lets the person chatting rate the conversation and, when the agent asks for it, single replies, against the owner endpoints PR 1 added. Everything is driven by the profile's `rating` object; without it the widget renders exactly as before.
-
-- **Reply thumbs** ([`StepRating.tsx`](../ui/chat/src/components/StepRating.tsx)) under the last agent bubble of each step — hover/focus on desktop, always on touch, `aria-pressed`, 44px targets on touch. Thumbs down rates at once, then offers optional reason tags and a comment.
-- **Rating card** ([`RatingCard.tsx`](../ui/chat/src/components/RatingCard.tsx)), a sibling of `PausedCard`: stars as a radio group (roving focus) or thumbs; offered on end (`askOnEnd`) and/or after `askAfterTurns` replies, at most once per conversation, never to somebody who already rated, never again once closed (localStorage, guarded); always available from a header entry. One tap rates, tags/comment follow (comment per `askBelowScore`), then a thanks state naming who receives the feedback; editable and removable afterwards; never blocks the composer.
-- **State** ([`useRatings.ts`](../ui/chat/src/hooks/useRatings.ts)): restored via `GET /agents/{id}/rating` when a conversation opens; optimistic updates with rollback and a short notice; every backend error code mapped to translated copy ([`rating-api.ts`](../ui/chat/src/api/rating-api.ts)); a rerun clears the local thumb of that step.
-- **Steps** ([`rating-steps.ts`](../ui/chat/src/rating-steps.ts)): reply ratings are keyed by step. Full conversation reads now stamp `stepIndex` on their messages (`stepsToMessages(…, fullHistory)`, `processSnapshot({ fullHistory })`); live turns are counted from the nearest stamped message.
-- **Demo mode** gets an in-memory rating backend and a profile asking for every control. i18n for en/de/fr/es; styles for both themes and phones.
-- Docs: Chat UI section in [`conversation-ratings.md`](conversation-ratings.md); [`ui/chat/AGENTS.md`](../ui/chat/AGENTS.md) structure and the rating error envelope.
-
-### Design decisions
-
-- The rating endpoints' error body is `{error: CODE, message}`, not the attachments' `{error, code}`; `rating-api.ts` parses its own and never shows the server's message.
-- One thumb per **step**, under the step's last bubble, because the server stores one reply rating per step.
-- Stars use radio semantics for screen readers, but arrow keys only move focus and Enter/Space rates: with "one tap rates", arrow-selects-and-submits would send a rating per key press.
-- A rerun clears the thumb locally only, as plan R8 says; the stored rating reappears after a reload (documented limitation).
-
-### Testing
-
-`npm run typecheck`, `npm run lint` and the full vitest suite (34 files, 564 tests, 67 of them new) pass; key logic was mutation-checked. Vitest needs Node ≥ 22.15 (jsdom 30's undici): the Maven-downloaded `ui/node/v24.*` works.
-
----
-
-## feat(ratings): conversation ratings — backend (2026-10-24)
-
-**Repo:** EDDI (`feat/conversation-ratings`) — PR 1 of the plan in [`planning/conversation-rating-plan.md`](../planning/conversation-rating-plan.md)
-
-### What changed and why
-
-People chatting with an agent can now rate the conversation and, if the agent asks for it, single agent replies; the people running the agent can list, summarize, export and triage those ratings. Off unless the agent designer adds `ratingConfig` with `"enabled": true` (checked per agent version the conversation runs on, cached per version in `ConversationRatingPolicy` like `ConversationReviewPolicy`).
-
-- **Config:** `AgentConfiguration.ratingConfig` (scale `THUMBS|FIVE_STAR`, conversation and reply ratings, comment rules, reason tags, rating window), validated on agent create/update/duplicate (`RatingConfigValidator`), and a `rating` subset on `GET /agents/{agentId}/profile` so chat clients need no extra call.
-- **Store:** `IConversationRatingStore` with MongoDB ([`ConversationRatingStore`](../src/main/java/ai/labs/eddi/engine/ratings/mongo/ConversationRatingStore.java)) and PostgreSQL ([`PostgresConversationRatingStore`](../src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationRatingStore.java)) implementations selected in `DataStoreProducers`. Key `(conversationId, stepIndex)`, conversation rating at `-1`; atomic upsert keeping `id`/`createdAt`; summaries aggregated in the database; indexes for agent+time, agent+version, user (GDPR) and the needs-attention count.
-- **Owner REST** (`IRestConversationRating`): `PUT|GET|DELETE /agents/{conversationId}/rating` and `PUT|DELETE /agents/{conversationId}/steps/{stepIndex}/rating`, with stable error codes (`RATING_DISABLED`, `RATING_WINDOW_CLOSED`, `INVALID_STEP`, `INVALID_SCORE`, `INVALID_TAG`, `COMMENT_NOT_ALLOWED`, `COMMENT_TOO_LONG`, `NOT_CONVERSATION_OWNER`, `CONVERSATION_NOT_FOUND`).
-- **Maintainer REST** (`IRestConversationRatingAdmin`, `eddi-admin`/`eddi-editor`): `GET /ratings`, `/ratings/summary`, `/ratings/export` (CSV, 100k cap, formula-injection escaping), and the triage loop of plan §0.1: `GET /ratings/attention-count`, `PATCH /ratings/{ratingId}`, `POST /ratings/review`.
-- **GDPR:** `ConversationRatingGdprParticipant` joins erasure (deletes the user's ratings, clears them as reviewer) and export; processing restriction blocks new ratings.
-- **Metrics:** `eddi_conversation_ratings_total`, `eddi_conversation_ratings_normalized`, `eddi_conversation_ratings_withdrawn_total`, charted in a new "Conversation Ratings" row of the Full Metrics Reference dashboard.
-- **Docs:** new [`conversation-ratings.md`](conversation-ratings.md), `ratingConfig` section in [`agent-config-authoring.md`](agent-config-authoring.md), [`gdpr-compliance.md`](gdpr-compliance.md), [`metrics.md`](metrics.md).
-
-### Design decisions
-
-- **Only the owner rates.** `requireConversationOwner` admits administrators too; the endpoint additionally requires `OwnershipValidator.isOwner`, so an admin can read and withdraw but never write a rating in somebody's name.
-- **User ids for administrators only** — decided on `isAdmin()`, not `seesEverything()`: without workspace enforcement every editor "sees everything", and the plan's R3 is about admins.
-- **Scoping (R6):** a caller who does not see everything must pass `agentId` and hold `EDIT`; `PATCH` checks `EDIT` on the rating's own agent.
-- **`canOpenTranscript`** applies the existing conversation-read rule per row (owner, admin, or conversation review) and is false for purged conversations — one descriptor read per distinct conversation on the page (≤ 100).
-- **Triage is hidden from the rater:** owner responses strip status, reviewer and note. A re-rating resets triage to `NEW` and clears the note. `PATCH` is conditional on the rating's `updatedAt`, so a maintainer cannot mark reviewed a rating that changed after they read it (409 `RATING_CHANGED`). The reviewer always comes from the principal.
-- **`minScore`/`maxScore` filter the normalized score** (0..1), so one filter means the same on every scale. Added `sort=newest|lowest`, `reviewStatus` and `needsAttention` filters.
-- Admin endpoints share one `@BeanParam` (`RatingQueryParams`) so the five filtered endpoints cannot drift.
-
-### Deviations from the plan
-
-- A reply rating records the conversation's agent version at rating time: conversation memory stores no version per step (plan §10 assumed one).
-- The per-reply excerpt for callers who may read the transcript (§6) is not returned; clients with `canOpenTranscript` open the conversation instead.
-- GDPR: implemented as an `IGdprParticipant` (erase + export), which is the SPI for stores; `UserErasureParticipant` is for stopping in-flight work and has nothing to stop here.
-- No separate `(conversationId)` index: the unique key's prefix serves it.
-
-### What's next
-
-The MCP rating tools ship with this backend. Next: the Chat UI and the Manager Feedback page (badge on `attention-count`) with the Platform Operator's read access, then push alerts. The store ITs (`MongoConversationRatingStoreIT`, `PostgresConversationRatingStoreIT`) need Docker.
-
----
-
-## ✨ feat(mail): email notifications for pending approvals — email Phase 1 (2026-10-24)
-
-**Repo:** EDDI (`feat/email-hitl-notifications`, on top of `feat/email-mail-core`)
-
-Phase 1 of [the email plan](../planning/email-channel-plan.md) (§16 "Notifications", the outbound half of §12).
-
-### Socket guard: an operator policy
-
-- **`SafeSocketConnector.resolveOperator`** (`Policy.OPERATOR`) for a host the operator set in
-  `application.properties` — today only the system mailer's relay. Private and loopback addresses, IP literals,
-  single-label names and any port (25 included) are allowed, and `eddi.email.allowed-hosts` (which confines
-  authors) is not consulted. Still resolved once and pinned, still no link-local or cloud-metadata address, TLS
-  still verified. `TlsMode.PLAINTEXT` exists only on an operator endpoint: the `Endpoint` constructor refuses it
-  for an author one. `resolve` (the author policy) is unchanged.
-
-### Connections: mail origins on `baseUrlAllowlist`
-
-- A connection's `baseUrlAllowlist` now accepts `smtp://`, `smtps://`, `imap://` and `imaps://` origins
-  (`ConnectionConfiguration.requireCanonicalAllowlistOrigin`), so `resolveAccessToken` (XOAUTH2) and the new
-  `resolveBasicLogin` (username + vault-backed password for SMTP/IMAP login) can check a mail server against it.
-  The ports a mail scheme implies fold away (`smtps` 465, `smtp` 587, `imaps` 993, `imap` 143); `smtp://relay:25`
-  stays a distinct origin. An https entry for the same host does not cover a mail origin. The credential-endpoint
-  allowlist and the public base URL stay http(s) only. The Manager's `connection-validation.ts` mirror accepts the
-  same schemes, with the `originScheme` message updated in all 11 locales.
-
-### The system mailer
-
-- **`SystemMailer`** (`engine/mail`): the deployment's one SMTP sender, configured by the operator under
-  `eddi.mail.smtp.*` (host, port, `tls` = `starttls` | `implicit` | `none`, `from`, `from-name`, and at most one
-  credential source: `connection` — `BASIC` or `OAUTH2_CLIENT_CREDENTIALS`/XOAUTH2 — or `username` + `password`).
-  Unset host = disabled, one INFO line at startup; an unusable configuration disables it with one ERROR line and
-  never falls back to something weaker. Sockets come from `SafeSocketConnector.resolveOperator`. STARTTLS is
-  required, not opportunistic; `tls=none` needs `eddi.mail.smtp.allow-plaintext=true` and never carries a
-  credential. Failures are classified (`MailSendException.Category`), permanent only for a 5xx refusal.
-- **GreenMail 2.1.14** (Apache-2.0, test scope; its aggregate `org.eclipse.angus:jakarta.mail` and JUnit 4 are
-  excluded) runs implicit TLS, plain SMTP and AUTH in `SystemMailerTest`; a small in-test STARTTLS server covers the
-  upgrade GreenMail does not speak, and proves AUTH (PLAIN and XOAUTH2) only ever crosses the wire after it. The
-  certificate is a throwaway made with the JDK's `keytool`; the production TLS path, with certificate and host-name
-  checks, is what accepts it.
-
-### The message ledger (outbound)
-
-- **`IEmailMessageLedger`** (`integrations/email/ledger`) with `MongoEmailMessageLedger` (`email_message_ledger`
-  collection) and `PostgresEmailMessageLedger` (`email_message_ledger` table, created on first use), selected by
-  `eddi.datastore.type` in `DataStoreProducers`. One row per message: integration (`system` for system mail),
-  kind (`NOTIFY`; `REPLY` later), direction, RFC Message-ID, conversation, `sourceRef` (what the message is rebuilt
-  from — the pause id for a notification), idempotency key, recipient, state `PENDING → SENT | FAILED | SUPPRESSED`,
-  attempts, `nextAttemptAt`, claim token, provider response, last error, created/updated/expires. **No body,
-  subject or MIME** — a retry re-renders from the source. Two unique keys (idempotency key;
-  `(integrationId, direction, messageId)`) make an insert a cluster-wide claim. `claimDue` leases rows by a
-  conditional update (`findOneAndUpdate` per row on Mongo; `UPDATE … FOR UPDATE SKIP LOCKED … RETURNING` on
-  Postgres), and every state change is conditional on the claim token, so a taken-over claim cannot overwrite the
-  new owner's result.
-- `MongoEmailMessageLedgerIT` / `PostgresEmailMessageLedgerIT` run one shared contract against real databases
-  (Testcontainers): duplicate keys, eight concurrent inserts of one notification (one winner), two sweepers claiming
-  20 rows at once (no overlap), lease expiry and stale claims, reschedule, retention, erasure by recipient, and the
-  stored field set (no body field exists).
-
-### HITL email notifications
-
-- **Agent opt-in** `hitlConfig.notify.email.recipients` (`HitlNotifyConfig`): 1–20 plain ASCII addresses, validated
-  at save and import time (`HitlConfigValidation.validateNotify` — empty, over 20, malformed, display-name,
-  non-ASCII and duplicate-after-normalisation entries refused with the position, never the address). Configs without
-  the field are unchanged.
-- **The hook:** `HitlPauseCommittedEvent(conversationId, pauseId)`, fired asynchronously by
-  `ConversationService.firePauseCommitted` at the three places a regular pause is committed — the say turn
-  (`ConversationStepRunner`, after the state CAS and the timeout schedule), the `CONVERSATION_START` turn, and a
-  resume that pauses again (`ConversationHitlService`). Not for a pause restored after a failed resume, nor on a CAS
-  miss. Group discussions are not covered yet.
-- **`HitlEmailNotifier`** (`integrations/email/notify`): re-reads the pause from the store (state and `pauseId` must
-  still match), inserts one ledger row per recipient under a digest key of kind/conversation/pause/recipient, and
-  sends at once for the rows it won. A `@Scheduled(identity = "email-ledger-sweeper")` sweep retries due rows with
-  exponential backoff (`eddi.email.outbound.retry-backoff`, capped at 1 h) up to `eddi.email.outbound.max-attempts`,
-  removes expired rows (`eddi.email.ledger-retention`) and refreshes the `eddi.email.ledger.pending` gauge. A
-  decided pause ends `SUPPRESSED`; a 5xx fails at once.
-- **Content** (`HitlNotificationContent`): agent name, pause type, reason, start, deadline + policy, conversation id,
-  and for a tool-call pause the same redacted, 300-char-truncated argument lines as the Slack card — extracted from
-  `SlackHitlSupport` into the shared `HitlToolCallPreview`. No conversation content. Subject
-  `[EDDI] Approval needed: <agent name>`, designer text flattened to one line. The link is
-  `eddi.connections.public-base-url` + `/manage/approvals`, no token; without a base URL the page is named, not
-  linked.
-- **Metrics** `eddi.email.outbound{kind,outcome}` and `eddi.email.ledger.pending`, on the Full Metrics dashboard's
-  Human-in-the-Loop row and in `metrics.md`. **Audit** entry `email.notify` per sent/failed notification with the
-  recipient as a SHA-256 hash plus domain (the audit ledger is write-once). **GDPR**: `EmailLedgerGdprParticipant`
-  (`emailLedger`) erases/exports rows by the user id's address and the directory's recorded email;
-  `IGdprParticipant.order()` makes the user directory run last so the address is still readable.
-
-### Recipient domain policy and flood brake (review follow-up)
-
-- **`eddi.mail.notify.allowed-recipient-domains`** (`NotifyRecipientPolicy`, `engine/mail`): exact domains, `*.domain`
-  for subdomains, `*` for any; **unset = the domain of `eddi.mail.smtp.from` and its subdomains**. Recipients are set by
-  anyone with EDIT on an agent while the mail leaves through the operator's relay under the operator's sender, so
-  without a bound the relay was an open mailer for agent authors. Enforced at send time on every attempt (the row ends
-  `SUPPRESSED`, `RECIPIENT_NOT_ALLOWED`, `outcome=not_allowed`) and at save time in `HitlConfigValidation` — refused
-  when a mailer is configured, accepted with a WARN when not (read through `ConfigProvider`, since the validation is
-  static). A malformed entry fails closed: nobody is mailed, ERROR at startup.
-- **`eddi.mail.notify.max-per-recipient-per-hour`** (default 30): `IEmailMessageLedger.countCreatedSince(recipient, kind,
-  since)` counts the recipient's non-suppressed `NOTIFY` rows of the last hour across the cluster (new index
-  `(recipient, kind, createdAt)` on both stores); over the limit the row is `SUPPRESSED` (`RATE_LIMITED`,
-  `outcome=rate_limited`) and each instance logs one WARN per recipient per hour, naming it by hash. Suppressed rows do
-  not count, so the window empties once the flood stops. Count and insert are two steps, so concurrent pods can
-  overshoot by a few.
-- Docs (`hitl.md`, `configuration-reference.md`, `metrics.md`), the Manager hint and the operator prompt say so;
-  operator revision stays 37 (one PR) with the new fingerprint.
-
-### Manager and the Platform Operator
-
-- The agent's **Human-in-the-Loop** settings gain "Email people when this agent waits for approval" with a
-  recipients field (`agent-config-sections.tsx`, parser in `lib/hitl-notify.ts` mirroring the save-time rules: 1–20,
-  plain ASCII, no duplicates). As with the approval timeout, an unsavable list never enters the draft; the field shows
-  what is wrong. Eight new `agentDetail.hitlNotify*` keys in all 11 locales.
-- **Operator prompt** (`system-prompt.ts`): how email notifications are set up — the operator's
-  `eddi.mail.smtp.*`, the agent's `hitlConfig.notify.email.recipients` in the Manager (the operator cannot write
-  `hitlConfig`), what the mail contains, why there is no "all approvers" switch. No new endpoint, so `tool-scopes.ts`
-  is unchanged. **Operator revision 36 → 37.**
-- Docs: [`hitl.md` → Email notifications](hitl.md#email-notifications) (with a sample config),
-  [`configuration-reference.md` → Email](configuration-reference.md#email), [`metrics.md`](metrics.md#hitl-metrics),
-  [`security.md` → the operator policy](security.md#the-operator-policy--the-system-mailers-relay),
-  [`connections.md`](connections.md), [`gdpr-compliance.md`](gdpr-compliance.md),
-  [`compliance-data-flow.md`](compliance-data-flow.md).
-
-### For Phase 2 and 3
-
-- The ledger API is the one they extend: add inbound states and a stranded-turn query to `IEmailMessageLedger`,
-  `Kind.REPLY` rows get their own worker (`claimDue` takes a kind), `sourceRef` carries the conversation step a
-  reply is rebuilt from. The unique `(integrationId, direction, messageId)` key is already the inbound dedup key.
-- The SMTP client is `SystemMailer` for operator relays only; a channel's author-configured SMTP must use
-  `SafeSocketConnector.resolve` (the author policy), not `resolveOperator`.
-- Group discussions (`AWAITING_APPROVAL`) are not notified yet; `GroupHitlCoordinator` commits group pauses in three
-  places and would need its own event.
-
----
-
-## ✨ feat(mail): mail core, socket guard and bare OAuth tokens — email Phase 0 + 0b (2026-10-24)
-
-**Repo:** EDDI (`feat/email-mail-core`)
-
-The first slice of [the email plan](../planning/email-channel-plan.md) (Phase 0 and 0b): a pure library under
-`engine/mail` that later phases (notifications, trigger mode, conversation mode) and the mail RAG source
-([`rag-ingestion-source-types-plan.md`](../planning/rag-ingestion-source-types-plan.md) §8) build on. No channel,
-no transport, no conversation code — nothing here is reachable from an agent yet.
-
-### What changed and why
-
-- **Angus Mail** (`org.eclipse.angus:angus-mail` 2.0.5, `jakarta.mail:jakarta.mail-api` 2.1.5 — the versions the
-  Quarkus BOM manages, so one copy on the classpath; EPL-2.0 / GPL-2.0-with-CPE / EDL-1.0) for MIME grammar.
-- **`MimeMessageParser`**: raw RFC 5322 bytes → `InboundMail`. Every limit (`MailLimits`: raw bytes, header bytes,
-  nesting depth, part count, attachments, per-attachment bytes, output characters) is enforced before the work it
-  bounds — multipart delimiters are counted in the raw bytes before Jakarta Mail materialises a part, so a few KB
-  declaring thousands of parts is refused, not allocated, and a base64-encoded multipart (which would hide its
-  delimiters) is skipped. `text/plain` preferred, HTML converted as fallback. Broken and unknown charsets, RFC 2047
-  words (split multi-byte, unknown charset), unparseable dates and invalid addresses become `MailAnomaly` values,
-  never exceptions. A message without a Message-ID gets `sha256:<hex of raw bytes>`, flagged `syntheticMessageId`.
-  Executables (by name, type and magic bytes) never carry content; archives are flagged, never expanded;
-  `message/rfc822` is never walked into. `multipart/report` DSNs are parsed into a `DeliveryReport` (recipient,
-  action, status, original Message-ID) for later bounce suppression.
-- **`AddressNormalizer`** (lower-case, IDN→ASCII, no dot/`+tag` folding, no domain literals or numeric TLDs),
-  **`QuoteStripper`** (trailing `>` blocks with en/de/fr/es/it/nl attributions; Outlook header blocks in en/de/fr;
-  Gmail `gmail_quote`, Apple/Thunderbird `blockquote type=cite` + `moz-cite-prefix`, Outlook web markers —
-  interleaved inline replies, forwards and quote-only messages are kept whole), **`AutoReplyDetector`** (RFC 3834,
-  `X-Autoreply`/`X-Autorespond`, `Precedence`, `List-*`, null/daemon return paths, reports),
-  **`PlainTextMailRenderer`** (`text/plain` UTF-8 `format=flowed`, threading headers with a capped References chain,
-  `Re:` without stacking, `Auto-Submitted`, `X-Auto-Response-Suppress: All`, random `<eddi.<uuid>@domain>` ids, and
-  a refusal of any header value containing CR/LF or another control character).
-- **`HiddenContentFilter`**, run by `HtmlToMarkdownConverter`, in two modes. **Page mode** (`convert()`, every
-  existing caller — crawler, file upload, `WebScraperTool`) is conservative: only HTML comments, text of 1px or
-  less, transparent text, and text the colour of a background set explicitly on it or an ancestor are dropped.
-  Accordions, `hidden` tab panels, `opacity:0` fade-ins, off-screen skip links and `sr-only` text — what pages hide
-  until script reveals it, and what a knowledge base wants — are kept. **Mail mode** (`convertMail`) is strict,
-  since mail runs no script: also `display:none`, opacity ~0, `mso-hide`, zero-size + overflow hidden, off-screen,
-  `clip`, `scale(0)`, `hidden`, inherited `visibility:hidden`, `display:none`/`visibility:hidden` rules in
-  `<style>` outside `@media` (`HiddenStylesheetRules`), and an assumed white page with black text. `convertMail`
-  also skips the `main`/`article` scoping and the `<title>`.
-- **Linear on hostile input.** Style blocks are read by one forward `indexOf` scan (no backtracking regex) and
-  matched in one pass against an index of rules; nothing is truncated, so a hiding rule after megabytes of junk is
-  still applied. Where exact matching would cost more, it over-approximates (rightmost compound selector only; an
-  element more than 64 hiding rules could apply to counts as hidden), which can only remove more. The quote
-  stripper's Outlook-header search computes subtree text sizes bottom-up and its top-level searches skip matched
-  subtrees. jsoup 1.23.2 itself caps tree depth at 512 (deeper elements become siblings).
-- **`ALTERNATIVES_DIVERGE`**: when a `multipart/alternative` has both parts, the plain text (what the agent reads) is
-  compared with the HTML as rendered, hidden content removed (what a reviewer sees), by word sets in both
-  directions; a substantial difference adds the anomaly. `text/plain` stays the preference.
-- **`SafeSocketConnector`** (`engine/net`): the socket-level SSRF guard the RAG plan §3.10 proposed. DNS names only
-  (every IP-literal spelling refused), IMAP 993/143-STARTTLS and SMTP 465/587-STARTTLS only, optional
-  `eddi.email.allowed-hosts`, resolved once with every address checked by `UrlValidationUtils.isPrivateAddress`,
-  pinned to the first address (`PinnedSocket` ignores a library's second lookup), TLS always verified, timeouts.
-  `angusProperties(endpoint)` wires Angus Mail to it with `socketFactory.fallback=false`; a loopback smoke test
-  proves Angus connects through it, requires STARTTLS before any credential, and does not fall back.
-- **`ConnectionResolver.resolveAccessToken`**: the bare access token for `XOAUTH2`, OAuth connections only
-  (`STATIC`, `BASIC`, `CALLER_SUPPLIED` → `UNSUPPORTED_PLACEMENT`), with the allowlist, `PER_USER`/`VERIFIED` rules
-  and the shared token supplier (refresh, caching) unchanged.
-
-### For the next phases
-
-- `InboundMail.authentication()` is `NOT_EVALUATED` until the DKIM verifier attaches a verdict with
-  `withAuthentication`; only `ALIGNED_PASS` authenticates. The verifier must also treat the `MULTIPLE_FROM` and
-  `DUPLICATE_SINGLETON_HEADER` anomalies as unauthenticated. Raw bytes are not kept in `InboundMail`; the verifier
-  gets them from the transport.
-- `baseUrlAllowlist` holds http(s) origins only, so `resolveAccessToken` refuses an `imaps://` target today (fails
-  closed). The IMAP phase must teach the connection model (and the Manager's mirror in
-  `connection-validation.ts`) mail origins.
-- Private-address mail servers (on-premises Exchange) are refused, with no override yet.
-
-**Files:** [`engine/mail/`](../src/main/java/ai/labs/eddi/engine/mail/),
-[`SafeSocketConnector.java`](../src/main/java/ai/labs/eddi/engine/net/SafeSocketConnector.java),
-[`HiddenContentFilter.java`](../src/main/java/ai/labs/eddi/modules/ingestion/HiddenContentFilter.java),
-[`HiddenStylesheetRules.java`](../src/main/java/ai/labs/eddi/modules/ingestion/HiddenStylesheetRules.java),
-[`ConnectionResolver.java`](../src/main/java/ai/labs/eddi/connections/ConnectionResolver.java),
-[`security.md`](security.md#mail-sockets--safesocketconnector),
-[`configuration-reference.md`](configuration-reference.md#email), [`rag.md`](rag.md), fixtures under
-[`src/test/resources/mail/`](../src/test/resources/mail/).
-
----
-
-## ✨ feat(llm): `expression` guardrail — a deterministic check over a JSON answer (2026-10-24)
-
-**Repo:** EDDI (`feat/llm-expression-guardrail`, from `main` at `5028af0a3`) — item E1c of the evaluated-generation plan. Independent of the `judge` guardrail (#1121, `feat/llm-judge-guardrail`): it builds only on what `main` has (`ContentGuardrail`, `GuardrailVerdict.violation(reason, hint)`, `GuardrailUndecidedException`, `failMode`).
-
-### What changed and why
-
-A well-formed answer can still be wrong: an invoice whose `total` is not the sum of its lines passes `responseSchema` and `json-object`. `expression` (output only) parses the answer as JSON and evaluates an author-written boolean expression over it, and reprompts with author-written feedback — the deterministic sibling of the `judge`.
-
-```json
-{ "type": "expression", "action": "reprompt", "maxRetries": 1,
-  "parameters": { "expr": "sum(lines[*].amount) == total", "issue": "LINE_SUM",
-                  "fix": "Make total equal the sum of the line amounts, to the cent." } }
-```
-
-- **`SafeJsonExpression`** (`ai.labs.eddi.utils`, new) — a small recursive-descent language in the style of `CalculatorTool.SafeMathParser`: number/string/`true`/`false`/`null` literals; paths (`invoice.total`, `lines[0].amount`, `invoice['due-date']`, `$` for the answer itself) with a `[*]` wildcard that yields a list; `+ - * / %` on `BigDecimal` (34 significant digits, `0.1 + 0.2 == 0.3` is true); `== != < <= > >=` (not chainable); `&& || !` with short-circuit; parentheses; nine functions — `sum`, `count`, `min`, `max`, `len`, `abs`, `round(x, n)` (half-up), `exists(path)`, `approx(a, b, tolerance)`. No script engine, no expression library, no reflection, no Qute; an unknown function is a compile-time error. JDK-only and Java 17 syntax so ClusterFuzzLite can compile a vendored copy.
-- **Null semantics:** a missing path and a JSON `null` are both `null`; `== null` / `!= null` test it; any other comparison with `null` is `false`; arithmetic, logic or a function on `null`, a type mismatch, division by zero, an empty `min`/`max` and an out-of-range number are evaluation errors — *could not decide*, never `false`. `exists(path)` tells a present key holding `null` from a missing one.
-- **Bounds:** expression ≤ 2000 characters, nesting ≤ 32, ≤ 500 parts, ≤ 32 segments per path (all refused at compile time with a position, never a `StackOverflowError`); ≤ 10,000 values per path, ≤ 200,000 steps per evaluation; numbers beyond 1000 digits or a ±1000 scale refused rather than materialised.
-- **`ExpressionGuardrail`** (`modules/llm/guardrails/impl`, new bean, picked up by `GuardrailService`'s type index) — parameters `expr`, `issue` (`[A-Z][A-Z0-9_]{0,39}`), `fix` (≤ 1000 characters), all required and checked in `validate()` at deploy (`parameter 'expr' is not valid at position 21: '=' is not an operator; compare with '=='`). Compiled expressions sit in a bounded Caffeine cache (512, refusals cached too). The answer is read with `ModelOutputParser` (fence and prose tolerant) over its own exact mapper: decimals as `BigDecimal`, integers as `BigInteger`, duplicate keys refused. Verdicts: `true` → allow; `false` → `VIOLATION` `expression_failed:<ISSUE>` with a hint that is EDDI's fixed frame (the judge guardrail's wording) around the author's `fix` only; not JSON / > 262,144 characters / duplicate key → `GuardrailUndecidedException` `expression_unparseable`; evaluation error or a non-boolean result → `expression_undecided:<cause>` (the evaluator's own codes). `failMode` decides as for every type.
-- **Fuzzing:** `SafeJsonExpressionFuzzTest` (Jazzer `@FuzzTest` over expressions and over JSON data, plus seeded random sweeps that run in every unit-test run) and a ClusterFuzzLite target `SafeJsonExpressionFuzzer`; `.clusterfuzzlite/SafeJsonExpression.java` is the vendored copy, and the `Vendored Fuzz Sources In Sync` guard knows the fourth file.
-- **Docs:** [langchain.md](langchain.md#the-expression-type-a-deterministic-check-over-a-json-answer) (grammar, semantics, bounds, the invoice example and the exact corrective message), [security.md](security.md) (sandboxed evaluator, closed vocabulary, fuzz targets), [security-review.md](security-review.md).
-
-- **End-to-end proof:** `ExpressionGuardrailIT` runs a real agent against a WireMock fake OpenAI endpoint: pass (also from a code fence), fail then repair (the second request carries the fixed frame around the author's `fix` and no computed value), exhausted reprompt and `block`/`warn` actions, non-JSON, duplicate-key and null-operand answers under both `failMode`s, exact decimal arithmetic (`0.1 + 0.2 == 0.3`, a one-cent difference caught), and deploy refusal for a syntax error, an over-long or over-deep expression, sandbox escapes and a bad issue code or fix.
-
-### Design decisions
-
-- **A new evaluator, not `ExpressionProvider`** (plan §9.1): that is the NLP expression grammar, with no arithmetic or paths into JSON. `PathNavigator` has only `+`/`-` on path values, no comparisons, logic or aggregates.
-- **Could not decide is the safe default for anything ambiguous.** A missing amount inside `sum(...)` is not skipped, comparing a number with a string is not `false`: both are undecided, so a `reprompt`/`block` guardrail withholds the answer (fail closed) unless the author set `failMode: open`.
-- **Closed vocabulary:** nothing read or computed from the answer — not the sum, not the total — reaches the corrective message. Only the issue code (author-declared, pattern-checked) reaches the audit reason.
-- **Duplicate keys are unparseable**, so the check and a downstream reader of `convertToObject` cannot see two different totals.
-- **No new meter**; `eddi.guardrail.triggered` counts the action as for every type.
-
-### Manager and operator
-
-- The guardrail editor offers `expression` on the output side (`guardrails.ts`: type list, phases, no-rewrite set, list-row summary `ISSUE · expr`, type text). Its sheet has fields for `expr`, `issue` and `fix`, and `expressionProblems()` mirrors `validate()`'s refusals (required, length caps, the issue-code pattern) as warnings; the expression's syntax is left to the server, which names the position at deploy. 16 new `llmEditor.grExpr*`/`grTypeExpression*` keys in all 11 locales. Tests: `guardrails-expression.test.ts` and an `expression` block in `task-guardrails-section.test.tsx`.
-- The Platform Operator's prompt explains the type (parameters, the language, null rules, the reasons, closed-vocabulary feedback, deploy refusals with a position); `operator-revision.json` 36 → 37. #1121 also takes 37, so whichever merges second re-bumps.
-
-### Next
-
-- When #1121 lands, `expression` can use `onExhausted: deliver-best` like any reprompting type, and its `HINT_HEADER`/`HINT_FOOTER` can be shared with the judge's (same wording today).
-
----
-
-## ✨ feat(llm): `judge` guardrail and `onExhausted: deliver-best` — evaluated generation E1a + E1b (2026-10-24)
-
-**Repo:** EDDI (`feat/llm-judge-guardrail`) — item E1 (E1a and E1b; not E1c) of the evaluated-generation plan.
-
-### What changed and why
-
-A well-formed but wrong answer passed every output guardrail EDDI had: the built-ins check shape and patterns, the `classifier` checks safety. E1a adds a check on **meaning** whose feedback says what to fix; E1b lets a quality check that cannot be satisfied deliver its best attempt instead of a block message.
-
-- **`GuardrailModelClient`** (`modules/llm/guardrails/impl`, package-private) — the classifier's model-call machinery, extracted rather than forked: `ChatModelRegistry` provider build with parameter pass-through (vault and `${vars}` resolved by the registry), `timeoutMs` capped at 60 s and bounded by the turn deadline, the virtual-thread executor, `promptTemplate` rendering with the screened text as data only (`{input}`, `{output}`, `{context}`), `includeRetrievedContext`, pricing from `inputPricePer1M`/`outputPricePer1M`, the unavailable/unparseable mapping (provider messages never propagated) and the per-call timer. `ClassifierGuardrail` now delegates to it; its behaviour, reasons, metric and test surface are unchanged (all 54 of its tests pass untouched). Each type passes its timer as `() -> Timer.builder(METRIC_DURATION)` so `MonitoringSeries` still finds the meter where it is named.
-- **`JudgeGuardrail`** (`judge`, output only, `screensHistory()` false) — parameters `provider`, `promptTemplate` and `issues` (a JSON object of issue code → author fix text; 1–20 codes matching `[A-Z][A-Z0-9_]{0,39}`, fix text non-blank and ≤ 1000 chars, duplicate codes refused), plus the shared ones and a per-guardrail `jsonResponseFormat` override. After the rendered template EDDI appends a fixed instruction listing the codes and the reply shape `{"issues": [...]}`. The request carries a JSON response format per request through `JsonResponseFormatPolicy` — with the codes as an `enum` schema where the provider enforces one — never baked into the cached model. The reply is read with `ModelOutputParser` (fence, prose around the object), codes matched case-insensitively. Only a parsed empty list passes; any other shape or an undeclared code is `judge_unparseable`, an unreachable or slow judge `judge_unavailable` — `failMode` applies.
-- **Closed-vocabulary feedback.** A finding is a `VIOLATION` with reason `judge_failed:<CODE>[,<CODE>…]` (declaration order) and a reprompt hint made of EDDI's frame and the author's fix texts for those codes only. `GuardrailService.correctiveMessage` is untouched, so its invariant — never the user's or the model's text — now also holds for judge output.
-- **`GuardrailVerdict.issues`** — a sixth record component (the 5-argument constructor stays), plus `GuardrailVerdict.issues(...)` and `severity()` (0 = nothing found, the code count for a grading guardrail, 1 for any other finding).
-- **`GuardrailConfig.onExhausted`** — `block` (default; also when unset) or `deliver-best`, plus `deliversBest()` (not a bean getter, never serialized). In `GuardrailService.runOutput`, a `deliver-best` reprompt guardrail records every attempt it rates; when it may not reprompt again (retries spent, no reprompter, or a reprompt that cannot start) the attempt with the lowest severity is delivered — ties to the later attempt, so a binary guardrail delivers the last — with a `warn` outcome, reason `<reason>:delivered_best`, `retryCount` = reprompts sent. That attempt is then **re-screened** by the output guardrails after the exhausted one, with no further reprompts — the ones before it already screened that attempt in the pass that rated it, so each guardrail sees it once and a model-backed one is called once: `redact` still rewrites, `warn` still records, `block` and `reprompt` findings block. The re-screen's outcomes are held back until it ends, so the `:delivered_best` warn is recorded only for an attempt that was actually delivered; a blocked one leaves the re-screen's records and the block, each counted once. A guardrail that could not decide is not "exhausted": its `failMode` applies as before. Because this lives in `runOutput`, it covers every mode output guardrails run in — plain, streaming (buffered), tool loop, cascade, HITL resume — and audit records, the ledger, SSE `guardrail_triggered` and `eddi.guardrail.triggered` stay on the one `emit` path.
-- **Deploy time.** `GuardrailService.validate` refuses an unknown `onExhausted`, `deliver-best` on any action but `reprompt`, and `deliver-best` on input guardrails; `JudgeGuardrail.validate` refuses a missing `provider`/`promptTemplate`/`issues` and a malformed `issues`. New `GuardrailService.warnings` / `ContentGuardrail.warnings` (default none) are logged by `LlmTask.validateGuardrails`: `deliver-best` on a `classifier`, an unpriced judge, and a judge on the task's own provider and model (self-judging bias) — risks the plan's §8 lists.
-- **Metric:** timer `eddi.guardrail.judge.duration{provider, outcome}` (`pass`, `fail`, `unparseable`, `unavailable`, `timeout`), mirroring the classifier's, with a panel on the Full Metrics dashboard next to it; `eddi.guardrail.triggered` counts the actions as before.
-- **Docs:** [langchain.md](langchain.md#the-judge-type-grading-the-answer-with-issue-codes) (type row, `onExhausted` field row, the `judge` subsection, [When the retries run out](langchain.md#when-the-retries-run-out-onexhausted)), [security.md](security.md) (closed vocabulary; a quality check never overrides a safety check), [metrics.md](metrics.md).
-
-### Design decisions
-
-- **Deviations from the plan, and why.** (1) `onExhausted: "block"` is accepted on any action (it is the default and changes nothing); only `deliver-best` is refused outside `reprompt`, and also on input guardrails, where a reprompt blocks. (2) `deliver-best` also applies when no reprompt can run at all (no reprompter, out of time, open circuit), not only when `maxRetries` is spent — in each case the guardrail has nothing further to try. (3) An attempt the guardrail *passed* but another guardrail later sent back is still a candidate with severity 0; if chosen, the re-screen decides. (4) A per-guardrail `jsonResponseFormat` parameter was added as the escape hatch for providers the matrix does not know, mirroring the task setting. (5) The judge's default `timeoutMs` is 5000, not the classifier's 3000: a grading LLM is slower than a safety classifier. (6) The fix texts are also listed in the judge's instruction, so the judge knows what each code means. (7) The prices-missing and self-judging notes from §8 are WARN logs at deploy, not refusals.
-- **The judge's free text never travels.** Extra keys in the reply object are ignored, never forwarded; only declared codes are kept, mapped to their declared spelling.
-- **Unusable `issues` at run time** (a config that bypassed deploy validation) is `judge_unavailable`, before any model call.
-
-### Manager
-
-- The guardrail editor offers `judge` on the output side (`guardrails.ts`: type list, phases, no-rewrite set, row summary, type text) with its own settings panel: provider, base URL, model and API key (shared with the classifier panel through a new `ModelCallFields`, so both write the provider's own model and credential keys), the required prompt template, an **issue-code editor** (rows of code + fix text, written back as the `issues` JSON string; codes upper-cased; a stored value that is not an object of strings is shown raw rather than rewritten; duplicates stay visible and are reported), timeout (default 5000) and prices (shared `CallLimitFields`), retrieved context, and warnings mirroring the deploy checks (missing provider, template or codes, malformed codes, unpriced judge).
-- **`onExhausted`** is a select under Max retries on an output `reprompt` guardrail: `block` is stored as absent, `deliver-best` as set, and switching the action away from `reprompt` drops it (as it drops `maxRetries`). `deliver-best` on a `classifier` shows the same warning the deploy logs.
-- 28 new `llmEditor.*` keys in all 11 locales. Tests: `task-guardrails-section.test.tsx` (+11) and `guardrails-judge.test.ts` (5).
-
-### Platform Operator
-
-- `system-prompt.ts`: the guardrail bullet lists `judge` and `onExhausted` (what deliver-best delivers, that it is re-screened, what the deploy refuses and warns about); a new `judge` bullet covers its parameters, the `issues` format, the closed-vocabulary reprompt, the could-not-decide reasons and failMode, cost and the timer, and the self-judging note; the docs pointer names the new topics. No allow-list change: the operator already edits LLM configs through `PATCH`. `operator-revision.json` 36 → 37.
-
-### Tests and checks
-
-`JudgeGuardrailTest` (47: parsing — fenced, prose-wrapped, undeclared codes, wrong shapes, oversized replies; closed-vocabulary hint and corrective message; template data; native schema enum, provider matrix and override; parameter pass-through; cost; unavailable/timeout/deadline; failMode both ways; validate bounds; warnings), `GuardrailServiceDeliverBestTest` (13: selection, ties, default block, re-screen with redaction, block and reprompt, deploy refusals and the classifier warning), `LlmTaskGuardrailsTest` (+5: acceptance reprompt with the author's fix text and judge cost in `audit:cost`; deliver-best in plain chat with PII redaction, SSE and audit records; tool loop; cascade; configure refusals), `GuardrailConfigDeserializationTest` (+1). Mutation-checked: free judge text in the hint, an undeclared code accepted, a missing `issues` field read as a pass, the re-screen removed, and a reprompt finding let through the re-screen — each fails the suite.
-
-- **End-to-end:** `JudgeGuardrailIT` (9, Mongo) runs a real agent against a WireMock OpenAI endpoint that plays both the task model and the judge (told apart by the request's `model`): a pass (judge reply in a code fence), fail-then-repair (the second task-model request carries only the author's fix text for the found code, never the judge's free text; call counts per model asserted), exhaustion with `deliver-best` (fewest codes wins) and with the default `block`, and bad judge output (unparseable reply, undeclared code, HTTP 500) under `failMode` closed and open. Outcomes are read back through the conversation REST API and the audit ledger.
-
-- **Review fix (docs):** `deliver-best` is re-screened only by the guardrails after the exhausted one, so on a `classifier` it delivers what that classifier flagged. `docs/security.md`, `docs/langchain.md` and the operator prompt no longer claim a classifier is never bypassed; a safety classifier should keep `onExhausted: "block"`. Operator revision stays 37, fingerprint updated.
-
-- **Merge with `main` (#1130, history-replay protection).** Conflicts in `GuardrailService` (both sides added methods next to `validate`: this branch's `onExhaustedProblem`/`warnings`, `main`'s `anySkipsHistory` — all kept), `LlmTaskGuardrailsTest` (an import) and `operator-revision.json`. Two semantic fixes the auto-merge did not show: #1130 taught `runOutput` to act on a fail-open guardrail's partial finding (`GuardrailUndecidedException.partialFinding`), and the deliver-best re-screen now does the same, so a pattern list that timed out part-way still applies its rewrite to the delivered attempt (`GuardrailServiceDeliverBestTest.partialFindingStillApplies`); and `ClassifierGuardrail` lost its last `TimeUnit` use to #1130's `RegexDeadline` switch, so the import went. The operator prompt keeps both sides' additions; `operator-revision.json` 37 → 38.
+- **The turn hook sits in the wait, not at error sites.** `waitForExecutionFinishOrTimeout` is where ERROR, interruption and the watchdog's deadline converge for both turn paths, and `BaseRuntime` runs the turn's callbacks before `Future.get` returns. A mid-loop cost-ceiling stop is not visible there (the loop ends with an answer); the next turn's refusal is.
+- **One maintenance schedule, not one per event or rule.** Fewer rows in the schedule list, one claim per minute; every step it takes is a conditional write, so a duplicated schedule (two nodes creating it at once) is harmless.
+- **Editors: one agent, Slack and inbox only.** A rule over several agents and a webhook target (arbitrary URL, signed with a vault secret) are an administrator's. An editor sees a webhook by host only. Access is re-checked against the stored rule on update and delete.
+- **Fixed, epoch-aligned windows** for dedupe and cap — exact across replicas through unique keys and atomic counters, at the price of a boundary where two windows meet.
+- **The rule author, the acknowledger and the reviewer come from the caller**, never the body; MCP and the operator use the same in-process resources.
+- **Operator: reads only.** Acknowledging is a person's statement; retry and test send real messages; rule writes decide where alert content goes. A rule read shows a webhook URL to the operator (it runs as the admin); the prompt says not to repeat it.
+
+### Tests
+
+Backend unit: 129 in the alert, step-runner, GDPR and MCP classes run together, plus `ScheduleFireExecutorTest` and `RestScheduleStoreExpandedTest` (648 with the related service suites); "never blocks" is proven twice — `AlertDispatcherTest` (10,000 hand-offs to a stuck worker in under a second) and `ConversationStepRunnerTurnOutcomeTest` (2,000 failing turns through the real hook). ITs: `MongoAlertStoresIT` and `PostgresAlertStoresIT` share `AlertStoreContract` (13 each, incl. a 40-thread window-counter race, the unique dedupe, version-conditional updates and single claims). Mutation check: 22 of 22 mutants killed by a test failure — every editor scoping guard (agentId required, single-agent scope, no webhooks, the EDIT check, agent-less events, webhook redaction, the stored-rule re-check on update and delete, editor rule listing, per-id bulk acknowledgement, single acknowledgement), the author from the caller, the privacy guards (comment truncation, no comment in the summary, Slack escaping, GDPR redaction), the hook never throwing into the turn, deadline classification, a full queue never throwing, and the webhook's strict SSRF, no redirects and unresolved-secret refusal. Manager: 18 new tests (page, editor, badge, `ruleProblems`). Full backend `./mvnw test`: 29,895 run; the two coverage guards it caught (configuration reference, dashboard) are fixed, the third failure is the known-flaky `DocumentExtractorsTest.honoursItsTimeBudget`.
 
 ---
 
@@ -900,6 +799,13 @@ _For recording decisions that come up during implementation that aren't in the p
 
 | Date       | Decision                                                              | Context                               | Alternative Considered                                      |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| 2026-10-25 | A validly signed message with a second From, or a duplicated Subject/Date/Message-ID/In-Reply-To/References, is FAIL, not ALIGNED_PASS | Bottom-up selection hashes only one instance; the other is unsigned attacker text that clients may display | Trusting the signature alone; downgrading to PASS_UNALIGNED (would hide that the message is malformed) |
+| 2026-10-25 | DKIM l= is refused as FAIL rather than honoured | It lets anyone append unsigned text that EDDI would read as the sender's | Honouring l= and ignoring the extra body (EDDI's parser would still read it) |
+| 2026-10-25 | Signatures under a t=y key make a message NONE, not FAIL | RFC 6376 §3.6.1: testing-mode mail must be treated as unsigned | FAIL (would misreport a sender who is merely testing) |
+| 2026-10-25 | A temporary DMARC lookup failure assumes strict alignment and flags the result temporary | Strict still authenticates an exact-domain signature, and never over-authenticates a subdomain one | Relaxed (could authenticate what the domain's policy forbids); FAIL (punishes the common exact-domain case for a DNS blip) |
+| 2026-10-25 | dnsjava, not JNDI's DNS provider | JNDI gives no TTLs, no rcode, no control of the server per lookup and no TCP fallback control; dnsjava is BSD-3-Clause with one runtime dependency | JNDI (com.sun.jndi.dns); a hand-written DNS client |
+| 2026-10-24 | Self-continuation is delivered as a one-shot schedule on the cluster-aware schedule machinery, not through the conversation coordinator's queue | E8 needs a continuation that survives a node crash, runs once under the conversation lease, and lands in dead letters when lost | Coordinator queue (in memory, lost on a crash); a custom scheduler (AGENTS.md forbids it) |
+| 2026-10-24 | `maxContinuations` counts per conversation (steps carrying the engine-written `continuation:number`), not per chain | A counter the author or a property setter can reset is no bound; a job that needs more starts a new conversation | A conversation property as counter (writable by config); per-chain counts reset by user input |
 | 2026-10-26 | Docs move off GitBook to an Astro + Starlight build of `docs/` on Vercel at docs.eddi.technology; docs.labs.ai redirects permanently; flat URLs from file names | GitBook URLs carry the SUMMARY section and break when a page moves; the backend's flat docs links 404 there; the marketing site already moved to eddi.technology on Vercel | Keeping docs.labs.ai canonical (docs stay on the old brand domain); folding the docs into the website repo (plain Astro with 11 locales, and docs PRs could not be validated before merge); GitHub Pages (no real redirects) |
 | 2026-10-26 | DNS rebinding is closed per client: Vert.x checks the connected peer before sending, OutboundHttp re-checks after the exchange, MCP re-validates per request | Found by a repository security scan; previously an accepted risk | A JVM-wide InetAddressResolverProvider (affects every lookup in the process, loaded before app classes in Quarkus); IP-literal URLs with a Host header (breaks SNI and certificate checks) |
 | 2026-10-25 | HITL notification recipients are bounded by an operator domain allowlist, defaulting to the sender's own domain | Agent authors choose recipients but the mail goes out under the operator's sender and relay, with author- and user-influenced text; an unbounded list makes the relay an open mailer | Unbounded recipients (open mailer); a per-agent allowlist (set by the same author it is meant to bound) |

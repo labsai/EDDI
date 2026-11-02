@@ -44,6 +44,7 @@ function jwt(expSeconds: number): string {
   return `${b64({ alg: "none" })}.${b64({ exp: expSeconds, sub: "u" })}.sig`;
 }
 
+
 let embed: EmbedAuth | null = null;
 const originalFetch = globalThis.fetch;
 
@@ -217,6 +218,45 @@ describe("refresh before expiry", () => {
     expect(requests()).toEqual([
       { data: { type: MSG_TOKEN_REQUEST, protocol: 1 }, targetOrigin: HOST },
     ]);
+  });
+
+  it("backs off when the host keeps handing over an expired token, instead of asking every 5 seconds forever", () => {
+    // A host that answers with the token it still has, or a clock that runs
+    // ahead of the issuer's, delivers a token that is already expired. The
+    // refresh timer used to floor at 5 s, so the widget and host looped.
+    vi.useFakeTimers();
+    const now = Date.now();
+    const expired = jwt(Math.floor(now / 1000) - 3600);
+    // After each delivery the next ask is further out than the previous one.
+    const { win: win2, posted: posted2, deliver: deliver2 } = framedWindow();
+    embed = startEmbedAuth({ allowedOrigins: [HOST], win: win2, now: () => Date.now() });
+    const count2 = () => posted2.filter((p) => p.data.type === MSG_TOKEN_REQUEST).length;
+    deliver2({ type: MSG_TOKEN, token: expired });
+    vi.advanceTimersByTime(9_000);
+    expect(count2()).toBe(0); // first back-off is 10 s, not 5 s
+    vi.advanceTimersByTime(2_000);
+    expect(count2()).toBe(1);
+    deliver2({ type: MSG_TOKEN, token: expired });
+    vi.advanceTimersByTime(15_000);
+    expect(count2()).toBe(1); // second is 20 s
+    vi.advanceTimersByTime(6_000);
+    expect(count2()).toBe(2);
+  });
+
+  it("returns to the normal cadence once a healthy token arrives", () => {
+    vi.useFakeTimers();
+    const now = Date.now();
+    const { win, posted, deliver } = framedWindow();
+    embed = startEmbedAuth({ allowedOrigins: [HOST], win, now: () => Date.now() });
+    deliver({ type: MSG_TOKEN, token: jwt(Math.floor(now / 1000) - 3600) });
+    deliver({ type: MSG_TOKEN, token: jwt(Math.floor(now / 1000) - 3600) });
+    deliver({ type: MSG_TOKEN, token: jwt(Math.floor(now / 1000) + 300) });
+    const requests = () => posted.filter((p) => p.data.type === MSG_TOKEN_REQUEST).length;
+
+    vi.advanceTimersByTime(230_000);
+    expect(requests()).toBe(0);
+    vi.advanceTimersByTime(15_000);
+    expect(requests()).toBe(1);
   });
 
   it("schedules no refresh for an opaque (non-JWT) token", () => {

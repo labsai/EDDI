@@ -147,7 +147,7 @@ function TemplateCard({
           </span>
           <span className="text-xs font-medium text-primary opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
             {t("Workforce.onboarding.getStarted", "Get started")}
-            <ArrowRight className="h-3 w-3" />
+            <ArrowRight className="h-3 w-3 rtl:rotate-180" />
           </span>
         </div>
       </div>

@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.ResultSnapsho
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.BaseRuntime;
@@ -56,9 +57,12 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -153,6 +157,8 @@ class ConversationServiceStoreConflictTest {
         when(conversation.isEnded()).thenReturn(false);
         when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
                 .thenThrow(new ConcurrentConversationModificationException(CONVERSATION_ID, 3L));
+        TurnIdempotencyService turnIdempotency = spy(new TurnIdempotencyService(600, 10, meterRegistry, System::currentTimeMillis));
+        conversationService.turnIdempotency = turnIdempotency;
 
         conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, false, List.of(),
                 new InputData("hello", Map.of()), false, mock(ConversationResponseHandler.class));
@@ -166,6 +172,52 @@ class ConversationServiceStoreConflictTest {
         assertEquals(1.0, meterRegistry.counter(CONFLICT_COUNTER).count(),
                 "a refused turn persist must be counted, or the loss is as invisible as before the guard");
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
+        // The answer the caller got is not in the conversation: an Idempotency-Key
+        // retry must run the turn again, not be handed that answer from the cache.
+        verify(turnIdempotency).forgetUnpersisted(CONVERSATION_ID);
+    }
+
+    @Test
+    @Timeout(30)
+    @DisplayName("a keyed say turn whose persist conflicts is forgotten from the replay cache: a same-key retry runs the turn again")
+    @SuppressWarnings("unchecked")
+    void keyedSayConflictIsNotReplayedToASameKeyRetry() throws Exception {
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(storedSnapshot(1));
+        when(conversationMemoryStore.getConversationState(CONVERSATION_ID)).thenReturn(ConversationState.READY);
+        IAgent agent = mock(IAgent.class);
+        when(agentFactory.getAgent(ENV, AGENT_ID, 1)).thenReturn(agent);
+        when(agent.continueConversation(any(), any(), any())).thenReturn(conversation);
+        when(conversation.isEnded()).thenReturn(false);
+        when(conversationMemoryStore.storeConversationMemorySnapshot(any()))
+                .thenThrow(new ConcurrentConversationModificationException(CONVERSATION_ID, 3L));
+        TurnIdempotencyService turnIdempotency = new TurnIdempotencyService(600, 10, meterRegistry, System::currentTimeMillis);
+        conversationService.turnIdempotency = turnIdempotency;
+        // The pipeline hands the answer to the caller (which remembers it under the
+        // key) before the
+        // persist is attempted: the cached answer is exactly what a same-key retry
+        // would be served.
+        doAnswer(invocation -> {
+            var answer = new SimpleConversationMemorySnapshot();
+            answer.setConversationState(ConversationState.READY); // only a settled answer is kept for replay
+            turnIdempotency.complete(CONVERSATION_ID, "retry-key-1", new TurnIdempotencyService.Outcome(answer, false));
+            return null;
+        }).when(conversation).say(anyString(), anyMap());
+
+        ArgumentCaptor<Callable<Void>> captor = ArgumentCaptor.forClass(Callable.class);
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            var input = new InputData("hello", Map.of());
+            input.setIdempotencyKey("retry-key-1");
+            // The overload that admits a keyed turn (the environment/agent one runs it
+            // directly).
+            conversationService.say(CONVERSATION_ID, false, false, List.of(), input, false, mock(ConversationResponseHandler.class));
+            verify(conversationCoordinator, times(attempt)).submitInOrder(eq(CONVERSATION_ID), captor.capture());
+            captor.getValue().call();
+        }
+
+        // Served from the cache, the second attempt would never have been queued, let
+        // alone run.
+        verify(conversation, times(2)).say(anyString(), anyMap());
     }
 
     /**

@@ -76,9 +76,54 @@ class BrandDeliveryTest {
         String css = BrandDelivery.stylesheet(brand("Acme", colors));
         assertEquals("/* brand revision 3 */\n"
                 + ":root{--color-primary:#0f766e;--color-ring:#0f766e;--color-sidebar-accent:#0f766e;"
-                + "--color-primary-foreground:#ffffff;--color-sidebar-accent-foreground:#ffffff;--chat-accent:#0f766e;}\n"
+                + "--color-primary-foreground:#ffffff;--color-sidebar-accent-foreground:#ffffff;" + BrandDelivery.BRAND_SCALE
+                + "--brand-loader-accent:#2dd4bf;--chat-accent:#0f766e;}\n"
                 + ".dark{--color-primary:#2dd4bf;--color-ring:#2dd4bf;--color-sidebar-accent:#2dd4bf;"
-                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;}\n", css);
+                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;" + BrandDelivery.BRAND_SCALE
+                + "}\n", css);
+    }
+
+    /**
+     * The scale covers every step the Manager's {@code @theme} declares, is pure
+     * formula text over {@code --color-primary}, and never re-brands the warning
+     * scale or the fixed categorical ochre scale.
+     */
+    @Test
+    void brandScaleIsFormulaTextForEveryStep() throws IOException {
+        String theme = Files.readString(Path.of("ui", "manager", "src", "index.css"), StandardCharsets.UTF_8);
+        for (int step : new int[]{50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950}) {
+            String token = "--color-brand-" + step + ":";
+            assertTrue(BrandDelivery.BRAND_SCALE.contains(token), token);
+            assertTrue(theme.contains("--color-brand-" + step + ": var(--color-amber-" + step + ");"),
+                    "index.css must declare brand-" + step + " as amber, so an unbranded page is unchanged");
+            assertTrue(theme.contains("--color-warn-" + step + ": var(--color-amber-" + step + ");"), "warn-" + step);
+            assertTrue(theme.contains("--color-ochre-" + step + ": var(--color-amber-" + step + ");"), "ochre-" + step);
+        }
+        assertFalse(BrandDelivery.BRAND_SCALE.contains("warn"));
+        assertFalse(BrandDelivery.BRAND_SCALE.contains("ochre"));
+        assertFalse(BrandDelivery.BRAND_SCALE.contains("#"), "the server never computes a shade");
+        for (String declaration : BrandDelivery.BRAND_SCALE.split(";")) {
+            assertTrue(declaration.contains("var(--color-primary)"), declaration);
+        }
+        String css = BrandDelivery.stylesheet(brand("Acme", BrandingService.resolveColors(new BrandColors("#0f766e", null, null, null, null))));
+        assertTrue(css.contains(BrandDelivery.BRAND_SCALE), css);
+        assertFalse(css.contains("--color-warn"), css);
+        assertFalse(css.contains("--color-ochre"), css);
+    }
+
+    /**
+     * The HTML shells' spinner reads {@code --brand-loader-accent} with today's
+     * gold as the fallback, and only a sheet with a primary colour defines it.
+     */
+    @Test
+    void loaderAccentIsOnlySetWithAPrimaryColour() throws IOException {
+        for (String shell : new String[]{"manage.html", "welcome.html", "workforce.html"}) {
+            String html = Files.readString(Path.of("ui", "manager", shell), StandardCharsets.UTF_8);
+            assertTrue(html.contains("var(--brand-loader-accent, #d4a843)"), shell);
+        }
+        String accentOnly = BrandDelivery.stylesheet(brand("Acme", BrandingService.resolveColors(new BrandColors(null, null, null, null, "#123"))));
+        assertFalse(accentOnly.contains("--brand-loader-accent"), accentOnly);
+        assertFalse(accentOnly.contains("--color-brand-"), accentOnly);
     }
 
     @Test
@@ -90,9 +135,11 @@ class BrandDeliveryTest {
     @Test
     void darkColoursAloneStillReachTheDarkTheme() {
         String css = BrandDelivery.stylesheet(brand("Acme", BrandingService.resolveColors(new BrandColors(null, null, "#2dd4bf", "#042f2e", null))));
-        assertEquals("/* brand revision 3 */\n:root{}\n"
-                + ".dark{--color-primary:#2dd4bf;--color-ring:#2dd4bf;--color-sidebar-accent:#2dd4bf;"
-                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;}\n", css);
+        // The light theme stays EDDI; the loader, on its dark background, takes the
+        // dark primary.
+        assertTrue(css.contains(":root{--brand-loader-accent:#2dd4bf;}\n"), css);
+        assertTrue(css.contains(".dark{--color-primary:#2dd4bf;--color-ring:#2dd4bf;--color-sidebar-accent:#2dd4bf;"
+                + "--color-primary-foreground:#042f2e;--color-sidebar-accent-foreground:#042f2e;--color-brand-50:"), css);
     }
 
     /**

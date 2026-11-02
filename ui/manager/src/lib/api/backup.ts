@@ -347,10 +347,15 @@ export function parseResourceUri(resource: string): { id: string; version: numbe
  * Build auth headers for cross-instance sync.
  * Merges the local auth token (if set via Keycloak) with the optional
  * X-Source-Authorization header used for authenticating with the remote instance.
+ *
+ * Also names the space the caller is working in (`importSpaceHeader`): the sync
+ * preview and execute decide which copy a merge updates by what the importer may
+ * edit IN the target space, so they must address the same space an import does.
  */
 function mergedHeaders(sourceAuth?: string): Record<string, string> {
   return {
     ...api.getAuthHeader(),
+    ...importSpaceHeader(),
     ...(sourceAuth ? { "X-Source-Authorization": sourceAuth } : {}),
   };
 }
@@ -567,7 +572,7 @@ export async function previewUpgrade(
   const params = new URLSearchParams({ targetAgentId });
   const res = await fetch(`${api.getBaseUrl()}/backup/import/preview?${params}`, {
     method: "POST",
-    headers: { "Content-Type": "application/zip", ...api.getAuthHeader() },
+    headers: { "Content-Type": "application/zip", ...api.getAuthHeader(), ...importSpaceHeader() },
     body: file,
   });
   if (!res.ok) throw await failureOf(res, "Upgrade preview failed");

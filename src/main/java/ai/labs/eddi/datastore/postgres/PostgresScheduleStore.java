@@ -925,7 +925,7 @@ public class PostgresScheduleStore implements IScheduleStore {
         String sql = """
                 UPDATE eddi_schedules
                 SET fire_status = 'CLAIMED', claimed_by = ?, claimed_at = ?, fire_id = ?, updated_at = ?
-                WHERE id = ? AND (fire_status = 'PENDING'
+                WHERE id = ? AND enabled = TRUE AND (fire_status = 'PENDING'
                     OR (fire_status = 'FAILED' AND next_retry_at <= ?)
                     OR (fire_status = 'CLAIMED' AND claimed_at <= ?))
                 """;

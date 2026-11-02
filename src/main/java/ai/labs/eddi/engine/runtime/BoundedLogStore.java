@@ -14,6 +14,8 @@ import org.jboss.logging.Logger;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Consumer;
 import java.util.logging.LogRecord;
@@ -58,6 +60,18 @@ public class BoundedLogStore {
 
     // Async DB writer
     private final ConcurrentLinkedQueue<LogEntry> dbQueue = new ConcurrentLinkedQueue<>();
+
+    /**
+     * Cap on entries waiting for the DB writer. The queue was unbounded: with the
+     * database slow or down (every flush failing, or one flush stuck) a burst of
+     * WARN/ERROR records — which a failing database itself produces — grew it
+     * without limit, until the heap went. Past the cap new entries are dropped and
+     * counted; the ring buffer and the live tail still see them.
+     */
+    static final int DEFAULT_MAX_DB_QUEUE = 50_000;
+    private final int maxDbQueue;
+    private final AtomicInteger dbQueued = new AtomicInteger();
+    private final AtomicLong dbDropped = new AtomicLong();
     private ScheduledExecutorService dbWriter;
 
     @Inject
@@ -74,6 +88,30 @@ public class BoundedLogStore {
         this.dbFlushIntervalSeconds = dbFlushIntervalSeconds;
         this.dbPersistMinLevel = dbPersistMinLevel.toUpperCase();
         this.buffer = new ArrayDeque<>(bufferSize);
+        this.maxDbQueue = DEFAULT_MAX_DB_QUEUE;
+    }
+
+    private BoundedLogStore(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
+            int dbFlushIntervalSeconds, String dbPersistMinLevel, int maxDbQueue) {
+        this.instanceIdProducer = instanceIdProducer;
+        this.databaseLogs = databaseLogs;
+        this.bufferSize = bufferSize;
+        this.dbEnabled = dbEnabled;
+        this.dbFlushIntervalSeconds = dbFlushIntervalSeconds;
+        this.dbPersistMinLevel = dbPersistMinLevel.toUpperCase();
+        this.buffer = new ArrayDeque<>(bufferSize);
+        this.maxDbQueue = maxDbQueue;
+    }
+
+    /**
+     * As
+     * {@link #createForTesting(InstanceIdProducer, IDatabaseLogs, int, boolean, int, String)},
+     * with a DB queue cap.
+     */
+    static BoundedLogStore createForTesting(InstanceIdProducer instanceIdProducer, IDatabaseLogs databaseLogs, int bufferSize, boolean dbEnabled,
+                                            int dbFlushIntervalSeconds, String dbPersistMinLevel, int maxDbQueue) {
+        return new BoundedLogStore(instanceIdProducer, databaseLogs, bufferSize, dbEnabled, dbFlushIntervalSeconds, dbPersistMinLevel,
+                maxDbQueue);
     }
 
     /**
@@ -244,7 +282,13 @@ public class BoundedLogStore {
 
         // Enqueue for DB persistence
         if (dbEnabled && meetsMinLevel(entry.level())) {
-            dbQueue.offer(entry);
+            if (dbQueued.incrementAndGet() <= maxDbQueue) {
+                dbQueue.offer(entry);
+            } else {
+                // Not logged here: this runs inside the logging pipeline.
+                dbQueued.decrementAndGet();
+                dbDropped.incrementAndGet();
+            }
         }
     }
 
@@ -306,13 +350,28 @@ public class BoundedLogStore {
         if (dbQueue.isEmpty())
             return;
 
-        List<LogEntry> batch = new ArrayList<>();
-        LogEntry entry;
-        while ((entry = dbQueue.poll()) != null) {
-            batch.add(entry);
+        long dropped = dbDropped.getAndSet(0);
+        if (dropped > 0) {
+            log.warnv("Dropped {0} log entries before DB persistence: more than {1} were waiting (the database is slow or down)", dropped,
+                    maxDbQueue);
         }
-
-        if (!batch.isEmpty()) {
+        // Batches of a fixed size, and no more entries than were queued when this flush
+        // began:
+        // producers refill the slots a drain frees, so draining "until empty" could
+        // build one batch
+        // far beyond the queue cap (or never finish).
+        int remaining = dbQueue.size();
+        while (remaining > 0) {
+            List<LogEntry> batch = new ArrayList<>(Math.min(remaining, FLUSH_BATCH_SIZE));
+            LogEntry entry;
+            while (batch.size() < FLUSH_BATCH_SIZE && remaining > 0 && (entry = dbQueue.poll()) != null) {
+                dbQueued.decrementAndGet();
+                batch.add(entry);
+                remaining--;
+            }
+            if (batch.isEmpty()) {
+                return;
+            }
             try {
                 databaseLogs.addLogsBatch(batch);
             } catch (Exception e) {
@@ -320,6 +379,9 @@ public class BoundedLogStore {
             }
         }
     }
+
+    /** The most entries handed to the database in one batch. */
+    static final int FLUSH_BATCH_SIZE = 5_000;
 
     // ==================== Visible for Testing ====================
 
@@ -337,7 +399,7 @@ public class BoundedLogStore {
     }
 
     int getDbQueueSize() {
-        return dbQueue.size();
+        return dbQueued.get();
     }
 
     // ==================== Private Helpers ====================

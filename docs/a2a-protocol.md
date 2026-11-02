@@ -150,6 +150,12 @@ A message may carry several text parts (joined with newlines) and data parts
 (read as JSON). A message made only of file parts is refused with `-32005`
 ContentTypeNotSupported.
 
+Identifiers the peer chooses — `contextId`, `taskId`, `messageId`, a legacy task
+`id` — are at most 256 characters (`-32602` InvalidParams otherwise), and the
+JSON-RPC `id` must be a number or a string of at most 256 characters (`-32600`
+InvalidRequest otherwise). Both are echoed in every streamed event, so an
+unbounded one would multiply the response by the number of chunks.
+
 ### Tasks, contexts and conversations
 
 A **context is a conversation**, and a **task is one turn** in it. A message

@@ -4,13 +4,16 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.model.output.TokenUsage;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The tool exchange of ONE tool-loop run, recorded as it happens rather than
@@ -35,6 +38,47 @@ final class ToolExchangeRecorder {
     }
 
     private final List<Round> rounds = new ArrayList<>();
+
+    /**
+     * The prices of the model this run is on, or null for the task's own. Set by a
+     * cascade, whose step model is not the task's: the loop prices its mid-loop
+     * ceiling, its pause spend and a failure's spend with them.
+     */
+    private final ModelPrices prices;
+
+    /** Token usage of the model rounds completed so far. */
+    private TokenUsage usage;
+
+    ToolExchangeRecorder() {
+        this(null);
+    }
+
+    ToolExchangeRecorder(ModelPrices prices) {
+        this.prices = prices;
+    }
+
+    /** The prices this run is priced at, or null for the task's own. */
+    ModelPrices prices() {
+        return prices;
+    }
+
+    /**
+     * Records a completed model round's token usage — so a caller that abandons the
+     * run (a timed-out cascade step) can still price the rounds it paid for.
+     */
+    synchronized void recordUsage(TokenUsage roundUsage) {
+        if (roundUsage != null) {
+            usage = ToolContextBudget.sumTokens(usage, roundUsage);
+        }
+    }
+
+    /**
+     * Token usage of the rounds completed so far, as a {@code tokenUsage} map;
+     * empty when none.
+     */
+    synchronized Map<String, Object> tokenUsage() {
+        return usage != null ? ToolContextBudget.tokenUsageMap(usage) : Map.of();
+    }
 
     /**
      * Records that {@code request}, one of the calls {@code call} asked for, has

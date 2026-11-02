@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment;
@@ -1043,10 +1044,27 @@ class RestAgentEngineTest {
 
         @Test
         @DisplayName("M-E5: an unknown conversation is a 404, not a 500 from a null dereference")
-        void unknownConversationIsNotFound() {
+        void unknownConversationIsNotFound() throws Exception {
             // The memory store answers null for an unknown id (the setUp mock's default).
             assertThrows(NotFoundException.class, () -> restAgentEngine.resetState("conv-missing", "READY"));
-            verify(conversationService, never()).resetConversationState(anyString(), any());
+            verify(conversationService, never()).resetConversationState(anyString(), any(), any());
+        }
+
+        @Test
+        @DisplayName("a state that changed between the read and the reset answers 409 and is not overwritten")
+        void stateChangedMeanwhileIsAConflict() throws Exception {
+            var memoryStore = mock(IConversationMemoryStore.class);
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.ERROR);
+            when(memoryStore.loadConversationMemorySnapshot("conv-1")).thenReturn(snapshot);
+            when(conversationService.resetConversationState("conv-1", ConversationState.ERROR, ConversationState.READY)).thenReturn(false);
+            var engine = new RestAgentEngine(conversationService, memoryStore, identity, ownershipValidator,
+                    new ConversationAccessGuard(identity, ownershipValidator, descriptorStore), mock(ResourceAccessGuard.class),
+                    new HitlAccessGuard(identity, ownershipValidator, descriptorStore, conversationService, mock(IGroupConversationService.class)),
+                    mock(IHitlToolJournalStore.class), mock(AgentDisplayNameResolver.class), 30);
+
+            assertEquals(409, engine.resetState("conv-1", "READY").getStatus());
+            verify(conversationService).resetConversationState("conv-1", ConversationState.ERROR, ConversationState.READY);
         }
     }
 }

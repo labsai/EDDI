@@ -30,7 +30,7 @@ import static org.mockito.Mockito.*;
  * only. It is deliberately NOT a behavioural guarantee that
  * {@code AgentConfiguration.SessionManagement#maxCheckpointsPerConversation}
  * reaches the store: the sole production caller
- * ({@code AgentOrchestrator#executeSingleToolCallResult}) still uses the 3-arg
+ * ({@code ToolLoopRunner#executeSingleToolCallResult}) still uses the 3-arg
  * overload, and the agent-level setting has no route onto
  * {@code IConversationMemory} yet, so auto-checkpointing prunes to
  * {@link MemorySnapshotService#DEFAULT_MAX_CHECKPOINTS} at runtime. See the

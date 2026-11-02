@@ -1069,6 +1069,22 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(claimed);
     }
 
+    /**
+     * A schedule disabled between the poll's read and the claim must not be
+     * claimable — the claim itself re-checks {@code enabled}.
+     */
+    @Test
+    void tryClaim_requiresTheScheduleToStillBeEnabled() throws Exception {
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        sut.tryClaim("sched-1", "node-1", Instant.now(), Instant.now().minusSeconds(300));
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("fire_status = 'CLAIMED'") && s.contains("enabled = TRUE")),
+                "the claim UPDATE must re-check enabled: " + sql.getAllValues());
+    }
+
     @Test
     void tryClaim_alreadyClaimed_returnsFalse() throws Exception {
         // given

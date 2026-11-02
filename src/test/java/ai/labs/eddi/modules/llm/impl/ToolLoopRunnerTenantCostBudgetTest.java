@@ -35,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -145,7 +147,7 @@ class ToolLoopRunnerTenantCostBudgetTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
 
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any()))
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
                 .thenAnswer(i -> i.getArgument(2));
 
         tenantQuotaService = mock(TenantQuotaService.class);
@@ -191,7 +193,7 @@ class ToolLoopRunnerTenantCostBudgetTest {
     @Test
     @DisplayName("a quota-store outage refuses the tool call and reports the outage, not a spent budget")
     void accountingUnavailable_refusesAndNamesTheOutage() {
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.unavailable(OUTAGE_REASON));
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.unavailable(OUTAGE_REASON));
         var trace = new ArrayList<Map<String, Object>>();
 
         String result = execute(trace);
@@ -223,7 +225,7 @@ class ToolLoopRunnerTenantCostBudgetTest {
     @Test
     @DisplayName("an over-budget denial refuses the tool call and reports the budget")
     void overBudget_refusesAndNamesTheBudget() {
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.denied(OVER_BUDGET_REASON));
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.denied(OVER_BUDGET_REASON));
         var trace = new ArrayList<Map<String, Object>>();
 
         String result = execute(trace);
@@ -248,7 +250,7 @@ class ToolLoopRunnerTenantCostBudgetTest {
     @Test
     @DisplayName("a cost check that throws refuses the tool call as tenant_check_error, not as an outage, and does not throw")
     void checkThatThrows_refusesAsCheckError() {
-        when(tenantQuotaService.checkCostBudget("default")).thenThrow(new IllegalStateException("bug"));
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenThrow(new IllegalStateException("bug"));
         var trace = new ArrayList<Map<String, Object>>();
         // The tool loop counts on the global composite, which has no registry in a
         // unit test — attach one for the duration.
@@ -276,7 +278,7 @@ class ToolLoopRunnerTenantCostBudgetTest {
     @Test
     @DisplayName("an allowed cost check lets the tool run")
     void allowed_executesTheTool() {
-        when(tenantQuotaService.checkCostBudget("default")).thenReturn(QuotaCheckResult.OK);
+        when(tenantQuotaService.checkCostBudget(eq("default"), anyDouble())).thenReturn(QuotaCheckResult.OK);
         var trace = new ArrayList<Map<String, Object>>();
 
         String result = execute(trace);

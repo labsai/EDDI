@@ -218,7 +218,9 @@ public class NatsConnectionManager {
         }
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(kmf == null ? null : kmf.getKeyManagers(), tmf == null ? null : tmf.getTrustManagers(), null);
-        return context;
+        // jnats sets no endpoint identification algorithm, so without this the JDK
+        // accepts a trusted certificate issued for ANY host.
+        return config.natsTlsVerifyHostname() ? new HostnameVerifyingSslContext(context) : context;
     }
 
     private static KeyStore loadKeyStore(String path, String password) throws IOException, GeneralSecurityException {

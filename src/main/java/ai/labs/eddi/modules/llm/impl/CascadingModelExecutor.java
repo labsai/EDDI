@@ -48,6 +48,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
@@ -83,6 +84,16 @@ class CascadingModelExecutor {
     // live-streamed step's future, so the streaming executor always returns its
     // (possibly partial) result before this backstop could cancel it mid-stream.
     private static final long STREAMING_STEP_TIMEOUT_MARGIN_MS = 5_000L;
+
+    /**
+     * How long a timed-out step's thread is given to unwind after its cancel, so
+     * what it settles on the way out — the charge for a paid tool it was waiting on
+     * ({@code ToolExecutionService} charges an interrupted wait) — is in the
+     * conversation's tool cost before the failed step's spend is snapshotted. A
+     * bound, not a join: a step stuck in uninterruptible code must not hold the
+     * cascade, and its late charges are still counted by the conversation budget.
+     */
+    static final long CANCELLED_STEP_SETTLE_MS = 1_000L;
 
     /**
      * Parameter keys that must NOT be run through the template engine
@@ -485,7 +496,8 @@ class CascadingModelExecutor {
                             // Nothing to return (every earlier step failed): the same path as a
                             // refused primary call — LlmTask serves the task's fallback answer,
                             // whatever onError says — not "no steps produced a result".
-                            throw new LlmSpendGate.SpendRefusedException(admission.refusal());
+                            throw UnrecordedSpend.attach(new LlmSpendGate.SpendRefusedException(admission.refusal()), totals.tokenUsage,
+                                    totals.llmCostUsd, totals.toolCostUsd);
                         }
                         return finalizeBest(bestSoFar, totals, trace, errors);
                     }
@@ -529,8 +541,10 @@ class CascadingModelExecutor {
                     LOGGER.warn("All cascade steps exhausted (last circuit open), returning best response");
                     return withRun(bestSoFar, totals, trace);
                 }
-                throw new LlmCircuitOpenException("Model cascade failed: " + denialMessage + ". Errors: " + String.join("; ", errors),
-                        denial.failure());
+                throw UnrecordedSpend.attach(
+                        new LlmCircuitOpenException("Model cascade failed: " + denialMessage + ". Errors: " + String.join("; ", errors),
+                                denial.failure()),
+                        totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
             }
 
             if (eventSink != null) {
@@ -557,7 +571,10 @@ class CascadingModelExecutor {
             // runs — read by the timeout and failure paths below, where the step's
             // own result (and with it its returned exchange) never arrives.
             List<ChatMessage> carried = List.copyOf(totals.carriedToolExchange);
-            var stepExchange = new ToolExchangeRecorder();
+            // Priced at THIS step's model, so the tool loop's mid-loop ceiling, a pause and
+            // a failure price its rounds at the step's rates, not the task's.
+            ModelPrices stepPrices = ModelPrices.ofCascadeStep(step, cascade);
+            var stepExchange = new ToolExchangeRecorder(stepPrices);
 
             try {
                 // Live-stream a step only when it is GUARANTEED to be accepted regardless of
@@ -581,8 +598,7 @@ class CascadingModelExecutor {
                 // emitted once by the caller.
                 FormatRetryRunner.Policy retryPolicy = FormatRetryRunner.Policy.from(task.getResponseValidation(), step.getMaxFormatRetries(),
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
-                        step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M(),
-                        step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M(),
+                        stepPrices.inputPer1M(), stepPrices.outputPer1M(),
                         // the step's merged params, so a step-level responseSchema override applies
                         mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
                 if (retryPolicy != null) {
@@ -673,7 +689,7 @@ class CascadingModelExecutor {
                     totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
                     toolCostBeforeStep = conversationToolCost(agentOrchestrator, memory);
                     carried = List.of();
-                    stepExchange = new ToolExchangeRecorder();
+                    stepExchange = new ToolExchangeRecorder(stepPrices);
                     stepResult = executeStepWithTimeout(chatModel, streamingModel, eventSink, stepPrompt, systemMessage, effectiveStrategy, task,
                             memory, agentOrchestrator, useAgentMode, judgeModel, heuristicConfig, stepJsonPolicy, stepTimeout,
                             effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carried, stepExchange, stepRecovery);
@@ -841,8 +857,13 @@ class CascadingModelExecutor {
 
             } catch (TimeoutException e) {
                 ticket.release();
-                // The step's tools ran and were charged even though its result is lost.
+                // The step's tools ran and were charged even though its result is lost —
+                // and so did the model rounds its tool loop completed before it was
+                // abandoned: the recorder saw each one as it finished.
                 totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
+                Map<String, Object> abandonedUsage = stepExchange.tokenUsage();
+                totals.llmCostUsd += stepPrices.cost(abandonedUsage);
+                mergeTokenUsage(totals.tokenUsage, abandonedUsage);
                 carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
                 long durationMs = System.currentTimeMillis() - stepStart;
                 stepTrace.put("status", "timeout");
@@ -868,7 +889,9 @@ class CascadingModelExecutor {
                         LOGGER.warn("All cascade steps exhausted (last timed out), returning best response");
                         return withRun(bestSoFar, totals, trace);
                     }
-                    throw new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors));
+                    throw UnrecordedSpend.attach(
+                            new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors)),
+                            totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
                 }
 
             } catch (Exception e) {
@@ -904,6 +927,13 @@ class CascadingModelExecutor {
                     totals.toolCostUsd += stepToolCostSince(agentOrchestrator, memory, toolCostBeforeStep);
                     carryCompletedExchange(cascade, totals, carried, stepExchange, stepTrace);
                 }
+                // The model rounds the failed step paid for (its tool loop attaches them to
+                // the failure). Taken into the run's totals, so the next step's ceiling
+                // checks and the run's cost count them; the tool part is ignored, it is
+                // already in toolCostUsd above.
+                UnrecordedSpend.Spend failedStep = UnrecordedSpend.drain(e);
+                totals.llmCostUsd += failedStep.llmCostUsd();
+                mergeTokenUsage(totals.tokenUsage, failedStep.tokenUsage());
                 long durationMs = System.currentTimeMillis() - stepStart;
                 LlmFailure failure = LlmFailureClassifier.classify(e);
                 var circuitFailure = LlmCircuitBreakers.Failure.of(failure.cls());
@@ -943,7 +973,9 @@ class CascadingModelExecutor {
                         // final snapshot ("done") event.
                         return withRun(bestSoFar, totals, trace, bestSoFar.streamedLive() || stepStreamedLive);
                     }
-                    throw new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors), e);
+                    throw UnrecordedSpend.attach(
+                            new LifecycleException("Model cascade failed: all steps exhausted. Errors: " + String.join("; ", errors), e),
+                            totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
                 }
             }
         }
@@ -1280,14 +1312,21 @@ class CascadingModelExecutor {
         // OpenTelemetry context is carried for the same reason: without it every
         // model call and tool span of the step became a new root trace instead of a
         // child of the eddi.pipeline.task span (ToolExecutionService does the same).
+        var started = new AtomicBoolean();
+        var unwound = new CountDownLatch(1);
         Future<StepResult> future = TIMEOUT_EXECUTOR.submit(Context.current().wrap(callerIdentityContext.propagate(() -> {
-            if (useAgentMode) {
-                return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
-                        heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange,
-                        recovery);
-            } else {
-                return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
-                        heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
+            started.set(true);
+            try {
+                if (useAgentMode) {
+                    return executeAgentModeStep(chatModel, messages, systemMessage, evaluationStrategy, task, memory, agentOrchestrator, judgeModel,
+                            heuristicConfig, jsonPolicy, effectiveToolApprovals, llmTaskIndex, transcriptMaxBytes, carriedToolExchange, stepExchange,
+                            recovery);
+                } else {
+                    return executeLegacyModeStep(chatModel, streamingModel, eventSink, messages, systemMessage, evaluationStrategy, task, judgeModel,
+                            heuristicConfig, jsonPolicy, recovery, memory != null ? memory.getTurnDeadline() : null);
+                }
+            } finally {
+                unwound.countDown();
             }
         })));
 
@@ -1295,6 +1334,7 @@ class CascadingModelExecutor {
             return future.get(timeoutMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             future.cancel(true);
+            awaitCancelledStep(started, unwound);
             increment("eddi.llm.cancelled", "scope", "cascade_step");
             throw e;
         } catch (ExecutionException e) {
@@ -1306,6 +1346,25 @@ class CascadingModelExecutor {
                 throw ex;
             }
             throw new LifecycleException("Cascade step execution failed", cause instanceof Exception ex ? ex : new RuntimeException(cause));
+        }
+    }
+
+    /**
+     * Waits, at most {@link #CANCELLED_STEP_SETTLE_MS}, for a cancelled step's body
+     * to leave. A step cancelled before it started has nothing to settle and never
+     * reaches its {@code finally}, so it is not waited for.
+     */
+    private static void awaitCancelledStep(AtomicBoolean started, CountDownLatch unwound) {
+        if (!started.get()) {
+            return;
+        }
+        try {
+            if (!unwound.await(CANCELLED_STEP_SETTLE_MS, TimeUnit.MILLISECONDS)) {
+                LOGGER.debugf("A timed-out cascade step was still running %dms after its cancel; anything it settles later is not in "
+                        + "this step's spend", CANCELLED_STEP_SETTLE_MS);
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -1498,9 +1557,7 @@ class CascadingModelExecutor {
      * (step price overrides cascade-level default). Returns 0 when no price is set.
      */
     static double computeCost(CascadeStep step, ModelCascadeConfig cascade, Map<String, Object> tokenUsage) {
-        Double inPrice = step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M();
-        Double outPrice = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M();
-        return TokenPricing.cost(inPrice, outPrice, tokenUsage);
+        return ModelPrices.ofCascadeStep(step, cascade).cost(tokenUsage);
     }
 
     private static long asLong(Object value) {
@@ -1696,7 +1753,11 @@ class CascadingModelExecutor {
         if (bestSoFar != null) {
             return withRun(bestSoFar, totals, trace);
         }
-        throw new LifecycleException("Model cascade failed: no steps produced a result. Errors: " + String.join("; ", errors));
+        // Every step tried so far failed, but they were paid for: a run ceiling
+        // (duration, deadline, maxCostPerRun) reached after them must not lose that.
+        throw UnrecordedSpend.attach(
+                new LifecycleException("Model cascade failed: no steps produced a result. Errors: " + String.join("; ", errors)),
+                totals.tokenUsage, totals.llmCostUsd, totals.toolCostUsd);
     }
 
     private void recordStepMetrics(String modelType, long durationMs, double confidence, Map<String, Object> tokenUsage, double stepCost) {

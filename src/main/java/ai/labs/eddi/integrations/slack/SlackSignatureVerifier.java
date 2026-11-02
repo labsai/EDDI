@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.slack;
 
 import ai.labs.eddi.integrations.channels.HmacSignatures;
+import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
@@ -138,6 +139,13 @@ public class SlackSignatureVerifier {
     /** Constant-time HMAC comparison of the request against a single secret. */
     private boolean matchesSecret(String timestamp, String rawBody, String signature, String secret) {
         if (secret == null || secret.isBlank()) {
+            return false;
+        }
+        if (SecretReference.isVaultReference(secret)) {
+            // A reference the vault could not resolve is passed through unchanged. Its
+            // text is visible in the configuration, so it is never a key: anyone who
+            // read the config could sign with it.
+            LOGGER.warn("Slack signature verification: a signing secret is an unresolved vault reference - refusing it as a key");
             return false;
         }
         String baseString = VERSION + ":" + timestamp + ":" + rawBody;

@@ -94,6 +94,16 @@ describe('buildRedirects', () => {
     assert.equal(first.destination, 'https://docs.eddi.technology/:path*');
   });
 
+  // The decision: docs.labs.ai -> 301, kept forever. Vercel's `permanent: true` would be a 308.
+  it('makes every rule an explicit 301, never `permanent`', () => {
+    const all = rules('/security-and-compliance/secrets-vault\n/old https://github.com/x');
+    assert.ok(all.length > 5);
+    for (const rule of all) {
+      assert.equal(rule.statusCode, 301, rule.source);
+      assert.equal('permanent' in rule, false, rule.source);
+    }
+  });
+
   it('redirects the plain, trailing-slash and .md forms of a legacy path', () => {
     const all = rules('/security-and-compliance/secrets-vault');
     assert.equal(find(all, '/security-and-compliance/secrets-vault'), '/secrets-vault/');
@@ -152,8 +162,32 @@ describe('the real site', () => {
   });
 
   it('has vercel.json redirects generated from the current list (run `npm run redirects`)', () => {
-    const committed = JSON.parse(fs.readFileSync(path.join(siteDir, 'vercel.json'), 'utf8')).redirects;
+    const committed = JSON.parse(fs.readFileSync(path.join(repoRoot, 'vercel.json'), 'utf8')).redirects;
     assert.deepEqual(committed, buildRedirects(resolved, realIndex));
+  });
+
+  // The project's Root Directory is the repository root because it exists on every branch.
+  // With docs-site as the Root Directory, Vercel failed every push to a branch without it —
+  // the orphan `metrics` data branch, every 10-35 minutes — before any ignore step could run.
+  // And it deploys `main` only: every other branch is skipped (decided 2026-10-27). A branch that
+  // merged a broken main, or predates the site, would otherwise fail and email on every push.
+  it('builds main only, from the repository root, and skips branches that have no docs-site', () => {
+    const config = JSON.parse(fs.readFileSync(path.join(repoRoot, 'vercel.json'), 'utf8'));
+    assert.equal(config.installCommand, 'cd docs-site && npm ci');
+    assert.equal(config.buildCommand, 'cd docs-site && npm run build');
+    assert.equal(config.outputDirectory, 'docs-site/.generated/dist');
+    assert.match(config.ignoreCommand, /^\[ "\$VERCEL_ENV" != production \] \|\| \[ ! -d docs-site \] \|\| /);
+    // Against the last successful deployment, not HEAD^: a cancelled docs build followed by a
+    // non-docs commit must still publish. No previous SHA, or one not in the clone, builds.
+    assert.match(config.ignoreCommand, /P=\$VERCEL_GIT_PREVIOUS_SHA; \[ -n "\$P" \] && git cat-file -e .*git diff --quiet "\$P" HEAD -- /);
+    assert.doesNotMatch(config.ignoreCommand, /HEAD\^/);
+    // Vercel refuses a longer one in the project settings, which carry the same command.
+    assert.ok(config.ignoreCommand.length <= 256, `ignoreCommand is ${config.ignoreCommand.length} characters`);
+    for (const p of ['docs-site', 'docs', 'PRIVACY.md', 'vercel.json']) {
+      // Whole word: followed by a space or the closing `;`.
+      assert.match(config.ignoreCommand, new RegExp(`HEAD --.*\\s${p.replace('.', '\\.')}[\\s;]`), p);
+    }
+    assert.equal(fs.existsSync(path.join(siteDir, 'vercel.json')), false, 'docs-site/vercel.json would be ignored by Vercel');
   });
 
   // The backend and the Manager print docs links (startup banners, the coordinator page), and

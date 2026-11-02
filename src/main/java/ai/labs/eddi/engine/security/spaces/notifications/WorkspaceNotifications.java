@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.notifications;
 
+import ai.labs.eddi.configs.descriptors.ConfigResourceTypes;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -79,11 +80,13 @@ public class WorkspaceNotifications {
     private final SpaceContext spaceContext;
     private final UserDirectory directory;
     private final ManagedExecutor executor;
+    private final ConfigResourceTypes configTypes;
 
     @Inject
     public WorkspaceNotifications(IWorkspaceNotificationStore store, IDocumentDescriptorStore descriptorStore, ResourceAccessGuard accessGuard,
-            SpaceContext spaceContext, UserDirectory directory, ManagedExecutor executor) {
+            SpaceContext spaceContext, UserDirectory directory, ManagedExecutor executor, ConfigResourceTypes configTypes) {
         this.store = store;
+        this.configTypes = configTypes;
         this.descriptorStore = descriptorStore;
         this.accessGuard = accessGuard;
         this.spaceContext = spaceContext;
@@ -180,7 +183,11 @@ public class WorkspaceNotifications {
             LOGGER.warnf("Could not load %s for an access request: %s", sanitize(resourceId), e.getMessage());
             return RequestOutcome.SENT;
         }
-        if (descriptor == null) {
+        if (descriptor == null || !configTypes.isConfigDescriptor(descriptor)) {
+            // Only configuration is shared, so only configuration can be asked for. A
+            // conversation's id (same collection) is answered exactly like a missing
+            // one, after the attempt was counted: a distinct refusal would tell the
+            // caller the id exists and what kind of thing it names.
             return RequestOutcome.SENT;
         }
         AccessLevel held = accessGuard.effectiveLevel(descriptor);
