@@ -626,6 +626,15 @@ public class GroupConversation {
     private Double inheritedCostCeiling;
 
     /**
+     * What this root discussion has charged to its team's monthly budget and the
+     * ceiling that follows (F6); {@code null} for nested children (their parent
+     * pays) and for documents written before the feature. Persisted for the same
+     * reason as {@link #inheritedCostCeiling}: it belongs to the run, which
+     * survives pauses.
+     */
+    private TeamBudgetState teamBudgetState;
+
+    /**
      * A single entry in the discussion transcript. Each entry records one agent's
      * contribution during a specific phase.
      *
@@ -1540,6 +1549,14 @@ public class GroupConversation {
 
     public void setInheritedCostCeiling(Double inheritedCostCeiling) {
         this.inheritedCostCeiling = inheritedCostCeiling;
+    }
+
+    public TeamBudgetState getTeamBudgetState() {
+        return teamBudgetState;
+    }
+
+    public void setTeamBudgetState(TeamBudgetState teamBudgetState) {
+        this.teamBudgetState = teamBudgetState;
     }
 
     public HitlTimeoutPolicy getHitlTimeoutPolicy() {

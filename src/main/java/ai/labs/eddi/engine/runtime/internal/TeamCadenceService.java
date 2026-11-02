@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskStatus;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
@@ -111,6 +112,10 @@ public class TeamCadenceService {
     private final ITemplatingEngine templatingEngine;
     private final MeterRegistry meterRegistry;
     private final Duration claimTtl;
+
+    /** F6; field-injected so direct construction in tests runs unbudgeted. */
+    @Inject
+    TeamBudgetService teamBudgetService;
 
     private Counter cadenceRunsStarted;
     private Counter cadenceRunsSkipped;
@@ -230,6 +235,21 @@ public class TeamCadenceService {
             if (cadence == null) {
                 return CadenceResult.failed(groupId, cadenceId,
                         "Cadence " + cadenceId + " no longer exists on the workspace — delete its schedule");
+            }
+
+            // F6: a team with no budget left this month does not start a run. A skip is a
+            // success (not retried, the backlog is untouched); an unreadable budget is a
+            // failure, so the poller's retry and dead-letter machinery makes it visible.
+            if (teamBudgetService != null) {
+                TeamBudgetService.Decision budget = teamBudgetService.decide(groupId);
+                if (!budget.allowed()) {
+                    teamBudgetService.countRefusal(TeamBudgetService.Surface.CADENCE, budget.reason());
+                    if ("unavailable".equals(budget.reason())) {
+                        return CadenceResult.failed(groupId, cadenceId, budget.message());
+                    }
+                    cadenceRunsSkipped.increment();
+                    return CadenceResult.skipped(groupId, cadenceId, budget.message());
+                }
             }
 
             // 2. Pull: top-N executable backlog tasks, highest priority first.
