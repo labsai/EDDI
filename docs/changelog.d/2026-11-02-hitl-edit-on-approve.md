@@ -52,3 +52,8 @@ shape that analytics can rely on.
   through `IConversationService.validateHitlDecision`, so errors show in the modal. Group cards keep Approve/Reject.
   `SlackHitlSupport.buildApprovalBlocks` keeps its signature; the new overload takes the card's edit controls and keeps
   the `actions` block last.
+- **Manager** — the approval banner offers "Edit the answer before approving" on a RULE pause whose
+  `pauseDetails.editableAnswer` is present (textarea with the draft, a counter against `maxChars`, JSON validation for
+  a JSON answer, the original one click away), a reason-code select for rejections and edits, and a notice when the
+  engine refused the last edit; the group transcript marks a reviewer's SYNTHESIS entry. Every Manager decision sends
+  `X-EDDI-Client: manager`. New keys under `hitlReview.*` in all 11 locales.

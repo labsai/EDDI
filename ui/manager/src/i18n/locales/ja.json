@@ -4380,6 +4380,24 @@
     "groupReviewLoadError": "ディスカッションを読み込めませんでした。",
     "groupReviewNoEntries": "まだ発言はありません。"
   },
+  "hitlReview": {
+    "approveEdited": "編集して承認",
+    "confirmApproveEditedDescription": "あなたのテキストがエージェントの回答に置き換わり、会話が再開されます。",
+    "confirmApproveEditedTitle": "編集内容で承認しますか？",
+    "discardEdit": "編集を破棄",
+    "editAnswer": "承認前に回答を編集",
+    "editEmpty": "回答を空にすることはできません。",
+    "editNotJson": "このエージェントは JSON で回答します — 回答は JSON オブジェクトである必要があります。",
+    "editTooLong": "回答が {{max}} 文字を超えています。",
+    "editedAnswerLabel": "最終回答",
+    "hideOriginal": "元の回答を隠す",
+    "lastEditDrift": "エージェントが変更されたため、前回の編集を適用できませんでした — 元の回答が再びレビュー待ちです。",
+    "lastEditScreenedOut": "前回の編集はエージェントの出力ガードレール（{{guardrail}}）によってブロックされました — 元の回答が再びレビュー待ちです。",
+    "noReason": "理由なし",
+    "reasonLabel": "理由（却下または編集の場合）",
+    "reviewerEdit": "レビュー担当者による編集",
+    "showOriginal": "元の回答を表示"
+  },
   "chatDrawer": {
     "deploying": "エージェントをデプロイ中…",
     "error": "問題が発生しました",

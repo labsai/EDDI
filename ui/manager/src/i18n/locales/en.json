@@ -4421,6 +4421,24 @@
     "groupReviewLoadError": "The discussion could not be loaded.",
     "groupReviewNoEntries": "Nothing has been said yet."
   },
+  "hitlReview": {
+    "approveEdited": "Approve with edits",
+    "confirmApproveEditedDescription": "Your text replaces the agent's answer and the conversation resumes.",
+    "confirmApproveEditedTitle": "Approve with your edits?",
+    "discardEdit": "Discard my edits",
+    "editAnswer": "Edit the answer before approving",
+    "editEmpty": "The answer must not be empty.",
+    "editNotJson": "This agent answers in JSON — the answer must be a JSON object.",
+    "editTooLong": "The answer is longer than {{max}} characters.",
+    "editedAnswerLabel": "Final answer",
+    "hideOriginal": "Hide the original",
+    "lastEditDrift": "Your last edit could not be applied because the agent changed — the original answer is up for review again.",
+    "lastEditScreenedOut": "Your last edit was blocked by the agent's output guardrails ({{guardrail}}) — the original answer is up for review again.",
+    "noReason": "No reason",
+    "reasonLabel": "Reason (for a rejection or an edit)",
+    "reviewerEdit": "Reviewer edit",
+    "showOriginal": "Show the original"
+  },
   "chatDrawer": {
     "deploying": "Deploying agent…",
     "error": "Something went wrong",

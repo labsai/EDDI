@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
+import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
@@ -5633,7 +5634,9 @@ export const backupSyncHandlers = [
   // (GET */agents/pending-approvals is registered earlier, before the
   //  ":conversationId" catch-all, so it isn't shadowed.)
 
-  http.post("*/agents/:conversationId/resume", async ({ request }) => {
+  http.post("*/agents/:conversationId/resume", async ({ params, request }) => {
+    const editable = await editableResumeFor(params.conversationId, request);
+    if (editable) return editable;
     const body = (await request.json().catch(() => ({}))) as { note?: string };
     if (body?.note && body.note.length > 4096) {
       return HttpResponse.json(
@@ -5663,7 +5666,9 @@ export const backupSyncHandlers = [
   http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
   http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
 
-  http.get("*/agents/:conversationId/approval-status", () => {
+  http.get("*/agents/:conversationId/approval-status", ({ params }) => {
+    const editable = editableApprovalStatusFor(params.conversationId);
+    if (editable) return editable;
     return HttpResponse.json({
       conversationId: "conv-awaiting-1",
       state: "AWAITING_HUMAN",

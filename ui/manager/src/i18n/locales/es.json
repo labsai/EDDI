@@ -4428,6 +4428,24 @@
     "groupReviewLoadError": "No se pudo cargar la discusión.",
     "groupReviewNoEntries": "Todavía no se ha dicho nada."
   },
+  "hitlReview": {
+    "approveEdited": "Aprobar con cambios",
+    "confirmApproveEditedDescription": "Tu texto reemplaza la respuesta del agente y la conversación continúa.",
+    "confirmApproveEditedTitle": "¿Aprobar con tus cambios?",
+    "discardEdit": "Descartar mis cambios",
+    "editAnswer": "Editar la respuesta antes de aprobar",
+    "editEmpty": "La respuesta no puede estar vacía.",
+    "editNotJson": "Este agente responde en JSON: la respuesta debe ser un objeto JSON.",
+    "editTooLong": "La respuesta supera los {{max}} caracteres.",
+    "editedAnswerLabel": "Respuesta final",
+    "hideOriginal": "Ocultar el original",
+    "lastEditDrift": "Tu último cambio no se pudo aplicar porque el agente cambió; la respuesta original vuelve a estar en revisión.",
+    "lastEditScreenedOut": "Las salvaguardas de salida del agente bloquearon tu último cambio ({{guardrail}}); la respuesta original vuelve a estar en revisión.",
+    "noReason": "Sin motivo",
+    "reasonLabel": "Motivo (de un rechazo o un cambio)",
+    "reviewerEdit": "Cambio del revisor",
+    "showOriginal": "Mostrar el original"
+  },
   "chatDrawer": {
     "deploying": "Desplegando agente…",
     "error": "Algo salió mal",

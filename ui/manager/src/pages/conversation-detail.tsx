@@ -57,7 +57,7 @@ import {
   useCancelConversation,
   useApprovalStatus,
 } from "@/hooks/use-hitl";
-import type { HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
+import type { DecisionReview, HitlVerdict, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
 import { isPauseChanged, shownPauseOf } from "@/lib/hitl-pause-binding";
 import { ConversationRatingPanel, StepRatingBadge } from "@/components/feedback/conversation-rating-panel";
 import { useConversationRatings } from "@/hooks/use-ratings";
@@ -411,11 +411,12 @@ export function ConversationDetailPage() {
             note?: string,
             _taskApprovals?: Record<string, string>,
             toolDecisions?: Record<string, ToolCallDecision>,
+            review?: DecisionReview,
           ) => {
             resumeMutation.mutate(
               {
                 conversationId: id!,
-                decision: { verdict, note, toolDecisions },
+                decision: { verdict, note, toolDecisions, ...review },
                 // Bound to the pause this banner rendered, so a decision cannot
                 // land on a later pause of the same conversation unseen.
                 shown: approvalStatus

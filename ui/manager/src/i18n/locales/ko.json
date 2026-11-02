@@ -4380,6 +4380,24 @@
     "groupReviewLoadError": "토론을 불러오지 못했습니다.",
     "groupReviewNoEntries": "아직 발언이 없습니다."
   },
+  "hitlReview": {
+    "approveEdited": "수정 후 승인",
+    "confirmApproveEditedDescription": "입력한 텍스트가 에이전트의 답변을 대체하고 대화가 재개됩니다.",
+    "confirmApproveEditedTitle": "수정한 내용으로 승인할까요?",
+    "discardEdit": "내 수정 취소",
+    "editAnswer": "승인 전에 답변 수정",
+    "editEmpty": "답변은 비워 둘 수 없습니다.",
+    "editNotJson": "이 에이전트는 JSON으로 답변합니다 — 답변은 JSON 객체여야 합니다.",
+    "editTooLong": "답변이 {{max}}자를 초과합니다.",
+    "editedAnswerLabel": "최종 답변",
+    "hideOriginal": "원본 숨기기",
+    "lastEditDrift": "에이전트가 변경되어 마지막 수정을 적용할 수 없었습니다 — 원래 답변이 다시 검토 대기 중입니다.",
+    "lastEditScreenedOut": "마지막 수정이 에이전트의 출력 가드레일({{guardrail}})에 의해 차단되었습니다 — 원래 답변이 다시 검토 대기 중입니다.",
+    "noReason": "사유 없음",
+    "reasonLabel": "사유(거부 또는 수정 시)",
+    "reviewerEdit": "검토자 수정",
+    "showOriginal": "원본 보기"
+  },
   "chatDrawer": {
     "deploying": "에이전트 배포 중…",
     "error": "문제가 발생했습니다",

@@ -194,6 +194,14 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
           <Badge variant={badgeVar} className="text-[10px] px-1.5 py-0">
             {t(`groups.entryType.${entry.type}`, info.label)}
           </Badge>
+          {entry.errorReason === "reviewer-edit" && (
+            <span
+              className="rounded-full bg-amber-500/10 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:text-amber-400"
+              data-testid="transcript-reviewer-edit"
+            >
+              {t("hitlReview.reviewerEdit", "Reviewer edit")}
+            </span>
+          )}
           {entry.targetAgentId && (
             <span className="text-[10px] text-muted-foreground" title={entry.targetAgentId}>
               → {entry.targetAgentId.slice(0, 8)}…

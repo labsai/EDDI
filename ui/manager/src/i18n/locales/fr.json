@@ -4428,6 +4428,24 @@
     "groupReviewLoadError": "La discussion n'a pas pu être chargée.",
     "groupReviewNoEntries": "Rien n'a encore été dit."
   },
+  "hitlReview": {
+    "approveEdited": "Approuver avec modifications",
+    "confirmApproveEditedDescription": "Votre texte remplace la réponse de l'agent et la conversation reprend.",
+    "confirmApproveEditedTitle": "Approuver avec vos modifications ?",
+    "discardEdit": "Annuler mes modifications",
+    "editAnswer": "Modifier la réponse avant d'approuver",
+    "editEmpty": "La réponse ne doit pas être vide.",
+    "editNotJson": "Cet agent répond en JSON — la réponse doit être un objet JSON.",
+    "editTooLong": "La réponse dépasse {{max}} caractères.",
+    "editedAnswerLabel": "Réponse finale",
+    "hideOriginal": "Masquer l'original",
+    "lastEditDrift": "Votre dernière modification n'a pas pu être appliquée car l'agent a changé — la réponse d'origine est à nouveau à examiner.",
+    "lastEditScreenedOut": "Votre dernière modification a été bloquée par les garde-fous de sortie de l'agent ({{guardrail}}) — la réponse d'origine est à nouveau à examiner.",
+    "noReason": "Aucun motif",
+    "reasonLabel": "Motif (d'un refus ou d'une modification)",
+    "reviewerEdit": "Modification du relecteur",
+    "showOriginal": "Afficher l'original"
+  },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
     "error": "Une erreur est survenue",
