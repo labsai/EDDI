@@ -53,17 +53,6 @@ export function formatDateTimeWithZone(ts: Ts, withZone = true): string {
   }
 }
 
-/** Calendar date only (`Oct 4, 2026`). */
-export function formatDateOnly(ts: Ts): string {
-  const d = toDate(ts);
-  if (!d) return "—";
-  return new Intl.DateTimeFormat(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(d);
-}
-
 // ─── Wall-clock <-> instant in a named IANA zone ────────────────────────────
 
 function zoneParts(ms: number, timeZone: string): Record<string, number> {

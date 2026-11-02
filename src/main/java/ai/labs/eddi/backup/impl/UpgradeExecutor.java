@@ -43,7 +43,9 @@ import ai.labs.eddi.configs.propertysetter.IRestPropertySetterStore;
 import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
 import ai.labs.eddi.configs.rules.IRuleSetStore;
 import ai.labs.eddi.configs.rules.IRestRuleSetStore;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
@@ -113,6 +115,27 @@ public class UpgradeExecutor {
     @Inject
     void useCallerTokenAuthorPolicy(CallerTokenAuthorPolicy policy) {
         this.callerTokenAuthorPolicy = policy;
+    }
+
+    /**
+     * The storage rules for a knowledge base this run creates. Null when built
+     * outside the container; {@link #applyStorageRulesToNewRag} then still forces
+     * per-id isolation.
+     */
+    private KnowledgeBaseStorageGuard knowledgeBaseStorageGuard;
+
+    @Inject
+    void useKnowledgeBaseStorageGuard(KnowledgeBaseStorageGuard guard) {
+        this.knowledgeBaseStorageGuard = guard;
+    }
+
+    /** See {@link RestImportService#applyStorageRulesToNewRag}. */
+    void applyStorageRulesToNewRag(RagConfiguration config) {
+        if (knowledgeBaseStorageGuard != null) {
+            knowledgeBaseStorageGuard.prepareNew(config, false);
+        } else if (config != null) {
+            config.setStoreNamespace(KnowledgeBaseStorage.NAMESPACE_ID);
+        }
     }
 
     @Inject
@@ -219,7 +242,8 @@ public class UpgradeExecutor {
             int deliveredResources = 0;
 
             for (WorkflowSourceData sourceWf : sourceWorkflows) {
-                ResourceDiff wfDiff = diffMap.get(sourceWf.sourceId());
+                Map<String, ResourceDiff> workflowDiffs = diffsOfWorkflow(preview, diffMap, sourceWf.positionIndex());
+                ResourceDiff wfDiff = workflowDiffs.get(sourceWf.sourceId());
                 if (wfDiff == null)
                     continue;
 
@@ -262,7 +286,7 @@ public class UpgradeExecutor {
                     // is certain to happen. Deciding it afterwards left the resource
                     // behind, unreferenced, whenever the adoption was then refused.
                     String adoptionBlocker = adoptSourceConfig
-                            ? adoptionBlocker(sourceWf, wfDiff, diffMap, selectedSourceIds)
+                            ? adoptionBlocker(sourceWf, wfDiff, workflowDiffs, selectedSourceIds)
                             : workflowAction == null
                                     ? "the workflow was changed on this instance and is left alone"
                                     : wfDiff.action() == DiffAction.SKIP
@@ -272,7 +296,7 @@ public class UpgradeExecutor {
                     Set<String> createdForAdoption = new HashSet<>();
                     Set<String> deliverableKeys = new LinkedHashSet<>();
                     Map<String, URI> extensionUpdates = processWorkflowExtensions(
-                            sourceWf, wfDiff, diffMap, selectedSourceIds, adoptionBlocker, createdForAdoption,
+                            sourceWf, wfDiff, workflowDiffs, selectedSourceIds, adoptionBlocker, createdForAdoption,
                             deliverableKeys, outcome);
 
                     int failuresBefore = outcome.failures.size();
@@ -409,6 +433,13 @@ public class UpgradeExecutor {
         private Boolean compatible;
         private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
+        /**
+         * Target resource id -> the version this run's own update produced. A resource
+         * two target workflows share is written once per workflow, and the second write
+         * meets a 409 naming the first one's version: that newer version is this run's,
+         * not a local edit to protect.
+         */
+        private final Map<String, Integer> versionsWritten = new HashMap<>();
 
         void failed(String sourceId, String resourceType, String name, Throwable cause) {
             String reason = cause.getMessage() != null
@@ -557,6 +588,36 @@ public class UpgradeExecutor {
     // ==================== Workflow Extension Processing ====================
 
     /**
+     * The preview's rows as one workflow sees them: the rows the matcher emitted
+     * for this workflow's position take precedence over same-id rows of other
+     * workflows.
+     * <p>
+     * A resource two source workflows share has a copy per workflow on the target
+     * (an import copies it once per workflow), so the matcher emits one row per
+     * workflow with different targets. Looking it up by source id alone answered
+     * every workflow with the first workflow's row: the second workflow's copy was
+     * never written, the first one was written twice (the second time against a
+     * stale version), the second workflow was repointed at the first workflow's
+     * copy and its own was orphaned — and a SKIP in the first workflow hid an
+     * UPDATE in the second that the preview had shown.
+     */
+    private static Map<String, ResourceDiff> diffsOfWorkflow(ImportPreview preview, Map<String, ResourceDiff> allDiffs,
+                                                             int workflowIndex) {
+        Map<String, ResourceDiff> own = new HashMap<>();
+        for (ResourceDiff diff : preview.resources()) {
+            if (diff.workflowIndex() == workflowIndex) {
+                own.putIfAbsent(diff.sourceId(), diff);
+            }
+        }
+        if (own.isEmpty()) {
+            return allDiffs;
+        }
+        Map<String, ResourceDiff> scoped = new HashMap<>(allDiffs);
+        scoped.putAll(own);
+        return scoped;
+    }
+
+    /**
      * For each extension in a matched workflow, update the target extension with
      * the source content.
      *
@@ -660,7 +721,7 @@ public class UpgradeExecutor {
             try {
                 if (action == DiffAction.UPDATE && extDiff.targetId() != null) {
                     WrittenExtension written = updateExtension(sourceExt, extDiff.targetId(), extDiff.targetVersion(),
-                            extDiff.targetContent());
+                            extDiff.targetContent(), outcome);
                     if (written != null) {
                         // Only a resource whose descriptor now names the new version counts
                         // as updated: one the deployment cannot resolve was written, but it
@@ -730,6 +791,9 @@ public class UpgradeExecutor {
                         onTargetBySourceId.put(sourceExt.sourceId(), created);
                     }
                 }
+            } catch (ChangedSincePreviewException e) {
+                LOGGER.warn(LogSanitizer.sanitize(e.getMessage()));
+                outcome.failed(sourceExt.sourceId(), sourceExt.type(), sourceExt.name(), e.getMessage());
             } catch (Exception e) {
                 LOGGER.warnf(e, "Failed to process extension %s '%s'", LogSanitizer.sanitize(sourceExt.type()),
                         LogSanitizer.sanitize(sourceExt.name()));
@@ -876,15 +940,27 @@ public class UpgradeExecutor {
         try {
             ExtensionStoreOps<Object> ops = resolveExtensionOps(source.type());
             IResourceStore<Object> store = getStore(ops.storeClass());
+            // Decoded first, then checked: the object checked is the object stored. The
+            // raw JSON was checked before — and a JSON escape for the dollar sign in
+            // front of {caller:token} hid the reference from that text scan, which
+            // deserialization then turned
+            // into a live one.
+            Object content = jsonSerialization.deserialize(source.contentJson(), ops.configClass());
             if (callerTokenAuthorPolicy != null) {
                 // Inside the per-resource try on purpose: an upgrade is not transactional
                 // and reports each resource's outcome, so a refusal is recorded as that
                 // resource failing (nothing is written), exactly as the same refusal from
                 // the REST store does on the update path. Throwing here would abort the
                 // run with earlier resources already written and no rollback.
-                callerTokenAuthorPolicy.requireMayAuthor(source.contentJson(), source.type());
+                callerTokenAuthorPolicy.requireMayAuthor(content, source.type());
             }
-            Object content = jsonSerialization.deserialize(source.contentJson(), ops.configClass());
+            if (content instanceof RagConfiguration rag) {
+                // A created knowledge base is a new one, addressed by its own id — the
+                // rule the REST create and the import apply. Without it a source config
+                // could keep the legacy "name" layout and name another knowledge base's
+                // collection, whose search then runs without an isolation filter.
+                applyStorageRulesToNewRag(rag);
+            }
             // The REST stores refuse a document carrying the read-redaction marker; this
             // direct create must too, for the five types whose reads produce it. A sync
             // source read through a non-admin peer credential carries it, and storing
@@ -1039,7 +1115,7 @@ public class UpgradeExecutor {
      *             wrong thing entirely.
      */
     private WrittenExtension updateExtension(ExtensionSourceData source, String targetId, Integer targetVersion,
-                                             String targetContentJson) {
+                                             String targetContentJson, Outcome outcome) {
         ExtensionStoreOps<?> ops = resolveExtensionOps(source.type());
         try {
             String contentJson = restoreRedactedSecrets(source, source.contentJson(), targetContentJson);
@@ -1052,10 +1128,21 @@ public class UpgradeExecutor {
                 if (current == null || current.equals(version)) {
                     throw conflict;
                 }
-                // The store knows a version this run did not. Writing the same content
-                // against the version it names is the difference between a target that
-                // heals itself and one that answers "the store did not accept the
-                // update" for ever after a single descriptor write went missing.
+                boolean ownWrite = current.equals(outcome.versionsWritten.get(targetId));
+                if (!ownWrite) {
+                    // Not this run's own write, so the store holds a version nobody here
+                    // accounts for. It may be somebody's edit made after the preview was
+                    // built (its descriptor moves only after the content commits, so no
+                    // read can tell an edit in flight from a lost descriptor bump), and
+                    // writing over it would discard that edit without the CONFLICT the
+                    // preview reports for every other local change. Fail safe: report it.
+                    throw new ChangedSincePreviewException(source.type() + " '" + source.name() + "' was changed on this instance"
+                            + " (now v" + current + ", previewed at v" + version + ") while the sync ran; it was not"
+                            + " overwritten — preview and sync again");
+                }
+                // The newer version is this run's own earlier write of the same target
+                // (two rows naming one resource): writing against it is the correct next
+                // step, not an overwrite.
                 LOGGER.infof("%s '%s' is at v%d, not v%d — retrying the update against the version the store reports",
                         LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()), current, version);
                 version = current;
@@ -1064,12 +1151,26 @@ public class UpgradeExecutor {
             if (resp == null || resp.getStatus() != 200) {
                 return null;
             }
+            outcome.versionsWritten.put(targetId, version + 1);
             return new WrittenExtension(
                     URI.create(ops.resourceUri() + targetId + ops.versionQueryParam() + (version + 1)), version);
+        } catch (ChangedSincePreviewException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.warnf(e, "Failed to update %s '%s' (target=%s)", LogSanitizer.sanitize(source.type()), LogSanitizer.sanitize(source.name()),
                     LogSanitizer.sanitize(targetId));
             return null;
+        }
+    }
+
+    /**
+     * A target resource changed on this instance between the preview this run built
+     * and its write. Reported as that resource's failure, with a reason the
+     * operator can act on.
+     */
+    private static final class ChangedSincePreviewException extends RuntimeException {
+        ChangedSincePreviewException(String message) {
+            super(message);
         }
     }
 
@@ -1184,6 +1285,35 @@ public class UpgradeExecutor {
                                 + "' was left out of the selection, and a new workflow needs every resource its steps name");
                 return null;
             }
+        }
+
+        // The REST create's reference check, which the direct create below bypasses -
+        // run before anything is written, so a refusal leaves no orphans. The
+        // references WorkflowExtensions recognises are about to be repointed at
+        // resources this run creates; any other one (a legacy authority the engine
+        // still resolves, a padded uri, say) would reach the store as written, naming
+        // a configuration the caller may not be able to read.
+        //
+        // Exempting by "<host>|<id>" key would excuse an unrecognised reference that
+        // shares a key with a recognised one, so the check runs on a copy in which each
+        // recognised reference has already been replaced by a stand-in for the
+        // resource this run will create: whatever still names an original id is then
+        // checked, and only the stand-ins are exempt.
+        try {
+            WorkflowConfiguration preview = jsonSerialization.deserialize(
+                    jsonSerialization.serialize(sourceWf.config()), WorkflowConfiguration.class);
+            Set<String> repointed = new HashSet<>();
+            int standIn = 0;
+            for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(preview)) {
+                URI created = URI.create("eddi://" + ref.extensionUri().getHost() + "/created/" + "created-by-this-run-" + standIn++
+                        + "?version=1");
+                repointed.add(WorkflowReferenceAccess.keyOf(created));
+                ref.repointTo(created);
+            }
+            WorkflowReferenceAccess.requireAccessToReferences(resourceAccessGuard, preview, repointed);
+        } catch (Exception e) {
+            outcome.failed(sourceWf.sourceId(), "workflow", sourceWf.name(), e);
+            return null;
         }
 
         Map<String, URI> createdByKey = new HashMap<>();
@@ -1596,13 +1726,13 @@ public class UpgradeExecutor {
     /**
      * The agent's current URI, for an upgrade that had nothing to write.
      * <p>
-     * This one does not fall back to version 1. {@link #readLatestVersion} swallows
-     * every descriptor failure and answers 1, which on this path handed the caller
-     * {@code ?version=1} for an agent that may well be at v14 — a wrong version
-     * number reported as the outcome of a successful no-op sync. When the version
-     * cannot be established the URI is returned without a {@code ?version=}
-     * parameter instead, which is this codebase's "unspecified, i.e. latest" form
-     * and states no number the deployment might not agree with.
+     * This does not fall back to version 1. A fallback that swallowed every
+     * descriptor failure and answered 1 once handed the caller {@code ?version=1}
+     * for an agent that may well be at v14 — a wrong version number reported as the
+     * outcome of a successful no-op sync. When the version cannot be established
+     * the URI is returned without a {@code ?version=} parameter instead, which is
+     * this codebase's "unspecified, i.e. latest" form and states no number the
+     * deployment might not agree with.
      */
     private URI currentAgentUri(String agentId) {
         Integer currentVersion = resolveLatestVersion(agentId);
@@ -1615,14 +1745,6 @@ public class UpgradeExecutor {
     }
 
     /**
-     * Reads the latest version of a resource via its descriptor.
-     */
-    private int readLatestVersion(String resourceId) {
-        Integer version = resolveLatestVersion(resourceId);
-        return version != null ? version : 1;
-    }
-
-    /**
      * The latest version of a resource per its descriptor, or {@code null} when
      * that cannot be established — an unreadable descriptor, one with no resource
      * URI, or one whose URI carries no resource id.
@@ -1630,11 +1752,11 @@ public class UpgradeExecutor {
      * Resolved through {@link IDocumentDescriptorStore#readCurrentDescriptor},
      * never {@code readDescriptor(id, null)}: the descriptor store is historized
      * and its read requires a version, so passing null always threw and this method
-     * always answered null. {@link #readLatestVersion} then substituted 1, so every
-     * upgrade after the first one read and wrote the target's <em>version 1</em> —
-     * the store refused it, and the sync reported "the store did not accept the
-     * update" forever. See {@link StructuralMatcher}'s counterpart for the matching
-     * half of the same defect.
+     * always answered null. A former fallback then substituted 1, so every upgrade
+     * after the first one read and wrote the target's <em>version 1</em> — the
+     * store refused it, and the sync reported "the store did not accept the update"
+     * forever. See {@link StructuralMatcher}'s counterpart for the matching half of
+     * the same defect.
      */
     private Integer resolveLatestVersion(String resourceId) {
         try {

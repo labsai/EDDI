@@ -248,7 +248,7 @@ function TemplateInstantiateView({ templateId, onBack }: { templateId: string; o
         className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors"
         data-testid="template-back"
       >
-        <ArrowLeft className="h-4 w-4" />
+        <ArrowLeft className="h-4 w-4 rtl:rotate-180" />
         {t("groupTemplates.backToGallery", "Back to templates")}
       </button>
 

@@ -73,6 +73,27 @@ class HttpClientModuleConnectedPeerTest {
         }
 
         @Test
+        @DisplayName("protection off: a redirect hop may reach a private peer only from a hop in that same class (rebinding)")
+        void redirectHopHeldToThePreviousHopsClassWithProtectionOff() {
+            // The redirect handler judged the name public; it connected privately.
+            String refusal = HttpClientModule.connectedPeerRefusal("10.0.0.5", "rebind.example", 443, true, false, Set.of(), true,
+                    HttpClientModule.AddressClass.PUBLIC);
+            assertNotNull(refusal);
+            assertTrue(refusal.contains("redirect"), refusal);
+            assertNotNull(HttpClientModule.connectedPeerRefusal("127.0.0.1", "rebind.example", 80, false, false, Set.of(), true, null));
+            // Within an internal network, and to public peers, redirects keep working.
+            assertNull(HttpClientModule.connectedPeerRefusal("10.0.0.6", "internal-b", 80, false, false, Set.of(), true,
+                    HttpClientModule.AddressClass.PRIVATE));
+            assertNull(HttpClientModule.connectedPeerRefusal("93.184.216.34", "api.example.com", 443, true, false, Set.of(), true,
+                    HttpClientModule.AddressClass.PRIVATE));
+            // An allow-listed host may be private wherever the chain came from.
+            assertNull(HttpClientModule.connectedPeerRefusal("10.0.0.5", "billing.internal", 443, true, false, Set.of("billing.internal"), true,
+                    HttpClientModule.AddressClass.PUBLIC));
+            // The first request is not a redirect hop: unchanged.
+            assertNull(HttpClientModule.connectedPeerRefusal("10.0.0.5", "internal-api", 80, false, false, Set.of(), false, null));
+        }
+
+        @Test
         @DisplayName("a metadata or link-local peer is refused always — protection off, allow-listed, zoned IPv6")
         void metadataPeerRefusedAlways() {
             for (String peer : new String[]{"169.254.169.254", "169.254.170.2", "fe80:0:0:0:0:0:0:1%eth0", "fd00:ec2:0:0:0:0:0:254",

@@ -18,7 +18,6 @@ import {
   useCreateAgent,
   useDeleteAgent,
   useDuplicateAgent,
-  useDeployAgent,
   useUndeployAgent,
   groupAgentsByName,
 } from "@/hooks/use-agents";
@@ -547,34 +546,6 @@ describe("useDuplicateAgent", () => {
   });
 });
 
-describe("useDeployAgent", () => {
-  it("deploys an agent", async () => {
-    const { result } = renderHook(() => useDeployAgent(), {
-      wrapper: createWrapper(),
-    });
-
-    await act(async () => {
-      result.current.mutate({ agentId: "agent1", version: 3 });
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-
-  it("deploys with custom environment", async () => {
-    const { result } = renderHook(() => useDeployAgent(), {
-      wrapper: createWrapper(),
-    });
-
-    await act(async () => {
-      result.current.mutate({
-        agentId: "agent1",
-        version: 3,
-        environment: "test",
-      });
-    });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-  });
-});
-
 describe("useUndeployAgent", () => {
   it("undeploys an agent", async () => {
     const { result } = renderHook(() => useUndeployAgent(), {
@@ -725,5 +696,34 @@ describe("useAgent placeholder data (review 2026-10-02)", () => {
     expect(result.current.data).toBeUndefined();
     act(() => releaseB());
     await waitFor(() => expect(result.current.data?.workflows?.[0]).toContain("agentB-1"));
+  });
+});
+
+describe("useDeploymentStatus / useDeploymentStatuses placeholder data", () => {
+  it("keeps the previous version of the same agent as a placeholder, never another agent's status", async () => {
+    let releaseB: () => void = () => {};
+    const gateB = new Promise<void>((r) => (releaseB = r));
+    server.use(
+      http.get("*/administration/:env/deploymentstatus/:agentId", async ({ params }) => {
+        if (params.agentId === "agentB") await gateB;
+        return HttpResponse.json({ status: "READY", agentId: params.agentId });
+      }),
+    );
+    const { result, rerender } = renderHook(({ id, v }) => useDeploymentStatus(id, v), {
+      wrapper: createWrapper(),
+      initialProps: { id: "agentA", v: 1 },
+    });
+    await waitFor(() => expect(result.current.data?.status).toBe("READY"));
+
+    // Same agent, another version: the previous status stands in, flagged.
+    rerender({ id: "agentA", v: 2 });
+    expect(result.current.isPlaceholderData).toBe(true);
+    await waitFor(() => expect(result.current.isPlaceholderData).toBe(false));
+
+    // Another agent: A's READY must not stand in — a deploy/undeploy button would act on it.
+    rerender({ id: "agentB", v: 1 });
+    expect(result.current.data).toBeUndefined();
+    act(() => releaseB());
+    await waitFor(() => expect(result.current.data?.status).toBe("READY"));
   });
 });

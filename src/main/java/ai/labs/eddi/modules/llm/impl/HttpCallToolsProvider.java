@@ -204,8 +204,8 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * create tools from each ApiCall.
      * <p>
      * {@code toolSources} is deliberately empty in the returned contribution —
-     * source tagging happens at merge time in {@code AgentOrchestrator
-     * .mergeExternalTools}, not at discovery time, exactly as before this move.
+     * source tagging happens at merge time in {@code ToolSourceRegistry}, not at
+     * discovery time, exactly as before this move.
      */
     ToolContribution discover(IConversationMemory memory) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();

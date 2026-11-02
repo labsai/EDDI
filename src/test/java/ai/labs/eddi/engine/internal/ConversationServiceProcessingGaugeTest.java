@@ -275,7 +275,7 @@ class ConversationServiceProcessingGaugeTest {
     void genuineInterruptedExceptionIsRecordedAsAnError() throws Exception {
         runTurnThenFailWith(new InterruptedException("pipeline thread interrupted"));
 
-        verify(conversationMemoryStore).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore).compareAndSetState(CONVERSATION_ID, ConversationState.READY, ConversationState.ERROR);
     }
 
     /**
@@ -291,6 +291,7 @@ class ConversationServiceProcessingGaugeTest {
         runTurnThenFailWith(new ExecutionAbandonedException("Execution completed after cancellation — result discarded"));
 
         verify(conversationMemoryStore, never()).setConversationState(CONVERSATION_ID, ConversationState.ERROR);
+        verify(conversationMemoryStore, never()).compareAndSetState(eq(CONVERSATION_ID), any(), eq(ConversationState.ERROR));
     }
 
     /**

@@ -76,3 +76,19 @@ describe("useLoadConversation — pause re-establishment", () => {
     expect(useChatStore.getState().pauseReason).toBeNull();
   });
 });
+
+describe("useLoadConversation — agent binding", () => {
+  it("refuses a conversation that belongs to a different agent than the one requested", async () => {
+    // The Manager's deep link pairs ?agentId with ?conversationId independently.
+    // Installing agent B's conversation under agent A's name would send every
+    // message to B while the header and review notice describe A.
+    mockLoadedConversation("READY");
+    const { result } = renderHook(() => useLoadConversation(), { wrapper });
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ agentId: "someone-else", conversationId: "conv-x" }),
+      ).rejects.toMatchObject({ name: "ConversationAgentMismatchError" });
+    });
+    expect(useChatStore.getState().conversationId).toBeNull();
+  });
+});

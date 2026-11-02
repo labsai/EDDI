@@ -1971,6 +1971,19 @@ export function ChatWidget() {
   const showInput =
     !isEnded && (state.quickReplies.length === 0 || state.messages.length > 0);
   const showStartRetry = startFailed && !state.conversationId && !isEnded;
+  // Shown in the empty state too: an agent with no greeting has no messages yet,
+  // and the header's "Rate this conversation" has to open the card for it.
+  const ratingCard =
+    ratings.cardOpen && ratings.profile && !isPaused ? (
+      <RatingCard
+        key={state.conversationId ?? "none"}
+        profile={ratings.profile}
+        current={ratings.conversationRating}
+        onSubmit={ratings.rateConversation}
+        onWithdraw={ratings.withdrawConversation}
+        onClose={ratings.closeCard}
+      />
+    ) : null;
 
   return (
     <div className="chat-root">
@@ -1999,16 +2012,19 @@ export function ChatWidget() {
         data-testid="chat-transcript"
       >
         {state.messages.length === 0 && !state.isProcessing && !isPaused ? (
-          <div className="chat-empty">
-            <MessagesSquare className="chat-empty__icon" size="1em" />
-            {/* Keyed on whether a conversation exists, not on whether it has
-                messages: an agent with no greeting is READY, not "starting". */}
-            <p className="chat-empty__text">
-              {state.conversationId
-                ? t("transcript.ready")
-                : t("transcript.starting")}
-            </p>
-          </div>
+          <>
+            <div className="chat-empty">
+              <MessagesSquare className="chat-empty__icon" size="1em" />
+              {/* Keyed on whether a conversation exists, not on whether it has
+                  messages: an agent with no greeting is READY, not "starting". */}
+              <p className="chat-empty__text">
+                {state.conversationId
+                  ? t("transcript.ready")
+                  : t("transcript.starting")}
+              </p>
+            </div>
+            {ratingCard}
+          </>
         ) : (
           <>
             {state.messages.map((msg, i) => {
@@ -2029,16 +2045,7 @@ export function ChatWidget() {
               );
             })}
 
-            {ratings.cardOpen && ratings.profile && !isPaused && (
-              <RatingCard
-                key={state.conversationId ?? "none"}
-                profile={ratings.profile}
-                current={ratings.conversationRating}
-                onSubmit={ratings.rateConversation}
-                onWithdraw={ratings.withdrawConversation}
-                onClose={ratings.closeCard}
-              />
-            )}
+            {ratingCard}
 
             {isPaused ? (
               // From the stream's own news, at once: approval-status may not have

@@ -68,6 +68,17 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     private final AtomicBoolean subscribed = new AtomicBoolean();
 
     /**
+     * Key text to its hash, for {@link #evictLocal}. An eviction event names the
+     * key only by hash, so every cached key has to be hashed to find it — a SHA-256
+     * per key per event, on the event bus's dispatch thread, for every cache write
+     * anywhere in the cluster. Remembering the hashes turns all but the first event
+     * into map lookups. Bounded; a forgotten hash is simply computed again.
+     */
+    private final Cache<String, String> keyHashes = Caffeine.newBuilder().maximumSize(KEY_HASH_MEMO_SIZE).build();
+
+    static final long KEY_HASH_MEMO_SIZE = 100_000L;
+
+    /**
      * Cluster mode: the shared wrapper of each local cache, by the same key as the
      * local cache. One wrapper per cache, because its record of the keys that live
      * on this node only must be seen by every caller of that cache.
@@ -140,7 +151,7 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         }
         caches.forEach((registered, cache) -> {
             if (registered.equals(cacheName) || registered.startsWith(cacheName + ":ttl=")) {
-                cache.asMap().keySet().removeIf(k -> KvKeys.hashed(String.valueOf(k)).equals(keyHash));
+                cache.asMap().keySet().removeIf(k -> keyHashes.get(String.valueOf(k), KvKeys::hashed).equals(keyHash));
             }
         });
     }

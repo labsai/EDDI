@@ -251,11 +251,6 @@ export function validateCascade(task: LlmTask): CascadeIssue[] {
   return issues;
 }
 
-/** True when any issue is error-level (the backend would reject the deploy). */
-export function cascadeHasErrors(issues: CascadeIssue[]): boolean {
-  return issues.some((i) => i.level === "error");
-}
-
 /** Issues scoped to a specific step. */
 export function cascadeIssuesForStep(
   issues: CascadeIssue[],
