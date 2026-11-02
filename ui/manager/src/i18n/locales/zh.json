@@ -5611,6 +5611,12 @@
     "backlogNote": "每次节奏运行都会优先选取优先级最高的任务（P5 先于 P1）。任务添加后无法编辑或删除，由运行来完成。",
     "priorityHint": "节奏运行会优先选取数字较大的任务。0 为默认值。"
   },
+  "groupHumanTasks": {
+    "bannerTitle": "{{name}}，有一项任务分配给你",
+    "resultPlaceholder": "你对此任务的结果",
+    "inboxBadge": "任务",
+    "inboxReason": "等待 {{member}} 完成分配的任务"
+  },
   "workforceWizard": {
     "title": "新建团队"
   },
