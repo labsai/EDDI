@@ -5,6 +5,8 @@
 package ai.labs.eddi.engine.lifecycle;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.time.Instant;
 import java.util.List;
@@ -202,11 +204,21 @@ public final class GroupConversationEventSink {
      *            channel that posts an approval card bind the card to THIS pause,
      *            so a stale card cannot resolve a later one. {@code null} when not
      *            known.
+     * @param approvalContext
+     *            the context rendered for this pause ({@code approvalContext}), for
+     *            the channel that posts the approval card; {@code null} when none
+     *            is configured. Never serialized: the SSE stream carries the pause,
+     *            not the approver-facing text.
      */
-    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+    public record HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt,
+            @JsonIgnore RenderedApprovalContext approvalContext) {
+
+        public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity, Instant pausedAt) {
+            this(phaseIndex, phaseName, reason, granularity, pausedAt, null);
+        }
 
         public HitlPauseEvent(int phaseIndex, String phaseName, String reason, String granularity) {
-            this(phaseIndex, phaseName, reason, granularity, null);
+            this(phaseIndex, phaseName, reason, granularity, null, null);
         }
     }
 
