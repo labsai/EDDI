@@ -468,6 +468,22 @@ class RestSecretStoreTest {
     }
 
     @Test
+    void updateGrant_aConflictAfterTheHostListWasWrittenStillEvictsCachedClients() throws Exception {
+        // The host list is written first and stays written when the conditional grant
+        // write is refused, so clients built under the wider list must still go.
+        givenSecretGrantedTo(List.of("agentOne", "agentTwo"));
+        when(secretProvider.updateGrant(any(SecretReference.class), any(), any(), any()))
+                .thenThrow(new ISecretProvider.GrantConflictException("changed", List.of("agentTwo")));
+
+        Response resp = rest.updateGrant("default", "llm-api-key", false, new IRestSecretStore.GrantRequest(List.of("agentOne"), null,
+                List.of("agentOne", "agentTwo"), List.of("api.openai.com")));
+
+        assertEquals(409, resp.getStatus());
+        verify(secretProvider).updateAllowedHosts(any(SecretReference.class), any());
+        verify(secretResolver).invalidateCache(any(SecretReference.class));
+    }
+
+    @Test
     void updateGrant_dryRunAnswersAStalePreconditionWith409() throws Exception {
         givenSecretGrantedTo(List.of("agentOne"));
 

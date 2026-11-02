@@ -243,9 +243,9 @@ The check answers "is this provably ungranted?", and anything short of proof is 
 - contains the `*` wildcard, or
 - is `null` or empty — an unset list means unrestricted, not "deny all"
 
-Uncertainty likewise never becomes a violation: unreadable metadata or a disabled vault resolve to *allowed*. A check that cannot run must not be able to take agents down.
+Uncertainty likewise never becomes a violation: unreadable metadata or a disabled vault resolve to *allowed*. A check that cannot run must not be able to take agents down. That is about a secret's metadata. A **configuration** the check needs to scan and cannot read (the agent, a workflow, a connection) is reported as a violation, because skipping it could let an indirect reference through; in `enforce` mode it blocks the deployment.
 
-A secret that **does not exist yet** is allowed at deployment too: it has no grant to check, and deploying first is a supported flow — [agent sync](agent-sync-guide.md) promotes a workflow to an instance that does not hold the source's secrets, then deploys it. Its grant is checked when the secret is **created** instead, because the resolver does not check grants: a secret created later and restricted to another agent would otherwise resolve for every agent already deployed with a reference to it. Under `enforce`, `PUT /secretstore/secrets/{tenantId}/{keyName}` and the space-secret endpoint answer **409** to a create whose `allowedAgents` leaves out a deployed agent that already references the secret, and name the agents: add them to the list, or undeploy them first. `warn` logs the same message and creates the secret; `off` does not look. The scan covers every deployment recorded in the shared database — so, on a cluster, the agents deployed on the other nodes too — plus the runtime registry of the node handling the request, which alone knows a deployment still coming up or one made with `autoDeploy=false`. Under `enforce` a scan that could not look everywhere refuses as well, with its own **409**: an agent whose configuration could not be read (it is named), or a listing that failed. That is the opposite of the deploy gate, which lets an unreadable configuration through, because the costs are reversed — a refused deployment is an outage, a refused creation is a retry. Naming the agent in `allowedAgents`, or granting the wildcard, needs no scan. What no scan can see is a deployment racing the creation, recorded on another node a moment after the records were read. Updating a secret that already exists is not checked this way — narrowing an existing grant is covered by the grant endpoint's `agentsLosingAccess` warning.
+A secret that **does not exist yet** is allowed at deployment too: it has no grant to check, and deploying first is a supported flow — [agent sync](agent-sync-guide.md) promotes a workflow to an instance that does not hold the source's secrets, then deploys it. Its grant is checked when the secret is **created** instead, because the resolver does not check grants: a secret created later and restricted to another agent would otherwise resolve for every agent already deployed with a reference to it. Under `enforce`, `PUT /secretstore/secrets/{tenantId}/{keyName}` and the space-secret endpoint answer **409** to a create whose `allowedAgents` leaves out a deployed agent that already references the secret, and name the agents: add them to the list, or undeploy them first. `warn` logs the same message and creates the secret; `off` does not look. The scan covers every deployment recorded in the shared database — so, on a cluster, the agents deployed on the other nodes too — plus the runtime registry of the node handling the request, which alone knows a deployment still coming up or one made with `autoDeploy=false`. Under `enforce` a scan that could not look everywhere refuses as well, with its own **409**: an agent whose configuration could not be read (it is named), or a listing that failed. The deploy gate is more lenient in one respect: it lets unreadable grant *metadata* through, because there the costs are reversed — a refused deployment is an outage, a refused creation is a retry. An agent configuration the deploy gate cannot read — a workflow, a credential-bearing extension config, a connection or a global variable it names — is refused at deployment as well: the runtime would read that same reference (or hold it from an earlier build) and resolve whatever it names unchecked. Naming the agent in `allowedAgents`, or granting the wildcard, needs no scan. What no scan can see is a deployment racing the creation, recorded on another node a moment after the records were read. Updating a secret that already exists is not checked this way — narrowing an existing grant is covered by the grant endpoint's `agentsLosingAccess` warning.
 
 ### What is scanned
 
@@ -320,7 +320,7 @@ Only names and references are returned, never a value. Any other cause of an ERR
 ```
 
 - `ready` is `false` only when the deploy would be refused: `enforce` mode with at least one issue. In `warn` mode the issues are still listed and `ready` is `true`.
-- `checked` is `false` when the check did not run — mode `off`, or it could not read what it needed. The deploy then goes ahead too, so the preflight reports `ready: true` rather than predict a refusal the deploy would not make.
+- `checked` is `false` when the check itself did not run — mode `off`, or it could not run at all. The deploy then goes ahead too, so the preflight reports `ready: true` rather than predict a refusal the deploy would not make. An agent configuration the check cannot **read** is different: it is reported as a violation (see above), so in `enforce` mode `ready` is `false`.
 - `allowedAgents` — the ids on the grant — is returned to administrators only; an editor gets `allowedAgentCount`. The ids are not secret, but they map which other agents hold a credential, and only an administrator can change a grant anyway.
 
 ### Adding one agent to a grant
@@ -454,7 +454,8 @@ row's value. Rows written before this keep decrypting through a no-AAD fallback,
 nothing has to be migrated, and the fallback retires itself: the first time such a row
 is resolved it is re-sealed in the bound form in place (same value, same DEK
 generation, not counted as a rotation), guarded on the IV it was read with so a
-concurrent store or DEK rotation always wins, and logged once per key. A DEK rotation
+concurrent store or DEK rotation always wins, and logged once per key. The same write
+replaces a legacy bare SHA-256 checksum with the keyed form. A DEK rotation
 still re-seals every remaining row, including those never read. System values (such as the pinned audit key) are bound to their name and have
 no unbound form. Wrapped DEKs are not bound.
 
@@ -473,6 +474,13 @@ Every grant **written** from this release on (a new link, every token refresh) i
 bound, and the next `POST /{tenantId}/rotate-dek` re-seals every remaining one in the
 bound form. Until a grant has been rewritten or swept, it can still be opened
 unbound — run a DEK rotation if you want that window closed now.
+
+*Retiring the fallback.* Every open that needed the unbound form, secret or sealed
+data, is counted in `eddi.vault.legacy.unbound.opened.count`. Once it stays at zero
+after a `rotate-dek` on every tenant, set `eddi.vault.accept-unbound-legacy-data=false`
+(default `true`): the fallback is then gone for good, and an unbound value fails like
+any other tampered ciphertext instead of opening. Turn it back on, rotate and turn it
+off again if a value was missed.
 
 **One generation per row.** A grant stores both tokens under a single `dekId`. They
 are now sealed in one call (`sealAll`), against one active-DEK lookup. Sealed one

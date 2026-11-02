@@ -139,6 +139,44 @@ public class CredentialReferenceResolver {
         return resolved;
     }
 
+    /**
+     * Refuses when a vault secret {@code template} names (after {@code ${vars:…}}
+     * expansion) restricts its hosts to a list {@code destination} is not on — for
+     * a field that is sent but not decrypted here, such as a BASIC connection's
+     * {@code username}, which may itself be a vault reference.
+     *
+     * @throws ConnectionException
+     *             with {@code TARGET_NOT_ALLOWED} when a secret may not go there,
+     *             or its list could not be read
+     */
+    public void requireHostsAllowed(String template, String destination, String connectionName, String what) {
+        if (template == null || template.isBlank()) {
+            return;
+        }
+        String expanded = globalVariableResolver.resolveValue(template);
+        String effective = expanded == null ? template : expanded;
+        if (VaultHostAllowlist.referencesIn(List.of(effective)).isEmpty()) {
+            return; // nothing vaulted in it, so no secret's list to consult
+        }
+        requireDestinationAllowed(effective, destination == null ? null : URI.create(destination), connectionName, what);
+    }
+
+    /**
+     * {@link #resolveVaultBacked(String, String, String, URI)} for a destination
+     * given as text.
+     */
+    public String resolveVaultBackedFor(String template, String destination, String connectionName, String what) {
+        return resolveVaultBacked(template, connectionName, what, destination == null ? null : URI.create(destination));
+    }
+
+    /**
+     * {@link #resolveRequired(String, String, String, URI)} for a destination given
+     * as text.
+     */
+    public String resolveRequiredFor(String template, String destination, String connectionName, String what) {
+        return resolveRequired(template, connectionName, what, destination == null ? null : URI.create(destination));
+    }
+
     private void requireDestinationAllowed(String expanded, URI destination, String connectionName, String what) {
         if (destination == null || vaultHostAllowlist == null || expanded == null) {
             return;
