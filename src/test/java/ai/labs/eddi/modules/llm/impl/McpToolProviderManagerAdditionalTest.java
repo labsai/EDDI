@@ -600,7 +600,12 @@ class McpToolProviderManagerAdditionalTest {
         @Test
         @DisplayName("a fresh entry is served from the cache without contacting the server")
         void freshEntryIsServedFromCache() throws Exception {
-            var target = sealedManager();
+            // SSRF protection off: a cache hit is validated again like a fresh discovery
+            // (DNS rebinding), so the sealed manager would refuse this loopback URL
+            // before the cache is consulted. Off, the URL passes and the server, which
+            // does not exist, can only be avoided by serving the cache.
+            var target = new McpToolProviderManager(globalVariableResolver, secretResolver, false,
+                    McpToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS);
             seedToolCache(target, System.currentTimeMillis());
 
             var result = target.discoverTools(List.of(config()));

@@ -73,6 +73,12 @@ export interface ChatMessage {
   isError?: boolean;
   /** Guardrails that fired on the turn this agent bubble answers, in order. */
   guardrails?: GuardrailNotice[];
+  /**
+   * The conversation step this message belongs to, when the source said so (a
+   * transcript rebuilt from a snapshot). Reply ratings are keyed by it; live
+   * messages are counted from the nearest one that has it (`chat-rating-steps.ts`).
+   */
+  stepIndex?: number;
 }
 
 /**

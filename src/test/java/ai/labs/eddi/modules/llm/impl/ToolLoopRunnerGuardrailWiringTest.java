@@ -250,6 +250,43 @@ class ToolLoopRunnerGuardrailWiringTest {
     }
 
     @Test
+    @DisplayName("a credential in a tool result is redacted before it reaches the model, not only in the trace")
+    void credentialsNeverReachTheModel() {
+        // An administrator's config-read tool returns the document
+        // unredacted, and the hosted model received the plaintext key while the
+        // operator's trace showed <REDACTED>.
+        String config = "{\"name\":\"weather\",\"apiKey\":\"plaintextliteral12345\",\"headers\":{\"Authorization\":\"Bearer "
+                + "abcdefghijklmnopqrstuvwxyz0123\"},\"note\":\"sk-ant-abcdefghijklmnopqrstuvwxyz\"}";
+        var trace = new ArrayList<Map<String, Object>>();
+
+        String result = execute(config, Map.of("get_order", "http"), trace);
+
+        assertFalse(result.contains("plaintextliteral12345"), result);
+        assertFalse(result.contains("abcdefghijklmnopqrstuvwxyz0123"), result);
+        assertFalse(result.contains("sk-ant-abcdefghijklmnopqrstuvwxyz"), result);
+        assertTrue(result.contains("\"name\":\"weather\""), "the rest of the document survives: " + result);
+        var resultStep = trace.stream().filter(step -> "tool_result".equals(step.get("type"))).findFirst().orElseThrow();
+        assertFalse(String.valueOf(resultStep.get("result")).contains("plaintextliteral12345"));
+    }
+
+    @Test
+    @DisplayName("redaction runs before truncation, so a cut cannot leave a key too short to recognise")
+    void redactsBeforeTheTruncatorSeesTheResult() {
+        var seen = new ArrayList<String>();
+        var truncator = mock(ToolResponseTruncator.class);
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            seen.add(invocation.getArgument(2));
+            return invocation.getArgument(2);
+        });
+        runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
+                new ToolResultGuardrail(new SimpleMeterRegistry()));
+
+        execute("{\"password\":\"hunter2hunter2\"}", Map.of("get_order", "http"), new ArrayList<>());
+
+        assertFalse(seen.get(0).contains("hunter2hunter2"), "the summarize strategy sends this to a model too: " + seen.get(0));
+    }
+
+    @Test
     @DisplayName("the trace records what the TOOL returned, not EDDI's envelope")
     void traceShowsTheToolsOwnOutput() {
         var trace = new ArrayList<Map<String, Object>>();

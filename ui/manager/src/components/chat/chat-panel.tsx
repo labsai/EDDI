@@ -29,6 +29,9 @@ import {
 } from "@/hooks/use-attachment-staging";
 import { FileDropOverlay, PendingAttachmentChip } from "./attachment-chip";
 import { ChatMessage } from "./chat-message";
+import { ChatRatingCard } from "./chat-rating";
+import { useChatRatings } from "@/hooks/use-chat-ratings";
+import { lastStepIndex, ratableSteps } from "@/lib/chat-rating-steps";
 import { ChatActivity } from "./chat-activity";
 import { ChatHistory } from "./chat-history";
 import { StreamingToggle } from "./streaming-toggle";
@@ -65,6 +68,7 @@ import {
   Clock,
   Wrench,
   ListOrdered,
+  Star,
 } from "lucide-react";
 
 export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
@@ -145,7 +149,10 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   // Every send waits while the review lookup is out, so nobody commits a turn an
   // opted-in agent's maintainers may read before being told so. A failed lookup
   // settles it: the chat waits for the request, never blocks on it.
-  const { pending: reviewPending } = useAgentReviewProfile(selectedAgentId, chatEnvironment);
+  const { pending: reviewPending, rating: ratingProfile } = useAgentReviewProfile(selectedAgentId, chatEnvironment);
+  // The same rating controls the Chat UI shows, so designers can try the flow.
+  const ratings = useChatRatings(conversationId, ratingProfile, messages);
+  const ratableByPosition = useMemo(() => ratableSteps(messages), [messages]);
 
   useEffect(() => {
     const rawAgentIdParam = searchParams.get("agentId");
@@ -390,12 +397,19 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
   const lastMessage = messages[messages.length - 1];
   const showRerun = lastMessage?.role === "agent" && lastMessage.isError === true;
 
+  const clearRatedStep = ratings.clearStep;
   const handleRerun = useCallback(() => {
+    // A rerun replaces the last reply, so its thumb no longer applies (locally;
+    // the server keeps the stored rating — no hook in the rerun path).
+    const rerunStep = lastStepIndex(messages);
     rerunConversation.mutate(undefined, {
-      onSuccess: () => toast.success(t("chat.retrySuccess", "Step re-executed")),
+      onSuccess: () => {
+        if (rerunStep !== null) clearRatedStep(rerunStep);
+        toast.success(t("chat.retrySuccess", "Step re-executed"));
+      },
       onError: () => toast.error(t("chat.retryError", "Retry failed")),
     });
-  }, [rerunConversation, t]);
+  }, [rerunConversation, t, messages, clearRatedStep]);
 
   return (
     <div className={cn(
@@ -599,6 +613,17 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
           {/* Top bar actions */}
           {conversationId && (
             <>
+              {ratings.profile?.conversationRating && (
+                <button
+                  onClick={ratings.openCard}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  title={t("chat.rating.card", "Rate this conversation")}
+                  aria-label={t("chat.rating.card", "Rate this conversation")}
+                  data-testid="chat-rate-conversation"
+                >
+                  <Star className="h-4 w-4" />
+                </button>
+              )}
               <button
                 onClick={handleNewConversation}
                 className="flex h-9 w-9 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
@@ -612,6 +637,7 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                   // The id on screen at click time, not whatever is current
                   // when the request returns.
                   endConversation.mutate(conversationId, {
+                    onSuccess: (endedId) => ratings.onEnded(endedId),
                     onError: (err) =>
                       toast.error(
                         t("chat.endConversationFailed", "Could not end the conversation: {{reason}}", {
@@ -731,13 +757,45 @@ export function ChatPanel({ embedded = false }: { embedded?: boolean } = {}) {
                     {t("commandPalette.openChat")}
                   </button>
                 )}
+                {/* Ending clears the transcript; the ended conversation's card stays. */}
+                {ratings.endedCard && (
+                  <div className="mt-6 text-start">
+                    <ChatRatingCard
+                      key={ratings.endedCard.conversationId}
+                      profile={ratings.endedCard.profile}
+                      current={ratings.endedCard.current}
+                      onRate={ratings.rateWhole}
+                      onClose={ratings.closeCard}
+                    />
+                  </div>
+                )}
               </div>
             </div>
           ) : (
             <div className={embedded ? "py-2" : "py-4"}>
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
+              {messages.map((msg, i) => {
+                const ratingStep = ratings.profile?.messageRating ? (ratableByPosition[i] ?? null) : null;
+                return (
+                  <ChatMessage
+                    key={msg.id}
+                    message={msg}
+                    ratingStep={ratingStep}
+                    rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
+                    ratingProfile={ratings.profile}
+                    onRateStep={ratings.rateReply}
+                  />
+                );
+              })}
+
+              {ratings.cardOpen && ratings.profile && (
+                <ChatRatingCard
+                  key={conversationId ?? "none"}
+                  profile={ratings.profile}
+                  current={ratings.conversationRating}
+                  onRate={ratings.rateWhole}
+                  onClose={ratings.closeCard}
+                />
+              )}
 
               {/* Live status — the SAME line the operator chat shows:
                   "Thinking…" / "Using {tool}…" + tool-call count, from the

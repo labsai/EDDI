@@ -15,6 +15,9 @@ import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
 import ai.labs.eddi.engine.memory.*;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.model.Data;
@@ -26,6 +29,7 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyValues;
 import ai.labs.eddi.configs.properties.model.Property.Scope;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
+import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
@@ -132,6 +136,27 @@ public class Conversation implements IConversation {
      * outlives the turn.
      */
     private String secretClientInput;
+
+    /**
+     * Revisions this turn has taken under {@code hitlConfig.onRejection: REVISE}. A
+     * resume reads it back from the paused step's candidate, and a pause writes it
+     * onto the next one, so the bound holds across pauses and reloads.
+     */
+    private int revisionRoundsUsed;
+
+    /**
+     * Conversation output written when a rejection revised the answer: the
+     * revision's number, so templates can tell a revision from a first answer
+     * ({@code {memory.current.hitlRevision}}). {@code hitlDecision} stays
+     * {@code REJECTED} — it is the decision on the draft.
+     */
+    static final String HITL_REVISION_OUTPUT_KEY = "hitlRevision";
+
+    /** {@code decidedBy} prefix of a decision made with a Slack button. */
+    private static final String SLACK_DECIDER_PREFIX = "slack:";
+
+    /** Counter of rejected rule pauses under REVISE, tagged by outcome. */
+    static final String REVISION_METER = "eddi.hitl.revision";
 
     Conversation(List<IExecutableWorkflow> executableWorkflows, IConversationMemory conversationMemory, IPropertiesHandler propertiesHandler,
             IConversationOutputRenderer outputProvider) {
@@ -710,6 +735,8 @@ public class Conversation implements IConversation {
             // baseline comes from the same document and therefore already contains the
             // un-persisted value.
             recordPendingLongTermWrites();
+            // A pause has already kept what it needs (persistRevisionCandidate).
+            conversationMemory.setHitlRevisionCandidate(null);
         }
         // A turn whose outcome is discarded must not commit its side effects.
         // ConversationService discards the snapshot of a cancelled or abandoned turn,
@@ -1417,7 +1444,166 @@ public class Conversation implements IConversation {
             statusData.setPublic(true);
             conversationMemory.getCurrentStep().storeData(statusData);
             conversationMemory.getCurrentStep().addConversationOutputString(HITL_STATUS_OUTPUT_KEY, HITL_STATUS_AWAITING);
+            persistRevisionCandidate(e);
         }
+        conversationMemory.setHitlRevisionCandidate(null);
+    }
+
+    /**
+     * {@code onRejection: REVISE}: keeps the answer under review with the pause, so
+     * a rejection with a note can have it revised — even days later on another
+     * node. Kept as step data (see {@link HitlRevisionCandidate#STEP_KEY}): the
+     * finally of the turn scrubs secret input and context from it with the rest of
+     * the step. Only an answer from an earlier task of the paused workflow
+     * qualifies; a transcript over the size cap was never recorded, and the pause
+     * then simply has nothing to revise.
+     */
+    private void persistRevisionCandidate(ConversationPauseException e) {
+        HitlRevisionCandidate candidate = conversationMemory.getHitlRevisionCandidate();
+        HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
+        if (candidate == null || policy == null || !policy.revise() || candidate.getTranscriptJson() == null) {
+            return;
+        }
+        if (!answerPrecedesPause(candidate, e.getPausedWorkflowId(), e.getPausedAbsoluteTaskIndex())) {
+            return;
+        }
+        candidate.setRoundsUsed(revisionRoundsUsed);
+        conversationMemory.getCurrentStep().storeData(new Data<>(HitlRevisionCandidate.STEP_KEY, candidate.toMap()));
+    }
+
+    /**
+     * Reads the revision candidate a RULE pause kept, and removes it from the step:
+     * whatever the decision, it has served its purpose once the pause is decided.
+     */
+    private HitlRevisionCandidate takeRevisionCandidate(IWritableConversationStep step) {
+        IData<?> stored = step.getData(HitlRevisionCandidate.STEP_KEY);
+        if (stored == null) {
+            return null;
+        }
+        step.removeData(HitlRevisionCandidate.STEP_KEY);
+        return HitlRevisionCandidate.fromMap(stored.getResult());
+    }
+
+    /**
+     * {@code onRejection: REVISE} for a rejected RULE pause: when the decision
+     * carries a human's note and the pause kept an answer to revise, the model
+     * revises it with the note and the pipeline continues from the task after the
+     * model's — so the revision passes the same rules, and a rule that paused on
+     * the draft pauses again on the revision.
+     *
+     * @return {@code true} when the revision ran and the pipeline continued; on
+     *         {@code false} the caller applies the rejection exactly as under SKIP
+     */
+    private boolean tryReviseRejectedAnswer(HitlDecision decision, HitlRevisionCandidate candidate, IWritableConversationStep step)
+            throws LifecycleException, ConversationStopException, ConversationPauseException {
+        HitlRevisionPolicy policy = conversationMemory.getHitlRevisionPolicy();
+        if (policy == null || !policy.revise()) {
+            return false;
+        }
+        // A Slack button writes its own attribution as the note ("Decided via Slack by
+        // U123"): that is not a reviewer's request, and a button cannot carry one.
+        boolean buttonDecision = decision.getDecidedBy() != null && decision.getDecidedBy().startsWith(SLACK_DECIDER_PREFIX);
+        String note = decision.getNote() != null && !buttonDecision ? decision.getNote().trim() : "";
+        String pausedWorkflowId = conversationMemory.getHitlPausedWorkflowId();
+        int pausedIndex = conversationMemory.getHitlPausedAbsoluteTaskIndex();
+        int roundsUsed = candidate != null ? candidate.getRoundsUsed() : 0;
+        IExecutableWorkflow workflow = null;
+        String unavailable;
+        if (note.isEmpty()) {
+            unavailable = "no_note";
+        } else if (decision.getDecidedBy() != null && decision.getDecidedBy().startsWith("system:")) {
+            // A timeout or a group never writes a revision request: only a human does.
+            unavailable = "automated";
+        } else if (candidate == null || candidate.getTranscriptJson() == null || !answerPrecedesPause(candidate, pausedWorkflowId, pausedIndex)
+                || (workflow = findWorkflow(candidate.getWorkflowId())) == null) {
+            unavailable = "no_answer";
+        } else if (roundsUsed >= policy.maxRevisionsPerTurn()) {
+            unavailable = "exhausted";
+        } else {
+            unavailable = null;
+        }
+        if (unavailable != null) {
+            recordRevisionOutcome(step, unavailable, roundsUsed);
+            return false;
+        }
+
+        int round = roundsUsed + 1;
+        clearHitlStatusMarker(step);
+        clearHitlBookmark();
+        stripPauseAction(step);
+        step.setCurrentWorkflowId(workflow.getWorkflowId());
+        boolean revised = workflow.getLifecycleManager().reviseAnswerAt(conversationMemory, candidate.getLifecycleIndex(),
+                new HitlRevisionRequest(candidate, note, round));
+        if (!revised) {
+            recordRevisionOutcome(step, "failed", roundsUsed);
+            return false;
+        }
+        revisionRoundsUsed = round;
+        recordRevisionOutcome(step, "revised", round);
+
+        step.addConversationOutputString(HITL_REVISION_OUTPUT_KEY, String.valueOf(round));
+
+        // Everything after the model's task ran on the draft, so it runs again on the
+        // revision: the rest of the answer's workflow, then every later workflow.
+        boolean found = false;
+        for (IExecutableWorkflow executable : executableWorkflows) {
+            String wfId = executable.getWorkflowId();
+            conversationMemory.getCurrentStep().setCurrentWorkflowId(wfId);
+            if (!found) {
+                if (wfId.equals(candidate.getWorkflowId())) {
+                    found = true;
+                    executable.getLifecycleManager().executeLifecycleFromIndex(conversationMemory, candidate.getLifecycleIndex() + 1);
+                }
+            } else {
+                executable.getLifecycleManager().executeLifecycle(conversationMemory, null);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Whether the answer was given before the pause in pipeline order: earlier in
+     * the paused workflow, or in a workflow that runs before it.
+     */
+    private boolean answerPrecedesPause(HitlRevisionCandidate candidate, String pausedWorkflowId, int pausedIndex) {
+        if (candidate.getLifecycleIndex() < 0 || candidate.getWorkflowId() == null || pausedWorkflowId == null) {
+            return false;
+        }
+        if (candidate.getWorkflowId().equals(pausedWorkflowId)) {
+            return candidate.getLifecycleIndex() < pausedIndex;
+        }
+        int answerPosition = -1;
+        int pausePosition = -1;
+        for (int i = 0; i < executableWorkflows.size(); i++) {
+            String wfId = executableWorkflows.get(i).getWorkflowId();
+            if (candidate.getWorkflowId().equals(wfId) && answerPosition < 0) {
+                answerPosition = i;
+            }
+            if (pausedWorkflowId.equals(wfId) && pausePosition < 0) {
+                pausePosition = i;
+            }
+        }
+        return answerPosition >= 0 && pausePosition >= 0 && answerPosition < pausePosition;
+    }
+
+    private IExecutableWorkflow findWorkflow(String workflowId) {
+        for (IExecutableWorkflow executable : executableWorkflows) {
+            if (executable.getWorkflowId().equals(workflowId)) {
+                return executable;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Records what a rejection did under REVISE, in the step (the HITL record of
+     * the turn) and as {@value #REVISION_METER}.
+     */
+    private void recordRevisionOutcome(IWritableConversationStep step, String outcome, int round) {
+        step.storeData(new Data<>(HitlRevisionCandidate.OUTCOME_STEP_KEY, Map.of("outcome", outcome, "round", round)));
+        Metrics.counter(REVISION_METER, "outcome", outcome).increment();
+        LOGGER.infof("HITL rejection under onRejection=REVISE for conversation '%s': %s (revision %d)",
+                sanitize(conversationMemory.getConversationId()), outcome, round);
     }
 
     /**
@@ -1677,6 +1863,17 @@ public class Conversation implements IConversation {
             // gracefully (Task 9). Only RULE pauses short-circuit on REJECTED.
             boolean toolPause = "TOOL_CALL".equals(conversationMemory.getHitlPauseType());
 
+            // onRejection: REVISE — the answer a rule pause kept for revision. Taken
+            // off the step on every decision; its round count carries over to any
+            // later pause of this turn.
+            HitlRevisionCandidate revisionCandidate = takeRevisionCandidate(currentStep);
+            revisionRoundsUsed = revisionCandidate != null ? revisionCandidate.getRoundsUsed() : 0;
+
+            if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && !toolPause
+                    && tryReviseRejectedAnswer(decision, revisionCandidate, currentStep)) {
+                return;
+            }
+
             if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED && !toolPause) {
                 String rejectionMessage = "This action was rejected by a human reviewer."
                         + (decision.getNote() != null ? " Reason: " + decision.getNote() : "");
@@ -1794,6 +1991,7 @@ public class Conversation implements IConversation {
                     && finalState != ConversationState.AWAITING_HUMAN) {
                 clearToolPauseState();
             }
+            conversationMemory.setHitlRevisionCandidate(null);
             // Same contract as the say path: note the owed writes BEFORE deciding
             // whether to persist, so a re-pause / ERROR / cancel carries them to the
             // next turn instead of dropping them.
