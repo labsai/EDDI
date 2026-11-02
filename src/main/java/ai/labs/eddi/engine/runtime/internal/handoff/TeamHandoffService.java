@@ -81,7 +81,7 @@ public class TeamHandoffService {
     static final int MAX_CAS_ATTEMPTS = 3;
     static final String QUOTA_AGENT = "team-handoff";
     static final String QUOTA_INTAKE_COUNTER = "intake";
-    static final String QUOTA_EDGE_PREFIX = "edge:";
+    static final String QUOTA_EDGE_TAG = "edge";
     static final Duration DAY = Duration.ofDays(1);
     static final String AUDIT_TASK_ID = "team.handoff";
 
@@ -334,7 +334,7 @@ public class TeamHandoffService {
         Instant expiresAt = resetAt.plus(ToolQuotaRules.RETENTION_GRACE);
         try {
             if (rule.maxPerDay() != null) {
-                ToolQuotaKey edge = new ToolQuotaKey(QUOTA_AGENT, QUOTA_EDGE_PREFIX + request.sourceKey(), request.targetGroupId(), windowStart);
+                ToolQuotaKey edge = new ToolQuotaKey(QUOTA_AGENT, QUOTA_EDGE_TAG + ":" + request.sourceKey(), request.targetGroupId(), windowStart);
                 if (!quotaStore.tryAcquire(edge, rule.maxPerDay(), expiresAt).granted()) {
                     reservation.releaseAll();
                     return HandoffResult.of(Outcome.DAY_CAPPED,

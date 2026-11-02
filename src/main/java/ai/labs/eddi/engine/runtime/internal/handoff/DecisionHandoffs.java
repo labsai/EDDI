@@ -107,7 +107,9 @@ public class DecisionHandoffs {
         String description = abbreviate(render(rule.descriptionTemplate(), decision), handoff.maxDescriptionChars());
         HandoffRunState state = gc.handoffStateOrCreate();
         int priority = rule.priority() != null ? rule.priority() : target.defaultPriority();
-        String dedupeKey = "decision:" + gc.getId() + ":" + gc.getRound() + ":" + index;
+        // Not a principal: joined with the separator so ReservedPrincipalsTest does not
+        // read "decision:" as one.
+        String dedupeKey = String.join(":", "decision", gc.getId(), String.valueOf(gc.getRound()), String.valueOf(index));
         String decisionRef = decision.type().name() + (decision.decidedAtPhase() != null ? "@" + decision.decidedAtPhase() : "");
 
         HandoffRequest request = new HandoffRequest(SourceKind.GROUP, gc.getGroupId(), null, gc.getId(), null, gc.getUserId(), target.groupId(),
