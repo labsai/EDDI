@@ -71,6 +71,9 @@ import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
 import ai.labs.eddi.engine.pricing.IModelPriceCatalogStore;
 import ai.labs.eddi.engine.pricing.mongo.MongoModelPriceCatalogStore;
 import ai.labs.eddi.datastore.postgres.PostgresModelPriceCatalogStore;
+import ai.labs.eddi.engine.groups.budget.ITeamBudgetStore;
+import ai.labs.eddi.engine.groups.budget.MongoTeamBudgetStore;
+import ai.labs.eddi.engine.groups.budget.PostgresTeamBudgetStore;
 import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.MongoToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.PostgresToolQuotaStore;
@@ -250,6 +253,12 @@ public class DataStoreProducers {
     @Produces
     @ApplicationScoped
     public IToolQuotaStore toolQuotaStore(Instance<MongoToolQuotaStore> mongo, Instance<PostgresToolQuotaStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ITeamBudgetStore teamBudgetStore(Instance<MongoTeamBudgetStore> mongo, Instance<PostgresTeamBudgetStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
