@@ -124,8 +124,12 @@ public record ImportPreview(
      *            JSON content from the target (null if CREATE or if content diffs
      *            are not requested)
      * @param workflowIndex
-     *            position in the agent's workflow list (0-based); -1 for
-     *            non-workflow resources (extensions, snippets)
+     *            position in the agent's workflow list (0-based) of the workflow
+     *            this row belongs to — on an upgrade or sync preview an extension
+     *            row carries its workflow's position too, since a resource two
+     *            workflows share yields one row per workflow; -1 for rows that
+     *            belong to no workflow (the agent, snippets) and for extension rows
+     *            of an export or import preview
      */
     public record ResourceDiff(
             String sourceId,
