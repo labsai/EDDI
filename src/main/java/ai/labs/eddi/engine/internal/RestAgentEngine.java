@@ -49,6 +49,7 @@ import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import io.quarkus.security.ForbiddenException;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.container.AsyncResponse;
@@ -60,6 +61,7 @@ import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -164,6 +166,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // refused client comes back after Retry-After, so that work repeats per refusal
         // and takes the CPU the admitted turns need. admitTurn stays the real check.
         conversationService.refuseIfAtCapacity("(new conversation of agent " + agentId + ")");
+        requireTypedContext(context);
         try {
             // USE, not VIEW: talking to an agent is not reading how it was built. Checked
             // here rather than in ConversationService, because the system-initiated starts
@@ -291,6 +294,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // conversation's agent (L4): a revoked share stops the next turn, not only the
         // next conversation.
         conversationAccessGuard.requireConversationTurnAccess(conversationId);
+        requireTypedContext(inputData.getContext());
 
         sayInternal(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, clientContextGuard.strip(inputData), false,
                 response);
@@ -557,6 +561,28 @@ public class RestAgentEngine implements IRestAgentEngine {
     /** {@code {"error": {code, retryable, retryAfterMs, message}}} */
     static Map<String, TurnError> errorBody(TurnError error) {
         return Map.of("error", error);
+    }
+
+    /**
+     * Refuses client context with an entry that has no {@code type} (or a null
+     * entry): a {@code 400 INVALID_CONTEXT} naming the key, instead of the
+     * {@code 500} the pipeline produced when it switched on the missing type. The
+     * usual cause is a body shaped {@code {"context": {...}}} sent to an endpoint
+     * that takes the context map itself, which turns {@code context} into one
+     * untyped entry.
+     */
+    static void requireTypedContext(Map<String, Context> context) {
+        if (context == null) {
+            return;
+        }
+        for (var entry : context.entrySet()) {
+            if (entry.getValue() == null || entry.getValue().getType() == null) {
+                String message = "Context entry '" + sanitize(entry.getKey()) + "' has no \"type\"; use one of "
+                        + Arrays.toString(Context.ContextType.values());
+                throw new BadRequestException(message, Response.status(Response.Status.BAD_REQUEST).type(MediaType.APPLICATION_JSON)
+                        .entity(errorBody(new TurnError("INVALID_CONTEXT", false, null, message))).build());
+            }
+        }
     }
 
     @Override

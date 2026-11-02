@@ -1222,6 +1222,11 @@ public class ConversationMemoryUtilities {
             String key = dataKey.substring(dataKey.indexOf(":") + 1);
             if (context != null) {
                 var contextType = context.getType();
+                if (contextType == null) {
+                    // The REST surfaces refuse an untyped entry with a 400; any other
+                    // producer's is skipped like an unknown type, never a crash.
+                    return;
+                }
                 switch (contextType) {
                     case object, array, string, expressions -> dynamicAttributesMap.put(key, context.getValue());
                     default -> {
