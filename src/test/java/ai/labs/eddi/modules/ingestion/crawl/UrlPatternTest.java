@@ -139,6 +139,37 @@ class UrlPatternTest {
     }
 
     @Test
+    @DisplayName("many overlapping wildcards against a near-miss path finish in linear time")
+    void overlappingWildcardsDoNotBacktrack() {
+        // As a regex this pattern is seven nested backtracking repetitions; on a
+        // path of a's that never ends in "b" the regex engine tries every way of
+        // splitting the run between them, roughly length^6 steps.
+        UrlPattern pattern = UrlPattern.compile("**a**a**a**a**a**a**b").orElseThrow();
+        String path = "/" + "a".repeat(20_000);
+
+        boolean matched = assertTimeoutPreemptively(Duration.ofSeconds(2), () -> pattern.matches(path));
+
+        assertFalse(matched);
+        assertTrue(pattern.matches(path + "b"));
+        assertTrue(matches("/docs/*/*.pdf", "/docs/v1/a.pdf"));
+        assertFalse(matches("/docs/*/*.pdf", "/docs/v1/x/a.pdf"));
+        assertTrue(matches("**", "/"));
+        assertTrue(matches("/a/**", "/a/"));
+        assertFalse(matches("/a?", "/a"));
+    }
+
+    @Test
+    @DisplayName("? consumes one whole character, including a supplementary one")
+    void questionMarkMatchesOneCodePoint() {
+        // The regex this matcher replaced worked on code points; stepping by char
+        // made "?" match only half of a character outside the BMP.
+        String face = new String(Character.toChars(0x1F600));
+        assertTrue(matches("/a?b", "/a" + face + "b"));
+        assertFalse(matches("/a??b", "/a" + face + "b"));
+        assertTrue(matches("/" + face + "/*", "/" + face + "/x"));
+    }
+
+    @Test
     @DisplayName("many single stars and a suffix the path lacks finish promptly")
     void manyStarsAndAnImpossibleSuffixTerminate() {
         // The regex translation backtracked through every split of the "a" run

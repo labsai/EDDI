@@ -887,6 +887,44 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a document that would cross the segment budget waits for the next run instead of being embedded")
+        void segmentBudgetIsCheckedBeforeEmbedding() {
+            // The check used to run after embed(), so the document that crossed the
+            // documented "hard ceiling" was paid for in full first.
+            IngestionSource capped = leafSource();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setMaxSegmentsPerRun(3);
+            capped.setSettings(settings);
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a"))
+                    .page(SITE + "/a", pageWith("word ".repeat(200)));
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), capped, Mode.INGEST);
+
+            assertTrue(report.segmentsStored() <= 3, "stored " + report.segmentsStored() + " segments over a budget of 3");
+            assertTrue(embeddingStore.segmentsOf(SITE + "/a").isEmpty(), "the over-budget document must not be embedded");
+            verify(embeddingModel, times(1)).embedAll(any());
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, capped);
+            assertTrue(stateStore.lookup(sourceKey, SITE + "/a").isEmpty(), "a deferred document is not recorded as done");
+        }
+
+        @Test
+        @DisplayName("a document larger than the whole segment budget is reported, not embedded in part")
+        void documentLargerThanTheBudgetFails() {
+            IngestionSource capped = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setMaxSegmentsPerRun(2);
+            capped.setSettings(settings);
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("word ".repeat(200)));
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), capped, Mode.INGEST);
+
+            verify(embeddingModel, times(0)).embedAll(any());
+            assertEquals(0, report.segmentsStored());
+            assertEquals(1, report.documentsFailed());
+        }
+
+        @Test
         @DisplayName("a configured rate turns segments into a reported cost")
         void reportsCostWhenRateConfigured() {
             IngestionSource priced = source();
@@ -932,6 +970,26 @@ class IngestionPipelineTest {
             assertTrue(embeddingStore.segmentsOf(SITE + "/c").isEmpty());
             assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
             assertTrue(report.message().contains("stopped"), report.message());
+        }
+
+        @Test
+        @DisplayName("a run that loses its source while the provider is answering publishes nothing")
+        void lostOwnershipDuringEmbeddingPublishesNothing() {
+            // Ownership was checked only before the embedding call. A provider that
+            // stalls past the claim's deadline lets the run be reaped and the
+            // document deleted; publishing afterwards made deleted text retrievable.
+            FakeSite site = new FakeSite().page(SITE + "/", pageWith("Confidential."));
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, source());
+            doAnswer(invocation -> {
+                stateStore.purgeSource(sourceKey);
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f})).toList());
+            }).when(embeddingModel).embedAll(any());
+
+            IngestionReport report = pipelineFor(site).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertTrue(embeddingStore.segments().isEmpty(), "nothing may be published after the run lost its source");
+            assertEquals(0, report.segmentsStored());
         }
     }
 
@@ -1068,6 +1126,33 @@ class IngestionPipelineTest {
 
             assertFalse(embeddingStore.segmentsOf(SITE + "/flaky").isEmpty(),
                     "a page the server would not serve this time still has only its old chunks");
+        }
+
+        @Test
+        @DisplayName("a document too large for the segment budget keeps its old chunks through the sweep")
+        void anOversizedDocumentKeepsItsOldChunks() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/big\">b</a></body></html>")
+                    .page(SITE + "/big", pageWith("Short."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+            assertFalse(embeddingStore.segmentsOf(SITE + "/big").isEmpty(), "precondition: the old version is stored");
+
+            // The page has since grown past what one run may store: it fails, and what it
+            // has is its old chunks.
+            IngestionSource capped = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setMaxSegmentsPerRun(2);
+            capped.setSettings(settings);
+            FakeSite grown = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/big\">b</a></body></html>")
+                    .page(SITE + "/big", pageWith("word ".repeat(400)));
+            for (int i = 0; i < 4; i++) {
+                pipelineFor(grown).run(KB_RESOURCE_ID, knowledgeBase(), capped, Mode.INGEST);
+            }
+
+            assertFalse(embeddingStore.segmentsOf(SITE + "/big").isEmpty(),
+                    "a failed document's old chunks are the ones to keep, not orphans to sweep");
         }
 
         @Test

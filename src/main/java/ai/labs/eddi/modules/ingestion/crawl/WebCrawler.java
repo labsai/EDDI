@@ -91,6 +91,20 @@ public class WebCrawler {
     private static final int MAX_SITEMAP_URLS = 5_000;
 
     /**
+     * Longest sitemap entry accepted. The sitemap protocol itself caps a
+     * {@code <loc>} at 2,048 characters.
+     */
+    static final int MAX_SITEMAP_URL_LENGTH = 2_048;
+
+    /**
+     * Longest link the crawl will follow. Browsers and servers stop well short of
+     * this, and every exclude pattern is matched against the path in time
+     * proportional to its length — so a megabyte-long {@code href} on a crawled
+     * page is refused here rather than matched.
+     */
+    static final int MAX_LINK_LENGTH = 8_192;
+
+    /**
      * Cap on sitemaps read per crawl — configured ones, those robots.txt lists, and
      * the children of any sitemap index among them. All three are the site's to
      * write and may run to thousands; each is a request made before the first page
@@ -584,7 +598,7 @@ public class WebCrawler {
     }
 
     private boolean isInScope(String url, String seedHost, CrawlRequest request, List<UrlPattern> excludes) {
-        if (!CrawlUrls.isHttpScheme(url)) {
+        if (url == null || url.length() > MAX_LINK_LENGTH || !CrawlUrls.isHttpScheme(url)) {
             return false;
         }
         if (request.scope().sameSiteOnly()) {
@@ -859,7 +873,12 @@ public class WebCrawler {
             if (into.size() >= MAX_SITEMAP_URLS) {
                 return;
             }
-            if (element.equals(localName(candidate)) && parent.equals(localName(candidate.parent()))) {
+            // Leaf elements only. text() is all descendant text, so a <loc> nested in
+            // a <url> nested in a <loc> copied the whole subtree once per level, and
+            // up to MAX_SITEMAP_URLS of those copies were kept. A real <loc> holds
+            // nothing but its URL.
+            if (element.equals(localName(candidate)) && parent.equals(localName(candidate.parent()))
+                    && candidate.childrenSize() == 0) {
                 addIfHttp(candidate.text(), into);
             }
         }
@@ -867,6 +886,11 @@ public class WebCrawler {
 
     private static void addIfHttp(String url, Set<String> into) {
         String trimmed = url == null ? "" : url.trim();
+        if (trimmed.length() > MAX_SITEMAP_URL_LENGTH) {
+            // No page has a URL this long, and keeping thousands of them would
+            // multiply the body's size in memory.
+            return;
+        }
         if ((trimmed.startsWith("http://") || trimmed.startsWith("https://")) && into.size() < MAX_SITEMAP_URLS) {
             into.add(trimmed);
         }
@@ -925,7 +949,7 @@ public class WebCrawler {
             }
         }
         String text = new String(bytes, charset);
-        if (!text.isEmpty() && text.charAt(0) == '\uFEFF') {
+        if (!text.isEmpty() && text.charAt(0) == BYTE_ORDER_MARK) {
             text = text.substring(1);
         }
         Set<String> found = new LinkedHashSet<>();

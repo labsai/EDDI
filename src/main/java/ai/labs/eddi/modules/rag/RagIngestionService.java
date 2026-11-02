@@ -145,7 +145,7 @@ public class RagIngestionService {
                     .put(METADATA_INGESTION_ID, ingestionId));
 
             // 2. Chunk
-            DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.getChunkSize(), ragConfig.getChunkOverlap());
+            DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.chunkSizeOrDefault(), ragConfig.chunkOverlapOrDefault());
 
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
