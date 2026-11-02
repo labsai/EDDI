@@ -718,7 +718,7 @@ export function ApprovalBanner({
       {rulePause?.lastEditRefused && (
         <p
           role="alert"
-          className="mb-3 flex items-center gap-1 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-400"
+          className="mb-3 flex items-center gap-1 rounded-md border border-warn-500/40 bg-warn-500/10 p-2 text-xs text-warn-700 dark:text-warn-400"
           data-testid="last-edit-refused"
         >
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
