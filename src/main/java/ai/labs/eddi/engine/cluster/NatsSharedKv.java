@@ -21,8 +21,12 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+
+import io.nats.client.PublishOptions;
 import io.nats.client.api.MessageInfo;
+import io.nats.client.api.PublishAck;
 import io.nats.client.impl.Headers;
+import io.nats.client.impl.NatsMessage;
 
 /**
  * {@link ISharedKv} on a NATS JetStream KV bucket.
@@ -54,16 +58,39 @@ public class NatsSharedKv implements ISharedKv {
         return e.getApiErrorCode() == WRONG_LAST_SEQUENCE || e.getApiErrorCode() == WRONG_LAST_SEQUENCE_CONSTANT;
     }
 
+    /**
+     * The youngest handle a failed call may drop. A slow server times out every
+     * call in flight at once; without this each failure would reopen the bucket
+     * (one STREAM.INFO round trip each) while it is still slow.
+     */
+    static final long MIN_HANDLE_AGE_NANOS = TimeUnit.SECONDS.toNanos(1);
+    /** How long a failed reopen is not retried; callers fail fast meanwhile. */
+    static final long REOPEN_BACKOFF_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
+
     private final NatsConnectionManager connections;
     private final String bucket;
     private final MeterRegistry meterRegistry;
-    private volatile KeyValue kv;
-    private volatile Object kvConnection;
+    private final Object reopenLock = new Object();
+    private volatile Handle handle;
+    /** {@code System.nanoTime()} of the last failed open, or {@code null}. */
+    private volatile Long openFailedAt;
+
+    /** An open bucket handle and the connection it was opened on. */
+    private record Handle(KeyValue kv, Object connection, long openedAt) {
+    }
+
+    private final long minHandleAgeNanos;
 
     public NatsSharedKv(NatsConnectionManager connections, String bucket, MeterRegistry meterRegistry) {
+        this(connections, bucket, meterRegistry, MIN_HANDLE_AGE_NANOS);
+    }
+
+    /** With the minimum age of a handle a failure may drop; for tests. */
+    NatsSharedKv(NatsConnectionManager connections, String bucket, MeterRegistry meterRegistry, long minHandleAgeNanos) {
         this.connections = connections;
         this.bucket = bucket;
         this.meterRegistry = meterRegistry;
+        this.minHandleAgeNanos = minHandleAgeNanos;
     }
 
     @Override
@@ -71,26 +98,63 @@ public class NatsSharedKv implements ISharedKv {
         return bucket;
     }
 
-    private KeyValue kv() {
+    /**
+     * The bucket handle, (re)opened once per connection — and only by one caller:
+     * the others wait for that open instead of each sending their own STREAM.INFO.
+     * A failed open is not retried for {@link #REOPEN_BACKOFF_NANOS}, so a burst of
+     * callers against a struggling server fails fast instead of piling opens onto
+     * it.
+     */
+    private Handle kv() {
         Object current = connections.requireConnected();
-        KeyValue handle = kv;
-        if (handle == null || kvConnection != current) {
-            handle = connections.keyValue(bucket);
-            kv = handle;
-            kvConnection = current;
+        Handle h = handle;
+        if (h != null && h.connection() == current) {
+            return h;
         }
-        return handle;
+        synchronized (reopenLock) {
+            h = handle;
+            if (h != null && h.connection() == current) {
+                return h;
+            }
+            Long failedAt = openFailedAt;
+            if (failedAt != null && System.nanoTime() - failedAt < REOPEN_BACKOFF_NANOS) {
+                throw new ClusterUnavailableException("KV bucket " + bucket + " could not be opened a moment ago; not retried yet");
+            }
+            KeyValue opened;
+            try {
+                opened = connections.keyValue(bucket);
+            } catch (RuntimeException e) {
+                openFailedAt = System.nanoTime();
+                throw e;
+            }
+            openFailedAt = null;
+            h = new Handle(opened, current, System.nanoTime());
+            handle = h;
+            if (meterRegistry != null) {
+                meterRegistry.counter("eddi.cluster.kv.reopens", "bucket", bucket).increment();
+            }
+            return h;
+        }
     }
 
     /**
-     * A failed call drops the cached handle. jnats decides at open time whether a
-     * handle reads with direct get; a handle opened before another node turned
-     * direct get off (see {@code NatsSharedStateFactory.leaderReads}) gets no
-     * answer to its reads from then on. Reopening on the next call makes that one
-     * failed call the whole cost, not every call until the connection drops.
+     * A failed call drops the handle it used — not one another caller has opened
+     * since, and not one younger than {@link #MIN_HANDLE_AGE_NANOS} (by default).
+     * jnats decides at open time whether a handle reads with direct get; a handle
+     * opened before another node turned direct get off (see
+     * {@code NatsSharedStateFactory.leaderReads}) gets no answer to its reads from
+     * then on. Reopening on the next call makes that one failed call the whole
+     * cost, not every call until the connection drops — and only one reopen per
+     * stale handle, however many calls failed on it at once.
      */
-    private void forgetHandle() {
-        kv = null;
+    private void forgetHandle(Handle failed) {
+        if (failed != null && handle == failed && System.nanoTime() - failed.openedAt() >= minHandleAgeNanos) {
+            synchronized (reopenLock) {
+                if (handle == failed) {
+                    handle = null;
+                }
+            }
+        }
     }
 
     @FunctionalInterface
@@ -101,14 +165,16 @@ public class NatsSharedKv implements ISharedKv {
     private <T> T run(String op, KvCall<T> call) {
         long start = System.nanoTime();
         String outcome = "ok";
+        Handle used = null;
         try {
-            return call.call(kv());
+            used = kv();
+            return call.call(used.kv());
         } catch (JetStreamApiException e) {
-            forgetHandle();
+            forgetHandle(used);
             outcome = "error";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (IOException e) {
-            forgetHandle();
+            forgetHandle(used);
             outcome = "unavailable";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } catch (InterruptedException e) {
@@ -119,8 +185,10 @@ public class NatsSharedKv implements ISharedKv {
             outcome = "unavailable";
             throw e;
         } catch (RuntimeException e) {
-            // jnats raises IllegalStateException on a closed connection.
-            forgetHandle();
+            // jnats raises IllegalStateException on a closed connection and on a full
+            // outgoing queue. Neither makes the handle stale: a new connection gets a new
+            // handle anyway (kv() compares the connection), and reopening because the
+            // queue is full would only add to it.
             outcome = "unavailable";
             throw new ClusterUnavailableException("KV " + op + " on " + bucket + " failed: " + e.getMessage(), e);
         } finally {
@@ -173,7 +241,7 @@ public class NatsSharedKv implements ISharedKv {
         return run("get-consistent", kv -> {
             MessageInfo info;
             try {
-                info = connections.jetStreamManagement().getLastMessage("KV_" + bucket, "$KV." + bucket + "." + key);
+                info = connections.jetStreamManagement().getLastMessage(streamName(), subject(key));
             } catch (JetStreamApiException e) {
                 if (JetStreamDeadLetterStore.notFound(e)) {
                     return Optional.empty();
@@ -190,6 +258,73 @@ public class NatsSharedKv implements ISharedKv {
             }
             return Optional.of(new Versioned(info.getData(), info.getSeq(),
                     info.getTime() == null ? 0L : info.getTime().toInstant().toEpochMilli()));
+        });
+    }
+
+    private String streamName() {
+        return "KV_" + bucket;
+    }
+
+    private String subject(String key) {
+        return "$KV." + bucket + "." + key;
+    }
+
+    /**
+     * The key's last message, from the stream leader: a value, or the revision of
+     * the delete (or purge) marker that removed it. One round trip; the revision of
+     * a marker lets the next writer recreate the key with a single compare-and-set
+     * instead of the three round trips of a {@code create} on a deleted key (write,
+     * conflict, read the marker, write again).
+     */
+    @Override
+    public Latest latest(String key) {
+        return run("latest", kv -> {
+            MessageInfo info;
+            try {
+                info = connections.jetStreamManagement().getLastMessage(streamName(), subject(key));
+            } catch (JetStreamApiException e) {
+                if (JetStreamDeadLetterStore.notFound(e)) {
+                    return new Latest(null, 0);
+                }
+                throw e;
+            }
+            if (info == null || !info.isMessage()) {
+                return new Latest(null, 0);
+            }
+            Headers headers = info.getHeaders();
+            String operation = headers == null ? null : headers.getFirst("KV-Operation");
+            if (operation != null && !"PUT".equals(operation)) {
+                return new Latest(null, info.getSeq());
+            }
+            byte[] data = info.getData() == null ? new byte[0] : info.getData();
+            return new Latest(new Versioned(data, info.getSeq(), info.getTime() == null ? 0L : info.getTime().toInstant().toEpochMilli()),
+                    info.getSeq());
+        });
+    }
+
+    /**
+     * The same delete marker jnats' {@code delete(key, expectedRevision)} writes
+     * ({@code KV-Operation: DEL}, guarded by the expected last subject sequence),
+     * published directly so the acknowledgement's sequence — the marker's revision
+     * — is not thrown away. Every client, of any EDDI version, reads it as a
+     * deleted key.
+     */
+    @Override
+    public OptionalLong deleteReturningRevision(String key, long expectedRevision) {
+        return run("delete", kv -> {
+            Headers headers = new Headers().put("KV-Operation", "DEL");
+            try {
+                PublishAck ack = connections.jetStream().publish(
+                        NatsMessage.builder().subject(subject(key)).headers(headers).data((byte[]) null).build(),
+                        PublishOptions.builder().expectedLastSubjectSequence(expectedRevision).build());
+                return OptionalLong.of(ack.getSeqno());
+            } catch (JetStreamApiException e) {
+                if (isConflict(e)) {
+                    countConflict();
+                    return OptionalLong.empty();
+                }
+                throw e;
+            }
         });
     }
 
