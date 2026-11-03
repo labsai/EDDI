@@ -272,7 +272,7 @@ Every `--sample-interval` seconds it records:
 The report fits a slope per hour to every series after a 10% warm-up. For the heap, which is a
 sawtooth, the slope is fitted to the floor of each tenth of the run. A series is flagged when it
 rose by more than 10% of its starting value. A leak shows as a slope, not as a peak.
-`--fail-on-growth` makes a flagged series exit 1, for CI. A chunk that fails, for example
+`--fail-on-growth` makes a flagged series exit 1, for CI. It also exits 1 when a node (or the node list) was sampled successfully less than half the time, since a series with no samples cannot show growth. A chunk that fails, for example
 because a replica restarted under it, is recorded and the soak carries on.
 
 **`scale`** holds `--held-leases` conversations per node at once: each turn waits `--delay-ms` at

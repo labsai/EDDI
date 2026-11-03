@@ -161,6 +161,25 @@ def window_minima(points, windows=10):
     return [min(pts[i * size:(i + 1) * size], key=lambda p: p[1]) for i in range(windows)]
 
 
+def sampling_gaps(samples, min_share=0.5):
+    """{node: share of samples that succeeded} for each node sampled less than `min_share` of the time,
+    plus "nodes" when the node list itself failed that often. A series that was never sampled has no slope,
+    so without this check a node that failed every sample would pass the growth gate unexamined."""
+    if not samples:
+        return {"nodes": 0.0}
+    gaps = {}
+    listed = sum(1 for s in samples if not isinstance(s.get("nodes_error"), str))
+    if listed / len(samples) < min_share:
+        gaps["nodes"] = round(listed / len(samples), 2)
+    names = {n for s in samples for n in s["nodes"]} | {n for s in samples if isinstance(s.get("nodes_error"), dict)
+                                                         for n in s["nodes_error"]}
+    for name in sorted(names):
+        ok = sum(1 for s in samples if name in s["nodes"])
+        if ok / len(samples) < min_share:
+            gaps[name] = round(ok / len(samples), 2)
+    return gaps
+
+
 def growth(samples, warmup_share=0.1, threshold=0.10):
     """{series: {first, last, slope_per_h, grows}}. Series that rise by more than `threshold` of their
     starting value over the run (after the warm-up share) are flagged."""
@@ -282,8 +301,12 @@ def cmd_soak(args):
         _, flagged = write_report("soak", args.label, meta, sampler.samples, chunks)
         if not args.keep and not args.reuse:
             lt.cmd_cluster_down(args)
-    if args.fail_on_growth and flagged:
-        raise SystemExit(f"{len(flagged)} series kept growing: {', '.join(sorted(flagged)[:10])}")
+    if args.fail_on_growth:
+        gaps = sampling_gaps(sampler.samples)
+        if gaps:
+            raise SystemExit(f"too few successful samples to judge growth: {gaps}")
+        if flagged:
+            raise SystemExit(f"{len(flagged)} series kept growing: {', '.join(sorted(flagged)[:10])}")
 
 
 def external_k6(args, vus):
