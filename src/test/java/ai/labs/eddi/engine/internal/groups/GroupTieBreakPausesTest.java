@@ -312,7 +312,7 @@ class GroupTieBreakPausesTest {
         @Test
         @DisplayName("a resume that fails before the discussion owns the leg drops the token and fails the conversation")
         void resumeFailureCleansUp() throws Exception {
-            var gc = paused(null);
+            paused(null);
             doThrow(new IllegalStateException("store down")).when(service).executeDiscussion(any(), any(), any(),
                     anyString(), any(), anyInt());
 
