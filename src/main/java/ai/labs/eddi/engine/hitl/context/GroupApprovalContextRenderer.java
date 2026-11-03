@@ -34,15 +34,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code group} holds: {@code groupId}, {@code conversationId},
  * {@code question}, {@code phase {index, name, type}}, {@code granularity},
  * {@code members[] {agentId, displayName, role}}, {@code transcript[]} (the
- * last {@value #MAX_TRANSCRIPT_ENTRIES} entries as
- * {@code {speaker, displayName, role, type, phaseName, content}}),
- * {@code lastByRole.<ROLE>}, {@code lastByType.<TYPE>} and
- * {@code lastBySpeaker.<agentId>} (each {@code {content, displayName,
- * phaseName}}; errors and skips do not count), {@code tasksAwaitingApproval[]
- * {id, subject, description, assignee, result}} and {@code artifacts.<name>
- * {type, version, status, content, json}} ({@code json} is the parsed content
- * of a JSON artifact, else null). Every string is capped at
- * {@value ApprovalContextTemplateData#MAX_STRING_CHARS} characters.
+ * last {@value #MAX_TRANSCRIPT_ENTRIES} entries as {@code {speaker,
+ * displayName, role, type, phaseName, content}}), {@code lastByRole.<ROLE>},
+ * {@code lastByType.<TYPE>} and {@code lastBySpeaker.<agentId>} (each
+ * {@code {content, displayName, phaseName}}; errors and skips do not count),
+ * {@code tasksAwaitingApproval[] {id, subject, description, assignee, result}}
+ * and {@code artifacts.<name> {type, version, status, content, json}}
+ * ({@code json} is the parsed content of a JSON artifact, else null). Every
+ * string is capped at {@value ApprovalContextTemplateData#MAX_STRING_CHARS}
+ * characters.
  * <p>
  * Artifacts are read from the artifact store once per pause (at most
  * {@value #MAX_ARTIFACTS}); a failed read leaves {@code group.artifacts} empty
