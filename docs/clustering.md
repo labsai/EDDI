@@ -242,6 +242,10 @@ NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and 
 
 **NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
 `true`) — for `eddi.nats.tls.enabled=true` **and** for every `tls://` or `wss://` server.
+The certificate must name one of the hosts in `eddi.nats.url`: jnats dials the address a
+name resolves to, so the check is made against the configured names (the earlier
+socket-level check compared the certificate with that IP and refused every certificate
+issued for a host name).
 Before, a `tls://` URL without `tls.enabled` (the chart's external path) fell back to the
 JVM's default context, which accepts any CA-signed certificate for any host: a man in the
 middle with any public certificate received the node's NATS credentials. `opentls://`
