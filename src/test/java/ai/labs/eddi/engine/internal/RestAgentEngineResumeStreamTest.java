@@ -80,8 +80,13 @@ class RestAgentEngineResumeStreamTest {
         when(eventBuilder.build()).thenReturn(mock(OutboundSseEvent.class));
     }
 
-    private RestAgentEngineStreaming streaming(boolean cancelOnDisconnect) {
-        var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class), cancelOnDisconnect, 15);
+    /**
+     * The say stream's switch is always on here; the argument is the RESUME
+     * stream's own switch.
+     */
+    private RestAgentEngineStreaming streaming(boolean resumeCancelOnDisconnect) {
+        var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class), true, 15);
+        streaming.resumeCancelOnClientDisconnect = resumeCancelOnDisconnect;
         streaming.shutdownKeepAlive();
         streaming.keepAliveScheduler = scheduler;
         streaming.restAgentEngine = restAgentEngine;
@@ -339,7 +344,7 @@ class RestAgentEngineResumeStreamTest {
     // ── disconnect ──
 
     @Test
-    @DisplayName("a client that vanished cancels the resumed turn when cancel-on-client-disconnect is on")
+    @DisplayName("a client that vanished cancels the resumed turn when resume-cancel-on-client-disconnect is on")
     void disconnectCancels() throws Exception {
         var handler = accepted(streaming(true));
         when(eventSink.isClosed()).thenReturn(true);
@@ -351,7 +356,7 @@ class RestAgentEngineResumeStreamTest {
     }
 
     @Test
-    @DisplayName("and lets the turn finish when it is off")
+    @DisplayName("and lets the resumed turn finish and persist when it is off")
     void disconnectDoesNotCancelWhenOff() throws Exception {
         var handler = accepted(streaming(false));
         when(eventSink.isClosed()).thenReturn(true);
@@ -359,6 +364,39 @@ class RestAgentEngineResumeStreamTest {
         handler.onToken("lost");
 
         verify(conversationService, never()).cancelConversation(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("by default a vanished /resume/stream client does NOT cancel the resumed turn, even though /stream's switch is on")
+    void resumeStreamDoesNotCancelByDefault() throws Exception {
+        // the field is left at its default; the say switch (constructor) is true
+        var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class), true, 15);
+        streaming.shutdownKeepAlive();
+        streaming.keepAliveScheduler = scheduler;
+        streaming.restAgentEngine = restAgentEngine;
+        streaming.clientGoneExecutor = Runnable::run;
+        assertFalse(streaming.resumeCancelOnClientDisconnect);
+        var handler = accepted(streaming);
+        when(eventSink.isClosed()).thenReturn(true);
+
+        handler.onToken("lost");
+
+        verify(conversationService, never()).cancelConversation(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("the say stream keeps its own switch whatever the resume switch says")
+    void sayStreamKeepsItsOwnSwitch() throws Exception {
+        var streaming = streaming(false);
+        streaming.sayStreaming(CONVERSATION_ID, false, true, List.of(), inputData(), eventSink, sse);
+        var handler = ArgumentCaptor.forClass(StreamingResponseHandler.class);
+        verify(conversationService).sayStreaming(eq(CONVERSATION_ID), any(), any(), any(), any(), handler.capture());
+        when(eventSink.isClosed()).thenReturn(true);
+
+        handler.getValue().onToken("lost");
+
+        verify(conversationService).cancelConversation(CONVERSATION_ID, ControlSignal.CANCEL_GRACEFUL,
+                RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
     }
 
     @Test

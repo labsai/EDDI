@@ -615,7 +615,9 @@ class ConversationHitlService {
                     returnMemory -> {
                         // A streamed turn that lost the cluster lease stored nothing: the
                         // stream ends with an error, not with a done event for a turn that
-                        // is not stored (as a streamed say does).
+                        // is not stored (as a streamed say does). Checked BEFORE meterTurnCost,
+                        // as the say path does: a turn stopped by lease loss stores nothing, and
+                        // the node that took the conversation over runs (and meters) it again.
                         if (streaming != null && conversationService.stoppedByLeaseLoss(conversationId, returnMemory,
                                 new SimpleConversationMemorySnapshot())) {
                             replyDelivered.set(true);

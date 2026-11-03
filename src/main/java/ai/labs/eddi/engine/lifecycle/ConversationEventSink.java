@@ -159,9 +159,11 @@ public interface ConversationEventSink {
     }
 
     /**
-     * One tool call has finished — sent exactly once for every call announced with
-     * {@link #onToolCall}. Status only, never the result: results may hold user
-     * data and are delivered, redacted, in the task summary's toolTrace.
+     * One tool call has finished — sent exactly once for every call, and always
+     * after that call's {@link #onToolCall} on the same stream (a gated call that a
+     * resume settles without running is announced immediately before its result).
+     * Status only, never the result: results may hold user data and are delivered,
+     * redacted, in the task summary's toolTrace.
      *
      * @param status
      *            {@code ok}, {@code error}, {@code not_executed} (refused or

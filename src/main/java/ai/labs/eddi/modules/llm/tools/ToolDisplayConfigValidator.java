@@ -17,6 +17,9 @@ import java.util.Set;
  */
 public final class ToolDisplayConfigValidator {
 
+    /** Most tools one task may configure a display for. */
+    static final int MAX_ENTRIES = 100;
+
     private ToolDisplayConfigValidator() {
     }
 
@@ -30,6 +33,9 @@ public final class ToolDisplayConfigValidator {
     public static void validate(Map<String, ToolDisplayConfig> toolDisplay, String fieldPath) {
         if (toolDisplay == null) {
             return;
+        }
+        if (toolDisplay.size() > MAX_ENTRIES) {
+            throw new IllegalArgumentException(fieldPath + " has " + toolDisplay.size() + " entries; at most " + MAX_ENTRIES + " are allowed");
         }
         for (Map.Entry<String, ToolDisplayConfig> entry : toolDisplay.entrySet()) {
             String tool = entry.getKey();

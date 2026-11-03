@@ -96,6 +96,19 @@ class ToolDisplayConfigValidatorTest {
     }
 
     @Test
+    @DisplayName("the number of entries is bounded at 100")
+    void entryCap() {
+        Map<String, ToolDisplayConfig> hundred = new HashMap<>();
+        for (int i = 0; i < 100; i++) {
+            hundred.put("tool" + i, config("L"));
+        }
+        assertDoesNotThrow(() -> ToolDisplayConfigValidator.validate(hundred, PATH));
+        hundred.put("one-too-many", config("L"));
+        var message = assertThrows(IllegalArgumentException.class, () -> ToolDisplayConfigValidator.validate(hundred, PATH)).getMessage();
+        assertTrue(message.contains("101 entries") && message.contains("at most 100"), message);
+    }
+
+    @Test
     @DisplayName("the message names the field path")
     void messageNamesThePath() {
         assertTrue(refusal("createAction", config("x".repeat(121))).contains(PATH + "['createAction']"));

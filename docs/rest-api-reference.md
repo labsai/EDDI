@@ -239,7 +239,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
 | `tool_call` | `{"tool","callId"}` plus `displayName` and `display` only for a tool the agent's [`toolDisplay`](langchain.md#showing-a-tool-call-to-a-watching-client-tooldisplay) names | Sent right before a tool runs. **Never the arguments**, unless the designer allow-listed a few fields in `toolDisplay` |
-| `tool_result` | `{"tool","callId","status","durationMs"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval) or `rejected` (a human declined it) | Sent exactly once for every `tool_call`, whichever way the call ends; on a resume also for a gated call that was declined. **Never the result** |
+| `tool_result` | `{"tool","callId","status","durationMs"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval) or `rejected` (a human declined it) | Sent exactly once for every `tool_call`, always after it in the same stream, whichever way the call ends; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the result** |
 | `hitl_resume` | `{"pauseId","verdict"}` | `/resume/stream` only. The decision was committed; sent once, before any event of the continued turn |
 | `approval_required` | `{"pauseId","pauseType","callCount"}` — `pauseType` is `TOOL_CALL` or `RULE`; `callCount` the number of gated tool calls awaiting a decision (`0` for a rule pause) | The turn ends waiting for a human. Sent immediately before `done` on `/stream` and `/resume/stream`; pass `pauseId` back in the decision |
 | `cascade_step_start` | `{"stepIndex","modelType","modelName","totalSteps"}` | A [model cascade](model-cascade.md) step starts |
@@ -300,12 +300,20 @@ Rules for clients:
   the correlation id is in the server log next to the real cause.
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
+- **`/resume/stream` does not cancel on disconnect by default.** A resume is a
+  deliberate human decision whose approved tool calls may already have run, so a
+  dropped connection must not discard the turn and its trace. The resumed turn
+  finishes and persists; read the conversation after reconnecting.
+  `eddi.streaming.resume-cancel-on-client-disconnect` (default `false`) turns
+  cancellation on for the resume stream only.
 - **`POST /agents/{conversationId}/resume/stream`** takes the body and the
   `returnDetailed` / `returnCurrentStepOnly` / `returningFields` query flags of
   [`/resume`](hitl.md#reply-and-approver-on-resume), needs the same roles and
   runs the same checks, and shares the stream's event contract and keep-alive. A
   reply is a read, so it needs the owner-or-admin access `say` needs, as a
-  `/resume` with reply flags does. Every refusal `/resume` has — `400`
+  `/resume` with reply flags does: an approver-only caller (`eddi-approver`,
+  neither owner nor admin) gets `403` and the pause is not consumed - such
+  callers use the plain `/resume`. Every refusal `/resume` has — `400`
   (malformed decision, bad `toolDecisions`, bad secret context), `403`, `404`,
   `409` (not `AWAITING_HUMAN`, agent not deployed, `pauseId` no longer current)
   and `503` (shutting down) — is the same plain HTTP error **before any event is
@@ -317,7 +325,8 @@ Rules for clients:
   `resume_dropped`); a failure, or losing the cluster lease, ends with `error`
   too.
 - **Disconnecting cancels the turn** by default
-  (`eddi.streaming.cancel-on-client-disconnect=true`). Set it to `false` to let
+  (`eddi.streaming.cancel-on-client-disconnect=true`; this governs `/stream`
+  only, `/resume/stream` has its own switch, below). Set it to `false` to let
   the turn finish and persist when the client goes away; the reply is then there
   when the conversation is read again.
 - **Silent stretches carry a keep-alive.** A model can work for a minute before

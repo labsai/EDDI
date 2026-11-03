@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.ToolDisplayConfig;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.CalculatorTool;
 import ai.labs.eddi.modules.llm.tools.impl.DataFormatterTool;
@@ -138,10 +139,16 @@ class ToolLoopResumerTraceAndEventsTest {
     }
 
     private List<Map<String, Object>> resume(ConversationMemory memory, PendingToolCallBatch batch, HitlDecision decision) throws Exception {
+        return resume(memory, batch, decision, task());
+    }
+
+    private List<Map<String, Object>> resume(ConversationMemory memory, PendingToolCallBatch batch, HitlDecision decision,
+                                             LlmConfiguration.Task task)
+            throws Exception {
         ChatModel chatModel = mock(ChatModel.class);
         when(chatModel.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("ok")).build());
-        return orchestrator.resumeToolLoop(chatModel, task(), memory, batch, decision, true).trace();
+        return orchestrator.resumeToolLoop(chatModel, task, memory, batch, decision, true).trace();
     }
 
     private static Map<String, Object> entry(List<Map<String, Object>> trace, String type, String callId) {
@@ -173,6 +180,12 @@ class ToolLoopResumerTraceAndEventsTest {
         assertNotNull(inherited);
         assertFalse(inherited.containsKey("note"));
 
+        // every tool_result follows its own tool_call in the same stream
+        int call = sink.events.indexOf("call:calculate:c1");
+        int result = sink.events.indexOf("result:calculate:c1:rejected");
+        assertTrue(call >= 0 && result > call, sink.events.toString());
+        assertTrue(sink.events.indexOf("call:calculate:c2") >= 0
+                && sink.events.indexOf("call:calculate:c2") < sink.events.indexOf("result:calculate:c2:rejected"), sink.events.toString());
         assertTrue(sink.events.contains("result:calculate:c1:rejected"), sink.events.toString());
         assertTrue(sink.events.contains("result:calculate:c2:rejected"), sink.events.toString());
         assertFalse(String.join("|", sink.events).contains(RAW_SECRET));
@@ -195,6 +208,26 @@ class ToolLoopResumerTraceAndEventsTest {
         // "rejected"
         assertTrue(sink.events.stream().anyMatch(e -> e.startsWith("result:calculate:c1:") && !e.endsWith(":rejected")),
                 sink.events.toString());
+    }
+
+    @Test
+    @DisplayName("the tool_call announced for a declined call carries the task's toolDisplay, and never the arguments")
+    void declinedCallIsAnnouncedWithItsDisplay() throws Exception {
+        var sink = new ToolLoopRunnerToolEventsTest.RecordingSink();
+        var memory = new ConversationMemory("conv-1", "agent-1", 1, "user-1");
+        memory.setEventSink(sink);
+        var task = task();
+        var config = new ToolDisplayConfig();
+        config.setLabel("Calculating");
+        config.setFields(List.of("expression"));
+        task.setToolDisplay(Map.of("calculate", config));
+
+        resume(memory, batchOf("c1"), decision(HitlDecision.HitlVerdict.REJECTED, null), task);
+
+        assertEquals(1, sink.displays.size());
+        assertEquals("Calculating", sink.displays.getFirst().displayName());
+        assertEquals(Map.of("expression", "1+1"), sink.displays.getFirst().fields());
+        assertFalse(sink.displays.getFirst().fields().toString().contains(RAW_SECRET));
     }
 
     @Test

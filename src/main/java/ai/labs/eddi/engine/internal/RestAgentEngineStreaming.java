@@ -148,6 +148,26 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private final boolean cancelOnClientDisconnect;
 
     /**
+     * Whether a vanished client of a {@code /resume/stream} cancels the resumed
+     * turn ({@code eddi.streaming.resume-cancel-on-client-disconnect}, default
+     * {@code false}). Governs the resume stream only; {@code /stream} keeps
+     * {@link #cancelOnClientDisconnect}.
+     *
+     * <p>
+     * Off by default because a resume is a deliberate human decision: a phone that
+     * drops the connection right after Approve must not cancel a turn whose
+     * approved tool calls may already have run, discarding the turn and its trace
+     * while the side effects stay. The resumed turn finishes and persists, and the
+     * client reads the outcome when it reconnects. Turn it on to stop generation
+     * when nobody is watching, accepting that the turn is then lost, as on
+     * {@code /stream}.
+     * </p>
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.streaming.resume-cancel-on-client-disconnect", defaultValue = "false")
+    boolean resumeCancelOnClientDisconnect;
+
+    /**
      * How long a turn's stream may stay silent before EDDI writes an SSE comment
      * line ({@code : keep-alive}) on it
      * ({@code eddi.streaming.keepalive-interval-seconds}, default 15; {@code 0}
@@ -302,7 +322,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
         // Every outbound frame goes through this stream, which doubles as the
         // client-disconnect detector — see SseStream.
-        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse);
+        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, cancelOnClientDisconnect);
         stream.startKeepAlive();
 
         try {
@@ -320,7 +340,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     public void resumeStreaming(String conversationId, HitlDecision decision, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                 List<String> returningFields, SseEventSink eventSink, Sse sse) {
         final String safeConversationId = sanitize(conversationId);
-        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse);
+        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, resumeCancelOnClientDisconnect);
 
         // Admission is the plain /resume's, unchanged: the access checks, the decision
         // checks and the pre-commit refusals (400/403/404/409/503, a pause that is no
@@ -685,7 +705,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
          */
         private volatile boolean turnEventSent;
 
-        private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse) {
+        /** Whether this stream's vanished client cancels the turn it was following. */
+        private final boolean cancelOnDisconnect;
+
+        private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse, boolean cancelOnDisconnect) {
+            this.cancelOnDisconnect = cancelOnDisconnect;
             this.conversationId = conversationId;
             this.safeConversationId = safeConversationId;
             this.eventSink = eventSink;
@@ -836,9 +860,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             if (terminal.get() || !cancelSignalled.compareAndSet(false, true)) {
                 return;
             }
-            if (!cancelOnClientDisconnect) {
+            if (!cancelOnDisconnect) {
                 LOGGER.infof("SSE client disconnected from conversation %s — letting the turn finish and persist "
-                        + "(eddi.streaming.cancel-on-client-disconnect is disabled)", safeConversationId);
+                        + "(cancel on client disconnect is disabled for this stream)", safeConversationId);
                 return;
             }
             LOGGER.infof("SSE client disconnected from conversation %s — cancelling the in-flight turn; "

@@ -14,7 +14,9 @@ import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
+import ai.labs.eddi.modules.llm.tools.ToolNameResolver;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -139,12 +141,24 @@ class ToolLoopResumer {
      * Closes a gated call that was settled without the tool loop running it, for a
      * client watching the resume. Status only.
      */
-    private static void emitToolResult(IConversationMemory memory, PendingToolCallBatch.PendingToolCall c, String status) {
+    private static void emitToolResult(IConversationMemory memory, LlmConfiguration.Task task, Map<String, String> toolCanonicalNames,
+                                       PendingToolCallBatch.PendingToolCall c, String status) {
         ConversationEventSink sink = memory != null ? memory.getEventSink() : null;
         if (sink == null) {
             return;
         }
         try {
+            // A tool_result always follows its tool_call in the same stream. A call that is
+            // settled here never reached the tool loop's own announcement (its tool_call,
+            // if
+            // any, was on the stream of the turn that paused), so announce it first, with
+            // the
+            // display resolved exactly as the loop resolves it.
+            ToolDisplay display = task != null
+                    ? ToolDisplayResolver.resolve(task.getToolDisplay(), c.getToolName(),
+                            ToolNameResolver.canonical(c.getToolName(), toolCanonicalNames), c.getArgumentsRaw())
+                    : null;
+            sink.onToolCall(c.getToolName(), c.getCallId(), display);
             sink.onToolResult(c.getToolName(), c.getCallId(), status, 0L);
         } catch (RuntimeException e) {
             LOGGER.debug("Event sink failed on tool_result; ignoring", e);
@@ -266,7 +280,7 @@ class ToolLoopResumer {
                 currentMessages
                         .add(ToolExecutionResultMessage.from(rebuiltRequest(c), rejectionEnvelope(c.getToolName(), note, decision.getDecidedBy())));
                 trace.add(rejectedEntry(c, cd));
-                emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_REJECTED);
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_REJECTED);
                 continue;
             }
 
@@ -280,7 +294,7 @@ class ToolLoopResumer {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"arguments exceeded the persistable size cap\"}"));
                 trace.add(Map.of("type", "hitl_not_executed", "tool", c.getToolName(), "callId", c.getCallId()));
-                emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -293,7 +307,7 @@ class ToolLoopResumer {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the request changed after it was approved\"}"));
                 trace.add(Map.of("type", "hitl_request_changed", "tool", c.getToolName(), "callId", c.getCallId(), "detail", changed));
-                emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -310,7 +324,7 @@ class ToolLoopResumer {
                         "{\"status\":\"NOT_EXECUTED\",\"reason\":\"an agent may not send a request to its own conversation\"}"));
                 trace.add(Map.of("type", "hitl_self_conversation", "tool", c.getToolName(), "callId", c.getCallId(),
                         "detail", selfTargeted));
-                emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -327,7 +341,7 @@ class ToolLoopResumer {
                         toJson(Map.of("status", "NOT_EXECUTED", "reason", selfUngating))));
                 trace.add(Map.of("type", "hitl_self_ungating", "tool", c.getToolName(), "callId", c.getCallId(),
                         "detail", selfUngating));
-                emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
             }
 
@@ -360,7 +374,7 @@ class ToolLoopResumer {
                     // Replay the stored result — NEVER re-execute (no checkpoint re-fire).
                     currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c), prior.get().resultCapped()));
                     trace.add(Map.of("type", "hitl_replayed", "tool", c.getToolName(), "callId", c.getCallId()));
-                    emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_OK);
+                    emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_OK);
                     clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
                 } else {
                     // EXECUTING (crash inside the tool) — honest at-most-once outcome.
@@ -369,7 +383,7 @@ class ToolLoopResumer {
                                     + "it may or may not have taken effect — verify externally before retrying\"}"));
                     auditOutcomeUnknown(memory, c);
                     trace.add(Map.of("type", "hitl_outcome_unknown", "tool", c.getToolName(), "callId", c.getCallId()));
-                    emitToolResult(memory, c, ToolLoopRunner.TOOL_STATUS_ERROR);
+                    emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_ERROR);
                     clearedCalls.clear(c.getCallId(), c.getToolName(), amended != null ? amended : c.getArgumentsRaw());
                 }
             }

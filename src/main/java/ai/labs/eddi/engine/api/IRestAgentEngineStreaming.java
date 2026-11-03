@@ -61,7 +61,9 @@ public interface IRestAgentEngineStreaming {
     @Operation(summary = "Resume a paused conversation with SSE streaming",
                description = "Submits a human decision (APPROVED/REJECTED) exactly as POST /agents/{conversationId}/resume does - "
                        + "same body, same checks, same errors - and streams the resumed turn. Every refusal (400, 403, 404, 409, 503) is "
-                       + "a plain HTTP error before any event is written. Once the decision is accepted the stream carries hitl_resume, "
+                       + "a plain HTTP error before any event is written. A streamed reply is a read of the conversation, so the caller needs the "
+                       + "owner-or-admin access that say needs: an approver-only caller (eddi-approver, neither owner nor admin) gets 403 and the pause "
+                       + "is not consumed - such callers decide with the plain POST /agents/{conversationId}/resume. Once the decision is accepted the stream carries hitl_resume, "
                        + "then the turn's task_start / tool_call / tool_result / token / task_complete events, "
                        + "approval_required when the turn pauses again, and finally done (or error).")
     void resumeStreaming(@PathParam("conversationId") String conversationId, HitlDecision decision,
