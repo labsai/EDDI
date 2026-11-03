@@ -1717,10 +1717,11 @@ class ConversationHitlService {
             }
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
             AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
-            if (hitlConfig == null) {
-                return;
-            }
-            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig.getApprovalContext(), hitlConfig.getToolApprovals()));
+            // An agent without hitlConfig can still pause on a task-level toolApprovals
+            // rule: the renderer then
+            // takes the blocks of the effective configuration stored on the pending batch.
+            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig != null ? hitlConfig.getApprovalContext() : null,
+                    hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
             LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
         }
