@@ -158,6 +158,13 @@ public class EmailReplySender {
     record Prepared(EmailChannelSettings settings, RenderedMail mail) {
     }
 
+    /**
+     * A rendered group reply and what its recipient was chosen from, so a retry can
+     * choose again under the integration's current settings.
+     */
+    record CachedGroupReply(Prepared prepared, Request request) {
+    }
+
     private final IEmailMessageLedger ledger;
     private final IEmailSuppressionStore suppressions;
     private final EmailIntegrationDirectory directory;
@@ -173,7 +180,7 @@ public class EmailReplySender {
     private final Duration retryBackoff;
 
     /** Rendered group replies this node may still retry, by row id. */
-    private final Map<String, Prepared> groupReplies = new ConcurrentHashMap<>();
+    private final Map<String, CachedGroupReply> groupReplies = new ConcurrentHashMap<>();
 
     @Inject
     public EmailReplySender(IEmailMessageLedger ledger, IEmailSuppressionStore suppressions, EmailIntegrationDirectory directory,
@@ -482,7 +489,7 @@ public class EmailReplySender {
             if (groupReplies.size() >= MAX_CACHED_GROUP_REPLIES) {
                 groupReplies.clear();
             }
-            groupReplies.put(row.id(), prepared);
+            groupReplies.put(row.id(), new CachedGroupReply(prepared, request));
         }
         try {
             executor.execute(() -> attempt(row, prepared));
@@ -583,12 +590,22 @@ public class EmailReplySender {
             return;
         }
         if (kind == ReplyKind.GROUP) {
-            Prepared cached = groupReplies.get(row.id());
+            CachedGroupReply cached = groupReplies.get(row.id());
             if (cached == null) {
                 failTerminal(row, settings, CONTENT_UNAVAILABLE, now);
                 return;
             }
-            attempt(row, new Prepared(settings, cached.mail()));
+            // The same check every other reply gets on a retry: the recipient is chosen
+            // again under the current settings (honorReplyTo switched off since, say),
+            // and a reply whose recipient that changes or refuses is not sent.
+            Request request = cached.request();
+            EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(row.integrationId(), settings, request.inbound(),
+                    request.stepMail(), request.userId());
+            if (!decision.allowed() || !decision.recipient().equals(row.recipient())) {
+                terminal(row, State.SUPPRESSED, RECIPIENT_REFUSED + (decision.allowed() ? "recipient_changed" : decision.refusal()), "refused", now);
+                return;
+            }
+            attempt(row, new Prepared(settings, cached.prepared().mail()));
             return;
         }
         Optional<LedgerEntry> inbound = ledger.findById(ref[0]);

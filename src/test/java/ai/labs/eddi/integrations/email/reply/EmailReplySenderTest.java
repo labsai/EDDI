@@ -564,5 +564,26 @@ class EmailReplySenderTest {
             verify(conversations, never()).readConversation(anyString(), any(), any(), any());
             verify(audit, atLeastOnce()).submit(any());
         }
+
+        @Test
+        @DisplayName("a group reply's retry chooses its recipient again: Reply-To routing switched off since stops it")
+        void retryRechecksTheRecipient() throws Exception {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            String user = EmailUserIdentity.perSender(INTEGRATION, SENDER);
+            Map<String, Object> mail = mail();
+            mail.put("replyTo", List.of("form-user@example.org"));
+            integration(Map.of("honorReplyTo", "true"));
+            transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+
+            var row = sender.onGroupCompleted(INTEGRATION, settings(Map.of("honorReplyTo", "true")), inbound, "gc-1", user, mail,
+                    "The panel recommends B.", NOW).orElseThrow();
+            assertEquals("form-user@example.org", row.recipient());
+            integration(Map.of()); // the owner turns Reply-To routing off
+            sender.sweep(ledger.findById(row.id()).orElseThrow().nextAttemptAt().plusSeconds(1));
+
+            assertTrue(transport.recipients.isEmpty(), "not sent to the Reply-To any more");
+            assertEquals(State.SUPPRESSED, ledger.findById(row.id()).orElseThrow().state());
+            assertFalse(sender.holdsGroupReply(row.id()));
+        }
     }
 }
