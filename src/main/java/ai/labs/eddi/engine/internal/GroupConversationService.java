@@ -2639,13 +2639,22 @@ public class GroupConversationService implements IGroupConversationService, User
             var lease = leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId);
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
-            } else {
-                // Held elsewhere — most likely a stale lease of a node that died, which
-                // expires with its TTL. The discussion still runs; a cancel forwarded to
-                // that holder is answered "not here" and falls back to the database path.
-                LOGGER.warnf("Group discussion %s runs without its group lease (held by another node)",
-                        LogSanitizer.sanitize(groupConversationId));
+                return;
             }
+            // A11: the lease is exclusive. A lease of a node that died or restarted is
+            // taken over by tryAcquireKey itself, so one still held by another node means
+            // that node runs this discussion: running it here as well made two legs write
+            // the same discussion, and a cancel was forwarded to only one of them. This
+            // leg stops without writing (the persisted state stands).
+            var holder = leaseManager.peekKey(IConversationLeaseManager.GROUP + groupConversationId);
+            if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
+                throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
+                        new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));
+            }
+            // No holder could be read (NATS unreachable): the discussion runs, as every
+            // turn does in degraded mode; a cancel then takes the database path.
+            LOGGER.warnf("Group discussion %s runs without its group lease (NATS unreachable or the lease could not be read)",
+                    LogSanitizer.sanitize(groupConversationId));
         }
     }
 

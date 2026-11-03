@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.cluster.admin;
 
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.cluster.ClusterConfig;
@@ -19,7 +20,9 @@ import ai.labs.eddi.engine.cluster.lease.KvLeaseManager.LeaseSnapshot;
 import ai.labs.eddi.engine.cluster.lease.NatsLeaseManager;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.internal.TurnIdempotencyService;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.ClusterAdminModels.AccountView;
 import ai.labs.eddi.engine.model.ClusterAdminModels.ActionResult;
 import ai.labs.eddi.engine.model.ClusterAdminModels.BucketView;
@@ -82,12 +85,17 @@ import ai.labs.eddi.engine.cluster.ISharedStateFactory;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.cluster.SharedBucket;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
@@ -210,15 +218,92 @@ public class ClusterAdminService implements ClusterStartable {
         manager.onConnected(this::syncOwnDrainKey);
         long every = drainKeyRefreshMillis(config.presenceInterval());
         manager.scheduler().scheduleWithFixedDelay(this::syncOwnDrainKey, every, every, TimeUnit.MILLISECONDS);
-        rpc.handle(RPC_DRAIN, request -> {
-            boolean drain = Boolean.parseBoolean(String.valueOf(request.get("drain")));
-            applyDrainLocally(drain);
-            return Map.of("draining", drain);
+        rpc.handle(RPC_DRAIN, this::onDrainRequest);
+        rpc.handle(RPC_RECONCILE, request -> {
+            Map<String, Object> reply = reconcileWithin(config.natsRequestTimeout().dividedBy(2));
+            recordRemoteAction("deployments.reconcile", reply);
+            return reply;
         });
-        rpc.handle(RPC_RECONCILE, request -> reconcileWithin(config.natsRequestTimeout().dividedBy(2)));
-        rpc.handle(RPC_FORWARD, request -> Map.of("forwarded",
-                clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0), "remaining",
-                clusterCoordinator().map(ClusterConversationCoordinator::localDeadLetterCount).orElse(0)));
+        rpc.handle(RPC_FORWARD, request -> {
+            Map<String, Object> reply = Map.of("forwarded",
+                    clusterCoordinator().map(ClusterConversationCoordinator::forwardLocalDeadLetters).orElse(0), "remaining",
+                    clusterCoordinator().map(ClusterConversationCoordinator::localDeadLetterCount).orElse(0));
+            recordRemoteAction("deadletters.forward-local", reply);
+            return reply;
+        });
+    }
+
+    /**
+     * The actor recorded for an action this node applied on another node's request.
+     */
+    static final String RPC_ACTOR = "cluster-rpc";
+
+    /**
+     * The receiving end of a drain or undrain (C4). The REST side checks the
+     * last-node guard before it sends the request, but anything that can publish on
+     * the RPC subject reaches this handler directly, a broadcast to every node
+     * included. So the drain is checked again here, against the shared admin state:
+     * a drain decision must be open (the drain gate is held), this node's own drain
+     * key must have been written by it, and at least one other live node must still
+     * take turns. A request that fails any of these is refused and changes nothing.
+     * A forged broadcast therefore drains no node: either it wrote no drain keys
+     * and every node refuses, or it wrote them all and every node is the last one.
+     * Applied or refused, the request is written to the audit ledger and the
+     * activity timeline of this node.
+     */
+    Map<String, Object> onDrainRequest(Map<String, Object> request) {
+        boolean drain = Boolean.parseBoolean(String.valueOf(request.get("drain")));
+        if (drain) {
+            String refusal = remoteDrainRefusal();
+            if (refusal != null) {
+                LOGGER.warnf("Refused a drain request received over RPC: %s", refusal);
+                audit("node.drain.refused", RPC_ACTOR, Map.of(), Map.of("reason", refusal));
+                activity.record("admin.node.drain.refused", ClusterActivityLog.WARNING, Map.of("actor", RPC_ACTOR, "reason", refusal), null);
+                count("node.drain.rpc", "refused");
+                return Map.of("error", refusal);
+            }
+        }
+        applyDrainLocally(drain);
+        recordRemoteAction(drain ? "node.drain" : "node.undrain", Map.of("draining", drain));
+        return Map.of("draining", drain);
+    }
+
+    /** Why this node must not drain on a request from another node, or null. */
+    String remoteDrainRefusal() {
+        String self = connections.get().node().nodeId();
+        try {
+            ISharedKv kv = claims();
+            if (kv.getConsistent(DRAIN_GATE).isEmpty()) {
+                return "no drain decision is being applied (the drain gate is not held)";
+            }
+            Set<String> drained = drainedNodes(kv);
+            if (!drained.contains(self)) {
+                return "the drain of this node was not recorded";
+            }
+            long now = System.currentTimeMillis();
+            long staleAfter = 2 * config.presenceInterval().toMillis();
+            long others = presence.get().currentMembers().stream()
+                    .filter(m -> !self.equals(String.valueOf(m.get("node"))))
+                    .filter(m -> !drained.contains(String.valueOf(m.get("node"))))
+                    .filter(m -> now - num(m.get("updatedAt")) <= staleAfter)
+                    .count();
+            if (others == 0) {
+                return "this is the last node taking turns";
+            }
+            return null;
+        } catch (ClusterUnavailableException e) {
+            return "NATS is unreachable: " + e.getMessage();
+        }
+    }
+
+    /**
+     * Records an administrative action this node applied on another node's request:
+     * the requesting side records its own decision, and this is the trace of what
+     * reached, and changed, this node.
+     */
+    private void recordRemoteAction(String action, Map<String, Object> result) {
+        audit(action + ".applied", RPC_ACTOR, Map.of(), result);
+        activity.record("admin." + action + ".applied", ClusterActivityLog.INFO, Map.of("actor", RPC_ACTOR), null);
     }
 
     public boolean isClustered() {
@@ -804,19 +889,27 @@ public class ClusterAdminService implements ClusterStartable {
      * <p>
      * The entry is <b>claimed</b> before anything is read: a create of
      * {@code replay.<id>} in the shared {@code ADMIN} bucket, which only one caller
-     * can win (the bucket's leader decides). The winner then reads the entry —
-     * after the claim, so a replay that finished in the meantime, which deletes the
-     * entry before it drops its claim, is seen as gone — submits the turn, deletes
-     * the entry and only then drops the claim. Whoever loses gets
+     * can win (the bucket's leader decides). The winner then reads the entry, after
+     * the claim, so a replay that finished in the meantime, which deletes the entry
+     * before it drops its claim, is seen as gone. Whoever loses gets
      * {@code IN_PROGRESS} and nothing runs.
      * <p>
-     * Nothing is lost: the entry stays in the stream until its turn was accepted; a
-     * rejected turn drops the claim and keeps the entry; a node that dies while
-     * holding a claim leaves the entry in place, and the claim expires with the
-     * bucket's TTL ({@value #CLAIM_TTL_SECONDS} s). The one window left is a node
-     * dying between the turn being accepted and the entry being deleted — then the
-     * entry is listed again after the TTL; the replayed turn carries
-     * {@code replayOf=<id>} in its context, which tells the two apart.
+     * <b>The entry is deleted when the replayed turn commits, not when it is
+     * queued</b> (A7). A queued turn can still be skipped, time out waiting for the
+     * lease, be drained or fail; deleting the entry at that point lost its input
+     * for good. So the claim is held while the turn runs, and once its answer is
+     * in, the conversation is checked for the turn's write: committed, the entry is
+     * deleted; not committed, the entry stays and can be replayed again. Either way
+     * the claim is then dropped and the outcome is recorded on the activity
+     * timeline.
+     * <p>
+     * Every replay of one entry carries the same {@code Idempotency-Key}, derived
+     * from the entry id ({@link #replayIdempotencyKey}). If a replay commits and
+     * its node dies before the entry is deleted, the entry is listed again once the
+     * claim expires ({@value #CLAIM_TTL_SECONDS} s), and replaying it a second time
+     * is answered from the stored outcome instead of running the turn again (within
+     * the idempotency TTL). The replayed turn also carries {@code replayOf=<id>} in
+     * its context.
      */
     ItemOutcome replayOne(String id) {
         boolean local = isLocal(id);
@@ -835,55 +928,206 @@ public class ClusterAdminService implements ClusterStartable {
                 return new ItemOutcome(id, "UNAVAILABLE", "NATS is unreachable — try again when the cluster is connected");
             }
         }
-        boolean releaseClaim = true;
+        Runnable releaseClaim = () -> releaseReplayClaim(id, local, claimKey);
+        boolean handedOver = false;
         try {
-            ItemOutcome outcome = replayClaimed(id);
-            // Submitted but the entry could not be deleted: keep the claim, so nobody
-            // replays it again until the claim expires (and someone may delete it).
-            releaseClaim = !("REPLAYED".equals(outcome.outcome()) && outcome.message() != null);
-            return outcome;
+            ReplaySubmission submission = replayClaimed(id, releaseClaim);
+            handedOver = submission.handedOver();
+            return submission.outcome();
         } finally {
-            if (local) {
-                localReplayClaims.remove(id);
-            } else if (releaseClaim) {
-                try {
-                    claims().delete(claimKey);
-                } catch (ClusterUnavailableException e) {
-                    LOGGER.debugf("Replay claim %s not released (expires with the TTL): %s", sanitize(id), e.getMessage());
-                }
+            if (!handedOver) {
+                releaseClaim.run();
             }
         }
     }
 
-    private ItemOutcome replayClaimed(String id) {
+    private void releaseReplayClaim(String id, boolean local, String claimKey) {
+        if (local) {
+            localReplayClaims.remove(id);
+            return;
+        }
+        try {
+            claims().delete(claimKey);
+        } catch (ClusterUnavailableException e) {
+            LOGGER.debugf("Replay claim %s not released (expires with the TTL): %s", sanitize(id), e.getMessage());
+        }
+    }
+
+    /**
+     * What submitting a replay came to: the outcome for the caller, and whether the
+     * claim was handed over to the turn's completion (which releases it).
+     */
+    private record ReplaySubmission(ItemOutcome outcome, boolean handedOver) {
+        static ReplaySubmission done(ItemOutcome outcome) {
+            return new ReplaySubmission(outcome, false);
+        }
+    }
+
+    /**
+     * How long a replay waits for its turn's answer before it stops waiting for the
+     * commit. The entry is then kept (and replaying it again is answered from the
+     * stored outcome if the turn did commit after all).
+     */
+    static final long REPLAY_ANSWER_WAIT_SECONDS = 300;
+
+    /**
+     * How long after the turn's answer the replay looks for its write: the reply
+     * goes out before the turn is persisted.
+     */
+    static final long REPLAY_COMMIT_WAIT_MILLIS = 10_000;
+    private static final long REPLAY_COMMIT_POLL_MILLIS = 200;
+
+    /** Where a replay's completion runs; replaced by a direct executor in tests. */
+    Executor replayCompletions = Executors.newVirtualThreadPerTaskExecutor();
+
+    /**
+     * Finds the replayed turn's write in the stored conversation. Field-injected;
+     * {@code null} in tests, where the revision is the fallback signal.
+     */
+    @Inject
+    TurnIdempotencyService turnIdempotency;
+
+    /**
+     * The {@code Idempotency-Key} every replay of entry {@code id} carries. At most
+     * {@link TurnIdempotencyService#MAX_KEY_LENGTH} printable characters: a longer
+     * id is hashed.
+     */
+    static String replayIdempotencyKey(String id) {
+        String key = "dead-letter-replay:" + id;
+        if (key.length() <= TurnIdempotencyService.MAX_KEY_LENGTH && key.chars().allMatch(c -> c >= 0x20 && c <= 0x7e)) {
+            return key;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(id.getBytes(StandardCharsets.UTF_8));
+            return "dead-letter-replay:" + HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
+        }
+    }
+
+    private ReplaySubmission replayClaimed(String id, Runnable releaseClaim) {
         Optional<DeadLetterEntry> found;
         try {
             found = coordinator.getDeadLetter(id);
         } catch (ClusterUnavailableException e) {
-            return new ItemOutcome(id, "UNAVAILABLE", "NATS is unreachable — try again when the cluster is connected");
+            return ReplaySubmission.done(new ItemOutcome(id, "UNAVAILABLE", "NATS is unreachable — try again when the cluster is connected"));
         }
         if (found.isEmpty()) {
-            return new ItemOutcome(id, "NOT_FOUND", "already replayed, discarded or expired");
+            return ReplaySubmission.done(new ItemOutcome(id, "NOT_FOUND", "already replayed, discarded or expired"));
         }
         DeadLetterEntry entry = found.get();
         if (!entry.isReplayable()) {
-            return new ItemOutcome(id, "NOT_REPLAYABLE", entry.notReplayableReason());
+            return ReplaySubmission.done(new ItemOutcome(id, "NOT_REPLAYABLE", entry.notReplayableReason()));
         }
+        String conversationId = entry.conversationId();
         Map<String, Context> context = new HashMap<>();
         context.put("replayOf", new Context(Context.ContextType.string, id));
         InputData input = new InputData(String.valueOf(entry.turn().get("input")), context);
+        String key = replayIdempotencyKey(id);
+        input.setIdempotencyKey(key);
+        Long revisionBefore = revisionOf(conversationId);
+        CompletableFuture<Boolean> answered = new CompletableFuture<>();
         try {
-            conversationService.say(entry.conversationId(), false, true, List.of(), input, false, snapshot -> {
+            conversationService.say(conversationId, false, true, List.of(), input, false, new ConversationResponseHandler() {
+                @Override
+                public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                    answered.complete(true);
+                }
+
+                @Override
+                public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                    answered.complete(false);
+                }
+
+                @Override
+                public void onCallerGone(SimpleConversationMemorySnapshot snapshot) {
+                    answered.complete(false);
+                }
             });
         } catch (Exception e) {
-            return new ItemOutcome(id, "REJECTED", e.getClass().getSimpleName() + ": " + sanitize(String.valueOf(e.getMessage())));
+            return ReplaySubmission.done(
+                    new ItemOutcome(id, "REJECTED", e.getClass().getSimpleName() + ": " + sanitize(String.valueOf(e.getMessage()))));
         }
+        answered.orTimeout(REPLAY_ANSWER_WAIT_SECONDS, TimeUnit.SECONDS).whenCompleteAsync(
+                (ran, failure) -> settleReplay(id, conversationId, key, revisionBefore, Boolean.TRUE.equals(ran), releaseClaim),
+                replayCompletions);
+        return new ReplaySubmission(new ItemOutcome(id, "REPLAYED", null), true);
+    }
+
+    /**
+     * Once the replayed turn has answered: deletes the entry if the turn committed,
+     * keeps it otherwise, records which on the activity timeline, and drops the
+     * claim.
+     */
+    void settleReplay(String id, String conversationId, String key, Long revisionBefore, boolean answered, Runnable releaseClaim) {
         try {
-            coordinator.replayDeadLetter(id);
-        } catch (ClusterUnavailableException e) {
-            return new ItemOutcome(id, "REPLAYED", "submitted; the entry could not be removed yet (NATS unreachable)");
+            boolean committed = answered && awaitReplayCommit(conversationId, key, revisionBefore);
+            if (committed) {
+                try {
+                    coordinator.replayDeadLetter(id);
+                } catch (ClusterUnavailableException e) {
+                    LOGGER.warnf("Dead letter %s was replayed and committed, but could not be removed yet (NATS unreachable); "
+                            + "replaying it again is answered from the stored outcome", sanitize(id));
+                }
+                activity.record("admin.deadletters.replay.committed", ClusterActivityLog.INFO,
+                        Map.of("id", id, "conversationId", conversationId), null);
+            } else {
+                LOGGER.warnf("Replay of dead letter %s did not commit (skipped, refused, failed or timed out) — the entry is kept",
+                        sanitize(id));
+                activity.record("admin.deadletters.replay.not-committed", ClusterActivityLog.WARNING,
+                        Map.of("id", id, "conversationId", conversationId), null);
+            }
+            invalidateDeadLetterSummary();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not settle the replay of dead letter %s: %s — the entry is kept", sanitize(id), e.getMessage());
+        } finally {
+            releaseClaim.run();
         }
-        return new ItemOutcome(id, "REPLAYED", null);
+    }
+
+    private boolean awaitReplayCommit(String conversationId, String key, Long revisionBefore) {
+        long deadline = System.currentTimeMillis() + REPLAY_COMMIT_WAIT_MILLIS;
+        while (true) {
+            if (replayCommitted(conversationId, key, revisionBefore)) {
+                return true;
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                return false;
+            }
+            try {
+                Thread.sleep(REPLAY_COMMIT_POLL_MILLIS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+    }
+
+    /**
+     * Whether the replayed turn is in the stored conversation: recorded under its
+     * {@code Idempotency-Key}, or, with the idempotency feature switched off, the
+     * conversation's revision moved past the one read before the replay.
+     */
+    boolean replayCommitted(String conversationId, String key, Long revisionBefore) {
+        try {
+            if (turnIdempotency != null && turnIdempotency.isEnabled()) {
+                var stored = memoryStore.loadConversationMemorySnapshot(conversationId);
+                return stored != null && turnIdempotency.isRecordedIn(stored, key);
+            }
+            Long now = memoryStore.getRevision(conversationId);
+            return now != null && revisionBefore != null && now > revisionBefore;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not check the replayed turn of %s: %s", sanitize(conversationId), e.getMessage());
+            return false;
+        }
+    }
+
+    private Long revisionOf(String conversationId) {
+        try {
+            return memoryStore.getRevision(conversationId);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public BulkResult discard(List<String> ids, String actor) {

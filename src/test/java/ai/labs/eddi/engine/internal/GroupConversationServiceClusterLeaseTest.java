@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.lease.LeaseInfo;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -133,9 +134,23 @@ class GroupConversationServiceClusterLeaseTest {
     }
 
     @Test
-    @DisplayName("a group lease held elsewhere is logged, the discussion goes on, and a later lease is still taken and released")
+    @DisplayName("A11: a group lease held by another live node stops this leg: that node runs the discussion")
+    void leaseHeldByAnotherNodeStopsThisLeg() {
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+        when(leaseManager.peekKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(new LeaseInfo("node-b", "boot-b", 7, 0)));
+
+        var stopped = assertThrows(RunningDiscussionWrites.DiscussionSupersededException.class, () -> service.holdGroupLease(GC_ID),
+                "two legs of one discussion must never run on two nodes at once");
+        assertTrue(stopped.getCause().getMessage().contains("node-b"));
+    }
+
+    // Before A11 this test's name said the discussion "goes on" whoever held the
+    // lease; now it goes on only when no holder can be read (NATS unreachable).
+    @Test
+    @DisplayName("a group lease that cannot be read is logged, the discussion goes on, and a later lease is still taken and released")
     void failedAcquisitionIsLoggedAndDoesNotWedge() {
         when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
+        when(leaseManager.peekKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty());
 
         service.holdGroupLease(GC_ID);
         service.releaseGroupLease(GC_ID);
