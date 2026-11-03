@@ -80,7 +80,16 @@ principal, not a user: erasing or exporting it is refused with 400.
    the data back seconds after the erasure reported success. In cluster mode
    (`eddi.messaging.type=nats`, see [Clustering](clustering.md)) the stop is also
    sent to every other replica — keyed by a hash of the user id, never the id
-   itself — and the user's dead letters are removed. Work a replica cannot be
+   itself — and the user's dead letters are removed. Each conversation is first
+   marked as erased in a cluster-wide marker (`ERASED` bucket, expiring after
+   `eddi.cluster.erasure-marker-ttl`, default `P7D`), then its dead letters are
+   purged. A node that was cut off from NATS and kept a dead letter of that
+   conversation locally checks the marker before it forwards the entry, and again
+   right after publishing it, and discards it (or purges the published copy) when
+   the marker is there. Without the marker the entry would be published again in
+   the window between the purge and the deletion of the conversation's snapshot.
+   A node that stays cut off for longer than the marker's lifetime falls back to
+   the check that the conversation still exists, which by then has long failed. Work a replica cannot be
    reached for (NATS down) is stopped by the stores refusing to recreate a
    deleted conversation or group discussion, and step 12 removes any memory it
    managed to write in the meantime. From this point the

@@ -18,7 +18,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -609,5 +611,80 @@ class GroupConversationStoreTest {
         assertEquals(0, store.deleteAllForUser(null));
         assertEquals(0, store.deleteAllForUser("   "));
         verify(storage, never()).removeAllPermanently(anyString());
+    }
+
+    // ==================== updateIfStateAndPause ====================
+
+    @Test
+    @DisplayName("updateIfStateAndPause - writes state AND pauseId in one multi-field CAS")
+    void updateIfStateAndPause_bindsBothFields() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("gc-1", 1, gc)).thenReturn(resource);
+
+        store.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, "42");
+
+        ArgumentCaptor<Map<String, String>> fields = ArgumentCaptor.forClass(Map.class);
+        verify(storage).storeIfFieldsEqual(eq(resource), fields.capture());
+        assertEquals("AWAITING_APPROVAL", fields.getValue().get("state"));
+        assertEquals("42", fields.getValue().get("pauseId"));
+        verify(storage, never()).storeIfFieldEquals(any(), anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("updateIfStateAndPause - a stale pause conflicts and a legacy (id-less) document is retried as absent")
+    void updateIfStateAndPause_staleConflicts_legacyFallsBackToAbsent() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("gc-1", 1, gc)).thenReturn(resource);
+        doThrow(new IResourceStore.ResourceModifiedException("stale")).when(storage).storeIfFieldsEqual(eq(resource), any());
+
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> store.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, "42"));
+
+        ArgumentCaptor<Map<String, String>> fields = ArgumentCaptor.forClass(Map.class);
+        verify(storage, times(2)).storeIfFieldsEqual(eq(resource), fields.capture());
+        assertEquals("42", fields.getAllValues().get(0).get("pauseId"));
+        assertTrue(fields.getAllValues().get(1).containsKey("pauseId"));
+        assertNull(fields.getAllValues().get(1).get("pauseId"), "the retry matches only a document with no stored id");
+    }
+
+    @Test
+    @DisplayName("updateIfStateAndPause - null pause id degrades to the plain state CAS")
+    void updateIfStateAndPause_nullPause_isStateCas() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("gc-1", 1, gc)).thenReturn(resource);
+
+        store.updateIfStateAndPause(gc, GroupConversationState.IN_PROGRESS, null);
+
+        verify(storage).storeIfFieldEquals(resource, "state", "IN_PROGRESS");
+        verify(storage, never()).storeIfFieldsEqual(any(), any());
+    }
+
+    @Test
+    @DisplayName("updateIfStateAndPause - deletion is Gone, not a conflict")
+    void updateIfStateAndPause_deleted_isGone() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-1");
+        IResourceStorage.IResource<GroupConversation> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource("gc-1", 1, gc)).thenReturn(resource);
+        doThrow(new IResourceStore.ResourceNotFoundException("gone")).when(storage).storeIfFieldsEqual(eq(resource), any());
+
+        assertThrows(GroupConversationGoneException.class,
+                () -> store.updateIfStateAndPause(gc, GroupConversationState.AWAITING_APPROVAL, "42"));
+    }
+
+    @Test
+    @DisplayName("setPausedAt keeps the persisted pauseId in lockstep")
+    void setPausedAt_derivesPauseId() {
+        GroupConversation gc = new GroupConversation();
+        gc.setPausedAt(Instant.ofEpochMilli(1234L));
+        assertEquals("1234", gc.getPauseId());
+        gc.setPausedAt(null);
+        assertNull(gc.getPauseId());
     }
 }

@@ -353,7 +353,7 @@ export function OperatorChat({
                   <CheckCircle2
                     className={cn(
                       "h-3.5 w-3.5 shrink-0",
-                      message.code === "partial" ? "text-amber-500" : "text-emerald-500",
+                      message.code === "partial" ? "text-warn-500" : "text-emerald-500",
                     )}
                     aria-hidden="true"
                   />
@@ -363,7 +363,7 @@ export function OperatorChat({
                 // not a pause, so it gets its own icon.
                 <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               ) : (
-                <PauseCircle className="h-3.5 w-3.5 shrink-0 text-amber-500" aria-hidden="true" />
+                <PauseCircle className="h-3.5 w-3.5 shrink-0 text-warn-500" aria-hidden="true" />
               )}
               <span className="shrink-0">
                 {/* `count` goes ONLY to "partial", the one pluralized key. Handing
@@ -459,7 +459,7 @@ export function OperatorChat({
             conversation that is waiting on it is, not on a separate page. */}
         {isPaused && pauseSurface === "compact" && (
           <div
-            className="flex flex-col gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+            className="flex flex-col gap-2 rounded-md border border-warn-500/40 bg-warn-500/10 p-3 text-sm text-warn-700 dark:text-warn-400"
             role="alert"
             data-testid="operator-chat-compact-pause"
           >

@@ -57,7 +57,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
       className={cn(
         "rounded-xl border p-4",
         unparsed
-          ? "border-amber-500/30 bg-amber-500/5"
+          ? "border-warn-500/30 bg-warn-500/5"
           : "border-primary/30 bg-primary/5",
         className,
       )}
@@ -215,7 +215,7 @@ export function DecisionRecordCard({ decision, className }: DecisionRecordCardPr
       )}
 
       {unparsed && (
-        <p className="mt-3 rounded-lg border border-amber-500/30 bg-background/60 p-2 text-[11px] text-muted-foreground">
+        <p className="mt-3 rounded-lg border border-warn-500/30 bg-background/60 p-2 text-[11px] text-muted-foreground">
           {t(
             "groups.decisionUnparsed",
             "The judge's answer could not be read as a structured verdict, so it is kept verbatim below and the conclusion stands as prose.",

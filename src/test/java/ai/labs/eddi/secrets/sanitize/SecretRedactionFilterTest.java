@@ -41,6 +41,15 @@ class SecretRedactionFilterTest {
     }
 
     @Test
+    void everyPasswordInACommaJoinedConnectionStringListIsRedacted() {
+        String result = SecretRedactionFilter.redact("redis://:p1secret@h1,redis://:p2secret@h2");
+
+        assertFalse(result.contains("p1secret"), result);
+        assertFalse(result.contains("p2secret"), result);
+        assertTrue(result.contains("@h1") && result.contains("@h2"), result);
+    }
+
+    @Test
     void redact_openaiKey() {
         String input = "Using key sk-abcdefghij1234567890abcdef to call API";
         String result = SecretRedactionFilter.redact(input);
@@ -638,6 +647,45 @@ class SecretRedactionFilterTest {
             assertEquals("${vault:tenant-key}", SecretRedactionFilter.maskCredentialValue("${vault:tenant-key}"));
             assertEquals("<REDACTED>", SecretRedactionFilter.maskCredentialValue("<REDACTED>"));
             assertNull(SecretRedactionFilter.maskCredentialValue(null));
+        }
+    }
+    @Nested
+    class CookieHeaders {
+
+        private String redactTwice(String input) {
+            String once = SecretRedactionFilter.redact(input);
+            assertEquals(once, SecretRedactionFilter.redact(once), () -> "redaction is not idempotent: " + once);
+            return once;
+        }
+
+        @Test
+        void cookieValuesAreRedactedAndNamesKept() {
+            assertEquals("Cookie: sid=<REDACTED>; theme=<REDACTED>", redactTwice("Cookie: sid=s3ss10nv4lue; theme=dark"));
+        }
+
+        @Test
+        void setCookieKeepsItsAttributes() {
+            assertEquals("Set-Cookie: JSESSIONID=<REDACTED>; Path=/; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly",
+                    redactTwice("Set-Cookie: JSESSIONID=8F2A9C11DEADBEEF; Path=/; Expires=Wed, 21 Oct 2015 07:28:00 GMT; Secure; HttpOnly"));
+        }
+
+        @Test
+        void aJsonHeaderMapStaysJson() {
+            String redacted = redactTwice("{\"Cookie\":\"sid=abc123; lang=en\",\"Accept\":\"*/*\"}");
+            assertEquals("{\"Cookie\":\"sid=<REDACTED>; lang=<REDACTED>\",\"Accept\":\"*/*\"}", redacted);
+            assertValidJson(redacted);
+        }
+
+        @Test
+        void theWalkStopsAtProseAndAtTheLineEnd() {
+            assertEquals("cookie: sid=<REDACTED> was rejected by the upstream x=y\nnext=line",
+                    redactTwice("cookie: sid=abc was rejected by the upstream x=y\nnext=line"));
+        }
+
+        @Test
+        void unrelatedWordsAreLeftAlone() {
+            String text = "cookies: none; the cookie jar holds key=value pairs";
+            assertEquals(text, redactTwice(text));
         }
     }
 }

@@ -239,7 +239,7 @@ export function EmailPlatformFields({
             <span className="font-medium">{t("emailChannel.requireAuthentication", "Require authenticated senders (DKIM/DMARC)")}</span>
             <span className="block text-[10px] text-muted-foreground">
               {conversation
-                ? t("emailChannel.requireAuthenticationConversationHint", "Always on in conversation mode: EDDI never answers a sender whose address may be forged.")
+                ? t("emailChannel.requireAuthenticationConversationHint", "Always on in conversation mode: {{productName}} never answers a sender whose address may be forged.")
                 : t("emailChannel.requireAuthenticationHint", "When off, mail that fails DKIM/DMARC alignment still runs a turn, under a one-off anonymous identity with no memory.")}
             </span>
           </span>
@@ -530,7 +530,7 @@ export function EmailSecurityNotes({ conversation = false }: { conversation?: bo
           <span>
             {t(
               "emailChannel.noteDkim",
-              "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — EDDI does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
+              "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — {{productName}} does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
             )}
           </span>
         </p>
@@ -541,7 +541,7 @@ export function EmailSecurityNotes({ conversation = false }: { conversation?: bo
           <span>
             {t(
               "emailChannel.noteBounces",
-              "A reply that bounces permanently puts the address on this integration's suppression list, and EDDI sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
+              "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
             )}
           </span>
         </p>

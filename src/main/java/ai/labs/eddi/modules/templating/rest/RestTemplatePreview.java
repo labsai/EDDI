@@ -107,6 +107,13 @@ public class RestTemplatePreview implements IRestTemplatePreview {
         boolean redactSnippets = !resourceAccessGuard.seesEverything();
         if (!snippets.isEmpty()) {
             templateData.put("snippets", redactSnippets ? redactValues(snippets) : snippets);
+        } else if (redactSnippets && templateData.get("snippets") instanceof Map<?, ?> converted) {
+            // Redaction must not depend on getAll(): the conversation conversion above
+            // fills "snippets" from getForAgent, and a store hiccup or cache race that
+            // leaves getAll() empty would otherwise leave those bodies in the map.
+            Map<String, Object> typed = new LinkedHashMap<>();
+            converted.keySet().forEach(key -> typed.put(String.valueOf(key), null));
+            templateData.put("snippets", redactValues(typed));
         }
 
         // Flatten keys for the variable reference panel
@@ -117,7 +124,7 @@ public class RestTemplatePreview implements IRestTemplatePreview {
         // Belt and braces: the panel is flattened from the already-redacted map, so
         // this only catches a snippet whose own value is a nested structure that
         // flattening walked into.
-        if (!snippets.isEmpty() && redactSnippets) {
+        if (redactSnippets && templateData.containsKey("snippets")) {
             variableValues.replaceAll((key, value) -> key.startsWith("snippets.") ? REDACTED : value);
         }
 

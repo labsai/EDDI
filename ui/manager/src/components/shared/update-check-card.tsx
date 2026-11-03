@@ -168,7 +168,7 @@ export function UpdateCheckCard() {
             <ResultRow tone="accent" icon={ArrowUpCircle}>
               <div className="space-y-1">
                 <p className="font-medium text-foreground">
-                  {t("updates.updateAvailable", "EDDI {{version}} is available", {
+                  {t("updates.updateAvailable", "{{productName}} {{version}} is available", {
                     version: latest.version,
                   })}
                 </p>
@@ -634,8 +634,8 @@ const TONE_STYLES: Record<ResultTone, { wrapper: string; icon: string }> = {
     icon: "text-emerald-600 dark:text-emerald-400",
   },
   warning: {
-    wrapper: "border-amber-500/30 bg-amber-500/5",
-    icon: "text-amber-600 dark:text-amber-400",
+    wrapper: "border-warn-500/30 bg-warn-500/5",
+    icon: "text-warn-600 dark:text-warn-400",
   },
   muted: { wrapper: "border-border bg-muted/40", icon: "text-muted-foreground" },
 };

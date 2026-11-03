@@ -24,6 +24,7 @@ import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -105,7 +106,7 @@ class SchedulePollerServiceTest {
                 Optional.empty(), "UTC", Duration.ofDays(90));
         disabled.init();
 
-        disabled.pollDueSchedules();
+        disabled.pollAndAwait();
 
         verifyNoInteractions(scheduleStore);
         verifyNoInteractions(fireExecutor);
@@ -115,7 +116,7 @@ class SchedulePollerServiceTest {
     void poll_noDueSchedules() throws Exception {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of());
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).findDueSchedules(any(), any(), eq(5));
         verifyNoInteractions(fireExecutor);
@@ -128,7 +129,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any(), any())).thenReturn(true);
         when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any(), any());
         verify(fireExecutor).fire(eq(schedule), eq("test-instance"), eq(1));
@@ -148,7 +149,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(eq("sched-stale"), eq("test-instance"), any(), any())).thenReturn(true);
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verifyNoInteractions(fireExecutor);
         verify(scheduleStore).markFailed(eq("sched-stale"), any(), any());
@@ -164,7 +165,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(eq("sched-poison"), eq("test-instance"), any(), any())).thenReturn(true);
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verifyNoInteractions(fireExecutor);
         verify(scheduleStore).markDeadLettered(eq("sched-poison"), any());
@@ -221,7 +222,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("sched-1"), eq("test-instance"), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var scheduleCaptor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
         verify(fireExecutor).fire(scheduleCaptor.capture(), eq("test-instance"), eq(1));
@@ -236,7 +237,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(false);
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).tryClaim(eq("sched-1"), eq("test-instance"), any(), any());
         verifyNoInteractions(fireExecutor);
@@ -244,7 +245,7 @@ class SchedulePollerServiceTest {
 
     @Test
     void poll_stalledFire_doesNotHangPollCycle() throws Exception {
-        // dispatchClaimed() must bound its wait on each fire: a stalled downstream
+        // the fire watchdog must bound its wait on each fire: a stalled downstream
         // call must not block this poll cycle forever, or this instance would stop
         // claiming/firing ANY schedule until the process is restarted. The wait is
         // bounded by leaseTimeout — use a short one so the test itself stays fast.
@@ -266,7 +267,7 @@ class SchedulePollerServiceTest {
         });
 
         long start = System.nanoTime();
-        assertTimeoutPreemptively(Duration.ofSeconds(5), shortLeasePoller::pollDueSchedules,
+        assertTimeoutPreemptively(Duration.ofSeconds(5), shortLeasePoller::pollAndAwait,
                 "a stalled fire task must not hang the poll cycle beyond the lease timeout");
         long elapsedMs = (System.nanoTime() - start) / 1_000_000;
         assertTrue(elapsedMs < 5000, "poll cycle took " + elapsedMs + "ms — expected it to return around the 200ms lease timeout");
@@ -302,7 +303,7 @@ class SchedulePollerServiceTest {
         // deadline keeps it near a single 200ms lease. 2s gives generous CI slack
         // while staying far below 30s (the real fire duration) proving the fires do
         // not run to completion serially.
-        assertTimeoutPreemptively(Duration.ofSeconds(2), shortLeasePoller::pollDueSchedules,
+        assertTimeoutPreemptively(Duration.ofSeconds(2), shortLeasePoller::pollAndAwait,
                 "multiple stalled fires must share one batch deadline, not stack to N * leaseTimeout");
     }
 
@@ -310,7 +311,7 @@ class SchedulePollerServiceTest {
     void poll_nonInterruptibleStuckFire_doesNotHangPollCycle() throws Exception {
         // Stronger than the sleep-based test above: this fire() SWALLOWS interruption
         // and keeps blocking, mimicking a synchronous DB socket read that the Mongo
-        // sync driver does not abort on Thread.interrupt(). If dispatchClaimed relied
+        // sync driver does not abort on Thread.interrupt(). If the fire watchdog relied
         // on try-with-resources ExecutorService.close() (which awaits termination),
         // future.cancel(true) would not free the task and the poll thread would pin
         // forever. shutdownNow() + no awaitTermination must keep the poll cycle live.
@@ -344,13 +345,177 @@ class SchedulePollerServiceTest {
         });
 
         try {
-            assertTimeoutPreemptively(Duration.ofSeconds(5), shortLeasePoller::pollDueSchedules,
+            assertTimeoutPreemptively(Duration.ofSeconds(5), shortLeasePoller::pollAndAwait,
                     "a non-interruptible stuck fire must not pin the poll thread");
             assertEquals(0, entered.getCount(), "the fire task should have started");
         } finally {
             // Let the leaked virtual thread finish so it does not linger past the test.
             release.countDown();
         }
+    }
+
+    // --- Claim cycle is decoupled from fire execution ---
+
+    @Test
+    void poll_longRunningFire_doesNotBlockNextPollFromClaimingAnotherSchedule() throws Exception {
+        var slow = makeCronSchedule("sched-slow", "0 9 * * *", "slow");
+        var fast = makeCronSchedule("sched-fast", "0 9 * * *", "fast");
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(slow)).thenReturn(List.of(fast));
+
+        var release = new CountDownLatch(1);
+        var slowEntered = new CountDownLatch(1);
+        when(fireExecutor.fire(argThat(s -> s != null && "sched-slow".equals(s.getId())), any(), anyInt())).thenAnswer(inv -> {
+            slowEntered.countDown();
+            release.await(30, TimeUnit.SECONDS);
+            return makeFireLog("sched-slow", FireStatus.COMPLETED.name());
+        });
+        when(fireExecutor.fire(argThat(s -> s != null && "sched-fast".equals(s.getId())), any(), anyInt()))
+                .thenReturn(makeFireLog("sched-fast", FireStatus.COMPLETED.name()));
+
+        try {
+            // The first poll must return while the slow fire is still running.
+            assertTimeoutPreemptively(Duration.ofSeconds(5), () -> poller.pollDueSchedules(), "the claim cycle must not wait for its fires");
+            assertTrue(slowEntered.await(5, TimeUnit.SECONDS));
+            assertEquals(1, poller.inFlightFires());
+
+            // The next poll claims and completes another schedule meanwhile.
+            poller.pollDueSchedules();
+            verify(scheduleStore, timeout(5000)).markCompleted(eq("sched-fast"), any(), any());
+            verify(scheduleStore, never()).markCompleted(eq("sched-slow"), any(), any());
+        } finally {
+            release.countDown();
+        }
+        assertTrue(poller.awaitIdle(Duration.ofSeconds(5)));
+        verify(scheduleStore).markCompleted(eq("sched-slow"), any(), any());
+    }
+
+    @Test
+    void poll_inFlightCap_holdsAndLeavesTheRestUnclaimed() throws Exception {
+        poller.maxConcurrentFires = 2;
+        poller.init();
+        var s1 = makeCronSchedule("cap-1", "0 9 * * *", "a");
+        var s2 = makeCronSchedule("cap-2", "0 9 * * *", "b");
+        var s3 = makeCronSchedule("cap-3", "0 9 * * *", "c");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(s1, s2, s3));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+
+        var release = new CountDownLatch(1);
+        var running = new AtomicInteger();
+        var peak = new AtomicInteger();
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            peak.accumulateAndGet(running.incrementAndGet(), Math::max);
+            release.await(30, TimeUnit.SECONDS);
+            running.decrementAndGet();
+            return makeFireLog("x", FireStatus.COMPLETED.name());
+        });
+
+        try {
+            poller.pollDueSchedules();
+            // Only two slots: the third schedule is neither claimed nor fired.
+            verify(scheduleStore, times(2)).tryClaim(any(), any(), any(), any());
+            verify(scheduleStore, never()).tryClaim(eq("cap-3"), any(), any(), any());
+            assertEquals(2, poller.inFlightFires());
+
+            // While both slots are busy, another cycle claims nothing.
+            poller.pollDueSchedules();
+            verify(scheduleStore, times(2)).tryClaim(any(), any(), any(), any());
+        } finally {
+            release.countDown();
+        }
+        assertTrue(poller.awaitIdle(Duration.ofSeconds(5)));
+        assertTrue(peak.get() <= 2, "no more than max-concurrent-fires may run at once, saw " + peak.get());
+
+        // Slots are returned when the fires end: the next cycle can claim again.
+        poller.pollAndAwait();
+        verify(scheduleStore, atLeast(3)).tryClaim(any(), any(), any(), any());
+    }
+
+    @Test
+    void poll_slotIsReleasedWhenClaimLoses() throws Exception {
+        poller.maxConcurrentFires = 1;
+        poller.init();
+        var s1 = makeCronSchedule("lost-1", "0 9 * * *", "a");
+        var s2 = makeCronSchedule("won-2", "0 9 * * *", "b");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(s1, s2));
+        when(scheduleStore.tryClaim(eq("lost-1"), any(), any(), any())).thenReturn(false);
+        when(scheduleStore.tryClaim(eq("won-2"), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("won-2", FireStatus.COMPLETED.name()));
+
+        poller.pollAndAwait();
+
+        // A lost claim must not strand the only slot.
+        verify(scheduleStore).markCompleted(eq("won-2"), any(), any());
+    }
+
+    @Test
+    void shutdown_cancelsInFlightFiresAndStopsClaiming() throws Exception {
+        poller.shutdownDrain = Duration.ofMillis(100);
+        var schedule = makeCronSchedule("sched-shutdown", "0 9 * * *", "x");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            entered.countDown();
+            try {
+                Thread.sleep(Duration.ofSeconds(30));
+            } catch (InterruptedException e) {
+                interrupted.countDown();
+                throw e;
+            }
+            return makeFireLog("sched-shutdown", FireStatus.COMPLETED.name());
+        });
+
+        poller.pollDueSchedules();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+
+        poller.shutdownFires();
+
+        assertTrue(interrupted.await(5, TimeUnit.SECONDS), "a fire still running after the drain period must be interrupted");
+        clearInvocations(scheduleStore);
+        poller.pollDueSchedules();
+        verify(scheduleStore, never()).findDueSchedules(any(), any(), anyInt());
+    }
+
+    @Test
+    void shutdown_letsAFireFinishInsideTheDrainPeriod() throws Exception {
+        poller.shutdownDrain = Duration.ofSeconds(5);
+        var schedule = makeCronSchedule("sched-drain", "0 9 * * *", "x");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        var entered = new CountDownLatch(1);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            entered.countDown();
+            Thread.sleep(200);
+            return makeFireLog("sched-drain", FireStatus.COMPLETED.name());
+        });
+
+        poller.pollDueSchedules();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        poller.shutdownFires();
+
+        verify(scheduleStore).markCompleted(eq("sched-drain"), any(), any());
+    }
+
+    @Test
+    void poll_fireTimeout_isPerFire_countedAndFreesItsSlot() throws Exception {
+        poller.fireTimeout = Duration.ofMillis(150);
+        poller.batchGrace = Duration.ZERO;
+        poller.maxConcurrentFires = 1;
+        poller.init();
+        var schedule = makeCronSchedule("sched-timeout", "0 9 * * *", "x");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(any(), any(), anyInt())).thenAnswer(inv -> {
+            Thread.sleep(Duration.ofSeconds(30));
+            return makeFireLog("sched-timeout", FireStatus.COMPLETED.name());
+        });
+
+        poller.pollDueSchedules();
+        assertTrue(poller.awaitIdle(Duration.ofSeconds(5)), "the watchdog must cut the fire off and free its slot");
+        assertEquals(1, meterRegistry.counter("eddi.schedule.fire.timedout").count(), "the timeout must be counted");
     }
 
     @Test
@@ -361,7 +526,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         // Should mark failed with exponential backoff: 15 * 4^0 = 15 seconds
         verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
@@ -384,7 +549,7 @@ class SchedulePollerServiceTest {
         poller.hitlTimeoutRetryInterval = Duration.ofMinutes(2);
 
         Instant before = Instant.now();
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var retryAt = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markSkipped(eq("hitl-1"), any(), retryAt.capture());
@@ -420,7 +585,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of());
 
         Instant before = Instant.now();
-        p.pollDueSchedules();
+        p.pollAndAwait();
 
         var leaseExpiry = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).findDueSchedules(any(), leaseExpiry.capture(), anyInt());
@@ -436,7 +601,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).markDeadLettered(eq("sched-1"), any());
         verify(scheduleStore, never()).markFailed(any(), any(), any());
@@ -487,7 +652,7 @@ class SchedulePollerServiceTest {
             return null;
         }).when(scheduleStore).markFailed(any(), any(), any());
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         assertTrue(markFailedCompleted.get(),
                 "failCount was never incremented: the schedule stays CLAIMED with nextFire in the past and re-fires forever");
@@ -511,7 +676,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).markCompleted(eq("hb-1"), any(), eq(due.plusSeconds(300)));
     }
@@ -524,7 +689,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("one-1", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         // One-shot: null nextFire → MongoScheduleStore disables automatically
         verify(scheduleStore).markCompleted(eq("one-1"), any(), isNull());
@@ -542,7 +707,7 @@ class SchedulePollerServiceTest {
         when(fireExecutor.fire(any(), any(), anyInt()))
                 .thenAnswer(inv -> makeFireLog(((ScheduleConfiguration) inv.getArgument(0)).getId(), FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         // Every due schedule is claimed (CAS runs on the poll thread) and fired.
         verify(scheduleStore).tryClaim(eq("s1"), any(), any(), any());
@@ -563,7 +728,7 @@ class SchedulePollerServiceTest {
         when(fireExecutor.fire(eq(bad), any(), anyInt())).thenThrow(new RuntimeException("boom"));
         when(fireExecutor.fire(eq(good), any(), anyInt())).thenReturn(makeFireLog("good", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         // good completes; bad is marked failed via the per-fire error isolation path.
         verify(scheduleStore).markCompleted(eq("good"), any(), any());
@@ -579,7 +744,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("theirs"), any(), any(), any())).thenReturn(false); // lost the CAS
         when(fireExecutor.fire(eq(mine), any(), anyInt())).thenReturn(makeFireLog("mine", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(fireExecutor).fire(eq(mine), any(), anyInt());
         verify(fireExecutor, never()).fire(eq(theirs), any(), anyInt());
@@ -604,7 +769,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("hb-drift"), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-drift", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var nextFire = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markCompleted(eq("hb-drift"), any(), nextFire.capture());
@@ -639,7 +804,7 @@ class SchedulePollerServiceTest {
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-overrun", FireStatus.COMPLETED.name()));
 
         Instant beforePoll = Instant.now();
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
         Instant afterPoll = Instant.now();
 
         var clamped = ArgumentCaptor.forClass(Instant.class);
@@ -660,7 +825,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("hb-late"), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("hb-late", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var kept = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markCompleted(eq("hb-late"), any(), kept.capture());
@@ -788,7 +953,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-6", FireStatus.SKIPPED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var nextFire = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markSkipped(eq("sched-skip-6"), any(), nextFire.capture());
@@ -805,7 +970,7 @@ class SchedulePollerServiceTest {
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-7", FireStatus.SKIPPED.name()));
 
         Instant before = Instant.now();
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var nextFire = ArgumentCaptor.forClass(Instant.class);
         verify(scheduleStore).markSkipped(eq("sched-skip-7"), any(), nextFire.capture());
@@ -829,7 +994,7 @@ class SchedulePollerServiceTest {
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-8", FireStatus.SKIPPED.name()));
         doThrow(new IResourceStore.ResourceStoreException("db down")).when(scheduleStore).markSkipped(any(), any(), any());
 
-        assertDoesNotThrow(() -> poller.pollDueSchedules());
+        assertDoesNotThrow(() -> poller.pollAndAwait());
 
         verify(scheduleStore, never()).markFailed(any(), any(), any());
         verify(scheduleStore, never()).markDeadLettered(any(), any());
@@ -921,7 +1086,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("batch-2"), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("batch-2", FireStatus.COMPLETED.name()));
 
-        assertDoesNotThrow(() -> poller.pollDueSchedules());
+        assertDoesNotThrow(() -> poller.pollAndAwait());
 
         verify(fireExecutor, never()).fire(argThat(s -> "batch-1".equals(s.getId())), any(), anyInt());
         verify(fireExecutor).fire(argThat(s -> "batch-2".equals(s.getId())), any(), anyInt());
@@ -939,7 +1104,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(contested));
         when(scheduleStore.tryClaim(eq("contested-1"), any(), any(), any())).thenReturn(false);
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verifyNoInteractions(fireExecutor);
         assertEquals(1.0, claimConflicts(), "a lost CAS claim on the poll path is exactly what the metric means");
@@ -1055,7 +1220,7 @@ class SchedulePollerServiceTest {
         // Ten consecutive skips — twice max-retries. The schedule object keeps its
         // failCount across them because nothing may increment it.
         for (int i = 0; i < 10; i++) {
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
         }
 
         verify(scheduleStore, never()).markDeadLettered(any(), any());
@@ -1079,7 +1244,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-2", FireStatus.SKIPPED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore, never()).markCompleted(any(), any(), any());
         verify(scheduleStore).markSkipped(eq("sched-skip-2"), any(), any());
@@ -1100,7 +1265,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-3", FireStatus.SKIPPED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).markSkipped(eq("sched-skip-3"), any(), eq(due.plusSeconds(3600)));
     }
@@ -1127,7 +1292,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-5", FireStatus.SKIPPED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore).markSkipped(eq("sched-skip-5"), any(), eq(Instant.parse("2099-01-01T00:00:00Z")));
     }
@@ -1148,7 +1313,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-skip-4", FireStatus.SKIPPED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         verify(scheduleStore, never()).markSkipped(any(), any(), any());
         verify(scheduleStore).markFailed(eq("sched-skip-4"), any(), any());
@@ -1244,7 +1409,7 @@ class SchedulePollerServiceTest {
         when(scheduleStore.tryClaim(eq("sched-fenced"), eq("test-instance"), any(), any())).thenReturn(true);
         when(fireExecutor.fire(any(), any(), anyInt())).thenReturn(makeFireLog("sched-fenced", FireStatus.COMPLETED.name()));
 
-        poller.pollDueSchedules();
+        poller.pollAndAwait();
 
         var fenced = ArgumentCaptor.forClass(String.class);
         verify(scheduleStore).markCompleted(eq("sched-fenced"), fenced.capture(), any());

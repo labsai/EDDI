@@ -6,8 +6,10 @@ package ai.labs.eddi.modules.templating.impl;
 
 import ai.labs.eddi.modules.templating.ITemplatingEngine.TemplateEngineException;
 import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.Settings;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory.TemplateLimitExceededException;
 import io.quarkus.qute.Engine;
 import io.quarkus.qute.EvalContext;
+import io.quarkus.qute.EvaluatedParams;
 import io.quarkus.qute.NamespaceResolver;
 import io.quarkus.qute.Results;
 import io.quarkus.qute.ValueResolver;
@@ -16,12 +18,14 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -80,6 +84,138 @@ class TemplatingEngineResourceLimitsTest {
 
     private static TemplatingEngine engine() {
         return new TemplatingEngine(sourceWithUncheckedFmt(), Settings.defaults());
+    }
+
+    @Nested
+    @DisplayName("str:concat and str:join pre-check")
+    class Concatenation {
+
+        @Test
+        @DisplayName("parts that add up to more than the limit are refused before they are joined")
+        void refusedBeforeJoining() {
+            String big = "x".repeat(600);
+            assertThrows(TemplateLimitExceededException.class, () -> BoundedFormat.requireConcatenationWithin(List.of(big, big), false, 1_000));
+            // the delimiter repeats between parts
+            assertThrows(TemplateLimitExceededException.class,
+                    () -> BoundedFormat.requireConcatenationWithin(List.of("-".repeat(600), "a", "b", "c"), true, 1_000));
+            // a list argument is one argument, rendered with its brackets and separators
+            assertThrows(TemplateLimitExceededException.class,
+                    () -> BoundedFormat.requireConcatenationWithin(List.of(",", List.of(big, big)), true, 1_000));
+        }
+
+        /**
+         * The pre-check is registered in the engine and answers "not found" when the
+         * result fits, so the next {@code str} resolver (the generated one in
+         * production, an unchecked stand-in here) still builds it.
+         */
+        @Test
+        @DisplayName("through the engine: a result within the limit is still built, one past it never reaches the builder")
+        void registeredInTheEngine() throws Exception {
+            AtomicInteger built = new AtomicInteger();
+            Engine source = Engine.builder().addDefaults().strictRendering(false)
+                    .addNamespaceResolver(NamespaceResolver.builder("str").resolveAsync(ctx -> {
+                        if (!"concat".equals(ctx.getName())) {
+                            return Results.notFound(ctx);
+                        }
+                        built.incrementAndGet();
+                        return evaluate(ctx).thenApply(values -> {
+                            StringBuilder joined = new StringBuilder();
+                            values.forEach(joined::append);
+                            return (Object) joined.toString();
+                        });
+                    }).build())
+                    .build();
+            var engine = new TemplatingEngine(source, settings(1_000, Settings.defaults().timeoutMillis()));
+
+            assertEquals("ab", engine.processTemplate("{str:concat(a, b)}", Map.of("a", "a", "b", "b")));
+            assertEquals(1, built.get());
+
+            String big = "x".repeat(600);
+            assertThrows(TemplateEngineException.class, () -> engine.processTemplate("{str:concat(s, s)}", Map.of("s", big)));
+            assertEquals(1, built.get(), "the over-limit concatenation must be refused before the builder runs");
+        }
+
+        /**
+         * A stand-in for the generated {@code str:concat}/{@code str:join} resolver
+         * that binds its varargs through Qute's own {@link EvaluatedParams}, as the
+         * generated one does, and renders each argument with {@code toString()} like
+         * {@code StringTemplateExtensions}.
+         */
+        private TemplatingEngine engineWithQuteVarargs(AtomicInteger built) {
+            Engine source = Engine.builder().addDefaults().strictRendering(false)
+                    .addNamespaceResolver(NamespaceResolver.builder("str").resolveAsync(ctx -> {
+                        boolean join = "join".equals(ctx.getName());
+                        if (!join && !"concat".equals(ctx.getName())) {
+                            return Results.notFound(ctx);
+                        }
+                        built.incrementAndGet();
+                        EvaluatedParams params = EvaluatedParams.evaluate(ctx);
+                        return params.stage.thenApply(_ -> {
+                            try {
+                                Object[] args = (Object[]) params.getVarargsResults(join ? 2 : 1, Object.class);
+                                List<String> rendered = new ArrayList<>();
+                                for (Object arg : args) {
+                                    rendered.add(arg.toString());
+                                }
+                                return (Object) (join ? String.join(params.getResult(0).toString(), rendered) : String.join("", rendered));
+                            } catch (Exception e) {
+                                throw new IllegalStateException(e);
+                            }
+                        });
+                    }).build())
+                    .build();
+            return new TemplatingEngine(source, settings(1_000, Settings.defaults().timeoutMillis()));
+        }
+
+        @Test
+        @DisplayName("a list is one rendered argument: its brackets and separators count")
+        void listIsOneRenderedArgument() throws Exception {
+            AtomicInteger built = new AtomicInteger();
+            var engine = engineWithQuteVarargs(built);
+            List<String> empties = Collections.nCopies(600, "");
+
+            assertEquals("[, ]", engine.processTemplate("{str:concat(xs)}", Map.of("xs", List.of("", ""))));
+            assertEquals(1, built.get());
+            // renders to 1,200 characters although every element is empty
+            assertThrows(TemplateEngineException.class, () -> engine.processTemplate("{str:concat(xs)}", Map.of("xs", empties)));
+            assertThrows(TemplateEngineException.class, () -> engine.processTemplate("{str:join('-', xs)}", Map.of("xs", empties)));
+            assertEquals(1, built.get(), "the over-limit list must be refused before the builder runs");
+        }
+
+        @Test
+        @DisplayName("a sole Object[] is the varargs array: its elements are the arguments")
+        void soleObjectArrayIsExpanded() throws Exception {
+            AtomicInteger built = new AtomicInteger();
+            var engine = engineWithQuteVarargs(built);
+            String big = "x".repeat(600);
+
+            assertEquals("ab", engine.processTemplate("{str:concat(arr)}", Map.of("arr", new Object[]{"a", "b"})));
+            assertEquals("a-b", engine.processTemplate("{str:join('-', arr)}", Map.of("arr", new Object[]{"a", "b"})));
+            assertThrows(TemplateEngineException.class,
+                    () -> engine.processTemplate("{str:concat(arr)}", Map.of("arr", new Object[]{big, big})));
+            assertEquals(2, built.get());
+        }
+
+        @Test
+        @DisplayName("an Object[] next to another argument renders as one object and is not refused for its elements")
+        void objectArrayWithAnotherArgumentIsOneObject() throws Exception {
+            AtomicInteger built = new AtomicInteger();
+            var engine = engineWithQuteVarargs(built);
+            String big = "x".repeat(600);
+
+            String result = engine.processTemplate("{str:concat(arr, '!')}", Map.of("arr", new Object[]{big, big}));
+            assertTrue(result.startsWith("[Ljava.lang.Object;@") && result.endsWith("!"), result);
+            assertEquals(1, built.get());
+        }
+
+        @Test
+        @DisplayName("results within the limit pass, and a huge delimiter count saturates instead of overflowing")
+        void withinTheLimit() {
+            BoundedFormat.requireConcatenationWithin(List.of("a", "b", "c"), false, 1_000);
+            BoundedFormat.requireConcatenationWithin(List.of(", ", "a", "b", "c"), true, 1_000);
+            assertThrows(TemplateLimitExceededException.class, () -> BoundedFormat
+                    .requireConcatenationWithin(List.of("x".repeat(100_000), "a", "b"), true, 1_000));
+        }
     }
 
     @Nested

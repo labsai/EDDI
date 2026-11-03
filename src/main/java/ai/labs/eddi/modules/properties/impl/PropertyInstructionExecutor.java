@@ -114,6 +114,14 @@ public class PropertyInstructionExecutor {
             value = PathNavigator.getValue(fromObjectPath, templateDataObjects);
             String toObjectPath = instruction.getToObjectPath();
             if (!isNullOrEmpty(toObjectPath)) {
+                if (scope == Scope.secret) {
+                    // The copy would write the plaintext into the template data and
+                    // return before any vaulting or scrubbing ran. Rejected when the
+                    // configuration is saved (SecretScopeValidation); refused here for
+                    // one stored before that check.
+                    throw new LifecycleException("Cannot store property '" + name + "' with scope 'secret' and toObjectPath: "
+                            + "copying to a path would bypass the vault. Refusing to copy the value in plaintext.");
+                }
                 PathNavigator.setValue(toObjectPath, templateDataObjects, value);
                 return null;
             }
@@ -137,17 +145,24 @@ public class PropertyInstructionExecutor {
             }
         }
 
+        String originalText = null;
         if (value instanceof String text) {
             if (isScrubbedPlaceholder(name, text, scope)) {
                 // Neither vaulted nor stored — see isScrubbedPlaceholder.
                 return null;
             }
+            originalText = text;
             value = convertToObjectIfRequested(instruction, text);
         }
 
         String vaulted = null;
         if (scope == Scope.secret) {
             if (!(value instanceof String plaintext)) {
+                if (originalText != null) {
+                    // The text was converted into an object and is refused below: the raw
+                    // input it came from would otherwise be persisted with the failed turn.
+                    secretPropertyVault.scrubSecretInput(memory, name, originalText);
+                }
                 throw new LifecycleException("Cannot store property '" + name + "' with scope 'secret': only "
                         + "string values can be vaulted, but the instruction produced a " + value.getClass().getSimpleName()
                         + ". Refusing to persist the value in plaintext.");

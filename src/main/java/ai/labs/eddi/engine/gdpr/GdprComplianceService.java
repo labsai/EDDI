@@ -453,11 +453,21 @@ public class GdprComplianceService {
         }
         // 0b. Cluster mode: the same stop on every other node, where the user's turns
         // and discussions may be running. The user travels as a hash. A node that does
-        // not answer is named in the log (its running work still cannot recreate what
-        // is deleted below: the stores refuse to resurrect a deleted conversation).
+        // not answer marks the step incomplete (its running work still cannot recreate
+        // what is deleted below — the stores refuse to resurrect a deleted
+        // conversation — but it can still flush audit entries after the sweep).
         if (clusterRpc != null && clusterRpc.isClustered()) {
             try {
+                int expectedPeers = clusterRpc.expectedPeers();
                 var replies = clusterRpc.callAll(IClusterRpc.GDPR_STOP, Map.of("userIdHash", KvKeys.sha256(userId)));
+                if (replies.size() < expectedPeers) {
+                    // A node that did not answer may still be running the user's work and
+                    // flush it (audit entries, memory) after the sweeps below. The cascade
+                    // goes on, but must not report a clean erasure.
+                    recordFailure(failedSteps, "clusterStop", new IllegalStateException(
+                            (expectedPeers - replies.size()) + " of " + expectedPeers + " node(s) did not confirm the stop — retry the erasure"),
+                            pseudonym);
+                }
                 for (var reply : replies.entrySet()) {
                     if (reply.getValue().get("stopped") instanceof Number stopped) {
                         inFlightWorkStopped += stopped.intValue();
@@ -515,9 +525,11 @@ public class GdprComplianceService {
         // Must happen BEFORE the bulk snapshot delete (step 4b) which removes
         // the documents that getConversationIdsByUserId queries.
         List<String> conversationIds = List.of();
+        boolean conversationLookupFailed = false;
         try {
             conversationIds = conversationMemoryStore.getConversationIdsByUserId(userId);
         } catch (Exception e) {
+            conversationLookupFailed = true;
             recordFailure(failedSteps, "conversationIdLookup", e, pseudonym);
         }
 
@@ -554,6 +566,10 @@ public class GdprComplianceService {
         // every remaining conversation kept the PII the cascade exists to remove,
         // and the response still looked plausible. The export path in this class
         // already isolates per conversation for exactly this reason.
+        // A conversation whose blobs could not be removed keeps its snapshot (4c):
+        // the snapshot is what lists it under the user, so deleting it would leave a
+        // retry with no id to find the orphaned blobs by — and a clean report.
+        boolean attachmentCleanupIncomplete = false;
         try {
             if (attachmentStorageInstance.isResolvable()) {
                 var attachmentStorage = attachmentStorageInstance.get();
@@ -563,6 +579,8 @@ public class GdprComplianceService {
                     } catch (Exception e) {
                         if (groupBlobOwnerIds.contains(convId)) {
                             groupBlobCleanupIncomplete = true;
+                        } else {
+                            attachmentCleanupIncomplete = true;
                         }
                         recordFailure(failedSteps, "attachments", e, pseudonym);
                     }
@@ -576,6 +594,7 @@ public class GdprComplianceService {
             if (!groupBlobOwnerIds.isEmpty()) {
                 groupBlobCleanupIncomplete = true;
             }
+            attachmentCleanupIncomplete = true;
             recordFailure(failedSteps, "attachments", e, pseudonym);
         }
 
@@ -685,11 +704,23 @@ public class GdprComplianceService {
         // incomplete. A snapshot is the only record of a custom tenant its secrets
         // live in; deleting it now would leave a retry of this erasure unable to
         // find them, while keeping it lets the retry finish the job. The result
-        // reports the step as failed either way.
+        // reports the step as failed either way. The same holds for attachments: the
+        // snapshot is the record that names a conversation whose blobs are still there.
         long conversationsDeleted = 0;
         if (vaultCleanupIncomplete) {
             recordFailure(failedSteps, "conversations",
                     new IllegalStateException("kept until their vault secrets are erased — retry the erasure"), pseudonym);
+        } else if (attachmentCleanupIncomplete) {
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept until their attachments are erased — retry the erasure"), pseudonym);
+        } else if (conversationLookupFailed) {
+            // The ids that the journal, descriptor, checkpoint and attachment sweeps above
+            // work
+            // from could not be read, so those sweeps did nothing. The snapshots are the
+            // only
+            // record a retry can find them through: keep them.
+            recordFailure(failedSteps, "conversations",
+                    new IllegalStateException("kept because the conversation ids could not be listed — retry the erasure"), pseudonym);
         } else {
             try {
                 conversationsDeleted = conversationMemoryStore
@@ -704,23 +735,33 @@ public class GdprComplianceService {
         // 5. Delete managed conversation mappings.
         // The intents are read FIRST: the cache is keyed by intent+userId, and once
         // the rows are gone there is no way left to work out which keys to evict.
+        // If the intents cannot be read, the rows are kept: deleting them would lose
+        // the only record of which cache keys still serve the erased mappings, and a
+        // retry would then find nothing to evict and report success.
         long mappingsDeleted = 0;
         List<String> mappedIntents = List.of();
+        boolean mappedIntentsKnown = false;
         try {
             mappedIntents = userConversationStore.getAllForUser(userId).stream()
                     .map(UserConversation::getIntent)
                     .filter(Objects::nonNull)
                     .toList();
+            mappedIntentsKnown = true;
         } catch (Exception e) {
             recordFailure(failedSteps, "conversationMappingIntents", e, pseudonym);
         }
 
-        try {
-            mappingsDeleted = userConversationStore.deleteAllForUser(userId);
-            LOGGER.infof("[GDPR] Deleted %d conversation mappings [%s]",
-                    mappingsDeleted, pseudonym);
-        } catch (Exception e) {
-            recordFailure(failedSteps, "conversationMappings", e, pseudonym);
+        if (mappedIntentsKnown) {
+            try {
+                mappingsDeleted = userConversationStore.deleteAllForUser(userId);
+                LOGGER.infof("[GDPR] Deleted %d conversation mappings [%s]",
+                        mappingsDeleted, pseudonym);
+            } catch (Exception e) {
+                recordFailure(failedSteps, "conversationMappings", e, pseudonym);
+            }
+        } else {
+            recordFailure(failedSteps, "conversationMappings",
+                    new IllegalStateException("kept until their cache keys can be read — retry the erasure"), pseudonym);
         }
 
         // 5b. Evict the mappings from the read-through cache.
@@ -1377,6 +1418,16 @@ public class GdprComplianceService {
                     RESTRICTION_CATEGORY, Property.Visibility.global, null,
                     List.of(), null, false, 0,
                     Instant.now(), Instant.now());
+            // A legacy agent-owned row under the key (forged before the reserved-key
+            // guard existed) would survive the write below: the global upsert keeps an
+            // existing row's sourceAgentId, and isAdminRestrictionRow refuses any row
+            // that has one — the restriction reported success and was never enforced.
+            // Such rows are never a valid restriction, so they go first.
+            for (UserMemoryEntry row : userMemoryStore.getAllEntries(userId)) {
+                if (RESTRICTION_KEY.equals(row.key()) && row.id() != null && row.sourceAgentId() != null) {
+                    userMemoryStore.deleteEntry(row.id());
+                }
+            }
             // The reserved write path: the ordinary upsert refuses _gdpr_ keys, which is
             // what stops a model or a REST caller from forging or overwriting this row.
             userMemoryStore.upsertReserved(entry);

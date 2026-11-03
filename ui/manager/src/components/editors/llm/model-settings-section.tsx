@@ -239,7 +239,7 @@ export function ModelSettingsSection({
           <Info className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {t(
             "llmEditor.modelSettings.variableModel",
-            "The model is a variable reference ({{model}}), so the checks below cannot know it yet; EDDI applies the model-specific rules once the variable is resolved.",
+            "The model is a variable reference ({{model}}), so the checks below cannot know it yet; {{productName}} applies the model-specific rules once the variable is resolved.",
             { model },
           )}
         </p>

@@ -72,6 +72,16 @@ class AutoVaultedSecretsTest {
     }
 
     @Test
+    @DisplayName("the owner is the second segment only: a property name carrying another user's hash does not make the slot theirs")
+    void ownerIsTheSecondSegmentOnly() {
+        String victimSegment = AutoVaultedSecrets.userSegment("bob@example.com");
+        String name = AutoVaultedSecrets.newSlotName(AGENT, "alice@example.com", "x." + victimSegment + ".y");
+
+        assertTrue(AutoVaultedSecrets.belongsToUser(name, "alice@example.com"));
+        assertFalse(AutoVaultedSecrets.belongsToUser(name, "bob@example.com"), "bob's erasure must not delete alice's slot");
+    }
+
+    @Test
     @DisplayName("a legacy shared <agentId>.<name> slot belongs to nobody — it may back other users' conversations")
     void legacySlotIsNeverOwned() {
         assertFalse(AutoVaultedSecrets.belongsToUser(AGENT + ".apiKey", "user-1"));

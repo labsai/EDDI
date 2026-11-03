@@ -49,6 +49,16 @@ public record AlertMatch(List<String> matched, ErrorKind errorKind, String ratin
         this(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, commentExcerpt, null);
     }
 
+    /** This match with the rating comment excerpt blanked (GDPR erasure). */
+    public AlertMatch withoutCommentExcerpt() {
+        return new AlertMatch(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, null, value);
+    }
+
+    /** This match with the captured output value blanked (GDPR erasure). */
+    public AlertMatch withoutValue() {
+        return new AlertMatch(matched, errorKind, ratingId, stepIndex, scale, score, normalizedScore, tags, commentExcerpt, null);
+    }
+
     public static AlertMatch error(ErrorKind kind) {
         return new AlertMatch(List.of("errorKind: " + kind.name()), kind, null, null, null, null, null, null, null);
     }

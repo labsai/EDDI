@@ -80,7 +80,7 @@ export function ParameterVerdictNote({
           <span className="block">
             {t(
               "llmEditor.modelSettings.droppedHint",
-              "EDDI removes it before each request, so this value is never sent.",
+              "{{productName}} removes it before each request, so this value is never sent.",
             )}
           </span>
         )}

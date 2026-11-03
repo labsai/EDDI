@@ -8,7 +8,9 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.secrets.AutoVaultedSecrets;
 import ai.labs.eddi.secrets.model.SecretReference;
 
+import java.util.ArrayList;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -50,8 +52,14 @@ import java.util.regex.Pattern;
  */
 public final class ConfigReferenceGuard {
 
-    /** The references resolved after templating that release a credential. */
-    static final Pattern CREDENTIAL_REFERENCE = Pattern.compile("\\$\\{(?:vault|eddivault|connection|caller):[^}]*\\}");
+    /**
+     * The references resolved after templating that release a credential:
+     * {@code ${vault:...}}, {@code ${eddivault:...}}, {@code ${connection:...}} and
+     * {@code ${caller:...}}, each up to the first closing brace (an empty body
+     * included). Found by {@link #findReferences}, never by a regex {@code find()}:
+     * that rescans the rest of the text at every unterminated opener.
+     */
+    private static final String[] CREDENTIAL_OPENERS = {"${vault:", "${eddivault:", "${connection:", "${caller:"};
 
     /**
      * {@code {properties.name}} and {@code properties.name} inside a template
@@ -60,7 +68,7 @@ public final class ConfigReferenceGuard {
     /**
      * A global variable reference: not a credential, but a variable may hold one.
      */
-    private static final Pattern VARS_REFERENCE = Pattern.compile("\\$\\{vars:[^}]*\\}");
+    private static final String[] VARS_OPENERS = {"${vars:"};
 
     private static final Pattern PROPERTY_ACCESS = Pattern.compile("properties\\.([A-Za-z0-9_\\-]+)");
 
@@ -154,9 +162,7 @@ public final class ConfigReferenceGuard {
             String location = what + " parameter '" + key + "'";
             requireConfiguredReferences(template, value, location, templateData, conversationProperties);
             Set<String> configuredVariables = variableReferences(template);
-            Matcher variables = VARS_REFERENCE.matcher(value);
-            while (variables.find()) {
-                String reference = variables.group();
+            for (String reference : findReferences(value, VARS_OPENERS)) {
                 if (!configuredVariables.contains(reference)) {
                     throw new ConfigReferenceRefusedException(refusal(location, reference));
                 }
@@ -169,23 +175,55 @@ public final class ConfigReferenceGuard {
      * references, like {@link #references}, not as substrings.
      */
     private static Set<String> variableReferences(String template) {
-        Set<String> found = new LinkedHashSet<>();
-        if (template != null) {
-            Matcher matcher = VARS_REFERENCE.matcher(template);
-            while (matcher.find()) {
-                found.add(matcher.group());
-            }
-        }
-        return found;
+        return new LinkedHashSet<>(findReferences(template, VARS_OPENERS));
     }
 
     private static Set<String> references(String value) {
-        Set<String> found = new LinkedHashSet<>();
-        if (value != null) {
-            Matcher matcher = CREDENTIAL_REFERENCE.matcher(value);
-            while (matcher.find()) {
-                found.add(matcher.group());
+        return new LinkedHashSet<>(findReferences(value, CREDENTIAL_OPENERS));
+    }
+
+    /**
+     * Every reference in {@code value} that starts with one of {@code openers}, in
+     * order, each running to the FIRST closing brace after its opener (a nested
+     * opener is part of the body) and with an empty body allowed — the matches the
+     * former regex gave, found in one forward pass. The next closing brace is
+     * searched for once and remembered; when there is none, no later opener can
+     * close either, so scanning stops. The regex retried every unterminated opener
+     * and rescanned the whole remainder each time: quadratic in a value a
+     * conversation can make long.
+     */
+    static List<String> findReferences(String value, String[] openers) {
+        List<String> found = new ArrayList<>();
+        if (value == null) {
+            return found;
+        }
+        int length = value.length();
+        int from = 0;
+        int nextClose = -2;
+        while (from < length) {
+            int start = value.indexOf("${", from);
+            if (start < 0) {
+                break;
             }
+            int bodyStart = -1;
+            for (String opener : openers) {
+                if (value.startsWith(opener, start)) {
+                    bodyStart = start + opener.length();
+                    break;
+                }
+            }
+            if (bodyStart < 0) {
+                from = start + 1;
+                continue;
+            }
+            if (nextClose == -2 || (nextClose >= 0 && nextClose < bodyStart)) {
+                nextClose = value.indexOf('}', bodyStart);
+            }
+            if (nextClose < 0) {
+                break;
+            }
+            found.add(value.substring(start, nextClose + 1));
+            from = nextClose + 1;
         }
         return found;
     }

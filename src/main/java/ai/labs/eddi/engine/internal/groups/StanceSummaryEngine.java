@@ -295,9 +295,14 @@ public final class StanceSummaryEngine {
             return null;
         }
         String trimmed = content.strip();
+        // Tracked during the one forward pass: rescanning the prefix at every
+        // terminator made a letter-free run of terminators quadratic (a 100k-char
+        // human turn of "!" cost billions of character checks).
+        boolean seenLetter = false;
         for (int i = 0; i < trimmed.length(); i++) {
             char c = trimmed.charAt(i);
             if (c != '.' && c != '!' && c != '?') {
+                seenLetter |= Character.isLetter(c);
                 continue;
             }
             if (c == '.' && i + 1 < trimmed.length() && Character.isDigit(trimmed.charAt(i + 1))
@@ -320,7 +325,7 @@ public final class StanceSummaryEngine {
             // sentence. "1. We should adopt pgvector." would otherwise be shown
             // to the reader as that member's own words, reading just "1." — and
             // LLM replies open with a numbered list constantly.
-            if (!hasLetter(trimmed, 0, i)) {
+            if (!seenLetter) {
                 continue;
             }
             int next = i + 1;
@@ -343,15 +348,6 @@ public final class StanceSummaryEngine {
             i++;
         }
         return i < text.length() && Character.isLowerCase(text.charAt(i));
-    }
-
-    private static boolean hasLetter(String text, int fromInclusive, int toExclusive) {
-        for (int i = fromInclusive; i < toExclusive; i++) {
-            if (Character.isLetter(text.charAt(i))) {
-                return true;
-            }
-        }
-        return false;
     }
 
     /**

@@ -9,6 +9,8 @@ import { WorkforceLayout } from "@/components/workforce/workforce-layout";
 import { LandingPage } from "@/pages/landing-page";
 import { NotFoundPage } from "@/pages/not-found";
 import { lazyPage } from "@/lib/lazy-page";
+import { isUpdateUiVisible } from "@/lib/brand";
+import { useBrand } from "@/hooks/use-brand";
 
 /**
  * Route components are code-split; the layouts, the landing page and the command
@@ -61,6 +63,7 @@ const QuotasPage = lazyPage(() => import("@/pages/quotas"), "QuotasPage");
 const ModelPricesPage = lazyPage(() => import("@/pages/model-prices"), "ModelPricesPage");
 const WorkspacesPage = lazyPage(() => import("@/pages/workspaces"), "WorkspacesPage");
 const GdprPage = lazyPage(() => import("@/pages/gdpr"), "GdprPage");
+const BrandingPage = lazyPage(() => import("@/pages/branding"), "BrandingPage");
 const UserDataPage = lazyPage(() => import("@/pages/user-data"), "UserDataPage");
 const TriggersPage = lazyPage(() => import("@/pages/triggers"), "TriggersPage");
 const CapabilitiesPage = lazyPage(() => import("@/pages/capabilities"), "CapabilitiesPage");
@@ -125,6 +128,7 @@ function WorkforceRedirect() {
 }
 
 export function App() {
+  const brand = useBrand();
   const location = useLocation();
   return (
     <ErrorBoundary resetKey={location.key}>
@@ -184,6 +188,7 @@ export function App() {
             <Route path="/manage/model-prices" element={<ModelPricesPage />} />
             <Route path="/manage/workspaces" element={<WorkspacesPage />} />
             <Route path="/manage/gdpr" element={<GdprPage />} />
+            <Route path="/manage/branding" element={<BrandingPage />} />
             <Route path="/manage/groups" element={<GroupsPage />} />
             <Route path="/manage/groups/wizard" element={<GroupWizardPage />} />
             <Route path="/manage/groups/templates" element={<GroupTemplatesPage />} />
@@ -204,7 +209,13 @@ export function App() {
             <Route path="/manage/approvals" element={<ApprovalsPage />} />
             <Route path="/manage/feedback" element={<FeedbackPage />} />
             <Route path="/manage/alerts" element={<AlertsPage />} />
-            <Route path="/manage/updates" element={<UpdatesPage />} />
+            {/* Hidden under a brand unless it opts in (white-label plan, R5).
+                A literal path, not UPDATES_PATH: route-integrity.test.ts reads
+                the route table as text. brand.test.ts pins the two equal. */}
+            <Route
+              path="/manage/updates"
+              element={isUpdateUiVisible(brand) ? <UpdatesPage /> : <Navigate to="/manage" replace />}
+            />
             {/* Redirects from old standalone user-data pages */}
             <Route
               path="/manage/memories"

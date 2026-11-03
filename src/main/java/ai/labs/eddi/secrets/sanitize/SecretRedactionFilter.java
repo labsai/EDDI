@@ -12,6 +12,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -624,7 +626,7 @@ public final class SecretRedactionFilter {
      * run: a 257-character password is still a password.
      */
     private static final Pattern CONNECTION_STRING_PASSWORD = Pattern.compile(
-            "(?i)(?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]++:");
+            "(?i)(?:mongodb(?:\\+srv)?+|postgres(?:ql)?+|mysql|rediss?+|amqps?+)://[^:/@\\s\"'\\\\,{}\\[\\]]*+:");
 
     private static String redactConnectionStringPasswords(String text) {
         Matcher matcher = CONNECTION_STRING_PASSWORD.matcher(text);
@@ -649,7 +651,15 @@ public final class SecretRedactionFilter {
                 out.append(text, copied, start).append(REDACTED);
                 copied = lastAt;
             }
-            from = Math.max(end, start);
+            // Resume right after this match's own prefix, not at the end of the walk: the
+            // walk can run
+            // through the scheme of the NEXT connection string in a comma-joined list (it
+            // stops at the
+            // '/' of its "://"), and a search starting beyond that scheme would never see
+            // it, leaving
+            // that string's password legible. The walk stops at the next "://", so this
+            // stays linear.
+            from = start;
         }
         if (copied == 0) {
             return text;
@@ -663,10 +673,15 @@ public final class SecretRedactionFilter {
      * up to the path, whitespace, a quote, or a JSON delimiter — so a carrier's
      * closing quote, the next field, and a {@code ${vault:…}} reference (its brace)
      * all end the walk.
+     * <p>
+     * A comma does not: it is legal in a password, and a MongoDB host list is
+     * comma-separated ({@code u:p@h1,h2}). Stopping there truncated a password with
+     * a comma in it and left its tail legible. The next field of a JSON carrier is
+     * still beyond the closing quote, and of a log line beyond whitespace.
      */
     private static boolean isAuthorityChar(char c) {
-        return c != '/' && !Character.isWhitespace(c) && c != '"' && c != '\'' && c != '\\' && c != ',' && c != '{' && c != '}'
-                && c != '[' && c != ']';
+        return c != '/' && !Character.isWhitespace(c) && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}' && c != '['
+                && c != ']';
     }
 
     public static String redact(String message) {
@@ -681,6 +696,7 @@ public final class SecretRedactionFilter {
         result = redactConnectionStringPasswords(result);
         result = redactQuotedValues(result);
         result = redactUnquotedValues(result);
+        result = redactCookieValues(result);
         return redactBareBasicCredentials(result);
     }
 
@@ -811,6 +827,112 @@ public final class SecretRedactionFilter {
     }
 
     /**
+     * {@code Cookie:} or {@code Set-Cookie:} up to the start of its value — the
+     * name, an optional (possibly backslash-escaped) quote, the separator, and an
+     * optional opening quote. The value is then walked by hand in
+     * {@link #redactCookieValues}. Possessive throughout, so a run of
+     * {@code cookie:} prefixes stays linear.
+     */
+    private static final Pattern COOKIE_HEADER = Pattern
+            .compile("(?i)(?<![A-Za-z0-9_])(?:set-)?+cookie(?:\\\\*+[\"'])?+\\s*+[:=]\\s*+(?:\\\\*+[\"'])?+");
+
+    /**
+     * {@code Set-Cookie} attributes: they describe the cookie, carry nothing
+     * secret, and keeping them keeps the line useful.
+     */
+    private static final Set<String> COOKIE_ATTRIBUTES = Set.of("path", "domain", "expires", "max-age", "samesite", "priority",
+            "partitioned", "secure", "httponly");
+
+    /**
+     * A {@code Cookie} or {@code Set-Cookie} header's values, with the cookie names
+     * kept: {@code Cookie: sid=abc; theme=dark} becomes
+     * {@code Cookie: sid=<REDACTED>; theme=<REDACTED>}. A session cookie is a
+     * bearer credential, and the name-bound rules only catch the ones whose name
+     * happens to say {@code token} or {@code secret}.
+     * <p>
+     * The value is a list of {@code name=value} pairs separated by {@code ;} or
+     * {@code ,}; the walk ends at a quote, a backslash (an escaped carrier's
+     * quote), a line break, or the first item that is not a pair, so prose after
+     * the header is left alone. A value already {@link #REDACTED} is kept as it is,
+     * which is what makes a second pass a no-op.
+     */
+    private static String redactCookieValues(String text) {
+        Matcher matcher = COOKIE_HEADER.matcher(text);
+        if (!matcher.find()) {
+            return text;
+        }
+        StringBuilder out = new StringBuilder(text.length());
+        int copied = 0;
+        int length = text.length();
+        int resumeAt;
+        do {
+            int pos = matcher.end();
+            while (pos < length) {
+                int nameStart = pos;
+                while (nameStart < length && (text.charAt(nameStart) == ' ' || text.charAt(nameStart) == '\t')) {
+                    nameStart++;
+                }
+                int nameEnd = nameStart;
+                while (nameEnd < length && isCookieNameChar(text.charAt(nameEnd))) {
+                    nameEnd++;
+                }
+                String name = text.substring(nameStart, nameEnd).toLowerCase(Locale.ROOT);
+                if (nameEnd == nameStart || nameEnd >= length || text.charAt(nameEnd) != '=') {
+                    // A bare Set-Cookie flag (Secure; HttpOnly) is stepped over; anything
+                    // else that is not a pair ends the header.
+                    if (COOKIE_ATTRIBUTES.contains(name) && nameEnd < length && (text.charAt(nameEnd) == ';' || text.charAt(nameEnd) == ',')) {
+                        pos = nameEnd + 1;
+                        continue;
+                    }
+                    pos = nameEnd;
+                    break;
+                }
+                int valueStart = nameEnd + 1;
+                int valueEnd = valueStart;
+                while (valueEnd < length && isCookieValueChar(text.charAt(valueEnd))) {
+                    valueEnd++;
+                }
+                String value = text.substring(valueStart, valueEnd);
+                if (name.equals("expires")) {
+                    // An HTTP date carries a comma and spaces ("Wed, 21 Oct 2015 …"):
+                    // step to the next ';' rather than read the rest as further pairs.
+                    while (valueEnd < length && text.charAt(valueEnd) != ';' && isCookieSpanChar(text.charAt(valueEnd))) {
+                        valueEnd++;
+                    }
+                } else if (!value.isEmpty() && !REDACTED.equals(value) && !COOKIE_ATTRIBUTES.contains(name)) {
+                    out.append(text, copied, valueStart).append(REDACTED);
+                    copied = valueEnd;
+                }
+                pos = valueEnd;
+                if (valueEnd >= length || (text.charAt(valueEnd) != ';' && text.charAt(valueEnd) != ',')) {
+                    break;
+                }
+                pos = valueEnd + 1;
+            }
+            resumeAt = Math.max(pos, matcher.end());
+        } while (resumeAt < length && matcher.find(resumeAt));
+        out.append(text, copied, length);
+        return out.toString();
+    }
+
+    private static boolean isCookieNameChar(char c) {
+        return c > ' ' && c < 0x7f && c != '=' && c != ';' && c != ',' && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}'
+                && c != '[' && c != ']';
+    }
+
+    private static boolean isCookieValueChar(char c) {
+        return c != ';' && c != ',' && c != ' ' && c != '\t' && isCookieSpanChar(c);
+    }
+
+    /**
+     * What may sit inside a header value at all: not a carrier's end or a line
+     * break.
+     */
+    private static boolean isCookieSpanChar(char c) {
+        return c != '"' && c != '\'' && c != '\\' && c != '\r' && c != '\n';
+    }
+
+    /**
      * {@code Authorization: Digest} with its directive list behind it. The scheme
      * rule in {@link #SHAPE_RULES} takes one unquoted token after the scheme word,
      * which on a Digest header is {@code username=} — and left {@code response=},
@@ -865,10 +987,20 @@ public final class SecretRedactionFilter {
             while (nameEnd < length && isDirectiveNameChar(text.charAt(nameEnd))) {
                 nameEnd++;
             }
-            if (nameEnd == pos || nameEnd >= length || text.charAt(nameEnd) != '=') {
+            // Optional whitespace around '=' (RFC 7235 "BWS"): username = "x" is a
+            // directive, and stopping at the space left response= legible.
+            int equals = nameEnd;
+            while (equals < length && (text.charAt(equals) == ' ' || text.charAt(equals) == '\t')) {
+                equals++;
+            }
+            if (nameEnd == pos || equals >= length || text.charAt(equals) != '=') {
                 break;
             }
-            int valueEnd = endOfDirectiveValue(text, nameEnd + 1);
+            int valueStart = equals + 1;
+            while (valueStart < length && (text.charAt(valueStart) == ' ' || text.charAt(valueStart) == '\t')) {
+                valueStart++;
+            }
+            int valueEnd = endOfDirectiveValue(text, valueStart);
             if (valueEnd < 0) {
                 break;
             }

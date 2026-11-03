@@ -95,7 +95,7 @@ export const RatingConfigSection = memo(function RatingConfigSection({
     <EditorSection
       label={t("agentDetail.rating.title", "Ratings")}
       icon={Star}
-      accent="text-amber-500"
+      accent="text-warn-500"
       variant="card"
       modified={modified}
       defaultOpen={enabled}

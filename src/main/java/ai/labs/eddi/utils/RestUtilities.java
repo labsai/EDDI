@@ -135,7 +135,7 @@ public class RestUtilities {
      * "id" and travelled on to the store. Whether a well-shaped id exists is the
      * store's question; both answer "not found" for one they cannot hold.
      */
-    static boolean isValidId(String s) {
+    public static boolean isValidId(String s) {
         if (s == null || s.length() < 18) {
             return false;
         }

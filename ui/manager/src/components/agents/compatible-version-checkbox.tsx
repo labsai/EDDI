@@ -62,7 +62,7 @@ export function CompatibleVersionCheckbox({
       className={cn(
         "flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm",
         amber
-          ? "border-amber-200 bg-white/60 dark:border-amber-800 dark:bg-amber-950/20"
+          ? "border-warn-200 bg-white/60 dark:border-warn-800 dark:bg-warn-950/20"
           : "border-border/60 bg-muted/30",
         disabled && "cursor-not-allowed opacity-60",
         className,
@@ -70,15 +70,15 @@ export function CompatibleVersionCheckbox({
     >
       <input
         type="checkbox"
-        className={cn("mt-0.5 h-4 w-4 shrink-0", amber ? "accent-amber-600" : "accent-primary")}
+        className={cn("mt-0.5 h-4 w-4 shrink-0", amber ? "accent-warn-600" : "accent-primary")}
         checked={checked}
         disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
         aria-describedby={hintId}
         data-testid={testId}
       />
-      <span className={amber ? "text-amber-800 dark:text-amber-300" : "text-muted-foreground"}>
-        <span className={cn("block font-medium", amber ? "text-amber-900 dark:text-amber-200" : "text-foreground")}>
+      <span className={amber ? "text-warn-800 dark:text-warn-300" : "text-muted-foreground"}>
+        <span className={cn("block font-medium", amber ? "text-warn-900 dark:text-warn-200" : "text-foreground")}>
           {t(
             "agentVersioning.compatibleLabel",
             "Compatible with the previous version — running conversations may switch to it",

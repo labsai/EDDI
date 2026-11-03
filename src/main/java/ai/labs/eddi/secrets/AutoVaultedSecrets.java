@@ -20,6 +20,7 @@ import java.util.Collection;
 import java.util.HexFormat;
 import java.util.LinkedHashSet;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -68,7 +69,7 @@ public class AutoVaultedSecrets {
     static final int NONCE_LENGTH = 12;
 
     private static final Pattern CURRENT_FORMAT = Pattern
-            .compile("^[^.]+\\.u[0-9a-f]{" + USER_HASH_LENGTH + "}\\.[0-9a-f]{" + NONCE_LENGTH + "}\\..+$");
+            .compile("^[^.]+\\.(u[0-9a-f]{" + USER_HASH_LENGTH + "})\\.[0-9a-f]{" + NONCE_LENGTH + "}\\..+$");
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final ISecretProvider secretProvider;
@@ -155,9 +156,20 @@ public class AutoVaultedSecrets {
         return nonce.chars().allMatch(c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
     }
 
-    /** Whether a slot name is a current-format slot owned by the given user. */
+    /**
+     * Whether a slot name is a current-format slot owned by the given user.
+     * <p>
+     * The owner is the second segment and nothing else. A {@code contains()} over
+     * the whole name also matched the property-name tail, which may itself contain
+     * dots: a property named {@code x.u<victimHash>.y} made one user's slot look
+     * like another's, and that user's erasure deleted it.
+     */
     public static boolean belongsToUser(String keyName, String userId) {
-        return isCurrentFormat(keyName) && keyName.contains("." + userSegment(userId) + ".");
+        if (keyName == null) {
+            return false;
+        }
+        Matcher matcher = CURRENT_FORMAT.matcher(keyName);
+        return matcher.matches() && matcher.group(1).equals(userSegment(userId));
     }
 
     /**

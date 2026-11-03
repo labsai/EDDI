@@ -617,6 +617,15 @@ class DkimVerifierTest {
         }
 
         @Test
+        @DisplayName("a bare CR in the header block refuses the message: the MIME parser would split a header there, this verifier would not")
+        void bareCrInHeaderBlock() {
+            DkimVerifier verifier = new DkimVerifier(new FakeDns().resolver(), CLOCK);
+            byte[] smuggled = bytes("From: a@example.com" + "\r" + "From: evil@attacker.example" + CRLF + "Subject: x" + CRLF + CRLF + "body");
+
+            assertNotNull(verifier.verify(smuggled, new MailDnsResolver.Budget(10)).messageFailure());
+        }
+
+        @Test
         @DisplayName("an RSA key with a huge public exponent is refused")
         void hugeExponent() throws Exception {
             BigInteger modulus = ((RSAPublicKey) rsa2048().pair().getPublic()).getModulus();

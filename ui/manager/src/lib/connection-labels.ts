@@ -45,7 +45,7 @@ export function authTypeDescription(t: TFunction, authType: AuthType): string {
     case "BASIC":
       return t(
         "connections.choice.basicBody",
-        "HTTP Basic. EDDI does the encoding, so the password stays a separate vault entry you can rotate on its own.",
+        "HTTP Basic. {{productName}} does the encoding, so the password stays a separate vault entry you can rotate on its own.",
       );
     case "OAUTH2_CLIENT_CREDENTIALS":
       return t(

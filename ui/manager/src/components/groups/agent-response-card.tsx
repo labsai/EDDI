@@ -157,7 +157,7 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
         isTaskResult &&
           "border border-emerald-500/20 bg-emerald-500/5",
         isVerification &&
-          "border border-amber-500/20 bg-amber-500/5",
+          "border border-ochre-500/20 bg-ochre-500/5",
         isDissent &&
           "border border-red-500/30 bg-red-500/5",
         isError && "opacity-60",

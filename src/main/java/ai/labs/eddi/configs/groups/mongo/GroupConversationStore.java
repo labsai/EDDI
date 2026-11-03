@@ -19,7 +19,9 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
@@ -191,6 +193,42 @@ public class GroupConversationStore implements IGroupConversationStore {
         } catch (IOException e) {
             throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
         }
+    }
+
+    @Override
+    public void updateIfStateAndPause(GroupConversation gc, GroupConversation.GroupConversationState expectedState,
+                                      String expectedPauseId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException {
+        if (expectedPauseId == null) {
+            updateIfState(gc, expectedState);
+            return;
+        }
+        try {
+            IResourceStorage.IResource<GroupConversation> resource = storage.newResource(gc.getId(), SINGLE_VERSION, gc);
+            try {
+                storage.storeIfFieldsEqual(resource, pauseBinding(expectedState, expectedPauseId));
+            } catch (IResourceStore.ResourceModifiedException e) {
+                // A document written before pauseId existed has no stored id: match it
+                // as absent (still state-bound, still atomic). A newer pause on such a
+                // document would already have stamped the field, so a stale writer
+                // cannot take this branch.
+                storage.storeIfFieldsEqual(resource, pauseBinding(expectedState, null));
+            }
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new GroupConversationGoneException(
+                    "Group conversation no longer exists.", e);
+        } catch (IOException e) {
+            throw new IResourceStore.ResourceStoreException("Failed conditional update: " + e.getMessage(), e);
+        }
+    }
+
+    private static Map<String, String> pauseBinding(GroupConversation.GroupConversationState expectedState,
+                                                    String pauseId) {
+        // LinkedHashMap, not Map.of: Map.of rejects the null that means "absent".
+        Map<String, String> fields = new LinkedHashMap<>();
+        fields.put("state", expectedState.name());
+        fields.put("pauseId", pauseId);
+        return fields;
     }
 
     /**

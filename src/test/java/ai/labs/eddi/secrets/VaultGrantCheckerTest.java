@@ -532,13 +532,16 @@ class VaultGrantCheckerTest {
         }
 
         @Test
-        @DisplayName("an unreadable workflow yields no violations rather than throwing")
-        void unreadableWorkflowIsSafe() throws Exception {
+        @DisplayName("an unreadable workflow fails closed rather than throwing")
+        void unreadableWorkflowFailsClosed() throws Exception {
             givenGrant(List.of("agent-owner"));
             var agent = agentReferencingTheVault();
             when(workflowStore.read(anyString(), anyInt())).thenThrow(new RuntimeException("store down"));
 
-            assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty());
+            List<String> violations = checker.findUngrantedReferences(agent, "some-other-agent");
+
+            assertEquals(1, violations.size(), "a workflow the scan could not read used to deploy unchecked");
+            assertTrue(violations.get(0).contains(WORKFLOW_ID));
         }
 
         @Test
@@ -759,6 +762,108 @@ class VaultGrantCheckerTest {
 
             doReturn(null).when(connectionStore).readByName("default", "finance-api");
             assertTrue(checker.referencedTenants(AGENT_ID, 1).isEmpty());
+        }
+    }
+
+    /**
+     * The scan must read exactly what the runtime reads. Each of these was a way
+     * the two disagreed, and every disagreement let a credential-bearing config
+     * deploy without its grant being checked.
+     */
+    @Nested
+    @DisplayName("the scan reads what the runtime reads")
+    class MatchesTheRuntime {
+
+        private AgentConfiguration agentWithRawStep(String stepType, String configUri) throws Exception {
+            var agent = new AgentConfiguration();
+            agent.setWorkflows(List.of(URI.create("eddi://ai.labs.workflow/workflowstore/workflows/" + WORKFLOW_ID + "?version=1")));
+            var step = new WorkflowConfiguration.WorkflowStep();
+            step.setType(URI.create(stepType));
+            var stepConfig = new LinkedHashMap<String, Object>();
+            stepConfig.put("uri", configUri);
+            step.setConfig(stepConfig);
+            var workflow = new WorkflowConfiguration();
+            workflow.setWorkflowSteps(List.of(step));
+            when(workflowStore.read(eq(WORKFLOW_ID), anyInt())).thenReturn(workflow);
+            return agent;
+        }
+
+        private void llmConfigCarrying(Map<String, String> parameters) throws Exception {
+            var task = new LlmConfiguration.Task();
+            task.setType("anthropic");
+            task.setParameters(new LinkedHashMap<>(parameters));
+            when(llmStore.read(eq(LLM_ID), anyInt())).thenReturn(new LlmConfiguration(List.of(task)));
+        }
+
+        @Test
+        @DisplayName("a config URI padded with whitespace is trimmed, as ResourceUris.require does")
+        void paddedConfigUriIsScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithRawStep("eddi://ai.labs.llm", "  eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1 ");
+            llmConfigCarrying(Map.of("apiKey", VAULT_REF));
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        @Test
+        @DisplayName("the ai.labs.langchain alias of the LLM step is scanned")
+        void langchainAliasIsScanned() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithRawStep("eddi://ai.labs.langchain", "eddi://ai.labs.llm/llmstore/llms/" + LLM_ID + "?version=1");
+            llmConfigCarrying(Map.of("apiKey", VAULT_REF));
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        @Test
+        @DisplayName("the store is chosen by exact host, not by a substring anywhere in the type")
+        void storeIsChosenByExactHost() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithRawStep("eddi://ai.labs.mcpcalls?x=ai.labs.llm",
+                    "eddi://ai.labs.mcpcalls/mcpcallsstore/mcpcalls/" + LLM_ID + "?version=1");
+            var mcpCalls = new McpCallsConfiguration();
+            mcpCalls.setMcpServerUrl("https://mcp.example.com");
+            mcpCalls.setApiKey(VAULT_REF);
+            when(mcpCallsStore.read(eq(LLM_ID), anyInt())).thenReturn(mcpCalls);
+            when(llmStore.read(anyString(), anyInt())).thenThrow(new ResourceNotFoundException("wrong store"));
+
+            assertEquals(List.of(VAULT_REF), checker.findUngrantedReferences(agent, "some-other-agent"));
+        }
+
+        @Test
+        @DisplayName("an unterminated opener in one field cannot swallow a real reference in a later one")
+        void unterminatedOpenerDoesNotHideALaterReference() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentReferencingTheVault();
+            var parameters = new LinkedHashMap<String, String>();
+            parameters.put("systemMessage", "see ${vault:oops");
+            parameters.put("apiKey", VAULT_REF);
+            llmConfigCarrying(parameters);
+
+            List<String> violations = checker.findUngrantedReferences(agent, "some-other-agent");
+
+            assertEquals(List.of(VAULT_REF), violations, "the runtime resolves apiKey on its own, so the scan must too");
+        }
+
+        @Test
+        @DisplayName("an unreadable credential-bearing extension config fails closed")
+        void unreadableExtensionConfigFailsClosed() throws Exception {
+            givenGrant(List.of("agent-owner"));
+            var agent = agentWithStep("ai.labs.httpcalls", LLM_ID);
+            when(apiCallsStore.read(eq(LLM_ID), anyInt())).thenThrow(new ResourceStoreException("store down"));
+
+            List<String> violations = checker.findUngrantedReferences(agent, "some-other-agent");
+
+            assertEquals(1, violations.size());
+            assertTrue(violations.get(0).contains(LLM_ID) && violations.get(0).contains("could not be read"), violations.get(0));
+        }
+
+        @Test
+        @DisplayName("a step whose config cannot carry a credential is still not read")
+        void unscannedConfigTypeIsNotUnreadable() throws Exception {
+            var agent = agentWithStep("ai.labs.output", LLM_ID);
+
+            assertTrue(checker.findUngrantedReferences(agent, "some-other-agent").isEmpty());
         }
     }
 }
