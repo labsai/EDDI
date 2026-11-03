@@ -449,12 +449,20 @@ abstract class AbstractClusterE2EIT {
         List<String> convs = List.of(run.conversation(0), run.conversation(1), run.conversation(2));
         AtomicBoolean stop = new AtomicBoolean();
         List<String> stepDowns = new CopyOnWriteArrayList<>();
+        List<String> stepDownFailures = new CopyOnWriteArrayList<>();
         Thread chaos = new Thread(() -> {
             while (!stop.get()) {
                 try {
-                    stepDowns.add(System.currentTimeMillis() + " " + cluster.stepDownStreamLeaders());
+                    List<String> moved = cluster.stepDownStreamLeaders();
+                    // only a step-down that reached at least one stream counts as the leaders
+                    // moving
+                    if (moved.isEmpty()) {
+                        stepDownFailures.add(System.currentTimeMillis() + " no stream stepped down");
+                    } else {
+                        stepDowns.add(System.currentTimeMillis() + " " + moved);
+                    }
                 } catch (RuntimeException e) {
-                    stepDowns.add(System.currentTimeMillis() + " failed: " + e.getMessage());
+                    stepDownFailures.add(System.currentTimeMillis() + " failed: " + e.getMessage());
                 }
                 ClusterHarness.sleep(Duration.ofSeconds(4));
             }
@@ -484,6 +492,7 @@ abstract class AbstractClusterE2EIT {
             stop.set(true);
             chaos.join(10_000);
             run.facts.put("stepDowns", stepDowns);
+            run.facts.put("stepDownFailures", stepDownFailures);
             Report r = run.verify();
             assertTrue(stepDowns.size() >= 4, "the leaders must actually have moved: " + stepDowns);
             assertClean(run, r);
