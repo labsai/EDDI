@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.groups.budget;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -75,7 +76,7 @@ public class TeamBudgetAudit {
             ledger.submit(new AuditEntry(UUID.randomUUID().toString(), null, null, null, actor, null, 0, "ai.labs.budget", "budget", 0, 0,
                     Map.of("action", action), output, null, null, List.of(action), 0.0, Instant.now(), null, null));
         } catch (Exception e) {
-            LOGGER.warnf("Could not write the %s audit entry: %s", action, e.getMessage());
+            LOGGER.warnf("Could not write the %s audit entry: %s", action, LogSanitizer.sanitize(e.getMessage()));
         }
     }
 }

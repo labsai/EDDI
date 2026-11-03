@@ -318,7 +318,8 @@ public class TeamBudgetService {
                 store.applyAdjustment(fromGroupId, month, amountUsd, fromBefore.baseUsd(), back, tid + ":rev", expiresAt(month));
                 audit.transferred(actor, fromGroupId, toGroupId, month, amountUsd, reason, tid, "REVERSED");
             } catch (RuntimeException reverseFailure) {
-                LOGGER.errorf(reverseFailure, "Team budget transfer %s PARTIAL: debited %s but could not credit %s nor reverse", tid,
+                LOGGER.errorf(reverseFailure, "Team budget transfer %s PARTIAL: debited %s but could not credit %s nor reverse",
+                        LogSanitizer.sanitize(tid),
                         LogSanitizer.sanitize(fromGroupId), LogSanitizer.sanitize(toGroupId));
                 audit.transferred(actor, fromGroupId, toGroupId, month, amountUsd, reason, tid, "PARTIAL");
             }

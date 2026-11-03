@@ -100,7 +100,7 @@ public class TeamSpendMeter {
                 // protocol alone, but the start gate has already refused a budgeted
                 // team it could not read, so this is a resume or a race.
                 LOGGER.warnf("Team budget of group %s unreadable at leg start; keeping the last-known ceiling: %s",
-                        LogSanitizer.sanitize(gc.getGroupId()), e.getMessage());
+                        LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
                 synchronized (state) {
                     state.setPolicy(policy);
                 }
@@ -108,7 +108,7 @@ public class TeamSpendMeter {
         } catch (RuntimeException e) {
             count("error");
             LOGGER.errorf(e, "Setting the team budget ceiling of group conversation %s failed -- the discussion is unaffected",
-                    LogSanitizer.sanitize(gc != null ? gc.getId() : null));
+                    LogSanitizer.sanitize(gc.getId()));
         }
     }
 
@@ -169,7 +169,7 @@ public class TeamSpendMeter {
         } catch (RuntimeException e) {
             count("error");
             LOGGER.errorf(e, "Metering the team budget of group conversation %s failed -- the discussion is unaffected",
-                    LogSanitizer.sanitize(gc != null ? gc.getId() : null));
+                    LogSanitizer.sanitize(gc.getId()));
         }
     }
 
