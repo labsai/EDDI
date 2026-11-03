@@ -51,7 +51,12 @@ it matters — see [HITL Oversight](../hitl-oversight.md).
 MCP read tools and the Platform Operator (see
 [`planning/operator-followups/approval-analytics-autonomy.md`](../../planning/operator-followups/approval-analytics-autonomy.md));
 the alerts `HITL_AUTONOMY` source and a Slack sample digest; Slack verdict buttons; an `oversight` form in the agent
-editor (JSON only for now); store integration tests against Docker (serializer-level round trips instead).
+editor (JSON only for now).
+
+**Tests.** The three stores have shared contracts (`OversightStoreContracts`) run against both backends by
+`MongoOversightStoresIT` and `PostgresOversightStoresIT` (Testcontainers): idempotent insert, window and field filters,
+compare-and-set review and save, expiry, retention, erasure and the indexes. They compile but were not run on the machine
+this was built on (no Docker); CI's `verify -DskipITs=false` runs them.
 
 ```decision-log
 | 2026-11-02 | Analytics read a projection (`approval_decisions`) fed by the decision event and rebuildable from the ledger | GDPR redaction empties ledger output; cancellation rows lack agents; no index on `output.*`; overflow drops | Aggregating the ledger directly; maintained `$inc` counters (not idempotent under retry/backfill) |
