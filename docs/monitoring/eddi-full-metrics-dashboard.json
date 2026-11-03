@@ -7153,7 +7153,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_decision_total{surface,outcome,channel}` — one per decided unit (answer, tool call, phase, task): `APPROVED`, `APPROVED_EDITED`, `REJECTED`, `AUTO_APPROVED`, `AUTO_REJECTED`, `ABORTED`. A rising `APPROVED_EDITED` share means approvers keep correcting what the agent proposes. `eddi_hitl_answer_edit_total{outcome}` shows edits the engine refused (`screened_out`, `config_drift`).",
+          "description": "`eddi_hitl_decision_total{surface,outcome,channel}` — one per decided unit (answer, tool call, phase, task): `APPROVED`, `APPROVED_EDITED`, `REJECTED`, `AUTO_APPROVED`, `AUTO_REJECTED`, `ABORTED`. A rising `APPROVED_EDITED` share means approvers keep correcting what the agent proposes. `eddi_hitl_answer_edit_total{outcome}` shows edits the engine refused (`screened_out`, `config_drift`, `redacted_content`).",
           "gridPos": {
             "h": 7,
             "w": 8,
