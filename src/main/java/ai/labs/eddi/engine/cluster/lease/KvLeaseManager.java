@@ -237,6 +237,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     private final Map<String, Held> held = new ConcurrentHashMap<>();
     private final Map<String, Set<Waiter>> waiters = new ConcurrentHashMap<>();
+    /** Lease ids a {@link #tryAcquireKey} of this process is writing, per key. */
+    private final Map<String, Set<String>> tryAcquiring = new ConcurrentHashMap<>();
     private final Map<String, Long> yieldUntil = new ConcurrentHashMap<>();
     /**
      * Other nodes waiting for a lease this node holds, with when each last said so.
@@ -587,11 +589,32 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     /**
-     * Whether this process holds the lease with id {@code lid} under {@code key}.
+     * Whether this process holds the lease with id {@code lid} under {@code key},
+     * or is still taking it: a waiter's or a {@link #tryAcquireKey}'s write is
+     * visible in the bucket before it is recorded in {@code held}, and another
+     * acquire of this process reading it in that window must not delete it as an
+     * orphan. A waiter stays registered until after {@code grant} recorded its
+     * lease (the future completes after {@code held.put}), and a tryAcquireKey id
+     * until the call returns.
      */
     private boolean heldHere(String key, String lid) {
+        if (lid == null) {
+            return false;
+        }
         Held h = held.get(key);
-        return h != null && lid != null && lid.equals(h.lid);
+        if (h != null && lid.equals(h.lid)) {
+            return true;
+        }
+        Set<Waiter> pending = waiters.get(key);
+        if (pending != null) {
+            for (Waiter w : pending) {
+                if (lid.equals(w.lid)) {
+                    return true;
+                }
+            }
+        }
+        Set<String> trying = tryAcquiring.get(key);
+        return trying != null && trying.contains(lid);
     }
 
     /**
@@ -727,8 +750,9 @@ public class KvLeaseManager implements IConversationLeaseManager {
         if (existing != null && !existing.isLost()) {
             return Optional.of(existing);
         }
+        String lid = newLeaseId();
+        tryAcquiring.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet()).add(lid);
         try {
-            String lid = newLeaseId();
             long sent = System.nanoTime();
             ISharedKv.Latest latest = kv.latest(key);
             if (latest.isLive()) {
@@ -769,6 +793,11 @@ public class KvLeaseManager implements IConversationLeaseManager {
             return Optional.of(h);
         } catch (ClusterUnavailableException e) {
             return Optional.empty();
+        } finally {
+            tryAcquiring.computeIfPresent(key, (k, ids) -> {
+                ids.remove(lid);
+                return ids.isEmpty() ? null : ids;
+            });
         }
     }
 

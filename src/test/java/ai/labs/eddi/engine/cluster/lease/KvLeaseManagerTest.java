@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -284,6 +285,42 @@ class KvLeaseManagerTest {
         }
         assertTrue(lostFired.get(), "the lost callbacks fire, so the turn is cancelled");
         assertEquals(0, a.heldCount());
+    }
+
+    @Test
+    @DisplayName("a lease this process is still writing is not deleted as an orphan by another acquire of it")
+    void inFlightWriteIsNotAnOrphan() throws Exception {
+        CountDownLatch written = new CountDownLatch(1);
+        CountDownLatch proceed = new CountDownLatch(1);
+        AtomicBoolean armed = new AtomicBoolean(true);
+        InMemorySharedKv store = new InMemorySharedKv("LEASES", Duration.ofSeconds(20)) {
+            @Override
+            public OptionalLong create(String key, byte[] value) {
+                OptionalLong revision = super.create(key, value);
+                if (armed.compareAndSet(true, false)) {
+                    // the write is in the bucket; its caller has not recorded it yet
+                    written.countDown();
+                    try {
+                        proceed.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+                return revision;
+            }
+        };
+        KvLeaseManager a = manager(store, "a", "a1");
+        CompletableFuture<Optional<LeaseHandle>> first = CompletableFuture.supplyAsync(() -> a.tryAcquireKey("c.conv1"));
+        assertTrue(written.await(5, TimeUnit.SECONDS));
+        var second = a.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
+        Thread.sleep(300); // the second acquire reads the in-flight lease meanwhile
+        proceed.countDown();
+        LeaseHandle h = first.get(5, TimeUnit.SECONDS).orElseThrow();
+        assertEquals(h.fence(), store.get("c.conv1").map(ISharedKv.Versioned::revision).orElse(-1L),
+                "the first acquire's lease is still the one in the bucket");
+        assertFalse(second.isDone(), "the second acquire waits for it instead of taking the conversation");
+        a.release(h);
+        assertNotNull(second.get(5, TimeUnit.SECONDS));
     }
 
     @Test
