@@ -1551,6 +1551,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // throws.
             if (decisionHandoffs != null) {
                 decisionHandoffs.afterCompleted(gc, config, listener);
+                persistDecisionHandoffs(gc);
             }
 
             if (listener != null) {
@@ -1741,6 +1742,27 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private boolean persistedTerminalOverride(GroupConversation gc, GroupDiscussionEventListener listener) {
         return hitlCoordinator.persistedTerminalOverride(gc, listener);
+    }
+
+    /**
+     * Persists the filed-handoff records {@code afterCompleted} added to a
+     * COMPLETED document. The completion write above ran before them, and no later
+     * write follows on the normal path, so without this the stored discussion would
+     * omit {@code handoffState.filed}. Conditional on the stored state still being
+     * COMPLETED, and best-effort: filing is idempotent (deterministic dedupe keys),
+     * so a lost write only costs the record, never a duplicate hand-off.
+     */
+    private void persistDecisionHandoffs(GroupConversation gc) {
+        if (gc.getHandoffState() == null) {
+            return;
+        }
+        try {
+            conversationStore.updateIfState(gc, GroupConversationState.COMPLETED);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceModifiedException
+                | IGroupConversationStore.GroupConversationGoneException e) {
+            LOGGER.warnf("Could not persist decision handoffs of group conversation %s: %s", LogSanitizer.sanitize(gc.getId()),
+                    e.getMessage());
+        }
     }
 
     /**

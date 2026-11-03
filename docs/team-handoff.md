@@ -87,7 +87,7 @@ The task also needs `enableBuiltInTools: true`; if it has a non-empty `builtInTo
 | `targets[]` | | 20 | `alias` is `[a-z0-9-]{1,40}` and unique; `description` (at most 300 characters) is shown to the model; `defaultPriority` 0..10 (default 5). The group id is **not** checked at save time, so an agent ZIP that names a team this instance does not have still imports; an unresolvable target is dropped at runtime with one `WARN`. |
 | `toolParticipants` | `MODERATOR` | | Who gets the tool in a discussion: `ALL`, `MODERATOR` or `ROLE:<role>`. One filer per discussion is cheaper and less spammy. The group setting alone does not hand anyone the tool: each eligible member's LLM task also needs `enableBuiltInTools: true` and, if it has a non-empty `builtInToolsWhitelist`, `team_handoff` in that list. |
 | `maxPerTurn` | 2 | 5 | Accepted handoffs per member turn. |
-| `maxPerDiscussion` | 10 | 50 | Handoffs per discussion, atomic under parallel phases and persisted across pause and resume. |
+| `maxPerDiscussion` | 10 | 50 | Handoffs per discussion made through the `team_handoff` tool, atomic under parallel phases and persisted across pause and resume. Handoffs filed by matching `onDecision` rules do not count against it. |
 | `maxDescriptionChars` | 2000 | 4000 | |
 | `onDecision[]` | | 20 | See below. |
 
