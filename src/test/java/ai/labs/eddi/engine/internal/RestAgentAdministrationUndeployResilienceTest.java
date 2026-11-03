@@ -48,6 +48,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.intThat;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -224,8 +225,13 @@ class RestAgentAdministrationUndeployResilienceTest {
     @Test
     @DisplayName("a single-version undeploy of a version below 1 is refused before any work (MIN_VALUE used to loop forever)")
     void singleVersionBelowOneIsRefused() {
-        // Preemptive timeout: without the guard, `current--` at Integer.MIN_VALUE wraps
-        // to MAX_VALUE and the loop never ends, so the mutant must fail, not hang.
+        // Without the guard, `current--` at Integer.MIN_VALUE wraps to MAX_VALUE and
+        // the
+        // loop never ends. The first per-version store read throws an Error the loop
+        // does not catch, so a regression fails at once instead of spinning on in the
+        // background after the preemptive timeout (which the loop cannot hear).
+        when(conversationMemoryStore.getActiveConversationCount(eq(AGENT), intThat(v -> v < 1)))
+                .thenThrow(new AssertionError("undeploy reached version < 1"));
         Response minValue = assertTimeoutPreemptively(Duration.ofSeconds(10),
                 () -> admin.undeployAgent(ENV, AGENT, Integer.MIN_VALUE, false, false));
         Response zero = assertTimeoutPreemptively(Duration.ofSeconds(10), () -> admin.undeployAgent(ENV, AGENT, 0, false, false));
