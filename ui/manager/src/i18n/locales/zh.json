@@ -5603,7 +5603,7 @@
   },
   "updates": {
     "title": "{{productName}} 更新",
-    "description": "检查是否有更新的 {{productName}} 版本。在你发起检查之前不会发送任何请求。",
+    "description": "检查是否有更新的 {{productName}} 版本。检查默认开启，您可以在下方关闭。",
     "installed": "已安装",
     "githubRelease": "GitHub 发布",
     "dockerImage": "Docker 镜像",
@@ -5612,7 +5612,7 @@
     "checking": "检查中…",
     "autoCheck": "自动检查更新",
     "autoCheckHint": "{{productName}} 每天检查一次新版本并通知管理员；此页面也会在每次加载时检查并显示横幅。关闭即可全部停止。",
-    "privacyNote": "检查仅会从你的浏览器直接访问 api.github.com，不会访问其他主机。浏览器会附带本站点的地址（请求来源 Origin），不会发送其他任何部署数据。",
+    "privacyNote": "检查只会连接 api.github.com（由此服务器每天一次，由您的浏览器在每次加载页面时），不会连接其他主机。浏览器会附带此站点的地址（请求来源），不会发送其他部署数据。",
     "neverChecked": "尚未执行检查。",
     "upToDate": "你正在运行最新版本（{{version}}）。",
     "updateAvailable": "{{productName}} {{version}} 已发布",

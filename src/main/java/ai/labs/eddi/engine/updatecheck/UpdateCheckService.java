@@ -184,7 +184,10 @@ public class UpdateCheckService {
         if (alreadyAnnounced(release.version())) {
             return Optional.of(release);
         }
-        notifications.onUpdateAvailable(release.version(), release.url());
+        if (!notifications.onUpdateAvailable(release.version(), release.url())) {
+            // Not stored: leave the release unannounced so the next check tries again.
+            return Optional.of(release);
+        }
         try {
             settings.write(SETTING_NOTIFIED_VERSION, release.version(), "system");
         } catch (RuntimeException e) {

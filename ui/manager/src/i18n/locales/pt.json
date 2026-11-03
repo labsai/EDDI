@@ -5663,7 +5663,7 @@
   },
   "updates": {
     "title": "Atualizações do {{productName}}",
-    "description": "Verifique se existe uma versão mais recente do {{productName}}. Nada é enviado até que você solicite.",
+    "description": "Verifica se há uma versão mais recente do {{productName}}. A verificação vem ativada por padrão; você pode desativá-la abaixo.",
     "installed": "Instalada",
     "githubRelease": "Versão no GitHub",
     "dockerImage": "Imagem Docker",
@@ -5672,7 +5672,7 @@
     "checking": "Verificando…",
     "autoCheck": "Verificar atualizações automaticamente",
     "autoCheckHint": "O {{productName}} procura uma nova versão uma vez por dia e avisa os administradores; esta página também verifica a cada carregamento e mostra um aviso. Desative para parar tudo.",
-    "privacyNote": "A verificação contata apenas api.github.com diretamente do seu navegador. O navegador anexa o endereço deste site (a origem da requisição); nenhum outro dado da implantação é enviado.",
+    "privacyNote": "As verificações contactam api.github.com — a partir deste servidor uma vez por dia e do seu navegador a cada carregamento de página — e nenhum outro host. O navegador anexa o endereço deste site (a origem da requisição); nenhum outro dado da implantação é enviado.",
     "neverChecked": "Nenhuma verificação executada ainda.",
     "upToDate": "Você está usando a versão mais recente ({{version}}).",
     "updateAvailable": "{{productName}} {{version}} está disponível",

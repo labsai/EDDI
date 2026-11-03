@@ -5603,7 +5603,7 @@
   },
   "updates": {
     "title": "{{productName}} のアップデート",
-    "description": "より新しい {{productName}} リリースがあるか確認します。実行するまで何も送信されません。",
+    "description": "{{productName}} の新しいリリースがあるかどうかを確認します。確認は既定で有効です。下でオフにできます。",
     "installed": "インストール済み",
     "githubRelease": "GitHub リリース",
     "dockerImage": "Docker イメージ",
@@ -5612,7 +5612,7 @@
     "checking": "確認中…",
     "autoCheck": "更新を自動的に確認する",
     "autoCheckHint": "{{productName}} は 1 日に 1 回新しいリリースを確認して管理者に通知します。このページも読み込みのたびに確認し、バナーを表示します。オフにするとすべて停止します。",
-    "privacyNote": "確認はブラウザから api.github.com にのみ直接アクセスします。ブラウザーはこのサイトのアドレス（リクエストのオリジン）を付加しますが、それ以外のデプロイ情報は送信されません。",
+    "privacyNote": "確認は api.github.com にのみ接続します（このサーバーから 1 日 1 回、ブラウザーからはページを読み込むたび）。ブラウザーはこのサイトのアドレス（リクエスト元）を付加しますが、それ以外のデプロイ情報は送信されません。",
     "neverChecked": "まだ確認していません。",
     "upToDate": "最新リリース（{{version}}）を使用しています。",
     "updateAvailable": "{{productName}} {{version}} が利用可能です",

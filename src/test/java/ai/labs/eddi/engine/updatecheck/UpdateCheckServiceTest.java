@@ -80,6 +80,7 @@ class UpdateCheckServiceTest {
         notifications = mock(WorkspaceNotifications.class);
         branding = mock(BrandingService.class);
         when(branding.current(any(BrandRequest.class))).thenReturn(ResolvedBrand.defaults(false));
+        when(notifications.onUpdateAvailable(anyString(), any())).thenReturn(true);
         answer(200, RELEASE);
     }
 
@@ -121,6 +122,20 @@ class UpdateCheckServiceTest {
         service(true, "6.7.0").checkNow();
 
         verify(notifications).onUpdateAvailable(eq("9.9.9"), any());
+    }
+
+    @Test
+    @DisplayName("a notice that could not be stored is not recorded as announced, so the next check retries")
+    void undeliveredNoticeIsRetried() {
+        when(notifications.onUpdateAvailable(anyString(), any())).thenReturn(false);
+        var sut = service(true, "6.7.0");
+
+        sut.checkNow();
+
+        assertFalse(store.values.containsKey(UpdateCheckService.SETTING_NOTIFIED_VERSION));
+        when(notifications.onUpdateAvailable(anyString(), any())).thenReturn(true);
+        sut.checkNow();
+        assertEquals("9.9.9", store.values.get(UpdateCheckService.SETTING_NOTIFIED_VERSION));
     }
 
     @Test

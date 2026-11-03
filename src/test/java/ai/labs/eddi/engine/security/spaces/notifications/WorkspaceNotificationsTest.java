@@ -26,6 +26,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,6 +35,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -260,6 +262,38 @@ class WorkspaceNotificationsTest {
             assertEquals("9.9.9", n.resourceName());
             assertEquals("https://github.com/labsai/EDDI/releases/tag/9.9.9", n.resourceUri());
             assertTrue(n.unread());
+        }
+
+        @Test
+        @DisplayName("report false when the notice could not be stored")
+        void reportsStoreFailure() {
+            doThrow(new IllegalStateException("down")).when(store).add(any());
+
+            assertFalse(sut.onUpdateAvailable("9.9.9", null));
+        }
+
+        @Test
+        @DisplayName("report true for a notice that is already waiting")
+        void alreadyWaitingCounts() {
+            when(store.hasUnread(WorkspaceNotifications.SYSTEM_ADMINS, "system", "9.9.9", WorkspaceNotification.Type.UPDATE_AVAILABLE))
+                    .thenReturn(true);
+
+            assertTrue(sut.onUpdateAvailable("9.9.9", null));
+        }
+
+        @Test
+        @DisplayName("cannot be read through a principal that is named like the shared inbox")
+        void reservedPrincipal() {
+            when(spaceContext.currentPrincipal()).thenReturn(WorkspaceNotifications.SYSTEM_ADMINS);
+            when(guard.callerIsAdmin()).thenReturn(false);
+
+            sut.inbox(false, 50);
+            sut.unreadCount();
+            sut.markRead(null);
+
+            verify(store, never()).list(eq(WorkspaceNotifications.SYSTEM_ADMINS), anyBoolean(), anyInt());
+            verify(store, never()).countUnread(WorkspaceNotifications.SYSTEM_ADMINS);
+            verify(store, never()).markRead(eq(WorkspaceNotifications.SYSTEM_ADMINS), any(), any());
         }
 
         @Test

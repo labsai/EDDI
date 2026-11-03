@@ -5603,7 +5603,7 @@
   },
   "updates": {
     "title": "{{productName}} Updates",
-    "description": "Check whether a newer {{productName}} release is available. Nothing is sent until you ask.",
+    "description": "Check whether a newer {{productName}} release is available. The check runs by default; you can turn it off below.",
     "installed": "Installed",
     "githubRelease": "GitHub release",
     "dockerImage": "Docker image",
@@ -5612,7 +5612,7 @@
     "checking": "Checking…",
     "autoCheck": "Check for updates automatically",
     "autoCheckHint": "{{productName}} checks for a new release once a day and notifies the administrators; this page also checks on each load and shows a banner. Turn it off to stop all of it.",
-    "privacyNote": "Checks contact api.github.com directly from your browser — no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
+    "privacyNote": "Checks contact api.github.com — from this server once a day and from your browser on each page load — and no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
     "neverChecked": "No check run yet.",
     "upToDate": "You are running the latest release ({{version}}).",
     "updateAvailable": "{{productName}} {{version}} is available",

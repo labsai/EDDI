@@ -26,7 +26,7 @@ import org.jboss.resteasy.reactive.NoCache;
 public interface IRestUpdateCheck {
 
     /** The request body of {@link #update(Update)}. */
-    record Update(boolean enabled) {
+    record Update(Boolean enabled) {
     }
 
     @GET

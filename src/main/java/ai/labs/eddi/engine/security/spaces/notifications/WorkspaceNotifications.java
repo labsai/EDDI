@@ -159,15 +159,18 @@ public class WorkspaceNotifications {
      *
      * @param releaseUrl
      *            the release page, or null
+     * @return whether the notice is in the inbox (delivered now, or already there);
+     *         false when it could not be stored, so the caller must not record the
+     *         release as announced
      */
-    public void onUpdateAvailable(String version, String releaseUrl) {
+    public boolean onUpdateAvailable(String version, String releaseUrl) {
         if (version == null || version.isBlank()) {
-            return;
+            return false;
         }
         if (store.hasUnread(SYSTEM_ADMINS, SYSTEM_ACTOR, version, WorkspaceNotification.Type.UPDATE_AVAILABLE)) {
-            return;
+            return true;
         }
-        deliver(new WorkspaceNotification(UUID.randomUUID().toString(), SYSTEM_ADMINS, WorkspaceNotification.Type.UPDATE_AVAILABLE, version,
+        return deliver(new WorkspaceNotification(UUID.randomUUID().toString(), SYSTEM_ADMINS, WorkspaceNotification.Type.UPDATE_AVAILABLE, version,
                 releaseUrl, version, SYSTEM_ACTOR, "EDDI", null, null, Instant.now(), null));
     }
 
@@ -178,7 +181,9 @@ public class WorkspaceNotifications {
     private List<String> recipients() {
         List<String> recipients = new ArrayList<>(2);
         String principal = spaceContext.currentPrincipal();
-        if (principal != null) {
+        // A principal literally named like the shared inbox must not read it as its
+        // own.
+        if (principal != null && !SYSTEM_ADMINS.equals(principal)) {
             recipients.add(principal);
         }
         if (accessGuard.callerIsAdmin()) {
@@ -346,14 +351,21 @@ public class WorkspaceNotifications {
         return store.listInvolving(principal, 10_000);
     }
 
-    private void deliver(WorkspaceNotification notification) {
+    private boolean deliver(WorkspaceNotification notification) {
         try {
             store.add(notification);
-            store.prune(notification.recipient(), INBOX_SIZE, notification.createdAt().minus(RETENTION));
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not deliver a %s notification to '%s': %s", notification.type(), sanitize(notification.recipient()),
                     e.getMessage());
+            return false;
         }
+        try {
+            store.prune(notification.recipient(), INBOX_SIZE, notification.createdAt().minus(RETENTION));
+        } catch (RuntimeException e) {
+            // Pruning is housekeeping: the notice is stored.
+            LOGGER.warnf("Could not prune the inbox of '%s': %s", sanitize(notification.recipient()), e.getMessage());
+        }
+        return true;
     }
 
     private static String resourceUri(DocumentDescriptor descriptor) {
