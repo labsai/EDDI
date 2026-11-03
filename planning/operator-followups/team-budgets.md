@@ -62,9 +62,6 @@ All four service methods are public and REST-backed; the MCP classes are thin wr
 
 ## Not built here (descoped, see the changelog fragment)
 
-- Manager screens: a team budget card beside the cost `MetricCard` in `pages/group-workspace.tsx`, a team table with
-  an adjust/transfer dialog in `pages/quotas.tsx` (REST: `GET /administration/team-budgets?groupIds=` for the table),
-  i18n in its own `teamBudget` namespace in the 11 locale files, MSW handlers in a new `team-budget-handlers.ts`.
 - The LLM budget-transfer proposal tool (`proposeBudgetTransfer`, inert until an admin approves; a
   `team_budget_proposals` store; `TeamBudgetToolsProvider` inserted directly after `ArtifactToolsProvider` in
   `AgentOrchestrator`). Group member tool calls cannot use the HITL gate (`inGroupTurns: REJECT`), which is why it

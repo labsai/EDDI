@@ -28,6 +28,7 @@ leave the others nothing, and nothing said who had spent what. A group can now c
   money moves are `eddi-admin`, both write the audit ledger.
 - **Template values** — `{context.teamBudget}` and `{context.teamBudgets}` (a board's `oversight.teams`, filtered by
   the discussion owner's view; numbers only).
+- **Manager** — a team budget card on the group workspace page (cap/spent/remaining, history), a team table on the Quotas page, and admin-only adjust-this-month and transfer dialogs (transfers send an `Idempotency-Key`); strings in a `teamBudget` namespace in all 11 locales.
 - **Metrics** — `eddi_team_budget_{metering,refusals,adjustments}_total`, a Team Budgets dashboard row (the
   Kubernetes copy is synced).
 
@@ -45,8 +46,7 @@ leave the others nothing, and nothing said who had spent what. A group can now c
 
 - Deferred to the combined follow-up (`planning/operator-followups/team-budgets.md`): the MCP tools, the Platform
   Operator grants and prompt text, and a `HandoffAdmission` bean that refuses a handoff to a team over budget (after F2).
-- The Manager screens (team budget card, quotas table, adjust/transfer dialog) and the LLM budget-transfer proposal
-  tool were not built in this change; budgets are managed through REST.
+- The LLM budget-transfer proposal tool was not built in this change.
 - GDPR erasure does not yet pseudonymise the admin principal recorded in a month's adjustment history (the audit-ledger
   entry carries it as its user id and is covered by the ledger's own erasure).
 - No oversubscription warning (sum of team caps above the tenant budget); `limitedBy` shows the tighter limit.

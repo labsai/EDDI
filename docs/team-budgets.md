@@ -179,5 +179,14 @@ Metrics Reference dashboard under **Team Budgets**.
   the tenant meter has the same bound.
 - **Oversubscription is not checked.** Team caps may add up to more than the tenant's budget; the tenant gate
   still binds, and `limitedBy` says which limit is the tighter one.
-- **Not yet in the box:** the MCP tools for budgets, the Platform Operator's knowledge of them, and the Manager
-  screens. Budgets are managed through the REST endpoints above.
+- **Not yet in the box:** the MCP tools for budgets and the Platform Operator's knowledge of them.
+
+## In the Manager
+
+- The group's workspace page shows a **team budget card** (cap, spent, remaining, reset date, a History table, and a
+  badge when the budget is spent or the tenant is the tighter limit). It is absent for a group without a
+  `teamBudget`.
+- **Quotas** lists every team that has a budget, with a bar per team.
+- An administrator gets **Adjust this month** (cap and a required reason; refused below the spend) and **Transfer
+  budget** (from, to, amount, reason; one `Idempotency-Key` per opening of the dialog). Other roles do not see the
+  buttons; the server enforces it regardless.
