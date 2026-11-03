@@ -4197,7 +4197,7 @@
     "wizardLink": "打开群组向导"
   },
   "groupTieBreak": {
-    "bannerTitle": "投票平局 — {{name}}，由你决定",
+    "bannerTitle": "投票需要裁决 — {{name}}，由你决定",
     "chooseOne": "选择一个选项",
     "rationalePlaceholder": "理由（可选）",
     "inboxBadge": "平局裁决",

@@ -3969,7 +3969,7 @@
     "wizardLink": "Gruppenassistent öffnen"
   },
   "groupTieBreak": {
-    "bannerTitle": "Die Abstimmung ist unentschieden — {{name}}, du entscheidest",
+    "bannerTitle": "Die Abstimmung braucht eine Entscheidung — {{name}}, du entscheidest",
     "chooseOne": "Wähle eine Option",
     "rationalePlaceholder": "Begründung (optional)",
     "inboxBadge": "Stichentscheid",

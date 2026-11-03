@@ -4197,7 +4197,7 @@
     "wizardLink": "เปิดตัวช่วยสร้างกลุ่ม"
   },
   "groupTieBreak": {
-    "bannerTitle": "ผลโหวตเสมอกัน — {{name}} คุณเป็นผู้ตัดสิน",
+    "bannerTitle": "ผลโหวตต้องมีการตัดสิน — {{name}} คุณเป็นผู้ตัดสิน",
     "chooseOne": "เลือกหนึ่งตัวเลือก",
     "rationalePlaceholder": "เหตุผล (ไม่บังคับ)",
     "inboxBadge": "ตัดสินผลเสมอ",

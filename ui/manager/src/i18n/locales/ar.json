@@ -4385,7 +4385,7 @@
     "wizardLink": "افتح معالج المجموعات"
   },
   "groupTieBreak": {
-    "bannerTitle": "التصويت متعادل — {{name}}، القرار لك",
+    "bannerTitle": "التصويت يحتاج إلى قرار — {{name}}، القرار لك",
     "chooseOne": "اختر خيارًا واحدًا",
     "rationalePlaceholder": "السبب (اختياري)",
     "inboxBadge": "حسم التعادل",

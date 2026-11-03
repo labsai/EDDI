@@ -4197,7 +4197,7 @@
     "wizardLink": "グループウィザードを開く"
   },
   "groupTieBreak": {
-    "bannerTitle": "投票が同数です — {{name}} さんが決めてください",
+    "bannerTitle": "投票には決定が必要です — {{name}} さんが決めてください",
     "chooseOne": "選択肢を 1 つ選んでください",
     "rationalePlaceholder": "理由 (任意)",
     "inboxBadge": "決選",

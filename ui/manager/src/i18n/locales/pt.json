@@ -4244,7 +4244,7 @@
     "wizardLink": "Abrir o assistente de grupo"
   },
   "groupTieBreak": {
-    "bannerTitle": "A votação está empatada — {{name}}, você decide",
+    "bannerTitle": "A votação precisa de uma decisão — {{name}}, você decide",
     "chooseOne": "Escolha uma opção",
     "rationalePlaceholder": "Motivo (opcional)",
     "inboxBadge": "Desempate",

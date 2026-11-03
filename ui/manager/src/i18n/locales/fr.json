@@ -4244,7 +4244,7 @@
     "wizardLink": "Ouvrir l'assistant de groupe"
   },
   "groupTieBreak": {
-    "bannerTitle": "Le vote est à égalité — {{name}}, c'est à vous de trancher",
+    "bannerTitle": "Le vote nécessite une décision — {{name}}, c'est à vous de trancher",
     "chooseOne": "Choisissez une option",
     "rationalePlaceholder": "Pourquoi (facultatif)",
     "inboxBadge": "Départage",

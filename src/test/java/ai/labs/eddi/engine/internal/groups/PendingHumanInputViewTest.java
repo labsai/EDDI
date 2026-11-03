@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -32,7 +33,7 @@ class PendingHumanInputViewTest {
     @DisplayName("nothing pending adds nothing")
     void nothingPending() {
         Map<String, Object> summary = new LinkedHashMap<>();
-        PendingHumanInputView.addTo(summary, new GroupConversation());
+        PendingHumanInputView.addTo(summary, new GroupConversation(), true);
         assertTrue(summary.isEmpty());
         assertNull(PendingHumanInputView.kindOf(new GroupConversation()));
     }
@@ -41,7 +42,7 @@ class PendingHumanInputViewTest {
     @DisplayName("a plain turn is TURN")
     void turn() {
         Map<String, Object> summary = new LinkedHashMap<>();
-        PendingHumanInputView.addTo(summary, pending(null));
+        PendingHumanInputView.addTo(summary, pending(null), true);
         assertEquals(Map.of("pendingKind", "TURN"), summary);
     }
 
@@ -49,7 +50,7 @@ class PendingHumanInputViewTest {
     @DisplayName("a tie-break carries its options")
     void tieBreak() {
         Map<String, Object> summary = new LinkedHashMap<>();
-        PendingHumanInputView.addTo(summary, pending(HumanRequestDetail.tieBreak(List.of("A", "B"), 3, "NO_DECISION")));
+        PendingHumanInputView.addTo(summary, pending(HumanRequestDetail.tieBreak(List.of("A", "B"), 3, "NO_DECISION")), true);
         assertEquals(Map.of("pendingKind", "TIE_BREAK", "pendingOptions", List.of("A", "B")), summary);
     }
 
@@ -57,7 +58,18 @@ class PendingHumanInputViewTest {
     @DisplayName("a task carries its task id")
     void task() {
         Map<String, Object> summary = new LinkedHashMap<>();
-        PendingHumanInputView.addTo(summary, pending(new HumanRequestDetail(HumanRequestDetail.KIND_TASK, null, "t-7", null, null)));
+        PendingHumanInputView.addTo(summary, pending(new HumanRequestDetail(HumanRequestDetail.KIND_TASK, null, "t-7", null, null)), true);
         assertEquals(Map.of("pendingKind", "TASK", "pendingTaskId", "t-7"), summary);
+    }
+
+    @Test
+    @DisplayName("a caller who may not read discussion content gets the kind but not the tie-break options")
+    void optionsFollowContentVisibility() {
+        var summary = new LinkedHashMap<String, Object>();
+
+        PendingHumanInputView.addTo(summary, pending(HumanRequestDetail.tieBreak(List.of("A", "B"), 3, "NO_DECISION")), false);
+
+        assertEquals("TIE_BREAK", summary.get("pendingKind"));
+        assertFalse(summary.containsKey("pendingOptions"));
     }
 }

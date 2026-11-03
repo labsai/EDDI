@@ -310,6 +310,21 @@ class GroupTieBreakPausesTest {
         }
 
         @Test
+        @DisplayName("a resume that fails before the discussion owns the leg drops the token and fails the conversation")
+        void resumeFailureCleansUp() throws Exception {
+            var gc = paused(null);
+            doThrow(new IllegalStateException("store down")).when(service).executeDiscussion(any(), any(), any(),
+                    anyString(), any(), anyInt());
+
+            coordinator.submitHumanInput(GC_ID, DECIDER, null, "SEO", DECIDER, null);
+            assertTrue(controls.containsKey(GC_ID), "the resume registered its token");
+            submitted.getFirst().run();
+
+            assertTrue(!controls.containsKey(GC_ID), "the token does not linger");
+            verify(conversationStore).compareAndSetState(GC_ID, GroupConversationState.IN_PROGRESS, GroupConversationState.FAILED);
+        }
+
+        @Test
         @DisplayName("an executor that refuses the resume restores the pause")
         void rollback() throws Exception {
             var gc = paused(null);
