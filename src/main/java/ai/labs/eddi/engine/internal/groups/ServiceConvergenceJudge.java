@@ -20,7 +20,11 @@ import org.jboss.logging.Logger;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -83,6 +87,8 @@ public class ServiceConvergenceJudge {
         return retry;
     }
 
+    private static final ExecutorService JUDGE_EXECUTOR = Executors.newVirtualThreadPerTaskExecutor();
+
     private final Supplier<SummarizationService> summarizationService;
     private final MeterRegistry meterRegistry;
 
@@ -130,8 +136,7 @@ public class ServiceConvergenceJudge {
         }
         SummarizationService.SummarizationResult result;
         try {
-            result = summarizer.summarizeWithUsage(input, JUDGE_INSTRUCTIONS, service.llmProvider(), service.llmModel(),
-                    parametersWithTimeout(service), SINGLE_ATTEMPT);
+            result = callWithin(summarizer, input, service);
         } catch (Exception e) {
             LOGGER.warnf("Group %s phase '%s': the service convergence judge failed (%s) — continuing without an early exit",
                     LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(phaseName(phase)), e.getClass().getSimpleName());
@@ -159,6 +164,30 @@ public class ServiceConvergenceJudge {
         }
         record(mode, verdict.converged() ? OUTCOME_CONVERGED : OUTCOME_CONTINUE, System.nanoTime() - start);
         return Optional.of(verdict);
+    }
+
+    /**
+     * Runs the model call under one deadline of {@code timeoutMs} that covers the
+     * whole operation — variable and vault resolution and the model build on a
+     * cache miss as well as the request — not only the provider's own request
+     * timeout, which starts when the chat call does. An overrun is abandoned
+     * (interrupted, best effort) and surfaces as a failure, which the caller turns
+     * into "not converged".
+     */
+    private static SummarizationService.SummarizationResult callWithin(SummarizationService summarizer, String input,
+                                                                       ServiceJudgeConfig service)
+            throws Exception {
+        Future<SummarizationService.SummarizationResult> call = JUDGE_EXECUTOR.submit(() -> summarizer.summarizeWithUsage(input,
+                JUDGE_INSTRUCTIONS, service.llmProvider(), service.llmModel(), parametersWithTimeout(service), SINGLE_ATTEMPT));
+        try {
+            return call.get(service.timeoutMs(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException | InterruptedException e) {
+            call.cancel(true);
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            throw e;
+        }
     }
 
     /**

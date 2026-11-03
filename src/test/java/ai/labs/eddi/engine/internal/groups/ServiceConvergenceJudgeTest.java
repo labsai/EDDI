@@ -35,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -206,6 +207,29 @@ class ServiceConvergenceJudgeTest {
             var retry = ArgumentCaptor.forClass(RetryConfiguration.class);
             verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), retry.capture());
             assertEquals(1, retry.getValue().getMaxAttempts());
+        }
+
+        @Test
+        @DisplayName("a call that outlasts timeoutMs, model setup included, is abandoned as not converged")
+        void overrunIsAbandoned() {
+            var release = new CountDownLatch(1);
+            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any())).thenAnswer(inv -> {
+                release.await();
+                return new SummarizationResult("{\"agreementScore\":0.9,\"converged\":true}", 1, 1);
+            });
+            var service = new ServiceJudgeConfig("openai", "gpt-4o-mini", null, null, null, 1);
+            var convergence = serviceConvergence(service);
+            var judge = new ServiceConvergenceJudge(() -> summarizer, meters);
+
+            long start = System.nanoTime();
+            var verdict = judge.judge(gc, phase(convergence), 0, 1, convergence, "MEMBER {text}",
+                    out -> ConvergenceDetector.parseJudgeVerdict(out, 0.8), null);
+            release.countDown();
+
+            assertTrue(verdict.isPresent());
+            assertFalse(verdict.get().converged());
+            assertTrue((System.nanoTime() - start) / 1_000_000 < 5_000, "returned at the deadline, not when the call finished");
+            assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
         }
 
         @Test
