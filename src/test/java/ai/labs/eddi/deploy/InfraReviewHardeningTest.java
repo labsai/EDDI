@@ -136,11 +136,85 @@ class InfraReviewHardeningTest {
     }
 
     @Test
+    @DisplayName("install.sh sends credentials to 127.0.0.1, the address the ports are published on, not to a name that may resolve to ::1")
+    void installerCredentialRequestsUseIpv4Loopback() throws IOException {
+        String sh = read("install.sh");
+        for (String base : List.of("kc_base=", "g_base=")) {
+            sh.lines().filter(l -> l.contains(base + "\"http://") || l.contains(" " + base + "\"http://")).forEach(l -> {
+                assertFalse(l.contains("http://localhost"), "credential base still uses localhost: " + l.strip());
+                assertTrue(l.contains("http://127.0.0.1:"), l.strip());
+            });
+        }
+        assertTrue(sh.lines().filter(l -> l.contains("kc_base=\"http://127.0.0.1:")).count() >= 4);
+        assertTrue(sh.lines().filter(l -> l.contains("g_base=\"http://127.0.0.1:")).count() >= 2);
+    }
+
+    @Test
+    @DisplayName("provision-vm.sh sends Keycloak admin credentials only to the port Docker reports, and the token not in argv")
+    void provisionVmKeycloakCallsAreScoped() throws IOException {
+        String sh = read("gcp/provision-vm.sh");
+        // Port 8180 stays in prose and the tunnel hint, but no request or proxy_pass
+        // targets it.
+        assertFalse(sh.contains("http://localhost:8180"), "a fixed 8180 may be someone else's listener");
+        assertTrue(sh.contains("proxy_pass         http://127.0.0.1:__KC_PORT__;") && sh.contains("-e \"s|__KC_PORT__|"));
+        assertTrue(sh.contains("--filter \"label=com.docker.compose.service=keycloak\""));
+        assertTrue(sh.contains("--filter \"publish=\\${KC_PORT}\""));
+        assertFalse(sh.contains("-H \"Authorization: Bearer"), "-H puts the token in argv");
+        assertTrue(sh.contains("curl -K - "));
+    }
+
+    @Test
+    @DisplayName("ci.yml escapes Slack markup in the contributor-controlled title before it reaches a mrkdwn field")
+    void slackTitleIsEscaped() throws IOException {
+        String ci = read(".github/workflows/ci.yml");
+        int escape = ci.indexOf("s/&/\\&amp;/g' -e 's/</\\&lt;/g' -e 's/>/\\&gt;/g'");
+        int payload = ci.indexOf("--arg commit \"$COMMIT_MSG\"");
+        assertTrue(escape > 0 && payload > escape, "COMMIT_MSG must be escaped before it goes into the payload");
+    }
+
+    @Test
+    @DisplayName("the load-test writers replace result files instead of following a symlink in the shared results directory")
+    void loadtestResultWritesDoNotFollowSymlinks() throws IOException {
+        String lt = read("scripts/loadtest/loadtest.py");
+        assertTrue(lt.contains("def write_text_atomic(path, text):") && lt.contains("tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path))"));
+        assertTrue(lt.contains("os.replace(tmp, path)"));
+        assertFalse(lt.contains("RESULTS, f\"{result['name']}.json\"), \"w\""), "write_result opens the predictable path itself");
+        assertFalse(lt.contains("f\"{name}.json\"), \"w\""), "the cluster runner opens the predictable path itself");
+        assertFalse(lt.contains("open(out, \"w\""), "the report opens the predictable path itself");
+        assertFalse(lt.contains("open(path, \"w\""), "the matrix reports open the predictable path themselves");
+        assertFalse(lt.contains("\"gate-summary.md\"), \"w\""));
+    }
+
+    @Test
+    @DisplayName("the stream driver accumulates bodies and SSE frames in linear time")
+    void streamDriverIsLinear() throws IOException {
+        String py = read("scripts/loadtest/drivers/stream_driver.py");
+        assertFalse(py.contains("out += c"), "bytes += copies the whole body per chunk");
+        assertFalse(py.contains("buf.split(\"\\n\\n\", 1)"), "split copies the whole remainder per frame");
+        assertTrue(py.contains("end = buf.find(\"\\n\\n\", pos)") && py.contains("buf = buf[pos:]"));
+        assertTrue(py.contains("async def text(self, limit=65536):"));
+    }
+
+    @Test
+    @DisplayName("the Kubernetes monitoring component admits only Grafana to Prometheus")
+    void prometheusIsIsolated() throws IOException {
+        String stack = read("k8s/overlays/monitoring/monitoring-stack.yaml");
+        int policy = stack.indexOf("kind: NetworkPolicy");
+        assertTrue(policy > 0, "no NetworkPolicy for Prometheus");
+        String doc = stack.substring(policy, stack.indexOf("\n---", policy));
+        assertTrue(doc.contains("app.kubernetes.io/name: prometheus") && doc.contains("- Ingress"));
+        assertTrue(doc.contains("app.kubernetes.io/name: grafana") && doc.contains("port: 9090"));
+        assertFalse(doc.contains("namespaceSelector") || doc.contains("ipBlock"), "only the Grafana pod may be admitted");
+    }
+
+    @Test
     @DisplayName("the demo seeder and create-secrets.ps1 keep key material out of argv and world-readable files")
     void secretsStayPrivate() throws IOException {
         String seed = read("src/main/docker/seed-demo-agent.sh");
         assertTrue(seed.contains("--data-binary @-"));
         assertFalse(seed.contains("-d \"{\\\"value\\\""), "the key must not be a curl -d argument");
+        assertFalse(seed.contains("-H \"Authorization: Bearer"), "the bearer key must not be a curl -H argument");
+        assertTrue(seed.contains("curl -sf -K - \"$EDDI/v1/models\""));
         String ps1 = read("k8s/create-secrets.ps1");
         // A 0700 directory made in one call (mktemp -d), not a chmod after the file
         // exists; and before the -Force delete, so its failure cannot strand a cluster

@@ -81,11 +81,17 @@ class Response:
                     return
                 yield data
 
-    async def text(self):
-        out = b""
+    async def text(self, limit=65536):
+        """The body, read until it ends or `limit` bytes are held. The pieces are joined once (a
+        growing bytes object is copied whole on every append), and the rest of an oversized body is
+        not read: the callers only look at an error body or discard it."""
+        parts, size = [], 0
         async for c in self.chunks():
-            out += c
-        return out.decode("utf-8", "replace")
+            parts.append(c)
+            size += len(c)
+            if size >= limit:
+                break
+        return b"".join(parts)[:limit].decode("utf-8", "replace")
 
 
 async def request(base, method, path, body=None, headers=None):
@@ -122,8 +128,15 @@ async def sse_events(resp):
     async for chunk in resp.chunks():
         t = time.perf_counter()
         buf += chunk.decode("utf-8", "replace").replace("\r\n", "\n")
-        while "\n\n" in buf:
-            raw, buf = buf.split("\n\n", 1)
+        # An advancing offset, with the unconsumed tail cut once per chunk: splitting the buffer
+        # per frame copies the whole remainder each time, which a chunk packed with empty frames
+        # turns into quadratic work on the loop every virtual user shares.
+        pos = 0
+        while True:
+            end = buf.find("\n\n", pos)
+            if end < 0:
+                break
+            raw, pos = buf[pos:end], end + 2
             name, data = "message", []
             for line in raw.split("\n"):
                 if line.startswith(":"):
@@ -136,6 +149,7 @@ async def sse_events(resp):
                     data.append(value)
             if data or name != "message":
                 yield t, name, "\n".join(data)
+        buf = buf[pos:]
 
 
 class Stats:

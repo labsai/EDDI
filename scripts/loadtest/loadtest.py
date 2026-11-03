@@ -180,6 +180,26 @@ def ensure_results():
         os.chmod(RESULTS, 0o777)  # nosec B103 - scratch output directory shared with a container user
 
 
+def write_text_atomic(path, text):
+    """Writes `text` to `path` through a fresh, exclusively created temp file in the same directory,
+    renamed over the target. results/ is world-writable (ensure_results), so a plain write-mode open would
+    follow a symlink another local user planted at a predictable result name and truncate whatever
+    it points to; os.replace swaps the directory entry itself and never follows it."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".out-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+        if os.name == "posix":
+            os.chmod(tmp, 0o644)  # mkstemp's 0600 would hide the report from the people it is for
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass  # best-effort: the temp file may already be gone; the original error is the one raised
+        raise
+
+
 def save_state(state):
     ensure_results()
     os.makedirs(STATE_DIR, mode=0o700, exist_ok=True)
@@ -571,8 +591,7 @@ def write_result(result):
     result.update({"command": command_line(), "env_overrides": env_overrides(), "env": state.get("env"),
                    "up_command": state.get("up_command"), "date": datetime.date.today().isoformat(),
                    "finished": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")})
-    with open(os.path.join(RESULTS, f"{result['name']}.json"), "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    write_text_atomic(os.path.join(RESULTS, f"{result['name']}.json"), json.dumps(result, indent=2))
     return result
 
 
@@ -673,8 +692,7 @@ def matrix_report(results, path, args):
         for c, d in sorted(big["db"]["detail"].items()):
             lines.append(f"- `{c}`: " + ", ".join(f"{k} {v / big['turns_ok']:.2f}" for k, v in d.items()))
     lines += ["", "Raw numbers: the `.json` files next to this report (not committed).", ""]
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    write_text_atomic(path, "\n".join(lines))
     print(f"wrote {path}")
 
 
@@ -920,8 +938,7 @@ def cmd_gate(args):
     if failures:
         summary += ["Failures:", ""] + [f"- {f}" for f in failures] + [""]
     text = "\n".join(summary)
-    with open(os.path.join(RESULTS, "gate-summary.md"), "w", encoding="utf-8") as f:
-        f.write(text)
+    write_text_atomic(os.path.join(RESULTS, "gate-summary.md"), text)
     print(text)
     if args.record and run_failed:
         # Ceilings from a partial run describe that run (with 0 turns, every ceiling would be its
@@ -1121,8 +1138,7 @@ def cmd_report(args):
                  f"Raw results: `scripts/loadtest/results/{args.label}-*.json` (not committed). "
                  + f"Report: `{command_line()}`.", ""]
     out = args.out or os.path.join(RESULTS, f"{args.label}-report.md")
-    with open(out, "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(L))
+    write_text_atomic(out, "\n".join(L))
     print(f"wrote {out}")
 
 
@@ -1425,8 +1441,7 @@ def cmd_cluster_run(args):
         "nats": nats, "nats_msgs_per_turn": (sum(v["in_msgs"] for v in nats.values()) / ok) if ok and nats else None,
         "docker": stats.summary(), "host_cpu": host.summary(), "per_node": per_node,
     }
-    with open(os.path.join(RESULTS, f"{name}.json"), "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2)
+    write_text_atomic(os.path.join(RESULTS, f"{name}.json"), json.dumps(result, indent=2))
     print(one_line(result) + f"; mongo {result['mongo_ops_per_s'] or 0:.0f} ops/s; containers {result['docker']['total_mean']:.0f}% CPU"
           f" (other stacks {result['docker']['foreign_mean']:.0f}%); host CPU {result['host_cpu'].get('mean', 0):.0f}%", flush=True)
     return result
@@ -1528,8 +1543,7 @@ def cluster_report(results, args):
                          f"{peak(p, 'eddi_processing_conversation_count')} | {peak(p, 'eddi_cluster_lease_held')} | {c:.0f} |")
         lines.append("")
     lines += ["Raw numbers: the `.json` files next to this report (not committed).", ""]
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
+    write_text_atomic(path, "\n".join(lines))
     print(f"wrote {path}", flush=True)
     return path
 

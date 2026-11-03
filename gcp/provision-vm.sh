@@ -590,6 +590,12 @@ if [[ "\${HTTPS_ENABLED}" == "true" ]]; then
 
   CERT_DIR="/etc/letsencrypt/live/\${EDDI_DOMAIN}"
 
+  # Keycloak's published port as install.sh recorded it (it leaves 8180 when that is
+  # taken); nginx and the admin calls below must use the same one.
+  KC_PORT=\$(grep -m1 '^KEYCLOAK_PORT=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_PORT=""
+  [[ "\${KC_PORT}" =~ ^[0-9]+\$ ]] || KC_PORT=8180
+  KC_BASE="http://127.0.0.1:\${KC_PORT}"
+
   # nginx config template — uses placeholder tokens to avoid clashing with
   # nginx's own \$variable syntax which must be preserved literally.
   cat > /tmp/nginx-eddi.tmpl <<'NGINX_TMPL'
@@ -675,7 +681,7 @@ server {
     # appended X-Forwarded-For would let the caller pick the address Keycloak
     # records for it in login events.
     location / {
-        proxy_pass         http://localhost:8180;
+        proxy_pass         http://127.0.0.1:__KC_PORT__;
         proxy_http_version 1.1;
         proxy_set_header   Host \$host;
         proxy_set_header   X-Real-IP \$remote_addr;
@@ -697,6 +703,7 @@ NGINX_TMPL
     -e "s|__KC_DOMAIN__|\${KC_DOMAIN}|g" \\
     -e "s|__CERT_DIR__|\${CERT_DIR}|g" \\
     -e "s|__EDDI_PORT__|${p_port}|g" \\
+    -e "s|__KC_PORT__|\${KC_PORT}|g" \\
     /tmp/nginx-eddi.tmpl > /etc/nginx/sites-available/eddi
 
   rm -f /etc/nginx/sites-enabled/eddi-acme
@@ -764,9 +771,24 @@ OVERRIDE_EOF
   # password travels on stdin.
   KC_ADMIN_USER=\$(grep -m1 '^KC_BOOTSTRAP_ADMIN_USERNAME=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_USER=""
   KC_ADMIN_PW=\$(grep -m1 '^KC_BOOTSTRAP_ADMIN_PASSWORD=' "\${EDDI_DIR}/.env" | cut -d= -f2- | tr -d "'\"") || KC_ADMIN_PW=""
+  # KC_PORT is the port install.sh actually published Keycloak on (it moves off an
+  # occupied 8180 and records the choice in .env). The admin password and token go
+  # only to a port Docker reports as a running keycloak container's, so a process
+  # that grabbed 8180 first is not handed them.
+  KC_OWNED=\$(docker ps -q --filter "label=com.docker.compose.service=keycloak" \\
+    --filter "publish=\${KC_PORT}" --filter "status=running" 2>/dev/null) || KC_OWNED=""
+  # The bearer token travels in a curl config on stdin, not a -H argument: argv is
+  # readable by every local user through the process table.
+  kc_curl() {
+    [[ "\${KC_TOKEN}" =~ ^[A-Za-z0-9._~+/=-]+\$ ]] || return 1
+    printf 'header = "Authorization: Bearer %s"\n' "\${KC_TOKEN}" | curl -K - "\$@"
+  }
+  if [[ -z "\${KC_OWNED}" ]]; then
+    echo "WARNING: no running Keycloak container publishes port \${KC_PORT}; not sending admin credentials."
+  else
   for attempt in \$(seq 1 18); do
     KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl -sf -X POST \\
-      "http://localhost:8180/realms/master/protocol/openid-connect/token" \\
+      "\${KC_BASE}/realms/master/protocol/openid-connect/token" \\
       --data-urlencode "client_id=admin-cli" --data-urlencode "grant_type=password" \\
       --data-urlencode "username=\${KC_ADMIN_USER:-admin}" --data-urlencode "password@-" \\
       2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
@@ -774,26 +796,24 @@ OVERRIDE_EOF
     echo "  Waiting for Keycloak admin API... (\${attempt}/18)"
     sleep 10
   done
+  fi
 
   if [[ -n "\${KC_TOKEN:-}" ]]; then
-    KC_CLIENT_UUID=\$(curl -sf \\
-      -H "Authorization: Bearer \${KC_TOKEN}" \\
-      "http://localhost:8180/admin/realms/eddi/clients?clientId=eddi-frontend" \\
+    KC_CLIENT_UUID=\$(kc_curl -sf \\
+      "\${KC_BASE}/admin/realms/eddi/clients?clientId=eddi-frontend" \\
       2>/dev/null | jq -r '.[0].id // empty') || KC_CLIENT_UUID=""
 
     if [[ -n "\${KC_CLIENT_UUID:-}" ]]; then
-      EXISTING_CLIENT=\$(curl -sf \\
-        -H "Authorization: Bearer \${KC_TOKEN}" \\
-        "http://localhost:8180/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" 2>/dev/null)
+      EXISTING_CLIENT=\$(kc_curl -sf \\
+        "\${KC_BASE}/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" 2>/dev/null)
       UPDATED_CLIENT=\$(echo "\${EXISTING_CLIENT}" | jq \\
         --arg d "https://\${EDDI_DOMAIN}" \\
         '.redirectUris += [\$d + "/*"] | .webOrigins += [\$d]' 2>/dev/null) || UPDATED_CLIENT=""
 
       if [[ -n "\${UPDATED_CLIENT:-}" ]]; then
-        STATUS=\$(curl -sf -o /dev/null -w "%{http_code}" -X PUT \\
-          -H "Authorization: Bearer \${KC_TOKEN}" \\
+        STATUS=\$(kc_curl -sf -o /dev/null -w "%{http_code}" -X PUT \\
           -H "Content-Type: application/json" \\
-          "http://localhost:8180/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" \\
+          "\${KC_BASE}/admin/realms/eddi/clients/\${KC_CLIENT_UUID}" \\
           -d "\${UPDATED_CLIENT}" 2>/dev/null) || STATUS="000"
         if [[ "\${STATUS}" == "204" ]]; then
           echo "Keycloak client updated with HTTPS origins."

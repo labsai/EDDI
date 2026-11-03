@@ -1480,6 +1480,9 @@ wait_for_ready() {
 # service's port is not handed them - nor is a same-named service of another
 # compose project, which says nothing about who holds this port. Answers "no" when
 # the daemon cannot be asked: the credentials are then withheld, not guessed at.
+# The credential requests go to 127.0.0.1, the address those ports are published on,
+# not to "localhost": that name can resolve to ::1 first, where a listener of another
+# local user would hold the same port number.
 # Args: service host_port
 compose_service_running() {
   local ids
@@ -1716,7 +1719,7 @@ ensure_stack_passwords_for_running_install() {
      && [[ -z "$(env_file_value KC_BOOTSTRAP_ADMIN_PASSWORD)" ]]; then
     local kc_port kc_base
     kc_port=$(env_file_value KEYCLOAK_PORT)
-    kc_base="http://localhost:${kc_port:-8180}"
+    kc_base="http://127.0.0.1:${kc_port:-8180}"
     KC_BOOTSTRAP_ADMIN_USERNAME="${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}"
     [[ -n "$KC_BOOTSTRAP_ADMIN_PASSWORD" ]] || KC_BOOTSTRAP_ADMIN_PASSWORD=$(generate_password)
     KEYCLOAK_PORT="${kc_port:-8180}"
@@ -1739,7 +1742,7 @@ ensure_stack_passwords_for_running_install() {
      && [[ -z "$(env_file_value GRAFANA_ADMIN_PASSWORD)" ]]; then
     local g_port g_base g_status g_user body="" legacy_auth
     g_port=$(env_file_value GRAFANA_PORT)
-    g_base="http://localhost:${g_port:-3000}"
+    g_base="http://127.0.0.1:${g_port:-3000}"
     [[ -n "$GRAFANA_ADMIN_USER" ]] || GRAFANA_ADMIN_USER=$(env_file_value GRAFANA_ADMIN_USER)
     g_user="${GRAFANA_ADMIN_USER:-admin}"
     [[ -n "$GRAFANA_ADMIN_PASSWORD" ]] || GRAFANA_ADMIN_PASSWORD=$(generate_password)
@@ -1930,7 +1933,7 @@ repair_running_keycloak() {
 
   local kc_port kc_base
   kc_port=$(grep '^KEYCLOAK_PORT=' "$EDDI_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- | tr -d "\"'\r ") || kc_port=""
-  kc_base="http://localhost:${kc_port:-8180}"
+  kc_base="http://127.0.0.1:${kc_port:-8180}"
 
   # The scope definitions have to be current: the realm file on disk is the one
   # this installation was set up with, which is exactly the file that lacked
@@ -2005,7 +2008,7 @@ configure_keycloak_client() {
   [[ "$WITH_AUTH" != "true" ]] && return 0
 
   local kc_port="${KEYCLOAK_PORT:-8180}"
-  local kc_base="http://localhost:${kc_port}"
+  local kc_base="http://127.0.0.1:${kc_port}"
 
   echo -ne "  Configuring Keycloak CORS  "
 
@@ -2310,7 +2313,7 @@ configure_first_logins() {
   fi
 
   if [[ "$WITH_AUTH" == "true" && -n "$json_tool" ]]; then
-    local kc_base="http://localhost:${KEYCLOAK_PORT:-8180}"
+    local kc_base="http://127.0.0.1:${KEYCLOAK_PORT:-8180}"
     [[ -n "$KC_ADMIN_TOKEN" ]] || keycloak_admin_login "$kc_base" "$json_tool"
     set_first_login_passwords "$kc_base" "$json_tool"
     # A stopped legacy stack: .env had no password, this run generated one, but
@@ -2360,7 +2363,7 @@ grafana_login_status() {
 # EDDI's readiness says nothing about Grafana's, so wait for Grafana first; one
 # that never answers is reported as unverified, not as a wrong password.
 confirm_grafana_login() {
-  local json_tool="$1" g_base="http://localhost:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
+  local json_tool="$1" g_base="http://127.0.0.1:${GRAFANA_PORT:-3000}" g_user="${GRAFANA_ADMIN_USER:-admin}" g_status body="" waited=0 rotation_failure=""
   if ! compose_service_running grafana "${GRAFANA_PORT:-3000}"; then
     warn "No running grafana container found - not sending Grafana credentials to ${g_base}."
     return 0
