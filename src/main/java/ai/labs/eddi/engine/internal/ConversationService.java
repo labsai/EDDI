@@ -9,8 +9,10 @@ import ai.labs.eddi.engine.alerts.TurnOutcome;
 import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.engine.cluster.rpc.IClusterRpc;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
@@ -74,6 +76,7 @@ import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IDiscardableTask;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -1785,7 +1788,8 @@ public class ConversationService implements IConversationService, UserErasurePar
         validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
         try {
-            return undoLoaded(environment, loadAndValidateConversationMemory(agentId, conversationId));
+            loadAndValidateConversationMemory(agentId, conversationId);
+            return editHistoryInOrder(conversationId, memory -> undoLoaded(environment, memory));
         } finally {
             recordMetrics(timerConversationUndo, counterConversationUndo, startTime);
         }
@@ -1815,9 +1819,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             // orphaning its armed timer. CAS from the loaded (pre-undo) state so
             // the store lands only if nothing moved the DB state meanwhile; on a
             // miss the concurrent writer wins and undo reports no-op.
-            if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForUndo)) {
-                LOGGER.warnf("Undo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
-                        conversationId, loadedStateForUndo);
+            if (!storeHistoryEdit(conversationMemory, environment, loadedStateForUndo, "Undo")) {
                 return false;
             }
             // The undone step is now on top of the redo cache.
@@ -1851,7 +1853,8 @@ public class ConversationService implements IConversationService, UserErasurePar
         validateParams(environment, agentId, conversationId);
         long startTime = System.nanoTime();
         try {
-            return redoLoaded(environment, loadAndValidateConversationMemory(agentId, conversationId));
+            loadAndValidateConversationMemory(agentId, conversationId);
+            return editHistoryInOrder(conversationId, memory -> redoLoaded(environment, memory));
         } finally {
             recordMetrics(timerConversationRedo, counterConversationRedo, startTime);
         }
@@ -1873,9 +1876,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             conversationMemory.redoLastStep();
             // Same second-writer race as undo (see above): CAS from the loaded
             // state so a concurrent say-turn pause commit is not clobbered.
-            if (!storeConversationMemoryIfState(conversationMemory, environment, loadedStateForRedo)) {
-                LOGGER.warnf("Redo of conversation %s aborted: its state or revision changed concurrently (state was %s)",
-                        conversationId, loadedStateForRedo);
+            if (!storeHistoryEdit(conversationMemory, environment, loadedStateForRedo, "Redo")) {
                 return false;
             }
             applyAgentMemoryConfig(environment, conversationMemory, conversationMemory.getCurrentStep());
@@ -1883,6 +1884,178 @@ public class ConversationService implements IConversationService, UserErasurePar
             return true;
         } else {
             return false;
+        }
+    }
+
+    /**
+     * Commits an undo or redo: CAS from the loaded state and revision (see
+     * {@link #undoLoaded}). A write refused by the cluster fence (another node took
+     * the conversation over while the edit ran) is a no-op too (409), never an
+     * ERROR: the document belongs to the newer holder.
+     */
+    private boolean storeHistoryEdit(IConversationMemory conversationMemory, Environment environment, ConversationState loadedState,
+                                     String what)
+            throws ResourceStoreException {
+        String conversationId = conversationMemory.getConversationId();
+        try {
+            if (storeConversationMemoryIfState(conversationMemory, environment, loadedState)) {
+                return true;
+            }
+            LOGGER.warnf("%s of conversation %s aborted: its state or revision changed concurrently (state was %s)", what,
+                    sanitize(conversationId), loadedState);
+        } catch (ConversationFencedException e) {
+            counterFenceRejected();
+            LOGGER.warnf("%s of conversation %s aborted: %s", what, sanitize(conversationId), e.getMessage());
+        }
+        return false;
+    }
+
+    /** One undo or redo, applied to the conversation as loaded for it. */
+    @FunctionalInterface
+    interface HistoryEdit {
+        boolean apply(IConversationMemory memory) throws ResourceStoreException;
+    }
+
+    /**
+     * How long an undo or redo waits for its turn in the coordinator before it is
+     * withdrawn and answered as a no-op (409). The acquire timeout of a cluster
+     * lease is well inside it, so a lease that never comes is reported by the
+     * coordinator first.
+     */
+    static final long HISTORY_EDIT_WAIT_SECONDS = 120;
+
+    /**
+     * Runs an undo or redo on a freshly loaded conversation.
+     * <p>
+     * On a single node it runs right here, on the REST thread, guarded by the
+     * state-and-revision CAS of its write, exactly as before. In cluster mode (A4)
+     * it runs through the per-conversation coordinator instead, like a turn: under
+     * the conversation's lease, after raising the fence, and with the lease's
+     * fencing token on its write. Run outside, it carried no token, so its
+     * full-document write could not be fenced, and a turn of the same conversation
+     * on another node could interleave with it and lose its write to it after its
+     * reply had gone out.
+     *
+     * @return the edit's result; {@code false} (409) when it could not run: the
+     *         lease did not come, the coordinator refused it, the fence could not
+     *         be raised, or it waited too long
+     */
+    boolean editHistoryInOrder(String conversationId, HistoryEdit edit) throws ResourceStoreException, ResourceNotFoundException {
+        if (leaseManager == null || !leaseManager.isClustered()) {
+            return edit.apply(convertConversationMemorySnapshot(requireSnapshot(conversationId)));
+        }
+        HistoryEditTask task = new HistoryEditTask(conversationId, edit);
+        try {
+            conversationCoordinator.submitInOrder(conversationId, task);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Undo/redo of conversation %s not queued: %s", sanitize(conversationId), e.getMessage());
+            return false;
+        }
+        return task.await(HISTORY_EDIT_WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /**
+     * An undo or redo queued in the coordinator. Never throws out of
+     * {@link #call()}: a failure is handed to the waiting REST thread, not
+     * dead-lettered. An undo is not a turn, and its caller is still there to be
+     * told.
+     */
+    final class HistoryEditTask implements ILeaseAwareTask {
+        private static final int PENDING = 0;
+        private static final int RUNNING = 1;
+        private static final int WITHDRAWN = 2;
+
+        private final AtomicInteger phase = new AtomicInteger(PENDING);
+        private final CompletableFuture<Boolean> result = new CompletableFuture<>();
+        private final String conversationId;
+        private final HistoryEdit edit;
+        private volatile LeaseHandle lease;
+
+        HistoryEditTask(String conversationId, HistoryEdit edit) {
+            this.conversationId = conversationId;
+            this.edit = edit;
+        }
+
+        @Override
+        public void bindLease(LeaseHandle lease) {
+            this.lease = lease;
+        }
+
+        @Override
+        public Void call() {
+            if (!phase.compareAndSet(PENDING, RUNNING)) {
+                return null; // withdrawn: the caller already answered 409
+            }
+            try {
+                LeaseHandle held = lease;
+                if (held != null && held.fence() != null && !conversationStepRunner.fenceRaised(conversationId, held)) {
+                    result.complete(false);
+                    return null;
+                }
+                IConversationMemory memory = convertConversationMemorySnapshot(requireSnapshot(conversationId));
+                if (held != null && held.fence() != null) {
+                    memory.setFenceToken(held.fence());
+                }
+                result.complete(edit.apply(memory));
+            } catch (Exception | Error e) {
+                result.completeExceptionally(e);
+            }
+            return null;
+        }
+
+        @Override
+        public void onDiscarded(Throwable cause) {
+            if (phase.compareAndSet(PENDING, WITHDRAWN)) {
+                LOGGER.warnf("Undo/redo of conversation %s not run: %s", sanitize(conversationId), cause.getMessage());
+                result.complete(false);
+            }
+        }
+
+        boolean await(long timeout, TimeUnit unit) throws ResourceStoreException, ResourceNotFoundException {
+            try {
+                return result.get(timeout, unit);
+            } catch (TimeoutException e) {
+                if (phase.compareAndSet(PENDING, WITHDRAWN)) {
+                    return false;
+                }
+                return awaitStarted();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                phase.compareAndSet(PENDING, WITHDRAWN);
+                return false;
+            } catch (ExecutionException e) {
+                throw rethrow(e.getCause());
+            }
+        }
+
+        /** The edit already started: its own answer, briefly awaited. */
+        private boolean awaitStarted() throws ResourceStoreException, ResourceNotFoundException {
+            try {
+                return result.get(5, TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                return false;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            } catch (ExecutionException e) {
+                throw rethrow(e.getCause());
+            }
+        }
+
+        private ResourceStoreException rethrow(Throwable cause) throws ResourceNotFoundException {
+            if (cause instanceof ResourceNotFoundException notFound) {
+                throw notFound;
+            }
+            if (cause instanceof ResourceStoreException storeFailure) {
+                return storeFailure;
+            }
+            if (cause instanceof RuntimeException runtime) {
+                throw runtime;
+            }
+            if (cause instanceof Error error) {
+                throw error;
+            }
+            return new ResourceStoreException(cause.getMessage(), cause);
         }
     }
 
@@ -2336,8 +2509,8 @@ public class ConversationService implements IConversationService, UserErasurePar
     public boolean undo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         long startTime = System.nanoTime();
         try {
-            var snapshot = requireSnapshot(conversationId);
-            return undoLoaded(snapshot.getEnvironment(), convertConversationMemorySnapshot(snapshot));
+            var environment = requireSnapshot(conversationId).getEnvironment();
+            return editHistoryInOrder(conversationId, memory -> undoLoaded(environment, memory));
         } finally {
             recordMetrics(timerConversationUndo, counterConversationUndo, startTime);
         }
@@ -2352,8 +2525,8 @@ public class ConversationService implements IConversationService, UserErasurePar
     public boolean redo(String conversationId) throws ResourceStoreException, ResourceNotFoundException {
         long startTime = System.nanoTime();
         try {
-            var snapshot = requireSnapshot(conversationId);
-            return redoLoaded(snapshot.getEnvironment(), convertConversationMemorySnapshot(snapshot));
+            var environment = requireSnapshot(conversationId).getEnvironment();
+            return editHistoryInOrder(conversationId, memory -> redoLoaded(environment, memory));
         } finally {
             recordMetrics(timerConversationRedo, counterConversationRedo, startTime);
         }

@@ -13,7 +13,11 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.lifecycle.IConversation;
+import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
@@ -30,6 +34,8 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.IDiscardableTask;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -53,12 +59,14 @@ import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -247,6 +255,75 @@ class ConversationServiceStoreConflictTest {
         assertFalse(conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID));
         assertEquals(0.0, meterRegistry.counter(CONFLICT_COUNTER).count(),
                 "a terminal state handover is the pre-existing, intended outcome — not a lost update");
+    }
+
+    /**
+     * Cluster mode: the coordinator runs every queued task at once, under
+     * {@code lease}.
+     */
+    private void clusterCoordinatorGranting(LeaseHandle lease) {
+        IConversationLeaseManager leaseManager = mock(IConversationLeaseManager.class);
+        when(leaseManager.isClustered()).thenReturn(true);
+        conversationService.leaseManager = leaseManager;
+        doAnswer(inv -> {
+            Callable<Void> task = inv.getArgument(1);
+            if (lease == null) {
+                ((IDiscardableTask) task)
+                        .onDiscarded(new LeaseUnavailableException(LeaseUnavailableException.Reason.TIMEOUT, "node-b", "held elsewhere"));
+                return null;
+            }
+            ((ILeaseAwareTask) task).bindLease(lease);
+            task.call();
+            return null;
+        }).when(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    private static LeaseHandle lease(long fence) {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(lease.fence()).thenReturn(fence);
+        return lease;
+    }
+
+    @Test
+    @DisplayName("A4: in cluster mode an undo runs through the coordinator, raises the fence first and writes with the lease's token")
+    void clusterUndoRunsUnderTheLease() throws Exception {
+        clusterCoordinatorGranting(lease(9L));
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(storedSnapshot(2));
+        ArgumentCaptor<ConversationMemorySnapshot> written = ArgumentCaptor.forClass(ConversationMemorySnapshot.class);
+        when(conversationMemoryStore.storeConversationMemorySnapshotIfState(written.capture(), eq(ConversationState.READY)))
+                .thenReturn(true);
+
+        assertTrue(conversationService.undo(CONVERSATION_ID));
+
+        var order = inOrder(conversationMemoryStore);
+        order.verify(conversationMemoryStore).raiseFence(CONVERSATION_ID, 9L);
+        order.verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY));
+        assertEquals(9L, written.getValue().getFenceToken(), "the undo's write is fenced like a turn's");
+        verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    @Test
+    @DisplayName("A4: in cluster mode an undo whose lease never comes is a no-op (409) and writes nothing")
+    void clusterUndoWithoutTheLeaseWritesNothing() throws Exception {
+        clusterCoordinatorGranting(null);
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(storedSnapshot(2));
+
+        assertFalse(conversationService.redo(CONVERSATION_ID));
+        verify(conversationMemoryStore, never()).storeConversationMemorySnapshotIfState(any(), any());
+    }
+
+    @Test
+    @DisplayName("A6: an undo refused by the fence is a no-op (409), counted, never an ERROR")
+    void fencedUndoIsANoOp() throws Exception {
+        clusterCoordinatorGranting(lease(4L));
+        when(conversationMemoryStore.loadConversationMemorySnapshot(CONVERSATION_ID)).thenReturn(storedSnapshot(2));
+        when(conversationMemoryStore.storeConversationMemorySnapshotIfState(any(), eq(ConversationState.READY)))
+                .thenThrow(new ConversationFencedException(CONVERSATION_ID, 4L, 9L));
+
+        assertFalse(conversationService.undo(ENV, AGENT_ID, CONVERSATION_ID));
+        assertEquals(1.0, meterRegistry.counter("eddi.cluster.fence.rejected").count());
+        verify(conversationMemoryStore, never()).setConversationState(anyString(), eq(ConversationState.ERROR));
+        verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), eq(ConversationState.ERROR));
     }
 
     private static ConversationMemorySnapshot storedSnapshot(int steps) {
