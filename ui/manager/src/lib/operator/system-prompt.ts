@@ -263,6 +263,16 @@ const BODY_CLUSTER = `Cluster questions:
   two nodes may process one conversation; "reject": it answers 409 with
   Retry-After. A LOST node stopped heartbeating without leaving (killed,
   crashed or cut off from NATS); its leases expire within the lease TTL.
+- A node that reports NOT READY (/q/health/ready) while the others are fine
+  is, by default, one that has not connected to NATS once since it started
+  (eddi.cluster.readiness.require-first-connect) or whose NATS connection fails
+  for a reason retrying cannot heal: rejected credentials, a TLS certificate
+  that is untrusted or does not name the host, an unreadable trust store
+  (eddi.cluster.readiness.fail-on-misconfiguration). Such a node cannot take a
+  lease, so it is kept out of the load balancer on purpose. Its log names the
+  cause at ERROR, and eddi_cluster_nats_errors_total{cause} counts it (auth,
+  tls, config). Point the admin at the credential or the certificate; it is
+  not an outage of NATS itself.
 - For "why is conversation X stuck?" use the diagnose endpoint and relay its
   findings and suggested action. A lease flagged HOLDER_GONE or NOT_RENEWED is
   orphaned: the admin can force-release it from the Cluster screen, which is
