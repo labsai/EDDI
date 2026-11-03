@@ -18,8 +18,10 @@ import java.util.Map;
 import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -131,7 +133,7 @@ class TeamBudgetServiceTest {
 
     @Test
     void aFailedGroupReadRefusesInsteadOfAdmitting() throws Exception {
-        when(t.groupStore.getCurrentResourceId("studio")).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+        doThrow(new IResourceStore.ResourceStoreException("db down")).when(t.groupStore).read(eq("studio"), anyInt());
 
         var decision = t.service.decide("studio");
 
@@ -141,7 +143,7 @@ class TeamBudgetServiceTest {
 
     @Test
     void aGroupThatDoesNotExistIsStillAdmittedWhenTheStoreSaysSo() throws Exception {
-        when(t.groupStore.getCurrentResourceId("gone")).thenThrow(new IResourceStore.ResourceNotFoundException("no such group"));
+        doThrow(new IResourceStore.ResourceNotFoundException("no such group")).when(t.groupStore).getCurrentResourceId("gone");
 
         assertTrue(t.service.decide("gone").allowed());
     }
