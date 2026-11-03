@@ -201,19 +201,35 @@ final class GroupReviewEditor {
      * Appends the approver's SYNTHESIS edit, when there is one, as the latest
      * synthesis of the paused phase. Call before the resume persists.
      */
-    void appendSynthesisEdit(GroupConversation gc, String decidedBy) {
+    TranscriptEntry appendSynthesisEdit(GroupConversation gc, String decidedBy) {
         if (synthesisEdit == null) {
-            return;
+            return null;
         }
         String original = latestSynthesis(gc);
         synthesisSummary = EditMetrics.ofText(EditSummary.Kind.SYNTHESIS, original, synthesisEdit);
         if (!synthesisSummary.changed()) {
-            return;
+            return null;
         }
         String speaker = REVIEWER_SPEAKER_PREFIX + (decidedBy != null ? decidedBy : "unknown");
+        TranscriptEntry entry = new TranscriptEntry(speaker, "Reviewer", synthesisEdit, gc.getPausedAtPhaseIndex(),
+                gc.getPausedPhaseName(), TranscriptEntryType.SYNTHESIS, Instant.now(), REVIEWER_EDIT_MARKER, null);
         synchronized (gc.getTranscript()) {
-            gc.getTranscript().add(new TranscriptEntry(speaker, "Reviewer", synthesisEdit, gc.getPausedAtPhaseIndex(),
-                    gc.getPausedPhaseName(), TranscriptEntryType.SYNTHESIS, Instant.now(), REVIEWER_EDIT_MARKER, null));
+            gc.getTranscript().add(entry);
+        }
+        return entry;
+    }
+
+    /**
+     * Takes the entry {@link #appendSynthesisEdit} returned back out of the
+     * transcript, by identity: a resume that is rolled back must not leave the
+     * approver's text behind for the next approval to build on.
+     */
+    void removeSynthesisEdit(GroupConversation gc, TranscriptEntry appended) {
+        if (appended == null) {
+            return;
+        }
+        synchronized (gc.getTranscript()) {
+            gc.getTranscript().removeIf(e -> e == appended);
         }
     }
 

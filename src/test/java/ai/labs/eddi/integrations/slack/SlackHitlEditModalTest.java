@@ -167,6 +167,17 @@ class SlackHitlEditModalTest {
         }
 
         @Test
+        void anArrayWithRedactedItemsCannotChangeLength() throws Exception {
+            String raw = "{\"keys\":[\"s1\",\"s2\"]}";
+            String shown = "{\"keys\":[\"<REDACTED>\",\"<REDACTED>\"]}";
+            var e = assertThrows(SlackRedactedArgumentsMerge.MergeException.class,
+                    () -> SlackRedactedArgumentsMerge.merge(raw, shown, "{\"keys\":[\"<REDACTED>\"]}"));
+            assertTrue(e.getMessage().contains("$.keys"));
+            // same length still merges
+            assertEquals(raw, SlackRedactedArgumentsMerge.merge(raw, shown, shown));
+        }
+
+        @Test
         void aNewMarkerIsRefused() {
             assertThrows(SlackRedactedArgumentsMerge.MergeException.class, () -> SlackRedactedArgumentsMerge.merge("{\"a\":\"x\"}",
                     "{\"a\":\"x\"}", "{\"a\":\"x\",\"b\":\"<REDACTED>\"}"));
@@ -284,7 +295,7 @@ class SlackHitlEditModalTest {
             assertEquals("slack:U_APPROVER", decision.getValue().getDecidedBy());
             assertEquals(PAUSE_ID, decision.getValue().getPauseId());
             verify(slackApi).updateMessage(eq("Bearer xoxb-token"), eq("C_APPROVAL"), eq("1700000000.000100"),
-                    eq("✅ Approved with edits by <@U_APPROVER>"), any());
+                    eq("✅ Approved (edit submitted) by <@U_APPROVER>"), any());
         }
 
         @Test

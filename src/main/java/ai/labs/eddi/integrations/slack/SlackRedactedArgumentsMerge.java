@@ -89,6 +89,12 @@ final class SlackRedactedArgumentsMerge {
             return out;
         }
         if (submitted.isArray()) {
+            // Items are matched to the raw ones by index, so adding or removing one in an
+            // array that holds redacted values could hand a different secret to the call.
+            if (redacted != null && redacted.isArray() && raw != null && raw.isArray() && !redacted.equals(raw)
+                    && submitted.size() != raw.size()) {
+                throw new MergeException(path + " holds redacted values, so items cannot be added or removed in Slack — edit it in the Manager");
+            }
             ArrayNode out = JSON.createArrayNode();
             for (int i = 0; i < submitted.size(); i++) {
                 JsonNode rawChild = raw != null && raw.isArray() ? raw.get(i) : null;

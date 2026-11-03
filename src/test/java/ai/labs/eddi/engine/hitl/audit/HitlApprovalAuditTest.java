@@ -247,6 +247,20 @@ class HitlApprovalAuditTest {
     class Groups {
 
         @Test
+        @DisplayName("the decision-level reason code is not copied onto a task approved as it stood")
+        void reasonCodeOnlyOnWhatChanged() {
+            var pause = new HitlDecisionRecords.GroupPause("TASK", "Execution", Instant.now().minusSeconds(5), null, List.of("t1", "t2"), "r");
+            var outcomes = new LinkedHashMap<String, HitlDecisionRecords.TaskOutcome>();
+            outcomes.put("t1", new HitlDecisionRecords.TaskOutcome(HitlVerdict.REJECTED, null, null));
+            var decision = decision(HitlVerdict.APPROVED, "bob");
+            decision.setReasonCode("SCOPE");
+            audit.write(HitlDecisionRecords.groupDecision("gc1", "g1", "owner", decision, null, pause, outcomes, null));
+            List<HitlDecisionUnit> units = events.get(0).units();
+            assertEquals("SCOPE", units.get(0).reasonCode(), "the rejected task takes the decision's code");
+            assertNull(units.get(1).reasonCode(), "the approved-as-is task takes none");
+        }
+
+        @Test
         @DisplayName("a TASK decision lists every awaiting task; unlisted tasks take the top-level verdict")
         void taskUnits() {
             var pause = new HitlDecisionRecords.GroupPause("TASK", "Execution", Instant.now().minusSeconds(5), null, List.of("t1", "t2"), "r");

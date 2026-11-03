@@ -195,7 +195,10 @@ public final class HitlApprovalAudit {
                 u.put("approvalCategory", category.category());
                 u.put("approvalCategorySource", category.source().name());
             }
-            String reasonCode = unit.reasonCode() != null ? unit.reasonCode() : r.reasonCode;
+            // the decision-level code explains only what changed or was rejected - a unit
+            // approved as it stood takes none
+            boolean unchanged = unit.outcome() == DecisionOutcome.APPROVED || unit.outcome() == DecisionOutcome.AUTO_APPROVED;
+            String reasonCode = unit.reasonCode() != null ? unit.reasonCode() : unchanged ? null : r.reasonCode;
             if (reasonCode != null) {
                 u.put("reasonCode", reasonCode);
             }

@@ -135,7 +135,7 @@ decides.
    present) and `toolDecisionsJson` (a verdict per call, optionally with amended arguments);
    `approve_group_phase` takes `taskDecisionsJson` (a verdict per task, optionally with an edited result) and
    `editedAnswer` for a synthesis. Send only text the user wrote or approved word for word,
-   and pass a `reasonCode` from `pauseDetails.reasonCodes` when the user says why.
+   and pass a `reasonCode` only when the user supplies a valid code or the status response exposes the vocabulary; otherwise omit it.
 4. `cancel_conversation` / `cancel_group_discussion` stop it instead — also only on the
    user's word.
 

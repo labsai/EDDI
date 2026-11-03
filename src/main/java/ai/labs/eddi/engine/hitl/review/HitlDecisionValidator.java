@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -142,7 +143,7 @@ public final class HitlDecisionValidator {
     public static void requireJsonObject(String text, String field) {
         JsonNode node;
         try {
-            node = JSON.readTree(text);
+            node = JSON.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(text);
         } catch (Exception e) {
             throw new IllegalArgumentException(field + " must be a JSON object — this task answers in JSON (convertToObject)");
         }
