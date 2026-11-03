@@ -17,7 +17,9 @@ import ai.labs.eddi.configs.groups.model.HumanTieBreakConfig.OnTieBreakTimeout;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -86,19 +88,53 @@ public final class GroupGapsValidation {
         if (!plansOrVerifies || config.getMembers() == null) {
             return problems;
         }
-        String moderator = config.getModeratorAgentId();
-        GroupMember planner = moderator != null && !moderator.isBlank()
-                ? config.getMembers().stream().filter(Objects::nonNull).filter(m -> moderator.equals(m.agentId())).findFirst()
-                        .orElse(null)
-                : config.getMembers().stream().filter(Objects::nonNull)
-                        .min(Comparator.comparingInt(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE))
-                        .orElse(null);
-        if (planner != null && planner.memberType() == MemberType.HUMAN) {
-            problems.add("HUMAN member '" + planner.agentId() + "' would plan or verify the task force (PLAN/VERIFY phases) — "
-                    + "a person can execute tasks, but planning and verification need an agent's structured reply. "
-                    + "Name an agent as moderatorAgentId");
+        // Each PLAN/VERIFY phase is resolved on its own, the way TaskForceEngine does:
+        // the first of
+        // the phase's participants plans or verifies, and `participants` is not always
+        // the moderator.
+        var reported = new LinkedHashSet<String>();
+        for (DiscussionPhase phase : phases) {
+            if (phase == null || (phase.type() != PhaseType.PLAN && phase.type() != PhaseType.VERIFY)) {
+                continue;
+            }
+            GroupMember planner = firstParticipant(phase, config);
+            if (planner != null && planner.memberType() == MemberType.HUMAN && reported.add(planner.agentId())) {
+                problems.add("HUMAN member '" + planner.agentId() + "' would plan or verify the task force (PLAN/VERIFY phase '" + phase.name()
+                        + "') — a person can execute tasks, but planning and verification need an agent's structured reply. "
+                        + "Name an agent as moderatorAgentId, or give the phase agent participants");
+            }
         }
         return problems;
+    }
+
+    /**
+     * The member who takes a phase's first turn, resolved with the rules of
+     * {@code GroupConversationService.resolveParticipants} (which the task-force
+     * engine uses for its planner and verifier): {@code MODERATOR} is the
+     * moderator, or the first member by speaking order when none is configured;
+     * {@code ROLE:x} is the first member with that role, falling back to everyone
+     * when nobody has it; anything else is the first member by speaking order.
+     */
+    static GroupMember firstParticipant(DiscussionPhase phase, AgentGroupConfiguration config) {
+        List<GroupMember> members = config.getMembers().stream().filter(Objects::nonNull).toList();
+        String participants = phase.participants() != null ? phase.participants() : "ALL";
+        if ("MODERATOR".equalsIgnoreCase(participants)) {
+            String moderator = config.getModeratorAgentId();
+            if (moderator == null || moderator.isBlank()) {
+                return firstBySpeakingOrder(members);
+            }
+            return members.stream().filter(m -> moderator.equals(m.agentId())).findFirst().orElse(null);
+        }
+        if (participants.toUpperCase(Locale.ROOT).startsWith("ROLE:")) {
+            String role = participants.substring(5).trim();
+            List<GroupMember> withRole = members.stream().filter(m -> role.equalsIgnoreCase(m.role())).toList();
+            return firstBySpeakingOrder(withRole.isEmpty() ? members : withRole);
+        }
+        return firstBySpeakingOrder(members);
+    }
+
+    private static GroupMember firstBySpeakingOrder(List<GroupMember> members) {
+        return members.stream().min(Comparator.comparingInt(m -> m.speakingOrder() != null ? m.speakingOrder() : Integer.MAX_VALUE)).orElse(null);
     }
 
     /**
