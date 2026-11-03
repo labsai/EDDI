@@ -138,6 +138,8 @@ Returns the unique identifier for this EDDI instance. Useful for correlating log
 
 ## Configuration
 
+Log capture starts at application boot (the log store is created eagerly, and records logged before it is ready are buffered, up to 1000, and replayed into it), so the ring buffer, live tail and database history cover startup warnings without anyone having to open the log view first.
+
 All logging configuration lives in `application.properties`:
 
 | Property | Default | Description |

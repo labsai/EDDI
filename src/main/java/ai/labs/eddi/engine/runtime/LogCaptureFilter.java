@@ -5,8 +5,15 @@
 package ai.labs.eddi.engine.runtime;
 
 import io.quarkus.logging.LoggingFilter;
+import org.jboss.logmanager.ExtLogRecord;
+import org.jboss.logmanager.ExtLogRecord.FormatStyle;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.logging.Filter;
+import java.util.logging.Level;
 import java.util.logging.LogRecord;
 
 /**
@@ -46,6 +53,20 @@ import java.util.logging.LogRecord;
  * successful access via {@link io.quarkus.arc.Arc#container()}, making the
  * filter safe to use from the very earliest log records.
  * </p>
+ * <p>
+ * The store is created eagerly at application startup ({@code @Startup} on
+ * {@link BoundedLogStore}), but a few records are always logged before that
+ * point. Rather than drop them, the filter holds the <em>redacted</em> form of
+ * each in a small bounded buffer ({@value #PRE_START_CAPACITY} records, newest
+ * kept, overflow counted) and replays it into the store, oldest first, when
+ * {@link #setStore(BoundedLogStore)} is called; a synthetic WARN records how
+ * many were dropped, if any. Only records whose redaction succeeded are held —
+ * a record that failed redaction is never buffered raw, it is stripped
+ * ({@link LogRecordRedactor#failClosed(LogRecord)}) exactly as before.
+ * Buffering never suppresses or alters console output, never throws and never
+ * waits on the store. Records racing with the replay may be stored slightly out
+ * of order relative to it.
+ * </p>
  *
  * <h3>Quarkus Integration</h3>
  * <p>
@@ -76,7 +97,82 @@ public final class LogCaptureFilter implements Filter {
      *            the fully initialized store proxy
      */
     public static void setStore(BoundedLogStore store) {
-        LogCaptureFilter.staticStore = store;
+        List<ExtLogRecord> early;
+        long dropped;
+        synchronized (PRE_START) {
+            early = new ArrayList<>(PRE_START);
+            PRE_START.clear();
+            dropped = preStartDropped;
+            preStartDropped = 0;
+            // Publish under the lock: a logger that finds the store null and then
+            // takes the lock sees it set and captures directly, never buffering
+            // into a queue nobody will drain again.
+            LogCaptureFilter.staticStore = store;
+        }
+        if (store == null) {
+            return;
+        }
+        try {
+            if (dropped > 0) {
+                ExtLogRecord note = new ExtLogRecord(Level.WARNING, "", FormatStyle.NO_FORMAT, LogCaptureFilter.class.getName());
+                note.setLoggerName(LogCaptureFilter.class.getName());
+                if (!early.isEmpty()) {
+                    note.setInstant(early.get(0).getInstant());
+                }
+                store.capture(note, dropped + " log record(s) logged before the log store started were dropped (pre-start buffer holds "
+                        + PRE_START_CAPACITY + ")");
+            }
+            for (ExtLogRecord r : early) {
+                store.capture(r, r.getMessage());
+            }
+        } catch (Exception _) {
+            // Replay is best effort; it must never break startup
+        }
+    }
+
+    /** Most records held while no store is registered. */
+    static final int PRE_START_CAPACITY = 1000;
+
+    private static final ArrayDeque<ExtLogRecord> PRE_START = new ArrayDeque<>();
+    private static long preStartDropped;
+
+    /** Visible for testing: the number of records currently held. */
+    static int preStartSize() {
+        synchronized (PRE_START) {
+            return PRE_START.size();
+        }
+    }
+
+    /**
+     * Holds an immutable, already-redacted copy of {@code record} until a store is
+     * registered. Returns the store if one appeared meanwhile, so the caller
+     * captures directly.
+     */
+    private static BoundedLogStore holdUntilStoreExists(LogRecord record, String redactedMessage) {
+        try {
+            ExtLogRecord copy = new ExtLogRecord(record.getLevel(), redactedMessage, FormatStyle.NO_FORMAT, LogCaptureFilter.class.getName());
+            copy.setLoggerName(record.getLoggerName());
+            copy.setInstant(record.getInstant());
+            if (record instanceof ExtLogRecord ext) {
+                Map<String, String> mdc = ext.getMdcCopy();
+                if (mdc != null) {
+                    mdc.forEach(copy::putMdc);
+                }
+            }
+            synchronized (PRE_START) {
+                if (staticStore != null) {
+                    return staticStore;
+                }
+                if (PRE_START.size() >= PRE_START_CAPACITY) {
+                    PRE_START.pollFirst();
+                    preStartDropped++;
+                }
+                PRE_START.addLast(copy);
+            }
+        } catch (Exception _) {
+            // Never let buffering break a log line
+        }
+        return null;
     }
 
     @Override
@@ -104,6 +200,9 @@ public final class LogCaptureFilter implements Filter {
         }
 
         BoundedLogStore store = staticStore;
+        if (store == null && redacted && redactedMessage != null && !redactedMessage.isEmpty()) {
+            store = holdUntilStoreExists(record, redactedMessage);
+        }
         if (store != null) {
             try {
                 store.capture(record, redactedMessage);
