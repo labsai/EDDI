@@ -33,7 +33,19 @@ export interface Brand {
   /** Keep the update check UI while branded. Off by default. */
   showUpdateCheck: boolean;
   chat: { accent: string | null };
+  /**
+   * Whether each image slot has an image of its own (uploaded, or from
+   * `eddi.branding.assets-dir`). `/branding/<slot>` always answers an image —
+   * the bundled EDDI one when this is false — so the logo components read this
+   * to show the product name instead of EDDI's wordmark.
+   */
+  assets: BrandAssetFlags;
 }
+
+/** The five image slots, by their admin-API id. */
+export const BRAND_ASSET_SLOTS = ["logo", "logoDark", "icon", "favicon", "ogImage"] as const;
+export type BrandAssetSlot = (typeof BRAND_ASSET_SLOTS)[number];
+export type BrandAssetFlags = Record<BrandAssetSlot, boolean>;
 
 declare global {
   interface Window {
@@ -52,6 +64,7 @@ export const DEFAULT_BRAND: Readonly<Brand> = Object.freeze({
   poweredBy: true,
   showUpdateCheck: false,
   chat: Object.freeze({ accent: null }),
+  assets: Object.freeze({ logo: false, logoDark: false, icon: false, favicon: false, ogImage: false }),
 });
 
 function str(value: unknown): string | null {
@@ -70,6 +83,8 @@ function bool(value: unknown, fallback: boolean): boolean {
 export function readBrand(raw: unknown): Brand {
   const source = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const chat = source.chat && typeof source.chat === "object" ? (source.chat as Record<string, unknown>) : {};
+  const assets =
+    source.assets && typeof source.assets === "object" ? (source.assets as Record<string, unknown>) : {};
   const productName = str(source.productName) ?? DEFAULT_BRAND.productName;
   return {
     branded: bool(source.branded, DEFAULT_BRAND.branded),
@@ -83,6 +98,13 @@ export function readBrand(raw: unknown): Brand {
     poweredBy: bool(source.poweredBy, DEFAULT_BRAND.poweredBy),
     showUpdateCheck: bool(source.showUpdateCheck, DEFAULT_BRAND.showUpdateCheck),
     chat: { accent: str(chat.accent) },
+    assets: {
+      logo: bool(assets.logo, false),
+      logoDark: bool(assets.logoDark, false),
+      icon: bool(assets.icon, false),
+      favicon: bool(assets.favicon, false),
+      ogImage: bool(assets.ogImage, false),
+    },
   };
 }
 
@@ -127,6 +149,18 @@ export function brandVariables(brand: Brand): { productName: string; shortName: 
  */
 export function isUpdateUiVisible(brand: Brand): boolean {
   return !brand.branded || brand.showUpdateCheck;
+}
+
+/**
+ * The URL of a `/branding/*` image, with the brand revision as a cache buster
+ * once a brand document exists. The images are served with `max-age=300`, so
+ * without it a logo replaced on the settings page would keep showing the old one
+ * for up to five minutes; with it, `setBrand` after a save re-renders every logo
+ * against a URL the browser has not cached. Revision 0 (nothing stored) keeps
+ * the plain URL the HTML shells use.
+ */
+export function brandAssetUrl(path: "logo" | "logo-dark" | "icon" | "favicon.ico" | "og-image", brand: Brand): string {
+  return brand.revision > 0 ? `/branding/${path}?r=${brand.revision}` : `/branding/${path}`;
 }
 
 /** The route of the Updates page, which {@link isUpdateUiVisible} gates. */
