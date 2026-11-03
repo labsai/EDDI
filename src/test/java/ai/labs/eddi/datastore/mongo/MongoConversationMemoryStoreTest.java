@@ -981,6 +981,21 @@ class MongoConversationMemoryStoreTest {
         }
 
         @Test
+        @DisplayName("A5: a fenced state CAS lands under its own fence and is refused once a newer holder raised it")
+        void fencedStateCas() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            store.setConversationState(id, ConversationState.IN_PROGRESS);
+            store.raiseFence(id, 9L);
+            assertTrue(store.compareAndSetStateFenced(id, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN, 9L));
+            assertEquals(ConversationState.AWAITING_HUMAN, store.getConversationState(id));
+
+            store.setConversationState(id, ConversationState.IN_PROGRESS);
+            store.raiseFence(id, 12L); // the conversation was taken over
+            assertFalse(store.compareAndSetStateFenced(id, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN, 9L));
+            assertEquals(ConversationState.IN_PROGRESS, store.getConversationState(id));
+        }
+
+        @Test
         @DisplayName("A4: a fenced full write raises _fence to its token and never below the stored one")
         void fencedFullWriteRaisesTheFence() throws IResourceStore.ResourceStoreException {
             String id = newConversation();
