@@ -54,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -286,6 +287,67 @@ class GroupHitlReviewTest {
         assertEquals(DecisionOutcome.APPROVED_EDITED, unit.decisionOutcome());
         assertEquals(EditSummary.Kind.SYNTHESIS, unit.edit().kind());
         assertEquals("Synthesis", unit.unitId());
+    }
+
+    @Test
+    @DisplayName("the original synthesis is the current round's: an earlier round's identical text is still an edit")
+    void synthesisFromAnEarlierRoundIsNotTheOriginal() throws Exception {
+        groupConfig(true, List.of(new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
+        var gc = phasePause("Synthesis");
+        // the only synthesis belongs to the previous round; this round produced none
+        gc.setRoundStartTranscriptIndex(1);
+        doReturn(gc).when(conversationStore).read(GC_ID);
+        var decision = approved();
+        decision.setEditedAnswer("Option A wins.");
+        var request = new GroupApprovalRequest();
+        request.setDecision(decision);
+
+        service.resumeDiscussion(GC_ID, request, null);
+
+        assertTrue(gc.getTranscript().stream().anyMatch(e -> "reviewer-edit".equals(e.errorReason())),
+                "the reviewer's text is applied even though it equals a previous round's synthesis");
+    }
+
+    @Test
+    @DisplayName("a resume that fails after the SYNTHESIS edit was appended leaves no reviewer edit behind")
+    void failedResumeRemovesTheSynthesisEdit() throws Exception {
+        groupConfig(true, List.of(new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
+        var gc = phasePause("Synthesis");
+        doReturn(gc).when(conversationStore).read(GC_ID);
+        // The decision is validated against the real config on the calling thread; the
+        // resume work then re-reads a config whose phase at that index has been
+        // renamed.
+        var original = groupStore.read(GROUP_ID, 1);
+        var drifted = new AgentGroupConfiguration();
+        drifted.setName("Review");
+        drifted.setStyle(DiscussionStyle.CUSTOM);
+        drifted.setPhases(List.of(new DiscussionPhase("Renamed", PhaseType.SYNTHESIS)));
+        drifted.setMembers(original.getMembers());
+        drifted.setHitlConfig(original.getHitlConfig());
+        final Thread caller = Thread.currentThread();
+        doAnswer(inv -> Thread.currentThread() == caller ? original : drifted).when(groupStore).read(GROUP_ID, 1);
+        var decision = approved();
+        decision.setEditedAnswer("Option B wins, because of cost.");
+        var request = new GroupApprovalRequest();
+        request.setDecision(decision);
+
+        service.resumeDiscussion(GC_ID, request, null);
+
+        // The worker adds the ERROR entry first, then drops the edit, then restores the
+        // pause: AWAITING_APPROVAL only comes back once the rollback is complete (the
+        // CAS left the conversation IN_PROGRESS).
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline && gc.getState() != GroupConversationState.AWAITING_APPROVAL) {
+            Thread.sleep(25);
+        }
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(), "the drift rolled the resume back");
+        List<TranscriptEntry> transcript;
+        synchronized (gc.getTranscript()) {
+            transcript = List.copyOf(gc.getTranscript());
+        }
+        assertTrue(transcript.stream().anyMatch(e -> e.type() == TranscriptEntryType.ERROR), "the drift is recorded");
+        assertTrue(transcript.stream().noneMatch(e -> "reviewer-edit".equals(e.errorReason())),
+                "the failed attempt's edit must not survive for the next approval to build on");
     }
 
     @Test
