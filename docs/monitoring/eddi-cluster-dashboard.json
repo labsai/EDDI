@@ -752,6 +752,215 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "type": "row",
+      "title": "Event bus, signing & versions",
+      "id": 200,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 90
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 201,
+      "title": "Event dispatch queue",
+      "type": "timeseries",
+      "description": "`eddi_cluster_events_dispatch_queue` - received cluster events waiting to be handled on this node. Stays near 0; a climbing queue means handlers are slower than the stream.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 91
+      },
+      "targets": [
+        {
+          "expr": "max(eddi_cluster_events_dispatch_queue{job=~\"$job\"}) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 202,
+      "title": "Events dropped (resync follows)",
+      "type": "timeseries",
+      "description": "`eddi_cluster_events_dropped_total` - received events a full dispatch lane could not take; each triggers a resync.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 91
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_events_dropped_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 203,
+      "title": "Payloads from a newer node",
+      "type": "timeseries",
+      "description": "`eddi_cluster_payload_newer_total` - messages written by a newer payload protocol than this node understands. Expected only during a rolling upgrade.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 91
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_payload_newer_total{job=~\"$job\"}[$__rate_interval])) by (kind)",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 204,
+      "title": "Signed messages rejected",
+      "type": "timeseries",
+      "description": "`eddi_cluster_signing_rejected_total` - control-plane messages refused, by kind and reason. Never routine.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 98
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_signing_rejected_total{job=~\"$job\"}[$__rate_interval])) by (kind, reason)",
+          "legendFormat": "{{kind}} {{reason}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 205,
+      "title": "Unsigned messages accepted",
+      "type": "timeseries",
+      "description": "`eddi_cluster_signing_unsigned_total` - unsigned messages accepted while signing is not yet enforced (rolling-upgrade window).",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 98
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_signing_unsigned_total{job=~\"$job\"}[$__rate_interval])) by (kind)",
+          "legendFormat": "{{kind}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 206,
+      "title": "Duplicate node id",
+      "type": "timeseries",
+      "description": "`eddi_cluster_node_duplicate` - 1 while another live JVM uses this node's id; readiness is DOWN.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 98
+      },
+      "targets": [
+        {
+          "expr": "max(eddi_cluster_node_duplicate{job=~\"$job\"}) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 207,
+      "title": "Distinct versions among members",
+      "type": "timeseries",
+      "description": "`eddi_cluster_versions` - distinct EDDI versions / payload protocols among the live members. More than 1 is expected only during a rolling upgrade.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 105
+      },
+      "targets": [
+        {
+          "expr": "max(eddi_cluster_versions{job=~\"$job\"})",
+          "legendFormat": "versions",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
     }
   ],
   "schemaVersion": 39,
