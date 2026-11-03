@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.cluster;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -183,7 +185,7 @@ public class TransientDeployments {
         } catch (ClusterUnavailableException e) {
             pending.put(key, value);
             LOGGER.warnf("Transient deployment record of %s/%s/%s (%s) not written, NATS unreachable — retried by the next sweep",
-                    environment, agentId, version, state);
+                    sanitize(environment), sanitize(agentId), version, state);
         }
     }
 

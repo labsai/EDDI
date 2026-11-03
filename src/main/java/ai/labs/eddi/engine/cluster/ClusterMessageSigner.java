@@ -83,6 +83,11 @@ public class ClusterMessageSigner {
     private static final String DOMAIN = "eddi-cluster-msg-v1";
     private static final int NONCE_BYTES = 16;
     private static final long MAX_REMEMBERED_NONCES = 200_000L;
+    /**
+     * A sealed value is a user-id hash; anything larger is a caller bug, not data
+     * to seal.
+     */
+    private static final int MAX_SEALED_VALUE_BYTES = 4096;
 
     /**
      * Why a message was refused; the tag of {@code eddi.cluster.signing.rejected}.
@@ -324,8 +329,13 @@ public class ClusterMessageSigner {
             random.nextBytes(iv);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE, sealKey, new GCMParameterSpec(128, iv));
-            byte[] sealed = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
-            return Base64.getUrlEncoder().withoutPadding().encodeToString(ByteBuffer.allocate(iv.length + sealed.length).put(iv).put(sealed).array());
+            byte[] plain = value.getBytes(StandardCharsets.UTF_8);
+            if (plain.length > MAX_SEALED_VALUE_BYTES) {
+                throw new IllegalArgumentException("A cluster value to seal is larger than " + MAX_SEALED_VALUE_BYTES + " bytes");
+            }
+            byte[] sealed = cipher.doFinal(plain);
+            return Base64.getUrlEncoder().withoutPadding()
+                    .encodeToString(ByteBuffer.allocate(Math.addExact(iv.length, sealed.length)).put(iv).put(sealed).array());
         } catch (GeneralSecurityException e) {
             throw new IllegalStateException("Could not seal a cluster payload", e);
         }

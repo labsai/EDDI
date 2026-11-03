@@ -17,6 +17,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -27,7 +28,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("AuditClusterSupport — sealed user ids and counted re-seeds")
 class ClusterReplayAndPseudonymTest {
 
-    private static final String KEY = "0123456789abcdef0123456789abcdef-seal-key";
+    private static final String KEY = "fixturefixturefixturefixturefixture-seal-key";
 
     private static ClusterMessageSigner signer(String key) {
         return new ClusterMessageSigner(ClusterSigningConfig.of(key, List.of(), false, Duration.ofSeconds(60)), new SimpleMeterRegistry());
@@ -39,6 +40,11 @@ class ClusterReplayAndPseudonymTest {
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(value);
         return instance;
+    }
+    @Test
+    @DisplayName("a value far larger than a user-id hash is refused instead of sealed")
+    void oversizedValueIsNotSealed() {
+        assertThrows(IllegalArgumentException.class, () -> signer(KEY).seal("x".repeat(5000)));
     }
 
     @Test
