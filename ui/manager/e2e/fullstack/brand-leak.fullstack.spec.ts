@@ -234,6 +234,7 @@ async function snapshot(page: Page): Promise<PageSnapshot> {
     const ATTRS = ["alt", "aria-label", "title", "placeholder", "aria-description", "aria-roledescription"];
     const attributes: { attr: string; value: string; tag: string }[] = [];
     for (const el of Array.from(document.querySelectorAll("*"))) {
+      if (el.closest("[data-log-content]")) continue;
       for (const attr of ATTRS) {
         const value = el.getAttribute(attr);
         if (value) attributes.push({ attr, value, tag: el.tagName.toLowerCase() });
@@ -247,7 +248,19 @@ async function snapshot(page: Page): Promise<PageSnapshot> {
     return {
       url: location.pathname,
       title: document.title,
-      text: document.body.innerText,
+      // Log messages are the server's own output shown verbatim (they honestly
+      // identify the engine), not product chrome, so the text of elements marked
+      // data-log-content is left out of the scan; the rest of the page is not.
+      text: (() => {
+        const logs = Array.from(document.querySelectorAll<HTMLElement>("[data-log-content]"));
+        const previous = logs.map((el) => el.style.display);
+        logs.forEach((el) => (el.style.display = "none"));
+        try {
+          return document.body.innerText;
+        } finally {
+          logs.forEach((el, i) => (el.style.display = previous[i] ?? ""));
+        }
+      })(),
       attributes,
       headMeta,
       images: Array.from(document.images).map((i) => i.currentSrc || i.src),
