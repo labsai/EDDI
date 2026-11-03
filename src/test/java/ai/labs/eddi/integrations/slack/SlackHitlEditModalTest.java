@@ -178,6 +178,17 @@ class SlackHitlEditModalTest {
         }
 
         @Test
+        void aSecretBearingArrayItemCannotChangeItsVisibleIdentity() throws Exception {
+            String raw = "{\"servers\":[{\"name\":\"A\",\"token\":\"tokA\"},{\"name\":\"B\",\"token\":\"tokB\"}]}";
+            String shown = "{\"servers\":[{\"name\":\"A\",\"token\":\"<REDACTED>\"},{\"name\":\"B\",\"token\":\"<REDACTED>\"}]}";
+            String renamed = "{\"servers\":[{\"name\":\"C\",\"token\":\"<REDACTED>\"},{\"name\":\"B\",\"token\":\"<REDACTED>\"}]}";
+            var e = assertThrows(SlackRedactedArgumentsMerge.MergeException.class, () -> SlackRedactedArgumentsMerge.merge(raw, shown, renamed));
+            assertTrue(e.getMessage().contains("$.servers[0]"));
+            // left as shown, the secrets are restored
+            assertEquals(raw, SlackRedactedArgumentsMerge.merge(raw, shown, shown));
+        }
+
+        @Test
         void aNewMarkerIsRefused() {
             assertThrows(SlackRedactedArgumentsMerge.MergeException.class, () -> SlackRedactedArgumentsMerge.merge("{\"a\":\"x\"}",
                     "{\"a\":\"x\"}", "{\"a\":\"x\",\"b\":\"<REDACTED>\"}"));
