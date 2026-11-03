@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.groups.budget;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.CostPolicy;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import org.junit.jupiter.api.BeforeEach;
+import ai.labs.eddi.datastore.IResourceStore;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -126,6 +127,23 @@ class TeamBudgetServiceTest {
     @Test
     void anUnknownGroupIsAdmitted() {
         assertTrue(t.service.decide("nope").allowed());
+    }
+
+    @Test
+    void aFailedGroupReadRefusesInsteadOfAdmitting() throws Exception {
+        when(t.groupStore.getCurrentResourceId("studio")).thenThrow(new IResourceStore.ResourceStoreException("db down"));
+
+        var decision = t.service.decide("studio");
+
+        assertFalse(decision.allowed(), "a read that failed cannot tell a budgeted team from an unbudgeted one");
+        assertEquals("unavailable", decision.reason());
+    }
+
+    @Test
+    void aGroupThatDoesNotExistIsStillAdmittedWhenTheStoreSaysSo() throws Exception {
+        when(t.groupStore.getCurrentResourceId("gone")).thenThrow(new IResourceStore.ResourceNotFoundException("no such group"));
+
+        assertTrue(t.service.decide("gone").allowed());
     }
 
     @Test

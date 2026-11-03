@@ -144,6 +144,21 @@ public class TeamBudgetService {
     }
 
     /**
+     * As {@link #config}, but a read that FAILED is an exception, not {@code null}:
+     * {@code null} here means the group does not exist.
+     */
+    private AgentGroupConfiguration readConfig(String groupId) {
+        try {
+            IResourceStore.IResourceId id = groupStore.getCurrentResourceId(groupId);
+            return id == null ? null : groupStore.read(groupId, id.getVersion());
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+            throw new TeamBudgetAccountingUnavailableException("Group configuration unreadable", e);
+        }
+    }
+
+    /**
      * The group's budget this month. Works for a group without a {@code teamBudget}
      * too (spend only, no cap).
      *
@@ -203,7 +218,18 @@ public class TeamBudgetService {
         if (!meteringEnabled) {
             return Decision.ok(null);
         }
-        AgentGroupConfiguration config = config(groupId);
+        AgentGroupConfiguration config;
+        try {
+            config = readConfig(groupId);
+        } catch (TeamBudgetAccountingUnavailableException e) {
+            // A group that does not exist, or has no teamBudget, is admitted; a read that
+            // FAILED
+            // cannot tell which it is, and a team with a budget must not slip past it.
+            LOGGER.warnf("Group %s could not be read for its team budget -- refusing (fail closed): %s", LogSanitizer.sanitize(groupId),
+                    e.getMessage());
+            return new Decision(false, "unavailable", "The budget of team '" + groupId
+                    + "' could not be read, so no new work is started for it. Retry shortly; an operator should check the database.", null);
+        }
         if (config == null || config.getTeamBudget() == null) {
             return Decision.ok(null);
         }
