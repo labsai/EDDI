@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools.impl;
 
 import ai.labs.eddi.modules.ingestion.extract.PdfDecodeBudget;
 import ai.labs.eddi.modules.ingestion.extract.PdfStreamBudget;
+import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -15,7 +16,9 @@ import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.io.RandomAccessStreamCache.StreamCacheCreateFunction;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
@@ -79,6 +82,13 @@ public class AttachmentTextExtractor {
 
     /** Wall-clock ceiling on one text extraction, checked between operators. */
     static final Duration EXTRACTION_DEADLINE = Duration.ofSeconds(60);
+
+    /**
+     * Glyphs one extraction may lay out beyond its character cap — the ingestion
+     * extractor's slack: spacing makes the text a little longer than the glyphs, so
+     * the cap is still reached; what it bounds is a page claiming millions.
+     */
+    static final int GLYPH_SLACK = 20_000;
 
     private final int defaultMaxChars;
     private final int maxPages;
@@ -244,7 +254,7 @@ public class AttachmentTextExtractor {
 
     private String extractAllPages(byte[] pdfBytes, int cap) throws IOException {
         try (PDDocument document = loadPdf(pdfBytes)) {
-            PDFTextStripper stripper = new BoundedTextStripper(MAX_CONTENT_OPERATORS, EXTRACTION_DEADLINE);
+            PDFTextStripper stripper = new BoundedTextStripper(MAX_CONTENT_OPERATORS, EXTRACTION_DEADLINE, (long) cap + GLYPH_SLACK);
             // Stop at the page cap: a document with tens of thousands of pages would
             // otherwise have every page extracted into memory before the character
             // cap trims the result. Extracting only up to the cap bounds both.
@@ -283,7 +293,7 @@ public class AttachmentTextExtractor {
             // page of a document with any number of them.
             effectiveEnd = (int) Math.min(effectiveEnd, (long) startPage + maxPages - 1);
 
-            PDFTextStripper stripper = new BoundedTextStripper(MAX_CONTENT_OPERATORS, EXTRACTION_DEADLINE);
+            PDFTextStripper stripper = new BoundedTextStripper(MAX_CONTENT_OPERATORS, EXTRACTION_DEADLINE, (long) cap + GLYPH_SLACK);
             stripper.setStartPage(startPage);
             stripper.setEndPage(effectiveEnd);
             String text = stripper.getText(document);
@@ -383,10 +393,54 @@ public class AttachmentTextExtractor {
         private final long deadlineNanos;
         private long operators;
         private String tripped;
+        private long glyphsLeft;
 
         BoundedTextStripper(long maxOperators, Duration deadline) {
+            this(maxOperators, deadline, Long.MAX_VALUE);
+        }
+
+        /**
+         * @param maxGlyphs
+         *            glyphs the whole extraction may lay out. A page's glyphs are all
+         *            held until the page is written, so a page claiming millions of
+         *            them used to fill the heap before the character cap was applied;
+         *            past this allowance the page in progress is written with what it
+         *            laid out and no later page is read — the text a cap would have cut
+         *            anyway
+         */
+        BoundedTextStripper(long maxOperators, Duration deadline, long maxGlyphs) {
             this.maxOperators = maxOperators;
             this.deadlineNanos = System.nanoTime() + deadline.toNanos();
+            this.glyphsLeft = maxGlyphs;
+        }
+
+        /**
+         * Charges the page's unfiltered content references to the decode budget before
+         * PDFBox parses them — the ingestion extractor's accounting: one unfiltered
+         * stream referenced thousands of times from {@code /Contents} is parsed in full
+         * each time, its operands held until an operator arrives, before
+         * {@link #processOperator} ever counts anything.
+         */
+        @Override
+        public void processPage(PDPage page) throws IOException {
+            if (glyphsLeft < 0) {
+                return;
+            }
+            PdfTextExtractor.chargePageContents(page);
+            try {
+                super.processPage(page);
+            } catch (GlyphsExhausted e) {
+                writePage();
+                endPage(page);
+            }
+        }
+
+        @Override
+        protected void processTextPosition(TextPosition text) {
+            if (--glyphsLeft < 0) {
+                throw new GlyphsExhausted();
+            }
+            super.processTextPosition(text);
         }
 
         @Override
@@ -413,6 +467,13 @@ public class AttachmentTextExtractor {
                 throw new IOException("Refused: " + tripped);
             }
             return text;
+        }
+    }
+
+    /** The extraction's glyph allowance is spent. */
+    private static final class GlyphsExhausted extends RuntimeException {
+        GlyphsExhausted() {
+            super(null, null, false, false);
         }
     }
 }

@@ -214,22 +214,33 @@ public class UserMemoryTool {
             if (turnDiscarded.getAsBoolean()) {
                 return TURN_DISCARDED_REFUSAL;
             }
-            if (ownedGlobalWrite) {
-                if (!store.upsertIfOwnedBy(entry, agentId)) {
-                    // Another agent claimed the key between the check above and this
-                    // write, or holds it with no recorded owner.
-                    return globalKeyRefusal(trimmedKey);
+            // An update goes through the update-only compare-and-set first: an erasure
+            // that deleted the entry since it was read makes it match nothing, where an
+            // upsert would have recreated the erased fact. Only when it no longer
+            // applies (the entry changed or is gone) does the inserting write run, and
+            // that write is then treated as an insert — taken back below if the turn
+            // was cancelled meanwhile.
+            boolean replaced = existing != null && existing.id() != null && store.replaceIfUnchanged(existing.id(), entry, existing.updatedAt());
+            boolean inserted = !replaced;
+            if (inserted) {
+                if (ownedGlobalWrite) {
+                    if (!store.upsertIfOwnedBy(entry, agentId)) {
+                        // Another agent claimed the key between the check above and this
+                        // write, or holds it with no recorded owner.
+                        return globalKeyRefusal(trimmedKey);
+                    }
+                } else {
+                    store.upsert(entry);
                 }
-            } else {
-                store.upsert(entry);
             }
-            if (existing == null && turnDiscarded.getAsBoolean()) {
+            if (inserted && turnDiscarded.getAsBoolean()) {
                 // The turn was cancelled — by the user, or by an erasure of this user —
                 // while the insert was in flight. An erasure signals before it deletes,
                 // so an insert that lands after its sweep is caught here and taken back
-                // rather than recreating a memory of an erased user. (An update of an
-                // existing entry is left alone: deleting it would destroy the fact it
-                // replaced, and an erasure removes it anyway.)
+                // rather than recreating a memory of an erased user. (An update made in
+                // place is left alone: deleting it would destroy the fact it replaced,
+                // and it landed on an entry the erasure had not yet removed, so the
+                // erasure removes it anyway.)
                 // Only this invocation's own write is taken back: the entry found under the key
                 // may by
                 // now be another turn's (it could have replaced this one), and deleting that
@@ -333,6 +344,14 @@ public class UserMemoryTool {
             }
             if (target == null) {
                 return "No memory with key '%s' found.".formatted(key);
+            }
+            // Seeing a global memory is not owning it. Deleting another agent's global
+            // entry and then writing the freed key would replace its value — exactly what
+            // the overwrite guard in rememberFact refuses — so the same rule applies here.
+            if (target.visibility() == Visibility.global && !guardrails.isAllowGlobalKeyOverwrite()
+                    && (agentId == null || agentId.isBlank() || !agentId.equals(target.sourceAgentId()))) {
+                return ("⚠️ The global memory with key '%s' is owned by another agent (or its owner is unknown) and cannot be "
+                        + "deleted by this agent.").formatted(key);
             }
             if (turnDiscarded.getAsBoolean()) {
                 return TURN_DISCARDED_REFUSAL;
