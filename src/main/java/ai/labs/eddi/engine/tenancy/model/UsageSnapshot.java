@@ -41,7 +41,18 @@ public record UsageSnapshot(
         // and emits the ARRAY [2026,7] rather than "2026-07". Both quota stores
         // already persist this as an ISO string (YearMonth.toString() /
         // YearMonth.parse), so only the REST representation disagreed.
-        @JsonFormat(shape = JsonFormat.Shape.STRING) YearMonth costMonth) {
+        @JsonFormat(shape = JsonFormat.Shape.STRING) YearMonth costMonth,
+        // Budget set aside for turns still running (opt-in hard ceiling); 0 when the
+        // mode is off.
+        double reservedUsd) {
+
+    /**
+     * A snapshot with nothing reserved - what a store without reservations reports.
+     */
+    public UsageSnapshot(String tenantId, int conversationsToday, int apiCallsThisMinute, double monthlyCostUsd, Instant minuteWindowStart,
+            Instant dayStart, YearMonth costMonth) {
+        this(tenantId, conversationsToday, apiCallsThisMinute, monthlyCostUsd, minuteWindowStart, dayStart, costMonth, 0.0);
+    }
 
     /**
      * Creates an empty snapshot (zero counters) for an unknown tenant.

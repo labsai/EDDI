@@ -56,6 +56,7 @@ import { TaskRagSection } from "./llm/task-rag-section";
 import { TaskResponseValidationSection } from "./llm/task-response-validation-section";
 import { TaskToolApprovalsSection } from "./llm/task-tool-approvals-section";
 import { TaskToolCallLimits } from "./llm/task-tool-call-limits";
+import { TaskToolQuotas } from "./llm/task-tool-quotas";
 import { TaskGuardrailsSection } from "./llm/task-guardrails-section";
 import { TaskToolCallGuardrailsSection } from "./llm/task-tool-call-guardrails-section";
 import { ModelSettingsSection } from "./llm/model-settings-section";
@@ -1686,6 +1687,9 @@ function TaskEditor({
 
               {/* Tool-call caps (EDDI 6.6+) — bound calls, where iterations bound rounds */}
               <TaskToolCallLimits task={task} onChange={onChange} readOnly={readOnly} />
+
+              {/* Per-subject and per-run tool quotas */}
+              <TaskToolQuotas task={task} onChange={onChange} readOnly={readOnly} />
 
               {/* Rate limiting */}
               <div className="border-t border-border pt-3 space-y-2">

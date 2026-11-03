@@ -1853,7 +1853,21 @@
     "grAddType": "Hinzuzufügender Guardrail-Typ",
     "grAdd": "Guardrail hinzufügen",
     "grStreamingBuffered": "Streaming ist für diese Aufgabe deaktiviert: Ein Ausgabe-Guardrail, das blockiert, schwärzt oder erneut anfragt, lässt die Antwort zurückhalten, bis sie geprüft ist; der Client erhält sie auf einmal. Mit Warnen bleibt Streaming erhalten.",
-    "grStreamingNote": "Bereits gestreamte Tokens lassen sich nicht zurücknehmen. Ein Ausgabe-Guardrail, das blockiert, schwärzt oder erneut anfragt, lässt die Aufgabe ihre Antwort daher zurückhalten, bis sie geprüft ist. Guardrails, die nur warnen, behalten das Streaming bei."
+    "grStreamingNote": "Bereits gestreamte Tokens lassen sich nicht zurücknehmen. Ein Ausgabe-Guardrail, das blockiert, schwärzt oder erneut anfragt, lässt die Aufgabe ihre Antwort daher zurückhalten, bis sie geprüft ist. Guardrails, die nur warnen, behalten das Streaming bei.",
+    "toolQuotasTitle": "Tool-Kontingente",
+    "toolQuotasHint": "Begrenzt, wie oft ein Tool laufen darf: pro Nutzer in einem Zeitfenster (über Konversationen hinweg gezählt) oder pro Lauf (ein geplanter Aufruf, eine Gruppendiskussion oder eine Konversation). Ein Aufruf über dem Limit wird nicht ausgeführt; das Modell erfährt, dass das Limit endgültig ist. Tools im selben Pool teilen sich einen Zähler und müssen Limit und Zeitfenster teilen.",
+    "toolQuotasSubject": "Zählen pro",
+    "toolQuotasSubjectDefault": "(Standard: die Nutzer-ID)",
+    "toolQuotasLimit": "Erlaubte Aufrufe",
+    "toolQuotasWindow": "Zeitfenster",
+    "toolQuotasPool": "Pool (optional)",
+    "toolQuotasAdd": "Kontingent hinzufügen",
+    "toolQuotasRunNote": "Ein Limit pro Lauf begrenzt einen autonomen Lauf (einen Zeitplan oder eine Gruppenkadenz). Es ist kein Missbrauchsschutz für Endnutzer – dafür ein festes Zeitfenster verwenden.",
+    "toolQuotasWindowRun": "Pro Lauf",
+    "toolQuotasWindowHour": "Pro Stunde",
+    "toolQuotasWindowDay": "Pro Tag (UTC)",
+    "toolQuotasWindowWeek": "Pro 7 Tage",
+    "toolQuotasWindowMonth": "Pro 31 Tage"
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -4802,7 +4816,9 @@
     "budgetRemaining": "{{spent}} von {{limit}} in diesem Monat verbraucht. Noch {{remaining}}, bevor Modelle nicht mehr aufgerufen werden.",
     "budgetNote": "Zählt berechnete Modellaufrufe und erfasste Tool-Kosten pro UTC-Kalendermonat. Modelle ohne Preis, Unterhaltungszusammenfassungen und Embeddings werden nicht erfasst. Ein Turn, der das Limit überschreitet, läuft noch zu Ende – die Summe kann also leicht darüber liegen. Abgelehnte Aufrufe zählt die Metrik eddi.llm.spend.refused.",
     "invalidInteger": "Geben Sie eine ganze Zahl (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
-    "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer."
+    "invalidAmount": "Geben Sie einen Betrag (0 oder mehr) ein oder lassen Sie das Feld für unbegrenzt leer.",
+    "heldByTurns": "{{amount}} von laufenden Turns reserviert",
+    "costHardCeiling": "Standardmäßig wird der Aufruf, der das Budget überschreitet, noch zu Ende ausgeführt. Um ihn stattdessen abzulehnen, kann der Server vorab die Höchstkosten jedes Aufrufs reservieren: eddi.tenant.quota.cost-reservation.enabled=true setzen (Startup-Property)."
   },
   "secretPicker": {
     "clearVault": "Vault-Referenz löschen",

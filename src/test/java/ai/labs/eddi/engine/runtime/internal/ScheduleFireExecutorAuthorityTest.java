@@ -146,6 +146,17 @@ class ScheduleFireExecutorAuthorityTest {
         }
 
         @Test
+        void theFireIdTravelsWithTheInputSoRunQuotasCountPerFire() {
+            var input = input();
+
+            ScheduleFireExecutor.addFireId(input, "fire-1");
+            ScheduleFireExecutor.addFireId(input, " ");
+            ScheduleFireExecutor.addFireId(input, null);
+
+            assertEquals("fire-1", input.getContext().get(ScheduleConfiguration.CONTEXT_FIRE_ID).getValue());
+        }
+
+        @Test
         void unlimitedAddsNothing() {
             var s = schedule(List.of());
             var input = input();

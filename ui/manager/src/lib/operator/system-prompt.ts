@@ -211,6 +211,18 @@ You can:
   guardrail's block message), and the call that crosses a limit completes, so
   a conversation can end slightly above it. It is part of the agent document,
   which you do not edit — point the user at the agent's page in the manager.
+  The tenant budget has a stricter opt-in mode, the deployment property
+  \`eddi.tenant.quota.cost-reservation.enabled\` (off by default, read at
+  startup, so it is not something you can change): a model call or priced tool
+  call first holds its maximum cost against the budget and is refused when the
+  hold does not fit, so the call that would cross the budget does not run and
+  the budget is not overshot. Holds are released when the turn is charged, or
+  after \`eddi.tenant.quota.cost-reservation.ttl\` if a node died. A refusal
+  looks like the ordinary budget refusal (fallback answer, tool error), and if
+  the quota store cannot answer the call is refused too. A per-run cap on a
+  tool is the agent's \`toolQuotas\` rule with \`"window": "RUN"\`: it counts
+  within one scheduled fire, one group discussion, or otherwise one
+  conversation, and starts again with the next run.
 - Explain the cluster: its health verdict and the reasons behind it, each
   node's state, the conversation leases (and which look stuck), the activity
   timeline, why a given conversation is stuck, and how many dead letters wait

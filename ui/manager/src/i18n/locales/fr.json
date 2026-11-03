@@ -1873,7 +1873,21 @@
     "grAddType": "Type de garde-fou à ajouter",
     "grAdd": "Ajouter un garde-fou",
     "grStreamingBuffered": "Le streaming est désactivé pour cette tâche : un garde-fou de sortie qui bloque, masque ou relance fait retenir la réponse jusqu'à son filtrage, et le client la reçoit d'un seul bloc. Utilisez Avertir pour conserver le streaming.",
-    "grStreamingNote": "Les tokens déjà diffusés ne peuvent pas être repris ; un garde-fou de sortie qui bloque, masque ou relance fait donc retenir la réponse de la tâche jusqu'à son filtrage. Les garde-fous qui ne font qu'avertir conservent le streaming."
+    "grStreamingNote": "Les tokens déjà diffusés ne peuvent pas être repris ; un garde-fou de sortie qui bloque, masque ou relance fait donc retenir la réponse de la tâche jusqu'à son filtrage. Les garde-fous qui ne font qu'avertir conservent le streaming.",
+    "toolQuotasTitle": "Quotas d'outils",
+    "toolQuotasHint": "Limite la fréquence d'exécution d'un outil : par utilisateur dans une fenêtre de temps (comptée sur toutes les conversations) ou par exécution (un déclenchement planifié, une discussion de groupe ou une conversation). Un appel au-delà de la limite n'est pas exécuté et le modèle est informé que la limite est définitive. Les outils d'un même pool partagent un compteur et doivent partager limite et fenêtre.",
+    "toolQuotasSubject": "Compter par",
+    "toolQuotasSubjectDefault": "(par défaut : l'identifiant utilisateur)",
+    "toolQuotasLimit": "Appels autorisés",
+    "toolQuotasWindow": "Fenêtre",
+    "toolQuotasPool": "Pool (facultatif)",
+    "toolQuotasAdd": "Ajouter un quota",
+    "toolQuotasRunNote": "Une limite par exécution borne une exécution autonome (une planification ou une cadence de groupe). Ce n'est pas une protection contre les abus des utilisateurs finaux — utilisez une fenêtre fixe pour cela.",
+    "toolQuotasWindowRun": "Par exécution",
+    "toolQuotasWindowHour": "Par heure",
+    "toolQuotasWindowDay": "Par jour (UTC)",
+    "toolQuotasWindowWeek": "Par 7 jours",
+    "toolQuotasWindowMonth": "Par 31 jours"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -4853,7 +4867,9 @@
     "budgetRemaining": "{{spent}} sur {{limit}} utilisés ce mois-ci. Il reste {{remaining}} avant que les modèles ne soient plus appelés.",
     "budgetNote": "Compte les appels de modèle tarifés et le coût des outils suivis, par mois calendaire UTC. Les modèles sans prix, les résumés de conversation et les embeddings ne sont pas mesurés. Un tour qui franchit la limite se termine quand même : le total peut la dépasser légèrement. Les appels refusés sont comptés dans la métrique eddi.llm.spend.refused.",
     "invalidInteger": "Saisissez un nombre entier (0 ou plus), ou laissez vide pour illimité.",
-    "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité."
+    "invalidAmount": "Saisissez un montant (0 ou plus), ou laissez vide pour illimité.",
+    "heldByTurns": "{{amount}} réservés par les tours en cours",
+    "costHardCeiling": "Par défaut, l'appel qui dépasse le budget se termine quand même. Pour le refuser, le serveur peut d'abord réserver le coût maximal de chaque appel : définissez eddi.tenant.quota.cost-reservation.enabled=true (propriété de démarrage)."
   },
   "secretPicker": {
     "clearVault": "Effacer la référence vault",

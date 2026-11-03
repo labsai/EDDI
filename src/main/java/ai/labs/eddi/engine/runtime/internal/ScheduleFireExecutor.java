@@ -299,7 +299,7 @@ public class ScheduleFireExecutor {
             Environment env = resolveEnvironment(schedule.getEnvironment());
 
             // 1. Resolve conversation
-            ResolvedConversation resolved = resolveConversation(schedule, env);
+            ResolvedConversation resolved = resolveConversation(schedule, env, fireLogId);
             conversationId = resolved.id();
 
             // The fire log's cost column was hard-wired to 0.0 on this path, so the
@@ -312,6 +312,7 @@ public class ScheduleFireExecutor {
 
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
+            addFireId(inputData, fireLogId);
             // A conversation this fire started already ran its startup workflow under
             // the allowance (createNewConversation); the turn gets what is left, so
             // startup and turn share ONE maxCostPerFire instead of each getting it.
@@ -957,7 +958,7 @@ public class ScheduleFireExecutor {
     record ResolvedConversation(String id, boolean created) {
     }
 
-    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private ResolvedConversation resolveConversation(ScheduleConfiguration schedule, Environment env, String fireLogId) throws Exception {
         String strategy = schedule.getConversationStrategy();
         if (strategy == null) {
             // Default: heartbeats use persistent, cron uses new
@@ -965,8 +966,8 @@ public class ScheduleFireExecutor {
         }
 
         return switch (strategy) {
-            case "persistent" -> resolveOrCreatePersistent(schedule, env);
-            default -> new ResolvedConversation(createNewConversation(schedule, env), true); // "new" or unknown
+            case "persistent" -> resolveOrCreatePersistent(schedule, env, fireLogId);
+            default -> new ResolvedConversation(createNewConversation(schedule, env, fireLogId), true); // "new" or unknown
         };
     }
 
@@ -975,9 +976,10 @@ public class ScheduleFireExecutor {
      * context: the agent's startup workflow (a CONVERSATION_START LLM task, say)
      * runs here, and with an empty context it spent outside the fire's allowance.
      */
-    private String createNewConversation(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private String createNewConversation(ScheduleConfiguration schedule, Environment env, String fireLogId) throws Exception {
         var userId = scheduleUserId(schedule);
         Map<String, Context> context = new HashMap<>();
+        context.put(ScheduleConfiguration.CONTEXT_FIRE_ID, new Context(Context.ContextType.string, fireLogId));
         double allowance = schedule.getMaxCostPerFire();
         if (allowance > 0 && Double.isFinite(allowance)) {
             context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
@@ -1059,7 +1061,7 @@ public class ScheduleFireExecutor {
         }
     }
 
-    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env) throws Exception {
+    private ResolvedConversation resolveOrCreatePersistent(ScheduleConfiguration schedule, Environment env, String fireLogId) throws Exception {
         // Before the reuse path below, which returns an existing conversation without
         // ever starting one.
         requireUnreservedUserId(schedule);
@@ -1104,7 +1106,7 @@ public class ScheduleFireExecutor {
         // the next poll (15s by default, while a fire may run for minutes) matched it
         // again, claimed it again, and pushed a second concurrent turn into this very
         // same persistent conversation.
-        String newConversationId = createNewConversation(schedule, env);
+        String newConversationId = createNewConversation(schedule, env, fireLogId);
         if (!carriedProperties.isEmpty()) {
             carryProperties(schedule, newConversationId, carriedProperties);
         }
@@ -1244,6 +1246,17 @@ public class ScheduleFireExecutor {
             return;
         }
         inputData.getContext().put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
+    }
+
+    /**
+     * Names the fire on its turn, so a {@code toolQuotas} rule with
+     * {@code window: "RUN"} counts per fire even on a persistent conversation.
+     */
+    static void addFireId(InputData inputData, String fireId) {
+        if (fireId == null || fireId.isBlank()) {
+            return;
+        }
+        inputData.getContext().put(ScheduleConfiguration.CONTEXT_FIRE_ID, new Context(Context.ContextType.string, fireId));
     }
 
     private InputData buildInputData(ScheduleConfiguration schedule) {

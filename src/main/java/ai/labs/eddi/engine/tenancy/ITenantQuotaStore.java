@@ -162,6 +162,44 @@ public interface ITenantQuotaStore {
      */
     QuotaCheckResult tryAddCost(String tenantId, double cost, double limit);
 
+    /**
+     * Atomically holds {@code amountUsd} of the monthly budget for a call that has
+     * not been charged yet, when {@code monthlyCost + everything already held +
+     * amountUsd <= limit} — the check and the hold are one indivisible operation,
+     * so concurrent callers (on any node) can never hold more than the budget has
+     * left. Unlike {@link #tryAddCost}, nothing is added to the month's cost: the
+     * hold is given back with {@link #releaseCost} once the actual cost is charged.
+     * <p>
+     * Holds that are never released (the node died) must not pin the budget
+     * forever: the held total is dropped once its epoch is older than
+     * {@code ttlMillis}, and {@link #releaseCost} for a dropped epoch is a no-op.
+     * <p>
+     * Not supported by a store that does not override it: it refuses, flagged as an
+     * outage (fail closed).
+     *
+     * @param limit
+     *            the monthly limit; not negative
+     * @param ttlMillis
+     *            how long an unreleased hold may pin the budget
+     */
+    default CostReservationResult tryReserveCost(String tenantId, double amountUsd, double limit, long ttlMillis) {
+        return CostReservationResult.refused(accountingUnavailable());
+    }
+
+    /**
+     * Gives back {@code amountUsd} of a hold made by {@link #tryReserveCost}.
+     * Idempotent in effect for a dropped epoch; never lets the held total go
+     * negative.
+     *
+     * @param generation
+     *            {@link CostReservation#generation()} of the hold being released
+     * @throws QuotaAccountingUnavailableException
+     *             if the store could not be reached; the TTL then frees the hold
+     */
+    default void releaseCost(String tenantId, long generation, double amountUsd) {
+        // nothing held by a store without reservation support
+    }
+
     // ─── Usage Reporting ───
 
     /**

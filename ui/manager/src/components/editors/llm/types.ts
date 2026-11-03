@@ -157,6 +157,15 @@ export interface LlmTask {
   enableRateLimiting?: boolean;
   defaultRateLimit?: number;
   toolRateLimits?: Record<string, number>;
+  /**
+   * Per-subject / per-run caps on tool calls. Absent = none; never sent unless
+   * set, because an older backend's strict config parser refuses an unknown
+   * field. `window` is an ISO-8601 duration (`PT1M`..`P31D`) or `RUN`.
+   */
+  toolQuotas?: {
+    subject?: string;
+    tools: Record<string, { limit?: number; window?: string; pool?: string }>;
+  };
   maxToolIterations?: number;
   /**
    * Most tool calls executed from ONE model response (EDDI 6.6+, default 20).

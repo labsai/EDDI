@@ -2082,7 +2082,7 @@ conversations and across EDDI nodes**.
 |-------|---------|
 | `tools` | Rules keyed by tool name, **exactly like `toolRateLimits`**: the dispatch name the model invoked, or the built-in slug; the dispatch name wins. Works for every tool source, **HTTP-call tools** (`httpcalls` exposed as tools) included. A rule keyed by a slug is one counter for all of that tool's operations |
 | `limit` | Calls permitted per window; a positive integer |
-| `window` | ISO-8601 duration, from `PT1M` to `P31D` (`P1D`, `PT12H`, `PT90M`). Windows are **fixed and aligned to the UTC epoch**: `P1D` resets at 00:00 UTC, `PT1H` on the hour. Weeks and months (`P1W`, `P1M`) are not accepted |
+| `window` | ISO-8601 duration, from `PT1M` to `P31D` (`P1D`, `PT12H`, `PT90M`). Windows are **fixed and aligned to the UTC epoch**: `P1D` resets at 00:00 UTC, `PT1H` on the hour. Weeks and months (`P1W`, `P1M`) are not accepted. Or `RUN`: a cap per run instead of per time span — see [Per-run caps](#per-run-caps-window-run) |
 | `pool` | Optional. Rules naming the same pool **share one counter** (above, 100 improvements per day across `updateAction` and `updateSession` together). All rules of a pool must state the same `limit` and `window` — anything else is a `400` at save time |
 | `subject` | Optional template, rendered with the turn's template data (the same syntax as a system prompt). Default: the conversation's user id. A template that renders blank falls back to the user id; a rendered subject longer than 256 characters is shortened to a prefix plus a digest. Without any user id (an unauthenticated caller) the conversation id is used, so an anonymous caller is capped per conversation |
 
@@ -2098,6 +2098,36 @@ With `{context.personId}` the value is a per-turn context variable of type `stri
 > trusted backend. A value a browser client sends directly is not enough: a user who changes it gets a
 > fresh quota. The anonymous fallback (`conversation:<id>`, used when there is no user id) is reset by
 > starting a new conversation, so it does **not** give fair use for unauthenticated users.
+
+##### Per-run caps (`window: "RUN"`)
+
+A fixed window cannot say "20 searches per scout **per run**". `"window": "RUN"` can: the counter belongs
+to one run and the next run starts again at zero, whatever the clock says.
+
+```json
+"toolQuotas": {
+  "tools": { "webSearch": { "limit": 20, "window": "RUN" } }
+}
+```
+
+| The turn belongs to… | …so the run is |
+|---|---|
+| A [scheduled](scheduling.md) fire | That fire. Even on a `persistent` conversation, the next fire is a new run |
+| A [group conversation](group-conversations.md) member turn (a cadence run, a discussion) | That group conversation, shared by all the member's turns in it |
+| Anything else (a standalone agent, a chat) | The conversation |
+
+The counter is per agent, per tool (or [pool](#per-subject-tool-quotas-toolquotas)) and per subject, as
+with a time window, so every scout of a group has its own 20. A run counter has no reset time and no end
+the store can see; its row is simply dropped 31 days after its first call, so a conversation that is
+still going after a month starts counting afresh. Everything else on this page — what counts, refunds
+for failed calls, the refusal being final, fail-closed, pools (all rules of a pool must use `RUN`
+together, or none), HITL, GDPR erasure — applies unchanged. The refusal the model sees names the per-run
+limit and no reset time.
+
+> **A run cap bounds an autonomous run; it is not an abuse limit for end users.** The run is identified
+> by context the runtime sets (`scheduleFireId`, `groupConversationId`), and a caller that can put its own
+> context on a turn could name a fresh run to reset the count. Use a fixed window — which a client cannot
+> reset — for fair use per user.
 
 **What counts.** A call is counted only when its tool **really runs**. The reservation is made at one
 point in the pipeline — after the rate limit and the cache, immediately before the tool executes — so a

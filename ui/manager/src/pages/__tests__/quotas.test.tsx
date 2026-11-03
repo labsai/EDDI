@@ -615,6 +615,42 @@ describe("QuotasPage", () => {
     expect(screen.getByTestId("usage-cost")).toHaveTextContent("/ $0.01");
   });
 
+  it("shows the budget that running turns hold (hard-ceiling mode), and nothing when none is held", async () => {
+    const usage = (reservedUsd?: number) =>
+      http.get("*/administration/quotas/:tenantId/usage", () =>
+        HttpResponse.json({
+          tenantId: "default",
+          conversationsToday: 1,
+          apiCallsThisMinute: 0,
+          monthlyCostUsd: 2,
+          ...(reservedUsd === undefined ? {} : { reservedUsd }),
+          minuteWindowStart: new Date().toISOString(),
+          dayStart: new Date().toISOString(),
+        }),
+      );
+    const quota = http.get("*/administration/quotas/:tenantId", () =>
+      HttpResponse.json({
+        tenantId: "default",
+        maxConversationsPerDay: -1,
+        maxAgentsPerTenant: -1,
+        maxApiCallsPerMinute: -1,
+        maxMonthlyCostUsd: 10,
+        enabled: true,
+      }),
+    );
+    server.use(quota, usage(1.5));
+    const first = renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("usage-cost-held")).toHaveTextContent("$1.50"));
+    expect(screen.getByTestId("usage-cost-held-bar")).toBeInTheDocument();
+    first.unmount();
+
+    // An older server sends no field; 0 means the mode is off. Neither shows anything.
+    server.use(quota, usage(0));
+    renderQuotas();
+    await waitFor(() => expect(screen.getByTestId("usage-cost")).toBeInTheDocument());
+    expect(screen.queryByTestId("usage-cost-held")).toBeNull();
+  });
+
   it("never shows a tiny positive budget as $0.00, and still shows zero spend as $0.00", async () => {
     server.use(
       http.get("*/administration/quotas/:tenantId", () =>

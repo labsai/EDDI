@@ -1895,7 +1895,21 @@
     "grAddType": "Guardrail type to add",
     "grAdd": "Add guardrail",
     "grStreamingBuffered": "Streaming is off for this task: an output guardrail that blocks, redacts or reprompts makes it hold the answer until it is screened, and the client receives it once. Use warn to keep streaming.",
-    "grStreamingNote": "Tokens already streamed cannot be taken back, so an output guardrail that blocks, redacts or reprompts makes the task hold its answer until it is screened. Warn-only guardrails keep streaming."
+    "grStreamingNote": "Tokens already streamed cannot be taken back, so an output guardrail that blocks, redacts or reprompts makes the task hold its answer until it is screened. Warn-only guardrails keep streaming.",
+    "toolQuotasTitle": "Tool quotas",
+    "toolQuotasHint": "Cap how often a tool may run: per user within a time window, counted across conversations, or per run (one scheduled fire, group discussion or conversation). A call over its cap is not run and the model is told the limit is final. Tools in the same pool share one counter and must share limit and window.",
+    "toolQuotasSubject": "Count per",
+    "toolQuotasSubjectDefault": "(default: the user id)",
+    "toolQuotasLimit": "Calls allowed",
+    "toolQuotasWindow": "Window",
+    "toolQuotasPool": "Pool (optional)",
+    "toolQuotasAdd": "Add quota",
+    "toolQuotasRunNote": "A per-run cap bounds an autonomous run (a schedule or a group cadence). It is not an abuse limit for end users — use a fixed window for that.",
+    "toolQuotasWindowRun": "Per run",
+    "toolQuotasWindowHour": "Per hour",
+    "toolQuotasWindowDay": "Per day (UTC)",
+    "toolQuotasWindowWeek": "Per 7 days",
+    "toolQuotasWindowMonth": "Per 31 days"
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -4843,7 +4857,9 @@
     "budgetRemaining": "{{spent}} of {{limit}} used this month. {{remaining}} left before models stop being called.",
     "budgetNote": "Counts priced model calls and tracked tool cost, per UTC calendar month. Unpriced models, conversation summaries and embeddings are not metered. A turn that crosses the limit still finishes, so the total can end slightly above it. Refused calls are counted in the eddi.llm.spend.refused metric.",
     "invalidInteger": "Enter a whole number (0 or more), or leave empty for unlimited.",
-    "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited."
+    "invalidAmount": "Enter an amount (0 or more), or leave empty for unlimited.",
+    "heldByTurns": "{{amount}} held by running turns",
+    "costHardCeiling": "By default the call that crosses the budget still finishes. To refuse it instead, the server can reserve each call's maximum cost first: set eddi.tenant.quota.cost-reservation.enabled=true (a startup property)."
   },
   "secretPicker": {
     "clearVault": "Clear vault reference",

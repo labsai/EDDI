@@ -10,7 +10,9 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
 import ai.labs.eddi.utils.LogSanitizer;
+import com.mongodb.ErrorCategory;
 import com.mongodb.MongoException;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Filters;
@@ -72,6 +74,8 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
     private static final String FIELD_MINUTE_START = "minuteStart";
     private static final String FIELD_MONTHLY_COST = "monthlyCostUsd";
     private static final String FIELD_COST_MONTH = "costMonth";
+    private static final String FIELD_RESERVED_USD = "reservedUsd";
+    private static final String FIELD_RESERVED_SINCE = "reservedSince";
 
     private final MongoCollection<Document> quotas;
     private final MongoCollection<Document> usage;
@@ -478,6 +482,87 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
     }
 
+    // ─── Cost reservations ───
+
+    /**
+     * The held total as an aggregation expression: 0 when its epoch is older than
+     * {@code staleBefore} (an unreleased hold), else the stored value.
+     */
+    private static Document effectiveReserved(long staleBefore) {
+        Document stale = new Document("$and", List.of(
+                new Document("$gt", List.of(new Document("$ifNull", List.of("$" + FIELD_RESERVED_SINCE, 0L)), 0L)),
+                new Document("$lt", List.of("$" + FIELD_RESERVED_SINCE, staleBefore))));
+        return new Document("$cond", List.of(stale, 0.0, new Document("$ifNull", List.of("$" + FIELD_RESERVED_USD, 0.0))));
+    }
+
+    @Override
+    public CostReservationResult tryReserveCost(String tenantId, double amountUsd, double limit, long ttlMillis) {
+        try {
+            String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
+            long now = clock.millis();
+            Document held = reserveWithinBudget(tenantId, monthKey, amountUsd, limit, now, now - ttlMillis);
+            if (held == null) {
+                // Denied, or the usage document is missing / still on last month's cost:
+                // materialise and roll it, then ask once more.
+                try {
+                    ensureUsageDocument(tenantId);
+                } catch (MongoWriteException duplicate) {
+                    // Another node materialised the document first: the unique index on
+                    // tenantId rejected this upsert, and the document it wanted is there.
+                    if (duplicate.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                        throw duplicate;
+                    }
+                }
+                usage.updateOne(
+                        Filters.and(Filters.eq(FIELD_TENANT_ID, tenantId), Filters.ne(FIELD_COST_MONTH, monthKey)),
+                        Updates.combine(Updates.set(FIELD_MONTHLY_COST, 0.0), Updates.set(FIELD_COST_MONTH, monthKey)));
+                held = reserveWithinBudget(tenantId, monthKey, amountUsd, limit, now, now - ttlMillis);
+            }
+            if (held == null) {
+                return CostReservationResult.refused(QuotaCheckResult
+                        .denied("Monthly cost budget ($%.2f) cannot take this call's reservation for tenant '%s'".formatted(limit, tenantId)));
+            }
+            Number since = held.get(FIELD_RESERVED_SINCE, Number.class);
+            return CostReservationResult.granted(new CostReservation(amountUsd, since == null ? now : since.longValue()));
+        } catch (MongoException e) {
+            LOGGER.errorf("Failed to reserve cost for tenant '%s': %s", LogSanitizer.sanitize(tenantId), LogSanitizer.sanitize(e.getMessage()));
+            return CostReservationResult.refused(accountingUnavailable());
+        }
+    }
+
+    /**
+     * One atomic step: the {@code $expr} filter checks {@code cost + held + amount
+     * <= limit} against the stored document and the pipeline update adds the hold,
+     * so two nodes can never both take the last of the budget.
+     */
+    private Document reserveWithinBudget(String tenantId, String monthKey, double amount, double limit, long now, long staleBefore) {
+        Document effective = effectiveReserved(staleBefore);
+        Document fits = new Document("$lte", List.of(
+                new Document("$add", List.of(new Document("$ifNull", List.of("$" + FIELD_MONTHLY_COST, 0.0)), effective, amount)), limit));
+        Document set = new Document("$set", new Document()
+                .append(FIELD_RESERVED_SINCE, new Document("$cond", List.of(
+                        new Document("$lte", List.of(effective, 0.0)), now, new Document("$ifNull", List.of("$" + FIELD_RESERVED_SINCE, now)))))
+                .append(FIELD_RESERVED_USD, new Document("$add", List.of(effective, amount))));
+        return usage.findOneAndUpdate(
+                Filters.and(Filters.eq(FIELD_TENANT_ID, tenantId), Filters.eq(FIELD_COST_MONTH, monthKey), Filters.expr(fits)),
+                List.of(set),
+                new FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER));
+    }
+
+    @Override
+    public void releaseCost(String tenantId, long generation, double amountUsd) {
+        try {
+            Document lowered = new Document("$set", new Document(FIELD_RESERVED_USD, new Document("$max", List.of(0.0,
+                    new Document("$subtract", List.of(new Document("$ifNull", List.of("$" + FIELD_RESERVED_USD, 0.0)), amountUsd))))));
+            Document drained = new Document("$set", new Document(FIELD_RESERVED_SINCE, new Document("$cond", List.of(
+                    new Document("$lte", List.of("$" + FIELD_RESERVED_USD, 1e-9)), 0L, "$" + FIELD_RESERVED_SINCE))));
+            usage.updateOne(Filters.and(Filters.eq(FIELD_TENANT_ID, tenantId), Filters.eq(FIELD_RESERVED_SINCE, generation)),
+                    List.of(lowered, drained));
+        } catch (MongoException e) {
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
+    }
+
     // ─── Usage Reporting ───
 
     @Override
@@ -569,7 +654,8 @@ public class MongoTenantQuotaStore implements ITenantQuotaStore {
                 ? doc.getDouble("monthlyCostUsd")
                 : 0.0;
 
+        Double reserved = doc.getDouble(FIELD_RESERVED_USD);
         return new UsageSnapshot(tenantId, conversationsToday, apiCallsThisMinute, monthlyCost,
-                minuteStart, dayStart, costMonth);
+                minuteStart, dayStart, costMonth, reserved != null ? reserved : 0.0);
     }
 }

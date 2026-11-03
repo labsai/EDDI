@@ -68,8 +68,50 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 api_calls_this_minute INT NOT NULL DEFAULT 0,
                 minute_start BIGINT NOT NULL DEFAULT 0,
                 monthly_cost_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
-                cost_month VARCHAR(10)
+                cost_month VARCHAR(10),
+                reserved_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                reserved_since BIGINT NOT NULL DEFAULT 0
             )
+            """;
+
+    /** Tables created before cost reservations existed get the two columns. */
+    private static final String ADD_RESERVATION_COLUMNS = """
+            ALTER TABLE tenant_usage
+                ADD COLUMN IF NOT EXISTS reserved_usd DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+                ADD COLUMN IF NOT EXISTS reserved_since BIGINT NOT NULL DEFAULT 0
+            """;
+
+    /**
+     * Held total as an expression: 0 when its epoch is older than the stale bound
+     * (parameter), else the stored value. Takes one parameter, used twice by
+     * callers via {@link #RESERVE_COST}.
+     */
+    private static final String EFFECTIVE_RESERVED = "(CASE WHEN reserved_since > 0 AND reserved_since < ? THEN 0.0 ELSE reserved_usd END)";
+
+    /**
+     * One atomic statement: the {@code WHERE} checks {@code cost + held + amount <=
+     * limit} on the current row and the {@code SET} adds the hold. Every SET
+     * expression reads the row as it was before the update.
+     */
+    private static final String RESERVE_COST = """
+            UPDATE tenant_usage SET
+                reserved_since = CASE WHEN %1$s <= 0 THEN ? ELSE reserved_since END,
+                reserved_usd = %1$s + ?
+            WHERE tenant_id = ? AND cost_month = ?
+              AND monthly_cost_usd + %1$s + ? <= ?
+            RETURNING reserved_since
+            """.formatted(EFFECTIVE_RESERVED);
+
+    private static final String ROLL_MONTH = """
+            UPDATE tenant_usage SET monthly_cost_usd = 0.0, cost_month = ?
+            WHERE tenant_id = ? AND cost_month IS DISTINCT FROM ?
+            """;
+
+    private static final String RELEASE_COST = """
+            UPDATE tenant_usage SET
+                reserved_usd = GREATEST(0.0, reserved_usd - ?),
+                reserved_since = CASE WHEN reserved_usd - ? <= 0.000000001 THEN 0 ELSE reserved_since END
+            WHERE tenant_id = ? AND reserved_since = ?
             """;
 
     /**
@@ -220,7 +262,9 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         try (Connection conn = dataSourceInstance.get().getConnection();
                 Statement stmt = conn.createStatement()) {
             stmt.execute(CREATE_QUOTAS_TABLE);
-            stmt.execute(CREATE_USAGE_TABLE);
+            // one round trip: a table created before cost reservations existed gets its two
+            // columns
+            stmt.execute(CREATE_USAGE_TABLE + ";\n" + ADD_RESERVATION_COLUMNS);
             LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
 
             // Bootstrap default tenant quota if none exists (parity with
@@ -574,6 +618,78 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
         }
     }
 
+    // ─── Cost reservations ───
+
+    @Override
+    public CostReservationResult tryReserveCost(String tenantId, double amountUsd, double limit, long ttlMillis) {
+        String monthKey = YearMonth.now(clock.withZone(ZoneOffset.UTC)).toString();
+        long dayStartMs = clock.instant().truncatedTo(ChronoUnit.DAYS).toEpochMilli();
+        long minuteStartMs = clock.instant().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        long now = clock.millis();
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            Long since = reserveOnce(conn, tenantId, monthKey, amountUsd, limit, now, now - ttlMillis);
+            if (since == null) {
+                // Denied, or the row is missing / still on last month's cost: materialise
+                // and roll it, then ask once more.
+                try (PreparedStatement ps = conn.prepareStatement(ENSURE_USAGE_ROW)) {
+                    ps.setString(1, tenantId);
+                    ps.setLong(2, dayStartMs);
+                    ps.setLong(3, minuteStartMs);
+                    ps.executeUpdate();
+                }
+                try (PreparedStatement ps = conn.prepareStatement(ROLL_MONTH)) {
+                    ps.setString(1, monthKey);
+                    ps.setString(2, tenantId);
+                    ps.setString(3, monthKey);
+                    ps.executeUpdate();
+                }
+                since = reserveOnce(conn, tenantId, monthKey, amountUsd, limit, now, now - ttlMillis);
+            }
+            if (since == null) {
+                return CostReservationResult.refused(QuotaCheckResult
+                        .denied("Monthly cost budget ($%.2f) cannot take this call's reservation for tenant '%s'".formatted(limit, tenantId)));
+            }
+            return CostReservationResult.granted(new CostReservation(amountUsd, since));
+        } catch (SQLException e) {
+            LOGGER.errorf("Failed to reserve cost for tenant '%s': %s", sanitize(tenantId), sanitize(e.getMessage()));
+            return CostReservationResult.refused(ITenantQuotaStore.accountingUnavailable());
+        }
+    }
+
+    private Long reserveOnce(Connection conn, String tenantId, String monthKey, double amount, double limit, long now, long staleBefore)
+            throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(RESERVE_COST)) {
+            int i = 1;
+            ps.setLong(i++, staleBefore); // reserved_since CASE
+            ps.setLong(i++, now);
+            ps.setLong(i++, staleBefore); // reserved_usd
+            ps.setDouble(i++, amount);
+            ps.setString(i++, tenantId);
+            ps.setString(i++, monthKey);
+            ps.setLong(i++, staleBefore); // budget check
+            ps.setDouble(i++, amount);
+            ps.setDouble(i, limit);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : null;
+            }
+        }
+    }
+
+    @Override
+    public void releaseCost(String tenantId, long generation, double amountUsd) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(RELEASE_COST)) {
+            ps.setDouble(1, amountUsd);
+            ps.setDouble(2, amountUsd);
+            ps.setString(3, tenantId);
+            ps.setLong(4, generation);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new QuotaAccountingUnavailableException(ACCOUNTING_UNAVAILABLE, e);
+        }
+    }
+
     // ─── Usage Reporting ───
 
     @Override
@@ -669,6 +785,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
                 costMonth.equals(currentMonth) ? rs.getDouble("monthly_cost_usd") : 0.0,
                 Instant.ofEpochMilli(minuteStartMs),
                 Instant.ofEpochMilli(dayStartMs),
-                costMonth);
+                costMonth,
+                rs.getDouble("reserved_usd"));
     }
 }

@@ -13,6 +13,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.time.Clock;
 import java.time.Instant;
@@ -176,5 +183,94 @@ class TenantQuotaStoreParityTest extends MongoTestBase {
         assertEquals(1, usage.conversationsToday(), storeName + ": conversation counter");
         assertEquals(1, usage.apiCallsThisMinute(), storeName + ": api-call counter");
         assertEquals(7.5, usage.monthlyCostUsd(), 1e-9, storeName + ": cost counter");
+    }
+
+    private static final long TTL = 600_000L;
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stores")
+    @DisplayName("cost reservation: a hold counts against the budget, a release gives it back")
+    void reservationHoldsAndReleases(String storeName, Supplier<ITenantQuotaStore> factory) {
+        ITenantQuotaStore store = factory.get();
+        String tenant = freshTenant(storeName);
+        store.tryAddCost(tenant, 4.0, 10.0);
+
+        CostReservationResult five = store.tryReserveCost(tenant, 5.0, 10.0, TTL);
+        assertTrue(five.granted(), storeName + ": 4 spent + 5 held fits a limit of 10");
+        assertEquals(5.0, store.getUsage(tenant).reservedUsd(), 1e-9, storeName + ": the usage snapshot reports what is held");
+        assertFalse(store.tryReserveCost(tenant, 2.0, 10.0, TTL).granted(), storeName + ": 4 + 5 + 2 does not fit");
+        CostReservationResult one = store.tryReserveCost(tenant, 1.0, 10.0, TTL);
+        assertTrue(one.granted(), storeName + ": 4 + 5 + 1 fits exactly (the limit itself is allowed)");
+        assertFalse(store.tryReserveCost(tenant, 0.01, 10.0, TTL).granted(), storeName + ": nothing is left");
+
+        store.releaseCost(tenant, five.reservation().generation(), 5.0);
+        assertTrue(store.tryReserveCost(tenant, 5.0, 10.0, TTL).granted(), storeName + ": the released 5 is available again");
+        assertEquals(4.0, store.getMonthlyCost(tenant), 1e-9, storeName + ": a hold never adds to the month's cost");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stores")
+    @DisplayName("cost reservation: settled spend and holds are summed against the limit")
+    void reservationSeesSettledCost(String storeName, Supplier<ITenantQuotaStore> factory) {
+        ITenantQuotaStore store = factory.get();
+        String tenant = freshTenant(storeName);
+        assertTrue(store.tryReserveCost(tenant, 6.0, 10.0, TTL).granted());
+        store.tryAddCost(tenant, 3.0, 10.0);
+        assertFalse(store.tryReserveCost(tenant, 1.5, 10.0, TTL).granted(), storeName + ": 3 spent + 6 held + 1.5 passes 10");
+        assertTrue(store.tryReserveCost(tenant, 1.0, 10.0, TTL).granted(), storeName + ": 3 + 6 + 1 fits");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stores")
+    @DisplayName("cost reservation: concurrent callers can never hold more than the budget has left")
+    void reservationIsAtomicUnderContention(String storeName, Supplier<ITenantQuotaStore> factory) throws Exception {
+        ITenantQuotaStore store = factory.get();
+        String tenant = freshTenant(storeName);
+        int threads = 24;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicInteger granted = new AtomicInteger();
+        List<Future<?>> done = new ArrayList<>();
+        for (int i = 0; i < threads; i++) {
+            done.add(pool.submit(() -> {
+                start.await();
+                if (store.tryReserveCost(tenant, 1.0, 10.0, TTL).granted()) {
+                    granted.incrementAndGet();
+                }
+                return null;
+            }));
+        }
+        start.countDown();
+        for (Future<?> f : done) {
+            f.get(60, TimeUnit.SECONDS);
+        }
+        pool.shutdownNow();
+        assertEquals(10, granted.get(), storeName + ": exactly the 10 that fit are granted - check and hold are one operation");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stores")
+    @DisplayName("cost reservation: a hold older than the TTL no longer pins the budget")
+    void reservationExpires(String storeName, Supplier<ITenantQuotaStore> factory) {
+        ITenantQuotaStore store = factory.get();
+        String tenant = freshTenant(storeName);
+        assertTrue(store.tryReserveCost(tenant, 9.0, 10.0, TTL).granted());
+        assertFalse(store.tryReserveCost(tenant, 5.0, 10.0, TTL).granted(), storeName + ": still held");
+        // The clock is fixed, so a negative TTL makes every existing hold already older
+        // than it.
+        assertTrue(store.tryReserveCost(tenant, 5.0, 10.0, -1L).granted(), storeName + ": the unreleased 9 was dropped");
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("stores")
+    @DisplayName("cost reservation: releasing more than is held never goes below zero")
+    void releaseNeverGoesNegative(String storeName, Supplier<ITenantQuotaStore> factory) {
+        ITenantQuotaStore store = factory.get();
+        String tenant = freshTenant(storeName);
+        CostReservationResult two = store.tryReserveCost(tenant, 2.0, 10.0, TTL);
+        store.releaseCost(tenant, two.reservation().generation(), 50.0);
+        store.releaseCost(tenant, two.reservation().generation(), 50.0);
+        assertTrue(store.tryReserveCost(tenant, 10.0, 10.0, TTL).granted(), storeName + ": the whole budget is free");
+        assertFalse(store.tryReserveCost(tenant, 0.5, 10.0, TTL).granted(), storeName + ": and a negative hold did not appear");
     }
 }
