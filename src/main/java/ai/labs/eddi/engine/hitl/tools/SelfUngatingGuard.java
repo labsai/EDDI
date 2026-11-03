@@ -277,13 +277,86 @@ public final class SelfUngatingGuard {
         }
         for (JsonNode operation : tree) {
             String path = operation.path("path").asText("");
+            String op = operation.path("op").asText("").toLowerCase(Locale.ROOT);
             for (String gatePath : gatePaths) {
                 if (path.isEmpty() || gatePath.equals(path) || gatePath.startsWith(path + "/")) {
+                    return LLM_GATE_REMOVAL_REASON;
+                }
+                // The gate paths are the STORED document's, and a patch applies in order:
+                // an add or remove at or before a gated element of the same array moves
+                // that element, and a later operation then reaches it at a position no
+                // stored path names.
+                if (("add".equals(op) || "remove".equals(op)) && shiftsElementOf(path, gatePath)) {
                     return LLM_GATE_REMOVAL_REASON;
                 }
             }
         }
         return null;
+    }
+
+    /**
+     * Whether an add or remove at {@code path} moves the array element that
+     * {@code gatePath} runs through: same array, an index at or before the gate's.
+     * An append ({@code -}) moves nothing.
+     */
+    static boolean shiftsElementOf(String path, String gatePath) {
+        int slash = path.lastIndexOf('/');
+        if (slash < 0) {
+            return false;
+        }
+        String parent = path.substring(0, slash);
+        String index = path.substring(slash + 1);
+        if (!gatePath.startsWith(parent + "/")) {
+            return false;
+        }
+        String rest = gatePath.substring(parent.length() + 1);
+        int end = rest.indexOf('/');
+        String gateIndex = end < 0 ? rest : rest.substring(0, end);
+        if (!isArrayIndex(index) || !isArrayIndex(gateIndex)) {
+            return false;
+        }
+        // Compared as digit strings of any length (no leading zeros): shorter is
+        // smaller, equal lengths compare as text.
+        return index.length() < gateIndex.length() || index.length() == gateIndex.length() && index.compareTo(gateIndex) <= 0;
+    }
+
+    private static boolean isArrayIndex(String segment) {
+        return !segment.isEmpty() && segment.chars().allMatch(Character::isDigit) && (segment.length() == 1 || segment.charAt(0) != '0');
+    }
+
+    /** The {@code resourceType} the MCP management tools give an LLM document. */
+    private static final String LLM_MCP_RESOURCE_TYPE = "langchain";
+
+    /**
+     * An MCP {@code update_resource} replacing an LLM document: the raw-argument
+     * twin of the whole-document rule in {@link #storedLlmGateRefusal}. A
+     * replacement carries every task, so it is refused whenever the stored version
+     * it replaces holds a gate (one that re-states the gate was refused for naming
+     * it). Without a lookup, or for arguments of any other shape, nothing is said.
+     */
+    private static String storedLlmReplacementRefusal(String rawArguments, StoredLlmLookup storedLlms) {
+        if (storedLlms == null || rawArguments == null || rawArguments.isBlank()) {
+            return null;
+        }
+        JsonNode args;
+        try {
+            args = MAPPER.readTree(rawArguments);
+        } catch (JsonProcessingException e) {
+            return null;
+        }
+        if (args == null || !args.isObject() || !LLM_MCP_RESOURCE_TYPE.equals(args.path("resourceType").asText("").trim().toLowerCase(Locale.ROOT))
+                || args.path("resourceId").asText("").isBlank() || !args.hasNonNull("config")) {
+            return null;
+        }
+        // update_resource's own default when the version is omitted.
+        Integer version = args.path("version").canConvertToInt() ? Integer.valueOf(args.path("version").asInt()) : Integer.valueOf(1);
+        List<String> gatePaths = new ArrayList<>();
+        try {
+            collectKeyPaths(storedLlms.llmConfigOf(args.path("resourceId").asText().trim(), version), TOOL_APPROVALS_KEY, "", gatePaths);
+        } catch (Exception e) {
+            return UNVERIFIABLE_REASON;
+        }
+        return gatePaths.isEmpty() ? null : LLM_GATE_REMOVAL_REASON;
     }
 
     /**
@@ -441,7 +514,7 @@ public final class SelfUngatingGuard {
         if (decoded.contains(HITL_CONFIG_KEY.toLowerCase(Locale.ROOT))) {
             return GATE_REMOVAL_REASON;
         }
-        return null;
+        return storedLlmReplacementRefusal(rawArguments, p.storedLlms());
     }
 
     private static boolean containsId(String haystack, String id) {

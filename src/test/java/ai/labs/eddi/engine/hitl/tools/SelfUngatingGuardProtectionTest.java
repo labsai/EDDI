@@ -256,6 +256,29 @@ class SelfUngatingGuardProtectionTest {
         }
 
         @Test
+        @DisplayName("an earlier add or remove that moves the gated task is refused; an append passes")
+        void patchThatShiftsTheGatedTask() {
+            String twoTasks = "{\"tasks\":[{\"id\":\"a\"},{\"id\":\"t\",\"toolApprovals\":{\"requireApproval\":[\"http:*\"]}}]}";
+            Protection p = withStoredLlm(twoTasks);
+            // remove /tasks/0 moves the gated task to /tasks/0, where the replace then
+            // reaches it at a path no stored gate path names.
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"remove\",\"path\":\"/tasks/0\"},{\"op\":\"replace\",\"path\":\"/tasks/0\",\"value\":{\"id\":\"t\"}}]", p));
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"add\",\"path\":\"/tasks/1\",\"value\":{\"id\":\"x\"}}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"add\",\"path\":\"/tasks/-\",\"value\":{\"id\":\"x\"}}]", p));
+        }
+
+        @Test
+        @DisplayName("an MCP update_resource replacing a gated LLM document is refused; an ungated one passes")
+        void mcpReplacementOmittingTheGate() {
+            String args = "{\"resourceType\":\"langchain\",\"resourceId\":\"" + UNRELATED + "\",\"version\":3,"
+                    + "\"config\":\"{\\\"tasks\\\":[{\\\"id\\\":\\\"t\\\"}]}\"}";
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusalFromArguments(args, withStoredLlm(storedWithGate)));
+            assertNull(SelfUngatingGuard.refusalFromArguments(args, withStoredLlm("{\"tasks\":[{\"id\":\"t\"}]}")));
+        }
+
+        @Test
         @DisplayName("a version too long for an int is unverifiable (refused), not an exception")
         void oversizedVersionIsUnverifiable() {
             String huge = "https://eddi/llmstore/llms/" + UNRELATED + "?version=99999999999999999999";
