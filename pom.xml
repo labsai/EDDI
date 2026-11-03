@@ -71,12 +71,40 @@
     </properties>
     <dependencyManagement>
         <dependencies>
+            <!-- Override the OpenTelemetry family to fix GHSA-ccrj-gw8r-854m (quadratic CPU in
+                 W3C tracestate parsing, opentelemetry-api <=1.66.0). Managed by the Quarkus BOM
+                 at 1.62.0. Imported ahead of the Quarkus BOM so its versions win; the whole
+                 family moves together because api, sdk and the exporters must stay on one
+                 release, and the -alpha BOM covers the incubator modules. Drop both imports
+                 once Quarkus manages OpenTelemetry at 1.67.0 or later. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>1.67.0</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom-alpha</artifactId>
+                <version>1.67.0-alpha</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>${quarkus.platform.group-id}</groupId>
                 <artifactId>${quarkus.platform.artifact-id}</artifactId>
                 <version>${quarkus.platform.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
+            </dependency>
+            <!-- Override guava to fix GHSA-xxph-c9ww-hj94 (uncontrolled allocation when
+                 CompactHashMap/CompactHashSet/MapMakerInternalMap are deserialized, <=33.7.1).
+                 Managed at 33.6.0-jre; pulled in by langchain4j-qdrant (gRPC). -->
+            <dependency>
+                <groupId>com.google.guava</groupId>
+                <artifactId>guava</artifactId>
+                <version>33.7.2-jre</version>
             </dependency>
             <dependency>
                 <groupId>io.github.classgraph</groupId>
