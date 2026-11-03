@@ -801,4 +801,27 @@ class MongoResourceStorageTest {
         assertThrows(IResourceStore.ResourceModifiedException.class,
                 () -> storage.storeIfFieldEqualsOrMissing(resource, "revision", "0"));
     }
+
+    // ==================== primaryReads ====================
+
+    @Test
+    @DisplayName("primaryReads — reads through collections bound to ReadPreference.primary()")
+    void primaryReadsUsesPrimaryReadPreference() {
+        MongoCollection<Document> primaryCurrent = mock(MongoCollection.class);
+        MongoCollection<Document> primaryHistory = mock(MongoCollection.class);
+        when(currentCollection.withReadPreference(com.mongodb.ReadPreference.primary())).thenReturn(primaryCurrent);
+        when(historyCollection.withReadPreference(com.mongodb.ReadPreference.primary())).thenReturn(primaryHistory);
+        FindIterable<Document> found = mock(FindIterable.class);
+        when(primaryCurrent.find(any(Document.class))).thenReturn(found);
+        when(found.first())
+                .thenReturn(new Document(MongoResourceStorage.ID_FIELD, new ObjectId(VALID_ID)).append(MongoResourceStorage.VERSION_FIELD, 7));
+
+        IResourceStorage<String> view = storage.primaryReads();
+
+        assertNotSame(storage, view);
+        assertSame(view, storage.primaryReads(), "the view is built once");
+        assertEquals(7, view.getCurrentVersion(VALID_ID));
+        verify(primaryCurrent).find(any(Document.class));
+        verify(currentCollection, never()).find(any(Document.class));
+    }
 }

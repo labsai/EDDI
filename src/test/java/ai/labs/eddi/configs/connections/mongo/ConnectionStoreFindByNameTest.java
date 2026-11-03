@@ -215,7 +215,7 @@ class ConnectionStoreFindByNameTest {
         }
 
         @Override
-        public IResourceStore.IResourceId getCurrentResourceId(String id) throws ResourceNotFoundException {
+        protected IResourceStore.IResourceId freshCurrentResourceId(String id) throws ResourceNotFoundException {
             Map<Integer, ConnectionConfiguration> held = versions.get(id);
             int live = held == null ? 1 : held.keySet().stream().max(Integer::compare).orElse(1);
             var resourceId = mock(IResourceStore.IResourceId.class);
@@ -225,7 +225,7 @@ class ConnectionStoreFindByNameTest {
         }
 
         @Override
-        public ConnectionConfiguration read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        protected ConnectionConfiguration freshRead(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
             if (unreadable.contains(id)) {
                 throw new ResourceStoreException("the database blinked");
             }
