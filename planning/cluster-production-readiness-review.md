@@ -117,12 +117,13 @@ Each phase lands as reviewable PRs (one concern each), with a changelog fragment
    - Adopt or delete an orphan created by this node and boot.
    - Run `deleteIfStillOurs` for lost handles too.
    - Check the lease is still valid before the user-memory upsert and before rendering the reply.
+     This check-then-upsert is bounded, not atomic: a holder stops trusting its lease `2 x heartbeat` (10 s by default) before the server-side TTL lets another node acquire, so a passing `isLost()` check leaves at least that long before a takeover, and the upsert would have to stall past it (a long GC pause, for example). Closing the gap fully is Phase 2 item 8.
    - Rewrite `heartbeatIoFailureKeepsLease`.
 2. **Fence first (A3).**
    - Raise the fence before any state read, reload or idempotency check.
    - If raising fails, answer 409 and keep the input unconsumed.
 3. **Every write path fenced (A4, A6).**
-   - Write `_fence` only with `$max` or `GREATEST` on full writes.
+   - Make the full-write predicate atomic: the write is applied only when the revision matches **and** the stored `_fence` is absent or not above the write's token (Mongo: filter on `_rev` plus the fence condition; Postgres: `WHERE _rev = ?` plus the fence condition). `$max` / `GREATEST` only keep an unfenced write from lowering the stored fence; they are not the guard.
    - Run undo/redo through `submitInOrder`.
    - Map a fence-caused compare-and-set miss to `ConversationFencedException`, which is dead-lettered.
    - Dead-letter `ConcurrentConversationModificationException` after a reply has gone out.
@@ -175,6 +176,8 @@ Each phase lands as reviewable PRs (one concern each), with a changelog fragment
    - Fix the gdpr-stop count and timeout.
    - Use HMAC instead of plain hashes for user ids.
    - Seed the audit position counter with a margin.
+8. **User-memory writes under the fence (A1).**
+   - Put a fence on user-memory entries, or write them through an outbox tied to the fenced snapshot write, so a holder that stalls past its lease cannot overwrite a successor's entry.
 
 ### Phase 3: evidence (blocks GA claims)
 1. **A multi-JVM end-to-end suite.**
