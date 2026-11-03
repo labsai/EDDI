@@ -348,6 +348,20 @@ class ArtifactValidatorsTest {
     }
 
     @Test
+    @DisplayName("an anchor reference counts every node of that name: a decoy anchor in examples does not hide the costly schema")
+    void decoyAnchor_doesNotHideTheExpansion() {
+        // examples comes first, so its {"$anchor":"big"} is indexed first; the
+        // validator resolves "#big" to the schema under $defs instead.
+        String doubling = doublingSchema(20);
+        String spec = "{\"examples\":[{\"$anchor\":\"big\"}]," + doubling.substring(1, doubling.lastIndexOf(",\"$ref\""))
+                .replace("\"a20\":{", "\"a20\":{\"$anchor\":\"big\",") + ",\"$ref\":\"#big\"}";
+
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertTrue(e.getMessage().contains("expands to more than"), e.getMessage());
+    }
+
+    @Test
     @DisplayName("a $ref back to its own schema at the same content location is refused: it recursed into a StackOverflowError")
     void sameLocationRecursion_refused() {
         String spec = """

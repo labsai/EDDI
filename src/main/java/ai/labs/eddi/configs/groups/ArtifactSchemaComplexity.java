@@ -285,9 +285,11 @@ final class ArtifactSchemaComplexity {
             if (named == null) {
                 throw new Refused("$ref \"" + reference + "\" names an anchor the schema does not define");
             }
-            // A $dynamicRef may land on any anchor of that name, so it counts as all of
-            // them.
-            return "$dynamicRef".equals(keyword) ? named : List.of(named.getFirst());
+            // Every node carrying the name counts, for $ref as for $dynamicRef: the scan
+            // also indexes anchors in non-schema values (examples, default), and if it
+            // picked one such decoy while the validator picked the schema of that name,
+            // the costly one would escape the bound. Counting all fails closed.
+            return named;
         }
         throw new Refused("$ref \"" + reference + "\" is not a JSON pointer or an anchor of this schema");
     }
