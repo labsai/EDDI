@@ -19,8 +19,6 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanContext;
 import io.opentelemetry.context.Scope;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
-import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -141,8 +139,7 @@ class A2ATaskCredentialWiringTest {
         @Test
         @DisplayName("the card fetch and the task call carry the current span's traceparent, and never baggage")
         void bothRequestsCarryTraceparent() {
-            SdkTracerProvider tracerProvider = SdkTracerProvider.builder().addSpanProcessor(SimpleSpanProcessor.create(InMemorySpanExporter.create()))
-                    .build();
+            SdkTracerProvider tracerProvider = SdkTracerProvider.builder().build();
             Span span = tracerProvider.get("test").spanBuilder("execute_tool peer_lookup").startSpan();
             var manager = new A2AToolProviderManager(globalVariableResolver, secretResolver, false,
                     A2AToolProviderManager.DEFAULT_MAX_DESCRIPTION_CHARS, A2AToolProviderManager.DEFAULT_MAX_SCHEMA_BYTES,

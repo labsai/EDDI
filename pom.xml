@@ -71,26 +71,6 @@
     </properties>
     <dependencyManagement>
         <dependencies>
-            <!-- Override the OpenTelemetry family to fix GHSA-ccrj-gw8r-854m (quadratic CPU in
-                 W3C tracestate parsing, opentelemetry-api <=1.66.0). Managed by the Quarkus BOM
-                 at 1.62.0. Imported ahead of the Quarkus BOM so its versions win; the whole
-                 family moves together because api, sdk and the exporters must stay on one
-                 release, and the -alpha BOM covers the incubator modules. Drop both imports
-                 once Quarkus manages OpenTelemetry at 1.67.0 or later. -->
-            <dependency>
-                <groupId>io.opentelemetry</groupId>
-                <artifactId>opentelemetry-bom</artifactId>
-                <version>1.67.0</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.opentelemetry</groupId>
-                <artifactId>opentelemetry-bom-alpha</artifactId>
-                <version>1.67.0-alpha</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
             <dependency>
                 <groupId>${quarkus.platform.group-id}</groupId>
                 <artifactId>${quarkus.platform.artifact-id}</artifactId>
