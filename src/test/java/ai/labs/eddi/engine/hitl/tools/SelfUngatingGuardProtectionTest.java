@@ -281,6 +281,10 @@ class SelfUngatingGuardProtectionTest {
                     SelfUngatingGuard.refusalFromArguments(args.replace("\"version\":3", "\"version\":\"3\""), withStoredLlm(storedWithGate)));
             assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON,
                     SelfUngatingGuard.refusalFromArguments(args.replace("\"version\":3", "\"version\":\"three\""), withStoredLlm(storedWithGate)));
+            // Digits beyond the int range are unverifiable, not a NumberFormatException.
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON,
+                    SelfUngatingGuard.refusalFromArguments(args.replace("\"version\":3", "\"version\":\"99999999999\""),
+                            withStoredLlm(storedWithGate)));
         }
 
         @Test
