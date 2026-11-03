@@ -348,8 +348,20 @@ public final class SelfUngatingGuard {
                 || args.path("resourceId").asText("").isBlank() || !args.hasNonNull("config")) {
             return null;
         }
-        // update_resource's own default when the version is omitted.
-        Integer version = args.path("version").canConvertToInt() ? Integer.valueOf(args.path("version").asInt()) : Integer.valueOf(1);
+        // update_resource's own default when the version is omitted. A string "3" is
+        // read as 3, since the server coerces it to the Integer parameter; any other
+        // value cannot be matched to the version being replaced.
+        JsonNode versionNode = args.get("version");
+        Integer version;
+        if (versionNode == null || versionNode.isNull()) {
+            version = 1;
+        } else if (versionNode.canConvertToInt() && versionNode.isIntegralNumber()) {
+            version = versionNode.asInt();
+        } else if (versionNode.isTextual() && versionNode.asText().trim().matches("\\d{1,9}")) {
+            version = Integer.valueOf(versionNode.asText().trim());
+        } else {
+            return UNVERIFIABLE_REASON;
+        }
         List<String> gatePaths = new ArrayList<>();
         try {
             collectKeyPaths(storedLlms.llmConfigOf(args.path("resourceId").asText().trim(), version), TOOL_APPROVALS_KEY, "", gatePaths);

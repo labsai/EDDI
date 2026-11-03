@@ -276,6 +276,11 @@ class SelfUngatingGuardProtectionTest {
                     + "\"config\":\"{\\\"tasks\\\":[{\\\"id\\\":\\\"t\\\"}]}\"}";
             assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusalFromArguments(args, withStoredLlm(storedWithGate)));
             assertNull(SelfUngatingGuard.refusalFromArguments(args, withStoredLlm("{\"tasks\":[{\"id\":\"t\"}]}")));
+            // A string version is the version being replaced, not the default 1.
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusalFromArguments(args.replace("\"version\":3", "\"version\":\"3\""), withStoredLlm(storedWithGate)));
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON,
+                    SelfUngatingGuard.refusalFromArguments(args.replace("\"version\":3", "\"version\":\"three\""), withStoredLlm(storedWithGate)));
         }
 
         @Test
