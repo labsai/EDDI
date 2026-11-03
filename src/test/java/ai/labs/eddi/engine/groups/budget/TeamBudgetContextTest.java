@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.CostPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.TeamBudgetConfig;
+import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.configs.groups.model.TeamBudgetConfig.Oversight;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +43,9 @@ class TeamBudgetContextTest {
         GroupConversation gc = new GroupConversation();
         gc.setId("gc-" + groupId);
         gc.setGroupId(groupId);
+        if (!"free".equals(groupId)) {
+            gc.setTeamBudgetState(new TeamBudgetState());
+        }
         return gc;
     }
 

@@ -3,7 +3,10 @@
 A [group](group-conversations.md) can carry a **monthly dollar budget**. It is the team's share of the
 tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget): when it is spent, the team starts no
 new work until the month turns over or an administrator moves money. Without a `teamBudget` nothing changes:
-no gate, no ceiling.
+no gate, no ceiling, and no metering either: a group that does not configure the block writes nothing to the
+budget store and its hot path gains nothing. Only a group that sets the block is metered, from the moment it does
+(spend before that is not back-filled). `eddi.groups.team-budget.metering-enabled=false` switches the whole
+feature off globally.
 
 Use it when several standing teams share one deployment and one tenant budget, and one busy team must not eat
 another's month: a Content Studio at $35, a Signal Radar at $30, a Growth Board over both.

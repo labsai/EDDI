@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.groups.budget;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig.CostPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -41,6 +42,10 @@ class TeamSpendMeterTest {
         gc.setGroupId("g1");
         gc.setDepth(depth);
         gc.setTotalCost(totalCost);
+        if (depth == 0) {
+            // what beginLeg gives a root discussion of a group that configures a teamBudget
+            gc.setTeamBudgetState(new TeamBudgetState());
+        }
         return gc;
     }
 
@@ -159,15 +164,30 @@ class TeamSpendMeterTest {
     }
 
     @Test
-    void anUnbudgetedGroupIsMeteredButHasNoCeiling() {
+    void aGroupWithoutATeamBudgetIsNeitherMeteredNorGated() {
         t.group("g2", "Free", null, null);
         GroupConversation gc = new GroupConversation();
         gc.setId("gc2");
         gc.setGroupId("g2");
         gc.setTotalCost(1.25);
         t.meter.beginLeg(gc, t.service.config("g2"));
-        assertNull(gc.getTeamBudgetState().getCeilingUsd());
-        assertEquals(1.25, t.store.read("g2", MONTH).orElseThrow().spentUsd(), 1e-9);
+        t.meter.charge(gc);
+        t.meter.endLeg(gc);
+        assertEquals(0, t.store.calls.get(), "no store round trip at all");
+        assertNull(gc.getTeamBudgetState());
+        assertTrue(t.store.read("g2", MONTH).isEmpty());
+    }
+
+    @Test
+    void removingTheBudgetStopsTheChargingOfAResumedRun() {
+        GroupConversation gc = gc(0, 1.0);
+        t.meter.beginLeg(gc, config);
+        t.group("g1", "Content Studio", null, null);
+        gc.setTotalCost(5.0);
+        t.meter.beginLeg(gc, t.service.config("g1"));
+        t.meter.charge(gc);
+        assertNull(gc.getTeamBudgetState());
+        assertEquals(1.0, spent(), 1e-9);
     }
 
     @Test

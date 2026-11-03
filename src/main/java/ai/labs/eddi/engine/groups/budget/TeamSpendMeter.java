@@ -74,18 +74,15 @@ public class TeamSpendMeter {
             if (!meteringEnabled || gc == null || gc.getDepth() != 0) {
                 return;
             }
-            TeamBudgetState state = stateOf(gc);
-            charge(gc);
             TeamBudgetConfig budget = config == null ? null : config.getTeamBudget();
             if (budget == null || budget.monthlyBudgetUsd() == null) {
-                synchronized (state) {
-                    state.setCeilingUsd(null);
-                    state.setCapUsd(null);
-                    state.setTenantCeilingUsd(null);
-                    state.setLimitedBy(null);
-                }
+                // Off when absent: a group with no teamBudget is neither metered nor
+                // gated. Dropping a state left by an earlier leg stops its charging.
+                gc.setTeamBudgetState(null);
                 return;
             }
+            TeamBudgetState state = stateOf(gc);
+            charge(gc);
             CostPolicy policy = budget.onExhausted() != null
                     ? budget.onExhausted()
                     : config.getProtocol() != null ? config.getProtocol().onCostExceeded() : CostPolicy.SYNTHESIZE_NOW;
@@ -133,7 +130,11 @@ public class TeamSpendMeter {
             if (!meteringEnabled || gc == null || gc.getDepth() != 0 || gc.getGroupId() == null) {
                 return;
             }
-            TeamBudgetState state = stateOf(gc);
+            // Only a group that configures a teamBudget has a state (beginLeg creates it).
+            TeamBudgetState state = gc.getTeamBudgetState();
+            if (state == null) {
+                return;
+            }
             double toSend;
             synchronized (state) {
                 double delta = gc.getTotalCost() - state.getChargedUsd();

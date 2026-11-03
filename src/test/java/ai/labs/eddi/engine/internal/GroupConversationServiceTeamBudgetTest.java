@@ -267,8 +267,8 @@ class GroupConversationServiceTeamBudgetTest {
     }
 
     @Test
-    @DisplayName("a group without a teamBudget runs exactly as before, uncapped, but is metered")
-    void unbudgetedGroupIsMeteredNotCapped() throws Exception {
+    @DisplayName("a group without a teamBudget runs exactly as before: uncapped, unmetered, no store access")
+    void unbudgetedGroupIsNeitherMeteredNorCapped() throws Exception {
         config(null, null, protocol(null, null));
         stubAgentSayCosting(2.0);
 
@@ -276,6 +276,8 @@ class GroupConversationServiceTeamBudgetTest {
 
         var phasesRun = gc.getTranscript().stream().filter(e -> e.type() != TranscriptEntryType.SKIPPED).map(e -> e.phaseName()).distinct().toList();
         assertTrue(phasesRun.containsAll(List.of("Opinion", "Critique", "Review", "Summary")));
-        assertEquals(gc.getTotalCost(), teamSpent(), 1e-9, "metered so that a cap added later sees the month to date");
+        assertEquals(0, budgetStore.calls.get(), "nothing new on the hot path: no budget store access");
+        assertEquals(0.0, teamSpent(), 1e-9);
+        assertNull(gc.getTeamBudgetState());
     }
 }

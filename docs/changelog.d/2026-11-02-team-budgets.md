@@ -15,6 +15,7 @@ leave the others nothing, and nothing said who had spent what. A group can now c
 - **Store** — one document per `(groupId, UTC month)` in `team_budget_months` (MongoDB and PostgreSQL twins) holding
   spend, the month's cap adjustment, a bounded adjustment history and the applied transfer ids; atomic `$inc` /
   `ON CONFLICT` spend, one conditional update for a debit, 13-month retention.
+- **Off when absent** — a group without a `teamBudget` is not metered, gated or ceilinged: no store access, no state on its discussions. `eddi.groups.team-budget.metering-enabled=false` is the global kill switch. Spend before a cap is added is not back-filled.
 - **Metering** — [`TeamSpendMeter`](../../src/main/java/ai/labs/eddi/engine/groups/budget/TeamSpendMeter.java) charges
   the increase of the root discussion's `gc.totalCost` after each member turn, each nested roll-up and each leg. A nested
   child charges nothing (its parent pays). Never fails a discussion; an outage is carried to the next charge.

@@ -66,7 +66,9 @@ public class TeamBudgetContext {
      *            whether the discussion's owner may read a given group
      */
     public Map<String, Object> values(GroupConversation gc, Predicate<String> mayView) {
-        if (gc == null || gc.getGroupId() == null) {
+        // No state means no teamBudget on this root discussion: nothing to show, no
+        // read.
+        if (gc == null || gc.getGroupId() == null || gc.getTeamBudgetState() == null) {
             return Map.of();
         }
         long now = clock.millis();

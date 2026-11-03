@@ -654,7 +654,7 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.groups.max-depth` | `3` | Nesting limit for groups-of-groups |
 | `eddi.groups.cadence.claim-ttl` | `PT24H` | How long a standing-team cadence claim is held |
 | `eddi.groups.team-budget.admin-only-edits` | `true` | Changing a group's `teamBudget` needs `eddi-admin`; `false` lets editors change it (and so raise their own cap). See [Team Budgets](team-budgets.md#who-may-change-what) |
-| `eddi.groups.team-budget.metering-enabled` | `true` | Charge root-discussion spend to the owning team's monthly budget (also for groups without a cap, so a cap added later sees the month to date). `false` stops all team accounting |
+| `eddi.groups.team-budget.metering-enabled` | `true` | Charge root-discussion spend to the owning team's monthly budget of groups that configure a `teamBudget` (a group without one is never metered or gated). `false` is a global kill switch that stops all team accounting and ceilings |
 | `eddi.groups.team-budget.retention-months` | `13` | How many months of team budget history are kept |
 | `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
