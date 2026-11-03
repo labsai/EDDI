@@ -490,7 +490,7 @@ public class MemberTurnExecutor {
                 if (memberPaused[0]) {
                     if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
                         TranscriptEntry graceful = tryResolveMemberToolPause(
-                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
+                                member, gc, convId, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
                         if (graceful != null) {
                             return graceful;
                         }
@@ -667,21 +667,14 @@ public class MemberTurnExecutor {
      * infrastructure failure likewise returns {@code null} so the fallback still
      * terminates the turn cleanly.
      *
-     * {@code input} is unused and stays: static analysis flags it every run, but
-     * the caller passes the member's turn input positionally alongside eight other
-     * arguments, and this method is the natural home for a retry that re-sends it —
-     * which the plan's I7 (delegation hardening) will need. Dropping one parameter
-     * from the middle of a nine-argument call is also the shape of change most
-     * likely to be silently mis-applied at the call site.
-     *
      * @return a real contribution entry on graceful success, or {@code null} to
      *         signal "fall back to SKIP + cancel"
      */
     public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                     String input, int timeoutSeconds, int phaseIdx,
+                                                     int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId) {
-        return tryResolveMemberToolPause(member, gc, convId, input, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId,
+        return tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId,
                 member.agentId());
     }
 
@@ -691,7 +684,7 @@ public class MemberTurnExecutor {
      * separately keyed conversation.
      */
     public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                     String input, int timeoutSeconds, int phaseIdx,
+                                                     int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId, String costKey) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "

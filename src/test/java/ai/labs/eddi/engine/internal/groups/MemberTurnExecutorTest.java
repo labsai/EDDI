@@ -278,7 +278,7 @@ class MemberTurnExecutorTest {
         gc.setId("gc-1");
         gc.setGroupId("group-1");
 
-        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", "input", 5, 0,
+        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", 5, 0,
                 phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
 
         assertNotNull(entry, "a completed resume yields a real contribution, not a fallback");
@@ -319,7 +319,7 @@ class MemberTurnExecutorTest {
         gc.setId("gc-1");
         gc.setGroupId("group-1");
 
-        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", "input", 5, 0,
+        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", 5, 0,
                 phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
 
         assertNotNull(entry);
@@ -359,7 +359,7 @@ class MemberTurnExecutorTest {
         gc.setId("gc-1");
         gc.setGroupId("group-1");
 
-        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", "input", 5, 0,
+        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", 5, 0,
                 phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null, "conv-key");
 
         assertNull(entry, "a re-paused resume still falls back to SKIP + cancel");

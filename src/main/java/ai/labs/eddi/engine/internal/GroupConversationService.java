@@ -2423,10 +2423,10 @@ public class GroupConversationService implements IGroupConversationService, User
     // requires the method to be declared directly on this class.
 
     private TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                      String input, int timeoutSeconds, int phaseIdx,
+                                                      int timeoutSeconds, int phaseIdx,
                                                       DiscussionPhase phase, TranscriptEntryType entryType,
                                                       String targetAgentId) {
-        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, input, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
+        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
     }
 
     private TranscriptEntry handleMemberPause(GroupMember member, GroupConversation gc, String convId,
