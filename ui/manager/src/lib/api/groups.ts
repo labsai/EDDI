@@ -1016,6 +1016,13 @@ export interface HumanRequestDetail {
   timeoutResolution?: string | null;
 }
 
+/** The task a pending human task-force task is about, or `undefined` for any other pending input. */
+export function pendingHumanTask(conversation?: GroupConversation | null): TaskItem | undefined {
+  const pending = conversation?.pendingHumanInput;
+  if (pending?.detail?.kind !== "TASK" || !pending.detail.taskId) return undefined;
+  return conversation?.taskList?.tasks?.find((t) => t.id === pending.detail!.taskId);
+}
+
 /** The options a pending tie-break offers, or `undefined` for any other pending input. */
 export function tieBreakOptions(pending?: PendingHumanInput | null): string[] | undefined {
   return pending?.detail?.kind === "TIE_BREAK" ? (pending.detail.options ?? []) : undefined;

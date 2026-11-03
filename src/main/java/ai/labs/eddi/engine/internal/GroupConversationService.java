@@ -2348,7 +2348,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                            DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                            GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
-        taskForceEngine.executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+        taskForceEngine.executeTaskExecutionPhase(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
     private void resetStrandedInProgressTasks(GroupConversation gc, String cause) {

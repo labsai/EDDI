@@ -15,7 +15,7 @@ import { hasDisplayableDecision } from "@/lib/group-config";
 import { isAgentFailurePlaceholder, parseTranscriptContent, safeFormatDate } from "./group-utils";
 import { AgentFailedNotice } from "./structured-entry-body";
 import type { GroupConversation, TranscriptEntry, PhaseType, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
-import { tieBreakOptions } from "@/lib/api/groups";
+import { pendingHumanTask, tieBreakOptions } from "@/lib/api/groups";
 import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn, formatUsd } from "@/lib/utils";
@@ -819,6 +819,7 @@ export function DiscussionTranscript({
                 turnTimeout={humanTurnTimeout}
                 isSubmitting={isSubmittingHumanInput}
                 options={tieBreakOptions(persisted)}
+                task={pendingHumanTask(conversation)}
                 onSubmit={(content, choice) => {
                   const memberId = persisted?.memberId ?? pending?.memberId;
                   if (gcId && memberId) onSubmitHumanInput?.(gcId, memberId, content, choice);

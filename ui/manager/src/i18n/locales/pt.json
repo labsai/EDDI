@@ -5740,6 +5740,12 @@
     "backlogNote": "Cada execução de cadência escolhe primeiro as tarefas de maior prioridade (P5 antes de P1). Uma tarefa não pode ser editada depois de adicionada; uma execução a conclui, ou você pode excluí-la.",
     "priorityHint": "Números mais altos são escolhidos primeiro por uma execução de cadência. 0 é o padrão."
   },
+  "groupHumanTasks": {
+    "bannerTitle": "Há uma tarefa atribuída a você, {{name}}",
+    "resultPlaceholder": "Seu resultado para esta tarefa",
+    "inboxBadge": "Tarefa",
+    "inboxReason": "Aguardando {{member}} concluir uma tarefa atribuída"
+  },
   "workforceWizard": {
     "title": "Nova equipa"
   },

@@ -5740,6 +5740,12 @@
     "backlogNote": "Cada ejecución de cadencia elige primero las tareas de mayor prioridad (P5 antes que P1). Una tarea no se puede editar una vez añadida; una ejecución la completa, o puedes eliminarla.",
     "priorityHint": "Una ejecución de cadencia elige primero los números más altos. 0 es el valor por defecto."
   },
+  "groupHumanTasks": {
+    "bannerTitle": "Tienes una tarea asignada, {{name}}",
+    "resultPlaceholder": "Tu resultado para esta tarea",
+    "inboxBadge": "Tarea",
+    "inboxReason": "Esperando a que {{member}} termine una tarea asignada"
+  },
   "workforceWizard": {
     "title": "Equipo nuevo"
   },

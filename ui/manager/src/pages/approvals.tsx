@@ -140,6 +140,8 @@ function ApprovalQueueRow({
   const isHumanTurn = item.pauseType === "HUMAN_TURN";
   /** A tied vote waiting for its decider (tiePolicy HUMAN_DECIDES) — still a human turn. */
   const isTieBreak = isHumanTurn && item.pendingKind === "TIE_BREAK";
+  /** A task-force task assigned to a HUMAN member. */
+  const isHumanTask = isHumanTurn && item.pendingKind === "TASK";
   /** A group phase pause: decided here, and reviewable in place like a tool call. */
   const isGroupDecision = !!item.groupId && !isHumanTurn;
   // A HUMAN turn names its member by id; the group's roster has the name a
@@ -260,7 +262,11 @@ function ApprovalQueueRow({
               data-testid={`human-turn-badge-${item.conversationId}`}
             >
               <UserCheck className="h-3 w-3" />{" "}
-              {isTieBreak ? t("groupTieBreak.inboxBadge", "Tie-break") : t("hitl.humanTurn", "Member's turn")}
+              {isTieBreak
+                ? t("groupTieBreak.inboxBadge", "Tie-break")
+                : isHumanTask
+                  ? t("groupHumanTasks.inboxBadge", "Task")
+                  : t("hitl.humanTurn", "Member's turn")}
             </span>
           )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
@@ -270,7 +276,11 @@ function ApprovalQueueRow({
                 ? t("groupTieBreak.inboxReason", "Waiting on {{member}} to break a tied vote", {
                     member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
                   })
-                : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
+                : isHumanTask
+                  ? t("groupHumanTasks.inboxReason", "Waiting on {{member}} to finish an assigned task", {
+                      member: turnMemberName || item.pendingMemberId || t("hitl.humanTurnMemberFallback", "a member"),
+                    })
+                  : t("hitl.humanTurnReason", "Waiting on {{member}} to speak", {
                     member:
                       turnMemberName ||
                       item.pendingMemberId ||

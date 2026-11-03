@@ -5680,6 +5680,12 @@
     "backlogNote": "Each cadence run picks the highest-priority tasks first (P5 before P1). A task cannot be edited once it is added; a run completes it, or you can delete it.",
     "priorityHint": "Higher numbers are picked first by a cadence run. 0 is the default."
   },
+  "groupHumanTasks": {
+    "bannerTitle": "A task is assigned to you, {{name}}",
+    "resultPlaceholder": "Your result for this task",
+    "inboxBadge": "Task",
+    "inboxReason": "Waiting on {{member}} to finish an assigned task"
+  },
   "workforceWizard": {
     "title": "New Team"
   },
