@@ -3395,7 +3395,6 @@
     "convergenceJudge": "ジャッジ",
     "judgeModerator": "モデレーター",
     "judgeService": "サービス",
-    "judgeServiceNote": "受け付けられますがまだ接続されていません — エンジンはモデレーターにフォールバックし、警告を記録します。",
     "convergenceMode": "停止条件",
     "convergenceModeSimilarity": "メンバーの意見が一致したとき",
     "convergenceModeVerdict": "モデレーターのレビューに合格したとき",
@@ -4138,6 +4137,16 @@
     "presetsLink": "グループテンプレート",
     "agentNotDeployed": "エージェントは作成されましたが、デプロイされていません",
     "deployingAgents": "エージェントをデプロイしています..."
+  },
+  "groupServiceJudge": {
+    "provider": "プロバイダー",
+    "model": "モデル",
+    "apiKey": "API キーの参照",
+    "timeoutMs": "タイムアウト (ms)",
+    "inputPrice": "入力 $ / 100 万トークン",
+    "outputPrice": "出力 $ / 100 万トークン",
+    "noteConfigured": "チェックごとにモデルを直接 1 回呼び出します。モデレーターは不要です。費用はディスカッションに計上されます。失敗や読み取れない応答でフェーズが終わることはありません。",
+    "noteFallback": "プロバイダーとモデルを指定してください。指定がなければモデレーターエージェントが判定します。"
   },
   "groupTemplates": {
     "advisoryBoard": "アドバイザリーボード",

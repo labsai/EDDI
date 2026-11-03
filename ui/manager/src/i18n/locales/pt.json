@@ -3427,7 +3427,6 @@
     "convergenceJudge": "Juiz",
     "judgeModerator": "Moderador",
     "judgeService": "Serviço",
-    "judgeServiceNote": "Aceite mas ainda não ligado — o motor recorre ao moderador e regista um aviso.",
     "convergenceMode": "Parar quando",
     "convergenceModeSimilarity": "Os membros concordam",
     "convergenceModeVerdict": "A revisão do moderador é aprovada",
@@ -4184,6 +4183,16 @@
     "presetsLink": "Modelos de grupo",
     "agentNotDeployed": "Agente criado, mas não implantado",
     "deployingAgents": "Implantando os agentes..."
+  },
+  "groupServiceJudge": {
+    "provider": "Provedor",
+    "model": "Modelo",
+    "apiKey": "Referência da chave de API",
+    "timeoutMs": "Tempo limite (ms)",
+    "inputPrice": "Entrada $ / 1 M tokens",
+    "outputPrice": "Saída $ / 1 M tokens",
+    "noteConfigured": "Uma chamada direta ao modelo por verificação, sem moderador. O custo conta para a discussão. Uma resposta com falha ou ilegível nunca encerra a fase.",
+    "noteFallback": "Informe um provedor e um modelo, ou o agente moderador julga."
   },
   "groupTemplates": {
     "advisoryBoard": "Conselho consultivo",

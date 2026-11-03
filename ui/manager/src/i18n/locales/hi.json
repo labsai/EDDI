@@ -3395,7 +3395,6 @@
     "convergenceJudge": "निर्णायक",
     "judgeModerator": "मॉडरेटर",
     "judgeService": "सेवा",
-    "judgeServiceNote": "स्वीकार्य है पर अभी जुड़ा नहीं — इंजन मॉडरेटर पर लौटता है और चेतावनी दर्ज करता है।",
     "convergenceMode": "कब रोकें",
     "convergenceModeSimilarity": "सदस्य सहमत हों",
     "convergenceModeVerdict": "मॉडरेटर की समीक्षा पास हो",
@@ -4138,6 +4137,16 @@
     "presetsLink": "समूह टेम्पलेट",
     "agentNotDeployed": "एजेंट बनाया गया, लेकिन डिप्लॉय नहीं किया गया",
     "deployingAgents": "एजेंट डिप्लॉय हो रहे हैं..."
+  },
+  "groupServiceJudge": {
+    "provider": "प्रदाता",
+    "model": "मॉडल",
+    "apiKey": "API कुंजी संदर्भ",
+    "timeoutMs": "समय-सीमा (ms)",
+    "inputPrice": "इनपुट $ / 10 लाख टोकन",
+    "outputPrice": "आउटपुट $ / 10 लाख टोकन",
+    "noteConfigured": "हर जाँच पर एक सीधा मॉडल कॉल, मॉडरेटर की ज़रूरत नहीं। इसकी लागत चर्चा में गिनी जाती है। विफल या अपठनीय उत्तर कभी चरण समाप्त नहीं करता।",
+    "noteFallback": "एक प्रदाता और एक मॉडल बताएँ, वरना मॉडरेटर एजेंट निर्णय करेगा।"
   },
   "groupTemplates": {
     "advisoryBoard": "सलाहकार मंडल",

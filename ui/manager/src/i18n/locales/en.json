@@ -3449,7 +3449,6 @@
     "convergenceJudge": "Judge",
     "judgeModerator": "Moderator",
     "judgeService": "Service",
-    "judgeServiceNote": "Accepted but not yet wired — the engine falls back to the moderator and logs a warning.",
     "convergenceMode": "Stop when",
     "convergenceModeSimilarity": "Members agree",
     "convergenceModeVerdict": "The moderator's review passes",
@@ -3964,6 +3963,16 @@
     "presetsLink": "Group Templates",
     "agentNotDeployed": "Agent created but not deployed",
     "deployingAgents": "Deploying the agents..."
+  },
+  "groupServiceJudge": {
+    "provider": "Provider",
+    "model": "Model",
+    "apiKey": "API key reference",
+    "timeoutMs": "Timeout (ms)",
+    "inputPrice": "Input $ / 1M tokens",
+    "outputPrice": "Output $ / 1M tokens",
+    "noteConfigured": "One direct model call per check, no moderator needed. Its cost counts toward the discussion. A failed or unreadable reply never ends the phase.",
+    "noteFallback": "Name a provider and a model, or the moderator agent judges instead."
   },
   "groupTemplates": {
     "advisoryBoard": "Advisory Board",

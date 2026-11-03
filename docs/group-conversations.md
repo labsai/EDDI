@@ -791,7 +791,7 @@ controls that shape *when it stops* and *what it costs*:
   "repeats": 3,
   "requiresApproval": false,
   "allowAbstention": true,
-  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "SERVICE" }
+  "convergence": { "enabled": true, "minRepeats": 2, "threshold": 0.8, "judge": "MODERATOR" }
 }
 ```
 
@@ -809,10 +809,11 @@ scores similarity against `threshold`; `minRepeats` (minimum 2 — one round has
 nothing to compare against) guards against calling convergence before there is
 evidence. `judge` selects who scores it: `MODERATOR` runs the moderator agent as
 the judge (in its own conversation, so the judge's JSON-only prompts never leak
-into a later SYNTHESIS turn). `SERVICE` is **accepted but not yet wired** — it
-logs a warning and falls back to the same moderator-agent path, so it currently
-costs the same as `MODERATOR` rather than the cheaper dedicated call the name
-suggests. Either way, a group with no moderator skips the judge and the phase
+into a later SYNTHESIS turn). `SERVICE` with a `service` model makes one cheap
+direct model call instead, needs no moderator, and books its spend as
+`system:judge:*` — see [Group Convergence Judge: SERVICE](group-service-judge.md);
+without a `service` model it falls back to the moderator path with a warning.
+A `MODERATOR` judge in a group with no moderator is skipped and the phase
 simply keeps going. Converging is a *real completed repeat*: it still
 persists, still fires `onPhaseComplete`, and still runs the phase's decision
 block.

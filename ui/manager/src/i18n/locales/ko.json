@@ -3395,7 +3395,6 @@
     "convergenceJudge": "심판",
     "judgeModerator": "진행자",
     "judgeService": "서비스",
-    "judgeServiceNote": "허용되지만 아직 연결되지 않았습니다 — 엔진이 진행자로 대체하고 경고를 기록합니다.",
     "convergenceMode": "중지 조건",
     "convergenceModeSimilarity": "멤버들이 합의하면",
     "convergenceModeVerdict": "모더레이터 검토를 통과하면",
@@ -4138,6 +4137,16 @@
     "presetsLink": "그룹 템플릿",
     "agentNotDeployed": "에이전트가 생성되었지만 배포되지 않았습니다",
     "deployingAgents": "에이전트를 배포하는 중..."
+  },
+  "groupServiceJudge": {
+    "provider": "제공자",
+    "model": "모델",
+    "apiKey": "API 키 참조",
+    "timeoutMs": "제한 시간 (ms)",
+    "inputPrice": "입력 $ / 100만 토큰",
+    "outputPrice": "출력 $ / 100만 토큰",
+    "noteConfigured": "확인할 때마다 모델을 한 번 직접 호출하며 모더레이터가 필요 없습니다. 비용은 토론에 포함됩니다. 실패하거나 읽을 수 없는 응답은 단계를 끝내지 않습니다.",
+    "noteFallback": "제공자와 모델을 지정하세요. 지정하지 않으면 모더레이터 에이전트가 판단합니다."
   },
   "groupTemplates": {
     "advisoryBoard": "자문단",
