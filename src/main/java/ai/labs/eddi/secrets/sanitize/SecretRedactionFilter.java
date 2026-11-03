@@ -917,7 +917,7 @@ public final class SecretRedactionFilter {
                     boolean closed = open == 1
                             ? close < length && text.charAt(close) == '"'
                             : close + 1 < length && text.charAt(close) == '\\' && text.charAt(close + 1) == '"';
-                    if (closed && close > valueStart + open && text.charAt(valueStart + open) != ':') {
+                    if (closed && close > valueStart + open && !isJsonKeyBoundary(text, valueStart + open, close)) {
                         closeLength = open;
                         valueStart += open;
                     }
@@ -968,6 +968,20 @@ public final class SecretRedactionFilter {
     private static boolean isCookieNameChar(char c) {
         return c > ' ' && c < 0x7f && c != '=' && c != ';' && c != ',' && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}'
                 && c != '[' && c != ']';
+    }
+
+    /**
+     * Whether the run between a quote pair is what follows a JSON key's closing
+     * quote rather than a cookie value: the key/value colon alone (before the
+     * value's own opening quote), or the colon right before an object or array
+     * value. A value that merely starts with a colon, {@code ":abc123"}, is a
+     * cookie and is redacted.
+     */
+    private static boolean isJsonKeyBoundary(String text, int runStart, int runEnd) {
+        if (text.charAt(runStart) != ':') {
+            return false;
+        }
+        return runEnd == runStart + 1 || text.charAt(runStart + 1) == '{' || text.charAt(runStart + 1) == '[';
     }
 
     /** Inside a double-quoted value RFC 6265 also allows an apostrophe. */

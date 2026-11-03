@@ -196,7 +196,9 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
             }
         }
-        if (recordsFailure) {
+        if (recordsFailure || !allAccepted) {
+            // A refused entry means the ledger never got this turn's prompt and response
+            // either
             retainEvidence(memory);
         }
         return allAccepted && !recordsFailure && !retainedEarlier;

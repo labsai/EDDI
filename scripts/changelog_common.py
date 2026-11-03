@@ -185,7 +185,12 @@ _PENDING_FRAGMENT = re.compile(r"(?:^|/)changelog\.d/\d{4}-\d{2}-\d{2}-[^/]+\.md
 def _is_pending_fragment(target):
     """Whether a link target, once its dots and slashes are resolved, names a dated
     fragment under docs/changelog.d/ — the files collation deletes."""
-    path = target.split("#", 1)[0].split("?", 1)[0]
+    destination = target.strip()
+    if destination.startswith("<") and ">" in destination:
+        destination = destination[1:destination.index(">")]  # [x](<../a b.md> "title")
+    else:
+        destination = destination.split()[0] if destination else destination  # [x](../a.md "title")
+    path = destination.split("#", 1)[0].split("?", 1)[0]
     return bool(_PENDING_FRAGMENT.search(posixpath.normpath(path)))
 
 

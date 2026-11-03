@@ -710,6 +710,17 @@ class SecretRedactionFilterTest {
         }
 
         @Test
+        void aQuotedCookieValueThatStartsWithAColonIsRedacted() {
+            assertEquals("Set-Cookie: Path=\"<REDACTED>\"", redactTwice("Set-Cookie: Path=\":abc123session\""));
+            assertEquals("Cookie: sid=\"<REDACTED>\"", redactTwice("Cookie: sid=\":abc123session\""));
+        }
+
+        @Test
+        void aJsonKeyFollowedByAnObjectValueStaysValidJson() {
+            assertValidJson(redactTwice("{\"Cookie: a=\":{\"x\":\"v\"}}"));
+        }
+
+        @Test
         void aQuotedSetCookieAttributeIsKept() {
             assertEquals("Set-Cookie: a=<REDACTED>; Domain=\"example.com\"", redactTwice("Set-Cookie: a=b; Domain=\"example.com\""));
         }
