@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
+import { useGroupDescriptors } from "@/hooks/use-groups";
 import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { useTeamBudgets } from "@/hooks/use-team-budget";
+import { groupGroupsByName } from "@/lib/api/groups";
 import { TEAM_BUDGET_MAX_LISTED_GROUPS, type TeamBudgetSnapshot } from "@/lib/api/team-budget";
 import { formatUsd } from "@/lib/utils";
 import { BudgetBar } from "@/components/workforce/team-budget-card";
@@ -18,8 +19,10 @@ import { AdjustBudgetDialog, TransferBudgetDialog } from "./team-budget-dialogs"
 export function TeamBudgetsTable() {
   const { t } = useTranslation();
   const isAdmin = useIsAdminOrUnknown();
-  const groups = useEnrichedGroupDescriptors(TEAM_BUDGET_MAX_LISTED_GROUPS, 0, "");
-  const ids = useMemo(() => (groups.data ?? []).map((g) => g.id), [groups.data]);
+  // Plain descriptors are enough (only ids are needed); the batch endpoint takes at most
+  // TEAM_BUDGET_MAX_LISTED_GROUPS ids, so the newest groups are listed.
+  const groups = useGroupDescriptors(TEAM_BUDGET_MAX_LISTED_GROUPS, 0, "");
+  const ids = useMemo(() => groupGroupsByName(groups.data ?? []).map((g) => g.id), [groups.data]);
   const budgets = useTeamBudgets(ids);
   const [adjusting, setAdjusting] = useState<TeamBudgetSnapshot | null>(null);
   const [transferFrom, setTransferFrom] = useState<string | null>(null);

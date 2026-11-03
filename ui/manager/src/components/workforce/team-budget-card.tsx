@@ -85,7 +85,7 @@ export function TeamBudgetCard({ groupId }: { groupId: string }) {
           <dd className="font-medium" data-testid="team-budget-remaining">{formatUsd(budget.remainingUsd ?? 0)}</dd>
         </div>
       </dl>
-      <p className="text-xs text-muted-foreground">{t("teamBudget.resetsOn", "Resets {{date}}", { date: new Date(budget.resetsAt).toLocaleDateString() })}</p>
+      <p className="text-xs text-muted-foreground">{t("teamBudget.resetsOn", "Resets {{date}}", { date: new Date(budget.resetsAt).toLocaleDateString(undefined, { timeZone: "UTC" }) })}</p>
 
       <button
         type="button"

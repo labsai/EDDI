@@ -19,7 +19,7 @@ another's month: a Content Studio at $35, a Signal Radar at $30, a Growth Board 
   "teamBudget": {
     "monthlyBudgetUsd": 35.0,
     "onExhausted": "SYNTHESIZE_NOW",
-    "oversight": { "teams": ["<signalRadarGroupId>", "<contentStudioGroupId>"] }
+    "oversight": { "teams": ["<signalRadarGroupId>"] }
   }
 }
 ```
@@ -134,8 +134,14 @@ is exactly when nobody is watching the spend.
 | POST | `/administration/team-budgets/transfers` | admin | `{"fromGroupId", "toGroupId", "amountUsd", "reason"}` plus an `Idempotency-Key` header |
 
 A transfer debits the source first, conditional on the source keeping a cap at or above its spend, then credits
-the target; if the credit fails the debit is reversed. Money only ever disappears from caps, never appears, so a
-failure in between is conservative. Retrying with the same `Idempotency-Key` moves nothing twice. A reason is
+the target; if the credit fails the debit is reversed (an attempted reversal, recorded as `TRANSFER_OUT_REVERSED`
+and audited as `REVERSED`). If the reversal fails too, the audit entry says `PARTIAL`: the source was debited and the
+target never credited, so money has disappeared from caps and an administrator should reconcile it by raising the
+source's cap again. Money never appears. Retrying with the same `Idempotency-Key` moves nothing twice: a retry of a
+finished transfer returns the original result without a second audit entry; a retry of one that was reversed is
+refused (use a new key); a retry of one that stopped between debit and credit completes the credit. The key is
+remembered for the last 200 adjustments of a team-month, so a retry that arrives after more than 200 later
+adjustments of the same team and month is no longer recognised. A reason is
 required (at most 1000 characters). Both adjustments and transfers write an audit-ledger entry
 (`ai.labs.budget`, `TEAM_BUDGET_ADJUSTED` / `TEAM_BUDGET_TRANSFERRED`, with amount, month and reason), because the
 admin-action audit records only method, path and status.

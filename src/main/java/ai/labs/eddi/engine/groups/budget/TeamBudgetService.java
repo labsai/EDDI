@@ -78,6 +78,14 @@ public class TeamBudgetService {
     @ConfigProperty(name = "eddi.groups.team-budget.retention-months", defaultValue = "13")
     int retentionMonths = 13;
 
+    /**
+     * {@code eddi.groups.team-budget.metering-enabled}: the single kill switch.
+     * Off, the admission gate admits everything as well, so a group with a cap is
+     * neither metered nor refused.
+     */
+    @ConfigProperty(name = "eddi.groups.team-budget.metering-enabled", defaultValue = "true")
+    boolean meteringEnabled = true;
+
     @Inject
     public TeamBudgetService(ITeamBudgetStore store, IAgentGroupStore groupStore, TenantQuotaService tenantQuotaService,
             MeterRegistry meterRegistry, TeamBudgetAudit audit) {
@@ -192,6 +200,9 @@ public class TeamBudgetService {
      * {@code teamBudget} is admitted without any store read.
      */
     public Decision decide(String groupId) {
+        if (!meteringEnabled) {
+            return Decision.ok(null);
+        }
         AgentGroupConfiguration config = config(groupId);
         if (config == null || config.getTeamBudget() == null) {
             return Decision.ok(null);
@@ -276,6 +287,15 @@ public class TeamBudgetService {
     }
 
     /**
+     * Whether the team's month already records an adjustment of this kind for the
+     * transfer id.
+     */
+    private boolean hasAdjustment(String groupId, String month, String kind, String transferId) {
+        return store.read(groupId, month).map(m -> m.adjustments().stream()
+                .anyMatch(adj -> kind.equals(adj.kind()) && transferId.equals(adj.transferId()))).orElse(false);
+    }
+
+    /**
      * Moves {@code amountUsd} of this month's cap from one team to another.
      * <p>
      * Debit first, conditional on the source keeping a cap at or above its spend,
@@ -306,6 +326,19 @@ public class TeamBudgetService {
         if (debit == ITeamBudgetStore.AdjustOutcome.REFUSED) {
             throw new IllegalArgumentException(String.format(Locale.ROOT, "Team '%s' has only $%.2f left this month; it cannot give up $%.2f.",
                     displayName(from, fromGroupId), fromBefore.remainingUsd(), amountUsd));
+        }
+        if (debit == ITeamBudgetStore.AdjustOutcome.DUPLICATE) {
+            // A retry of this transfer id. The first attempt may have finished, been
+            // reversed after
+            // a failed credit, or died between debit and credit: only the last needs the
+            // credit.
+            if (hasAdjustment(fromGroupId, month, "TRANSFER_OUT_REVERSED", tid)) {
+                throw new IllegalArgumentException(
+                        "Transfer " + tid + " was reversed after its credit failed; start it again with a new Idempotency-Key.");
+            }
+            if (hasAdjustment(toGroupId, month, "TRANSFER_IN", tid)) {
+                return new TransferResult(snapshot(fromGroupId, from), snapshot(toGroupId, to), tid);
+            }
         }
         TeamBudgetMonth.Adjustment in = new TeamBudgetMonth.Adjustment(now, actor, "TRANSFER_IN", amountUsd, toBefore.capUsd() + amountUsd, reason,
                 fromGroupId, tid);

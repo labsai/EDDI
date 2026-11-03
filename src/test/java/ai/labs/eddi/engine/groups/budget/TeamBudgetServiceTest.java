@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.OptionalDouble;
@@ -19,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -209,6 +211,64 @@ class TeamBudgetServiceTest {
         t.service.transfer("radar", "studio", 5.0, "x", "alice", "same");
         assertEquals(25.0, t.service.snapshot("radar").capUsd());
         assertEquals(40.0, t.service.snapshot("studio").capUsd());
+    }
+
+    @Test
+    void theKillSwitchAdmitsAnExhaustedTeamToo() {
+        t.store.addSpend("radar", MONTH, 30.0, NOW);
+        assertFalse(t.service.decide("radar").allowed(), "precondition: exhausted team is refused");
+
+        t.service.meteringEnabled = false;
+
+        assertTrue(t.service.decide("radar").allowed());
+    }
+
+    @Test
+    void aRetriedFinishedTransferChangesNothingAndIsNotAuditedOrCountedTwice() {
+        t.service.transfer("radar", "studio", 5.0, "x", "alice", "once");
+        var again = t.service.transfer("radar", "studio", 5.0, "x", "alice", "once");
+
+        assertEquals(25.0, again.from().capUsd());
+        assertEquals(40.0, again.to().capUsd());
+        assertEquals(1.0, t.counter("eddi.team.budget.adjustments", "kind", "transfer"));
+        verify(t.audit, times(1)).transferred("alice", "radar", "studio", MONTH, 5.0, "x", "once", "APPLIED");
+    }
+
+    @Test
+    void aRetryAfterAFailedCreditWasReversedIsRefusedAndNeverCreditsTheTarget() {
+        var failFirstCredit = new AtomicBoolean(true);
+        var flaky = new InMemoryTeamBudgetStore() {
+            @Override
+            public synchronized AdjustOutcome applyAdjustment(String g, String m, double d, double b, TeamBudgetMonth.Adjustment e, String id,
+                                                              Instant x) {
+                if (g.equals("studio") && d > 0 && failFirstCredit.getAndSet(false)) {
+                    throw new TeamBudgetAccountingUnavailableException("boom");
+                }
+                return super.applyAdjustment(g, m, d, b, e, id, x);
+            }
+        };
+        var service = new TeamBudgetService(flaky, t.groupStore, t.tenant, t.registry, t.audit, TeamBudgetTestSupport.CLOCK);
+        assertThrows(TeamBudgetAccountingUnavailableException.class, () -> service.transfer("radar", "studio", 5.0, "x", "alice", "rev"));
+
+        var e = assertThrows(IllegalArgumentException.class, () -> service.transfer("radar", "studio", 5.0, "x", "alice", "rev"));
+
+        assertTrue(e.getMessage().contains("reversed"), e.getMessage());
+        assertEquals(30.0, service.snapshot("radar").capUsd());
+        assertEquals(35.0, service.snapshot("studio").capUsd(), "no money appeared");
+    }
+
+    @Test
+    void aRetryAfterTheDebitSurvivedButTheCreditNeverHappenedFinishesTheCredit() {
+        // the first attempt died between debit and credit: debit recorded, no credit,
+        // no reversal
+        t.store.applyAdjustment("radar", MONTH, -5.0, 30.0,
+                new TeamBudgetMonth.Adjustment(NOW, "alice", "TRANSFER_OUT", -5.0, 25.0, "x", "studio", "crash"), "crash:out",
+                NOW.plusSeconds(86_400));
+
+        var result = t.service.transfer("radar", "studio", 5.0, "x", "alice", "crash");
+
+        assertEquals(40.0, result.to().capUsd());
+        assertEquals(25.0, result.from().capUsd());
     }
 
     @Test
