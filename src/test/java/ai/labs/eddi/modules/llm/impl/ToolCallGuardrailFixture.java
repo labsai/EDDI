@@ -118,6 +118,11 @@ final class ToolCallGuardrailFixture {
         }
 
         @Override
+        public boolean callsModel() {
+            return true;
+        }
+
+        @Override
         public GuardrailVerdict evaluate(String text, GuardrailContext context) {
             calls.incrementAndGet();
             try (PaidCallGate.PaidCall paid = context.spend().begin(COST)) {
