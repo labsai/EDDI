@@ -214,11 +214,12 @@ class RestWorkflowStoreReferenceAccessTest {
     }
 
     @Test
-    @DisplayName("a reference spelled with another scheme is still checked: the engine resolves it by host and id alone")
+    @DisplayName("a reference spelled with another scheme, or none, is still checked: the engine resolves it by host and id alone")
     void nonCanonicalSchemeIsStillChecked() throws Exception {
         var config = new WorkflowConfiguration();
         for (String uri : List.of("Eddi://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1",
-                "x://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1")) {
+                "x://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1",
+                "//ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1")) {
             var step = new WorkflowStep();
             step.setConfig(new HashMap<>(Map.of("uri", uri)));
             config.getWorkflowSteps().clear();

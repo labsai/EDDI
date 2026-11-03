@@ -299,9 +299,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
         // Not filtered on a literal "eddi://" prefix: the engine resolves a step by
         // URI.create + host and never looks at the scheme, so "Eddi://ai.labs.llm/…"
-        // or "x://ai.labs.llm/…" runs exactly the configuration "eddi://…" does. A
-        // reference the check skipped but the engine executes was a way round it.
-        if (uri.getScheme() == null || uri.getHost() == null) {
+        // or "x://ai.labs.llm/…" runs exactly the configuration "eddi://…" does, and
+        // so does the scheme-less "//ai.labs.llm/…". A reference the check skipped
+        // but the engine executes was a way round it.
+        if (uri.getHost() == null) {
             return;
         }
         IResourceStore.IResourceId resourceId = RestUtilities.extractResourceId(uri);

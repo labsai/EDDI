@@ -1139,7 +1139,7 @@ public class ChannelTargetRouter {
             String value = resolved.get(key);
             if (value != null && SecretReference.isVaultReference(value)) {
                 resolved.remove(key);
-                warnUnusable(integrationKey, key, "does not resolve to a vault value");
+                warnUnusable(integrationKey, key, "does not resolve to a vault value", false);
             }
         }
         config.setPlatformConfig(resolved);
@@ -1155,7 +1155,7 @@ public class ChannelTargetRouter {
         }
         String value = resolveSecret(raw);
         if (value != null && SecretReference.isVaultReference(value)) {
-            warnUnusable(integrationKey, key, "does not resolve to a vault value");
+            warnUnusable(integrationKey, key, "does not resolve to a vault value", false);
             return null;
         }
         return value;
@@ -1174,14 +1174,21 @@ public class ChannelTargetRouter {
             vaultHostAllowlist.requireAllowed(List.of(raw), SLACK_API_DESTINATION, "Slack integration " + integrationKey + " bot token");
             return true;
         } catch (VaultHostAllowlist.HostNotAllowedException e) {
-            warnUnusable(integrationKey, KEY_BOT_TOKEN, "may not be sent to slack.com (" + e.getMessage() + ")");
+            warnUnusable(integrationKey, KEY_BOT_TOKEN, "may not be sent to slack.com (" + e.getMessage() + ")", true);
             return false;
         }
     }
 
-    private void warnUnusable(String integrationKey, String key, String problem) {
+    /**
+     * @param security
+     *            a refusal of a destination, tagged {@code [SECURITY]} for the
+     *            operators who alert on it; an unresolved secret is a missing
+     *            value, not that
+     */
+    private void warnUnusable(String integrationKey, String key, String problem, boolean security) {
         if (unusableCredentialWarned.add(integrationKey + "/" + key)) {
-            LOGGER.warnf("Channel integration %s: its %s %s - it is not used until that is fixed", sanitize(integrationKey), key, problem);
+            LOGGER.warnf("%sChannel integration %s: its %s %s - it is not used until that is fixed", security ? "[SECURITY] " : "",
+                    sanitize(integrationKey), key, problem);
         }
     }
 

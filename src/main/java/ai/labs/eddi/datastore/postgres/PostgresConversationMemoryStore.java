@@ -502,6 +502,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         // A read can be the first statement against a fresh database (GET of an
         // unknown conversation before any was created): without the table it failed
         // with "relation does not exist" — a 500 for what is a plain 404.
+        ensureSchema();
         return loadSnapshot(conversationId, "SELECT conversation_state, data FROM conversation_memories WHERE id = ?::uuid");
     }
 

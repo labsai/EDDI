@@ -117,11 +117,11 @@ export function brandPreviewStyle(primary: string | null, foreground: string | n
  */
 export function renderBrandStylesheet(colors: BrandColorValues, revision: number): string {
   const { primary, primaryForeground, darkPrimary, darkPrimaryForeground, chatAccent } = colors;
-  if (!primary && !primaryForeground && !chatAccent) return "";
+  if (!primary && !primaryForeground && !darkPrimary && !darkPrimaryForeground && !chatAccent) return "";
   const decl = (pairs: [string, string][]) => pairs.map(([k, v]) => `${k}:${v};`).join("");
   let css = `/* brand revision ${revision} */\n:root{`;
   css += decl(managerTokenDeclarations(primary, primaryForeground));
-  if (primary) css += `--brand-loader-accent:${darkPrimary ?? primary};`;
+  if (primary || darkPrimary) css += `--brand-loader-accent:${darkPrimary ?? primary};`;
   if (chatAccent) css += `--chat-accent:${chatAccent};`;
   css += "}\n";
   if (darkPrimary || darkPrimaryForeground) {
