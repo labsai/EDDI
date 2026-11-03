@@ -186,7 +186,9 @@ Metrics Reference dashboard under **Team Budgets**.
   the tenant meter has the same bound.
 - **Oversubscription is not checked.** Team caps may add up to more than the tenant's budget; the tenant gate
   still binds, and `limitedBy` says which limit is the tighter one.
-- **Not yet in the box:** the MCP tools for budgets and the Platform Operator's knowledge of them.
+- **MCP and the Platform Operator.** `read_team_budget`, `list_team_budgets` and, for administrators,
+  `adjust_team_budget` and `transfer_team_budget` (see [MCP Server](mcp-server.md#team-budget-tools-4)). The Platform
+  Operator reads budgets and explains refusals; it holds no budget write, so a cap is raised by an administrator.
 
 ## In the Manager
 

@@ -142,6 +142,8 @@ REST (`/groupstore/groups/{groupId}/workspace`, roles `eddi-admin` / `eddi-edito
 | `POST /handoffs/{handoffId}/decline` | EDIT | Body `{reasonCode?, note?}`. |
 | `DELETE /backlog/{taskId}` | EDIT | Deletes a backlog task and its origin. The backlog is capped at 200 tasks and had no other way to shrink; handoff makes the cap reachable. `409` while a cadence discussion is working the task. |
 
+MCP: `list_team_handoffs`, `accept_team_handoff` and `decline_team_handoff`, with the same access rules (see [MCP Server](mcp-server.md#team-handoff-tools-3)). The Platform Operator can read the inbox and explain a refusal, but never accepts or declines: an intake decision is a person's.
+
 Every decision writes an audit entry (`taskId` `team.handoff.intake`) in the shared approval vocabulary: `approvalCategory: team_handoff_intake`, outcome `APPROVED | APPROVED_EDITED | REJECTED`, `reasonCode`, so approval analytics need no special case.
 
 ## Observability

@@ -125,7 +125,9 @@ The prices above illustrate the shape; take real prices from the provider.
   `If-Match` or in the body); a stale one answers `409` with `currentRevision`.
 - **Only `eddi-admin` writes.** The catalog is a budget lever — lowering a price to $0
   is raising a budget — so there is no MCP write tool and no Platform Operator write
-  grant. Editors can read it and resolve a model.
+  grant. Editors can read it and resolve a model, also over MCP (`read_model_prices`,
+  see [MCP Server](mcp-server.md#model-price-tool-1)), and the Platform Operator can
+  read the catalog, resolve a model and list unpriced calls.
 - **Limits**: at most 500 entries; `model` is 1–128 characters of `A–Z a–z 0–9 . _ : / @ + -`
   with `*` only as a leading and/or trailing wildcard; `provider` is a model type of
   this deployment or `*`; prices 0–10 000; `thresholdTokens` 1 000–10 000 000; `note`

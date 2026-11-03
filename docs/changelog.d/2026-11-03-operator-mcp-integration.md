@@ -29,3 +29,30 @@ what was built from those notes, after checking each against the merged code.
   fields — recorded in the version comment as decided, valid while the ten ship in one release.
 - `GroupConversationService.executeTaskExecutionPhase` keeps its unused `speakers` parameter (the reflection seam
   every phase delegator shares); the reason is now in its Javadoc.
+
+### MCP tools (96 → 108)
+
+Thin wrappers over the in-process REST beans, so every access rule of the REST resource — existence first, VIEW or
+EDIT on the group, per-agent oversight scoping, the caller's principal as the recorded actor — applies to the MCP
+caller unchanged. Each class checks its tier itself, because an in-process call never passes the HTTP layer's
+`@RolesAllowed`; `McpRoleTierParityTest` measures the tiers and compares them with the REST annotations (now also
+method-level ones). New tiers in `McpRoles`: `OVERSIGHT` (admin, editor, approver) and `BUDGET_READ` (admin, editor,
+viewer). `McpToolUtils.responseJson` turns a resource's `Response` into the tool result, keeping its sentence or code.
+
+| Class | Tools | Tier |
+| --- | --- | --- |
+| `McpPricingTools` | `read_model_prices(provider?, model?)` | Author (read only — prices are a budget lever) |
+| `McpTeamHandoffTools` | `list_team_handoffs`, `accept_team_handoff`, `decline_team_handoff` | Author, then VIEW / EDIT on the group |
+| `McpTeamBudgetTools` | `read_team_budget(groupId, historyMonths?)`, `list_team_budgets` | Budget read |
+| | `adjust_team_budget`, `transfer_team_budget` | Admin |
+| `McpOversightTools` | `summarize_approvals`, `list_autonomy_recommendations`, `get_autonomy_state`, `count_pending_audit_samples` | Oversight |
+
+Not built: a tool to file a handoff or delete a backlog task, any oversight write (never), the per-decision and
+sample listings (they carry users' redacted tool arguments), `preview_approval_context` (no render-preview service
+method exists) and a separate `get_hitl_decisions` (`summarize_approvals` answers it). The `eddi-admin` Claude Code
+skill teaches the new tools (`SKILL.md`, `references/groups.md`, `references/destructive-ops.md`).
+
+**Found on the way:** `RestTeamHandoffs` caught the guard's `io.quarkus.security.ForbiddenException` in its generic
+`catch (Exception)` and answered **500** to a caller without access to the group, over REST and MCP alike; its test
+threw the JAX-RS `ForbiddenException`, which the guard never throws. It now rethrows the Quarkus exception (403), and
+the test uses the real type. `RestGroupWorkspace` on `main` has the same pattern and is left for its own fix.
