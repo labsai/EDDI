@@ -4401,6 +4401,7 @@
     "editedAnswerLabel": "最终回答",
     "hideOriginal": "隐藏原文",
     "lastEditDrift": "由于智能体已更改，您上次的修改未能应用——原始回答再次等待审核。",
+    "lastEditRedacted": "您上一次的编辑未被应用:回答包含已隐藏(已遮蔽)的内容,因此只能按原样批准或拒绝。",
     "lastEditScreenedOut": "您上次的修改被智能体的输出护栏拦截（{{guardrail}}）——原始回答再次等待审核。",
     "noReason": "无原因",
     "reasonLabel": "原因（用于拒绝或修改）",

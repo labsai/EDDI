@@ -4442,6 +4442,7 @@
     "editedAnswerLabel": "Final answer",
     "hideOriginal": "Hide the original",
     "lastEditDrift": "Your last edit could not be applied because the agent changed — the original answer is up for review again.",
+    "lastEditRedacted": "Your last edit was not applied: the answer contains concealed (redacted) content, so it can only be approved or rejected as it is.",
     "lastEditScreenedOut": "Your last edit was blocked by the agent's output guardrails ({{guardrail}}) — the original answer is up for review again.",
     "noReason": "No reason",
     "reasonLabel": "Reason (for a rejection or an edit)",
