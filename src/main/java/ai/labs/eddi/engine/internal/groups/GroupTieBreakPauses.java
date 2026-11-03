@@ -35,6 +35,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -387,10 +388,18 @@ public class GroupTieBreakPauses {
      */
     private void decideByModerator(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, int phaseIdx,
                                    GroupConversation.PendingHumanInput pending, GroupDiscussionEventListener listener) {
-        ProtocolConfig protocol = config.getProtocol() != null
+        ProtocolConfig base = config.getProtocol() != null
                 ? config.getProtocol()
                 : new ProtocolConfig(ProtocolConfig.DEFAULT_AGENT_TIMEOUT_SECONDS, ProtocolConfig.MemberFailurePolicy.SKIP,
                         ProtocolConfig.DEFAULT_MAX_RETRIES, ProtocolConfig.MemberUnavailablePolicy.SKIP);
+        // The same resolution executeDiscussion applies at the top of a leg: a cadence
+        // run's maxCostPerRun or a parent's remaining budget is persisted as the
+        // inherited ceiling, and a group with no ceiling of its own is gated by it.
+        Double ceiling = GroupConversationService.effectiveCostCeiling(base.maxCostPerDiscussion(), gc.getInheritedCostCeiling());
+        ProtocolConfig protocol = Objects.equals(ceiling, base.maxCostPerDiscussion())
+                ? base
+                : new ProtocolConfig(base.agentTimeoutSeconds(), base.onAgentFailure(), base.maxRetries(), base.onMemberUnavailable(),
+                        base.maxTurns(), ceiling, base.onCostExceeded());
         int maxTurns = protocol.maxTurns() > 0 ? protocol.maxTurns() : 50;
         var turnCounter = new AtomicInteger(Math.max(gc.getPausedTurnCount(), 0));
         var rebuilt = HumanTieBreakEngine.rebuildOutcome(gc, phase, phaseIdx, transcriptFrom(pending));

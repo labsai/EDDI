@@ -376,6 +376,22 @@ class GroupTieBreakPausesTest {
         }
 
         @Test
+        @DisplayName("MODERATOR_DECIDES honours an inherited cost ceiling when the group has none of its own")
+        void moderatorInheritedCeiling() throws Exception {
+            config = configWith(false, OnTieBreakTimeout.MODERATOR_DECIDES);
+            var gc = paused(null);
+            gc.setInheritedCostCeiling(1.0);
+            gc.setTotalCost(2.0);
+
+            coordinator.skipHumanTurnOnTimeout(GC_ID, null);
+            submitted.getFirst().run();
+
+            assertEquals(DecisionType.NONE, gc.getDecision().type());
+            verify(memberTurnExecutor, never()).executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any(), any(),
+                    any());
+        }
+
+        @Test
         @DisplayName("MODERATOR_DECIDES asks the moderator and charges one turn")
         void moderatorDecides() throws Exception {
             config = configWith(false, OnTieBreakTimeout.MODERATOR_DECIDES);
