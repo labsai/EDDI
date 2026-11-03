@@ -334,9 +334,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                 // Workflows & their extensions
                 AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+                // Each archived workflow once, as the import itself does: re-reading and
+                // re-scanning it for every repetition in the agent's list multiplied the
+                // work of one stored file.
+                Set<String> previewed = new HashSet<>();
                 for (URI workflowUri : agentConfig.getWorkflows()) {
                     IResourceId workflowResourceId = RestUtilities.extractResourceId(workflowUri);
-                    if (workflowResourceId == null)
+                    if (workflowResourceId == null || (workflowResourceId.getId() != null
+                            && !previewed.add(workflowResourceId.getId() + "?version=" + workflowResourceId.getVersion())))
                         continue;
 
                     String workflowId = workflowResourceId.getId();
@@ -889,7 +894,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // Each distinct workflow once. The first pass repoints every occurrence of
                 // a URI, so a repeated one used to be imported again for nothing — a full
                 // copy of the workflow and all its extensions per repetition, left behind
-                // as orphans no agent names.
+                // as orphans no agent names. "Distinct" is by resource id and version:
+                // two spellings of one URI name the same archive directory.
+                agentConfig.setWorkflows(sameSpellingPerResource(agentConfig.getWorkflows()));
                 new LinkedHashSet<>(agentConfig.getWorkflows())
                         .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
 
@@ -985,6 +992,28 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    /**
+     * The workflow list with every URI spelled as the first one naming the same id
+     * and version. Deduplicating by the URI text kept two spellings of one workflow
+     * apart (a different authority, an extra query parameter), and each was then
+     * imported in full — workflow and extensions — from the one archive directory
+     * both resolve to.
+     */
+    static List<URI> sameSpellingPerResource(List<URI> workflowUris) {
+        if (workflowUris == null) {
+            return null;
+        }
+        Map<String, URI> firstSpelling = new HashMap<>();
+        List<URI> canonical = new ArrayList<>(workflowUris.size());
+        for (URI uri : workflowUris) {
+            IResourceId resourceId = uri == null ? null : RestUtilities.extractResourceId(uri);
+            canonical.add(resourceId == null || resourceId.getId() == null
+                    ? uri
+                    : firstSpelling.computeIfAbsent(resourceId.getId() + "?version=" + resourceId.getVersion(), key -> uri));
+        }
+        return canonical;
+    }
+
     private URI buildOldAgentUri(Path agentPath) {
         String agentPathString = agentPath.toString();
         String oldAgentId = agentPathString.substring(agentPathString.lastIndexOf(File.separator) + 1,
@@ -1005,6 +1034,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
             var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
             boolean[] imported = {false};
+            requireOneWorkflowDocument(dir, workflowId, workflowVersion);
             try (var directoryStream = Files.newDirectoryStream(dir,
                     wfFilePath -> wfFilePath.toString().endsWith(".workflow.json") || wfFilePath.toString().endsWith(".package.json"))) {
                 directoryStream.forEach(workflowFilePath -> {
@@ -1172,6 +1202,26 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
+    /**
+     * Refuses a workflow directory holding more than one workflow document. Every
+     * document in it used to be imported in turn, with all its extensions, although
+     * only one could ever be the workflow the agent names: a handful of tiny
+     * workflow files multiplied one large extension into as many stored copies.
+     */
+    private void requireOneWorkflowDocument(Path dir, String workflowId, String workflowVersion) throws IOException {
+        int documents = 0;
+        try (var directoryStream = Files.newDirectoryStream(dir,
+                wfFilePath -> wfFilePath.toString().endsWith(".workflow.json") || wfFilePath.toString().endsWith(".package.json"))) {
+            for (Path ignored : directoryStream) {
+                documents++;
+            }
+        }
+        if (documents > 1) {
+            throw badArchive("the archive has " + documents + " workflow documents for workflow " + workflowId + " v"
+                    + workflowVersion + "; a workflow directory holds one");
+        }
+    }
+
     // ==================== Create or Update Logic ====================
 
     @FunctionalInterface
@@ -1184,8 +1234,48 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         URI update(T config, String localId, Integer localVersion, ImportTransaction transaction);
     }
 
+    /**
+     * Writes each distinct document once. Two references that resolve to the same
+     * archive file — the file is named by id alone, so {@code ?version=1} and
+     * {@code ?version=2} of one id are the same document — decode to one object
+     * ({@link #readResources}); every reference to it is answered with the one
+     * resource written for it. Writing it once per reference let a workflow of
+     * version aliases multiply one archived file into as many stored copies.
+     */
     private <T> List<URI> createOrUpdateResources(List<T> configs, List<URI> originUris, boolean isMerge, Set<String> selectedSet,
                                                   ResourceCreator<T> creator, ResourceUpdater<T> updater, ImportTransaction transaction) {
+        Map<T, Integer> slotOf = new IdentityHashMap<>();
+        int[] slots = new int[configs.size()];
+        List<T> distinctConfigs = new ArrayList<>();
+        List<URI> distinctOrigins = new ArrayList<>();
+        for (int i = 0; i < configs.size(); i++) {
+            T config = configs.get(i);
+            Integer slot = config == null ? null : slotOf.get(config);
+            if (slot == null) {
+                slot = distinctConfigs.size();
+                if (config != null) {
+                    slotOf.put(config, slot);
+                }
+                distinctConfigs.add(config);
+                distinctOrigins.add(i < originUris.size() ? originUris.get(i) : null);
+            }
+            slots[i] = slot;
+        }
+        List<URI> written = createOrUpdateDistinct(distinctConfigs, distinctOrigins, isMerge, selectedSet, creator, updater, transaction);
+        if (distinctConfigs.size() == configs.size()) {
+            return written;
+        }
+        List<URI> perReference = new ArrayList<>(configs.size());
+        for (int slot : slots) {
+            if (slot < written.size()) {
+                perReference.add(written.get(slot));
+            }
+        }
+        return perReference;
+    }
+
+    private <T> List<URI> createOrUpdateDistinct(List<T> configs, List<URI> originUris, boolean isMerge, Set<String> selectedSet,
+                                                 ResourceCreator<T> creator, ResourceUpdater<T> updater, ImportTransaction transaction) {
 
         if (!isMerge) {
             // Original behavior: create everything new
@@ -1513,8 +1603,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
         try {
             IResourceId currentDescriptorId = documentDescriptorStore.getCurrentResourceId(id);
-            previousDescriptor.setResource(restoredUri);
-            documentDescriptorStore.setDescriptor(currentDescriptorId.getId(), currentDescriptorId.getVersion(), previousDescriptor);
+            // Only what the merge rewrote goes back. Writing the whole snapshot also put
+            // back its owner, grants and visibility, so a sharing change the owner made
+            // while the import ran — a revoked grant — was undone by an importer who
+            // may only edit the content.
+            DocumentDescriptor current = documentDescriptorStore.readDescriptor(currentDescriptorId.getId(),
+                    currentDescriptorId.getVersion());
+            current.setResource(restoredUri);
+            current.setName(previousDescriptor.getName());
+            current.setDescription(previousDescriptor.getDescription());
+            current.setOriginId(previousDescriptor.getOriginId());
+            current.setSyncedVersion(previousDescriptor.getSyncedVersion());
+            documentDescriptorStore.setDescriptor(currentDescriptorId.getId(), currentDescriptorId.getVersion(), current);
         } catch (Exception e) {
             LOGGER.warnf("Restored %s '%s' but could not restore its descriptor: %s", storeClass.getSimpleName(),
                     LogSanitizer.sanitize(id), LogSanitizer.sanitize(e.getMessage()));
@@ -1666,9 +1766,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      */
     private String archivedText(List<URI> uris, String extension, Path workflowPath) {
         StringBuilder text = new StringBuilder();
+        // Each file once: the file is named by id, so version aliases of one id
+        // appended the same document again for every alias.
+        Set<String> scanned = new HashSet<>();
         for (URI uri : uris) {
             IResourceId resourceId = RestUtilities.extractResourceId(uri);
-            if (resourceId == null || resourceId.getId() == null) {
+            if (resourceId == null || resourceId.getId() == null || !scanned.add(resourceId.getId())) {
                 continue;
             }
             try {
@@ -1767,8 +1870,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return configs;
         }
         List<T> repointed = new ArrayList<>(configs.size());
+        // One object per document stays one object (see readResources), so it is
+        // still written once.
+        Map<T, T> done = new IdentityHashMap<>();
         for (T config : configs) {
-            repointed.add(repointReferences(config, oldUris, newUris));
+            T copy = config == null ? null : done.get(config);
+            if (copy == null) {
+                copy = repointReferences(config, oldUris, newUris);
+                if (config != null) {
+                    done.put(config, copy);
+                }
+            }
+            repointed.add(copy);
         }
         return repointed;
     }
@@ -1791,7 +1904,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewParsers(List<ParserConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(IParserStore.class, c, IRestParserStore.resourceURI, transaction)).toList();
+        return configs.stream().map(c -> createNewParser(c, transaction)).toList();
+    }
+
+    /**
+     * {@code RestParserStore.createParser}'s reference check, on the repointed
+     * parser about to be stored: a dictionary the archive left out keeps the
+     * archive's reference, which may name a dictionary of this deployment the
+     * caller cannot read.
+     */
+    private URI createNewParser(ParserConfiguration config, ImportTransaction transaction) {
+        WorkflowReferenceAccess.requireAccessToParserReferences(resourceAccessGuard, config);
+        return createResourceDirect(IParserStore.class, config, IRestParserStore.resourceURI, transaction);
     }
 
     private URI updateParser(ParserConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
@@ -1801,7 +1925,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // carrying the archive's content.
         URI updated = updateTracked(IParserStore.class, IRestParserStore.resourceURI, localId, localVersion, config, store::updateParser,
                 transaction);
-        return updated != null ? updated : createResourceDirect(IParserStore.class, config, IRestParserStore.resourceURI, transaction);
+        return updated != null ? updated : createNewParser(config, transaction);
     }
 
     private List<URI> createNewDictionaries(List<DictionaryConfiguration> configs, ImportTransaction transaction) {
@@ -3291,9 +3415,27 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      */
     private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz,
                                       boolean isMerge, Set<String> v5LlmUris) {
-        return uris.stream()
-                .map(uri -> readResource(uri, workflowPath, extension, clazz, isMerge, v5LlmUris))
-                .collect(Collectors.toList());
+        // The archive file is named by id alone, so references to one id in several
+        // versions (or spellings) all read the same file: it is decoded once and the
+        // same object answers each of them. Decoding it per reference kept a full copy
+        // per alias alive in this list, and createOrUpdateResources writes it once.
+        Map<String, T> decodedById = new HashMap<>();
+        List<T> resources = new ArrayList<>(uris.size());
+        for (URI uri : uris) {
+            IResourceId resourceId = RestUtilities.extractResourceId(uri);
+            String key = resourceId == null || resourceId.getId() == null
+                    ? null
+                    : resourceId.getId() + "|" + v5LlmUris.contains(uri.toString());
+            T resource = key == null ? null : decodedById.get(key);
+            if (resource == null) {
+                resource = readResource(uri, workflowPath, extension, clazz, isMerge, v5LlmUris);
+                if (resource != null && key != null) {
+                    decodedById.put(key, resource);
+                }
+            }
+            resources.add(resource);
+        }
+        return resources;
     }
 
     @SuppressWarnings("unchecked")
