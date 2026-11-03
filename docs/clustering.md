@@ -206,8 +206,7 @@ NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and 
 `nats.tls` when pod traffic is not already encrypted.
 
 **NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
-`true`), for every `tls://` or `wss://` server whether or not `eddi.nats.tls.enabled` is set; an
-`opentls://` server stays the explicit trust-all opt-in. Before this check existed, any certificate the trust store accepted was
+`true`). Before this check existed, any certificate the trust store accepted was
 accepted for any host. On upgrade, the broker certificate must name every host in
 `eddi.nats.url` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. The client
 also reconnects to broker addresses it learns from NATS cluster discovery, and checks the

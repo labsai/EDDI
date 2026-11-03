@@ -37,7 +37,6 @@ import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.List;
-import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -197,27 +196,10 @@ public class NatsConnectionManager {
             String seed = Files.readString(Path.of(config.natsNkeySeedFile().get()), StandardCharsets.UTF_8).trim();
             builder.authHandler(Nats.staticCredentials(null, seed.toCharArray()));
         }
-        if (config.natsTlsEnabled() || anyServerIsTls()) {
+        if (config.natsTlsEnabled()) {
             builder.sslContext(buildSslContext());
         }
         return builder.build();
-    }
-
-    /**
-     * Whether a configured server names TLS in its URL ({@code tls://} or
-     * {@code wss://}) and none is {@code opentls://}. jnats applies one SSL context
-     * to the whole connection once any server asks for TLS, and builds its own,
-     * with no host name check, when none is supplied; so a list that mixes
-     * {@code tls://} and {@code nats://} servers needs the context built here
-     * (which verifies the host name unless
-     * {@code eddi.nats.tls.verify-hostname=false}) just as an all-TLS list does. An
-     * {@code opentls://} server is the explicit trust-all opt-in and is left to
-     * jnats whatever else is listed.
-     */
-    private boolean anyServerIsTls() {
-        var servers = config.natsServers().stream().map(s -> s.trim().toLowerCase(Locale.ROOT)).toList();
-        return servers.stream().noneMatch(s -> s.startsWith("opentls://"))
-                && servers.stream().anyMatch(s -> s.startsWith("tls://") || s.startsWith("wss://"));
     }
 
     private SSLContext buildSslContext() throws IOException, GeneralSecurityException {
