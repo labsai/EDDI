@@ -48,6 +48,15 @@ import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
+import ai.labs.eddi.datastore.postgres.PostgresApprovalDecisionStore;
+import ai.labs.eddi.datastore.postgres.PostgresAuditSampleStore;
+import ai.labs.eddi.datastore.postgres.PostgresAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.analytics.mongo.MongoApprovalDecisionStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.autonomy.mongo.MongoAutonomyStateStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.IAuditSampleStore;
+import ai.labs.eddi.engine.hitl.oversight.samples.mongo.MongoAuditSampleStore;
 import ai.labs.eddi.engine.ratings.IConversationRatingStore;
 import ai.labs.eddi.engine.ratings.mongo.ConversationRatingStore;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
@@ -173,6 +182,25 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IConversationRatingStore conversationRatingStore(Instance<ConversationRatingStore> mongo,
                                                             Instance<PostgresConversationRatingStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IApprovalDecisionStore approvalDecisionStore(Instance<MongoApprovalDecisionStore> mongo,
+                                                        Instance<PostgresApprovalDecisionStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAuditSampleStore auditSampleStore(Instance<MongoAuditSampleStore> mongo, Instance<PostgresAuditSampleStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public IAutonomyStateStore autonomyStateStore(Instance<MongoAutonomyStateStore> mongo, Instance<PostgresAutonomyStateStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

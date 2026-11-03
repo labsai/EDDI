@@ -718,6 +718,23 @@ after a failed one. Pauses minus resumes, the old way of estimating the backlog,
 reset with every restart and never saw pauses taken before it; alert on
 `eddi_hitl_pending_oldest_age_seconds` instead (`EddiApprovalWaitingLong`).
 
+**Oversight — approval analytics, sampled audit, earned autonomy** ([hitl-oversight.md](hitl-oversight.md)). No meter carries
+an agent or category tag; the per-category numbers are in `GET /hitl/analytics/summary`.
+
+```text
+eddi_hitl_decision_latency_seconds          # Timer: how long a pause waited for its decision; tags: surface, pause_type
+eddi_hitl_decision_projection_failures_total # Decision units that could not be stored for analytics (a rebuild repairs them)
+eddi_audit_sample_total                     # Allowed calls considered by the sampled audit; tag: outcome (sampled|capped|dropped|skipped)
+eddi_audit_sample_review_total              # Sample verdicts; tag: verdict (OK|FLAGGED)
+eddi_audit_sample_expired_total             # Samples that expired unreviewed — an oversight-capacity signal
+eddi_audit_sample_pending                   # Samples waiting for review, store-wide (gauge)
+eddi_autonomy_recommendation_total          # Recommendations opened; tag: kind (PROMOTE|REVERT)
+eddi_autonomy_promotion_applied_total       # Recommendations a human applied
+eddi_autonomy_demotion_total                # Categories suspended; tag: trigger (REASON_CODE|SAMPLE_FLAGGED|MANUAL)
+eddi_autonomy_suspension_active             # Categories suspended right now, store-wide (gauge)
+eddi_autonomy_suspension_gated_total        # Calls the suspension overlay gated
+```
+
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
 ```text

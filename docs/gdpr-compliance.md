@@ -167,7 +167,8 @@ principal, not a user: erasing or exporting it is refused with 400.
     as the *reviewer* of ratings they triaged as a maintainer (those ratings are
     other people's data and stay). Ratings deliberately outlive retention purges
     of transcripts, so no conversation sweep reaches them. See
-    [Conversation Ratings](conversation-ratings.md)
+    [Conversation Ratings](conversation-ratings.md). The `hitlOversight` participant deletes the audit samples of the user's
+    conversations and keeps their approval-decision facts without them ([HITL Oversight](hitl-oversight.md#gdpr))
 17. **Tool quota counters** (`toolQuotas`) — **permanently deleted** by the `toolQuotas`
     participant: every counter whose subject equals the erased user id. A counter holds a subject
     identifier and a count, no content, and expires on its own an hour after its window ends. When an
@@ -201,6 +202,8 @@ yet every category EDDI erases; what it leaves out is named in `omittedCategorie
   agent and version, score, tags, comment, triage status and note — without the
   reviewing maintainer's identity; capped at 10,000). Processing restriction (Art. 18)
   blocks new ratings
+- HITL oversight (`hitlOversight`): audit samples of the user's conversations (redacted tool arguments) and the approval-decision
+  facts of their conversations and decisions (capped at 10,000 each)
 - Alerting (`alerts`): for a user who runs agents, the alert rules they created or last
   edited — id, name, times and which role — and the alert events they acknowledged —
   id, rule name, source, agent, fired and acknowledged times; for a user who chatted,

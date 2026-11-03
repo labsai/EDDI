@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.hitl.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.List;
 
@@ -107,6 +108,27 @@ public class ToolApprovalsConfig {
      * rules tune HOW a gated call is reviewed, never WHETHER it is gated.
      */
     private List<ApprovalRule> rules;
+    /**
+     * Runtime-only: patterns of earned-autonomy categories that are currently
+     * suspended. The gate gates an allowed call matching one with
+     * {@code suspended:<pattern>}. Set on a copy by {@code AutonomyOverlayService},
+     * never read from or written to JSON, so configuration can neither pre-set nor
+     * clear a suspension.
+     *
+     * @since 6.7.0
+     */
+    @JsonIgnore
+    private transient List<String> suspendedPatterns;
+
+    @JsonIgnore
+    public List<String> getSuspendedPatterns() {
+        return suspendedPatterns;
+    }
+
+    @JsonIgnore
+    public void setSuspendedPatterns(List<String> suspendedPatterns) {
+        this.suspendedPatterns = suspendedPatterns;
+    }
 
     /**
      * Per-tool override of the approval scalars above, addressed by the same

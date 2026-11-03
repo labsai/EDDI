@@ -56,6 +56,8 @@ Each audit entry captures:
 | `timestamp`      | Instant | When the task completed                                    |
 | `hmac`           | String  | HMAC-SHA256 integrity hash                                 |
 
+HITL oversight writes `hitl.sample.review`, `autonomy.promotion`, `autonomy.revert`, `autonomy.recommendation.dismissed`, `autonomy.demotion` and `autonomy.suspension.lifted` entries (`taskType: hitl`); approval analytics reads a projection of the `hitl.approval` entries, never the ledger itself — see [HITL Oversight](hitl-oversight.md#audit-ledger-entries).
+
 ### The ledger is the only copy of the prompt and the response
 
 While a turn runs, `LlmTask` keeps the compiled prompt (`audit:compiled_prompt`) and the model response (`audit:model_response`) on the conversation step, because `LifecycleManager` builds the entry from them. When the turn ends and the ledger has **accepted every entry** of the turn, both keys are removed from the step before the conversation is stored. A conversation document therefore does not repeat them: on a measured 20-step conversation the compiled prompt alone was a fifth of the document, and every read and write of the conversation paid for it.
