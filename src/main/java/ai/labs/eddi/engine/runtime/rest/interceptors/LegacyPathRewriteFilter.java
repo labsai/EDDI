@@ -83,14 +83,30 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext requestContext) {
-        String path = requestContext.getUriInfo().getRequestUri().getPath();
+        String fullPath = requestContext.getUriInfo().getRequestUri().getPath();
+        // The rules are anchored at the application's own paths, so they are matched
+        // below
+        // quarkus.http.root-path (when one is set) and the root is put back on the
+        // result.
+        String root = rootOf(requestContext.getUriInfo().getBaseUri().getPath());
+        boolean underRoot = !root.isEmpty() && (fullPath.equals(root) || fullPath.startsWith(root + "/"));
+        String path = underRoot ? fullPath.substring(root.length()) : fullPath;
         String rewritten = rewritePath(path);
 
         if (!rewritten.equals(path)) {
-            LOGGER.debugv("Legacy path rewrite: {0} → {1}", path, rewritten);
+            String target = underRoot ? root + rewritten : rewritten;
+            LOGGER.debugv("Legacy path rewrite: {0} → {1}", fullPath, target);
             requestContext.setRequestUri(requestContext.getUriInfo().getBaseUri(),
-                    UriBuilder.fromPath(rewritten).replaceQuery(requestContext.getUriInfo().getRequestUri().getRawQuery()).build());
+                    UriBuilder.fromPath(target).replaceQuery(requestContext.getUriInfo().getRequestUri().getRawQuery()).build());
         }
+    }
+
+    /** The base path without its trailing slash: empty for the default root. */
+    private static String rootOf(String basePath) {
+        if (basePath == null || basePath.isEmpty() || "/".equals(basePath)) {
+            return "";
+        }
+        return basePath.endsWith("/") ? basePath.substring(0, basePath.length() - 1) : basePath;
     }
 
     static String rewritePath(String path) {

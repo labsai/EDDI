@@ -14,6 +14,9 @@ Fixes the findings that were still open as review threads on the 38 PRs merged o
 - **Alerts** (`AlertMaintenanceService.java`, both alert event stores): the bounded orphan scan resumes after the last rule id it saw, so rules that still digest cannot crowd a disabled or deleted rule out of every pass.
 - **HITL journal** (`HitlToolJournalStore.java`): `reconcileRetention` counts only index drops that happened, still handles every other stale index and recreates the partial one when a drop fails, and then rethrows the first failure (anything but "index not found").
 - **Helm** (`helm/eddi`, chart `2.13.0` → `2.14.0`): `nats.externalAllowPlaintext` must be a boolean (the string `"false"` is truthy and switched the plaintext guard off); external NATS credentials are escaped for the properties file they are written to (backslash, line breaks, `${…}` expansion and a leading blank).
+- **Audit evidence** (`TurnAuditBuffer.java`): a turn that recorded a failed task no longer hands its compiled prompt and model response over to the ledger. The failure entry carries no LLM detail, so releasing them deleted the only copy.
+- **NATS** (`NatsConnectionManager.java`): every `tls://` or `wss://` server gets the host-name-verifying context even when `eddi.nats.tls.enabled` is false (jnats builds an unverified one otherwise); `opentls://` is unchanged. A broker whose certificate does not name its host will now be refused where it was accepted before.
+- **Legacy path rewrite** (`LegacyPathRewriteFilter.java`): the rules are matched below `quarkus.http.root-path`; the cache memo of hashed keys (`CacheFactory.java`) forgets an evicted key on the publishing node.
 - **Shutdown** (`SchedulePollerService.java`): a poll that is already running stops claiming once shutdown begins.
 
 **Correctness and smaller fixes**
@@ -28,5 +31,6 @@ Fixes the findings that were still open as review threads on the 38 PRs merged o
 
 - `TemplateSyntaxMigrator` ReDoS: already bounded by `conversionWork` before any pattern runs; a regression test pins it.
 - `BoundedRegex` stacked counted quantifiers: measured at milliseconds on this JDK, so no refusal is needed.
-- `TurnAuditBuffer` durability window: documented (see above); releasing the evidence keys only after the store confirms the entries is a larger change, left open.
+- `TurnAuditBuffer` durability window: documented; releasing the evidence keys only after the store confirms the entries is a larger change, left open.
+- `CacheFactory`: receiving nodes keep the memoised hash of an evicted key until the bounded memo turns it over; a reverse lookup per event on the dispatch thread would cost what the memo exists to save.
 - A fragment dated 2026-11-01 for the Node 26 change: the date is when it was written.

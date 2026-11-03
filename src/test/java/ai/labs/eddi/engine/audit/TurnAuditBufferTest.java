@@ -106,6 +106,21 @@ class TurnAuditBufferTest {
     }
 
     @Test
+    @DisplayName("a turn that recorded a failed task does not hand its evidence over: that entry carries no llmDetail")
+    void flushDoesNotHandOverAFailedTurn() {
+        List<AuditEntry> accepted = new ArrayList<>();
+        memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> accepted.add(entry));
+        TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        AuditEntry failed = new AuditEntry("id-failed", "conv-1", "agent-1", 1, "user-1", null, 1, "llm", "type", 1, 5L, null,
+                Map.of("status", "TASK_FAILED"), null, null, null, 0.0, Instant.now(), null, null);
+        memory.getAuditCollector().collect(failed);
+
+        assertFalse(buffer.flush(memory), "the failure entry is accepted but holds no prompt or response");
+        assertEquals(2, accepted.size(), "both entries are still submitted");
+    }
+
+    @Test
     @DisplayName("flush reports failure when a submit throws; a plain collector counts as accepting")
     void flushReportsFailure() {
         memory.setAuditCollector(entry -> {

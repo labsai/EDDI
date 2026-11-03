@@ -123,8 +123,8 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
      * Restore the original collector and submit every buffered entry to it, in
      * order. A failing submit is logged and does not stop the rest.
      *
-     * @return true when the ledger accepted every entry (see
-     *         {@link #releaseLedgerOwnedEvidence})
+     * @return true when the ledger accepted every entry and none of them records a
+     *         failed task (see {@link #releaseLedgerOwnedEvidence})
      */
     public boolean flush(IConversationMemory memory) {
         return flush(memory, List.of());
@@ -163,7 +163,14 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
         }
         boolean secretInput = inputWasScrubbed(memory);
         boolean allAccepted = true;
+        // A failed task's entry is built without llmDetail, so a task that wrote the
+        // compiled
+        // prompt and the model response and then failed leaves them in the step and
+        // nowhere
+        // else: acceptance of that entry does not mean the ledger holds them.
+        boolean recordsFailure = false;
         for (AuditEntry entry : pending) {
+            recordsFailure |= isFailureEntry(entry);
             try {
                 AuditEntry submitted = secretInput ? redact(entry, inputs) : entry;
                 if (secretContextValues != null && !secretContextValues.isEmpty()) {
@@ -183,7 +190,11 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
             }
         }
-        return allAccepted;
+        return allAccepted && !recordsFailure;
+    }
+
+    private static boolean isFailureEntry(AuditEntry entry) {
+        return entry.output() != null && "TASK_FAILED".equals(entry.output().get("status"));
     }
 
     /**
