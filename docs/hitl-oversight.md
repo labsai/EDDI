@@ -225,10 +225,14 @@ Neither an agent nor a model can influence its own promotion:
 
 - **Evidence** comes only from verified humans on evidence channels; timeouts, system decisions and legacy rows never
   count.
-- **Agent-originated requests are marked.** Every outbound httpcall carries the engine-owned header
-  `X-EDDI-Agent-Call: true`, set after the configured headers so no configuration removes it. Any non-read request with it
-  to `/hitl/samples/**`, `/hitl/autonomy/**` or `/hitl/analytics/rebuild` answers 403 `AGENT_ORIGINATED` — even with a
-  forwarded `${caller:token}`.
+- **Agent-originated requests are marked.** An httpcall aimed at **this deployment** carries the engine-owned header
+  `X-EDDI-Agent-Call: true`, set after the configured headers so no configuration removes or replaces it. "This
+  deployment" is the own origin (`eddi.self.base-url`, or the derived listener address), any loopback address, and the
+  hosts in `eddi.hitl.oversight.self-hosts` (the public or in-cluster names it is also reached by, `host` or
+  `host:port`). Calls to any other host carry no EDDI header. Any non-read request with the header to
+  `/hitl/samples/**`, `/hitl/autonomy/**` or `/hitl/analytics/rebuild` answers 403 `AGENT_ORIGINATED` — even with a
+  forwarded `${caller:token}`. If agents reach this deployment under a name none of those cover, list it in
+  `eddi.hitl.oversight.self-hosts`.
 - **The self-ungating guard** refuses an approved tool call that writes to those paths, and an agent-document write that
   changes `hitlConfig.oversight` (an agent could otherwise lower its own sample rate or loosen its own policy).
 - **The overlay field is transient** (`@JsonIgnore`): configuration can neither pre-set nor clear a suspension.
@@ -263,7 +267,7 @@ Metrics are listed in [Metrics → HITL](metrics.md#hitl-metrics) and charted in
 Human-in-the-Loop row. Properties (all optional): `eddi.hitl.analytics.retention` (`P400D`),
 `eddi.hitl.analytics.initial-backfill` (`P90D`), `eddi.hitl.samples.enabled` (`true`), `eddi.hitl.samples.retention`
 (`P180D`), `eddi.hitl.autonomy.maintenance-interval` (`PT1H`), `eddi.hitl.autonomy.suspension-cache-ttl` (`PT15S`),
-`eddi.hitl.autonomy.max-agents-per-run` (`500`) — see [Configuration Reference](configuration-reference.md).
+`eddi.hitl.autonomy.max-agents-per-run` (`500`), `eddi.hitl.oversight.self-hosts` (empty) — see [Configuration Reference](configuration-reference.md).
 
 ## Storage
 

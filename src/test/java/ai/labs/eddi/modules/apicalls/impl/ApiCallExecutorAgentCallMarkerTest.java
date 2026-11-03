@@ -26,10 +26,11 @@ import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.atLeastOnce;
@@ -38,14 +39,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Every outbound httpcall carries the engine-owned {@code X-EDDI-Agent-Call}
- * marker, set after the configured headers, so the server can refuse an
- * oversight write an agent's tool call makes.
+ * An httpcall to this deployment carries the engine-owned
+ * {@code X-EDDI-Agent-Call} marker, set after the configured headers; a call to
+ * any other host carries no EDDI header at all.
  */
 @DisplayName("ApiCallExecutor — agent-call marker header")
 class ApiCallExecutorAgentCallMarkerTest {
-
-    private static final String SERVER = "http://api.example.com";
 
     private ApiCallExecutor executor;
     private IConversationMemory memory;
@@ -66,6 +65,7 @@ class ApiCallExecutorAgentCallMarkerTest {
         executor = new ApiCallExecutor(httpClient, mock(IJsonSerialization.class), mock(IRuntime.class), prePostUtils, globalVariableResolver,
                 secretResolver, callerIdentityResolver, mock(CallerIdentityContext.class), new RequestRedactor(callerIdentityResolver),
                 mock(ConnectionResolver.class), false, 30_000L, 2_000_000);
+        executor.agentCallMarker = new AgentCallMarker(Set.of("eddi.example.com"));
 
         memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));
@@ -83,30 +83,39 @@ class ApiCallExecutorAgentCallMarkerTest {
     }
 
     @Test
-    @DisplayName("the marker is sent on a call with no configured headers")
-    void markerOnEveryCall() throws Exception {
-        executor.execute(call(Map.of()), memory, new HashMap<>(), SERVER);
+    @DisplayName("a call to a third-party host carries no EDDI header")
+    void thirdPartyUnmarked() throws Exception {
+        executor.execute(call(Map.of("Accept", "application/json")), memory, new HashMap<>(), "https://api.example.com");
 
-        assertEquals(List.of(AgentCallMarker.HEADER), headerNames());
+        var names = ArgumentCaptor.forClass(String.class);
+        verify(mockRequest, atLeastOnce()).setHttpHeader(names.capture(), any());
+        assertFalse(names.getAllValues().contains(AgentCallMarker.HEADER), "the marker must not leak to " + names.getAllValues());
     }
 
     @Test
-    @DisplayName("the marker is written last, so a configured header of that name cannot replace it")
-    void markerOverridesConfiguredHeader() throws Exception {
-        executor.execute(call(Map.of("Accept", "application/json", AgentCallMarker.HEADER, "false")), memory, new HashMap<>(), SERVER);
+    @DisplayName("a call to this deployment is marked, last, so a configured header of that name cannot replace it")
+    void selfCallMarkedLast() throws Exception {
+        executor.execute(call(Map.of("Accept", "application/json", AgentCallMarker.HEADER, "false")), memory, new HashMap<>(),
+                "https://eddi.example.com");
 
+        assertMarkedLast();
+    }
+
+    @Test
+    @DisplayName("a call to a loopback address is marked")
+    void loopbackMarked() throws Exception {
+        executor.execute(call(Map.of()), memory, new HashMap<>(), "http://127.0.0.1:7070");
+
+        assertMarkedLast();
+    }
+
+    private void assertMarkedLast() {
         var names = ArgumentCaptor.forClass(String.class);
         var values = ArgumentCaptor.forClass(String.class);
         verify(mockRequest, atLeastOnce()).setHttpHeader(names.capture(), values.capture());
         int last = names.getAllValues().size() - 1;
         assertEquals(AgentCallMarker.HEADER, names.getAllValues().get(last), "the engine's write must come after every configured one");
         assertEquals(AgentCallMarker.VALUE, values.getAllValues().get(last));
-    }
-
-    private List<String> headerNames() {
-        var names = ArgumentCaptor.forClass(String.class);
-        verify(mockRequest, atLeastOnce()).setHttpHeader(names.capture(), any());
-        return names.getAllValues();
     }
 
     private static ApiCall call(Map<String, String> headers) {
@@ -116,8 +125,8 @@ class ApiCallExecutorAgentCallMarkerTest {
         call.setResponseObjectName("response");
         call.setFireAndForget(false);
         Request request = new Request();
-        request.setPath("/api/test");
-        request.setMethod("POST");
+        request.setPath("/hitl/samples/s1");
+        request.setMethod("PATCH");
         request.setHeaders(new LinkedHashMap<>(headers));
         call.setRequest(request);
         return call;

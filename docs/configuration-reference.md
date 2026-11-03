@@ -423,6 +423,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.autonomy.maintenance-interval` | `PT1H` | How often the `hitl-autonomy-maintenance` system schedule runs (sample expiry, earned-autonomy evaluation, retention); at least 60 s |
 | `eddi.hitl.autonomy.suspension-cache-ttl` | `PT15S` | How long a node trusts its cached list of an agent's suspended categories — the longest a suspension takes to reach every pod |
 | `eddi.hitl.autonomy.max-agents-per-run` | `500` | Deployed agents one maintenance run evaluates (round-robin) |
+| `eddi.hitl.oversight.self-hosts` | *(empty)* | Extra names this deployment is reached by (`host` or `host:port`, comma-separated; a bare host matches any port). An httpcall to one of them, to `eddi.self.base-url`'s origin or to a loopback address carries `X-EDDI-Agent-Call`, so the oversight API can refuse an agent's own write. No other host ever sees the header |
 | `eddi.mcp.hitl.mutations.enabled` | `true` | Allow approve/reject decisions through the MCP surface |
 
 ---

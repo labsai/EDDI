@@ -29,7 +29,9 @@ it matters — see [HITL Oversight](../hitl-oversight.md).
   edit: "strictest rule wins" does the rest); `ToolApprovalGate` gates an allowed call matching one with
   `suspended:<pattern>`. Applied in `LlmTask` (memory carrier and effective config), `McpCallsTask`, and carried through
   `TaskToolApprovalsResolver`'s strict merge. `ToolApprovalGate.firstExemptMatch` tells exempt from unmatched calls.
-- **Security** — `X-EDDI-Agent-Call` set last on every httpcall (`AgentCallMarker`, one line in `ApiCallExecutor`);
+- **Security** — `X-EDDI-Agent-Call` set last on an httpcall aimed at this deployment only — its own origin
+  (`SelfUrlResolver`), a loopback address or a host in the new `eddi.hitl.oversight.self-hosts`; third-party APIs see no
+  EDDI header and their wire format is unchanged (`AgentCallMarker`, one line in `ApiCallExecutor`);
   `AgentOriginatedRequestFilter` answers 403 `AGENT_ORIGINATED` to marked oversight writes; `SelfUngatingGuard` delegates
   to `OversightWriteGuard` (no oversight-API writes, no change to `hitlConfig.oversight`).
 - **Maintenance** — `hitl-autonomy-maintenance` system schedule (fast path right after the alerts one in

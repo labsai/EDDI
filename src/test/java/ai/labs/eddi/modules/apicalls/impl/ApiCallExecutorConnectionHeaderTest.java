@@ -11,7 +11,6 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
-import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
@@ -325,8 +324,8 @@ class ApiCallExecutorConnectionHeaderTest {
             executor.execute(callWithHeaders(headers), memory, templateData("alice"), SERVER);
 
             var names = ArgumentCaptor.forClass(String.class);
-            verify(mockRequest, times(3)).setHttpHeader(names.capture(), anyString());
-            assertEquals(List.of("Accept", "accept", AgentCallMarker.HEADER), names.getAllValues(),
+            verify(mockRequest, times(2)).setHttpHeader(names.capture(), anyString());
+            assertEquals(List.of("Accept", "accept"), names.getAllValues(),
                     "both plain headers must still be written; the collision guard must not fire when no connection "
                             + "claims the name");
         }
@@ -555,9 +554,6 @@ class ApiCallExecutorConnectionHeaderTest {
         for (int i = 0; i < names.getAllValues().size(); i++) {
             captured.put(names.getAllValues().get(i), values.getAllValues().get(i));
         }
-        // The engine-owned agent-call marker rides on every request; it is asserted
-        // in ApiCallExecutorAgentCallMarkerTest, not here.
-        captured.remove(AgentCallMarker.HEADER);
         return captured;
     }
 }
