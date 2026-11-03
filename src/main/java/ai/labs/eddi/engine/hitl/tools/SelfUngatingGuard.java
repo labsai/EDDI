@@ -104,6 +104,8 @@ public final class SelfUngatingGuard {
             + "configuration";
     public static final String LLM_GATE_REMOVAL_REASON = "an agent may not remove or replace a tool-approval gate (toolApprovals) "
             + "stored in an LLM configuration";
+    public static final String LLM_GUARDRAIL_REMOVAL_REASON = "an agent may not remove or replace tool-call guardrails (toolCallGuardrails) "
+            + "stored in an LLM configuration";
     public static final String GATE_REMOVAL_REASON = "an agent may not remove or change another agent's tool-approval gate (hitlConfig)";
     public static final String PATCH_OP_REASON = "a configuration patch may only use add, replace, remove and test operations";
     private static final Set<String> PATCH_OPS = Set.of("add", "replace", "remove", "test");
@@ -272,12 +274,15 @@ public final class SelfUngatingGuard {
             return UNVERIFIABLE_REASON;
         }
         List<String> gatePaths = new ArrayList<>();
+        List<String> guardrailPaths = new ArrayList<>();
         try {
-            collectKeyPaths(storedLlms.llmConfigOf(target.group(1), versionNumber), TOOL_APPROVALS_KEY, "", gatePaths);
+            JsonNode stored = storedLlms.llmConfigOf(target.group(1), versionNumber);
+            collectKeyPaths(stored, TOOL_APPROVALS_KEY, "", gatePaths);
+            collectNonEmptyKeyPaths(stored, TOOL_CALL_GUARDRAILS_KEY, "", guardrailPaths);
         } catch (Exception e) {
             return UNVERIFIABLE_REASON;
         }
-        if (gatePaths.isEmpty()) {
+        if (gatePaths.isEmpty() && guardrailPaths.isEmpty()) {
             return null;
         }
         JsonNode tree;
@@ -287,13 +292,18 @@ public final class SelfUngatingGuard {
             return UNVERIFIABLE_REASON;
         }
         if (!(tree.isArray() && isPatch(method))) {
-            return LLM_GATE_REMOVAL_REASON;
+            return !gatePaths.isEmpty() ? LLM_GATE_REMOVAL_REASON : LLM_GUARDRAIL_REMOVAL_REASON;
         }
         for (JsonNode operation : tree) {
             String path = operation.path("path").asText("");
             for (String gatePath : gatePaths) {
                 if (path.isEmpty() || gatePath.equals(path) || gatePath.startsWith(path + "/")) {
                     return LLM_GATE_REMOVAL_REASON;
+                }
+            }
+            for (String guardrailPath : guardrailPaths) {
+                if (path.isEmpty() || guardrailPath.equals(path) || guardrailPath.startsWith(path + "/")) {
+                    return LLM_GUARDRAIL_REMOVAL_REASON;
                 }
             }
         }
@@ -304,6 +314,34 @@ public final class SelfUngatingGuard {
      * Adds the JSON pointer of every {@code key} member at any depth of
      * {@code node}.
      */
+    /**
+     * As {@link #collectKeyPaths}, but a key holding an empty array or object is
+     * skipped: an empty stored list protects nothing, and a default-serialised
+     * document carries one, so counting it would refuse every whole-document write.
+     */
+    static void collectNonEmptyKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String child = pointer + "/" + field.getKey().replace("~", "~0").replace("/", "~1");
+                JsonNode value = field.getValue();
+                boolean empty = value.isNull() || ((value.isArray() || value.isObject()) && value.isEmpty());
+                if (key.equals(field.getKey()) && !empty) {
+                    paths.add(child);
+                }
+                collectNonEmptyKeyPaths(value, key, child, paths);
+            }
+        } else if (node.isArray()) {
+            for (int i = 0; i < node.size(); i++) {
+                collectNonEmptyKeyPaths(node.get(i), key, pointer + "/" + i, paths);
+            }
+        }
+    }
+
     static void collectKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
         if (node == null) {
             return;

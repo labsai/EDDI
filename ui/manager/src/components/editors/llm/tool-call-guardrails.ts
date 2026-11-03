@@ -1,3 +1,4 @@
+import { validateToolPattern } from "@/lib/hitl-tool-approvals";
 import { newGuardrail } from "./guardrails";
 import type { LlmTask, ToolCallGuardrailConfig } from "./types";
 
@@ -5,9 +6,6 @@ import type { LlmTask, ToolCallGuardrailConfig } from "./types";
 export const MAX_TOOL_CALL_GUARDRAILS = 32;
 export const MAX_TOOL_PATTERNS = 32;
 export const MAX_FIELDS = 16;
-
-/** The characters a tool-approval pattern may contain (`ToolApprovalPatterns`). */
-const TOOL_PATTERN = /^[A-Za-z0-9_\-.:*/{}]+$/;
 
 /** How the whole-arguments pointer `""` is written in the one-per-line editor. */
 export const WHOLE_ARGUMENTS = '""';
@@ -46,9 +44,13 @@ export function withFields(entry: ToolCallGuardrailConfig, fields: string[]): To
   return fields.length > 0 ? { ...rest, fields } : rest;
 }
 
-/** True for a pattern the server would refuse for its characters or its colons. */
+/**
+ * True for a pattern the server would refuse: the same rules as the tool-approval
+ * editor (`ToolApprovalPatterns.validate` — length, characters, colons, a known
+ * source prefix, an endpoint path behind an http method with its leading slash).
+ */
 export function toolPatternProblem(pattern: string): boolean {
-  return !TOOL_PATTERN.test(pattern) || pattern.startsWith(":") || pattern.endsWith(":");
+  return validateToolPattern(pattern) !== null;
 }
 
 /**

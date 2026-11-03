@@ -3989,6 +3989,8 @@
     "toolsHint": "نمط واحد في كل سطر، بلغة موافقات الأدوات: mcp:add_issue_comment، http.post:/issues/*، builtin:*.",
     "toolsRequired": "حدّد أداة واحدة على الأقل؛ يرفض الخادم إدخالًا بلا أداة.",
     "toolsInvalid": "{{pattern}} ليس نمط أداة صالحًا.",
+    "toolsTooMany": "المسموح به {{max}} نمطًا للأدوات كحد أقصى؛ يحتوي هذا الإدخال على {{count}}.",
+    "fieldsTooMany": "المسموح به {{max}} مؤشرًا للحقول كحد أقصى؛ يحتوي هذا الإدخال على {{count}}.",
     "fieldsLabel": "الحقول",
     "fieldsHint": "مؤشر JSON واحد في كل سطر، مثل /body أو /items/*/text؛ و\"\" يعني الوسائط كاملة. فارغ: كل سلسلة نصية في الوسائط.",
     "fieldsInvalid": "{{field}} ليس مؤشر حقل صالحًا.",

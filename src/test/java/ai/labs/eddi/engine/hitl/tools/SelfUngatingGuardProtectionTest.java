@@ -255,6 +255,29 @@ class SelfUngatingGuardProtectionTest {
                     "[{\"op\":\"replace\",\"path\":\"/tasks/0/description\",\"value\":\"x\"}]", p));
         }
 
+        private final String storedWithGuardrails = "{\"tasks\":[{\"id\":\"t\",\"toolCallGuardrails\":[{\"type\":\"judge\",\"tools\":[\"mcp:x\"]}]}]}";
+
+        @Test
+        @DisplayName("omitting stored tool-call guardrails is refused like omitting a gate")
+        void guardrailOmissionIsRefused() {
+            Protection p = withStoredLlm(storedWithGuardrails);
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[{\"id\":\"t\"}]}", p));
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0\",\"value\":{\"id\":\"t\"}}]", p));
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"remove\",\"path\":\"/tasks\"}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0/description\",\"value\":\"x\"}]", p));
+        }
+
+        @Test
+        @DisplayName("an empty stored guardrail list protects nothing, so a document that carries one can still be replaced")
+        void emptyStoredListIsNotProtected() {
+            assertNull(SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[{\"id\":\"t\"}]}",
+                    withStoredLlm("{\"tasks\":[{\"id\":\"t\",\"toolCallGuardrails\":[]}]}")));
+        }
+
         @Test
         @DisplayName("a version too long for an int is unverifiable (refused), not an exception")
         void oversizedVersionIsUnverifiable() {

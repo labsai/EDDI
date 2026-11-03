@@ -4084,6 +4084,8 @@
     "toolsHint": "One pattern per line, in the language of tool approvals: mcp:add_issue_comment, http.post:/issues/*, builtin:*.",
     "toolsRequired": "Name at least one tool; the server refuses an entry without one.",
     "toolsInvalid": "{{pattern}} is not a valid tool pattern.",
+    "toolsTooMany": "At most {{max}} tool patterns are allowed; this entry has {{count}}.",
+    "fieldsTooMany": "At most {{max}} field pointers are allowed; this entry has {{count}}.",
     "fieldsLabel": "Fields",
     "fieldsHint": "One JSON pointer per line, e.g. /body or /items/*/text; \"\" is the whole arguments. Empty: every string in the arguments.",
     "fieldsInvalid": "{{field}} is not a valid field pointer.",

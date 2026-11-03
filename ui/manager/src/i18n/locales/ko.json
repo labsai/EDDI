@@ -3809,6 +3809,8 @@
     "toolsHint": "한 줄에 하나의 패턴, 도구 승인과 같은 형식: mcp:add_issue_comment, http.post:/issues/*, builtin:*.",
     "toolsRequired": "도구를 하나 이상 지정하세요. 도구가 없는 항목은 서버가 거부합니다.",
     "toolsInvalid": "{{pattern}}은(는) 유효한 도구 패턴이 아닙니다.",
+    "toolsTooMany": "도구 패턴은 최대 {{max}}개까지 허용됩니다. 이 항목에는 {{count}}개가 있습니다.",
+    "fieldsTooMany": "필드 포인터는 최대 {{max}}개까지 허용됩니다. 이 항목에는 {{count}}개가 있습니다.",
     "fieldsLabel": "필드",
     "fieldsHint": "한 줄에 하나의 JSON 포인터(예: /body 또는 /items/*/text). \"\"는 인수 전체입니다. 비워 두면: 인수의 모든 문자열.",
     "fieldsInvalid": "{{field}}은(는) 유효한 필드 포인터가 아닙니다.",

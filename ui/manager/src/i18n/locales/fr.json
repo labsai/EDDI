@@ -3854,6 +3854,8 @@
     "toolsHint": "Un motif par ligne, dans le langage des approbations d'outils : mcp:add_issue_comment, http.post:/issues/*, builtin:*.",
     "toolsRequired": "Indiquez au moins un outil ; le serveur refuse une entrée sans outil.",
     "toolsInvalid": "{{pattern}} n'est pas un motif d'outil valide.",
+    "toolsTooMany": "{{max}} motifs d'outils au maximum sont autorisés ; cette entrée en compte {{count}}.",
+    "fieldsTooMany": "{{max}} pointeurs de champ au maximum sont autorisés ; cette entrée en compte {{count}}.",
     "fieldsLabel": "Champs",
     "fieldsHint": "Un pointeur JSON par ligne, p. ex. /body ou /items/*/text ; \"\" désigne l'ensemble des arguments. Vide : chaque chaîne des arguments.",
     "fieldsInvalid": "{{field}} n'est pas un pointeur de champ valide.",

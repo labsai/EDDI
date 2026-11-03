@@ -150,6 +150,11 @@ public class JudgeGuardrail implements ContentGuardrail {
     }
 
     @Override
+    public boolean callsModel() {
+        return true;
+    }
+
+    @Override
     public String validate(Map<String, String> parameters) {
         Map<String, String> p = parameters != null ? parameters : Map.of();
         if (GuardrailModelClient.isBlank(p.get(GuardrailModelClient.PARAM_PROVIDER))) {

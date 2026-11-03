@@ -13,6 +13,8 @@ Available since EDDI 6.7. Absent or empty, nothing runs: the tool loop is exactl
 | `tools` | yes | The calls the entry applies to, in the [tool-approval pattern language](hitl.md#pattern-language): `mcp:add_issue_comment`, `http.post:/issues/*`, `builtin:*`, a bare tool name. The same matcher as `toolApprovals`, so a pattern means the same thing in both places. |
 | `fields` | no | JSON pointers (RFC 6901) into the arguments: `/body`, `/items/0/text`. A segment that is exactly `*` means every element of an array or member of an object (`/items/*/text`). `""` is the whole arguments document as JSON — for `expression` and `json-object`. **Absent: every string in the arguments.** |
 
+**A pointer that matches nothing screens nothing.** A pointer the arguments do not contain selects no field, so the entry has nothing to run on for that call: it does not run, and `failMode` does not apply (it only covers a check that ran and could not decide). A pointer that does not fit a tool's argument shape therefore leaves that call unscreened by the entry. Check each pointer against the tool's argument schema, and for a tool whose shape you are unsure of, leave `fields` out so every string is screened.
+
 Entries run in the order written. For each call, every entry whose `tools` match it screens each of its `fields`; a redaction by one entry is what the next entry sees.
 
 ### Example: a DevRel desk that answers GitHub issues
@@ -104,14 +106,14 @@ Streaming needs nothing: tool-call arguments are never streamed to a client. Cas
  "issues":["UNAPPROVED_CLAIM"],"message":"Remove every product claim that is not in the approved list.","retryAllowed":true}
 ```
 
-Only configuration and EDDI vocabulary: your block message or fix text, the issue codes you declared, the configured field pointer (`*` when the entry screens every string). Reasons and codes are passed through an allow-list, so even a custom guardrail that breaks the "never echo the screened text" rule cannot carry it out. **The screened arguments are never echoed** — not to the model, the audit ledger, the event stream or the log.
+Only configuration and EDDI vocabulary: your block message or fix text, the issue codes you declared, the configured field pointer (`*` when the entry screens every string). Reasons and issue codes are filtered to a short token shape (lower-case letters, digits and `_:,.-`, at most 120 characters), which keeps free text and long excerpts out. That is a shape check, not a vocabulary: a custom guardrail that returned the screened value itself as its reason, in token shape, would be recorded. The built-in types never do. **The built-in types never echo the screened arguments** — not to the model, the audit ledger, the event stream or the log — and a custom guardrail type is responsible for the same.
 
 ## Limits and cost
 
 - At most 256 fields and 256 KiB of text are screened per call and entry; past that the call is "could not decide".
-- At most 20 model-backed checks (judge, classifier) per tool-loop run; past that, "could not decide" (`tool_guardrail_model_cap`).
+- At most 20 model-backed checks (judge, classifier) per tool-loop run; past that, "could not decide" (`tool_guardrail_model_cap`). `expression` and the other deterministic types make no model call and do not count. After a human approves, the limit applies to each approved call that was amended (only an amended call gets the model-backed types again), so a batch with two edited calls can make up to 40 checks in total.
 - A model-backed check is one model call per call, entry and field — and without `fields`, per string in the arguments, which a deploy-time warning points out. Name the field.
-- Every model-backed check is admitted against the conversation's cost ceiling and the tenant budget first, with the run's unrecorded spend counted; a refusal is "could not decide". Its cost is charged to the conversation as a priced tool call (`toolCallGuardrail`), so it is part of the run's tool cost, the cost ceiling between rounds, `maxBudgetPerConversation` and the turn's audit cost. It is priced like the judge or classifier everywhere else.
+- Every model-backed check is admitted against the conversation's cost ceiling and the tenant budget first, with the run's unrecorded spend counted; a refusal is "could not decide". Its cost is charged to the conversation as a priced tool call (`toolCallGuardrail`), so it is part of the run's tool cost, the cost ceiling between rounds, `maxBudgetPerConversation` and the turn's audit cost. It is priced like the judge or classifier everywhere else, which means **you must set `inputPricePer1M` and `outputPricePer1M` in the entry's `parameters`**: without them its checks add nothing to the tracked cost or the ceilings (the deploy-time warning says so), and so does a deployment that has cost tracking turned off. The example above leaves them out for brevity; add them for a real agent.
 
 ## Validation
 

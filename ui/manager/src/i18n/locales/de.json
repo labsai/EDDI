@@ -4030,6 +4030,8 @@
     "toolsHint": "Ein Muster pro Zeile, in der Sprache der Tool-Freigaben: mcp:add_issue_comment, http.post:/issues/*, builtin:*.",
     "toolsRequired": "Nennen Sie mindestens ein Tool; der Server lehnt einen Eintrag ohne Tool ab.",
     "toolsInvalid": "{{pattern}} ist kein gültiges Tool-Muster.",
+    "toolsTooMany": "Höchstens {{max}} Tool-Muster sind erlaubt; dieser Eintrag hat {{count}}.",
+    "fieldsTooMany": "Höchstens {{max}} Feldzeiger sind erlaubt; dieser Eintrag hat {{count}}.",
     "fieldsLabel": "Felder",
     "fieldsHint": "Ein JSON-Pointer pro Zeile, z. B. /body oder /items/*/text; \"\" sind die gesamten Argumente. Leer: jeder String in den Argumenten.",
     "fieldsInvalid": "{{field}} ist kein gültiger Feld-Pointer.",

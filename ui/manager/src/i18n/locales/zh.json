@@ -3809,6 +3809,8 @@
     "toolsHint": "每行一个模式，使用工具审批的语法：mcp:add_issue_comment、http.post:/issues/*、builtin:*。",
     "toolsRequired": "至少指定一个工具；服务器会拒绝没有工具的条目。",
     "toolsInvalid": "{{pattern}} 不是有效的工具模式。",
+    "toolsTooMany": "最多允许 {{max}} 个工具模式；此条目有 {{count}} 个。",
+    "fieldsTooMany": "最多允许 {{max}} 个字段指针；此条目有 {{count}} 个。",
     "fieldsLabel": "字段",
     "fieldsHint": "每行一个 JSON 指针，例如 /body 或 /items/*/text；\"\" 表示全部参数。留空：参数中的每个字符串。",
     "fieldsInvalid": "{{field}} 不是有效的字段指针。",

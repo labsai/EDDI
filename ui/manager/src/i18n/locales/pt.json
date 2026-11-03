@@ -3854,6 +3854,8 @@
     "toolsHint": "Um padrão por linha, na linguagem das aprovações de ferramentas: mcp:add_issue_comment, http.post:/issues/*, builtin:*.",
     "toolsRequired": "Indique pelo menos uma ferramenta; o servidor recusa uma entrada sem nenhuma.",
     "toolsInvalid": "{{pattern}} não é um padrão de ferramenta válido.",
+    "toolsTooMany": "São permitidos no máximo {{max}} padrões de ferramentas; esta entrada tem {{count}}.",
+    "fieldsTooMany": "São permitidos no máximo {{max}} ponteiros de campo; esta entrada tem {{count}}.",
     "fieldsLabel": "Campos",
     "fieldsHint": "Um ponteiro JSON por linha, por ex. /body ou /items/*/text; \"\" são os argumentos inteiros. Vazio: cada string dos argumentos.",
     "fieldsInvalid": "{{field}} não é um ponteiro de campo válido.",
