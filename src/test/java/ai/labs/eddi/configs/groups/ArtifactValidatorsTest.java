@@ -309,6 +309,108 @@ class ArtifactValidatorsTest {
         assertDoesNotThrow(() -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, metaRef))));
     }
 
+    // =================================================================
+    // bounded evaluation: references, recursion, empty repetitions
+    // =================================================================
+
+    /** {@code depth} definitions, each referencing the previous one twice. */
+    private static String doublingSchema(int depth) {
+        StringBuilder defs = new StringBuilder("\"a0\":{\"type\":\"object\"}");
+        for (int i = 1; i <= depth; i++) {
+            defs.append(",\"a").append(i).append("\":{\"allOf\":[{\"$ref\":\"#/$defs/a").append(i - 1)
+                    .append("\"},{\"$ref\":\"#/$defs/a").append(i - 1).append("\"}]}");
+        }
+        return "{\"$defs\":{" + defs + "},\"$ref\":\"#/$defs/a" + depth + "\"}";
+    }
+
+    private static List<ArtifactValidator> schemaChain(String spec) {
+        return List.of(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec));
+    }
+
+    @Test
+    @DisplayName("references that multiply are refused at save and not run at write: 2^20 subschemas took seconds per artifact")
+    void multiplyingReferences_refused() {
+        String spec = doublingSchema(20);
+
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertTrue(e.getMessage().contains("expands to more than"), e.getMessage());
+
+        long started = System.nanoTime();
+        String rejection = ArtifactValidators.firstRejection(schemaChain(spec), "{}");
+        assertNotNull(rejection);
+        assertTrue(rejection.contains("could not finish"), rejection);
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 1000, "a stored schema like this must not be evaluated");
+
+        // a few references to one definition are ordinary and still pass
+        assertDoesNotThrow(
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, doublingSchema(3)))));
+    }
+
+    @Test
+    @DisplayName("a $ref back to its own schema at the same content location is refused: it recursed into a StackOverflowError")
+    void sameLocationRecursion_refused() {
+        String spec = """
+                {"$defs":{"r":{"allOf":[{"$ref":"#/$defs/r"}]}},"$ref":"#/$defs/r"}""";
+
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertTrue(e.getMessage().contains("recurses endlessly"), e.getMessage());
+        assertTrue(ArtifactValidators.firstRejection(schemaChain(spec), "{}").contains("could not finish"));
+    }
+
+    @Test
+    @DisplayName("a recursion that reaches the same property by two routes is refused: it doubles per nesting level")
+    void doubledRecursion_refused() {
+        String spec = """
+                {"$defs":{"r":{"type":"object","allOf":[{"properties":{"c":{"$ref":"#/$defs/r"}}},
+                 {"properties":{"c":{"$ref":"#/$defs/r"}}}]}},"$ref":"#/$defs/r"}""";
+
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        assertTrue(e.getMessage().contains("two routes"), e.getMessage());
+    }
+
+    @Test
+    @DisplayName("ordinary recursive schemas — a tree, a binary tree — still save and validate")
+    void ordinaryRecursion_passes() {
+        String tree = """
+                {"type":"object","required":["title"],"properties":{"title":{"type":"string"},
+                 "children":{"type":"array","items":{"$ref":"#"}}}}""";
+        String binary = """
+                {"$defs":{"n":{"type":"object","properties":{"left":{"$ref":"#/$defs/n"},"right":{"$ref":"#/$defs/n"}}}},
+                 "$ref":"#/$defs/n"}""";
+
+        assertDoesNotThrow(() -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, tree),
+                new ArtifactValidator(ValidatorKind.JSON_SCHEMA, binary))));
+        assertNull(ArtifactValidators.firstRejection(schemaChain(tree), "{\"title\":\"a\",\"children\":[{\"title\":\"b\"}]}"));
+        assertNotNull(ArtifactValidators.firstRejection(schemaChain(tree), "{\"title\":\"a\",\"children\":[{}]}"));
+        assertNull(ArtifactValidators.firstRejection(schemaChain(binary), "{\"left\":{\"right\":{}}}"));
+    }
+
+    @Test
+    @DisplayName("a counted repetition of an empty match is refused in a REGEX validator and a schema pattern: the deadline never sees it")
+    void emptyRepetition_refused() {
+        String regex = "(?:(?:){99999}){99999}";
+
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.REGEX, regex))));
+        assertTrue(e.getMessage().contains("iterations"), e.getMessage());
+        long started = System.nanoTime();
+        assertNotNull(ArtifactValidators.firstRejection(List.of(new ArtifactValidator(ValidatorKind.REGEX, regex)), "abc"));
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 1000, "the pattern must not be run");
+
+        String spec = "{\"type\":\"string\",\"pattern\":\"" + regex + "\"}";
+        assertThrows(IllegalArgumentException.class,
+                () -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.JSON_SCHEMA, spec))));
+        started = System.nanoTime();
+        assertNotNull(ArtifactValidators.firstRejection(schemaChain(spec), "\"abc\""));
+        assertTrue(Duration.ofNanos(System.nanoTime() - started).toMillis() < 1000, "the schema pattern must not be run");
+
+        // a counted repetition of something that reads input is fine
+        assertDoesNotThrow(() -> ArtifactValidators.requireValidSpecs(config(new ArtifactValidator(ValidatorKind.REGEX, "^\\d{4}-\\d{2}$"))));
+    }
+
     @Test
     @DisplayName("only the bundled meta-schema classpath prefixes are loadable")
     void loadableIris() {
