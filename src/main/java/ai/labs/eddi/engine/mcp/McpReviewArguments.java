@@ -61,7 +61,7 @@ final class McpReviewArguments {
      * "{…}", "reasonCode": "TONE"}}}.
      */
     static Map<String, ToolCallDecision> toolDecisions(IJsonSerialization json, String raw) throws BadArgument {
-        Map<?, ?> parsed = parseObject(json, raw, "toolDecisionsJson");
+        Map<?, ?> parsed = parseObject(raw, "toolDecisionsJson");
         if (parsed == null) {
             return null;
         }
@@ -93,8 +93,8 @@ final class McpReviewArguments {
      * {@code {"<taskId>": {"verdict": "APPROVED", "note": "…", "editedResult": "…",
      * "reasonCode": "SCOPE"}}}.
      */
-    static Map<String, TaskDecision> taskDecisions(IJsonSerialization json, String raw) throws BadArgument {
-        Map<?, ?> parsed = parseObject(json, raw, "taskDecisionsJson");
+    static Map<String, TaskDecision> taskDecisions(String raw) throws BadArgument {
+        Map<?, ?> parsed = parseObject(raw, "taskDecisionsJson");
         if (parsed == null) {
             return null;
         }
@@ -113,7 +113,7 @@ final class McpReviewArguments {
         return decisions;
     }
 
-    private static Map<?, ?> parseObject(IJsonSerialization json, String raw, String name) throws BadArgument {
+    private static Map<?, ?> parseObject(String raw, String name) throws BadArgument {
         if (raw == null || raw.isBlank()) {
             return null;
         }
