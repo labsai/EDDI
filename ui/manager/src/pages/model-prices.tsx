@@ -50,7 +50,11 @@ export function ModelPricesPage() {
 
   useEffect(() => {
     // an older view (the refetch after a save has not landed yet) must not overwrite a newer form
-    if (view && !dirty && (!form || view.catalog.revision >= form.revision)) setForm(view.catalog);
+    if (view && !dirty && (!form || view.catalog.revision >= form.revision)) {
+      setForm(view.catalog);
+      // server data replaced the form: a reference preview merged against the old entries is stale
+      if (form && form.entries !== view.catalog.entries) setPreview(null);
+    }
   }, [view, dirty, form]);
 
   useEffect(() => {
@@ -92,6 +96,7 @@ export function ModelPricesPage() {
       onSuccess: (stored) => {
         if (formRef.current === submitted) {
           setForm(stored);
+          setPreview(null);
           setDirty(false);
         } else {
           // edited while the save was in flight: keep those edits, on top of the stored revision
@@ -113,6 +118,7 @@ export function ModelPricesPage() {
   const reload = useCallback(() => {
     setDirty(false);
     setConflict(false);
+    setPreview(null);
     void refetch();
   }, [refetch]);
 

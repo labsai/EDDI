@@ -20,6 +20,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -143,12 +146,35 @@ public class SystemSpendMeter {
         return usd;
     }
 
+    /** One group system charge, with the attribution its spend event reports. */
+    private record Pending(String groupId, String groupConversationId, String detail, double usd, int unpricedCalls, long inputTokens,
+            long outputTokens) {
+    }
+
+    /**
+     * A cap on carried charges, so a long store outage cannot grow memory without
+     * bound.
+     */
+    static final int MAX_PENDING = 256;
+
+    /**
+     * Charges the tenant counter has not recorded yet (store outage), oldest first.
+     */
+    private final ArrayDeque<Pending> pending = new ArrayDeque<>();
+
     private void chargeTenant(GroupConversation gc, String detail, double delta, PricedSpend priced, Map<?, ?> usage) {
+        // Charges the tenant counter could not take are carried to the next one, as
+        // DreamService
+        // does: the ledger delta has already advanced, so without this the amount would
+        // be lost
+        // for good. Each carries its own group and usage, so a recovery reports every
+        // charge
+        // under the group that incurred it.
+        List<Pending> batch = takePending();
+        batch.add(new Pending(gc.getGroupId(), gc.getId(), detail, delta, priced.unpricedCalls(), asLong(usage, "inputTokens"),
+                asLong(usage, "outputTokens")));
+        double charge = batch.stream().mapToDouble(Pending::usd).sum();
         String tenantId = null;
-        // A charge the tenant counter could not take is carried to the next one, as
-        // DreamService does: the ledger delta has already advanced, so without this the
-        // amount would be lost for good.
-        double charge = delta + takePending();
         try {
             if (tenantQuotaService != null) {
                 tenantId = tenantQuotaService.getDefaultTenantId();
@@ -157,7 +183,7 @@ public class SystemSpendMeter {
                     // An unreadable quota store is a returned result, not an exception. The tenant
                     // counter did not take the charge, so no sink may see it ("a sink sees exactly
                     // the charges the tenant counter saw").
-                    addPending(charge);
+                    restorePending(batch);
                     LOGGER.warnf("Group %s: system spend of $%.6f was not charged to the tenant — quota accounting unavailable; "
                             + "carried to the next group system charge", LogSanitizer.sanitize(gc.getId()), charge);
                     return;
@@ -165,28 +191,36 @@ public class SystemSpendMeter {
             }
         } catch (RuntimeException e) {
             // The work already ran; a denied or unavailable result must not fail it.
-            addPending(charge);
+            restorePending(batch);
             LOGGER.warnf("Group %s: system spend of $%.6f could not be charged to the tenant (carried to the next charge): %s",
                     LogSanitizer.sanitize(gc.getId()), charge, LogSanitizer.sanitize(e.getMessage()));
             return;
         }
-        sinks.fire(new SpendEvent(tenantId, null, null, null, null, gc.getGroupId(), gc.getId(), SpendEvent.Kind.GROUP_SYSTEM, detail, charge,
-                priced.unpricedCalls(), asLong(usage, "inputTokens"), asLong(usage, "outputTokens"), Instant.now()));
+        for (Pending entry : batch) {
+            sinks.fire(new SpendEvent(tenantId, null, null, null, null, entry.groupId(), entry.groupConversationId(),
+                    SpendEvent.Kind.GROUP_SYSTEM, entry.detail(), entry.usd(), entry.unpricedCalls(), entry.inputTokens(), entry.outputTokens(),
+                    Instant.now()));
+        }
     }
 
-    /**
-     * Group system spend the tenant counter has not recorded yet (store outage).
-     */
-    private double pendingTenantCost;
-
-    private synchronized double takePending() {
-        double pending = pendingTenantCost;
-        pendingTenantCost = 0.0;
-        return pending;
+    private synchronized List<Pending> takePending() {
+        var taken = new ArrayList<>(pending);
+        pending.clear();
+        return taken;
     }
 
-    private synchronized void addPending(double amount) {
-        pendingTenantCost += amount;
+    private synchronized void restorePending(List<Pending> batch) {
+        // oldest first; once over the cap the oldest are dropped (their tenant charge
+        // is lost,
+        // which the warning above and the docs state)
+        for (Pending entry : batch) {
+            pending.addLast(entry);
+        }
+        while (pending.size() > MAX_PENDING) {
+            Pending dropped = pending.pollFirst();
+            LOGGER.warnf("Dropping a carried group system charge of $%.6f: more than %d are waiting for the quota store",
+                    dropped.usd(), MAX_PENDING);
+        }
     }
 
     private static long asLong(Map<?, ?> usage, String key) {
