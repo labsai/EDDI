@@ -528,11 +528,70 @@ class PostgresConversationMemoryStoreTest extends PostgresTestBase {
             assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(zombie));
             var fenced = store.loadConversationMemorySnapshot(id);
             fenced.setFenceToken(3L);
-            assertFalse(store.storeConversationMemorySnapshotIfState(fenced, ConversationState.READY),
-                    "the conditional write is refused too");
+            // A6: refused as FENCED, not as a silent "state moved" miss, so the turn is
+            // dead-lettered instead of discarded
+            var thrown = assertThrows(ConversationFencedException.class,
+                    () -> store.storeConversationMemorySnapshotIfState(fenced, ConversationState.READY),
+                    "the conditional write is refused too, and says why");
+            assertEquals(9L, thrown.getStoredFence());
             var current = store.loadConversationMemorySnapshot(id);
             current.setFenceToken(9L);
             store.storeConversationMemorySnapshot(current); // the holder itself may write again
+        }
+
+        @Test
+        @DisplayName("A6: a conditional write that misses on its state, not its fence, is still a plain false")
+        void conditionalStateMissIsNotFenced() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var turn = store.loadConversationMemorySnapshot(id);
+            turn.setFenceToken(9L);
+            assertFalse(store.storeConversationMemorySnapshotIfState(turn, ConversationState.AWAITING_HUMAN));
+        }
+
+        @Test
+        @DisplayName("A4: an unfenced full write after a raise never lowers _fence")
+        void unfencedFullWriteAfterRaiseNeverLowersFence() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var a = loadForTurn(id);
+            addTurn(a);
+            a.setFenceToken(4L);
+            store.storeConversationMemorySnapshot(a);
+            // an unfenced writer (degraded turn, schedule, undo) loads at fence 4 ...
+            var unfenced = store.loadConversationMemorySnapshot(id);
+            assertEquals(4L, unfenced.getFence());
+            // ... a successor's lease starts and raises the fence (the revision does not
+            // move) ...
+            store.raiseFence(id, 9L);
+            // ... and the unfenced full write still lands, without putting fence 4 back
+            store.storeConversationMemorySnapshot(unfenced);
+            var stored = store.loadConversationMemorySnapshot(id);
+            assertEquals(9L, stored.getFence(), "the full write must not lower the fence the successor raised");
+            // so the predecessor the raise shut out stays shut out
+            var zombie = store.loadConversationMemorySnapshot(id);
+            zombie.setFenceToken(4L);
+            assertThrows(ConversationFencedException.class, () -> store.storeConversationMemorySnapshot(zombie));
+        }
+
+        @Test
+        @DisplayName("A4: an unfenced conditional write after a raise lands and never lowers _fence")
+        void unfencedConditionalWriteAfterRaiseNeverLowersFence() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var unfenced = store.loadConversationMemorySnapshot(id); // no _fence at all yet
+            assertNull(unfenced.getFence());
+            store.raiseFence(id, 7L);
+            assertTrue(store.storeConversationMemorySnapshotIfState(unfenced, ConversationState.READY));
+            assertEquals(7L, store.loadConversationMemorySnapshot(id).getFence());
+        }
+
+        @Test
+        @DisplayName("A4: a fenced full write raises _fence to its token and never below the stored one")
+        void fencedFullWriteRaisesTheFence() throws IResourceStore.ResourceStoreException {
+            String id = newConversation();
+            var holder = store.loadConversationMemorySnapshot(id);
+            store.raiseFence(id, 12L);
+            holder.setFenceToken(12L);
+            store.storeConversationMemorySnapshot(holder);
+            assertEquals(12L, store.loadConversationMemorySnapshot(id).getFence());
         }
     }
 

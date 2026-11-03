@@ -30,9 +30,9 @@ import java.util.Map;
  *            input can be replayed.
  * @param reason
  *            why the turn was dead-lettered: {@link #REASON_FENCED},
- *            {@link #REASON_LEASE_LOST}, {@link #REASON_TIMEOUT} or
- *            {@link #REASON_FAILED}; {@code null} for an entry written before
- *            the reason was recorded
+ *            {@link #REASON_LEASE_LOST}, {@link #REASON_CONFLICT},
+ *            {@link #REASON_TIMEOUT} or {@link #REASON_FAILED}; {@code null}
+ *            for an entry written before the reason was recorded
  * @param nodeId
  *            the node the turn failed on, {@code null} on a single node and for
  *            older entries
@@ -56,6 +56,12 @@ public record DeadLetterEntry(String id, String conversationId, String error, lo
      * stopped before anything of it was stored.
      */
     public static final String REASON_LEASE_LOST = "lease-lost";
+    /**
+     * Cluster mode: the turn ran and its reply went out, but its write lost the
+     * optimistic-concurrency race to another writer of the conversation (an undo, a
+     * degraded-mode turn on another node), so nothing of it was stored.
+     */
+    public static final String REASON_CONFLICT = "conflict";
     /** The turn ran out of time. */
     public static final String REASON_TIMEOUT = "timeout";
     /** Any other failure. */

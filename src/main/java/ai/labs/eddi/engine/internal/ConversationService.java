@@ -2971,7 +2971,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      * from it.
      */
     boolean stoppedByLeaseLoss(String conversationId, IConversationMemory memory, SimpleConversationMemorySnapshot snapshot) {
-        if (!memory.isCancelled() || !conversationStepRunner.isLeaseLost(conversationId)) {
+        if (!memory.isCancelled() || !conversationStepRunner.isLeaseLost(conversationId, memory)) {
             return false;
         }
         snapshot.setConversationState(ConversationState.IN_PROGRESS);
