@@ -1495,6 +1495,8 @@
     "evalStructured": "Structured Output (JSON)",
     "evalHeuristic": "Heuristic (hedging detection)",
     "evalJudge": "Judge Model (secondary LLM)",
+    "cascadeAcceptanceCriterion": "Acceptance criterion (optional)",
+    "cascadeAcceptanceCriterionHint": "One sentence the judge checks besides the user's request, e.g. \"Gives concrete steps\"",
     "evalNone": "None (always accept)",
     "cascadeInAgent": "Also use cascade in Agent Mode (with tools)",
     "cascadeSteps": "Cascade Steps (cheap → expensive)",

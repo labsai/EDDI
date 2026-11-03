@@ -2162,6 +2162,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private JudgeModelConfig judgeModel;
 
         /**
+         * Optional sentence telling the judge model what an acceptable answer must do,
+         * e.g. "The answer gives concrete steps and does not tell the user to contact
+         * support". Added to the judge's instructions; the judge then rates the
+         * probability that the answer addresses the user's request <em>and</em> meets
+         * it. Only the judge reads it, so it has no effect on the {@code heuristic},
+         * {@code structured_output} or {@code none} strategies. Null = no criterion.
+         */
+        private String acceptanceCriterion;
+
+        /**
          * Optional overrides for the {@code heuristic} evaluation strategy. When null,
          * the built-in English defaults are used. Enables per-deployment localization
          * of hedging/refusal phrases and thresholds.
@@ -2256,6 +2266,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setJudgeModel(JudgeModelConfig judgeModel) {
             this.judgeModel = judgeModel;
+        }
+
+        public String getAcceptanceCriterion() {
+            return acceptanceCriterion;
+        }
+
+        public void setAcceptanceCriterion(String acceptanceCriterion) {
+            this.acceptanceCriterion = acceptanceCriterion;
         }
 
         public HeuristicConfig getHeuristic() {

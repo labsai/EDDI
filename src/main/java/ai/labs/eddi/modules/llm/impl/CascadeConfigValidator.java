@@ -102,6 +102,11 @@ final class CascadeConfigValidator {
             }
         }
 
+        // Only the judge reads the acceptance criterion: without one it is dead config.
+        if (!isBlank(cascade.getAcceptanceCriterion()) && (cascade.getJudgeModel() == null || isBlank(cascade.getJudgeModel().getType()))) {
+            warn(taskId, "acceptanceCriterion is set but there is no judgeModel with a 'type' — only the judge reads it, so it has no effect");
+        }
+
         // Cross-provider credential check. Step/judge parameters are merged OVER the
         // task parameters (step wins), so a step targeting a DIFFERENT provider than
         // the task silently inherits the task's apiKey — the wrong key for that

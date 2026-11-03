@@ -1443,6 +1443,8 @@
     "evalStructured": "Strukturierte Ausgabe (JSON)",
     "evalHeuristic": "Heuristisch (Unsicherheitserkennung)",
     "evalJudge": "Bewertungsmodell (Sub-LLM)",
+    "cascadeAcceptanceCriterion": "Akzeptanzkriterium (optional)",
+    "cascadeAcceptanceCriterionHint": "Ein Satz, den das Bewertungsmodell zusätzlich zur Anfrage prüft, z. B. „Nennt konkrete Schritte“",
     "evalNone": "Keine (immer akzeptieren)",
     "cascadeInAgent": "Kaskade auch im Agentenmodus (mit Werkzeugen) verwenden",
     "cascadeSteps": "Cascade Steps",

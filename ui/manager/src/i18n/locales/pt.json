@@ -1459,6 +1459,8 @@
     "evalStructured": "Saída estruturada (JSON)",
     "evalHeuristic": "Heurística (deteção de hesitação)",
     "evalJudge": "Modelo juiz (LLM secundário)",
+    "cascadeAcceptanceCriterion": "Critério de aceitação (opcional)",
+    "cascadeAcceptanceCriterionHint": "Uma frase que o modelo avaliador verifica além do pedido, p. ex. «Dá passos concretos»",
     "evalNone": "Nenhuma (aceitar sempre)",
     "cascadeInAgent": "Usar cascata também no modo agente (com ferramentas)",
     "cascadeSteps": "Cascade Steps",

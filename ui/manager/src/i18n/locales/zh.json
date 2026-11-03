@@ -1443,6 +1443,8 @@
     "evalStructured": "结构化输出 (JSON)",
     "evalHeuristic": "启发式（犹豫检测）",
     "evalJudge": "裁判模型（辅助 LLM）",
+    "cascadeAcceptanceCriterion": "验收标准（可选）",
+    "cascadeAcceptanceCriterionHint": "评估模型除请求外还会检查的一句话，例如“给出具体步骤”",
     "evalNone": "无（始终接受）",
     "cascadeInAgent": "在代理模式（含工具）中也使用级联",
     "cascadeSteps": "Cascade Steps",

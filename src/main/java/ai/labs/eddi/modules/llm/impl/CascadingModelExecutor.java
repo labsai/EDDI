@@ -1423,7 +1423,8 @@ class CascadingModelExecutor {
             tokenUsage = extractTokenUsage(responseMetadata);
         }
 
-        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+        var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig,
+                judgeRequest(originalMessages, task));
         return new StepResult(evalResult.response(), evalResult.confidence(), null, tokenUsage, streamedLive, responseMetadata,
                 evalResult.judgeTokenUsage(), unresolved, reasks);
     }
@@ -1433,6 +1434,15 @@ class CascadingModelExecutor {
      * wrapper is never used here — {@code evaluationStrategy} has already been
      * downgraded to judge/heuristic by {@link #resolveEffectiveStrategy}.
      */
+    /**
+     * What a {@code judge_model} grades a step's answer against: the user's latest
+     * request as the step's model saw it, and the cascade's acceptance criterion.
+     */
+    private static ConfidenceEvaluator.JudgeRequest judgeRequest(List<ChatMessage> messages, LlmConfiguration.Task task) {
+        ModelCascadeConfig cascade = task != null ? task.getModelCascade() : null;
+        return ConfidenceEvaluator.JudgeRequest.of(messages, cascade != null ? cascade.getAcceptanceCriterion() : null);
+    }
+
     private StepResult executeAgentModeStep(ChatModel chatModel, List<ChatMessage> originalMessages, String systemMessage, String evaluationStrategy,
                                             LlmConfiguration.Task task, IConversationMemory memory, IAgentOrchestrator agentOrchestrator,
                                             ChatModel judgeModel, HeuristicConfig heuristicConfig, JsonResponseFormatPolicy jsonPolicy,
@@ -1482,7 +1492,8 @@ class CascadingModelExecutor {
             }
             String responseText = agentResult.response();
             Map<String, Object> tokenUsage = extractTokenUsage(agentResult.responseMetadata());
-            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig);
+            var evalResult = ConfidenceEvaluator.evaluate(evaluationStrategy, responseText, judgeModel, heuristicConfig,
+                    judgeRequest(originalMessages, task));
             return new StepResult(evalResult.response(), evalResult.confidence(), agentResult, tokenUsage, false, agentResult.responseMetadata(),
                     evalResult.judgeTokenUsage(), unresolved, reasks);
         }

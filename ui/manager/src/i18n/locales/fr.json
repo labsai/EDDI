@@ -1459,6 +1459,8 @@
     "evalStructured": "Sortie structurée (JSON)",
     "evalHeuristic": "Heuristique (détection d’hésitation)",
     "evalJudge": "Modèle juge (sous-LLM)",
+    "cascadeAcceptanceCriterion": "Critère d’acceptation (facultatif)",
+    "cascadeAcceptanceCriterionHint": "Une phrase que le modèle évaluateur vérifie en plus de la demande, p. ex. « Donne des étapes concrètes »",
     "evalNone": "Aucune (toujours accepter)",
     "cascadeInAgent": "Utiliser aussi la cascade en mode agent (avec outils)",
     "cascadeSteps": "Cascade Steps",

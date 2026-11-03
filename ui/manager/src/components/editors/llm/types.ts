@@ -66,6 +66,8 @@ export interface ModelCascadeConfig {
   steps?: CascadeStep[];
   /** Judge model config — used when evaluationStrategy is "judge_model". */
   judgeModel?: CascadeJudgeModel;
+  /** One sentence the judge checks besides the request; only the judge reads it. */
+  acceptanceCriterion?: string;
   /** Overrides for the "heuristic" evaluation strategy. */
   heuristic?: CascadeHeuristic;
   /** Wall-clock ceiling across the whole cascade (ms). Must be > 0 when set. */

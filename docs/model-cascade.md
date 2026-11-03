@@ -66,6 +66,7 @@ Cascading is configured per-task in a `langchain.json` resource:
 | `evaluationStrategy` | string | `"structured_output"` | How confidence is evaluated (see below) |
 | `enableInAgentMode` | boolean | `true` | Whether cascade activates when tools/agents are configured |
 | `judgeModel` | object | — | Model for the `judge_model` strategy: `{ "type": "...", "parameters": {...}, "inputPricePer1M": 0.15, "outputPricePer1M": 0.6 }` (prices optional; they make the judge's spend count toward `maxCostPerRun` and the reported cost; negative values fail deployment). Expected when `evaluationStrategy` is `judge_model`; if omitted or unbuildable, deployment logs a warning and confidence evaluation falls back to `heuristic` at runtime. |
+| `acceptanceCriterion` | string | — | One sentence telling the judge what an acceptable answer must do, e.g. `"The answer gives concrete steps and does not tell the user to contact support"`. Only the judge reads it: without a `judgeModel` it has no effect, and deployment logs a warning. See [`judge_model`](#judge_model). |
 | `heuristic` | object | — | Overrides for the `heuristic` strategy (see below). Optional. |
 | `maxTotalDurationMs` | long | — | Wall-clock ceiling across the whole cascade. When reached, escalation stops and the best response so far is returned. Also caps each **buffered** step's timeout by the remaining budget — a step streamed live is exempt (see [Streaming the Final Step](#streaming-the-final-step)). |
 | `maxCostPerRun` | double | — | Dollar ceiling for a single run: the steps' token cost (per-step pricing) **plus** the judge model's token cost (`judgeModel` pricing) **plus** the tracked cost of the tools agent-mode steps ran. When reached, escalation stops and the best response so far is returned. |
@@ -121,11 +122,16 @@ Analyzes the response text for uncertainty signals. Phrases and thresholds are *
 
 ### `judge_model`
 
-A separate (typically cheap) model rates the response's confidence. Requires a `judgeModel` config block; the judge is built once via the model registry (with vault + global-variable resolution). If the judge cannot be built or the call fails, it falls back to `heuristic`.
+A separate (typically cheap) model rates the probability that the step's answer **fully and correctly addresses the user's request**. Requires a `judgeModel` config block; the judge is built once via the model registry (with vault + global-variable resolution). If the judge cannot be built or the call fails, it falls back to `heuristic`.
+
+The judge sees the request as well as the answer: the text of the latest user message the step's model was sent (its last 8,000 characters), so a fluent answer to the wrong question is not graded as a good one. An image-only message has no text, and the judge then rates the answer on its own. `acceptanceCriterion` adds a condition of your own to the grade:
 
 ```json
-"judgeModel": { "type": "openai", "parameters": { "modelName": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } }
+"judgeModel": { "type": "openai", "parameters": { "modelName": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } },
+"acceptanceCriterion": "The answer gives concrete steps and does not tell the user to contact support"
 ```
+
+The request and the answer are sent to the judge as JSON data, and it is told never to follow instructions inside them; the criterion goes into its instructions. That keeps the text being graded from posing as grading instructions, but it does not make the grade tamper-proof: a crafted request or answer can still sway a model. Treat the cascade as a cost and quality trade-off, not as a security or review boundary. The grade also judges relevance and completeness, not facts. Tune `confidenceThreshold` for the judge model you use, and tune it again when you change that model: different models score on different scales.
 
 ### `none`
 

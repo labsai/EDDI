@@ -1443,6 +1443,8 @@
     "evalStructured": "構造化出力 (JSON)",
     "evalHeuristic": "ヒューリスティック（あいまい検出）",
     "evalJudge": "評価モデル（サブLLM）",
+    "cascadeAcceptanceCriterion": "受け入れ基準（任意）",
+    "cascadeAcceptanceCriterionHint": "評価モデルがリクエストに加えて確認する一文。例：「具体的な手順を示している」",
     "evalNone": "なし（常に受け入れ）",
     "cascadeInAgent": "エージェントモード（ツール使用時）でもカスケードを使用",
     "cascadeSteps": "Cascade Steps",

@@ -1443,6 +1443,8 @@
     "evalStructured": "เอาต์พุตแบบมีโครงสร้าง (JSON)",
     "evalHeuristic": "ฮิวริสติก (ตรวจจับความลังเล)",
     "evalJudge": "โมเดลผู้ตัดสิน (LLM รอง)",
+    "cascadeAcceptanceCriterion": "เกณฑ์การยอมรับ (ไม่บังคับ)",
+    "cascadeAcceptanceCriterionHint": "ประโยคหนึ่งที่โมเดลผู้ประเมินตรวจสอบเพิ่มจากคำขอ เช่น \"ให้ขั้นตอนที่ชัดเจน\"",
     "evalNone": "ไม่มี (ยอมรับเสมอ)",
     "cascadeInAgent": "ใช้คาสเคดในโหมดเอเจนต์ (กับเครื่องมือ) ด้วย",
     "cascadeSteps": "Cascade Steps",
