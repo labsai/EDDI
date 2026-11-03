@@ -1035,7 +1035,7 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 | **Production** | No + explicit opt-out | Starts, but logs an ERROR at startup and a WARN reminder every hour |
 | **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
 
-The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The hourly WARN reminder ensures operators remain aware.
+The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The startup ERROR keeps operators aware; a periodic WARN reminder is opt-in via `eddi.security.unauthenticated-reminder-interval`.
 
 ### CI Security Scanning
 
