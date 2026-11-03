@@ -220,6 +220,20 @@ class RestImportServiceReviewFixesTest {
     }
 
     @Test
+    @DisplayName("the merge preview refuses a workflow directory holding two workflow documents, as the import does")
+    void previewRejectsTwoWorkflowDocuments() throws Exception {
+        givenArchive(List.of(WORKFLOW_ID), workflowDir -> {
+            Files.writeString(new File(workflowDir, WORKFLOW_ID + ".workflow.json").toPath(), "{\"workflowSteps\":[]}");
+            Files.writeString(new File(workflowDir, "other.workflow.json").toPath(), "{\"workflowSteps\":[]}");
+        });
+
+        var thrown = assertThrows(WebApplicationException.class,
+                () -> importService.previewImport(new ByteArrayInputStream(new byte[0]), null));
+
+        assertEquals(400, thrown.getResponse().getStatus());
+    }
+
+    @Test
     @DisplayName("two spellings of one workflow URI are one workflow, imported once")
     void workflowSpellingsAreImportedOnce() throws Exception {
         givenArchive(List.of(WORKFLOW_ID), workflowDir -> Files.writeString(

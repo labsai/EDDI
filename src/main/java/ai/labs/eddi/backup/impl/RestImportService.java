@@ -351,6 +351,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
                     // Read workflow file to find extension URIs
                     var dir = Paths.get(FileUtilities.buildPath(targetDirPath, workflowId, workflowVersion));
+                    // The import refuses such a directory; the preview must not list it.
+                    requireOneWorkflowDocument(dir, workflowId, workflowVersion);
                     try (var wfStream = Files.newDirectoryStream(dir,
                             p -> p.toString().endsWith(".workflow.json") || p.toString().endsWith(".package.json"))) {
                         for (Path workflowFilePath : wfStream) {
