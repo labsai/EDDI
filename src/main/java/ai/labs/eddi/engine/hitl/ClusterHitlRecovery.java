@@ -86,11 +86,34 @@ public class ClusterHitlRecovery implements ClusterStartable {
         }
     }
 
+    private boolean natsConnected() {
+        try {
+            return connections.isResolvable() && connections.get().isConnected();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
     /** No lease, and unchanged for at least the minimum age. */
     synchronized boolean eligible(String conversationId) {
         touched.add(conversationId);
+        // A11: peek answers "no lease" when NATS cannot be read, which must not read as
+        // "nobody runs it, recover now". Not eligible while this node is cut off from
+        // NATS, before and after the read (a read that failed because the connection
+        // dropped meanwhile); the next sweep asks again.
+        // TODO(cluster): use IConversationLeaseManager.peekStrict
+        // (fix/cluster-lease-validity),
+        // which throws on an unreadable lease, so a request that timed out on a
+        // connection
+        // still marked connected is not taken for "no lease" either.
+        if (!natsConnected()) {
+            return false;
+        }
         if (leases.peek(conversationId).isPresent()) {
             sightings.remove(conversationId);
+            return false;
+        }
+        if (!natsConnected()) {
             return false;
         }
         Long revision = memoryStore.getRevision(conversationId);

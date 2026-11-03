@@ -585,7 +585,8 @@ public class ClusterAdminService implements ClusterStartable {
         if (!isClustered()) {
             return new LeasePage(List.of(), 0, 0, false);
         }
-        List<LeaseSnapshot> snapshots = natsLeases.get().snapshot("", MAX_LEASE_SCAN);
+        LeaseScan scan = leaseScan();
+        List<LeaseSnapshot> snapshots = scan.snapshots();
         boolean truncated = snapshots.size() >= MAX_LEASE_SCAN;
         Map<String, Map<String, Object>> members = membersById();
         long now = System.currentTimeMillis();
@@ -593,9 +594,7 @@ public class ClusterAdminService implements ClusterStartable {
         for (LeaseSnapshot s : snapshots) {
             views.add(leaseView(s, members, now, null));
         }
-        // Agents for the conversations, in one read.
-        Map<String, ConversationListingSummary> summaries = summaries(
-                views.stream().map(LeaseView::conversationId).filter(id -> id != null).toList());
+        Map<String, ConversationListingSummary> summaries = scan.summaries();
         List<LeaseView> enriched = new ArrayList<>();
         for (LeaseView v : views) {
             ConversationListingSummary summary = v.conversationId() == null ? null : summaries.get(v.conversationId());
@@ -610,6 +609,50 @@ public class ClusterAdminService implements ClusterStartable {
         int suspicious = (int) enriched.stream().filter(v -> !v.flags().isEmpty()).count();
         int max = Math.max(1, Math.min(limit <= 0 ? 100 : limit, MAX_PAGE));
         return new LeasePage(matching.size() <= max ? matching : matching.subList(0, max), matching.size(), suspicious, truncated);
+    }
+
+    /**
+     * How long one scan of the lease bucket is shared (D6). Every open lease page
+     * polls every 5 s, and a scan reads up to {@value #MAX_LEASE_SCAN} keys plus
+     * the conversation summaries from the bucket's leader, the same NATS server
+     * every turn's lease goes through. The consoles of several administrators, and
+     * the filters one administrator types, share one scan instead; a force-release
+     * on this node drops it at once. The flags and ages are still computed per
+     * request.
+     */
+    static final long LEASE_SCAN_CACHE_MILLIS = 3_000;
+    private final Object leaseScanLock = new Object();
+    private volatile LeaseScan cachedLeaseScan;
+
+    /** One read of the lease bucket and the summaries of its conversations. */
+    private record LeaseScan(List<LeaseSnapshot> snapshots, Map<String, ConversationListingSummary> summaries, long at) {
+    }
+
+    private LeaseScan leaseScan() {
+        LeaseScan cached = cachedLeaseScan;
+        if (cached != null && System.currentTimeMillis() - cached.at() < LEASE_SCAN_CACHE_MILLIS) {
+            return cached;
+        }
+        synchronized (leaseScanLock) {
+            // Concurrent callers wait for the one scan instead of each running their own.
+            cached = cachedLeaseScan;
+            if (cached != null && System.currentTimeMillis() - cached.at() < LEASE_SCAN_CACHE_MILLIS) {
+                return cached;
+            }
+            List<LeaseSnapshot> snapshots = natsLeases.get().snapshot("", MAX_LEASE_SCAN);
+            // Agents for the conversations, in one read.
+            List<String> conversationIds = snapshots.stream().map(LeaseSnapshot::key)
+                    .filter(k -> k.startsWith(IConversationLeaseManager.CONVERSATION))
+                    .map(k -> k.substring(IConversationLeaseManager.CONVERSATION.length())).toList();
+            LeaseScan fresh = new LeaseScan(snapshots, summaries(conversationIds), System.currentTimeMillis());
+            cachedLeaseScan = fresh;
+            return fresh;
+        }
+    }
+
+    /** Drops the shared lease scan after this node changed a lease. */
+    void invalidateLeaseScan() {
+        cachedLeaseScan = null;
     }
 
     private static boolean contains(String value, String q) {
@@ -682,7 +725,7 @@ public class ClusterAdminService implements ClusterStartable {
     private List<DeadLetterEntry> page(int limit, String after) {
         Optional<ClusterConversationCoordinator> cluster = clusterCoordinator();
         if (cluster.isPresent()) {
-            return cluster.get().getDeadLetters(limit, after);
+            return cachedBatch(cluster.get(), limit, after);
         }
         List<DeadLetterEntry> all = coordinator.getDeadLetters();
         int start = 0;
@@ -695,6 +738,38 @@ public class ClusterAdminService implements ClusterStartable {
             }
         }
         return all.subList(Math.min(start, all.size()), Math.min(all.size(), start + limit));
+    }
+
+    /**
+     * How long a page read from the dead-letter stream is reused (D6): a console
+     * re-reads its page on every poll, and filters typed into it re-read the same
+     * pages. Dropped at once by a replay, discard or forward on this node, like the
+     * summary.
+     */
+    static final long DEAD_LETTER_PAGE_CACHE_MILLIS = 3_000;
+    private static final int MAX_CACHED_PAGES = 64;
+    private final Map<String, CachedPage> cachedPages = new ConcurrentHashMap<>();
+
+    private record CachedPage(List<DeadLetterEntry> entries, long at, long generation) {
+    }
+
+    private List<DeadLetterEntry> cachedBatch(ClusterConversationCoordinator cluster, int limit, String after) {
+        String key = limit + "|" + (after == null ? "" : after);
+        long generation = summaryGeneration.get();
+        long now = System.currentTimeMillis();
+        CachedPage cached = cachedPages.get(key);
+        if (cached != null && cached.generation() == generation && now - cached.at() < DEAD_LETTER_PAGE_CACHE_MILLIS) {
+            return cached.entries();
+        }
+        List<DeadLetterEntry> entries = cluster.getDeadLetters(limit, after);
+        if (cachedPages.size() >= MAX_CACHED_PAGES) {
+            cachedPages.entrySet().removeIf(e -> now - e.getValue().at() >= DEAD_LETTER_PAGE_CACHE_MILLIS);
+            if (cachedPages.size() >= MAX_CACHED_PAGES) {
+                cachedPages.clear();
+            }
+        }
+        cachedPages.put(key, new CachedPage(List.copyOf(entries), now, generation));
+        return entries;
     }
 
     /** Filters for {@link #deadLetters}; every field optional. */
@@ -802,6 +877,7 @@ public class ClusterAdminService implements ClusterStartable {
     void invalidateDeadLetterSummary() {
         summaryGeneration.incrementAndGet();
         cachedSummary = null;
+        cachedPages.clear();
     }
 
     private DeadLetterSummary scanDeadLetterSummary() {
@@ -1309,6 +1385,7 @@ public class ClusterAdminService implements ClusterStartable {
         requireCluster("Releasing a lease");
         String key = IConversationLeaseManager.CONVERSATION + conversationId;
         ForceRelease result;
+        invalidateLeaseScan();
         try {
             result = natsLeases.get().forceRelease(key, expectedRevision);
         } catch (ClusterUnavailableException e) {

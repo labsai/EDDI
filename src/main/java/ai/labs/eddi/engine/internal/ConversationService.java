@@ -331,6 +331,14 @@ public class ConversationService implements IConversationService, UserErasurePar
     final Counter counterConversationStoreConflict;
 
     /**
+     * Cluster mode: writes refused by the fence. Registered at startup (C12), not
+     * on the first rejection: {@code increase()} over a series that starts at its
+     * first sample misses that sample, so the first fenced turn on a pod never
+     * alerted.
+     */
+    private final Counter counterFenceRejected;
+
+    /**
      * Whether a dead letter records the turn's input and context so an operator can
      * replay it. Field-injected with its default so the many tests that build this
      * service with {@code new} keep the documented behaviour.
@@ -453,6 +461,7 @@ public class ConversationService implements IConversationService, UserErasurePar
         this.counterConversationRedo = meterRegistry.counter("eddi_conversation_redo_count");
         this.counterAgentVersionSwitch = meterRegistry.counter("eddi_conversation_agent_version_switch_count");
         this.counterConversationStoreConflict = meterRegistry.counter("eddi_conversation_store_conflict_count");
+        this.counterFenceRejected = meterRegistry.counter("eddi.cluster.fence.rejected");
         this.counterHitlPause = meterRegistry.counter("eddi_hitl_pause_count", "surface", "regular");
         this.counterHitlResume = meterRegistry.counter("eddi_hitl_resume_count", "surface", "regular");
         // (timeout fires are counted in HitlTimeoutHandler, tagged by surface)
@@ -3153,7 +3162,7 @@ public class ConversationService implements IConversationService, UserErasurePar
 
     /** A turn's write was refused by the cluster fence (cluster mode only). */
     void counterFenceRejected() {
-        meterRegistry.counter("eddi.cluster.fence.rejected").increment();
+        counterFenceRejected.increment();
     }
 
     /**

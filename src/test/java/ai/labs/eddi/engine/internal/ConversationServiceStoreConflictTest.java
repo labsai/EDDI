@@ -59,6 +59,7 @@ import java.util.concurrent.Executors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -276,6 +277,14 @@ class ConversationServiceStoreConflictTest {
             task.call();
             return null;
         }).when(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    @Test
+    @DisplayName("C12: the fence-rejected counter exists from startup, so the first rejection on a pod shows in increase()")
+    void fenceRejectedCounterIsRegisteredEagerly() {
+        var counter = meterRegistry.find("eddi.cluster.fence.rejected").counter();
+        assertNotNull(counter, "registered before any rejection");
+        assertEquals(0.0, counter.count());
     }
 
     private static LeaseHandle lease(long fence) {

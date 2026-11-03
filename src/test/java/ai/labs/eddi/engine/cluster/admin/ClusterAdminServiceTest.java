@@ -360,6 +360,25 @@ class ClusterAdminServiceTest {
         }
 
         @Test
+        @DisplayName("D6: consoles polling the lease page share one scan until a force-release on this node")
+        void leaseScanIsShared() throws Exception {
+            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+                    new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null)));
+            when(natsLeases.forceRelease("c.conv1", 10L))
+                    .thenReturn(new ForceRelease(ForceReleaseOutcome.RELEASED, new LeaseInfo("n2", "b2", 10, NOW), 10));
+
+            service.leases(null, false, 100);
+            service.leases("conv", true, 100);
+            service.leases(null, false, 10);
+            verify(natsLeases, times(1)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+            verify(memoryStore, times(1)).loadListingSummaries(anyCollection());
+
+            service.forceRelease("conv1", 10L, "admin-1");
+            service.leases(null, false, 100);
+            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+        }
+
+        @Test
         @DisplayName("a holder that came back with a new boot is RESTARTED")
         void restartedHolder() {
             when(natsLeases.snapshot(anyString(), anyInt()))
