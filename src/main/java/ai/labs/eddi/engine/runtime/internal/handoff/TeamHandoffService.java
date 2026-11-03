@@ -442,7 +442,7 @@ public class TeamHandoffService {
                     return HandoffResult.of(Outcome.BACKLOG_FULL,
                             "That team's backlog is full. Do not retry; tell the user the team needs to clear its backlog.");
                 }
-                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority));
+                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority, request.bet()));
                 handoffs.putOrigin(task.id(), origin);
                 landed = "backlog";
             } else {
@@ -450,7 +450,7 @@ public class TeamHandoffService {
                     return HandoffResult.of(Outcome.INBOX_FULL,
                             "That team's intake inbox is full. Do not retry; tell the user the team needs to review its pending handoffs.");
                 }
-                handoffs.addInbox(new InboxItem(handoffId, subject, description, priority, origin));
+                handoffs.addInbox(new InboxItem(handoffId, subject, description, priority, origin, request.bet()));
                 landed = "inbox";
             }
             try {

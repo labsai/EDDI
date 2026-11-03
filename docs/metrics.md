@@ -312,6 +312,7 @@ eddi_team_cadence_runs_skipped_total        # Fires skipped (run still in flight
 eddi_team_cadence_writebacks_total          # Completed runs written back to the backlog
 eddi_team_cadence_claims_reclaimed_total    # Stale claims reclaimed after claim-ttl
 eddi_team_handoff_total{trigger,mode,outcome}  # Cross-team handoff attempts (see team-handoff.md)
+eddi_group_outcomes_total{outcome}  # Team outcome reports: recorded, duplicate, disabled, invalid, not_found, subject_full (see team-learning-loop.md)
 eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, approved_edited, rejected
 eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```

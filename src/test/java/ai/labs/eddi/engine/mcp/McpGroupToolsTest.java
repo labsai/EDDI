@@ -972,7 +972,7 @@ class McpGroupToolsTest {
     void addTeamTask_persistsWithPriority() throws Exception {
         var workspace = teamWorkspace();
 
-        String result = tools.add_team_task("g1", "Ship the feature", "with tests", "7");
+        String result = tools.add_team_task("g1", "Ship the feature", "with tests", "7", null, null, null, null);
 
         assertFalse(result.contains("error"), result);
         assertEquals(1, workspace.getBacklog().size());
@@ -988,7 +988,7 @@ class McpGroupToolsTest {
                     new TaskItem("Task " + i, "", 0));
         }
 
-        String result = tools.add_team_task("g1", "One more", null, null);
+        String result = tools.add_team_task("g1", "One more", null, null, null, null, null, null);
 
         assertTrue(result.contains("complete or delete"), "the cap error says what to do about it: " + result);
         verify(workspaceStore, never()).casRevision(any());
@@ -996,7 +996,7 @@ class McpGroupToolsTest {
 
     @Test
     void addTeamTask_blankSubject_errors() throws Exception {
-        assertTrue(tools.add_team_task("g1", "  ", null, null).contains("error"));
+        assertTrue(tools.add_team_task("g1", "  ", null, null, null, null, null, null).contains("error"));
     }
 
     @Test
@@ -1011,11 +1011,11 @@ class McpGroupToolsTest {
             return w;
         });
         when(workspaceStore.casRevision(any())).thenReturn(false, true);
-        assertFalse(tools.add_team_task("g1", "Ship it", null, null).contains("error"));
+        assertFalse(tools.add_team_task("g1", "Ship it", null, null, null, null, null, null).contains("error"));
         verify(workspaceStore, times(2)).readOrCreate("g1");
 
         when(workspaceStore.casRevision(any())).thenReturn(false);
-        String result = tools.add_team_task("g1", "Another", null, null);
+        String result = tools.add_team_task("g1", "Another", null, null, null, null, null, null);
         assertTrue(result.contains("error"), result);
         assertTrue(result.contains("concurrently"), "exhausted retries tell the caller to retry: " + result);
     }
@@ -1024,9 +1024,9 @@ class McpGroupToolsTest {
     void addTeamTask_oversizedFields_error() throws Exception {
         teamWorkspace();
         String longSubject = "s".repeat(SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + 1);
-        assertTrue(tools.add_team_task("g1", longSubject, null, null).contains("error"));
+        assertTrue(tools.add_team_task("g1", longSubject, null, null, null, null, null, null).contains("error"));
         String longDescription = "d".repeat(SharedTaskList.MAX_AGENT_TASK_DESCRIPTION_LENGTH + 1);
-        assertTrue(tools.add_team_task("g1", "Ok", longDescription, null).contains("error"));
+        assertTrue(tools.add_team_task("g1", "Ok", longDescription, null, null, null, null, null).contains("error"));
         verify(workspaceStore, never()).casRevision(any());
     }
 
@@ -1035,7 +1035,7 @@ class McpGroupToolsTest {
         var workspace = teamWorkspace();
         workspace.getBacklog().addTask(new TaskItem("Ship it", "", 0));
 
-        String result = tools.add_team_task("g1", "ship IT", null, null);
+        String result = tools.add_team_task("g1", "ship IT", null, null, null, null, null, null);
 
         assertTrue(result.contains("error"), result);
         assertTrue(result.contains("subject"), "the error names the conflict: " + result);
@@ -1046,13 +1046,13 @@ class McpGroupToolsTest {
     @Test
     void listTeamBacklog_serializesTasks_andEmptyWithoutWorkspace() throws Exception {
         teamWorkspace();
-        tools.add_team_task("g1", "A task", null, null);
+        tools.add_team_task("g1", "A task", null, null, null, null, null, null);
 
-        tools.list_team_backlog("g1");
+        tools.list_team_backlog("g1", null);
         verify(jsonSerialization, atLeastOnce()).serialize(any());
 
         when(workspaceStore.find("g1")).thenReturn(null);
-        String result = tools.list_team_backlog("g1");
+        String result = tools.list_team_backlog("g1", null);
         assertFalse(result.contains("error"), "no workspace is an empty backlog, not an error: " + result);
     }
 
@@ -1126,7 +1126,7 @@ class McpGroupToolsTest {
         var workspace = teamWorkspace();
         when(resourceAccessGuard.hasAccess("g1", AccessLevel.EDIT)).thenReturn(false);
 
-        String result = tools.add_team_task("g1", "Sneak in", null, null);
+        String result = tools.add_team_task("g1", "Sneak in", null, null, null, null, null, null);
 
         assertTrue(result.contains("Access denied"), result);
         assertEquals(0, workspace.getBacklog().size());
@@ -1138,9 +1138,42 @@ class McpGroupToolsTest {
         teamWorkspace();
         when(resourceAccessGuard.hasAccess("g1", AccessLevel.VIEW)).thenReturn(false);
 
-        String result = tools.list_team_backlog("g1");
+        String result = tools.list_team_backlog("g1", null);
 
         assertTrue(result.contains("Access denied"), result);
         verify(workspaceStore, never()).find(any());
     }
+
+    @Test
+    void addTeamTask_withBetFields_filesABet_andDueFilterListsIt() throws Exception {
+        var workspace = teamWorkspace();
+
+        String added = tools.add_team_task("g1", "Launch post", "d", "1", "a post gets replies", "replies", ">= 5", "2020-01-01");
+        tools.add_team_task("g1", "Plain", "d", "1", null, null, null, null);
+
+        assertFalse(added.contains("error"), added);
+        assertEquals("replies", workspace.getBacklog().getTasks().get(0).bet().metric());
+        var serialized = org.mockito.ArgumentCaptor.forClass(Object.class);
+        tools.list_team_backlog("g1", true);
+        tools.list_team_backlog("g1", false);
+        verify(jsonSerialization, atLeastOnce()).serialize(serialized.capture());
+        var values = serialized.getAllValues();
+        @SuppressWarnings("unchecked")
+        var dueList = (List<TaskItem>) values.get(values.size() - 2);
+        @SuppressWarnings("unchecked")
+        var allList = (List<TaskItem>) values.get(values.size() - 1);
+        assertEquals(List.of("Launch post"), dueList.stream().map(TaskItem::subject).toList());
+        assertEquals(2, allList.size());
+    }
+
+    @Test
+    void addTeamTask_halfABet_isRefusedWithoutWriting() throws Exception {
+        var workspace = teamWorkspace();
+
+        String result = tools.add_team_task("g1", "Launch post", "d", "1", "only a hypothesis", null, null, null);
+
+        assertTrue(result.contains("error") && result.contains("reviewDate"), result);
+        assertEquals(0, workspace.getBacklog().size());
+    }
+
 }

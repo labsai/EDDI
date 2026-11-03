@@ -141,7 +141,12 @@ public class WorkspaceHandoffs {
     }
 
     /** One REVIEW item waiting for a human. */
-    public record InboxItem(String handoffId, String subject, String description, int priority, HandoffOrigin origin) {
+    public record InboxItem(String handoffId, String subject, String description, int priority, HandoffOrigin origin, SharedTaskList.Bet bet) {
+
+        /** The form that predates {@code bet}: an ordinary task. */
+        public InboxItem(String handoffId, String subject, String description, int priority, HandoffOrigin origin) {
+            this(handoffId, subject, description, priority, origin, null);
+        }
     }
 
     private Map<String, HandoffOrigin> origins = new LinkedHashMap<>();

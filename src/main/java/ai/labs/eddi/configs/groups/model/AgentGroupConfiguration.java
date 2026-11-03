@@ -174,6 +174,68 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * Real-world outcomes a team accepts against its work (webhook / REST), and how
+     * many of them its RETRO phase reads. <b>{@code null} is off</b>: the outcome
+     * endpoint answers 409 and nothing is stored or shown, so a config written
+     * before 6.8 behaves exactly as it did.
+     */
+    private OutcomeConfig outcomeConfig;
+
+    public OutcomeConfig getOutcomeConfig() {
+        return outcomeConfig;
+    }
+
+    public void setOutcomeConfig(OutcomeConfig outcomeConfig) {
+        this.outcomeConfig = outcomeConfig;
+    }
+
+    /**
+     * Bounds for team outcome events. Every cap has a hard ceiling no config can
+     * exceed: the endpoint is open to whatever system the operator wires to it.
+     *
+     * @param maxPerSubject
+     *            events one task or decision may carry (default 50, ceiling
+     *            {@value #CEILING_MAX_PER_SUBJECT}); further posts answer 409
+     * @param maxStored
+     *            events the team holds in total (default 2000, ceiling
+     *            {@value #CEILING_MAX_STORED}); the oldest are dropped past it
+     * @param retentionDays
+     *            events older than this are dropped on the next write (default 180,
+     *            ceiling {@value #CEILING_RETENTION_DAYS})
+     * @param retroDigestSize
+     *            recent events quoted into a RETRO phase's input (default 10,
+     *            ceiling {@value #CEILING_RETRO_DIGEST}); absent uses the default,
+     *            <b>{@code 0} keeps outcomes out of the retro</b>
+     */
+    public record OutcomeConfig(int maxPerSubject, int maxStored, int retentionDays, Integer retroDigestSize) {
+
+        public static final int DEFAULT_MAX_PER_SUBJECT = 50;
+        public static final int DEFAULT_MAX_STORED = 2000;
+        public static final int DEFAULT_RETENTION_DAYS = 180;
+        public static final int DEFAULT_RETRO_DIGEST = 10;
+        public static final int CEILING_MAX_PER_SUBJECT = 200;
+        public static final int CEILING_MAX_STORED = 10_000;
+        public static final int CEILING_RETENTION_DAYS = 730;
+        public static final int CEILING_RETRO_DIGEST = 50;
+
+        /**
+         * Non-positive falls back to the default (digest: absent or negative only); all
+         * clamped.
+         */
+        public OutcomeConfig {
+            maxPerSubject = Math.min(maxPerSubject <= 0 ? DEFAULT_MAX_PER_SUBJECT : maxPerSubject, CEILING_MAX_PER_SUBJECT);
+            maxStored = Math.min(maxStored <= 0 ? DEFAULT_MAX_STORED : maxStored, CEILING_MAX_STORED);
+            retentionDays = Math.min(retentionDays <= 0 ? DEFAULT_RETENTION_DAYS : retentionDays, CEILING_RETENTION_DAYS);
+            retroDigestSize = Math.min(retroDigestSize == null || retroDigestSize < 0 ? DEFAULT_RETRO_DIGEST : retroDigestSize, CEILING_RETRO_DIGEST);
+        }
+
+        /** Every cap at its default. */
+        public OutcomeConfig() {
+            this(DEFAULT_MAX_PER_SUBJECT, DEFAULT_MAX_STORED, DEFAULT_RETENTION_DAYS, DEFAULT_RETRO_DIGEST);
+        }
+    }
+
+    /**
      * Bounds for the NEGOTIATION concession ledger (M-G1). {@code null} runs with
      * the defaults — like {@link #retroConfig}, a default, not a switch: the caps
      * apply either way, because the ledger is an LLM write surface quoted into

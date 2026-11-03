@@ -624,7 +624,8 @@ Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
 a soft (versioned) delete keeps it, because the group can come back. Another
 team or a standalone agent can file tasks into a workspace: see
-[Cross-Team Handoff](team-handoff.md). Not in v1: reputation weighting.
+[Cross-Team Handoff](team-handoff.md). A backlog task can be a **bet** (hypothesis, metric, review date) and a team
+can record the real-world **outcomes** of its work: see [Team Learning Loop](team-learning-loop.md). Not in v1: reputation weighting.
 
 ## Shared artifacts (blackboard-lite)
 

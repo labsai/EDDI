@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.HandoffPolicies;
 import ai.labs.eddi.configs.groups.model.HandoffPolicies.HandoffTarget;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.SourceKind;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.Trigger;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.Bet;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffRequest;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffResult;
 import ai.labs.eddi.engine.runtime.internal.handoff.TeamHandoffService;
@@ -120,6 +121,10 @@ public class TeamHandoffTool {
                 .addStringProperty("description", "What needs doing and the context to do it, under " + ctx.maxDescriptionChars() + " characters")
                 .addIntegerProperty("priority", "0 = highest priority, 10 = lowest. Omit to use the team's default")
                 .addStringProperty("reference", "Optional: the name of the shared artifact or decision this comes from")
+                .addStringProperty("hypothesis", "Optional, to file the work as a bet: what you believe it will achieve")
+                .addStringProperty("metric", "Optional, with hypothesis: what is measured to judge the bet")
+                .addStringProperty("target", "Optional, with hypothesis: the value that counts as success")
+                .addStringProperty("reviewDate", "Optional, with hypothesis: ISO date the bet is judged, e.g. 2026-12-01")
                 .required("team", "subject", "description").build();
         return ToolSpecification.builder().name(TOOL_NAME).description(description.toString()).parameters(schema).build();
     }
@@ -157,10 +162,16 @@ public class TeamHandoffTool {
             priority = target.defaultPriority();
         }
         String artifactId = reference != null && ctx.artifactResolver() != null ? ctx.artifactResolver().apply(reference) : null;
+        Bet bet;
+        try {
+            bet = Bet.of(text(args, "hypothesis"), text(args, "metric"), text(args, "target"), text(args, "reviewDate"));
+        } catch (IllegalArgumentException e) {
+            return e.getMessage() + ". Nothing was handed off.";
+        }
 
         HandoffRequest request = new HandoffRequest(ctx.sourceKind(), ctx.sourceId(), ctx.sourceVersion(), ctx.sourceConversationId(),
                 ctx.sourceMemberAgentId(), ctx.userId(), target.groupId(), subject, description, priority, Trigger.TOOL, null, artifactId, reference,
-                ctx.hop(), ctx.lineage(), null, ctx.maxDescriptionChars(), ctx.runQuota());
+                ctx.hop(), ctx.lineage(), null, ctx.maxDescriptionChars(), ctx.runQuota(), bet);
         HandoffResult result = service.file(request);
         if (result.outcome() == HandoffResult.Outcome.FILED || result.outcome() == HandoffResult.Outcome.QUEUED_FOR_REVIEW) {
             acceptedThisTurn.incrementAndGet();

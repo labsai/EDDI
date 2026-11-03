@@ -5,7 +5,11 @@
 package ai.labs.eddi.configs.groups.model;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -55,6 +59,12 @@ public class SharedTaskList {
      *            when this task was created
      * @param completedAt
      *            when this task was completed
+     * @param createdByAgentId
+     *            the member that filed the task, or {@code null}
+     * @param bet
+     *            optional bet specification (hypothesis, metric, target, review
+     *            date) - {@code null} for an ordinary task, so every stored task
+     *            and every old config reads unchanged
      */
     public record TaskItem(
             String id,
@@ -70,7 +80,8 @@ public class SharedTaskList {
             int priority,
             Instant createdAt,
             Instant completedAt,
-            String createdByAgentId) {
+            String createdByAgentId,
+            Bet bet) {
 
         /**
          * Convenience constructor for creating a new pending task, authored by config
@@ -79,7 +90,28 @@ public class SharedTaskList {
         public TaskItem(String subject, String description, int priority) {
             this(UUID.randomUUID().toString(), subject, description,
                     TaskStatus.PENDING, null, null, List.of(),
-                    null, null, false, priority, Instant.now(), null, null);
+                    null, null, false, priority, Instant.now(), null, null, null);
+        }
+
+        /** A new pending task that carries a bet. */
+        public TaskItem(String subject, String description, int priority, Bet bet) {
+            this(UUID.randomUUID().toString(), subject, description,
+                    TaskStatus.PENDING, null, null, List.of(),
+                    null, null, false, priority, Instant.now(), null, null, bet);
+        }
+
+        /** The 14-component form that predates {@code bet}; the task is not a bet. */
+        public TaskItem(String id, String subject, String description, TaskStatus status, String assignedAgentId,
+                String assignedDisplayName, List<String> dependsOnIds, String result, String verificationNote,
+                boolean verified, int priority, Instant createdAt, Instant completedAt, String createdByAgentId) {
+            this(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
+                    result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, null);
+        }
+
+        /** This task with a different bet (or none). */
+        public TaskItem withBet(Bet newBet) {
+            return new TaskItem(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
+                    result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, newBet);
         }
 
         /**
@@ -92,7 +124,85 @@ public class SharedTaskList {
                 String assignedDisplayName, List<String> dependsOnIds, String result, String verificationNote,
                 boolean verified, int priority, Instant createdAt, Instant completedAt) {
             this(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
-                    result, verificationNote, verified, priority, createdAt, completedAt, null);
+                    result, verificationNote, verified, priority, createdAt, completedAt, null, null);
+        }
+    }
+
+    /**
+     * What turns a task into a bet: a falsifiable claim, the number that judges it,
+     * the target, and the day somebody looks.
+     *
+     * @param hypothesis
+     *            what is believed ("a founder-led post gets 5 replies")
+     * @param metric
+     *            what is measured ("replies_received")
+     * @param target
+     *            the value that counts as success, free text so "&gt;= 5" and "3
+     *            listings live" both fit
+     * @param reviewDate
+     *            when the bet is due for a verdict
+     * @param reviewedAt
+     *            when a verdict was last given; {@code null} while the bet is open.
+     *            A reviewed bet stops being <em>due</em>
+     */
+    public record Bet(String hypothesis, String metric, String target, Instant reviewDate, Instant reviewedAt) {
+
+        public static final int MAX_FIELD_CHARS = 500;
+
+        /** The bet, as a copy marked reviewed at {@code when}. */
+        public Bet reviewed(Instant when) {
+            return new Bet(hypothesis, metric, target, reviewDate, when);
+        }
+
+        /** The bet with a new review date, reopened. */
+        public Bet rescheduled(Instant newReviewDate) {
+            return new Bet(hypothesis, metric, target, newReviewDate, null);
+        }
+
+        /** Due: it has a review date that has arrived and no verdict yet. */
+        public boolean dueAt(Instant now) {
+            return reviewDate != null && reviewedAt == null && !reviewDate.isAfter(now);
+        }
+
+        /**
+         * Builds a validated bet from the loose fields a surface accepts.
+         *
+         * @return {@code null} when every field is blank (not a bet)
+         * @throws IllegalArgumentException
+         *             with an actionable message when a field is too long or only some
+         *             of the required ones are present
+         */
+        public static Bet of(String hypothesis, String metric, String target, String reviewDate) {
+            String h = clean(hypothesis);
+            String m = clean(metric);
+            String t = clean(target);
+            String r = clean(reviewDate);
+            if (h == null && m == null && t == null && r == null) {
+                return null;
+            }
+            if (h == null || m == null || r == null) {
+                throw new IllegalArgumentException("A bet needs a hypothesis, a metric and a reviewDate (target is optional)");
+            }
+            for (String field : new String[]{h, m, t}) {
+                if (field != null && field.length() > MAX_FIELD_CHARS) {
+                    throw new IllegalArgumentException("A bet field exceeds " + MAX_FIELD_CHARS + " characters");
+                }
+            }
+            return new Bet(h, m, t, parseReviewDate(r), null);
+        }
+
+        /** An ISO date (2026-12-01, UTC midnight) or instant. */
+        public static Instant parseReviewDate(String text) {
+            try {
+                String r = text.trim();
+                return r.length() <= 10 ? LocalDate.parse(r).atStartOfDay(ZoneOffset.UTC).toInstant() : Instant.parse(r);
+            } catch (DateTimeParseException | NullPointerException e) {
+                throw new IllegalArgumentException("reviewDate must be an ISO date (2026-12-01) or instant (2026-12-01T09:00:00Z)");
+            }
+        }
+
+        private static String clean(String value) {
+            return value == null || value.isBlank() ? null : value.trim();
         }
     }
 
@@ -124,6 +234,19 @@ public class SharedTaskList {
         return tasks.stream()
                 .filter(t -> t.status() == TaskStatus.PENDING || t.status() == TaskStatus.ASSIGNED)
                 .filter(t -> t.dependsOnIds().isEmpty() || allDependenciesSatisfied(t))
+                .toList();
+    }
+
+    /**
+     * Bets whose review date has arrived and that have no verdict yet, earliest
+     * review date first. Not filtered by status: a bet is judged by what it
+     * measured, and a task that finished long ago is exactly the one whose result
+     * is now worth looking at.
+     */
+    public synchronized List<TaskItem> findDueReviews(Instant now) {
+        return tasks.stream()
+                .filter(t -> t.bet() != null && t.bet().dueAt(now))
+                .sorted(Comparator.comparing(t -> t.bet().reviewDate()))
                 .toList();
     }
 
@@ -274,6 +397,14 @@ public class SharedTaskList {
     public synchronized AddTaskResult addAgentTask(String subject, String description, List<String> dependsOnSubjects,
                                                    int priority, String createdByAgentId, String assignedAgentId,
                                                    String assignedDisplayName, int maxAgentAddedTasks) {
+        return addAgentTask(subject, description, dependsOnSubjects, priority, createdByAgentId, assignedAgentId,
+                assignedDisplayName, maxAgentAddedTasks, null);
+    }
+
+    /** As above, filing the task as a bet when {@code bet} is not null. */
+    public synchronized AddTaskResult addAgentTask(String subject, String description, List<String> dependsOnSubjects,
+                                                   int priority, String createdByAgentId, String assignedAgentId,
+                                                   String assignedDisplayName, int maxAgentAddedTasks, Bet bet) {
 
         // The per-discussion cap belongs INSIDE this monitor. Counting outside it let
         // every speaker of a PARALLEL phase read the same under-limit count and all
@@ -325,7 +456,7 @@ public class SharedTaskList {
         var filed = new TaskItem(UUID.randomUUID().toString(), trimmedSubject, trimmedDescription,
                 assignedAgentId != null ? TaskStatus.ASSIGNED : TaskStatus.PENDING,
                 assignedAgentId, assignedDisplayName, List.copyOf(dependsOnIds), null, null, false,
-                priority, Instant.now(), null, createdByAgentId);
+                priority, Instant.now(), null, createdByAgentId, bet);
         tasks.add(filed);
 
         // Cycles are only visible once the candidate is in the graph. Rolling back
@@ -355,7 +486,7 @@ public class SharedTaskList {
                 TaskStatus.ASSIGNED, agentId, displayName,
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
-                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId());
+                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -374,7 +505,7 @@ public class SharedTaskList {
                 TaskStatus.IN_PROGRESS, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
-                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId());
+                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -394,7 +525,7 @@ public class SharedTaskList {
                 TaskStatus.COMPLETED, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), result,
                 existing.verificationNote(), existing.verified(),
-                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId());
+                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId(), existing.bet());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -411,7 +542,7 @@ public class SharedTaskList {
                 newStatus, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 note, passed,
-                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId());
+                existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -432,7 +563,7 @@ public class SharedTaskList {
                 TaskStatus.FAILED, existing.assignedAgentId(), existing.assignedDisplayName(),
                 existing.dependsOnIds(), existing.result(),
                 reason, false,
-                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId());
+                existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId(), existing.bet());
         replaceTask(taskId, updated);
         return updated;
     }
@@ -459,7 +590,7 @@ public class SharedTaskList {
         requireResult(taskId, result, "submitForApproval");
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
         return u;
     }
@@ -471,7 +602,7 @@ public class SharedTaskList {
             throw new IllegalStateException("approveTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
         return u;
     }
@@ -483,7 +614,7 @@ public class SharedTaskList {
             throw new IllegalStateException("rejectTask '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.FAILED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
-                rejectionNote, false, t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId());
+                rejectionNote, false, t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
         return u;
     }
@@ -495,7 +626,7 @@ public class SharedTaskList {
             throw new IllegalStateException("resetToAssigned '%s': expected IN_PROGRESS but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
         return u;
     }
@@ -521,7 +652,7 @@ public class SharedTaskList {
         }
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
-                reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId());
+                reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
         return u;
     }
@@ -707,7 +838,7 @@ public class SharedTaskList {
                     "approveTaskWithEditedResult '%s': expected AWAITING_APPROVAL but was %s".formatted(taskId, t.status()));
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), editedResult,
-                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId());
+                t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
         replaceTask(taskId, u);
         if (edit != null) {
             reviewerEdits.put(taskId, edit);

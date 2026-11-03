@@ -47,6 +47,7 @@
 - [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
   - [Cross-Team Handoff](team-handoff.md)
+  - [Team Learning Loop](team-learning-loop.md)
   - [Group Convergence Judge: SERVICE](group-service-judge.md)
   - [Group Human Decisions: Tie-Breaks and Tasks](group-human-decisions.md)
 - [Human-in-the-Loop (HITL)](hitl.md)

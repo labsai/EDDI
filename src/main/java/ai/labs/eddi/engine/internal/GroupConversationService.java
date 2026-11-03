@@ -60,6 +60,7 @@ import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.engine.internal.groups.GroupHitlCoordinator;
 import ai.labs.eddi.engine.internal.groups.GroupTieBreakPauses;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
+import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
 import ai.labs.eddi.engine.internal.groups.RetroEngine;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.internal.groups.GroupLifecycleOps;
@@ -2778,6 +2779,16 @@ public class GroupConversationService implements IGroupConversationService, User
 
     @Inject
     IClusterRpc clusterRpc;
+
+    /**
+     * Wires the team's reported outcomes into what a RETRO phase quotes.
+     * Initializer injection: the context builder exists from construction, the
+     * service only afterwards; builds made with {@code new} in tests quote nothing.
+     */
+    @Inject
+    void wireOutcomeDigest(OutcomeEventService outcomeEventService) {
+        contextBuilder.setOutcomeDigestProvider(outcomeEventService.retroDigestProvider());
+    }
 
     @Inject
     NodeIdentity nodeIdentity;

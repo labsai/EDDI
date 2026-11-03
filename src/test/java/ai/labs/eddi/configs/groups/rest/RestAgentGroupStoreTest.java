@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.groups.outcomes.OutcomeEventService;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -173,6 +174,20 @@ class RestAgentGroupStoreTest {
             inOrder.verify(scheduleStore).deleteSchedule("sched-1");
             inOrder.verify(scheduleStore).deleteSchedule("sched-2");
             inOrder.verify(workspaceStore).deleteByGroupId("group-1");
+        }
+
+        @Test
+        @DisplayName("a PERMANENT delete also drops the team's outcome events; a soft delete keeps them")
+        void permanentDelete_dropsOutcomes() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(createResourceId("group-1", 1));
+            var outcomes = mock(OutcomeEventService.class);
+            restStore.outcomeEventService = outcomes;
+
+            restStore.deleteGroup("group-1", 1, false);
+            verify(outcomes, never()).deleteForGroup(anyString());
+
+            restStore.deleteGroup("group-1", 1, true);
+            verify(outcomes).deleteForGroup("group-1");
         }
 
         @Test

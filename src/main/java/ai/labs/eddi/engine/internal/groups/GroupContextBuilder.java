@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -51,9 +52,19 @@ public class GroupContextBuilder {
     private static final Logger LOGGER = Logger.getLogger(GroupContextBuilder.class);
 
     private final ITemplatingEngine templatingEngine;
+    /**
+     * Group id to the outcome digest a RETRO phase quotes; {@code null} (every
+     * caller that never wires one) quotes nothing.
+     */
+    private volatile Function<String, String> outcomeDigestProvider;
 
     public GroupContextBuilder(ITemplatingEngine templatingEngine) {
         this.templatingEngine = templatingEngine;
+    }
+
+    /** Wires the source of the real-world outcomes a RETRO phase quotes. */
+    public void setOutcomeDigestProvider(Function<String, String> provider) {
+        this.outcomeDigestProvider = provider;
     }
 
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
@@ -284,7 +295,28 @@ public class GroupContextBuilder {
         // otherwise silently disable abstention for exactly the turns already going
         // wrong — the member would be told nothing about PASS, answer normally, and
         // the phase would look like it simply had nothing to abstain about.
-        return AbstentionDetector.isEnabledFor(phase) ? rendered + AbstentionDetector.ABSTENTION_INSTRUCTION : rendered;
+        rendered = AbstentionDetector.isEnabledFor(phase) ? rendered + AbstentionDetector.ABSTENTION_INSTRUCTION : rendered;
+        return phase.type() == PhaseType.RETRO ? rendered + outcomeDigest(gc) : rendered;
+    }
+
+    /**
+     * The team's reported outcomes, appended after rendering (so a custom
+     * {@code inputTemplate} gets them too), or nothing when none are wired, the
+     * group has none enabled or the provider fails — a retro must never fail on its
+     * own context.
+     */
+    private String outcomeDigest(GroupConversation gc) {
+        Function<String, String> provider = outcomeDigestProvider;
+        if (provider == null || gc == null || gc.getGroupId() == null) {
+            return "";
+        }
+        try {
+            String digest = provider.apply(gc.getGroupId());
+            return digest != null ? digest : "";
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Outcome digest unavailable for group %s: %s", gc.getGroupId(), e.getMessage());
+            return "";
+        }
     }
 
     /**
