@@ -120,8 +120,11 @@ class Sampler(threading.Thread):
         t0 = time.time()
         while not self.stop.is_set():
             sample = {"t": round(time.time() - t0, 1), "nodes": {}, "nats": {}}
-            for name, base in self.nodes_fn():
-                sample["nodes"][name] = node_sample(base)
+            try:
+                for name, base in self.nodes_fn():
+                    sample["nodes"][name] = node_sample(base)
+            except (SystemExit, Exception) as e:  # a node mid-restart: keep sampling the rest of the run
+                sample["nodes_error"] = str(e)
             try:
                 sample["nats"] = self.nats_fn()
             except SystemExit as e:  # a NATS server mid-restart: keep sampling the rest of the run
