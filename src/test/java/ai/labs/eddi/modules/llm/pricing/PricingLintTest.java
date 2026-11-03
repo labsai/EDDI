@@ -37,24 +37,24 @@ class PricingLintTest {
 
     @Test
     void cataloguedOrExplicitlyPricedModelsAreClean() {
-        assertEquals(List.of(), PricingLint.lint("llm task 't'", task("openai", "gpt-4o-mini"), catalog(UnpricedPolicy.ALLOW)));
+        assertEquals(List.of(), PricingLint.lint(task("openai", "gpt-4o-mini"), catalog(UnpricedPolicy.ALLOW)));
         var priced = task("openai", "my-finetune");
         priced.setInputPricePer1M(0.0);
-        assertEquals(List.of(), PricingLint.lint("llm task 't'", priced, catalog(UnpricedPolicy.ALLOW)));
+        assertEquals(List.of(), PricingLint.lint(priced, catalog(UnpricedPolicy.ALLOW)));
     }
 
     @Test
     void anUnpricedModelIsReportedWithThePolicyConsequence() {
-        List<String> allow = PricingLint.lint("llm task 't'", task("openai", "my-finetune"), catalog(UnpricedPolicy.ALLOW));
+        List<String> allow = PricingLint.lint(task("openai", "my-finetune"), catalog(UnpricedPolicy.ALLOW));
         assertEquals(1, allow.size());
         assertTrue(allow.getFirst().contains("openai/my-finetune"), allow.getFirst());
-        List<String> refuse = PricingLint.lint("llm task 't'", task("openai", "my-finetune"), catalog(UnpricedPolicy.REFUSE));
+        List<String> refuse = PricingLint.lint(task("openai", "my-finetune"), catalog(UnpricedPolicy.REFUSE));
         assertTrue(refuse.getFirst().contains("refused"), refuse.getFirst());
     }
 
     @Test
     void aTemplatedModelIsCheckedPerCall() {
-        List<String> warnings = PricingLint.lint("llm task 't'", task("openai", "{context.model}"), catalog(UnpricedPolicy.ALLOW));
+        List<String> warnings = PricingLint.lint(task("openai", "{context.model}"), catalog(UnpricedPolicy.ALLOW));
         assertEquals(1, warnings.size());
         assertTrue(warnings.getFirst().contains("checked per call"));
     }
@@ -74,7 +74,7 @@ class PricingLintTest {
         summary.setLlmModel("cheap-model");
         task.setConversationSummary(summary);
 
-        List<String> warnings = PricingLint.lint("llm task 't'", task, catalog(UnpricedPolicy.ALLOW));
+        List<String> warnings = PricingLint.lint(task, catalog(UnpricedPolicy.ALLOW));
         assertEquals(2, warnings.size(), warnings.toString());
         assertTrue(warnings.get(0).contains("cascade step 0"));
         assertTrue(warnings.get(1).contains("conversation summary"));
