@@ -170,8 +170,8 @@ Regular-conversation approval cards gain two buttons that open modals (`views.op
 - **Reject with reason…** asks for a reason code and an optional note.
 
 Submissions re-run every check the buttons run — approver list (fail-closed), workspace, card record, current pause
-— and are validated synchronously, so Slack shows errors inside the modal. The card is finalised as "✅ Approved with
-edits by @user" or "⛔ Rejected (TONE) by @user"; the edited text is never echoed into the channel. Group cards keep
+— and are validated synchronously, so Slack shows errors inside the modal. The card is finalised as "✅ Approved
+(edit submitted) by @user" or "⛔ Rejected (TONE) by @user"; the edited text is never echoed into the channel. Group cards keep
 Approve/Reject. A note typed in the Slack modal is recorded, but does not drive `onRejection: REVISE`.
 
 ## The audit contract
