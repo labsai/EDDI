@@ -870,6 +870,11 @@ public final class SecretRedactionFilter {
             // Attributes (Path, Expires, ...) belong to Set-Cookie only: in a Cookie
             // request header "Path" is a cookie's name and its value is a credential.
             boolean setCookie = matcher.group(1) != null;
+            // The first name=value pair of a Set-Cookie is the cookie itself, whatever its
+            // name:
+            // "Set-Cookie: Path=<secret>" sets a cookie called Path. Only the pairs after
+            // it are attributes.
+            boolean firstPair = true;
             while (pos < length) {
                 int nameStart = pos;
                 while (nameStart < length && (text.charAt(nameStart) == ' ' || text.charAt(nameStart) == '\t')) {
@@ -922,7 +927,9 @@ public final class SecretRedactionFilter {
                 while (valueEnd < length && (quoted ? isQuotedCookieValueChar(text.charAt(valueEnd)) : isCookieValueChar(text.charAt(valueEnd)))) {
                     valueEnd++;
                 }
-                boolean attribute = setCookie && COOKIE_ATTRIBUTES.contains(name);
+                boolean exemptAttributes = setCookie && !firstPair;
+                firstPair = false;
+                boolean attribute = exemptAttributes && COOKIE_ATTRIBUTES.contains(name);
                 if (quoted) {
                     // valueEnd is the closing quote; step over it below.
                     if (!attribute && !REDACTED.equals(text.substring(valueStart, valueEnd))) {
@@ -938,7 +945,7 @@ public final class SecretRedactionFilter {
                     while (valueEnd < length && text.charAt(valueEnd) != ';' && isCookieSpanChar(text.charAt(valueEnd))) {
                         valueEnd++;
                     }
-                    if (!setCookie && valueEnd > valueStart && !REDACTED.equals(text.substring(valueStart, valueEnd))) {
+                    if (!exemptAttributes && valueEnd > valueStart && !REDACTED.equals(text.substring(valueStart, valueEnd))) {
                         out.append(text, copied, valueStart).append(REDACTED);
                         copied = valueEnd;
                     }

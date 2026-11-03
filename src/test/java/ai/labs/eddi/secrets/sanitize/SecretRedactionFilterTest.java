@@ -699,6 +699,17 @@ class SecretRedactionFilterTest {
         }
 
         @Test
+        void aSetCookieWhoseFirstPairIsNamedLikeAnAttributeIsStillACookie() {
+            assertEquals("Set-Cookie: Path=<REDACTED>; Secure", redactTwice("Set-Cookie: Path=abc123session; Secure"));
+            assertEquals("Set-Cookie: Domain=<REDACTED>; Path=/", redactTwice("Set-Cookie: Domain=abc123session; Path=/"));
+        }
+
+        @Test
+        void aSetCookieWhoseFirstPairIsExpiresIsStillACookie() {
+            assertEquals("Set-Cookie: Expires=<REDACTED>; HttpOnly", redactTwice("Set-Cookie: Expires=abc123session; HttpOnly"));
+        }
+
+        @Test
         void aQuotedSetCookieAttributeIsKept() {
             assertEquals("Set-Cookie: a=<REDACTED>; Domain=\"example.com\"", redactTwice("Set-Cookie: a=b; Domain=\"example.com\""));
         }
