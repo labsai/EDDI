@@ -271,6 +271,44 @@ short-lived), and the exported archives of the last retention window. The JetStr
 can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, `<prefix>_ACTIVITY`, and the
 `<prefix>_*` KV buckets).
 
+## How cluster mode is tested
+
+Unit tests and `ClusterCoordinatorIT` (one JVM, one NATS server) cover the logic. Three
+heavier layers cover what only several processes show. They run nightly in
+[`cluster-e2e-nightly.yml`](../.github/workflows/cluster-e2e-nightly.yml), which uploads
+their results as artifacts. They are not part of the normal build and not a required
+check.
+
+- **The end-to-end suite** (`src/test/java/ai/labs/eddi/integration/cluster`). It starts
+  three EDDI processes from the packaged app, a three-server NATS cluster at R3, a real
+  MongoDB or PostgreSQL and the demo's mock LLM. A Toxiproxy sits between every EDDI
+  process and every NATS server. Turns go through the REST API while one fault is injected:
+  latency on every NATS link, a partitioned node, NATS replies dropped after the server
+  applied the write, a half-open link, a holder frozen with SIGSTOP past `lease.ttl`,
+  repeated stream-leader elections under load, and `kill -9` mid-turn. A history checker
+  then compares what clients were answered, what was committed and what the LLM saw. It
+  flags lost, duplicated, phantom and out-of-order turns, overlapping turns, a turn that
+  did not run on its predecessor, and a 409 whose input was committed anyway. A 200 for a
+  turn that was then fenced off counts as lost, even when it was dead-lettered (see the
+  residual limitation below). The nodes run `degraded.turns=reject`. Scenarios that the
+  code does not meet yet name the finding of the
+  [readiness review](../planning/cluster-production-readiness-review.md) in their title.
+  Opt-in, because it takes about 15 minutes per database:
+
+  ```bash
+  ./mvnw package -DskipTests -DskipUi=true
+  ./mvnw test -Dtest=MongoClusterE2EIT -Deddi.cluster.e2e=true -Dsurefire.failIfNoSpecifiedTests=false
+  ```
+
+  On Windows PowerShell, quote each `-D` argument. Results, one JSON file per scenario plus
+  every node's log, go to `target/cluster-e2e/<db>/`.
+- **The [cluster demo](../scripts/cluster-demo/README.md)**: 13 scenarios through the
+  published runtime image with the build mounted, on MongoDB and on PostgreSQL.
+- **Soak and scale** ([load test](../scripts/loadtest/README.md#soak-and-scale-cluster)):
+  hours of churn with heap, thread, subscription and stream-growth sampling, and many
+  concurrently held leases per node, on one host or on a cluster deployed elsewhere. These
+  run by hand. The sizing numbers above were not produced by them.
+
 ## Residual limitations
 
 - **A load balancer must not eject a node for answering 503.** EDDI answers 503
