@@ -4402,6 +4402,7 @@
     "hideOriginal": "隐藏原文",
     "lastEditDrift": "由于智能体已更改，您上次的修改未能应用——原始回答再次等待审核。",
     "lastEditRedacted": "您上一次的编辑未被应用:回答包含已隐藏(已遮蔽)的内容,因此只能按原样批准或拒绝。",
+    "redactedMarkerRemains": "文本中仍含有遮蔽标记 <REDACTED>。请删除它，或不编辑直接批准：服务器无法应用保留该标记的编辑。",
     "lastEditScreenedOut": "您上次的修改被智能体的输出护栏拦截（{{guardrail}}）——原始回答再次等待审核。",
     "noReason": "无原因",
     "reasonLabel": "原因（用于拒绝或修改）",

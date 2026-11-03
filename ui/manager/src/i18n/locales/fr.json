@@ -4450,6 +4450,7 @@
     "hideOriginal": "Masquer l'original",
     "lastEditDrift": "Votre dernière modification n'a pas pu être appliquée car l'agent a changé — la réponse d'origine est à nouveau à examiner.",
     "lastEditRedacted": "Votre dernière modification n'a pas été appliquée : la réponse contient un contenu masqué (expurgé), elle ne peut donc être approuvée ou rejetée que telle quelle.",
+    "redactedMarkerRemains": "Le texte contient encore le marqueur d'expurgation <REDACTED>. Supprimez-le ou approuvez sans modification : le serveur ne peut pas appliquer une modification qui le conserve.",
     "lastEditScreenedOut": "Votre dernière modification a été bloquée par les garde-fous de sortie de l'agent ({{guardrail}}) — la réponse d'origine est à nouveau à examiner.",
     "noReason": "Aucun motif",
     "reasonLabel": "Motif (d'un refus ou d'une modification)",

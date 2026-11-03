@@ -11,6 +11,8 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -28,6 +30,8 @@ final class McpReviewArguments {
 
     /** Upper bound of a decisions JSON argument. */
     static final int MAX_DECISIONS_JSON_CHARS = 256 * 1024;
+
+    private static final ObjectMapper STRICT_READER = new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     private McpReviewArguments() {
     }
@@ -117,7 +121,9 @@ final class McpReviewArguments {
             throw new BadArgument(name + " exceeds " + MAX_DECISIONS_JSON_CHARS + " characters");
         }
         try {
-            return json.deserialize(raw, Map.class);
+            // A second JSON value after the first would be dropped silently, taking its
+            // decisions with it.
+            return STRICT_READER.readValue(raw, Map.class);
         } catch (Exception e) {
             throw new BadArgument("Malformed " + name + " (expected a JSON object keyed by id)");
         }

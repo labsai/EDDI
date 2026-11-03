@@ -153,6 +153,17 @@ class SlackHitlEditModalTest {
     class Merge {
 
         @Test
+        @DisplayName("an object or array cannot be submitted in place of a redacted text value")
+        void containerInPlaceOfRedactedLeaf() {
+            String raw = "{\"token\":\"real-secret\",\"body\":\"hi\"}";
+            String shown = "{\"token\":\"<REDACTED>\",\"body\":\"hi\"}";
+            assertThrows(SlackRedactedArgumentsMerge.MergeException.class,
+                    () -> SlackRedactedArgumentsMerge.merge(raw, shown, "{\"token\":{\"a\":1},\"body\":\"hi\"}"));
+            assertThrows(SlackRedactedArgumentsMerge.MergeException.class,
+                    () -> SlackRedactedArgumentsMerge.merge(raw, shown, "{\"token\":[\"x\"],\"body\":\"hi\"}"));
+        }
+
+        @Test
         void unchangedRedactedLeafKeepsTheRawValue() throws Exception {
             String merged = SlackRedactedArgumentsMerge.merge("{\"token\":\"real-secret\",\"body\":\"hi\"}",
                     "{\"token\":\"<REDACTED>\",\"body\":\"hi\"}", "{\"token\":\"<REDACTED>\",\"body\":\"hello\"}");
