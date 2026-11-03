@@ -2634,9 +2634,31 @@ public class GroupConversationService implements IGroupConversationService, User
         return leaseManager != null && clusterRpc != null && leaseManager.isClustered() && clusterRpc.isClustered();
     }
 
+    /**
+     * Pauses between the tries of {@link #holdGroupLease}. The previous leg of a
+     * discussion persists its state and fires its completion before its
+     * {@code finally} releases the lease, so a continuation started on another node
+     * in that gap would otherwise take the discussion for running elsewhere.
+     */
+    long[] groupLeaseRetryMillis = {100, 250, 500, 1000};
+
     void holdGroupLease(String groupConversationId) {
         if (clustered()) {
-            var lease = leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + groupConversationId);
+            String key = IConversationLeaseManager.GROUP + groupConversationId;
+            var lease = leaseManager.tryAcquireKey(key);
+            for (int i = 0; lease.isEmpty() && i < groupLeaseRetryMillis.length; i++) {
+                var current = leaseManager.peekKey(key);
+                if (current.isEmpty() || nodeIdentity == null || nodeIdentity.nodeId().equals(current.get().node())) {
+                    break;
+                }
+                try {
+                    Thread.sleep(groupLeaseRetryMillis[i]);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                lease = leaseManager.tryAcquireKey(key);
+            }
             if (lease.isPresent()) {
                 groupLeases.put(groupConversationId, lease.get());
                 return;
@@ -2646,7 +2668,7 @@ public class GroupConversationService implements IGroupConversationService, User
             // that node runs this discussion: running it here as well made two legs write
             // the same discussion, and a cancel was forwarded to only one of them. This
             // leg stops without writing (the persisted state stands).
-            var holder = leaseManager.peekKey(IConversationLeaseManager.GROUP + groupConversationId);
+            var holder = leaseManager.peekKey(key);
             if (holder.isPresent() && nodeIdentity != null && !nodeIdentity.nodeId().equals(holder.get().node())) {
                 throw new RunningDiscussionWrites.DiscussionSupersededException(groupConversationId,
                         new IllegalStateException("its group lease is held by node " + holder.get().node() + ", which runs it"));

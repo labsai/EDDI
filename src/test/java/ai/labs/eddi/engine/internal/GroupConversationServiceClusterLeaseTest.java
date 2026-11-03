@@ -114,6 +114,7 @@ class GroupConversationServiceClusterLeaseTest {
         service.leaseManager = leaseManager;
         service.clusterRpc = clusterRpc;
         service.nodeIdentity = new NodeIdentity("node-a", "boot-a");
+        service.groupLeaseRetryMillis = new long[]{1, 1, 1, 1};
         // logging.properties turns ai.labs.eddi OFF for unit tests: open this logger
         // explicitly.
         previousLevel = julLogger.getLevel();
@@ -142,6 +143,19 @@ class GroupConversationServiceClusterLeaseTest {
         var stopped = assertThrows(RunningDiscussionWrites.DiscussionSupersededException.class, () -> service.holdGroupLease(GC_ID),
                 "two legs of one discussion must never run on two nodes at once");
         assertTrue(stopped.getCause().getMessage().contains("node-b"));
+    }
+
+    @Test
+    @DisplayName("A11: a lease the previous leg is about to release is waited for, not taken for a discussion running elsewhere")
+    void leaseReleasedByThePreviousLegIsTaken() {
+        LeaseHandle lease = mock(LeaseHandle.class);
+        when(leaseManager.tryAcquireKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.empty(), Optional.of(lease));
+        when(leaseManager.peekKey(IConversationLeaseManager.GROUP + GC_ID)).thenReturn(Optional.of(new LeaseInfo("node-b", "boot-b", 7, 0)));
+
+        service.holdGroupLease(GC_ID);
+        service.releaseGroupLease(GC_ID);
+
+        verify(leaseManager).release(lease);
     }
 
     // Before A11 this test's name said the discussion "goes on" whoever held the
