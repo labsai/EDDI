@@ -171,7 +171,7 @@ Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '
 | — | Session Forking | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7) |
 | — | Conversation Chaining | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3) |
 | 9 | DAG Pipeline | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped |
-| — | HITL — remaining | The reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses. `VoteConfig.tiePolicy: HUMAN_DECIDES` is likewise still save-time rejected pending its own resume machinery |
+| — | HITL — remaining | The reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses |
 | — | Guardrails | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`) |
 | 11b | Multi-Channel | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`) |
 | 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |

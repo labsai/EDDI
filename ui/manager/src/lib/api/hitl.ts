@@ -107,6 +107,8 @@ export interface PendingApprovalSummary {
   toolNames?: string[] | null;
   /** Set only when `pauseType === "HUMAN_TURN"` (I6) — the member whose turn is pending. */
   pendingMemberId?: string | null;
+  /** What a HUMAN_TURN asks for: `TURN`, `TIE_BREAK` or `TASK`. */
+  pendingKind?: "TURN" | "TIE_BREAK" | "TASK" | string | null;
 }
 
 /** Group discussion approval request body. */

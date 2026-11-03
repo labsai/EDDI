@@ -40,6 +40,7 @@ import {
   followupGroupMember,
   closeGroupConversation,
   getGroupConversation,
+  tieBreakOptions,
   type GroupAttachmentRef,
   type GroupConversationState,
 } from "@/lib/api/groups";
@@ -693,10 +694,10 @@ function WorkforceBoard() {
   // form belongs here rather than behind a link to another surface.
   const submitHumanInputMutation = useSubmitHumanInput();
   const handleSubmitHumanInput = useCallback(
-    (memberId: string, content: string) => {
+    (memberId: string, content: string, choice?: string) => {
       if (!boardId || !selectedConvId) return;
       submitHumanInputMutation.mutate(
-        { groupId: boardId, gcId: selectedConvId, memberId, content },
+        { groupId: boardId, gcId: selectedConvId, memberId, content, choice },
         {
           onSuccess: () => toast.success(t("groups.humanTurnSubmitted", "Your response was recorded")),
           onError: (err) => toast.error(getErrorMessage(err)),
@@ -1133,8 +1134,9 @@ function WorkforceBoard() {
               requestedAt={selectedConversation.pendingHumanInput.requestedAt}
               turnTimeout={groupConfig?.humanMemberConfig?.turnTimeout}
               isSubmitting={submitHumanInputMutation.isPending}
-              onSubmit={(content) =>
-                handleSubmitHumanInput(selectedConversation.pendingHumanInput!.memberId, content)
+              options={tieBreakOptions(selectedConversation.pendingHumanInput)}
+              onSubmit={(content, choice) =>
+                handleSubmitHumanInput(selectedConversation.pendingHumanInput!.memberId, content, choice)
               }
             />
           </div>

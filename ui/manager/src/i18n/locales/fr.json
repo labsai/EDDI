@@ -3509,7 +3509,6 @@
     "voteOptionsList": "Options (une par ligne)",
     "voteOptionsSource": "Options du scrutin",
     "voteQuorum": "Quorum",
-    "voteTieHuman": "Décision humaine (pas encore disponible)",
     "voteTieModerator": "Le modérateur décide",
     "voteTieNoDecision": "Aucune décision",
     "voteTiePolicy": "En cas d'égalité",
@@ -4252,6 +4251,20 @@
     "emptyDescription": "Ce serveur ne fournit aucun modèle de groupe. Vous pouvez tout de même créer un groupe de zéro avec l'assistant.",
     "wizardNote": "Vous préférez créer de nouveaux agents au fil de l'eau ou partir de zéro ? L'assistant de groupe propose des préréglages plus légers.",
     "wizardLink": "Ouvrir l'assistant de groupe"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "Le vote est à égalité — {{name}}, c'est à vous de trancher",
+    "chooseOne": "Choisissez une option",
+    "rationalePlaceholder": "Pourquoi (facultatif)",
+    "inboxBadge": "Départage",
+    "inboxReason": "En attente de {{member}} pour départager le vote",
+    "policyOption": "Une personne décide",
+    "decider": "Décideur",
+    "timeout": "Délai (ISO-8601)",
+    "onTimeout": "À l'expiration",
+    "onTimeoutAbort": "Annuler la discussion",
+    "deciderRequired": "Indiquez un décideur — le groupe n'a pas exactement un membre HUMAN à qui revenir par défaut.",
+    "note": "Une égalité met la discussion en pause jusqu'à ce que le décideur choisisse une option. Seul le décideur ou un administrateur peut répondre."
   },
   "channels": {
     "agentIdPlaceholder": "ID de l’agent pour traiter les messages",

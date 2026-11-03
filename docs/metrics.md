@@ -301,6 +301,7 @@ eddi_group_close_count_total                # Conversations closed to further ro
 eddi_group_task_reworks_total               # Tasks VERIFY sent back for rework (maxReworks)
 eddi_group_verify_unparseable_total         # VERIFY verdicts that could not be parsed (tasks auto-verified)
 eddi_group_convergence_judge_duration_seconds{judge,mode,outcome}  # SERVICE convergence judge calls (timer)
+eddi_group_vote_tiebreaks_total{policy,resolution}  # HUMAN_DECIDES tie-breaks resolved (human, timeout_none, timeout_moderator)
 ```
 
 ### Standing Team (Cadence) Metrics

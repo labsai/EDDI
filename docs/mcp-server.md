@@ -203,7 +203,7 @@ Resolve Human-in-the-Loop approval gates over MCP — the counterpart to the RES
 | `list_all_group_pending_approvals`| Cross-group HITL inbox across all groups (owner-scoped)                                                                        |
 | `get_group_approval_status`       | Read a paused group discussion's status (summary; `detail=full` returns the whole conversation)                               |
 | `approve_group_phase`             | Approve/reject a paused phase, with optional `taskApprovals` JSON for TASK granularity and optional `pauseId` binding the decision to the pause reviewed; returns the resumed discussion |
-| `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving |
+| `submit_group_human_input`        | Submit a HUMAN member's response for the turn an `AWAITING_HUMAN_INPUT` discussion is waiting on (I6). Recorded as that member's transcript entry; the discussion resumes from the next speaker. Only the pending member's own principal (or an admin) may submit — this is the member **speaking**, not approving. A `TIE_BREAK` pause (`pendingKind`) is answered with the optional `choice` argument — one of `pendingOptions` — and `content` becomes an optional rationale |
 | `cancel_group_discussion`         | Cancel an in-progress or paused group discussion                                                                              |
 
 See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, and REST-endpoint parity.

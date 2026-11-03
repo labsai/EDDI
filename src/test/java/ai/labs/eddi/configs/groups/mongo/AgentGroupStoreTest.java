@@ -22,6 +22,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ArtifactConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupTaskConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
+import ai.labs.eddi.configs.groups.model.HumanTieBreakConfig;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -490,23 +491,21 @@ class AgentGroupStoreTest {
     }
 
     /**
-     * The rejection stands, but its stated reason must not: HUMAN members ship (I6
-     * — this same class validates them), so blaming their absence tells a config
-     * author a shipped feature is missing. What is actually absent is the resume
-     * path a paused tie-break would need. Asserting on the alternatives rather than
-     * on prose keeps this test from pinning the wording again.
+     * HUMAN_DECIDES ships: accepted once a decider can be resolved — named, or the
+     * group's single HUMAN member — and refused, naming the field, when not.
      */
     @Test
-    void votePhase_humanDecides_isRejectedPendingResumePath() {
-        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(voteGroup(
-                votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
-                        new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
-                                TiePolicy.HUMAN_DECIDES)))));
-        assertTrue(ex.getMessage().contains("HUMAN_DECIDES"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("MODERATOR_DECIDES"), ex.getMessage());
-        assertTrue(ex.getMessage().contains("NO_DECISION"), ex.getMessage());
-        assertFalse(ex.getMessage().contains("not available yet"),
-                "must not claim HUMAN members are unavailable — they ship: " + ex.getMessage());
+    void votePhase_humanDecides_isAcceptedWithAResolvableDecider() {
+        var named = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES, new HumanTieBreakConfig("founder@acme.com", "PT24H", null))));
+        assertDoesNotThrow(() -> AgentGroupStore.validateVotePhases(named));
+
+        var unnamed = voteGroup(votePhase(TurnOrder.PARALLEL, ContextScope.NONE,
+                new VoteConfig(VoteMethod.MAJORITY, OptionsSource.EXPLICIT, List.of("A", "B"), 0.5, Map.of(), false,
+                        TiePolicy.HUMAN_DECIDES)));
+        var ex = assertThrows(IllegalArgumentException.class, () -> AgentGroupStore.validateVotePhases(unnamed));
+        assertTrue(ex.getMessage().contains("humanTieBreak.decider"), ex.getMessage());
     }
 
     @Test

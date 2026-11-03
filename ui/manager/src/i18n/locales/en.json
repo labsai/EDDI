@@ -3519,7 +3519,6 @@
     "voteTiePolicy": "On a tie",
     "voteTieNoDecision": "No decision",
     "voteTieModerator": "Moderator decides",
-    "voteTieHuman": "Human decides (not yet available)",
     "voteWeightByConfidence": "Weight by confidence",
     "transcriptWindowed": "The first {{count}} transcript entries were folded into a rolling summary to keep later turns' context bounded. Hover for the summary.",
     "negotiationTableTitle": "Negotiation Table",
@@ -4031,6 +4030,20 @@
     "emptyDescription": "This server ships no group templates. You can still build a group from scratch with the wizard.",
     "wizardNote": "Prefer to create new agents as you go, or build from scratch? The group wizard offers lighter starter presets.",
     "wizardLink": "Open the group wizard"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "The vote is tied — {{name}}, you decide",
+    "chooseOne": "Choose one option",
+    "rationalePlaceholder": "Why (optional)",
+    "inboxBadge": "Tie-break",
+    "inboxReason": "Waiting on {{member}} to break a tied vote",
+    "policyOption": "A human decides",
+    "decider": "Decider",
+    "timeout": "Timeout (ISO-8601)",
+    "onTimeout": "On timeout",
+    "onTimeoutAbort": "Cancel the discussion",
+    "deciderRequired": "Name a decider — the group does not have exactly one HUMAN member to default to.",
+    "note": "A tie pauses the discussion until the decider picks one option. Only the decider or an admin can answer."
   },
   "memories": {
     "title": "User Memory",

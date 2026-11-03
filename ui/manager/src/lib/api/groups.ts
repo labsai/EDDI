@@ -287,13 +287,27 @@ export type VoteMethod = "MAJORITY" | "APPROVAL";
 export type VoteOptionsSource = "LAST_SYNTHESIS" | "EXPLICIT";
 
 /**
- * How a tied ballot resolves (I14). `HUMAN_DECIDES` is a real enum value but is
- * still save-time REJECTED by the backend pending its resume machinery — despite
- * I6 (human members) having since shipped, that cross-reference in the backend's
- * own docs is stale. Treat it as unselectable, matching backend reality, not the
- * aspirational doc.
+ * How a tied ballot resolves (I14). `HUMAN_DECIDES` pauses the discussion until
+ * the `humanTieBreak` decider chooses one of the tied options.
  */
 export type VoteTiePolicy = "MODERATOR_DECIDES" | "HUMAN_DECIDES" | "NO_DECISION";
+
+/** What an unanswered human tie-break resolves to. */
+export type TieBreakTimeoutPolicy = "NO_DECISION" | "MODERATOR_DECIDES" | "ABORT";
+
+/**
+ * Backend `HumanTieBreakConfig`: who breaks a tie under `HUMAN_DECIDES`. Without
+ * a `decider` the group's single HUMAN member decides; a group with none or
+ * several must name one (save-time 400).
+ */
+export interface HumanTieBreakConfig {
+  /** Principal id of the decider. Need not be a member. */
+  decider?: string | null;
+  /** ISO-8601 duration; absent = `humanMemberConfig.turnTimeout`, else no timeout. */
+  timeout?: string | null;
+  /** Default NO_DECISION. MODERATOR_DECIDES needs a moderatorAgentId. */
+  onTimeout?: TieBreakTimeoutPolicy | null;
+}
 
 /** Backend `AgentGroupConfiguration.VoteConfig.DEFAULT_QUORUM`. Valid range (0,1]. */
 export const DEFAULT_VOTE_QUORUM = 0.5;
@@ -316,6 +330,8 @@ export interface VoteConfig {
   /** Scale each ballot's weight by the voter's stated confidence, if parsed. */
   weightByConfidence: boolean;
   tiePolicy: VoteTiePolicy;
+  /** Only read when `tiePolicy === "HUMAN_DECIDES"`. */
+  humanTieBreak?: HumanTieBreakConfig | null;
 }
 
 /**
@@ -983,6 +999,26 @@ export interface PendingHumanInput {
   renderedPrompt: string;
   onTimeout: OnHumanTimeout;
   requestedAt: string;
+  /** Set when the pending input is not a plain speaking turn — a tie-break or a task. */
+  detail?: HumanRequestDetail | null;
+}
+
+/**
+ * Backend `HumanRequestDetail`: what a pending human input asks for when it is
+ * not a speaking turn. A `TIE_BREAK` is answered with `choice` (one of `options`);
+ * `content` is then an optional rationale.
+ */
+export interface HumanRequestDetail {
+  kind: "TIE_BREAK" | "TASK" | string;
+  options?: string[];
+  taskId?: string | null;
+  transcriptFrom?: number | null;
+  timeoutResolution?: string | null;
+}
+
+/** The options a pending tie-break offers, or `undefined` for any other pending input. */
+export function tieBreakOptions(pending?: PendingHumanInput | null): string[] | undefined {
+  return pending?.detail?.kind === "TIE_BREAK" ? (pending.detail.options ?? []) : undefined;
 }
 
 /** How consumers should read a `SharedArtifact.content` string (I17). */
@@ -1450,7 +1486,9 @@ export function isHumanInputAcknowledgement(result: HumanInputResult): result is
  * separate from the HITL approve endpoints even though both resume a paused
  * discussion.
  * POST /groups/{groupId}/conversations/{groupConversationId}/human-input
- * Body: HumanInputRequest { memberId, content }.
+ * Body: HumanInputRequest { memberId, content, choice? } — `choice` answers a
+ * tie-break (one of `pendingHumanInput.detail.options`), with `content` then an
+ * optional rationale.
  * Response: the full GroupConversation only for its owner or an admin; the
  * pending member gets `{ groupConversationId, accepted, state }` instead, so
  * callers must not read conversation fields off the result.
@@ -1463,10 +1501,11 @@ export function submitHumanInput(
   gcId: string,
   memberId: string,
   content: string,
+  choice?: string,
 ): Promise<HumanInputResult> {
   return api.post<HumanInputResult>(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/human-input`,
-    { memberId, content },
+    choice !== undefined ? { memberId, content, choice } : { memberId, content },
   );
 }
 
@@ -1666,6 +1705,8 @@ export interface HumanInputRequestedPayload {
   displayName: string;
   phaseIndex: number;
   phaseName: string;
+  /** Set for a tie-break or a task; absent for a speaking turn. */
+  detail?: HumanRequestDetail | null;
 }
 
 /** Payload of `retro_recorded` (I8). */

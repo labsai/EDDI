@@ -345,6 +345,22 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         }
     }
 
+    /**
+     * The tie-break notice (tiePolicy HUMAN_DECIDES): who decides and among what.
+     * Notification-only like every human-turn notice — the decision is made in
+     * EDDI, where the decider's identity is the one the access guard checks.
+     */
+    private String tieBreakNotice(String name, String phaseName, List<String> options) {
+        var sb = new StringBuilder(String.format("🗳️ Tie in *%s* — *%s* decides:\n", phaseName, name));
+        options.stream().limit(MAX_TALLY_LINES)
+                .forEach(option -> sb.append(String.format("• %s\n", buildPreview(option, MAX_TALLY_OPTION_CHARS))));
+        if (options.size() > MAX_TALLY_LINES) {
+            sb.append(String.format("… and %d more option(s)\n", options.size() - MAX_TALLY_LINES));
+        }
+        sb.append(String.format("Decide in EDDI (conversation `%s`).", groupConversationId != null ? groupConversationId : "unknown"));
+        return sb.toString();
+    }
+
     /** Slack messages are skimmed, not scrolled — a ten-option tally is noise. */
     private static final int MAX_TALLY_LINES = 6;
 
@@ -369,9 +385,11 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String name = event.displayName() != null && !event.displayName().isBlank()
                 ? event.displayName()
                 : event.memberId();
-        String msg = String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
-                name, event.phaseName(),
-                groupConversationId != null ? groupConversationId : "unknown");
+        String msg = event.detail() != null && event.detail().isTieBreak()
+                ? tieBreakNotice(name, event.phaseName(), event.detail().options())
+                : String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
+                        name, event.phaseName(),
+                        groupConversationId != null ? groupConversationId : "unknown");
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, msg);
         // A human pause is terminal for THIS listener instance — the discussion

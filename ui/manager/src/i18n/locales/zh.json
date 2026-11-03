@@ -3476,7 +3476,6 @@
     "voteOptionsList": "选项（每行一个）",
     "voteOptionsSource": "投票选项",
     "voteQuorum": "法定票数",
-    "voteTieHuman": "由人工决定（暂不可用）",
     "voteTieModerator": "由主持人决定",
     "voteTieNoDecision": "不作决定",
     "voteTiePolicy": "出现平局时",
@@ -4205,6 +4204,20 @@
     "emptyDescription": "此服务器未附带群组模板。你仍可使用向导从零创建群组。",
     "wizardNote": "想边做边创建新智能体，或从零开始？群组向导提供更轻量的入门预设。",
     "wizardLink": "打开群组向导"
+  },
+  "groupTieBreak": {
+    "bannerTitle": "投票平局 — {{name}}，由你决定",
+    "chooseOne": "选择一个选项",
+    "rationalePlaceholder": "理由（可选）",
+    "inboxBadge": "平局裁决",
+    "inboxReason": "等待 {{member}} 裁决平局投票",
+    "policyOption": "由人决定",
+    "decider": "决定者",
+    "timeout": "超时 (ISO-8601)",
+    "onTimeout": "超时时",
+    "onTimeoutAbort": "取消讨论",
+    "deciderRequired": "请指定决定者 — 该小组没有恰好一位可默认决定的 HUMAN 成员。",
+    "note": "平局会暂停讨论，直到决定者选出一个选项。只有决定者或管理员可以回答。"
   },
   "channels": {
     "agentIdPlaceholder": "处理消息的代理 ID",
