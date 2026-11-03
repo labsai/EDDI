@@ -174,7 +174,7 @@ def sampling_gaps(samples, min_share=0.5):
     names = {n for s in samples for n in s["nodes"]} | {n for s in samples if isinstance(s.get("nodes_error"), dict)
                                                          for n in s["nodes_error"]}
     for name in sorted(names):
-        ok = sum(1 for s in samples if name in s["nodes"])
+        ok = sum(1 for s in samples if s["nodes"].get(name) is not None)  # a scrape without metrics is None
         if ok / len(samples) < min_share:
             gaps[name] = round(ok / len(samples), 2)
     return gaps
