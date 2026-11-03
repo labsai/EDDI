@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
+import ai.labs.eddi.modules.llm.tools.guardrail.ToolCallGuardrailConfigValidator;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaConfigValidator;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -62,6 +63,7 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
             if (task != null) {
                 String fieldPath = "langchain.task[" + i + "].toolApprovals";
                 HitlConfigValidation.validateToolApprovals(task.getToolApprovals(), fieldPath);
+                ToolCallGuardrailConfigValidator.validate(task.getToolCallGuardrails(), "langchain.task[" + i + "].toolCallGuardrails");
                 ToolQuotaConfigValidator.validate(task.getToolQuotas(), "langchain.task[" + i + "].toolQuotas");
                 HandoffConfigValidator.validateTask(task.getTeamHandoff(), "langchain.task[" + i + "].teamHandoff");
                 SecretScopeValidation.validate(task.getPreRequest(), "langchain.task[" + i + "].preRequest");

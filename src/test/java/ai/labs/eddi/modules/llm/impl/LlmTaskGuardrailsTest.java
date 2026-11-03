@@ -35,6 +35,7 @@ import ai.labs.eddi.modules.llm.guardrails.impl.JsonObjectGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.impl.PromptInjectionGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.model.ToolCallGuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CircuitBreakerConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.GuardrailConfig;
@@ -712,6 +713,20 @@ class LlmTaskGuardrailsTest {
 
         assertTrue(e.getMessage().contains("outputGuardrails[0]: expression guardrail: parameter 'expr' is not valid at position 21"),
                 e.getMessage());
+    }
+
+    @Test
+    @DisplayName("toolCallGuardrails: an unknown type is refused at deploy time")
+    void toolCallGuardrailUnknownType_refusedAtDeploy() {
+        var task = task();
+        var entry = new ToolCallGuardrailConfig();
+        entry.setType("regx-filter");
+        entry.setTools(List.of("mcp:add_issue_comment"));
+        task.setToolCallGuardrails(List.of(entry));
+
+        var e = assertThrows(WorkflowConfigurationException.class, () -> llmTask.validateGuardrails(new LlmConfiguration(List.of(task))));
+
+        assertTrue(e.getMessage().contains("toolCallGuardrails[0]: unknown guardrail type 'regx-filter'"), e.getMessage());
     }
 
     @Test

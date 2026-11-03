@@ -51,7 +51,9 @@ import java.util.regex.Pattern;
  * task-level {@code toolApprovals} is combined with the agent gate (strictly by
  * default, wholesale under {@code eddi.hitl.tool.task-approvals.mode=replace}),
  * and an agent should not be the one writing it: changing what gates an agent
- * is a human's edit, made in the Manager, not an approval click. A body that
+ * is a human's edit, made in the Manager, not an approval click. The same holds
+ * for {@code toolCallGuardrails}, the hard blocks on a task's tool-call
+ * arguments: an agent that could write them could strip its own. A body that
  * cannot be parsed is refused too — "could not see it" is not "it is not
  * there".</li>
  * <li><b>An agent-store write that removes or changes another agent's gate.</b>
@@ -92,11 +94,14 @@ public final class SelfUngatingGuard {
     /** Every configuration store answers under {@code /<name>store/}. */
     private static final Pattern CONFIG_STORE_PATH = Pattern.compile("/[a-z]+store/");
     private static final String TOOL_APPROVALS_KEY = "toolApprovals";
+    private static final String TOOL_CALL_GUARDRAILS_KEY = "toolCallGuardrails";
     private static final String HITL_CONFIG_KEY = "hitlConfig";
 
     public static final String OWN_AGENT_REASON = "an agent may not modify, deploy or start itself";
     public static final String OWN_RESOURCE_REASON = "an agent may not modify the workflow or configuration resources it runs on";
     public static final String GATE_WRITE_REASON = "an agent may not write a tool-approval gate (toolApprovals) into an LLM configuration";
+    public static final String GUARDRAIL_WRITE_REASON = "an agent may not write tool-call guardrails (toolCallGuardrails) into an LLM "
+            + "configuration";
     public static final String LLM_GATE_REMOVAL_REASON = "an agent may not remove or replace a tool-approval gate (toolApprovals) "
             + "stored in an LLM configuration";
     public static final String GATE_REMOVAL_REASON = "an agent may not remove or change another agent's tool-approval gate (hitlConfig)";
@@ -224,9 +229,18 @@ public final class SelfUngatingGuard {
         try {
             JsonNode tree = MAPPER.readTree(body);
             if (tree.isArray() && isPatch(method)) {
-                return patchRefusal(tree, TOOL_APPROVALS_KEY);
+                String gate = patchRefusal(tree, TOOL_APPROVALS_KEY);
+                if (GATE_WRITE_REASON.equals(gate)) {
+                    return gate;
+                }
+                // Naming the guardrails outranks an unsupported operation, as naming the
+                // gate does.
+                return GATE_WRITE_REASON.equals(patchRefusal(tree, TOOL_CALL_GUARDRAILS_KEY)) ? GUARDRAIL_WRITE_REASON : gate;
             }
-            return containsKey(tree, TOOL_APPROVALS_KEY) ? GATE_WRITE_REASON : null;
+            if (containsKey(tree, TOOL_APPROVALS_KEY)) {
+                return GATE_WRITE_REASON;
+            }
+            return containsKey(tree, TOOL_CALL_GUARDRAILS_KEY) ? GUARDRAIL_WRITE_REASON : null;
         } catch (JsonProcessingException e) {
             return UNVERIFIABLE_REASON;
         }
@@ -437,6 +451,9 @@ public final class SelfUngatingGuard {
         // the key alone is enough: no legitimate argument list needs to carry it.
         if (decoded.contains(TOOL_APPROVALS_KEY.toLowerCase(Locale.ROOT))) {
             return GATE_WRITE_REASON;
+        }
+        if (decoded.contains(TOOL_CALL_GUARDRAILS_KEY.toLowerCase(Locale.ROOT))) {
+            return GUARDRAIL_WRITE_REASON;
         }
         if (decoded.contains(HITL_CONFIG_KEY.toLowerCase(Locale.ROOT))) {
             return GATE_REMOVAL_REASON;
