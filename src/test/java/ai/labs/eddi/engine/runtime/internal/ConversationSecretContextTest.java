@@ -40,6 +40,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -277,6 +278,48 @@ class ConversationSecretContextTest {
         IData<Object> copy = memory.getCurrentStep().getLatestData("copy");
         assertNotNull(copy);
         assertEquals(Map.of("account", PLACEHOLDER), copy.getResult());
+    }
+
+    @Test
+    @DisplayName("a later workflow does not put back the input an earlier one scrubbed")
+    void laterWorkflowKeepsTheScrubbedInput() throws Exception {
+        // The first workflow's scope:secret instruction vaults the input and replaces
+        // input:initial; the second used to be handed the original datum again.
+        doAnswer(invocation -> {
+            memory.getCurrentStep().storeData(new Data<>("input:initial", "<secret input>"));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var second = mock(IExecutableWorkflow.class);
+        var secondLifecycle = mock(ILifecycleManager.class);
+        when(second.getLifecycleManager()).thenReturn(secondLifecycle);
+        when(second.getWorkflowId()).thenReturn("wf2");
+        var seenBySecond = new AtomicReference<Object>();
+        doAnswer(invocation -> {
+            seenBySecond.set(memory.getCurrentStep().getData("input:initial").getResult());
+            return null;
+        }).when(secondLifecycle).executeLifecycle(any(), any());
+
+        new Conversation(List.of(workflow, second), memory, propertiesHandler, outputRenderer).say("my pin is 4711", Map.of());
+
+        assertEquals("<secret input>", seenBySecond.get());
+        assertEquals("<secret input>", memory.getCurrentStep().getData("input:initial").getResult());
+    }
+
+    @Test
+    @DisplayName("a secret that equals the turn's cost does not erase the spend record")
+    void accountingIsNotScrubbed() throws Exception {
+        doAnswer(invocation -> {
+            memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 1234.5678));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var secretNumber = new Context(Context.ContextType.object, Map.of("n", 1234.5678));
+        secretNumber.setSecret(true);
+
+        conversation().say("hello", Map.of("price", secretNumber));
+
+        IData<Object> cost = memory.getCurrentStep().getLatestData(MemoryKeys.AUDIT_COST);
+        assertNotNull(cost);
+        assertEquals(1234.5678, cost.getResult());
     }
 
     @Test

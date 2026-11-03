@@ -1127,13 +1127,19 @@ public class DreamService {
         return result;
     }
 
+    /**
+     * Global and group-scoped entries never share a key, not even a group entry
+     * with no group ids: a global entry can carry the group ids of the conversation
+     * it was written in, and in one part with a reader-less group entry the union
+     * stamped those ids onto the reader-less fact.
+     */
     private static String readershipKey(UserMemoryEntry entry) {
         if (entry.visibility() != Visibility.group) {
-            return "";
+            return "global";
         }
         return entry.groupIds() == null
-                ? ""
-                : entry.groupIds().stream().filter(Objects::nonNull).distinct().sorted()
+                ? "group:"
+                : "group:" + entry.groupIds().stream().filter(Objects::nonNull).distinct().sorted()
                         .collect(Collectors.joining(","));
     }
 
