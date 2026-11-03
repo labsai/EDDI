@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
@@ -620,8 +621,15 @@ public class McpHitlTools {
                     + "or already approved", "WRONG_STATE", null);
         } catch (McpReviewArguments.BadArgument e) {
             return errorJson(e.getMessage(), "BAD_REQUEST", null);
-        } catch (IllegalArgumentException e) {
+        } catch (ReviewRefusalException e) {
+            // the review validation's own message, written for the caller
             return errorJson("Invalid approval request: " + e.getMessage(), "BAD_REQUEST", null);
+        } catch (IllegalArgumentException e) {
+            // other validation in the coordinator names internal state (member ids, task
+            // statuses): fixed text
+            LOGGER.debugf("MCP approve_group_phase rejected the request: %s", e.getMessage());
+            return errorJson("Invalid approval request: check taskApprovals and the pause state with get_group_approval_status", "BAD_REQUEST",
+                    null);
         } catch (Exception e) {
             LOGGER.warn("MCP approve_group_phase failed", e);
             return errorJson("Failed to approve group phase", "INTERNAL", null);

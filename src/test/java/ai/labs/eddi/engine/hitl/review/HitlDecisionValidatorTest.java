@@ -153,6 +153,19 @@ class HitlDecisionValidatorTest {
     }
 
     @Test
+    void anEditIdenticalToTheDraftTakesNoReasonCode() {
+        var snapshot = ruleSnapshot("the draft", "TEXT");
+        var same = approveWith("the draft");
+        same.setReasonCode("TONE");
+        assertThrows(IllegalArgumentException.class, () -> HitlDecisionValidator.validate(same, snapshot, editsAllowed(100)),
+                "an unchanged edit is a plain approval, which takes no reason code");
+
+        var changed = approveWith("the draft, corrected");
+        changed.setReasonCode("TONE");
+        assertDoesNotThrow(() -> HitlDecisionValidator.validate(changed, snapshot, editsAllowed(100)));
+    }
+
+    @Test
     void perCallReasonCodes() {
         var snapshot = ruleSnapshot(null, null);
         snapshot.setHitlPauseType("TOOL_CALL");
