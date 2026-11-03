@@ -389,7 +389,7 @@ final class ClusterHarness {
         body.put("systemPrompt", "You are a cluster end-to-end test agent.");
         body.put("provider", "openai");
         body.put("model", "mock-1");
-        body.put("apiKey", "sk-e2e-0123456789");
+        body.put("apiKey", "fixturefixturefixture");
         body.put("baseUrl", "http://mockllm:" + MOCK_PORT + "/v1");
         body.put("deploy", true);
         Response r = request(0, "POST", "/administration/agents/setup", write(body), Duration.ofSeconds(120));
