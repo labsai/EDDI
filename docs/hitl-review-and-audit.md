@@ -2,7 +2,7 @@
 
 An approver can do more than say yes or no: they can **approve with an edit** — the final answer of a rule pause,
 the arguments of a gated tool call, the result of a group task, the output of a group synthesis — and say **why**
-they rejected or changed something with a **reason code**. Every decision, edited or not, lands in the audit ledger
+they rejected or changed something with a **reason code**. When the audit ledger is enabled, every decision, edited or not, lands in the audit ledger
 in one typed shape, so analytics can count how often an approver changes what an agent does, and why.
 
 This page builds on [Human-in-the-Loop (HITL)](hitl.md); read that first for pauses, resumes and who may decide.
@@ -176,7 +176,7 @@ Approve/Reject. A note typed in the Slack modal is recorded, but does not drive 
 
 ## The audit contract
 
-Every HITL decision event — a resume, a group approval, a cancellation — writes **one** `hitl.approval` entry
+When the audit ledger is enabled, every HITL decision event — a resume, a group approval, a cancellation — writes **one** `hitl.approval` entry
 (`taskType: hitl`). Since 6.7 the entry carries `schema: 2`: every pre-6.7 field is kept for existing readers, and
 the decision's units are listed in `units[]`. Read entries through `HitlApprovalAudit.parse(AuditEntry)`, never the
 raw map: it reads schema 1 and 2 into `HitlDecisionUnit`s.
@@ -274,5 +274,5 @@ An agent drafts replies to GitHub issues; a human approves each one in Slack, an
 The behavior rule that pauses runs directly after the LLM task; the Slack integration sets
 `hitlApprovalChannel`, `hitlApproverUserIds` and `hitlShareRuleDrafts: "true"`. The approver sees the draft on the
 card, clicks **✏️ Edit & approve**, fixes a sentence and picks `FALSE_CLAIM`. The reply goes out with the fix, the
-card reads "✅ Approved with edits", and the ledger records an `APPROVED_EDITED` unit in category `github.reply` with
+card reads "✅ Approved (edit submitted)", and the ledger records an `APPROVED_EDITED` unit in category `github.reply` with
 the size of the change — the numbers an approval dashboard groups by.

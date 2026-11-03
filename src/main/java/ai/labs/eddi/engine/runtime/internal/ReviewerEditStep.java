@@ -22,6 +22,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -76,7 +77,7 @@ final class ReviewerEditStep {
             outcome = workflow.getLifecycleManager().replaceAnswerAt(memory, candidate.getLifecycleIndex(),
                     new ReviewerEditRequest(candidate, decision.getEditedAnswer(), decision.getDecidedBy(), screen));
         }
-        Metrics.counter(EDIT_METER, "outcome", outcome.applied() ? "applied" : outcome.refusal().toLowerCase()).increment();
+        Metrics.counter(EDIT_METER, "outcome", outcome.applied() ? "applied" : outcome.refusal().toLowerCase(Locale.ROOT)).increment();
         if (outcome.applied()) {
             var applied = new LinkedHashMap<String, Object>();
             applied.put("originalSha256", EditMetrics.sha256Hex(candidate.getDraft()));
@@ -95,7 +96,7 @@ final class ReviewerEditStep {
         }
         LOGGER.infof("HITL answer edit for conversation '%s' not applied (%s) — pausing again on the unchanged draft",
                 sanitize(memory.getConversationId()), outcome.refusal());
-        step.storeData(new Data<>(OUTCOME_STEP_KEY, Map.of("outcome", outcome.refusal().toLowerCase())));
+        step.storeData(new Data<>(OUTCOME_STEP_KEY, Map.of("outcome", outcome.refusal().toLowerCase(Locale.ROOT))));
         var refused = new LinkedHashMap<String, Object>();
         refused.put("reason", outcome.refusal());
         if (outcome.guardrail() != null) {

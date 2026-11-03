@@ -209,6 +209,7 @@ class GroupHitlReviewTest {
         assertThrows(IllegalArgumentException.class, () -> service.resumeDiscussion(GC_ID, request, null));
         assertTrue(gc.getTaskList().hasAwaitingApproval());
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -225,6 +226,7 @@ class GroupHitlReviewTest {
         var e = assertThrows(IllegalArgumentException.class, () -> service.resumeDiscussion(GC_ID, request, null));
         assertTrue(e.getMessage().contains("allowResultEdits"));
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     @Test
@@ -242,6 +244,7 @@ class GroupHitlReviewTest {
         request.setTaskDecisions(Map.of(a, taskDecision(HitlVerdict.APPROVED, null, null, "TONE")));
         assertThrows(IllegalArgumentException.class, () -> service.resumeDiscussion(GC_ID, request, null));
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 
     private GroupConversation phasePause(String phaseName) {
@@ -299,5 +302,6 @@ class GroupHitlReviewTest {
         var e = assertThrows(IllegalArgumentException.class, () -> service.resumeDiscussion(GC_ID, request, null));
         assertTrue(e.getMessage().contains("synthesis"));
         verify(conversationStore, never()).updateIfState(any(), any());
+        verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
     }
 }

@@ -684,15 +684,15 @@ public class SlackInteractivityHandler {
     }
 
     /**
-     * " with edits" or " (TONE)" for the resolved card — never the edited text,
-     * which is not echoed into the channel.
+     * " (edit submitted)" or " (TONE)" for the resolved card — never the edited
+     * text, which is not echoed into the channel.
      */
     private static String resolutionDetail(HitlDecision decision) {
         boolean edited = decision.getEditedAnswer() != null
                 || decision.getToolDecisions() != null && decision.getToolDecisions().values().stream()
                         .anyMatch(d -> d != null && d.getAmendedArguments() != null);
         if (decision.getVerdict() == HitlVerdict.APPROVED) {
-            return edited ? " with edits" : null;
+            return edited ? " (edit submitted)" : null;
         }
         return decision.getReasonCode() != null ? " (" + decision.getReasonCode() + ")" : null;
     }
