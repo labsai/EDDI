@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
-import { Bot, ShieldCheck } from "lucide-react";
+import { Bot, ScanEye } from "lucide-react";
 import { AgentPicker } from "@/components/shared/agent-picker";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ApprovalAnalytics } from "@/components/oversight/approval-analytics";
@@ -62,7 +62,7 @@ export function OversightPage() {
     <div className="space-y-6" data-testid="oversight-page">
       <div>
         <h1 className="flex items-center gap-2 text-3xl font-bold text-foreground">
-          <ShieldCheck className="h-8 w-8 text-primary" />
+          <ScanEye className="h-8 w-8 text-primary" />
           {t("oversight.title", "Oversight")}
         </h1>
         <p className="mt-1 text-muted-foreground">
