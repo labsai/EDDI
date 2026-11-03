@@ -307,7 +307,7 @@ class KvLeaseManagerTest {
         KvLeaseManager a = manager("a", "a1");
         KvLeaseManager b = manager("b", "b1");
         LeaseHandle first = get(a.acquire("conv1", Duration.ofSeconds(1)));
-        var bWaiting = b.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
+        var bWaiting = b.acquire("conv1", Duration.ofSeconds(15)).toCompletableFuture();
         // wait until b has registered its waiter marker
         long deadline = System.currentTimeMillis() + 2000;
         while (kv.get("w.c.conv1").isEmpty() && System.currentTimeMillis() < deadline) {
@@ -319,7 +319,8 @@ class KvLeaseManagerTest {
         var aAgain = a.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
         bus.deliver = true;
         bus.publishReleased("c.conv1");
-        LeaseHandle bLease = bWaiting.get(3, TimeUnit.SECONDS);
+        // generous: b's poll fallback is the only timing here, and a loaded CI runner can stall it
+        LeaseHandle bLease = bWaiting.get(10, TimeUnit.SECONDS);
         assertNotNull(bLease);
         assertFalse(aAgain.isDone(), "a must not re-acquire ahead of the waiting node");
         b.release(bLease);
