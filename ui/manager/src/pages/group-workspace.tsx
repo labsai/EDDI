@@ -23,6 +23,7 @@ import { useAgentNames } from "@/hooks/use-agent-names";
 import { useDeleteWorkspaceBacklogTask } from "@/hooks/use-team-handoffs";
 import { BetDetails } from "@/components/groups/bet-details";
 import { DueBetReviews } from "@/components/groups/due-bet-reviews";
+import { LessonsPanel } from "@/components/groups/lessons-panel";
 import { OutcomeAnalyticsPanel } from "@/components/groups/outcome-analytics";
 import { TaskOutcomes } from "@/components/groups/task-outcomes";
 import { useReviewBet } from "@/hooks/use-group-workspace";
@@ -352,6 +353,7 @@ export function GroupWorkspacePage() {
 
       <DueBetReviews groupId={groupId!} readOnly={readOnly} />
       {groupConfig?.outcomeConfig && <OutcomeAnalyticsPanel groupId={groupId!} />}
+      {groupConfig?.lessonConfig && <LessonsPanel groupId={groupId!} readOnly={readOnly} />}
 
       {/* Backlog */}
       <div className="rounded-xl border border-border bg-card p-4" data-testid="workspace-backlog">

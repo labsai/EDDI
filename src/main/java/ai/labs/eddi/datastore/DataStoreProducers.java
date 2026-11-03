@@ -50,7 +50,10 @@ import ai.labs.eddi.engine.alerts.mongo.AlertEventStore;
 import ai.labs.eddi.engine.alerts.mongo.AlertRuleStore;
 import ai.labs.eddi.datastore.postgres.PostgresApprovalDecisionStore;
 import ai.labs.eddi.datastore.postgres.PostgresAuditSampleStore;
+import ai.labs.eddi.datastore.postgres.PostgresLessonHistoryStore;
 import ai.labs.eddi.datastore.postgres.PostgresOutcomeEventStore;
+import ai.labs.eddi.engine.groups.lessons.ILessonHistoryStore;
+import ai.labs.eddi.engine.groups.lessons.mongo.MongoLessonHistoryStore;
 import ai.labs.eddi.engine.groups.outcomes.IOutcomeEventStore;
 import ai.labs.eddi.engine.groups.outcomes.mongo.MongoOutcomeEventStore;
 import ai.labs.eddi.datastore.postgres.PostgresAutonomyStateStore;
@@ -195,6 +198,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IApprovalDecisionStore approvalDecisionStore(Instance<MongoApprovalDecisionStore> mongo,
                                                         Instance<PostgresApprovalDecisionStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ILessonHistoryStore lessonHistoryStore(Instance<MongoLessonHistoryStore> mongo, Instance<PostgresLessonHistoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

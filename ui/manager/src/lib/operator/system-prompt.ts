@@ -18,6 +18,7 @@ import {
   grantsModelPriceReads,
   grantsTeamHandoffReads,
   grantsTeamLearningReads,
+  grantsTeamLessonReads,
   grantsTeamBudgetReads,
   grantsOversightReads,
   type OperatorScope,
@@ -814,6 +815,34 @@ const BODY_TEAM_LEARNING = `Team learning loop (bets, outcomes, and what the ret
   (approver or admin role). A retry with the same \`idempotencyKey\` stores once.
 - You cannot record an outcome or give a bet its verdict: outcomes are facts the
   observing system reports, and a verdict is the team's.`;
+
+/**
+ * Team lessons — gated on {@link grantsTeamLessonReads}.
+ */
+const BODY_TEAM_LESSONS = `Team lessons (what a team's RETRO phase learned, sharing between teams, consolidation):
+- A RETRO phase stores lessons as the team's own group memory (the \`retroConfig\` caps
+  apply: FIFO at maxStoredLessons). Read them with the lessons read.
+- Sharing needs BOTH sides, in each group's \`lessonConfig\`: the owning team lists the
+  reader in \`shareWith\`, and the reading team lists the owner in \`readFrom\`. Without a
+  \`lessonConfig\` a team shares and reads nothing. The shared read returns \`notShared\`:
+  the owners the reader asked for that did not grant it, which is the usual reason a
+  reader sees nothing. Shared lessons are quoted into the reader's RETRO input as the
+  other team's words, newest first, at most \`maxSharedLessons\` (default 10).
+- \`lessonConfig.consolidation\` is a scheduled job that merges lessons saying the same
+  thing and retires a lesson a later outcome contradicted (it must cite outcome ids it was
+  shown; there is no retirement without evidence). It needs \`llmProvider\` and \`llmModel\`
+  (a background job inherits none) and is capped by \`maxCostPerRun\` (default $0.10,
+  ceiling $5), checked BEFORE the call against a worst-case estimate: a run that could
+  exceed it drops lessons, and makes no call when it cannot fit. Runs start at
+  \`minLessons\` (default 6). The consolidation state read says whether it is configured,
+  has a model and is scheduled.
+- Nothing removed is lost: the history read lists each merged or retired lesson with its
+  text, reason and cited outcomes.
+- Metric \`eddi_group_lessons_total\` by outcome (merged, retired, rejected, skipped_changed,
+  run_completed, run_skipped, run_failed): \`rejected\` means the model proposed a change that
+  failed validation (an unknown key, a retirement without evidence).
+- You cannot schedule, run or remove the consolidation: it rewrites a team's memory and
+  spends budget, so it is done on the group's workspace page in the manager.`;
 
 /**
  * Team budgets — gated on {@link grantsTeamBudgetReads}.
@@ -1913,6 +1942,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     ...(grantsModelPriceReads(endpoints) ? [BODY_COST] : []),
     ...(grantsTeamHandoffReads(endpoints) ? [BODY_TEAM_HANDOFF] : []),
     ...(grantsTeamLearningReads(endpoints) ? [BODY_TEAM_LEARNING] : []),
+    ...(grantsTeamLessonReads(endpoints) ? [BODY_TEAM_LESSONS] : []),
     ...(grantsTeamBudgetReads(endpoints) ? [BODY_TEAM_BUDGETS] : []),
     ...(grantsOversightReads(endpoints) ? [BODY_OVERSIGHT] : []),
     BODY_APP_CONTEXT,

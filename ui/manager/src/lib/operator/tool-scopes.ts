@@ -371,6 +371,18 @@ export const READ_ENDPOINTS: readonly string[] = [
   // evidence the team's retro then learns from) and `POST …/bet/review` (a verdict
   // on a bet is the team's).
   "GET /groupstore/groups/{groupId}/outcomes",
+  // Team lessons (EDDI 6.8.0+): a team's retro lessons, what other teams share
+  // with it, what consolidation removed, and whether the job is scheduled. Reads
+  // only; the backend checks VIEW on the group.
+  //
+  // Deliberately NOT granted: `PUT/DELETE …/lessons/consolidation/schedule` and
+  // `POST …/lessons/consolidation/run`. Consolidation rewrites a team's institutional
+  // memory and spends the tenant's budget on a model call; an operator doing that
+  // through its own approval pause would launder one approval through another.
+  "GET /groupstore/groups/{groupId}/lessons",
+  "GET /groupstore/groups/{groupId}/lessons/shared",
+  "GET /groupstore/groups/{groupId}/lessons/history",
+  "GET /groupstore/groups/{groupId}/lessons/consolidation",
   "GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews",
   "GET /hitl/analytics/outcomes",
   // Team budgets (EDDI 6.7.0+): one team's budget this month and its history, and
@@ -928,6 +940,20 @@ const TEAM_LEARNING_READS = [
 export function grantsTeamLearningReads(endpoints: readonly string[]): boolean {
   const set = new Set(endpoints);
   return TEAM_LEARNING_READS.every((entry) => set.has(entry));
+}
+
+/** The team-lesson reads the prompt's lessons section uses. */
+const TEAM_LESSON_READS = [
+  "GET /groupstore/groups/{groupId}/lessons",
+  "GET /groupstore/groups/{groupId}/lessons/shared",
+  "GET /groupstore/groups/{groupId}/lessons/history",
+  "GET /groupstore/groups/{groupId}/lessons/consolidation",
+] as const;
+
+/** Whether a team's lessons, shared lessons, consolidation history and state can be read. */
+export function grantsTeamLessonReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return TEAM_LESSON_READS.every((entry) => set.has(entry));
 }
 
 /** The team-budget reads the prompt's budget section uses. */
