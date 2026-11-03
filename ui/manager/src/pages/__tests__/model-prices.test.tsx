@@ -75,6 +75,14 @@ describe("ModelPricesPage", () => {
     expect(screen.getAllByTestId("model-prices-row")).toHaveLength(3);
   });
 
+  it("shows a failed sightings request with a retry instead of 'None seen'", async () => {
+    server.use(http.get("*/administration/model-prices/unpriced", () => HttpResponse.json({ error: "down" }, { status: 500 })));
+    renderPage("/manage/model-prices", <ModelPricesPage />);
+    expect(await screen.findByTestId("model-prices-unpriced-error")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-prices-unpriced-empty")).toBeNull();
+    expect(screen.getByTestId("model-prices-unpriced-retry")).toBeInTheDocument();
+  });
+
   it("prefills the sheet from an unpriced sighting", async () => {
     renderPage("/manage/model-prices", <ModelPricesPage />);
     fireEvent.click(await screen.findByTestId("model-prices-sighting-add"));

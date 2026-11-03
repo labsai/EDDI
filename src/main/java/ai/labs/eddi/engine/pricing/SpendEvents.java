@@ -27,6 +27,26 @@ public final class SpendEvents {
 
     /** The event for {@code usd} just charged for the current step. */
     public static SpendEvent forTurn(IConversationMemory memory, String tenantId, double usd) {
+        return forTurn(memory, tenantId, usd, new long[3]);
+    }
+
+    /**
+     * Moves the current step's not-yet-reported attribution out of the step and
+     * returns it as {@code [unpricedCalls, inputTokens, outputTokens]}, for a
+     * charge that could not be recorded and is carried to a later settle together
+     * with it.
+     */
+    public static long[] takeUnreported(IConversationMemory memory) {
+        SpendEvent taken = forTurn(memory, null, 0.0, new long[3]);
+        return new long[]{taken.unpricedCalls(), taken.inputTokens(), taken.outputTokens()};
+    }
+
+    /**
+     * As {@link #forTurn(IConversationMemory, String, double)}, adding the
+     * attribution {@code carried} ({@code [unpricedCalls, inputTokens,
+     * outputTokens]}) of earlier charges this one includes.
+     */
+    public static SpendEvent forTurn(IConversationMemory memory, String tenantId, double usd, long[] carried) {
         var step = memory.getCurrentStep();
         String groupId = step != null ? contextValue(step.getData(MemoryKeys.CONTEXT_PREFIX + ":groupId")) : null;
         String groupConversationId = step != null ? contextValue(step.getData(MemoryKeys.CONTEXT_PREFIX + ":groupConversationId")) : null;
@@ -59,6 +79,9 @@ public final class SpendEvents {
             input = Math.max(0L, input - reported[1]);
             output = Math.max(0L, output - reported[2]);
         }
+        unpriced += (int) carried[0];
+        input += carried[1];
+        output += carried[2];
         return new SpendEvent(tenantId, memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), memory.getUserId(), groupId,
                 groupConversationId, SpendEvent.Kind.TURN, null, usd, unpriced, input, output, Instant.now());
     }

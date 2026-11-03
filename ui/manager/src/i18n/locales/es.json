@@ -4595,6 +4595,7 @@
     "unpricedTitle": "Modelos sin precio vistos (este nodo)",
     "unpricedDesc": "Llamadas a modelos sin precio en el nodo que sirve esta página desde su inicio. Cuestan 0 $ frente a cualquier presupuesto.",
     "unpricedNone": "Ninguno visto.",
+    "unpricedError": "No se pudo cargar la lista de modelos sin precio.",
     "sightingDetail": "{{n}} llamadas · {{site}}",
     "sheetTitle": "Precio del modelo",
     "modelHint": "Nombre exacto, o * al inicio y/o al final. Gana la coincidencia más larga; se prueba el modelo informado por el proveedor antes que el solicitado.",

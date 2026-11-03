@@ -3,8 +3,8 @@
 EDDI turns every model call's token usage into dollars, and those dollars feed the
 conversation's tracked cost (`audit:cost`), the agent's `maxCostPerConversationUsd`, a
 cascade's `maxCostPerRun`, a group's `maxCostPerDiscussion`, the tenant's
-[monthly cost budget](tenant-quotas.md#the-monthly-cost-budget), the audit ledger and the
-`/v1` usage block. This page explains how a call is priced, where the prices come from,
+[monthly cost budget](tenant-quotas.md#the-monthly-cost-budget) and the audit ledger. (The
+`/v1` usage block reports tokens only.) This page explains how a call is priced, where the prices come from,
 how to see spend that has no price, and how to refuse it.
 
 ## In short

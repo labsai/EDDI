@@ -82,6 +82,20 @@ class SystemSpendMeterTest {
     }
 
     @Test
+    void aChargeTheStoreCouldNotTakeIsCarriedAndTheTenantThenSeesTheFullAmount() {
+        when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("store down"), QuotaCheckResult.OK);
+
+        SystemSpendMeter.charge(gc, "system:summarizer:full:10", PriceOverride.of(1.0, 2.0), usage(1_000_000, 500_000), "w");
+        assertEquals(0, events.size());
+        SystemSpendMeter.charge(gc, "system:summarizer:full:20", PriceOverride.of(1.0, 2.0), usage(1_000_000, 0), "w");
+
+        verify(quota).recordCost("default", 2.0);
+        verify(quota).recordCost("default", 3.0);
+        assertEquals(1, events.size());
+        assertEquals(3.0, events.getFirst().usd(), 1e-12, "the carried $2 plus the new $1");
+    }
+
+    @Test
     void aReRunOfTheSameOperationChargesOnlyTheIncrease() {
         SystemSpendMeter.charge(gc, "k", PriceOverride.of(1.0, null), usage(1_000_000, 0), "w");
         SystemSpendMeter.charge(gc, "k", PriceOverride.of(1.0, null), usage(1_000_000, 0), "w");

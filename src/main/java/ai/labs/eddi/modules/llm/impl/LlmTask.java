@@ -1276,8 +1276,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
                         historicInputScreen(memory, task), summaryAdmission(memory));
-                recordSpend(currentStep, summaryUsage, ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
-                        effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel()).cost(summaryUsage));
+                ModelPrices summaryPrices = ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
+                        effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel());
+                recordSpend(currentStep, summaryUsage, summaryPrices.cost(summaryUsage), summaryPrices);
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));

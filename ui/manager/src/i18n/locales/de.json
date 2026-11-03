@@ -4545,6 +4545,7 @@
     "unpricedTitle": "Gesehene Modelle ohne Preis (dieser Knoten)",
     "unpricedDesc": "Modellaufrufe ohne Preis auf dem Knoten, der diese Seite ausliefert, seit seinem Start. Sie kosten $0 gegenüber jedem Budget.",
     "unpricedNone": "Keine gesehen.",
+    "unpricedError": "Die Liste der Modelle ohne Preis konnte nicht geladen werden.",
     "sightingDetail": "{{n}} Aufrufe · {{site}}",
     "sheetTitle": "Modellpreis",
     "modelHint": "Exakter Name oder * am Anfang und/oder Ende. Der längste Treffer gewinnt; das vom Anbieter gemeldete Modell wird vor dem angefragten geprüft.",

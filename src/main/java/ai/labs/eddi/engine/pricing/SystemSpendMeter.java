@@ -145,28 +145,48 @@ public class SystemSpendMeter {
 
     private void chargeTenant(GroupConversation gc, String detail, double delta, PricedSpend priced, Map<?, ?> usage) {
         String tenantId = null;
+        // A charge the tenant counter could not take is carried to the next one, as
+        // DreamService does: the ledger delta has already advanced, so without this the
+        // amount would be lost for good.
+        double charge = delta + takePending();
         try {
             if (tenantQuotaService != null) {
                 tenantId = tenantQuotaService.getDefaultTenantId();
-                QuotaCheckResult result = tenantQuotaService.recordCost(tenantId, delta);
+                QuotaCheckResult result = tenantQuotaService.recordCost(tenantId, charge);
                 if (result != null && result.accountingUnavailable()) {
                     // An unreadable quota store is a returned result, not an exception. The tenant
                     // counter did not take the charge, so no sink may see it ("a sink sees exactly
-                    // the charges the tenant counter saw"). The group's own ledger keeps the cost,
-                    // so its ceilings stay honest; the tenant-side amount is the one that is lost.
-                    LOGGER.warnf("Group %s: system spend of $%.6f was not charged to the tenant — quota accounting unavailable",
-                            LogSanitizer.sanitize(gc.getId()), delta);
+                    // the charges the tenant counter saw").
+                    addPending(charge);
+                    LOGGER.warnf("Group %s: system spend of $%.6f was not charged to the tenant — quota accounting unavailable; "
+                            + "carried to the next group system charge", LogSanitizer.sanitize(gc.getId()), charge);
                     return;
                 }
             }
         } catch (RuntimeException e) {
             // The work already ran; a denied or unavailable result must not fail it.
-            LOGGER.warnf("Group %s: system spend of $%.6f could not be charged to the tenant: %s", LogSanitizer.sanitize(gc.getId()), delta,
-                    LogSanitizer.sanitize(e.getMessage()));
+            addPending(charge);
+            LOGGER.warnf("Group %s: system spend of $%.6f could not be charged to the tenant (carried to the next charge): %s",
+                    LogSanitizer.sanitize(gc.getId()), charge, LogSanitizer.sanitize(e.getMessage()));
             return;
         }
-        sinks.fire(new SpendEvent(tenantId, null, null, null, null, gc.getGroupId(), gc.getId(), SpendEvent.Kind.GROUP_SYSTEM, detail, delta,
+        sinks.fire(new SpendEvent(tenantId, null, null, null, null, gc.getGroupId(), gc.getId(), SpendEvent.Kind.GROUP_SYSTEM, detail, charge,
                 priced.unpricedCalls(), asLong(usage, "inputTokens"), asLong(usage, "outputTokens"), Instant.now()));
+    }
+
+    /**
+     * Group system spend the tenant counter has not recorded yet (store outage).
+     */
+    private double pendingTenantCost;
+
+    private synchronized double takePending() {
+        double pending = pendingTenantCost;
+        pendingTenantCost = 0.0;
+        return pending;
+    }
+
+    private synchronized void addPending(double amount) {
+        pendingTenantCost += amount;
     }
 
     private static long asLong(Map<?, ?> usage, String key) {
