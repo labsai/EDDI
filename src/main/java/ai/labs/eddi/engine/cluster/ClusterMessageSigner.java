@@ -113,7 +113,7 @@ public class ClusterMessageSigner {
     private final Set<String> warnedUnsigned = ConcurrentHashMap.newKeySet();
     private final Set<String> warnedRejections = ConcurrentHashMap.newKeySet();
     private final Cache<String, Boolean> seenNonces;
-    LongSupplier clock = System::currentTimeMillis;
+    private LongSupplier clock = System::currentTimeMillis;
 
     @Inject
     public ClusterMessageSigner(ClusterSigningConfig config, MeterRegistry meterRegistry) {
@@ -150,6 +150,12 @@ public class ClusterMessageSigner {
     public static ClusterMessageSigner unsigned() {
         return new ClusterMessageSigner(ClusterSigningConfig.of(null, List.of(), false, Duration.ofSeconds(60)),
                 new SimpleMeterRegistry());
+    }
+
+    /** For tests: the clock signatures are stamped and checked with. */
+    public ClusterMessageSigner withClock(LongSupplier clock) {
+        this.clock = clock;
+        return this;
     }
 
     /** Logs the mode once at boot (cluster mode only). */
