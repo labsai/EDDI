@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
+import java.net.URI;
 import java.util.Date;
 
 import java.util.List;
@@ -93,6 +95,22 @@ class RestAgentAdministrationTest {
     @Nested
     @DisplayName("deployAgent")
     class DeployAgent {
+
+        @Test
+        @DisplayName("a legacy Slack connector's groupId needs the deployer's USE on that group")
+        @SuppressWarnings("removal")
+        void legacyConnectorGroupNeedsUse() throws Exception {
+            var connector = new AgentConfiguration.ChannelConnector();
+            connector.setType(URI.create("slack"));
+            connector.setConfig(Map.of("channelId", "C1", "groupId", "foreign-group"));
+            var config = new AgentConfiguration();
+            config.setChannels(List.of(connector));
+            when(agentStore.read("agent-1", 1)).thenReturn(config);
+            doThrow(new ForbiddenException("no")).when(resourceAccessGuard).requireUseAccess("foreign-group", "group");
+
+            assertThrows(ForbiddenException.class, () -> restAgentAdmin.deployAgent(Deployment.Environment.production, "agent-1", 1, true, false));
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
 
         @Test
         @DisplayName("should return 202 Accepted when not waiting")

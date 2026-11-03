@@ -154,6 +154,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // catch(Exception) there rethrows as InternalServerErrorException, which
         // would turn this 404 into a 500.
         requireAgentExists(agentId, version);
+        // Same placement, for the 403.
+        requireUseOnLegacyChannelGroups(agentId, version);
 
         // MUST sit before the try below: the catch(Exception) there rethrows as
         // InternalServerErrorException, which would turn the mapper's 429 into a 500.
@@ -248,6 +250,34 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      * @throws IResourceStore.ResourceNotFoundException
      *             mapped to 404 by {@code ResourceNotFoundExceptionMapper}
      */
+    /**
+     * A legacy Slack connector on the agent ({@code channels[].config.groupId})
+     * becomes a standing route into that group once the agent is deployed:
+     * {@code ChannelTargetRouter} serves it to anyone who can message the channel.
+     * The channel API refuses a group target its author may not USE; this applies
+     * the same rule to the legacy form, against the person deploying. A store
+     * outage is left to the deploy itself, as in {@link #requireAgentExists}.
+     */
+    @SuppressWarnings("removal")
+    private void requireUseOnLegacyChannelGroups(String agentId, Integer version) {
+        AgentConfiguration config;
+        try {
+            config = agentStore.read(agentId, version);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            return;
+        }
+        if (config == null || config.getChannels() == null) {
+            return;
+        }
+        for (AgentConfiguration.ChannelConnector connector : config.getChannels()) {
+            String groupId = connector == null || connector.getConfig() == null ? null : connector.getConfig().get("groupId");
+            if (groupId != null && !groupId.isBlank()) {
+                // As stored: it is the id the router routes to.
+                resourceAccessGuard.requireUseAccess(groupId, "group");
+            }
+        }
+    }
+
     private void requireAgentExists(String agentId, Integer version) {
         try {
             agentStore.read(agentId, version);

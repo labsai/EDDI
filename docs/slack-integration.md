@@ -115,6 +115,8 @@ Add a `ChannelConnector` to your agent configuration:
 
 > **Note**: When both a `ChannelIntegrationConfiguration` and a legacy `ChannelConnector` cover the same `channelId`, the new-style config always wins.
 
+> **Note**: A `groupId` makes the channel a standing route into that group, so deploying the agent requires USE on the group, the same rule the channel API applies to a group target (403 otherwise).
+
 ### 6. Enable Direct Messages (App Home)
 
 For the bot to accept DMs, you must enable the Messages Tab:
