@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -280,6 +281,24 @@ public class RestGroupConversation implements IRestGroupConversation {
             LOGGER.errorf("Group discussion failed: %s", e.getMessage());
             throw sneakyThrow(e);
         }
+    }
+
+    /**
+     * The 400 body of an invalid approval request, on both the plain and the
+     * streaming path: which field was refused and why, because the caller needs it
+     * to correct the request (a fixed "unknown task id" text named the wrong cause
+     * for every review-field refusal). The rule is the same for both: only a
+     * {@link ReviewRefusalException} - the review validation's own message, written
+     * for the caller, control characters stripped and capped at 300 characters - is
+     * returned; any other {@code IllegalArgumentException} (its message was not
+     * written for a caller and may carry internal or request data) gets the fixed
+     * hint.
+     */
+    static String invalidApprovalDetail(IllegalArgumentException e) {
+        if (e instanceof ReviewRefusalException && e.getMessage() != null && !e.getMessage().isBlank()) {
+            return "Invalid approval request: " + e.getMessage();
+        }
+        return "Invalid approval request: an unknown task id was referenced, or a task is not awaiting approval.";
     }
 
     @Override
@@ -606,15 +625,11 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.")
                     .build();
         } catch (IllegalArgumentException e) {
-            // #13: an invalid approval request (unknown taskId / task not awaiting, or a
-            // review field the editor refused) → 400. The message says which field and
-            // why - the caller needs it to correct the request; it is plain text, capped.
+            // #13: an invalid approval request → 400 naming the field and why (see
+            // invalidApprovalDetail for the one rule both approve paths follow).
             LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
-            String detail = e.getMessage() == null || e.getMessage().isBlank()
-                    ? "an unknown task id was referenced, or a task is not awaiting approval."
-                    : e.getMessage().length() > 300 ? e.getMessage().substring(0, 300) : e.getMessage();
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Invalid approval request: " + detail)
+                    .entity(invalidApprovalDetail(e))
                     .build();
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
@@ -866,11 +881,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.");
             closeQuietly(eventSink);
         } catch (IllegalArgumentException e) {
-            // invalid taskApprovals (unknown taskId / task not awaiting) — keep the
-            // hint generic, never reflect the caller-supplied taskId.
-            sendErrorEvent(eventSink, sse,
-                    "Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
-                            + "approval.");
+            // the same 400 detail as the non-streaming path
+            LOGGER.infof("Streaming approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
+            sendErrorEvent(eventSink, sse, invalidApprovalDetail(e));
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);

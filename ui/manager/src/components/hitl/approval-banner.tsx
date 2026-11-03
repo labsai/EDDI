@@ -326,13 +326,14 @@ export function ApprovalBanner({
     }
     const finalNote = note.trim() || undefined;
     if (verdict === "APPROVED" && isEditing && editableAnswer) {
-      const error = validateEditedAnswer(t, editedAnswer, editableAnswer);
+      // An edit identical to the draft is a plain approval - and is not held to the
+      // edit limits (a blank or over-long draft can still be approved as it stands).
+      const changed = editedAnswer !== editableAnswer.draft;
+      const error = changed ? validateEditedAnswer(t, editedAnswer, editableAnswer) : null;
       if (error) {
         setSubmitError(error);
         return;
       }
-      // An edit identical to the draft is a plain approval.
-      const changed = editedAnswer !== editableAnswer.draft;
       const review = reviewFor("APPROVED", changed, changed ? editedAnswer : undefined);
       if (review) onDecide("APPROVED", finalNote, undefined, undefined, review);
       else onDecide("APPROVED", finalNote, undefined);

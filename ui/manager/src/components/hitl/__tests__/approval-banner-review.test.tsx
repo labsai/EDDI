@@ -52,6 +52,22 @@ describe("ApprovalBanner — edit on approve and reason codes", () => {
     expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined);
   });
 
+  it("an unchanged over-cap or blank draft is still a plain approval", () => {
+    for (const draft of ["x".repeat(60), ""]) {
+      const onDecide = vi.fn();
+      const base = rulePause();
+      const pause = rulePause({ editableAnswer: { ...base.editableAnswer!, draft } });
+      const { unmount } = renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={pause} onDecide={onDecide} />);
+
+      fireEvent.click(screen.getByTestId("edit-answer-toggle"));
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirm();
+
+      expect(onDecide).toHaveBeenCalledWith("APPROVED", undefined, undefined);
+      unmount();
+    }
+  });
+
   it("refuses an edit over the cap or empty, before any request", () => {
     const onDecide = vi.fn();
     renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={rulePause()} onDecide={onDecide} />);
