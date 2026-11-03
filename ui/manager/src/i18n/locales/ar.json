@@ -23,7 +23,7 @@
     "hintRule": "المتاح: call.args.NAME (معاملات هذا الاستدعاء بعد حجب المعلومات الحساسة) وcall.name بالإضافة إلى properties.* وcontext.* وmemory.*.",
     "leftOut": "تم حذف جزء من السياق للحفاظ على قصر البطاقة.",
     "limitReached": "الحد الأقصى {{max}} كتل.",
-    "notVerified": "تم إنشاؤه من بيانات المحادثة عند الإيقاف المؤقت ولم يتحقق منه EDDI.",
+    "notVerified": "تم إنشاؤه من بيانات المحادثة عند الإيقاف المؤقت ولم يتحقق منه {{productName}}.",
     "removeBlock": "إزالة الكتلة"
   },
   "attachments": {

@@ -23,7 +23,7 @@
     "hintRule": "Disponible : call.args.NOM (les arguments masqués de cet appel), call.name, ainsi que properties.*, context.* et memory.*.",
     "leftOut": "Une partie du contexte a été omise pour garder cette carte courte.",
     "limitReached": "{{max}} blocs au maximum.",
-    "notVerified": "Généré à partir des données de la conversation au moment de la pause, non vérifié par EDDI.",
+    "notVerified": "Généré à partir des données de la conversation au moment de la pause, non vérifié par {{productName}}.",
     "removeBlock": "Supprimer le bloc"
   },
   "attachments": {

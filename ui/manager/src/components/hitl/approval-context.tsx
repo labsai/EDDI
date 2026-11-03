@@ -30,7 +30,7 @@ export function ApprovalContext({ context }: { context?: ApprovalContextView | n
             {t("approvalContext.heading", "Context for this decision")}
           </p>
           <p className="text-[11px] text-muted-foreground">
-            {t("approvalContext.notVerified", "Rendered from conversation data at pause time — not verified by EDDI.")}
+            {t("approvalContext.notVerified", "Rendered from conversation data at pause time — not verified by {{productName}}.")}
           </p>
         </div>
       </div>

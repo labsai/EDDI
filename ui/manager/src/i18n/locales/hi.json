@@ -23,7 +23,7 @@
     "hintRule": "उपलब्ध: call.args.NAME (इस कॉल के छिपाए गए आर्गुमेंट), call.name, साथ ही properties.*, context.* और memory.*।",
     "leftOut": "कार्ड को छोटा रखने के लिए कुछ संदर्भ छोड़ दिया गया।",
     "limitReached": "अधिकतम {{max}} ब्लॉक।",
-    "notVerified": "रोक के समय बातचीत के डेटा से तैयार किया गया — EDDI द्वारा सत्यापित नहीं।",
+    "notVerified": "रोक के समय बातचीत के डेटा से तैयार किया गया — {{productName}} द्वारा सत्यापित नहीं।",
     "removeBlock": "ब्लॉक हटाएँ"
   },
   "attachments": {

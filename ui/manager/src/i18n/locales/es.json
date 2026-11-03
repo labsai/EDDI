@@ -23,7 +23,7 @@
     "hintRule": "Disponible: call.args.NOMBRE (los argumentos censurados de esta llamada), call.name, además de properties.*, context.* y memory.*.",
     "leftOut": "Se omitió parte del contexto para mantener la tarjeta breve.",
     "limitReached": "Como máximo {{max}} bloques.",
-    "notVerified": "Generado a partir de los datos de la conversación al pausar; EDDI no lo ha verificado.",
+    "notVerified": "Generado a partir de los datos de la conversación al pausar; {{productName}} no lo ha verificado.",
     "removeBlock": "Quitar bloque"
   },
   "attachments": {

@@ -23,7 +23,7 @@
     "hintRule": "利用可能: call.args.NAME(この呼び出しのマスク済み引数)、call.name、および properties.*、context.*、memory.*。",
     "leftOut": "カードを短く保つため、一部の文脈を省略しました。",
     "limitReached": "ブロックは最大 {{max}} 個までです。",
-    "notVerified": "一時停止時に会話データから生成されたもので、EDDI は内容を検証していません。",
+    "notVerified": "一時停止時に会話データから生成されたもので、{{productName}} は内容を検証していません。",
     "removeBlock": "ブロックを削除"
   },
   "attachments": {

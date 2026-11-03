@@ -23,7 +23,7 @@
     "hintRule": "Verfügbar: call.args.NAME (die geschwärzten Argumente dieses Aufrufs), call.name sowie properties.*, context.* und memory.*.",
     "leftOut": "Ein Teil des Kontexts wurde ausgelassen, damit die Karte kurz bleibt.",
     "limitReached": "Höchstens {{max}} Blöcke.",
-    "notVerified": "Beim Pausieren aus Gesprächsdaten erzeugt – von EDDI nicht geprüft.",
+    "notVerified": "Beim Pausieren aus Gesprächsdaten erzeugt – von {{productName}} nicht geprüft.",
     "removeBlock": "Block entfernen"
   },
   "attachments": {

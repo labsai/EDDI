@@ -23,7 +23,7 @@
     "hintRule": "사용 가능: call.args.NAME(이 호출의 마스킹된 인수), call.name, 그리고 properties.*, context.*, memory.*.",
     "leftOut": "카드를 짧게 유지하기 위해 일부 컨텍스트를 생략했습니다.",
     "limitReached": "블록은 최대 {{max}}개입니다.",
-    "notVerified": "일시 중지 시점의 대화 데이터에서 생성되었으며 EDDI가 검증하지 않았습니다.",
+    "notVerified": "일시 중지 시점의 대화 데이터에서 생성되었으며 {{productName}}가 검증하지 않았습니다.",
     "removeBlock": "블록 삭제"
   },
   "attachments": {

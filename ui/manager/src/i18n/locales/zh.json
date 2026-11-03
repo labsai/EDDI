@@ -23,7 +23,7 @@
     "hintRule": "可用：call.args.NAME（此次调用的已脱敏参数）、call.name，以及 properties.*、context.* 和 memory.*。",
     "leftOut": "为保持卡片简短，部分上下文已省略。",
     "limitReached": "最多 {{max}} 个块。",
-    "notVerified": "在暂停时根据对话数据生成，未经 EDDI 验证。",
+    "notVerified": "在暂停时根据对话数据生成，未经 {{productName}} 验证。",
     "removeBlock": "删除块"
   },
   "attachments": {

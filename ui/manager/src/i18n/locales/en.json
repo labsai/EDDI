@@ -23,7 +23,7 @@
     "hintRule": "Available: call.args.NAME (this call's redacted arguments), call.name, plus properties.*, context.* and memory.*.",
     "leftOut": "Some context was left out to keep this card short.",
     "limitReached": "At most {{max}} blocks.",
-    "notVerified": "Rendered from conversation data at pause time — not verified by EDDI.",
+    "notVerified": "Rendered from conversation data at pause time — not verified by {{productName}}.",
     "removeBlock": "Remove block"
   },
   "attachments": {

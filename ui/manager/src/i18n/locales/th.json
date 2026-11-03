@@ -23,7 +23,7 @@
     "hintRule": "ใช้ได้: call.args.NAME (อาร์กิวเมนต์ที่ปกปิดแล้วของการเรียกนี้), call.name รวมถึง properties.*, context.* และ memory.*",
     "leftOut": "ข้ามบริบทบางส่วนเพื่อให้การ์ดสั้นลง",
     "limitReached": "มีได้สูงสุด {{max}} บล็อก",
-    "notVerified": "สร้างจากข้อมูลการสนทนา ณ เวลาที่หยุดชั่วคราว และ EDDI ไม่ได้ตรวจสอบ",
+    "notVerified": "สร้างจากข้อมูลการสนทนา ณ เวลาที่หยุดชั่วคราว และ {{productName}} ไม่ได้ตรวจสอบ",
     "removeBlock": "ลบบล็อก"
   },
   "attachments": {
