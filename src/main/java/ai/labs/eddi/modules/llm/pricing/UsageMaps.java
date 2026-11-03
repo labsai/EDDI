@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.pricing;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -38,6 +39,17 @@ public final class UsageMaps {
             return;
         }
         boolean totalWasEmpty = total.isEmpty();
+        // A legacy map (tokens, no call counts) is ONE uncatalogued call when priced on
+        // its own; keep that meaning when it is summed with a metered map, or its
+        // tokens
+        // would price at $0 without being counted as unpriced.
+        if (delta.containsKey(MeteredTokenUsage.CALLS) || total.containsKey(MeteredTokenUsage.CALLS)) {
+            delta = withLegacyCall(delta);
+            if (!totalWasEmpty && !total.containsKey(MeteredTokenUsage.CALLS) && hasTokens(total)) {
+                total.put(MeteredTokenUsage.CALLS, 1L);
+                total.put(MeteredTokenUsage.UNCATALOGUED_CALLS, 1L);
+            }
+        }
         for (String field : baseFields) {
             addLong(total, delta, field);
         }
@@ -57,6 +69,20 @@ public final class UsageMaps {
         } else if (deltaModel == null ? totalModel != null : !deltaModel.equals(totalModel)) {
             total.put(MeteredTokenUsage.PRICING_MODEL, MeteredTokenUsage.MIXED);
         }
+    }
+
+    private static boolean hasTokens(Map<String, Object> usage) {
+        return asLong(usage.get("inputTokens")) > 0 || asLong(usage.get("outputTokens")) > 0;
+    }
+
+    private static Map<String, Object> withLegacyCall(Map<String, Object> usage) {
+        if (usage.containsKey(MeteredTokenUsage.CALLS) || !hasTokens(usage)) {
+            return usage;
+        }
+        Map<String, Object> copy = new LinkedHashMap<>(usage);
+        copy.put(MeteredTokenUsage.CALLS, 1L);
+        copy.put(MeteredTokenUsage.UNCATALOGUED_CALLS, 1L);
+        return copy;
     }
 
     private static void addLong(Map<String, Object> total, Map<String, Object> delta, String field) {

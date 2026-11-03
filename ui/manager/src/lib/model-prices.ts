@@ -80,8 +80,28 @@ export interface ReferenceMerge {
   unchanged: number;
 }
 
+const n = (v: number | null | undefined) => v ?? null;
+
+function sameTier(a: ModelPriceEntry["longContext"], b: ModelPriceEntry["longContext"]): boolean {
+  if (!a || !b) return !a && !b;
+  return (
+    n(a.thresholdTokens) === n(b.thresholdTokens) &&
+    n(a.inputPricePer1M) === n(b.inputPricePer1M) &&
+    n(a.outputPricePer1M) === n(b.outputPricePer1M) &&
+    n(a.cacheReadPricePer1M) === n(b.cacheReadPricePer1M) &&
+    n(a.cacheWritePricePer1M) === n(b.cacheWritePricePer1M)
+  );
+}
+
+/** Field by field, so key order and null-versus-absent do not read as a change. */
 function samePrices(a: ModelPriceEntry, b: ModelPriceEntry): boolean {
-  return JSON.stringify({ ...a, asOf: null, source: null, note: null }) === JSON.stringify({ ...b, asOf: null, source: null, note: null });
+  return (
+    n(a.inputPricePer1M) === n(b.inputPricePer1M) &&
+    n(a.outputPricePer1M) === n(b.outputPricePer1M) &&
+    n(a.cacheReadPricePer1M) === n(b.cacheReadPricePer1M) &&
+    n(a.cacheWritePricePer1M) === n(b.cacheWritePricePer1M) &&
+    sameTier(a.longContext, b.longContext)
+  );
 }
 
 /**
@@ -101,7 +121,7 @@ export function mergeReference(current: readonly ModelPriceEntry[], reference: r
     if (!existing) {
       entries.push(ref);
       added.push(ref);
-    } else if (samePrices(existing, ref) && existing.asOf === ref.asOf) {
+    } else if (samePrices(existing, ref) && (existing.asOf ?? null) === (ref.asOf ?? null)) {
       unchanged++;
     } else {
       entries[entries.indexOf(existing)] = ref;

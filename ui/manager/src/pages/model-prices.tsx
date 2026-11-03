@@ -5,6 +5,7 @@ import { AlertTriangle, Coins, Download, Pencil, Plus, RefreshCw, Save, Trash2, 
 import { ErrorState } from "@/components/shared/error-state";
 import { ModelPriceEntrySheet } from "@/components/model-prices/model-price-entry-sheet";
 import { useModelPrices, useReferencePrices, useSaveModelPrices, useUnpricedSightings } from "@/hooks/use-model-prices";
+import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
@@ -32,6 +33,8 @@ export function ModelPricesPage() {
   const { data: view, isLoading, isError, error, refetch } = useModelPrices();
   const { data: sightings } = useUnpricedSightings();
   const save = useSaveModelPrices();
+  // GET is open to editors; every write is admin-only on the server, so the page offers none to others.
+  const isAdmin = useIsAdminOrUnknown();
 
   const [form, setForm] = useState<ModelPriceCatalog | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -48,6 +51,13 @@ export function ModelPricesPage() {
     // an older view (the refetch after a save has not landed yet) must not overwrite a newer form
     if (view && !dirty && (!form || view.catalog.revision >= form.revision)) setForm(view.catalog);
   }, [view, dirty, form]);
+
+  useEffect(() => {
+    if (wantReference && reference.isError) {
+      setWantReference(false);
+      toast.error(getErrorMessage(reference.error));
+    }
+  }, [wantReference, reference.isError, reference.error]);
 
   useEffect(() => {
     if (wantReference && reference.data && form) {
@@ -171,7 +181,8 @@ export function ModelPricesPage() {
             type="button"
             onClick={() => setWantReference(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"
-            data-testid="model-prices-load-reference"
+            disabled={!isAdmin}
+data-testid="model-prices-load-reference"
           >
             <BookOpen className="h-4 w-4" />
             {view.referenceAsOf
@@ -191,7 +202,8 @@ export function ModelPricesPage() {
             type="button"
             onClick={() => fileRef.current?.click()}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-sm hover:bg-secondary"
-            data-testid="model-prices-import"
+            disabled={!isAdmin}
+data-testid="model-prices-import"
           >
             <Upload className="h-4 w-4" />
             {t("modelPrices.import", "Import")}
@@ -207,7 +219,7 @@ export function ModelPricesPage() {
           <button
             type="button"
             onClick={handleSave}
-            disabled={!dirty || invalid || save.isPending}
+            disabled={!isAdmin || !dirty || invalid || save.isPending}
             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
             data-testid="model-prices-save"
           >
@@ -246,7 +258,8 @@ export function ModelPricesPage() {
             onChange={(e) => update({ unpricedPolicy: e.target.value as UnpricedPolicy })}
             className="h-9 rounded-md border border-input bg-background px-2 text-sm"
             aria-label={t("modelPrices.policyTitle", "Unpriced calls")}
-            data-testid="model-prices-policy-select"
+            disabled={!isAdmin}
+data-testid="model-prices-policy-select"
           >
             {UNPRICED_POLICIES.map((p, i) => (
               <option key={p} value={p} disabled={i < floorIndex}>
@@ -325,7 +338,8 @@ export function ModelPricesPage() {
             type="button"
             onClick={() => setEditing({ index: null, entry: EMPTY_ENTRY })}
             className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-primary hover:bg-primary/10"
-            data-testid="model-prices-add"
+            disabled={!isAdmin}
+data-testid="model-prices-add"
           >
             <Plus className="h-3.5 w-3.5" />
             {t("modelPrices.add", "Add price")}
@@ -399,7 +413,8 @@ export function ModelPricesPage() {
                           onClick={() => removeEntry(i)}
                           aria-label={t("common.delete", "Delete")}
                           className="rounded p-1 text-muted-foreground hover:bg-secondary"
-                          data-testid="model-prices-delete"
+                          disabled={!isAdmin}
+data-testid="model-prices-delete"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
@@ -440,7 +455,8 @@ export function ModelPricesPage() {
                   type="button"
                   onClick={() => setEditing({ index: null, entry: { provider: s.provider, model: s.model } })}
                   className="rounded-md px-2 py-1 font-medium text-primary hover:bg-primary/10"
-                  data-testid="model-prices-sighting-add"
+                  disabled={!isAdmin}
+data-testid="model-prices-sighting-add"
                 >
                   {t("modelPrices.add", "Add price")}
                 </button>
@@ -455,6 +471,7 @@ export function ModelPricesPage() {
           entry={editing.entry}
           others={editing.index === null ? entries : entries.filter((_, i) => i !== editing.index)}
           knownProviders={view.knownProviders}
+          readOnly={!isAdmin}
           onApply={applyEntry}
           onClose={() => setEditing(null)}
         />

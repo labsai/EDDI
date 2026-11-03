@@ -16595,12 +16595,12 @@
         {
           "id": 291,
           "type": "timeseries",
-          "title": "LLM spend by model and price source",
+          "title": "LLM spend per hour by model and price source",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_cost_usd_total` — priced LLM spend in USD per model phase, by `provider`, `model` and `source` (task/catalog/mixed). See docs/model-pricing.md.",
+          "description": "`eddi_llm_cost_usd_total` — priced LLM spend in USD, summed over each hour, per model phase, by `provider`, `model` and `source` (task/catalog/mixed). See docs/model-pricing.md.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -16610,7 +16610,7 @@
           "targets": [
             {
               "refId": "A",
-              "expr": "sum by (provider, model, source) (rate(eddi_llm_cost_usd_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "expr": "sum by (provider, model, source) (increase(eddi_llm_cost_usd_total{job=~\"$job\"}[1h])) or on() vector(0)",
               "datasource": {
                 "type": "prometheus",
                 "uid": "${datasource}"
