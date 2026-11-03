@@ -243,6 +243,50 @@ One Docker host is not N machines: every replica, MongoDB, NATS, nginx and k6 sh
 falling efficiency can be the host as easily as the database. Read the CPU columns before the
 efficiency one.
 
+## Soak and scale (cluster)
+
+`cluster_soak.py` adds two long runs on top of the cluster stack. They are phase 3, items 4
+and 5 of the [cluster readiness review](../../planning/cluster-production-readiness-review.md).
+
+```bash
+./mvnw package -DskipTests -DskipUi=true
+# 24 h of steady load on 3 replicas, one replica restarted (gracefully) every 30 min
+python scripts/loadtest/cluster_soak.py soak --nodes 3 --duration 24h --churn-every 30 --sample-interval 60
+# 500 concurrently held leases on each of 10 local replicas (each turn waits 30 s at the mock)
+python scripts/loadtest/cluster_soak.py scale --nodes 10 --held-leases 500 --delay-ms 30000
+# the same against a cluster deployed on separate hosts; k6 runs here with --network host
+python scripts/loadtest/cluster_soak.py scale --external --balancer http://eddi.example:7070 \
+  --metrics http://node-1:7070,http://node-2:7070 --nats-monitor http://nats-1:8222 \
+  --agent <agent id> --held-leases 5000
+```
+
+**`soak`** runs the `steady` k6 scenario in chunks (`--vus-per-node` × N conversations, `--turns` each)
+until `--duration` (`90s`, `30m`, `24h`, `3d`) has passed. With `--churn-every MIN`, it restarts one
+replica after another with `docker restart -t 40`, which drains each one like a rolling update.
+Every `--sample-interval` seconds it records:
+
+- on each node: heap used, live threads, `eddi_cluster_lease_held`, open files and in-flight turns;
+- on each NATS server: subscriptions, connections, and the messages and bytes of every stream,
+  KV buckets included.
+
+The report fits a slope per hour to every series after a 10% warm-up. For the heap, which is a
+sawtooth, the slope is fitted to the floor of each tenth of the run. A series is flagged when it
+rose by more than 10% of its starting value. A leak shows as a slope, not as a peak.
+`--fail-on-growth` makes a flagged series exit 1, for CI. A chunk that fails, for example
+because a replica restarted under it, is recorded and the soak carries on.
+
+**`scale`** holds `--held-leases` conversations per node at once: each turn waits `--delay-ms` at
+the mock LLM, so that many leases are held for that long. It samples the same series every
+`--sample-interval` seconds and reports the peak of `eddi_cluster_lease_held` per node. Locally the
+stack publishes 19 replica ports. Beyond that, or on separate hosts, deploy the cluster yourself
+and pass `--external`. Your agent's LLM then has to answer slowly enough to hold the leases.
+
+Both write `results/<label>-soak-<date>.{json,md}` or `results/<label>-scale-<date>.{json,md}`.
+They take the cluster stack's sizing options (`--java-opts`, `--eddi-cpus`, `--max-in-flight`, …),
+plus `--reuse` (the stack `cluster-up` left running) and `--keep`. Neither is scheduled in CI: a
+GitHub runner is one small host, and a soak needs hours. Run them on dedicated hosts and keep
+the Markdown report with the numbers you publish.
+
 ## What a run records
 
 Each command writes `results/<label>-<kind>-….json`; `matrix` adds the Markdown report
