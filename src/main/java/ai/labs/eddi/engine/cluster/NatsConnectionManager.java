@@ -37,6 +37,7 @@ import java.security.GeneralSecurityException;
 import java.security.KeyStore;
 import java.time.Duration;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -196,10 +197,22 @@ public class NatsConnectionManager {
             String seed = Files.readString(Path.of(config.natsNkeySeedFile().get()), StandardCharsets.UTF_8).trim();
             builder.authHandler(Nats.staticCredentials(null, seed.toCharArray()));
         }
-        if (config.natsTlsEnabled()) {
+        // A tls:// or wss:// URL turns TLS on in jnats by itself, with
+        // SSLContext.getDefault() and so without the host-name check: build our
+        // context for those URLs too, not only when the flag is set.
+        if (config.natsTlsEnabled() || anyUrlRequestsTls(config.natsServers())) {
             builder.sslContext(buildSslContext());
         }
         return builder.build();
+    }
+
+    /**
+     * {@code opentls://} is left out on purpose: it is jnats' explicit
+     * trust-any-certificate scheme, and an operator who wrote it asked for that.
+     */
+    static boolean anyUrlRequestsTls(List<String> servers) {
+        return servers.stream().map(s -> s.toLowerCase(Locale.ROOT))
+                .anyMatch(s -> s.startsWith("tls://") || s.startsWith("wss://"));
     }
 
     private SSLContext buildSslContext() throws IOException, GeneralSecurityException {
