@@ -203,6 +203,32 @@ class GroupConversationServiceCostCeilingTest {
     }
 
     @Test
+    @DisplayName("SYNTHESIZE_NOW: the tripping phase skips its approval, but a synthesis that runs still pauses for it")
+    void synthesizeNow_synthesisThatRuns_keepsItsApprovalGate() throws Exception {
+        // The first turn (Opinion) spends $2; the ceiling trips at Critique's first
+        // turn, so Critique is the abandoned phase whose own approval is skipped.
+        var phases = List.of(
+                phase("Opinion", PhaseType.OPINION),
+                new DiscussionPhase("Critique", PhaseType.CRITIQUE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true),
+                new DiscussionPhase("Summary", PhaseType.SYNTHESIS, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true));
+        var config = buildConfig(phases, protocol(0.5, CostPolicy.SYNTHESIZE_NOW));
+        doReturn(mockResourceId()).when(groupStore).getCurrentResourceId(GROUP_ID);
+        doReturn(config).when(groupStore).read(GROUP_ID, 1);
+        doReturn("gc-synth-gate").when(conversationStore).create(any());
+        stubAgentSayCosting(2.0);
+
+        GroupConversation gc = service.discuss(GROUP_ID, "Q?", USER_ID, 0);
+
+        var phasesRun = gc.getTranscript().stream()
+                .filter(e -> e.type() != TranscriptEntryType.SKIPPED)
+                .map(e -> e.phaseName()).distinct().toList();
+        assertTrue(phasesRun.contains("Summary"), "the abandoned Critique phase must not pause — the run skips ahead to synthesis");
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
+                "the synthesis ran and its answer would be published, so its requiresApproval gate must still pause");
+        assertEquals(2, gc.getCurrentPhaseIndex(), "the pause belongs to the synthesis phase");
+    }
+
+    @Test
     @DisplayName("ABORT: the discussion fails immediately, remaining phases including synthesis never run")
     void abort_failsDiscussionImmediately() throws Exception {
         var phases = List.of(

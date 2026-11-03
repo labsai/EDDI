@@ -889,6 +889,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 if (costCeilingSynthesizeNow && phase.type() != PhaseType.SYNTHESIS) {
                     continue;
                 }
+                // A SYNTHESIS phase the skip-ahead lets through is executed work, not
+                // abandoned work: its answer is published, so its approval gate holds.
+                // Only the phase that trips the ceiling itself skips its gate below.
+                final boolean ranUnderSkipAhead = costCeilingSynthesizeNow;
 
                 // I11: the one skip condition — a phase marked skipIf=AGREEMENT_REACHED
                 // (the negotiation's arbitration) is only needed when bargaining
@@ -1322,7 +1326,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 // complete, so no boundary gate is owed yet and the
                                 // resumed leg still reaches it at phase end.
                                 boolean boundaryGateWillPause = !facilitatorMidPhaseResume
-                                        && phase.requiresApproval() && !costCeilingSynthesizeNow
+                                        && phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)
                                         && (!(taskLevelHitl && phase.type() == PhaseType.EXECUTE)
                                                 || (gc.getTaskList() != null
                                                         && (gc.getTaskList().hasAwaitingApproval()
@@ -1392,8 +1396,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 // appending a second identical SKIPPED entry and re-incrementing the
                 // hit counter, which is exactly the "one overspend reported as many"
                 // the repeat-loop break exists to prevent. The guard's own comment
-                // states this requirement; it just could not see this phase.
-                if (phase.requiresApproval() && !costCeilingSynthesizeNow) {
+                // states this requirement; it just could not see this phase. A
+                // SYNTHESIS phase that ran under the skip-ahead (ranUnderSkipAhead) is
+                // not that phase — its answer is about to be published, so it pauses.
+                if (phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)) {
                     if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
                         // TASK granularity: pause if tasks await approval — or if an
                         // aborted wave (timeout/error) left executable tasks behind.

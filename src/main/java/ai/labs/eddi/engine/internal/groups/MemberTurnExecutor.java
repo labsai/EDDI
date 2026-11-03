@@ -490,7 +490,7 @@ public class MemberTurnExecutor {
                 if (memberPaused[0]) {
                     if (pausedSnapshot[0] != null && "TOOL_CALL".equals(pausedSnapshot[0].getHitlPauseType())) {
                         TranscriptEntry graceful = tryResolveMemberToolPause(
-                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId);
+                                member, gc, convId, input, timeout, phaseIdx, phase, entryType, targetAgentId, convKey);
                         if (graceful != null) {
                             return graceful;
                         }
@@ -681,6 +681,19 @@ public class MemberTurnExecutor {
                                                      String input, int timeoutSeconds, int phaseIdx,
                                                      DiscussionPhase phase, TranscriptEntryType entryType,
                                                      String targetAgentId) {
+        return tryResolveMemberToolPause(member, gc, convId, input, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId,
+                member.agentId());
+    }
+
+    /**
+     * As above, with the key the member turn attributes its cost under
+     * ({@code GroupCostLedger}) — the member's agent id unless the turn runs in a
+     * separately keyed conversation.
+     */
+    public TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
+                                                     String input, int timeoutSeconds, int phaseIdx,
+                                                     DiscussionPhase phase, TranscriptEntryType entryType,
+                                                     String targetAgentId, String costKey) {
         LOGGER.infof("Member agent '%s' TOOL_CALL-paused during group discussion %s (phase %d) — "
                 + "auto-rejecting the gated tool call(s) (system:group) and resuming for a tool-less answer",
                 LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getId()), phaseIdx);
@@ -692,6 +705,9 @@ public class MemberTurnExecutor {
 
         var resumeFuture = new CompletableFuture<SimpleConversationMemorySnapshot>();
         try {
+            // Detailed, as the member's say: the default summary projection drops the
+            // dynamic-agent tracking keys, so agents created during the resumed run
+            // would never reach the group's cleanup registry.
             conversationService.resumeConversation(convId, decision,
                     new ConversationResponseHandler() {
                         @Override
@@ -705,7 +721,7 @@ public class MemberTurnExecutor {
                             // "could not complete" so the caller falls back.
                             resumeFuture.complete(null);
                         }
-                    });
+                    }, true, true, List.of());
         } catch (Exception e) {
             LOGGER.warnf("Graceful tool-pause resume failed to start for member '%s' (conv %s): %s — falling back to SKIP+cancel",
                     member.agentId(), convId, e.getMessage());
@@ -725,14 +741,21 @@ public class MemberTurnExecutor {
             return null;
         }
 
+        // Whatever the resumed run did — answered, abstained or paused again — it
+        // created what it created and spent what it spent: the same bookkeeping as
+        // the ordinary turn, before any return, so the next member's ceiling check
+        // sees this spend.
+        if (resumed != null) {
+            GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
+            GroupCostLedger.accumulateMemberCost(gc, costKey, resumed);
+        }
+
         // Re-paused (still awaiting a human) → the graceful attempt did not resolve.
         if (resumed == null || resumed.getConversationState() == ConversationState.AWAITING_HUMAN) {
             LOGGER.warnf("Member '%s' re-paused after graceful tool rejection (conv %s) — falling back to SKIP+cancel",
                     member.agentId(), convId);
             return null;
         }
-
-        GroupConversationService.propagateDynamicAgentTracking(resumed, gc);
 
         String response = contextBuilder.extractResponse(resumed);
         if ((response == null || response.isEmpty())

@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventLis
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -263,7 +265,7 @@ class MemberTurnExecutorTest {
         doAnswer(inv -> {
             inv.getArgument(2, ConversationResponseHandler.class).onComplete(snapshot);
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
         when(contextBuilder.extractResponse(snapshot)).thenReturn("tool-less answer");
         when(signingGuard.signOutgoingMessage(eq(AGENT_A), eq("group-1"), eq("tool-less answer"), anyString()))
                 .thenReturn(new GroupSigningGuard.SigningResult("sig-abc", "nonce-1", 1234L, 7));
@@ -304,7 +306,7 @@ class MemberTurnExecutorTest {
         doAnswer(inv -> {
             inv.getArgument(2, ConversationResponseHandler.class).onComplete(snapshot);
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
         when(contextBuilder.extractResponse(snapshot)).thenReturn("tool-less answer");
         when(signingGuard.signOutgoingMessage(any(), any(), any(), any()))
                 .thenReturn(GroupSigningGuard.SigningResult.UNSIGNED);
@@ -325,6 +327,45 @@ class MemberTurnExecutorTest {
         assertNull(entry.signatureNonce());
         assertNull(entry.signatureTimestampMs());
         assertNull(entry.signatureKeyVersion());
+    }
+
+    /**
+     * The graceful resume used to ask for the summary projection — which drops the
+     * dynamic-agent tracking keys — and never harvested the resumed run's cost, so
+     * an agent created while resuming escaped the group's cleanup and the next
+     * member's ceiling check saw a stale total. Both hold for a resume that pauses
+     * again, too.
+     */
+    @Test
+    void tryResolveMemberToolPause_recordsTrackingAndCost_ofTheResumedRun() throws Exception {
+        var conversationService = Mockito.mock(IConversationService.class);
+        var contextBuilder = Mockito.mock(GroupContextBuilder.class);
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN); // re-paused: falls back
+        var step = new SimpleConversationMemorySnapshot.SimpleConversationStep();
+        step.setConversationStep(new ArrayList<>(List.of(new SimpleConversationMemorySnapshot.ConversationStepData(
+                MemoryKeys.DYNAMIC_CREATED_AGENT_IDS, List.of("sub-agent-1"), null, null))));
+        snapshot.setConversationSteps(new ArrayList<>(List.of(step)));
+        snapshot.setConversationCost(1.5);
+        doAnswer(inv -> {
+            inv.getArgument(2, ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), eq(true), eq(true), any());
+
+        var executor = new MemberTurnExecutor(conversationService, Mockito.mock(IAgentFactory.class),
+                new GroupSigningGuard(null, null, null, "default"), contextBuilder, Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+
+        var entry = executor.tryResolveMemberToolPause(member(), gc, "conv-1", "input", 5, 0,
+                phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null, "conv-key");
+
+        assertNull(entry, "a re-paused resume still falls back to SKIP + cancel");
+        assertTrue(gc.getCreatedAgentIds().contains("sub-agent-1"), "the resumed run's creation must reach the cleanup registry");
+        assertEquals(1.5, gc.getMemberCosts().get("conv-key"), 1e-9, "the resumed run's spend is attributed to the turn's key");
+        assertEquals(1.5, gc.getTotalCost(), 1e-9);
     }
 
     // =================================================================

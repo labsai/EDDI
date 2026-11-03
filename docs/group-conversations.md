@@ -1207,7 +1207,10 @@ bounds *dollars*, which is what actually differs between a cheap 40-turn round
 table and an expensive 8-turn one with large contexts. Hitting the cost ceiling
 under `SYNTHESIZE_NOW` skips the remaining discussion phases and jumps straight
 to synthesis, so the caller still gets an answer for what was already spent;
-`ABORT` fails the discussion instead. Every LLM call in the discussion is
+`ABORT` fails the discussion instead. The skipped phases' `requiresApproval`
+gates are skipped with them — and so is that of the phase in which the ceiling
+tripped — but a synthesis phase that runs keeps its own: its answer is paused for
+approval as usual. Every LLM call in the discussion is
 attributed, including the facilitator's, the convergence judge's, and the
 summarizer's.
 

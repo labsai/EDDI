@@ -241,7 +241,7 @@ class GroupConversationServiceHitlCoverage2Test {
     void toolPauseResumeStartThrows() throws Exception {
         var gc = pausedPhaseGc("gc-tool-start-throw");
         doThrow(new RuntimeException("resume start failed"))
-                .when(conversationService).resumeConversation(anyString(), any(), any());
+                .when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
         Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp1", "input",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
@@ -257,7 +257,7 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onSkipped(snapshot(ConversationState.READY, "ignored"));
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
         Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp2", "input",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
@@ -273,7 +273,7 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(snapshot(ConversationState.AWAITING_HUMAN, "still paused"));
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
         Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp3", "input",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
@@ -289,7 +289,7 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(snapshot(ConversationState.READY, "Tool-less answer"));
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
         Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp4", "input",
                 5, 3, phase(PhaseType.CRITIQUE), TranscriptEntryType.CRITIQUE, "peer-1");
@@ -314,7 +314,7 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(errSnap);
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
         Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp5", "input",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
