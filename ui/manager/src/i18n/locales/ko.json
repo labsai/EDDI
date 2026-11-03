@@ -7618,5 +7618,34 @@
       "lte": "이하",
       "contains": "포함함"
     }
+  },
+  "groupLearning": {
+    "betToggle": "베팅으로 등록",
+    "betHypothesis": "가설",
+    "betHypothesisPlaceholder": "가설: 이것으로 무엇을 달성할 수 있다고 보나요?",
+    "betMetric": "지표",
+    "betMetricPlaceholder": "지표, 예: replies_received",
+    "betTarget": "목표",
+    "betTargetPlaceholder": "목표, 예: >= 5 (선택)",
+    "betReviewDate": "검토 날짜",
+    "betIncomplete": "베팅에는 가설, 지표, 검토 날짜가 필요합니다.",
+    "betBadge": "베팅",
+    "betReviewOn": "{{date}} 검토",
+    "betDue": "검토 기한 도래",
+    "betReviewed": "{{date}}에 검토됨",
+    "betTargetValue": "목표: {{target}}",
+    "betMarkReviewed": "검토 완료로 표시",
+    "betReschedule": "일정 변경",
+    "betRescheduleTo": "다시 검토할 날짜",
+    "dueTitle": "검토 기한이 된 베팅 ({{count}})",
+    "dueNote": "이 베팅들은 검토 날짜에 도달했습니다. 결과를 확인한 뒤 검토를 닫거나 일정을 변경하세요.",
+    "outcomes": "결과",
+    "outcomesEmpty": "아직 보고된 결과가 없습니다.",
+    "analyticsTitle": "승인의 결과",
+    "analyticsNote": "이 팀의 최근 30일 승인 결정과 해당 작업이 보고한 결과를 연결한 것입니다.",
+    "colWithOutcome": "결과 있음",
+    "colByKind": "종류별 결과",
+    "configLabel": "팀 결과",
+    "configValue": "항목당 {{perSubject}}개, 최대 {{stored}}개 저장, 회고에서 {{digest}}개 인용"
   }
 }

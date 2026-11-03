@@ -7902,5 +7902,34 @@
       "lte": "على الأكثر",
       "contains": "يحتوي على"
     }
+  },
+  "groupLearning": {
+    "betToggle": "تسجيل كرهان",
+    "betHypothesis": "الفرضية",
+    "betHypothesisPlaceholder": "الفرضية: ما الذي تتوقع أن يحققه هذا؟",
+    "betMetric": "المقياس",
+    "betMetricPlaceholder": "المقياس، مثل replies_received",
+    "betTarget": "الهدف",
+    "betTargetPlaceholder": "الهدف، مثل >= 5 (اختياري)",
+    "betReviewDate": "تاريخ المراجعة",
+    "betIncomplete": "يحتاج الرهان إلى فرضية ومقياس وتاريخ مراجعة.",
+    "betBadge": "رهان",
+    "betReviewOn": "المراجعة في {{date}}",
+    "betDue": "حان موعد المراجعة",
+    "betReviewed": "روجع في {{date}}",
+    "betTargetValue": "الهدف: {{target}}",
+    "betMarkReviewed": "وضع علامة تمت مراجعته",
+    "betReschedule": "إعادة الجدولة",
+    "betRescheduleTo": "راجع مجددًا في",
+    "dueTitle": "رهانات حان موعد مراجعتها ({{count}})",
+    "dueNote": "بلغت هذه الرهانات تاريخ مراجعتها. اطّلع على ما أسفرت عنه، ثم أغلق المراجعة أو أعد جدولتها.",
+    "outcomes": "النتائج",
+    "outcomesEmpty": "لم يتم الإبلاغ عن أي نتائج بعد.",
+    "analyticsTitle": "ماذا أسفرت عنه الموافقات",
+    "analyticsNote": "قرارات الموافقة لهذا الفريق خلال آخر 30 يومًا مقترنة بالنتائج التي أبلغ عنها عمله.",
+    "colWithOutcome": "مع نتيجة",
+    "colByKind": "النتائج حسب النوع",
+    "configLabel": "نتائج الفريق",
+    "configValue": "{{perSubject}}/عنصر، حتى {{stored}} محفوظة، {{digest}} في المراجعة الاستعادية"
   }
 }

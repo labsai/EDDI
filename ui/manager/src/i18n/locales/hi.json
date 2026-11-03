@@ -7618,5 +7618,34 @@
       "lte": "अधिकतम है",
       "contains": "शामिल है"
     }
+  },
+  "groupLearning": {
+    "betToggle": "दांव के रूप में दर्ज करें",
+    "betHypothesis": "परिकल्पना",
+    "betHypothesisPlaceholder": "परिकल्पना: आपको क्या लगता है इससे क्या हासिल होगा?",
+    "betMetric": "मीट्रिक",
+    "betMetricPlaceholder": "मीट्रिक, जैसे replies_received",
+    "betTarget": "लक्ष्य",
+    "betTargetPlaceholder": "लक्ष्य, जैसे >= 5 (वैकल्पिक)",
+    "betReviewDate": "समीक्षा तिथि",
+    "betIncomplete": "दांव के लिए परिकल्पना, मीट्रिक और समीक्षा तिथि चाहिए।",
+    "betBadge": "दांव",
+    "betReviewOn": "{{date}} को समीक्षा",
+    "betDue": "समीक्षा देय",
+    "betReviewed": "{{date}} को समीक्षा हुई",
+    "betTargetValue": "लक्ष्य: {{target}}",
+    "betMarkReviewed": "समीक्षित चिह्नित करें",
+    "betReschedule": "नई तिथि तय करें",
+    "betRescheduleTo": "फिर से समीक्षा की तिथि",
+    "dueTitle": "समीक्षा के लिए देय दांव ({{count}})",
+    "dueNote": "इन दांवों की समीक्षा तिथि आ गई है। देखें कि क्या हुआ, फिर समीक्षा बंद करें या नई तिथि तय करें।",
+    "outcomes": "परिणाम",
+    "outcomesEmpty": "अभी तक कोई परिणाम दर्ज नहीं हुआ।",
+    "analyticsTitle": "अनुमोदनों का नतीजा",
+    "analyticsNote": "इस टीम के पिछले 30 दिनों के अनुमोदन निर्णय, उनके काम द्वारा दर्ज परिणामों के साथ जोड़े गए।",
+    "colWithOutcome": "परिणाम के साथ",
+    "colByKind": "प्रकार के अनुसार परिणाम",
+    "configLabel": "टीम के परिणाम",
+    "configValue": "प्रति आइटम {{perSubject}}, अधिकतम {{stored}} संग्रहित, रेट्रो में {{digest}}"
   }
 }

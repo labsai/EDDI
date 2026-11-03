@@ -7689,5 +7689,34 @@
       "lte": "est au plus",
       "contains": "contient"
     }
+  },
+  "groupLearning": {
+    "betToggle": "Enregistrer comme pari",
+    "betHypothesis": "Hypothèse",
+    "betHypothesisPlaceholder": "Hypothèse : qu'espérez-vous obtenir ?",
+    "betMetric": "Indicateur",
+    "betMetricPlaceholder": "Indicateur, p. ex. replies_received",
+    "betTarget": "Objectif",
+    "betTargetPlaceholder": "Objectif, p. ex. >= 5 (facultatif)",
+    "betReviewDate": "Date de revue",
+    "betIncomplete": "Un pari demande une hypothèse, un indicateur et une date de revue.",
+    "betBadge": "Pari",
+    "betReviewOn": "Revue le {{date}}",
+    "betDue": "Revue à faire",
+    "betReviewed": "Revu le {{date}}",
+    "betTargetValue": "Objectif : {{target}}",
+    "betMarkReviewed": "Marquer comme revu",
+    "betReschedule": "Reporter",
+    "betRescheduleTo": "Revoir le",
+    "dueTitle": "Paris à revoir ({{count}})",
+    "dueNote": "Ces paris ont atteint leur date de revue. Regardez ce qu'ils ont donné, puis clôturez ou reportez la revue.",
+    "outcomes": "Résultats",
+    "outcomesEmpty": "Aucun résultat signalé pour l'instant.",
+    "analyticsTitle": "Ce que les approbations ont donné",
+    "analyticsNote": "Les décisions d'approbation de cette équipe sur les 30 derniers jours, rapprochées des résultats signalés par leur travail.",
+    "colWithOutcome": "Avec un résultat",
+    "colByKind": "Résultats par type",
+    "configLabel": "Résultats de l'équipe",
+    "configValue": "{{perSubject}}/élément, {{stored}} conservés au plus, {{digest}} dans la rétro"
   }
 }

@@ -7618,5 +7618,34 @@
       "lte": "ist höchstens",
       "contains": "enthält"
     }
+  },
+  "groupLearning": {
+    "betToggle": "Als Wette anlegen",
+    "betHypothesis": "Hypothese",
+    "betHypothesisPlaceholder": "Hypothese: Was soll das bewirken?",
+    "betMetric": "Kennzahl",
+    "betMetricPlaceholder": "Kennzahl, z. B. replies_received",
+    "betTarget": "Ziel",
+    "betTargetPlaceholder": "Ziel, z. B. >= 5 (optional)",
+    "betReviewDate": "Prüfdatum",
+    "betIncomplete": "Eine Wette braucht eine Hypothese, eine Kennzahl und ein Prüfdatum.",
+    "betBadge": "Wette",
+    "betReviewOn": "Prüfung am {{date}}",
+    "betDue": "Zur Prüfung fällig",
+    "betReviewed": "Geprüft am {{date}}",
+    "betTargetValue": "Ziel: {{target}}",
+    "betMarkReviewed": "Als geprüft markieren",
+    "betReschedule": "Verschieben",
+    "betRescheduleTo": "Erneut prüfen am",
+    "dueTitle": "Wetten zur Prüfung fällig ({{count}})",
+    "dueNote": "Diese Wetten haben ihr Prüfdatum erreicht. Sieh dir an, was daraus geworden ist, und schließe oder verschiebe die Prüfung.",
+    "outcomes": "Ergebnisse",
+    "outcomesEmpty": "Noch keine Ergebnisse gemeldet.",
+    "analyticsTitle": "Was aus den Freigaben wurde",
+    "analyticsNote": "Die Freigabeentscheidungen dieses Teams der letzten 30 Tage, verknüpft mit den Ergebnissen, die ihre Arbeit gemeldet hat.",
+    "colWithOutcome": "Mit Ergebnis",
+    "colByKind": "Ergebnisse nach Art",
+    "configLabel": "Team-Ergebnisse",
+    "configValue": "{{perSubject}}/Element, max. {{stored}} gespeichert, {{digest}} in der Retro"
   }
 }

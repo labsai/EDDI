@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import type { OutcomeAnalytics } from "./group-outcomes";
 import { seg } from "./path-segment";
 
 /**
@@ -192,6 +193,11 @@ function params(entries: Record<string, string | number | undefined | null>): st
 
 export function summarizeApprovals(query: OversightQuery, groupBy: OversightGroupBy): Promise<ApprovalSummaries> {
   return api.get<ApprovalSummaries>(`/hitl/analytics/summary${params({ ...query, groupBy })}`);
+}
+
+/** `GET /hitl/analytics/outcomes`: decisions joined with the outcomes their work reported. Outcomes are team-scoped. Needs the approver or admin role. */
+export function getOutcomeAnalytics(groupId: string, window: Pick<OversightQuery, "from" | "to"> = {}): Promise<OutcomeAnalytics> {
+  return api.get<OutcomeAnalytics>(`/hitl/analytics/outcomes${params({ groupId, ...window })}`);
 }
 
 export function listSamples(agentId: string | undefined, status: SampleStatus | "ALL", index: number, limit: number): Promise<SamplePage> {

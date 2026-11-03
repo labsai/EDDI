@@ -361,6 +361,18 @@ export const READ_ENDPOINTS: readonly string[] = [
   // through another. The workspace read itself (`GET …/workspace`) is not needed
   // for this and stays out.
   "GET /groupstore/groups/{groupId}/workspace/handoffs",
+  // Team learning loop (EDDI 6.8.0+): the real-world outcomes a team's work
+  // reported, and the bets whose review date has arrived. Reads only; the backend
+  // checks VIEW on the group, and `GET /hitl/analytics/outcomes` needs the
+  // approver or admin role (it joins approval decisions, which carry deciders).
+  //
+  // Deliberately NOT granted: `POST …/outcomes` (an outcome is a fact reported by
+  // the system that observed it; an operator writing one would be inventing
+  // evidence the team's retro then learns from) and `POST …/bet/review` (a verdict
+  // on a bet is the team's).
+  "GET /groupstore/groups/{groupId}/outcomes",
+  "GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews",
+  "GET /hitl/analytics/outcomes",
   // Team budgets (EDDI 6.7.0+): one team's budget this month and its history, and
   // the cross-team listing. Counters and adjustment reasons only, no conversation
   // content; VIEW on each group is checked by the backend.
@@ -904,6 +916,18 @@ export function grantsModelPriceReads(endpoints: readonly string[]): boolean {
 /** Whether a standing team's handoff intake inbox can be read. */
 export function grantsTeamHandoffReads(endpoints: readonly string[]): boolean {
   return new Set(endpoints).has("GET /groupstore/groups/{groupId}/workspace/handoffs");
+}
+
+/** The team-learning reads the prompt's learning section uses. */
+const TEAM_LEARNING_READS = [
+  "GET /groupstore/groups/{groupId}/outcomes",
+  "GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews",
+] as const;
+
+/** Whether a team's outcomes and due bet reviews can be read. */
+export function grantsTeamLearningReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return TEAM_LEARNING_READS.every((entry) => set.has(entry));
 }
 
 /** The team-budget reads the prompt's budget section uses. */

@@ -17,6 +17,7 @@ import {
   grantsAlertReads,
   grantsModelPriceReads,
   grantsTeamHandoffReads,
+  grantsTeamLearningReads,
   grantsTeamBudgetReads,
   grantsOversightReads,
   type OperatorScope,
@@ -792,6 +793,27 @@ const BODY_TEAM_HANDOFF = `Cross-team handoff (one team or agent files work into
   source lists a team that has not accepted it.
 - You cannot accept, decline or delete a backlog task: an intake decision is a
   person's, on the group's workspace page in the manager.`;
+
+/**
+ * Team learning loop — gated on {@link grantsTeamLearningReads}.
+ */
+const BODY_TEAM_LEARNING = `Team learning loop (bets, outcomes, and what the retro sees):
+- A backlog task can be a bet: \`bet\` carries a hypothesis, a metric, an optional
+  target and a \`reviewDate\`. It is due from that date until somebody gives a
+  verdict (\`reviewedAt\`). Read what is due with the due-reviews read. Closing or
+  rescheduling a review is the team's, on the workspace page in the manager.
+- Outcomes are real-world results an external system reports against a backlog
+  task or an approval decision (\`reply_received\`, \`pr_merged\`, a metric
+  reading). They exist only for a group whose configuration has an
+  \`outcomeConfig\`; without it the endpoint answers 409 "not enabled" and nothing
+  is stored — that, not an error, is why a team shows none. Caps: maxPerSubject
+  (default 50), maxStored (2000), retentionDays (180); the team's RETRO phase
+  quotes the newest \`retroDigestSize\` (default 10; 0 keeps outcomes out of it).
+- Read a task's outcomes with the outcomes read (\`subjectId\`), and what came of
+  the team's approvals, per approval category, with the outcomes analytics read
+  (approver or admin role). A retry with the same \`idempotencyKey\` stores once.
+- You cannot record an outcome or give a bet its verdict: outcomes are facts the
+  observing system reports, and a verdict is the team's.`;
 
 /**
  * Team budgets — gated on {@link grantsTeamBudgetReads}.
@@ -1890,6 +1912,7 @@ export function buildOperatorPromptBody(endpoints: readonly string[]): string {
     ...(grantsAlertReads(endpoints) ? [BODY_ALERTS] : []),
     ...(grantsModelPriceReads(endpoints) ? [BODY_COST] : []),
     ...(grantsTeamHandoffReads(endpoints) ? [BODY_TEAM_HANDOFF] : []),
+    ...(grantsTeamLearningReads(endpoints) ? [BODY_TEAM_LEARNING] : []),
     ...(grantsTeamBudgetReads(endpoints) ? [BODY_TEAM_BUDGETS] : []),
     ...(grantsOversightReads(endpoints) ? [BODY_OVERSIGHT] : []),
     BODY_APP_CONTEXT,

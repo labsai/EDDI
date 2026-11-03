@@ -7618,5 +7618,34 @@
       "lte": "is at most",
       "contains": "contains"
     }
+  },
+  "groupLearning": {
+    "betToggle": "File as a bet",
+    "betHypothesis": "Hypothesis",
+    "betHypothesisPlaceholder": "Hypothesis: what do you believe this will achieve?",
+    "betMetric": "Metric",
+    "betMetricPlaceholder": "Metric, e.g. replies_received",
+    "betTarget": "Target",
+    "betTargetPlaceholder": "Target, e.g. >= 5 (optional)",
+    "betReviewDate": "Review date",
+    "betIncomplete": "A bet needs a hypothesis, a metric and a review date.",
+    "betBadge": "Bet",
+    "betReviewOn": "Review {{date}}",
+    "betDue": "Due for review",
+    "betReviewed": "Reviewed {{date}}",
+    "betTargetValue": "Target: {{target}}",
+    "betMarkReviewed": "Mark reviewed",
+    "betReschedule": "Reschedule",
+    "betRescheduleTo": "Review again on",
+    "dueTitle": "Bets due for review ({{count}})",
+    "dueNote": "These bets have reached their review date. Look at what came of them, then close or reschedule the review.",
+    "outcomes": "Outcomes",
+    "outcomesEmpty": "No outcomes reported yet.",
+    "analyticsTitle": "What came of approvals",
+    "analyticsNote": "This team's approval decisions of the last 30 days, joined with the outcomes their work reported.",
+    "colWithOutcome": "With an outcome",
+    "colByKind": "Outcomes by kind",
+    "configLabel": "Team outcomes",
+    "configValue": "{{perSubject}}/item, {{stored}} stored, {{digest}} in the retro"
   }
 }

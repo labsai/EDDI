@@ -7689,5 +7689,34 @@
       "lte": "é no máximo",
       "contains": "contém"
     }
+  },
+  "groupLearning": {
+    "betToggle": "Registrar como aposta",
+    "betHypothesis": "Hipótese",
+    "betHypothesisPlaceholder": "Hipótese: o que você acredita que isso vai alcançar?",
+    "betMetric": "Métrica",
+    "betMetricPlaceholder": "Métrica, ex.: replies_received",
+    "betTarget": "Meta",
+    "betTargetPlaceholder": "Meta, ex.: >= 5 (opcional)",
+    "betReviewDate": "Data de revisão",
+    "betIncomplete": "Uma aposta precisa de uma hipótese, uma métrica e uma data de revisão.",
+    "betBadge": "Aposta",
+    "betReviewOn": "Revisão em {{date}}",
+    "betDue": "Revisão pendente",
+    "betReviewed": "Revisada em {{date}}",
+    "betTargetValue": "Meta: {{target}}",
+    "betMarkReviewed": "Marcar como revisada",
+    "betReschedule": "Reagendar",
+    "betRescheduleTo": "Revisar novamente em",
+    "dueTitle": "Apostas com revisão pendente ({{count}})",
+    "dueNote": "Estas apostas chegaram à data de revisão. Veja o que resultou delas e depois encerre ou reagende a revisão.",
+    "outcomes": "Resultados",
+    "outcomesEmpty": "Nenhum resultado informado ainda.",
+    "analyticsTitle": "O que resultou das aprovações",
+    "analyticsNote": "As decisões de aprovação desta equipe nos últimos 30 dias, associadas aos resultados informados pelo trabalho.",
+    "colWithOutcome": "Com resultado",
+    "colByKind": "Resultados por tipo",
+    "configLabel": "Resultados da equipe",
+    "configValue": "{{perSubject}}/item, até {{stored}} guardados, {{digest}} na retro"
   }
 }

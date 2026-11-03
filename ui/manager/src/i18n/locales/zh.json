@@ -7618,5 +7618,34 @@
       "lte": "至多为",
       "contains": "包含"
     }
+  },
+  "groupLearning": {
+    "betToggle": "作为押注创建",
+    "betHypothesis": "假设",
+    "betHypothesisPlaceholder": "假设：你认为这会带来什么？",
+    "betMetric": "指标",
+    "betMetricPlaceholder": "指标，例如 replies_received",
+    "betTarget": "目标",
+    "betTargetPlaceholder": "目标，例如 >= 5（可选）",
+    "betReviewDate": "复盘日期",
+    "betIncomplete": "押注需要假设、指标和复盘日期。",
+    "betBadge": "押注",
+    "betReviewOn": "复盘日期 {{date}}",
+    "betDue": "待复盘",
+    "betReviewed": "已于 {{date}} 复盘",
+    "betTargetValue": "目标：{{target}}",
+    "betMarkReviewed": "标记为已复盘",
+    "betReschedule": "改期",
+    "betRescheduleTo": "再次复盘日期",
+    "dueTitle": "待复盘的押注（{{count}}）",
+    "dueNote": "这些押注已到复盘日期。先看看结果如何，然后关闭或改期复盘。",
+    "outcomes": "结果",
+    "outcomesEmpty": "尚未上报任何结果。",
+    "analyticsTitle": "审批带来了什么",
+    "analyticsNote": "该团队最近 30 天的审批决定，与其工作所上报的结果相关联。",
+    "colWithOutcome": "有结果",
+    "colByKind": "按类型统计的结果",
+    "configLabel": "团队结果",
+    "configValue": "每项 {{perSubject}} 条，最多存储 {{stored}} 条，复盘中引用 {{digest}} 条"
   }
 }

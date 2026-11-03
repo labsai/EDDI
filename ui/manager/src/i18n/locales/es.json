@@ -7689,5 +7689,34 @@
       "lte": "es como máximo",
       "contains": "contiene"
     }
+  },
+  "groupLearning": {
+    "betToggle": "Registrar como apuesta",
+    "betHypothesis": "Hipótesis",
+    "betHypothesisPlaceholder": "Hipótesis: ¿qué crees que conseguirá esto?",
+    "betMetric": "Métrica",
+    "betMetricPlaceholder": "Métrica, p. ej. replies_received",
+    "betTarget": "Objetivo",
+    "betTargetPlaceholder": "Objetivo, p. ej. >= 5 (opcional)",
+    "betReviewDate": "Fecha de revisión",
+    "betIncomplete": "Una apuesta necesita una hipótesis, una métrica y una fecha de revisión.",
+    "betBadge": "Apuesta",
+    "betReviewOn": "Revisión el {{date}}",
+    "betDue": "Pendiente de revisión",
+    "betReviewed": "Revisada el {{date}}",
+    "betTargetValue": "Objetivo: {{target}}",
+    "betMarkReviewed": "Marcar como revisada",
+    "betReschedule": "Reprogramar",
+    "betRescheduleTo": "Volver a revisar el",
+    "dueTitle": "Apuestas pendientes de revisión ({{count}})",
+    "dueNote": "Estas apuestas han llegado a su fecha de revisión. Mira qué resultó de ellas y luego cierra o reprograma la revisión.",
+    "outcomes": "Resultados",
+    "outcomesEmpty": "Aún no se ha informado de ningún resultado.",
+    "analyticsTitle": "Qué resultó de las aprobaciones",
+    "analyticsNote": "Las decisiones de aprobación de este equipo de los últimos 30 días, junto con los resultados que informó su trabajo.",
+    "colWithOutcome": "Con resultado",
+    "colByKind": "Resultados por tipo",
+    "configLabel": "Resultados del equipo",
+    "configValue": "{{perSubject}}/elemento, {{stored}} guardados como máximo, {{digest}} en la retro"
   }
 }

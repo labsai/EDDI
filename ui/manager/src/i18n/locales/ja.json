@@ -7618,5 +7618,34 @@
       "lte": "以下",
       "contains": "含む"
     }
+  },
+  "groupLearning": {
+    "betToggle": "ベットとして登録",
+    "betHypothesis": "仮説",
+    "betHypothesisPlaceholder": "仮説：これで何が達成できると考えますか？",
+    "betMetric": "指標",
+    "betMetricPlaceholder": "指標（例：replies_received）",
+    "betTarget": "目標",
+    "betTargetPlaceholder": "目標（例：>= 5、任意）",
+    "betReviewDate": "レビュー日",
+    "betIncomplete": "ベットには仮説、指標、レビュー日が必要です。",
+    "betBadge": "ベット",
+    "betReviewOn": "{{date}} にレビュー",
+    "betDue": "レビュー期限",
+    "betReviewed": "{{date}} にレビュー済み",
+    "betTargetValue": "目標：{{target}}",
+    "betMarkReviewed": "レビュー済みにする",
+    "betReschedule": "日程を変更",
+    "betRescheduleTo": "次回レビュー日",
+    "dueTitle": "レビュー期限のベット（{{count}}）",
+    "dueNote": "これらのベットはレビュー日に達しました。結果を確認し、レビューを完了するか日程を変更してください。",
+    "outcomes": "成果",
+    "outcomesEmpty": "まだ成果は報告されていません。",
+    "analyticsTitle": "承認の結果",
+    "analyticsNote": "このチームの直近30日の承認判断と、その作業が報告した成果を突き合わせたものです。",
+    "colWithOutcome": "成果あり",
+    "colByKind": "種類別の成果",
+    "configLabel": "チームの成果",
+    "configValue": "1件あたり{{perSubject}}、最大{{stored}}件保存、レトロで{{digest}}件を参照"
   }
 }

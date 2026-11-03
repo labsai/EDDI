@@ -7618,5 +7618,34 @@
       "lte": "ไม่เกิน",
       "contains": "มี"
     }
+  },
+  "groupLearning": {
+    "betToggle": "บันทึกเป็นการเดิมพัน",
+    "betHypothesis": "สมมติฐาน",
+    "betHypothesisPlaceholder": "สมมติฐาน: คุณเชื่อว่าสิ่งนี้จะบรรลุอะไร?",
+    "betMetric": "ตัวชี้วัด",
+    "betMetricPlaceholder": "ตัวชี้วัด เช่น replies_received",
+    "betTarget": "เป้าหมาย",
+    "betTargetPlaceholder": "เป้าหมาย เช่น >= 5 (ไม่บังคับ)",
+    "betReviewDate": "วันที่ทบทวน",
+    "betIncomplete": "การเดิมพันต้องมีสมมติฐาน ตัวชี้วัด และวันที่ทบทวน",
+    "betBadge": "เดิมพัน",
+    "betReviewOn": "ทบทวนวันที่ {{date}}",
+    "betDue": "ถึงกำหนดทบทวน",
+    "betReviewed": "ทบทวนแล้วเมื่อ {{date}}",
+    "betTargetValue": "เป้าหมาย: {{target}}",
+    "betMarkReviewed": "ทำเครื่องหมายว่าทบทวนแล้ว",
+    "betReschedule": "เลื่อนกำหนด",
+    "betRescheduleTo": "ทบทวนอีกครั้งวันที่",
+    "dueTitle": "การเดิมพันที่ถึงกำหนดทบทวน ({{count}})",
+    "dueNote": "การเดิมพันเหล่านี้ถึงวันที่ทบทวนแล้ว ดูว่าเกิดผลอย่างไร แล้วปิดหรือเลื่อนการทบทวน",
+    "outcomes": "ผลลัพธ์",
+    "outcomesEmpty": "ยังไม่มีผลลัพธ์ที่รายงาน",
+    "analyticsTitle": "ผลที่ได้จากการอนุมัติ",
+    "analyticsNote": "การตัดสินใจอนุมัติของทีมนี้ใน 30 วันที่ผ่านมา เชื่อมกับผลลัพธ์ที่งานของทีมรายงาน",
+    "colWithOutcome": "มีผลลัพธ์",
+    "colByKind": "ผลลัพธ์ตามประเภท",
+    "configLabel": "ผลลัพธ์ของทีม",
+    "configValue": "{{perSubject}}/รายการ เก็บสูงสุด {{stored}} รายการ อ้างอิง {{digest}} รายการในการทบทวน"
   }
 }
