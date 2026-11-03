@@ -12,6 +12,7 @@ import { BackLink } from "@/components/shared/back-link";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
+import { TeamBudgetCard } from "@/components/workforce/team-budget-card";
 import { useGroup } from "@/hooks/use-groups";
 import { useSchedules } from "@/hooks/use-schedules";
 import {
@@ -266,6 +267,8 @@ export function GroupWorkspacePage() {
           value={workspace.metrics.lastRunAt ? new Date(workspace.metrics.lastRunAt).toLocaleString() : t("groupWorkspace.never", "Never")}
         />
       </div>
+
+      {groupId && <TeamBudgetCard groupId={groupId} />}
 
       {Object.keys(workspace.metrics.perMemberStats).length > 0 && (
         <div className="rounded-xl border border-border bg-card p-4">

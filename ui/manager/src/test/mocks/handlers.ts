@@ -3,6 +3,7 @@ import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
+import { teamBudgetHandlers } from "./team-budget-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 const AGENTS_MOCK = [
@@ -897,6 +898,8 @@ export const handlers = [
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
   ...modelPriceHandlers,
+  // Per-team monthly budgets: /groupstore/groups/{id}/budget* and /administration/team-budgets*.
+  ...teamBudgetHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
