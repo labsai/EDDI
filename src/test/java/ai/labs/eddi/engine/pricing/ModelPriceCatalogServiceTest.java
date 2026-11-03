@@ -98,6 +98,14 @@ class ModelPriceCatalogServiceTest {
     }
 
     @Test
+    void anOutOfRangeExpectedRevisionIsRefused() {
+        var service = service(UnpricedPolicy.ALLOW);
+        assertEquals(400, assertThrows(ModelPriceCatalogException.class, () -> service.replace(-1, catalog(UnpricedPolicy.ALLOW), "a")).status());
+        assertEquals(400,
+                assertThrows(ModelPriceCatalogException.class, () -> service.replace(Long.MAX_VALUE, catalog(UnpricedPolicy.ALLOW), "a")).status());
+    }
+
+    @Test
     void anInvalidCatalogIsRefusedWithViolations() {
         var service = service(UnpricedPolicy.ALLOW);
         var e = assertThrows(ModelPriceCatalogException.class,

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
 import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.modules.llm.pricing.PricedSpend;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkus.runtime.Startup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -150,7 +151,8 @@ public class SystemSpendMeter {
             }
         } catch (RuntimeException e) {
             // The work already ran; a denied or unavailable result must not fail it.
-            LOGGER.warnf("Group %s: system spend of $%.6f could not be charged to the tenant: %s", gc.getId(), delta, e.getMessage());
+            LOGGER.warnf("Group %s: system spend of $%.6f could not be charged to the tenant: %s", LogSanitizer.sanitize(gc.getId()), delta,
+                    LogSanitizer.sanitize(e.getMessage()));
             return;
         }
         sinks.fire(new SpendEvent(tenantId, null, null, null, null, gc.getGroupId(), gc.getId(), SpendEvent.Kind.GROUP_SYSTEM, detail, delta,
