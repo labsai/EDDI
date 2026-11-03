@@ -848,7 +848,15 @@ public class GroupConversationService implements IGroupConversationService, User
         // SYNTHESIS one, so the discussion concludes with an answer rather than
         // stopping mid-transcript. Deliberately NOT a break: "jump to the first
         // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
-        boolean costCeilingSynthesizeNow = false;
+        //
+        // Carried across a resume (gc.costCeilingSkipAhead): a synthesis that requires
+        // approval pauses the run under the skip-ahead, and the leg its approval starts
+        // must go on skipping the remaining work phases. A fresh leg (a new round)
+        // starts with it off.
+        if (startPhaseIndex == 0) {
+            gc.setCostCeilingSkipAhead(false);
+        }
+        boolean costCeilingSynthesizeNow = gc.isCostCeilingSkipAhead();
 
         try {
             // F1: publish the live instance this leg runs with. Covers both a fresh
@@ -1076,6 +1084,7 @@ public class GroupConversationService implements IGroupConversationService, User
                             return gc;
                         }
                         costCeilingSynthesizeNow = true;
+                        gc.setCostCeilingSkipAhead(true);
                         // Leave the REPEAT loop too, not just future phases: a phase
                         // with repeats > 1 (ROUND_TABLE's "Discussion" is repeats =
                         // rounds - 1 by default) would otherwise re-enter its executor
@@ -1532,6 +1541,7 @@ public class GroupConversationService implements IGroupConversationService, User
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
+            gc.setCostCeilingSkipAhead(false);
             // I12: a facilitator's phase-list divergence is one-off for the round —
             // a continuation round starts from the config's phases again, and stale
             // extension counts would misattribute under next round's indices.
