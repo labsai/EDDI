@@ -238,7 +238,7 @@ public final class ArgumentFields {
                 return false;
             }
             for (int i = 0; i < name.length(); i++) {
-                if (!Character.isDigit(name.charAt(i))) {
+                if (name.charAt(i) < '0' || name.charAt(i) > '9') {
                     return false;
                 }
             }

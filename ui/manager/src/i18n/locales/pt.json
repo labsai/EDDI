@@ -3845,7 +3845,7 @@
   },
   "toolCallGuardrails": {
     "sectionTitle": "Guardrails de chamadas de ferramentas",
-    "intro": "Verifica os argumentos das chamadas de ferramentas que o modelo pede, antes da aprovação: uma chamada recusada nunca chega a um aprovador, e uma ocultada chega já ocultada. Uma chamada aprovada ou editada é verificada de novo antes de ser executada, e então qualquer achado a recusa. Requer EDDI 6.7 ou posterior: um servidor mais antigo ignora esta lista.",
+    "intro": "Verifica os argumentos das chamadas de ferramentas que o modelo pede, antes da aprovação: uma chamada recusada nunca chega a um aprovador, e uma ocultada chega já ocultada. Uma chamada aprovada ou editada é verificada de novo antes de ser executada, e então qualquer achado a recusa. Requer {{productName}} 6.7 ou posterior: um servidor mais antigo ignora esta lista.",
     "empty": "Nenhum configurado: as chamadas de ferramentas são executadas como o modelo as escreveu.",
     "allStrings": "cada string",
     "noTools": "ainda sem ferramentas",

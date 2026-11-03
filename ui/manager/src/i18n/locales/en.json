@@ -4075,7 +4075,7 @@
   },
   "toolCallGuardrails": {
     "sectionTitle": "Tool-call guardrails",
-    "intro": "Screen the arguments of the tool calls the model asks for, before the approval gate: a refused call never reaches an approver, and a redacted one reaches them already redacted. An approved or edited call is checked again before it runs, and then any finding refuses it. Needs EDDI 6.7 or later: an older server ignores this list.",
+    "intro": "Screen the arguments of the tool calls the model asks for, before the approval gate: a refused call never reaches an approver, and a redacted one reaches them already redacted. An approved or edited call is checked again before it runs, and then any finding refuses it. Needs {{productName}} 6.7 or later: an older server ignores this list.",
     "empty": "None configured: tool calls run as the model wrote them.",
     "allStrings": "every string",
     "noTools": "no tools yet",

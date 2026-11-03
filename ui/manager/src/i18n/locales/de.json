@@ -4021,7 +4021,7 @@
   },
   "toolCallGuardrails": {
     "sectionTitle": "Guardrails für Tool-Aufrufe",
-    "intro": "Prüft die Argumente der Tool-Aufrufe, die das Modell anfordert, vor der Freigabeprüfung: Ein abgelehnter Aufruf erreicht nie eine freigebende Person, ein geschwärzter erreicht sie bereits geschwärzt. Ein freigegebener oder bearbeiteter Aufruf wird vor der Ausführung erneut geprüft; dann lehnt jeder Befund ihn ab. Erfordert EDDI 6.7 oder neuer: Ein älterer Server ignoriert diese Liste.",
+    "intro": "Prüft die Argumente der Tool-Aufrufe, die das Modell anfordert, vor der Freigabeprüfung: Ein abgelehnter Aufruf erreicht nie eine freigebende Person, ein geschwärzter erreicht sie bereits geschwärzt. Ein freigegebener oder bearbeiteter Aufruf wird vor der Ausführung erneut geprüft; dann lehnt jeder Befund ihn ab. Erfordert {{productName}} 6.7 oder neuer: Ein älterer Server ignoriert diese Liste.",
     "empty": "Keine konfiguriert: Tool-Aufrufe laufen so, wie das Modell sie geschrieben hat.",
     "allStrings": "jeder String",
     "noTools": "noch keine Tools",

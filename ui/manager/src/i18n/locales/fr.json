@@ -3845,7 +3845,7 @@
   },
   "toolCallGuardrails": {
     "sectionTitle": "Garde-fous des appels d'outils",
-    "intro": "Contrôle les arguments des appels d'outils demandés par le modèle, avant la validation : un appel refusé n'atteint jamais un approbateur, et un appel caviardé lui parvient déjà caviardé. Un appel approuvé ou modifié est contrôlé à nouveau avant son exécution, et toute détection le refuse alors. Nécessite EDDI 6.7 ou plus récent : un serveur plus ancien ignore cette liste.",
+    "intro": "Contrôle les arguments des appels d'outils demandés par le modèle, avant la validation : un appel refusé n'atteint jamais un approbateur, et un appel caviardé lui parvient déjà caviardé. Un appel approuvé ou modifié est contrôlé à nouveau avant son exécution, et toute détection le refuse alors. Nécessite {{productName}} 6.7 ou plus récent : un serveur plus ancien ignore cette liste.",
     "empty": "Aucun configuré : les appels d'outils s'exécutent tels que le modèle les a écrits.",
     "allStrings": "chaque chaîne",
     "noTools": "aucun outil pour l'instant",

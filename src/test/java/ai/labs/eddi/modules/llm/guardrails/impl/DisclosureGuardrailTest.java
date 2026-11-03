@@ -26,6 +26,9 @@ class DisclosureGuardrailTest {
     private final DisclosureGuardrail guardrail = new DisclosureGuardrail();
 
     private static GuardrailContext context(String... keyValues) {
+        if (keyValues.length % 2 != 0) {
+            throw new IllegalArgumentException("context expects key/value pairs, got " + keyValues.length + " arguments");
+        }
         Map<String, String> params = new HashMap<>();
         for (int i = 0; i < keyValues.length; i += 2) {
             params.put(keyValues[i], keyValues[i + 1]);

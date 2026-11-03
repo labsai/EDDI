@@ -195,6 +195,9 @@ final class ToolCallGuardrailFixture {
         entry.setAction(action);
         entry.setTools(List.of("builtin:calculate"));
         entry.setFields(List.of("/expression"));
+        if (parameters.length % 2 != 0) {
+            throw new IllegalArgumentException("entry expects key/value parameter pairs, got " + parameters.length + " arguments");
+        }
         Map<String, String> params = new HashMap<>();
         for (int i = 0; i < parameters.length; i += 2) {
             params.put(parameters[i], parameters[i + 1]);

@@ -63,6 +63,13 @@ class ArgumentFieldsTest {
         }
 
         @Test
+        @DisplayName("an index too long for an int, or with non-ASCII digits, matches nothing instead of throwing")
+        void overlongOrUnicodeIndex() throws Exception {
+            var doc = ArgumentFields.parse("{\"a\":[\"zero\",\"one\"]}");
+            assertEquals(List.of(), texts(doc.select(List.of("/a/99999999999", "/a/4294967297", "/a/١"))));
+        }
+
+        @Test
         @DisplayName("\"\" is the whole document, serialized; a non-string target is its JSON")
         void wholeDocumentAndNonString() throws Exception {
             var doc = ArgumentFields.parse("{\"a\":1.50,\"b\":{\"c\":true}}");

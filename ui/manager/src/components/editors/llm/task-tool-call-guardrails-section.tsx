@@ -61,7 +61,7 @@ export function TaskToolCallGuardrailsSection({ task, onChange, readOnly }: Task
         <p className="text-[10px] leading-relaxed text-muted-foreground">
           {t(
             "toolCallGuardrails.intro",
-            "Screen the arguments of the tool calls the model asks for, before the approval gate: a refused call never reaches an approver, and a redacted one reaches them already redacted. An approved or edited call is checked again before it runs, and then any finding refuses it. Needs EDDI 6.7 or later: an older server ignores this list.",
+            "Screen the arguments of the tool calls the model asks for, before the approval gate: a refused call never reaches an approver, and a redacted one reaches them already redacted. An approved or edited call is checked again before it runs, and then any finding refuses it. Needs {{productName}} 6.7 or later: an older server ignores this list.",
           )}
         </p>
 
@@ -298,7 +298,7 @@ function TargetFields({
 
 function Notice({ testId, children }: { testId: string; children: React.ReactNode }) {
   return (
-    <p className="mt-1 flex items-start gap-1 text-[10px] text-amber-700 dark:text-amber-400" role="status" data-testid={testId}>
+    <p className="mt-1 flex items-start gap-1 text-[10px] text-warn-700 dark:text-warn-400" role="status" data-testid={testId}>
       <AlertTriangle className="mt-px h-3 w-3 shrink-0" />
       <span>{children}</span>
     </p>

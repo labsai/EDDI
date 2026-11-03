@@ -3845,7 +3845,7 @@
   },
   "toolCallGuardrails": {
     "sectionTitle": "Guardrails de llamadas a herramientas",
-    "intro": "Revisa los argumentos de las llamadas a herramientas que pide el modelo, antes de la aprobación: una llamada rechazada nunca llega a un aprobador, y una censurada le llega ya censurada. Una llamada aprobada o editada se revisa de nuevo antes de ejecutarse, y entonces cualquier hallazgo la rechaza. Requiere EDDI 6.7 o posterior: un servidor más antiguo ignora esta lista.",
+    "intro": "Revisa los argumentos de las llamadas a herramientas que pide el modelo, antes de la aprobación: una llamada rechazada nunca llega a un aprobador, y una censurada le llega ya censurada. Una llamada aprobada o editada se revisa de nuevo antes de ejecutarse, y entonces cualquier hallazgo la rechaza. Requiere {{productName}} 6.7 o posterior: un servidor más antiguo ignora esta lista.",
     "empty": "Ninguno configurado: las llamadas a herramientas se ejecutan tal como las escribió el modelo.",
     "allStrings": "cada cadena",
     "noTools": "aún sin herramientas",
