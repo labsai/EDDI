@@ -5744,6 +5744,7 @@
   "workforce": {
     "addAgent": "エージェントをデプロイ",
     "count": "{{count}} 名のエキスパート",
+    "loadIncomplete": "一部のエキスパートを読み込めませんでした。",
     "ready": "準備完了",
     "showAll": "すべて表示（{{total}}）",
     "showLess": "表示を減らす",

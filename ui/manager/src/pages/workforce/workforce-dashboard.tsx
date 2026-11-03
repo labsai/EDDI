@@ -210,7 +210,7 @@ function WorkforceSection() {
   const orderByRecentUse = useRecentAgents();
   // Descriptors are per version, so a single page can hold fewer distinct agents
   // than its size. Page through all of them so no agent is ever missing.
-  const { data: agentPages } = useAllAgentDescriptors();
+  const { data: agentPages, isError, isComplete, fetchNextPage } = useAllAgentDescriptors();
   const agentsRaw = useMemo(() => agentPages?.pages.flat(), [agentPages]);
   const navigate = useNavigate();
 
@@ -268,6 +268,27 @@ function WorkforceSection() {
           );
         })}
       </div>
+
+      {isError && !isComplete && (
+        <div
+          role="alert"
+          data-testid="workforce-load-incomplete"
+          className="mt-1 flex items-center gap-2 text-xs text-muted-foreground"
+        >
+          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            {t("workforce.loadIncomplete", "Some experts could not be loaded.")}
+          </span>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-testid="workforce-load-retry"
+            onClick={() => void fetchNextPage()}
+          >
+            {t("common.retry", "Retry")}
+          </Button>
+        </div>
+      )}
 
       {collapsible && (
         <Button

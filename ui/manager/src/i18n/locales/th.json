@@ -5744,6 +5744,7 @@
   "workforce": {
     "addAgent": "ปรับใช้เอเจนต์",
     "count": "ผู้เชี่ยวชาญ {{count}} คน",
+    "loadIncomplete": "โหลดผู้เชี่ยวชาญบางรายไม่สำเร็จ",
     "ready": "พร้อม",
     "showAll": "แสดงทั้งหมด {{total}}",
     "showLess": "แสดงน้อยลง",

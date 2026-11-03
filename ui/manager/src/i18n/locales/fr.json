@@ -5804,6 +5804,7 @@
   "workforce": {
     "addAgent": "Déployer un agent",
     "count": "{{count}} experts",
+    "loadIncomplete": "Certains experts n’ont pas pu être chargés.",
     "ready": "Prêt",
     "showAll": "Tout afficher ({{total}})",
     "showLess": "Afficher moins",

@@ -5744,6 +5744,7 @@
   "workforce": {
     "addAgent": "部署代理",
     "count": "{{count}} 位专家",
+    "loadIncomplete": "部分专家无法加载。",
     "ready": "就绪",
     "showAll": "显示全部 {{total}} 个",
     "showLess": "收起",
