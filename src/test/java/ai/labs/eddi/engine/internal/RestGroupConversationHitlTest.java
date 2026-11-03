@@ -648,6 +648,63 @@ class RestGroupConversationHitlTest {
         }
     }
 
+    @Nested
+    @DisplayName("Invalid review fields — the 400 names the refused field on both approve paths")
+    class InvalidApprovalDetail {
+
+        private GroupApprovalRequest refusedRequest() throws Exception {
+            asUser(OWNER_ID);
+            when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any()))
+                    .thenThrow(new IllegalArgumentException("editedAnswer is only valid with verdict APPROVED"));
+            var request = new GroupApprovalRequest();
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.REJECTED);
+            request.setDecision(decision);
+            return request;
+        }
+
+        @Test
+        @DisplayName("approve → 400 carrying the refusal message")
+        void approveReturnsTheDetail() throws Exception {
+            Response response = restGroupConversation.approveGroupPhase(GROUP_ID, GC_ID, refusedRequest());
+
+            assertEquals(Response.Status.BAD_REQUEST.getStatusCode(), response.getStatus());
+            assertEquals("Invalid approval request: editedAnswer is only valid with verdict APPROVED", String.valueOf(response.getEntity()));
+        }
+
+        @Test
+        @DisplayName("approve (streaming) → the same detail in the error event, not the old fixed 'unknown task id' text")
+        void streamingApproveReturnsTheSameDetail() throws Exception {
+            var eventSink = mock(SseEventSink.class);
+            var sse = mock(Sse.class);
+            var eventBuilder = mock(OutboundSseEvent.Builder.class);
+            when(sse.newEventBuilder()).thenReturn(eventBuilder);
+            when(eventBuilder.name(anyString())).thenReturn(eventBuilder);
+            when(eventBuilder.data(any(Class.class), any())).thenReturn(eventBuilder);
+            when(eventBuilder.build()).thenReturn(mock(OutboundSseEvent.class));
+
+            restGroupConversation.approveGroupPhaseStreaming(GROUP_ID, GC_ID, refusedRequest(), eventSink, sse);
+
+            var errorEvent = ArgumentCaptor.forClass(Object.class);
+            verify(jsonSerialization, atLeastOnce()).serialize(errorEvent.capture());
+            var error = errorEvent.getAllValues().stream()
+                    .filter(GroupConversationEventSink.GroupErrorEvent.class::isInstance)
+                    .map(GroupConversationEventSink.GroupErrorEvent.class::cast)
+                    .findFirst().orElseThrow();
+            assertEquals("Invalid approval request: editedAnswer is only valid with verdict APPROVED", error.error());
+            verify(eventSink).close();
+        }
+
+        @Test
+        @DisplayName("a long or empty message is capped / replaced by the generic hint, identically for both paths")
+        void capAndFallback() {
+            String capped = RestGroupConversation.invalidApprovalDetail(new IllegalArgumentException("x".repeat(500)));
+            assertEquals("Invalid approval request: ".length() + 300, capped.length());
+            assertTrue(RestGroupConversation.invalidApprovalDetail(new IllegalArgumentException()).contains("unknown task id"));
+        }
+    }
+
     // =================================================================
     // groupId path-parameter validation (CodeQL: unused path param)
     // =================================================================

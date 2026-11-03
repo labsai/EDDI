@@ -282,6 +282,23 @@ public class RestGroupConversation implements IRestGroupConversation {
         }
     }
 
+    /**
+     * The 400 body of an invalid approval request, on both the plain and the
+     * streaming path: which field was refused and why, because the caller needs it
+     * to correct the request (a fixed "unknown task id" text named the wrong cause
+     * for every review-field refusal). The rule is the same for both: the engine's
+     * own refusal message (it may quote a caller-supplied task id), delivered as
+     * plain text or an SSE error string, never as markup, capped at 300 characters;
+     * a message-less exception gets the generic hint.
+     */
+    static String invalidApprovalDetail(IllegalArgumentException e) {
+        String message = e.getMessage();
+        String detail = message == null || message.isBlank()
+                ? "an unknown task id was referenced, or a task is not awaiting approval."
+                : message.length() > 300 ? message.substring(0, 300) : message;
+        return "Invalid approval request: " + detail;
+    }
+
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
         String rejection = request == null ? "A request body is required." : rejectionReason(request.question(), request.userId());
@@ -606,15 +623,11 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.")
                     .build();
         } catch (IllegalArgumentException e) {
-            // #13: an invalid approval request (unknown taskId / task not awaiting, or a
-            // review field the editor refused) → 400. The message says which field and
-            // why - the caller needs it to correct the request; it is plain text, capped.
+            // #13: an invalid approval request → 400 naming the field and why (see
+            // invalidApprovalDetail for the one rule both approve paths follow).
             LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
-            String detail = e.getMessage() == null || e.getMessage().isBlank()
-                    ? "an unknown task id was referenced, or a task is not awaiting approval."
-                    : e.getMessage().length() > 300 ? e.getMessage().substring(0, 300) : e.getMessage();
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Invalid approval request: " + detail)
+                    .entity(invalidApprovalDetail(e))
                     .build();
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
@@ -866,11 +879,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.");
             closeQuietly(eventSink);
         } catch (IllegalArgumentException e) {
-            // invalid taskApprovals (unknown taskId / task not awaiting) — keep the
-            // hint generic, never reflect the caller-supplied taskId.
-            sendErrorEvent(eventSink, sse,
-                    "Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
-                            + "approval.");
+            // the same 400 detail as the non-streaming path
+            LOGGER.infof("Streaming approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
+            sendErrorEvent(eventSink, sse, invalidApprovalDetail(e));
             closeQuietly(eventSink);
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
