@@ -124,7 +124,7 @@ Analyzes the response text for uncertainty signals. Phrases and thresholds are *
 
 A separate (typically cheap) model rates the probability that the step's answer **fully and correctly addresses the user's request**. Requires a `judgeModel` config block; the judge is built once via the model registry (with vault + global-variable resolution). If the judge cannot be built or the call fails, it falls back to `heuristic`.
 
-The judge sees the request as well as the answer: the text of the latest user message the step's model was sent (its last 8,000 characters), so a fluent answer to the wrong question is not graded as a good one. An image-only message has no text, and the judge then rates the answer on its own. `acceptanceCriterion` adds a condition of your own to the grade:
+The judge sees the request as well as the answer: the text of the latest user message the step's model was sent (8,000 characters at most: a long single text keeps its end, and when attachments follow the typed question the question is kept whole and the head of the attached text fills the rest), so a fluent answer to the wrong question is not graded as a good one. An image-only message has no text, and the judge then rates the answer on its own. `acceptanceCriterion` adds a condition of your own to the grade:
 
 ```json
 "judgeModel": { "type": "openai", "parameters": { "modelName": "gpt-4o-mini", "apiKey": "${vault:openai-key}" } },

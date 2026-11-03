@@ -12,7 +12,7 @@ broke. This change adopts what the release made possible, and one lesson from it
 - **The `judge_model` cascade judge sees the request.** It was sent only the answer and asked to rate it, so a
   fluent answer to the wrong question scored as well as a right one. langchain4j's cascade grades "does the answer
   fully and correctly address the request?". `ConfidenceEvaluator` now sends the text of the latest user message
-  the step's model saw (its last 8,000 characters, where a templated prompt puts the question) together with the
+  the step's model saw (8,000 characters at most: a single long text keeps its end, where a templated prompt puts the question; with attachments the typed question is kept whole and the head of the attached text fills the rest) together with the
   answer, and asks for the probability that the answer is acceptable for the request. With no user text (an
   image-only message) the judge rates the answer on its own, as before. `CascadingModelExecutor` passes the request
   from both the legacy and the agent-mode step.

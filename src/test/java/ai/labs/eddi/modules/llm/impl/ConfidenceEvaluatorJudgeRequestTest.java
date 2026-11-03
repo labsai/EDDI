@@ -103,7 +103,7 @@ class ConfidenceEvaluatorJudgeRequestTest {
     }
 
     @Test
-    @DisplayName("a long request keeps its end, where a templated prompt puts the question")
+    @DisplayName("a long single-text request keeps its end, where a templated prompt puts the question")
     void longRequestKeepsItsTail() {
         String text = "x".repeat(ConfidenceEvaluator.MAX_JUDGE_REQUEST_CHARS) + "THE QUESTION?";
 
@@ -111,5 +111,27 @@ class ConfidenceEvaluatorJudgeRequestTest {
         assertTrue(request.startsWith("[…] "));
         assertTrue(request.endsWith("THE QUESTION?"));
         assertEquals(ConfidenceEvaluator.MAX_JUDGE_REQUEST_CHARS + "[…] ".length(), request.length());
+    }
+
+    @Test
+    @DisplayName("a long attachment cannot push the typed question out of the request")
+    void longAttachmentKeepsTheQuestion() {
+        String question = "What does section 3 say about refunds?";
+        String label = "[Attachment terms.pdf (application/pdf) — extracted text]";
+        String attachment = label + "\n" + "y".repeat(20_000);
+
+        String request = ConfidenceEvaluator.latestUserRequest(List.of(UserMessage.from(TextContent.from(question), TextContent.from(attachment))));
+        assertTrue(request.startsWith(question + "\n" + label));
+        assertTrue(request.endsWith(" […]"));
+        assertTrue(request.length() <= ConfidenceEvaluator.MAX_JUDGE_REQUEST_CHARS + " […]".length());
+    }
+
+    @Test
+    @DisplayName("a question and attachment that fit are joined unchanged")
+    void shortAttachmentIsJoinedUnchanged() {
+        String request = ConfidenceEvaluator
+                .latestUserRequest(
+                        List.of(UserMessage.from(TextContent.from("question?"), TextContent.from("[Attachment a.txt (text/plain)]\nbody"))));
+        assertEquals("question?\n[Attachment a.txt (text/plain)]\nbody", request);
     }
 }

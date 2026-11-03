@@ -22,7 +22,6 @@ import org.jboss.logging.Logger;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -91,9 +90,11 @@ class ConfidenceEvaluator {
     static final double DEFAULT_SCORE = 0.8;
 
     /**
-     * How much of the user's request the judge sees, counted from the END of the
-     * latest user message: a templated prompt usually puts context first and the
-     * question last. Bounds the judge's input cost on a long message.
+     * How much of the user's request the judge sees. A message of one text keeps
+     * its END, where a templated prompt puts the question. A message of several
+     * texts keeps its first one, the typed question, whole and gives the attached
+     * context after it what is left, from its head. Bounds the judge's input cost
+     * on a long message.
      */
     static final int MAX_JUDGE_REQUEST_CHARS = 8_000;
 
@@ -404,9 +405,15 @@ class ConfidenceEvaluator {
     }
 
     /**
-     * The text of the latest user message, its last
-     * {@value #MAX_JUDGE_REQUEST_CHARS} characters at most; null when there is none
-     * or it has no text (an image-only message).
+     * The text of the latest user message, {@value #MAX_JUDGE_REQUEST_CHARS}
+     * characters at most (plus a truncation marker); null when there is none or it
+     * has no text (an image-only message). The first non-blank text is the question
+     * ({@code AttachmentForwarder} puts the typed question first and each
+     * attachment's extracted text after it), the rest is attached context. When all
+     * of it fits it is joined unchanged. When the question alone is too long its
+     * last characters are kept. Otherwise the question is kept whole and the head
+     * of the context fills the remaining budget, because each attachment starts
+     * with its label; a long attachment must not push the question out.
      */
     static String latestUserRequest(List<ChatMessage> messages) {
         if (messages == null) {
@@ -414,12 +421,25 @@ class ConfidenceEvaluator {
         }
         for (int i = messages.size() - 1; i >= 0; i--) {
             if (messages.get(i) instanceof UserMessage user) {
-                String text = user.contents().stream().filter(TextContent.class::isInstance).map(c -> ((TextContent) c).text())
-                        .collect(Collectors.joining("\n"));
-                if (isBlank(text)) {
+                List<String> texts = user.contents().stream().filter(TextContent.class::isInstance).map(c -> ((TextContent) c).text())
+                        .filter(t -> !isBlank(t)).toList();
+                if (texts.isEmpty()) {
                     return null;
                 }
-                return text.length() <= MAX_JUDGE_REQUEST_CHARS ? text : "[…] " + text.substring(text.length() - MAX_JUDGE_REQUEST_CHARS);
+                String all = String.join("\n", texts);
+                if (all.length() <= MAX_JUDGE_REQUEST_CHARS) {
+                    return all;
+                }
+                String question = texts.get(0);
+                if (question.length() >= MAX_JUDGE_REQUEST_CHARS) {
+                    return "[…] " + question.substring(question.length() - MAX_JUDGE_REQUEST_CHARS);
+                }
+                int budget = MAX_JUDGE_REQUEST_CHARS - question.length() - 1;
+                if (budget < 1) {
+                    return question;
+                }
+                String context = String.join("\n", texts.subList(1, texts.size()));
+                return question + "\n" + context.substring(0, Math.min(budget, context.length())) + " […]";
             }
         }
         return null;
