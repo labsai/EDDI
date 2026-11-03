@@ -5610,8 +5610,8 @@
     "unknownVersion": "Unbekannt",
     "checkNow": "Jetzt prüfen",
     "checking": "Wird geprüft…",
-    "autoCheck": "Bei jedem Seitenaufruf automatisch prüfen",
-    "autoCheckHint": "Führt pro Browser-Neuladen eine Prüfung durch und zeigt einen Hinweis, wenn eine neuere Version vorliegt.",
+    "autoCheck": "Automatisch nach Updates suchen",
+    "autoCheckHint": "{{productName}} sucht einmal täglich nach einer neuen Version und benachrichtigt die Administratoren; diese Seite prüft zusätzlich bei jedem Laden und zeigt einen Hinweis. Deaktivieren Sie die Option, um alles zu stoppen.",
     "privacyNote": "Die Prüfung kontaktiert ausschließlich api.github.com direkt aus Ihrem Browser. Ihr Browser fügt die Adresse dieser Seite (den Request-Origin) hinzu; weitere Daten der Installation werden nicht übertragen.",
     "neverChecked": "Noch keine Prüfung durchgeführt.",
     "upToDate": "Sie verwenden die neueste Version ({{version}}).",
@@ -5632,7 +5632,9 @@
     "howToUpdate": "So aktualisieren Sie",
     "howToUpdateCli": "Mit dem eddi-CLI (vom Installer angelegt):",
     "howToUpdateManual": "Ohne CLI, im Installationsverzeichnis (standardmäßig ~/.eddi):",
-    "howToUpdateNote": "Passen Sie die -f-Flags an Ihr Setup an — mit Keycloak zusätzlich -f docker-compose.auth.yml."
+    "howToUpdateNote": "Passen Sie die -f-Flags an Ihr Setup an — mit Keycloak zusätzlich -f docker-compose.auth.yml.",
+    "autoCheckLocked": "Durch die Konfiguration dieser Installation deaktiviert (EDDI_UPDATE_CHECK_ENABLED=false). Entfernen Sie die Einstellung und starten Sie neu, um die Prüfung zu erlauben.",
+    "autoCheckAdminOnly": "Nur ein Administrator kann dies ändern."
   },
   "analyticsPage": {
     "acrossGroups": "über {{count}} Task Forces",

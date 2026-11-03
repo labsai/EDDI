@@ -5610,8 +5610,8 @@
     "unknownVersion": "Unknown",
     "checkNow": "Check now",
     "checking": "Checking…",
-    "autoCheck": "Check automatically on every page load",
-    "autoCheckHint": "Runs one check per browser reload and shows a banner when a newer release exists.",
+    "autoCheck": "Check for updates automatically",
+    "autoCheckHint": "{{productName}} checks for a new release once a day and notifies the administrators; this page also checks on each load and shows a banner. Turn it off to stop all of it.",
     "privacyNote": "Checks contact api.github.com directly from your browser — no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
     "neverChecked": "No check run yet.",
     "upToDate": "You are running the latest release ({{version}}).",
@@ -5632,7 +5632,9 @@
     "howToUpdate": "How to update",
     "howToUpdateCli": "With the eddi CLI (created by the installer):",
     "howToUpdateManual": "Without the CLI, from your install directory (~/.eddi by default):",
-    "howToUpdateNote": "Adjust the -f flags to match your setup — add -f docker-compose.auth.yml if you run Keycloak."
+    "howToUpdateNote": "Adjust the -f flags to match your setup — add -f docker-compose.auth.yml if you run Keycloak.",
+    "autoCheckLocked": "Switched off by this deployment's configuration (EDDI_UPDATE_CHECK_ENABLED=false). Remove that setting and restart to allow it.",
+    "autoCheckAdminOnly": "Only an administrator can change this."
   },
   "analyticsPage": {
     "acrossGroups": "across {{count}} task forces",

@@ -5610,8 +5610,8 @@
     "unknownVersion": "不明",
     "checkNow": "今すぐ確認",
     "checking": "確認中…",
-    "autoCheck": "ページを読み込むたびに自動で確認する",
-    "autoCheckHint": "ブラウザの再読み込みごとに 1 回確認し、新しいリリースがあればバナーを表示します。",
+    "autoCheck": "更新を自動的に確認する",
+    "autoCheckHint": "{{productName}} は 1 日に 1 回新しいリリースを確認して管理者に通知します。このページも読み込みのたびに確認し、バナーを表示します。オフにするとすべて停止します。",
     "privacyNote": "確認はブラウザから api.github.com にのみ直接アクセスします。ブラウザーはこのサイトのアドレス（リクエストのオリジン）を付加しますが、それ以外のデプロイ情報は送信されません。",
     "neverChecked": "まだ確認していません。",
     "upToDate": "最新リリース（{{version}}）を使用しています。",
@@ -5632,7 +5632,9 @@
     "howToUpdate": "アップデート方法",
     "howToUpdateCli": "eddi CLI（インストーラーが作成）を使う場合:",
     "howToUpdateManual": "CLI がない場合、インストールディレクトリ（既定は ~/.eddi）で:",
-    "howToUpdateNote": "-f フラグは構成に合わせて調整してください。Keycloak を使う場合は -f docker-compose.auth.yml を追加します。"
+    "howToUpdateNote": "-f フラグは構成に合わせて調整してください。Keycloak を使う場合は -f docker-compose.auth.yml を追加します。",
+    "autoCheckLocked": "このデプロイの設定により無効化されています (EDDI_UPDATE_CHECK_ENABLED=false)。許可するには、この設定を削除して再起動してください。",
+    "autoCheckAdminOnly": "この設定を変更できるのは管理者のみです。"
   },
   "analyticsPage": {
     "acrossGroups": "{{count}} 件のタスクフォース全体",

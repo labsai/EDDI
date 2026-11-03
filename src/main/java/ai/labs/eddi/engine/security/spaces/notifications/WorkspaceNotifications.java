@@ -24,7 +24,9 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -58,6 +60,16 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 public class WorkspaceNotifications {
 
     private static final Logger LOGGER = Logger.getLogger(WorkspaceNotifications.class);
+
+    /**
+     * The recipient of deployment-level notices (a newer release exists). Not a
+     * principal: an administrator reads it in addition to their own inbox, and with
+     * authorization off — where everybody is an administrator — everybody does.
+     */
+    public static final String SYSTEM_ADMINS = "system:admins";
+
+    /** The actor of a notification the deployment itself raised. */
+    static final String SYSTEM_ACTOR = "system";
 
     /** Newest notifications kept per recipient. */
     public static final int INBOX_SIZE = 200;
@@ -133,6 +145,44 @@ public class WorkspaceNotifications {
             recipients.add(Subjects.decode(subject.substring(Subjects.USER_PREFIX.length())));
         } else if (subject.startsWith(Subjects.TEAM_PREFIX)) {
             recipients.addAll(directory.teamMembers(subject, MAX_TEAM_FAN_OUT));
+        }
+        return recipients;
+    }
+
+    // --- Deployment notices --------------------------------------------------
+
+    /**
+     * Tells the administrators that release {@code version} is out. Best effort and
+     * idempotent per version: a version already announced and still unread is not
+     * announced twice, so a check that runs on every node, or after a restart, adds
+     * at most one entry.
+     *
+     * @param releaseUrl
+     *            the release page, or null
+     */
+    public void onUpdateAvailable(String version, String releaseUrl) {
+        if (version == null || version.isBlank()) {
+            return;
+        }
+        if (store.hasUnread(SYSTEM_ADMINS, SYSTEM_ACTOR, version, WorkspaceNotification.Type.UPDATE_AVAILABLE)) {
+            return;
+        }
+        deliver(new WorkspaceNotification(UUID.randomUUID().toString(), SYSTEM_ADMINS, WorkspaceNotification.Type.UPDATE_AVAILABLE, version,
+                releaseUrl, version, SYSTEM_ACTOR, "EDDI", null, null, Instant.now(), null));
+    }
+
+    /**
+     * Whose inboxes the caller reads: their own, and the deployment's when they are
+     * an administrator. Empty for an anonymous caller who is not one.
+     */
+    private List<String> recipients() {
+        List<String> recipients = new ArrayList<>(2);
+        String principal = spaceContext.currentPrincipal();
+        if (principal != null) {
+            recipients.add(principal);
+        }
+        if (accessGuard.callerIsAdmin()) {
+            recipients.add(SYSTEM_ADMINS);
         }
         return recipients;
     }
@@ -251,17 +301,22 @@ public class WorkspaceNotifications {
 
     /** The caller's notifications, newest first. Empty for an anonymous caller. */
     public List<WorkspaceNotification> inbox(boolean unreadOnly, int limit) {
-        String principal = spaceContext.currentPrincipal();
-        if (principal == null) {
-            return List.of();
+        int max = Math.max(1, Math.min(limit, INBOX_SIZE));
+        List<WorkspaceNotification> merged = new ArrayList<>();
+        for (String recipient : recipients()) {
+            merged.addAll(store.list(recipient, unreadOnly, max));
         }
-        return store.list(principal, unreadOnly, Math.max(1, Math.min(limit, INBOX_SIZE)));
+        merged.sort(Comparator.comparing(WorkspaceNotification::createdAt).reversed());
+        return merged.size() > max ? List.copyOf(merged.subList(0, max)) : merged;
     }
 
     /** How many of the caller's notifications are unread. */
     public long unreadCount() {
-        String principal = spaceContext.currentPrincipal();
-        return principal == null ? 0 : store.countUnread(principal);
+        long unread = 0;
+        for (String recipient : recipients()) {
+            unread += store.countUnread(recipient);
+        }
+        return unread;
     }
 
     /**
@@ -272,11 +327,13 @@ public class WorkspaceNotifications {
      *            the notifications, or null for all
      */
     public long markRead(Collection<String> ids) {
-        String principal = spaceContext.currentPrincipal();
-        if (principal == null) {
-            return 0;
+        List<String> wanted = ids == null ? null : List.copyOf(ids);
+        Instant now = Instant.now();
+        long marked = 0;
+        for (String recipient : recipients()) {
+            marked += store.markRead(recipient, wanted, now);
         }
-        return store.markRead(principal, ids == null ? null : List.copyOf(ids), Instant.now());
+        return marked;
     }
 
     // --- GDPR ----------------------------------------------------------------

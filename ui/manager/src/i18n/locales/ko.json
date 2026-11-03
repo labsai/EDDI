@@ -5610,8 +5610,8 @@
     "unknownVersion": "알 수 없음",
     "checkNow": "지금 확인",
     "checking": "확인 중…",
-    "autoCheck": "페이지를 불러올 때마다 자동으로 확인",
-    "autoCheckHint": "브라우저를 새로 고칠 때마다 한 번 확인하고, 더 새로운 릴리스가 있으면 배너를 표시합니다.",
+    "autoCheck": "업데이트 자동 확인",
+    "autoCheckHint": "{{productName}}는 하루에 한 번 새 릴리스를 확인하고 관리자에게 알립니다. 이 페이지도 로드할 때마다 확인하고 배너를 표시합니다. 끄면 모두 중지됩니다.",
     "privacyNote": "확인은 브라우저에서 api.github.com에만 직접 연결합니다. 브라우저가 이 사이트의 주소(요청 출처)를 함께 보내며, 그 외의 배포 데이터는 전송하지 않습니다.",
     "neverChecked": "아직 확인하지 않았습니다.",
     "upToDate": "최신 릴리스({{version}})를 사용 중입니다.",
@@ -5632,7 +5632,9 @@
     "howToUpdate": "업데이트 방법",
     "howToUpdateCli": "eddi CLI(설치 관리자가 생성)를 사용하는 경우:",
     "howToUpdateManual": "CLI가 없다면 설치 디렉터리(기본값 ~/.eddi)에서:",
-    "howToUpdateNote": "-f 플래그는 설정에 맞게 조정하세요. Keycloak을 사용한다면 -f docker-compose.auth.yml을 추가합니다."
+    "howToUpdateNote": "-f 플래그는 설정에 맞게 조정하세요. Keycloak을 사용한다면 -f docker-compose.auth.yml을 추가합니다.",
+    "autoCheckLocked": "이 배포의 구성으로 꺼져 있습니다(EDDI_UPDATE_CHECK_ENABLED=false). 허용하려면 해당 설정을 제거하고 다시 시작하세요.",
+    "autoCheckAdminOnly": "관리자만 변경할 수 있습니다."
   },
   "analyticsPage": {
     "acrossGroups": "태스크포스 {{count}}개 전반",

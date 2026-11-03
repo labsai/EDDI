@@ -22,12 +22,14 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -239,5 +241,79 @@ class WorkspaceNotificationsTest {
 
         verify(store).list("bob", true, WorkspaceNotifications.INBOX_SIZE);
         verify(store).markRead(eq("bob"), eq(List.of("someone-elses-id")), any());
+    }
+
+    @Nested
+    @DisplayName("update notices")
+    class UpdateNotices {
+
+        @Test
+        @DisplayName("go to the administrators' shared inbox, naming the version and the release page")
+        void addressedToAdministrators() {
+            sut.onUpdateAvailable("9.9.9", "https://github.com/labsai/EDDI/releases/tag/9.9.9");
+
+            ArgumentCaptor<WorkspaceNotification> saved = ArgumentCaptor.forClass(WorkspaceNotification.class);
+            verify(store).add(saved.capture());
+            WorkspaceNotification n = saved.getValue();
+            assertEquals(WorkspaceNotifications.SYSTEM_ADMINS, n.recipient());
+            assertEquals(WorkspaceNotification.Type.UPDATE_AVAILABLE, n.type());
+            assertEquals("9.9.9", n.resourceName());
+            assertEquals("https://github.com/labsai/EDDI/releases/tag/9.9.9", n.resourceUri());
+            assertTrue(n.unread());
+        }
+
+        @Test
+        @DisplayName("are not raised twice while the first is unread")
+        void notTwice() {
+            when(store.hasUnread(WorkspaceNotifications.SYSTEM_ADMINS, "system", "9.9.9", WorkspaceNotification.Type.UPDATE_AVAILABLE))
+                    .thenReturn(true);
+
+            sut.onUpdateAvailable("9.9.9", null);
+
+            verify(store, never()).add(any());
+        }
+
+        @Test
+        @DisplayName("are read by an administrator in addition to their own inbox, newest first")
+        void administratorReadsBoth() {
+            when(guard.callerIsAdmin()).thenReturn(true);
+            var own = new WorkspaceNotification("a", "bob", WorkspaceNotification.Type.SHARED_WITH_YOU, "r", null, "R", "al", "Al", "VIEW", null,
+                    Instant.parse("2026-01-01T00:00:00Z"), null);
+            var update = new WorkspaceNotification("b", WorkspaceNotifications.SYSTEM_ADMINS, WorkspaceNotification.Type.UPDATE_AVAILABLE, "9.9.9",
+                    null, "9.9.9", "system", "EDDI", null, null, Instant.parse("2026-02-01T00:00:00Z"), null);
+            when(store.list("bob", false, 50)).thenReturn(List.of(own));
+            when(store.list(WorkspaceNotifications.SYSTEM_ADMINS, false, 50)).thenReturn(List.of(update));
+            when(store.countUnread("bob")).thenReturn(1L);
+            when(store.countUnread(WorkspaceNotifications.SYSTEM_ADMINS)).thenReturn(1L);
+
+            assertEquals(List.of("b", "a"), sut.inbox(false, 50).stream().map(WorkspaceNotification::id).toList());
+            assertEquals(2L, sut.unreadCount());
+        }
+
+        @Test
+        @DisplayName("are invisible to a caller who is not an administrator")
+        void hiddenFromOthers() {
+            when(guard.callerIsAdmin()).thenReturn(false);
+
+            sut.inbox(false, 50);
+            sut.unreadCount();
+            sut.markRead(null);
+
+            verify(store, never()).list(eq(WorkspaceNotifications.SYSTEM_ADMINS), anyBoolean(), anyInt());
+            verify(store, never()).countUnread(WorkspaceNotifications.SYSTEM_ADMINS);
+            verify(store, never()).markRead(eq(WorkspaceNotifications.SYSTEM_ADMINS), any(), any());
+        }
+
+        @Test
+        @DisplayName("reach an administrator when authorization is off and there is no principal")
+        void anonymousAdministrator() {
+            when(spaceContext.currentPrincipal()).thenReturn(null);
+            when(guard.callerIsAdmin()).thenReturn(true);
+
+            sut.markRead(null);
+
+            verify(store).markRead(eq(WorkspaceNotifications.SYSTEM_ADMINS), any(), any());
+            verify(store, never()).markRead(eq("bob"), any(), any());
+        }
     }
 }

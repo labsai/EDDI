@@ -684,6 +684,10 @@ The brand is normally edited at runtime (`/administration/branding`, `eddi-admin
 | `eddi.branding.color.chat-accent` | *(unset: the primary)* | The Chat UI's accent |
 | `eddi.branding.powered-by` | *(unset: `true`)* | Show "Powered by EDDI" |
 | `eddi.branding.show-update-check` | *(unset: `false`)* | Keep the Manager's update check UI while branded |
+| `eddi.update-check.enabled` | `true` (env `EDDI_UPDATE_CHECK_ENABLED`) | The daily "is a newer EDDI out?" check against `api.github.com`, with a notification for administrators. `false` stops it entirely, the first check after the first boot included, and locks the Manager's switch off. See [Docker → Update check](docker.md#update-check) |
+| `eddi.update-check.interval` | `24h` | How often the update check runs |
+| `eddi.update-check.initial-delay` | `1m` | Delay after boot before the first update check |
+| `eddi.update-check.url` | GitHub `labsai/EDDI` `releases/latest` API | Release lookup endpoint; change only for a mirror or a test |
 | `eddi.branding.assets-dir` | *(unset)* | Directory of brand images under fixed names (`logo.svg\|png\|webp`, `logo-dark.*`, `icon.*`, `favicon.ico\|png\|svg`, `og-image.*`), each checked like an upload. A missing directory or a refused file fails startup |
 
 The Helm chart sets each of these from its `eddi.branding.*` values, and mounts a ConfigMap of images as `assets-dir` ([White-Labeling → Helm](white-labeling.md#helm)). The MCP server's `serverInfo` follows the product name unless `quarkus.mcp.server.server-info.name` is set.
