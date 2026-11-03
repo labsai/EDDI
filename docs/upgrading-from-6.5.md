@@ -204,7 +204,7 @@ every new field is optional and absent on existing documents. What an existing d
 
 - **A new-release check is on by default.** The backend asks `api.github.com` once a day (through the
   SSRF-safe `OutboundHttp`) whether a newer EDDI exists and raises one admin notification per
-  release. Set `EDDI_UPDATE_CHECK_ENABLED=false` (`eddi.update-check.enabled`) to turn it off before
+  release. Set `eddi.update-check.enabled=false` (or its environment-variable form) to turn it off before
   first boot; that also locks the switch in the Manager. The old browser-only `localStorage` flag is
   ignored. In an air-gapped deployment, disable it so the daily call does not fail.
 - **Cost figures rise for some workloads.** Usage is normalised the way each provider bills it, so
