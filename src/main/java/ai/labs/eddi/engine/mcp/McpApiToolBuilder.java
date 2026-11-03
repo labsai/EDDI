@@ -333,6 +333,10 @@ public final class McpApiToolBuilder {
             // The base for relative $refs is the URL the document was finally read
             // from: after a redirect that differs from the location the editor gave.
             OpenApiSpecFetcher.FetchedSpec fetched = specFetcher.fetchSpec(location);
+            // A downloaded document is the publisher's, not the editor's: a file: or
+            // classpath: $ref in it would be read from the local filesystem by the
+            // parser's 3.1 resolver. Relative refs stay (they resolve against the URL).
+            rejectUnsafeRefs(fetched.content(), true);
             result = new OpenAPIV3Parser().readContents(fetched.content(), null, parseOptions, fetched.location());
         }
 
@@ -385,12 +389,24 @@ public final class McpApiToolBuilder {
      *             cannot be deserialized for inspection
      */
     static void rejectUnsafeInlineRefs(String specContent) {
+        rejectUnsafeRefs(specContent, false);
+    }
+
+    /**
+     * {@link #rejectUnsafeInlineRefs} for either kind of document. A
+     * {@code downloaded} one has a base URL, against which a relative {@code $ref}
+     * ({@code ./pet.yaml}, {@code /schemas/pet.json}) resolves to an http(s) URL,
+     * so only a ref with an explicit scheme other than http(s) — or a UNC path — is
+     * refused there; an inline document has no base, and its relative refs would be
+     * read from the process working directory.
+     */
+    static void rejectUnsafeRefs(String specContent, boolean downloaded) {
         if (specContent == null) {
             return;
         }
         Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
         while (matcher.find()) {
-            checkInlineRef(matcher.group(1));
+            checkRef(matcher.group(1), downloaded);
         }
 
         JsonNode root = deserializeLikeParser(specContent);
@@ -403,7 +419,7 @@ public final class McpApiToolBuilder {
             if (node.isObject()) {
                 JsonNode ref = node.get("$ref");
                 if (ref != null && ref.isValueNode()) {
-                    checkInlineRef(ref.asText());
+                    checkRef(ref.asText(), downloaded);
                 }
             }
             if (node.isContainerNode()) {
@@ -429,7 +445,9 @@ public final class McpApiToolBuilder {
         }
     }
 
-    private static void checkInlineRef(String rawRef) {
+    private static final Pattern EXPLICIT_SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
+
+    private static void checkRef(String rawRef, boolean downloaded) {
         String ref = rawRef.trim();
         if (ref.isEmpty() || ref.startsWith("#")) {
             return; // internal fragment reference
@@ -438,7 +456,10 @@ public final class McpApiToolBuilder {
         if (lower.startsWith("http://") || lower.startsWith("https://")) {
             return; // URL ref — guarded by setSafelyResolveURL
         }
-        throw new IllegalArgumentException("Inline OpenAPI spec contains an external $ref '" + ref
+        if (downloaded && !ref.startsWith("\\\\") && !EXPLICIT_SCHEME.matcher(ref).find()) {
+            return; // relative to the document's URL
+        }
+        throw new IllegalArgumentException((downloaded ? "Downloaded" : "Inline") + " OpenAPI spec contains an external $ref '" + ref
                 + "'. Only internal (#/...) or http(s) references are allowed; a filesystem or non-http reference is refused.");
     }
 
