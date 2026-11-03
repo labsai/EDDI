@@ -251,4 +251,23 @@ class TurnAuditBufferTest {
         assertEquals("<p>", redacted.output().get("echo"));
         assertEquals("order 14711", redacted.output().get("note"));
     }
+
+    /** A payload object that is not a map, list or string — an output item. */
+    public record OutputItem(String text) {
+    }
+
+    @Test
+    @DisplayName("a secret in a payload object, or in a JSON string's escaped form, is redacted too")
+    void secretsInObjectsAndEscapedJsonAreRedacted() {
+        String secret = "line1\"quoted\"\\end";
+        String escaped = "{\"arguments\":\"line1\\\"quoted\\\"\\\\end\"}";
+        var entry = new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "task", "type", 0, 1L, Map.of("userInput", "hi"),
+                Map.of("item", new OutputItem("say " + secret)), Map.of("raw", escaped), null, List.of(), 0.0, Instant.now(), null, null);
+
+        AuditEntry redacted = TurnAuditBuffer.redactValues(entry, List.of(secret), "<p>");
+
+        assertFalse(String.valueOf(redacted.output().get("item")).contains("quoted"), "the object's field must be scrubbed");
+        assertFalse(String.valueOf(redacted.llmDetail().get("raw")).contains("quoted"), "the decoded JSON value must be scrubbed");
+        assertTrue(String.valueOf(redacted.llmDetail().get("raw")).contains("<p>"));
+    }
 }

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.audit;
 
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.cluster.KvKeys;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -13,6 +14,9 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -60,6 +64,40 @@ class AuditLedgerErasedUserTest {
         var stored = flushed();
         assertKeyedPseudonym(stored.get(0).userId());
         assertEquals("someone-else", stored.get(1).userId());
+    }
+
+    /**
+     * The peer's gdpr-stop reply lets the erasing node sweep the stored rows: it
+     * must not go out while a batch drained before the mark is still being
+     * committed.
+     */
+    @Test
+    void theClusterStopReplyWaitsForABatchThatIsBeingCommitted() throws Exception {
+        var committing = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            committing.countDown();
+            assertTrue(release.await(10, TimeUnit.SECONDS));
+            return null;
+        }).when(auditStore).appendBatch(anyList());
+        ledger.submit(entryFor("erased-user", "queued"));
+        var flusher = new Thread(ledger::flush);
+        flusher.start();
+        assertTrue(committing.await(10, TimeUnit.SECONDS));
+
+        var replied = new AtomicBoolean();
+        var stop = new Thread(() -> {
+            ledger.stopInFlightWorkByHash(KvKeys.sha256("erased-user"));
+            replied.set(true);
+        });
+        stop.start();
+        stop.join(300);
+        assertFalse(replied.get(), "the reply went out while the batch was still being written");
+
+        release.countDown();
+        stop.join(10_000);
+        flusher.join(10_000);
+        assertTrue(replied.get());
     }
 
     @Test
