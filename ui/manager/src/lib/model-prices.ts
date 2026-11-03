@@ -117,5 +117,11 @@ export function parseCatalogImport(text: string): Pick<ModelPriceCatalog, "unpri
   if (!parsed || typeof parsed !== "object" || !Array.isArray(parsed.entries)) {
     throw new Error("not a price catalog");
   }
+  const wellFormed = parsed.entries.every(
+    (e) => e != null && typeof e === "object" && typeof e.provider === "string" && typeof e.model === "string" && (e.asOf == null || typeof e.asOf === "string"),
+  );
+  if (!wellFormed) {
+    throw new Error("not a price catalog");
+  }
   return { unpricedPolicy: parsed.unpricedPolicy ?? "ALLOW", entries: parsed.entries };
 }

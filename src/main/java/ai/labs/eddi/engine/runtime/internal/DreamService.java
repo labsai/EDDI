@@ -1069,9 +1069,13 @@ public class DreamService {
                              Double outputPricePer1M) {
         boolean inputPriced = inputPricePer1M != null && inputPricePer1M >= 0;
         boolean outputPriced = outputPricePer1M != null && outputPricePer1M >= 0;
+        if (!(inputPriced && outputPriced) && result != null && result.usage() != null) {
+            // a missing price is completed from the catalog, as everywhere else
+            return ModelPriceResolver.price(PriceOverride.of(inputPriced ? inputPricePer1M : null, outputPriced ? outputPricePer1M : null),
+                    result.usage()).usd();
+        }
         if (!inputPriced && !outputPriced) {
-            // no Dream prices: the catalog prices the call's metered usage, if any
-            return result != null && result.usage() != null ? ModelPriceResolver.price(PriceOverride.NONE, result.usage()).usd() : 0.0;
+            return 0.0;
         }
         return estimateCost(result, inputContentLength, inputPriced ? inputPricePer1M : 0.0, outputPriced ? outputPricePer1M : 0.0);
     }

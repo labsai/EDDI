@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DollarSign } from "lucide-react";
 import { EditorSection } from "../editor-section";
@@ -110,6 +110,8 @@ type TierField = "inputPricePer1M" | "outputPricePer1M";
 function AdvancedPricing({ task, onChange, readOnly }: TaskSectionProps) {
   const { t } = useTranslation();
   const baseId = useId();
+  // seeded once from the data: clearing the last price must not close the panel mid-edit
+  const [open, setOpen] = useState(task.pricing != null);
   const pricing = task.pricing ?? {};
 
   const write = (next: typeof pricing) => {
@@ -156,7 +158,7 @@ function AdvancedPricing({ task, onChange, readOnly }: TaskSectionProps) {
   );
 
   return (
-    <details className="rounded-md border border-border/60 p-2" data-testid="task-pricing-advanced" open={task.pricing != null}>
+    <details className="rounded-md border border-border/60 p-2" data-testid="task-pricing-advanced" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className="cursor-pointer text-[10px] font-medium text-muted-foreground">
         {t("modelPrices.advancedPricing", "Cache and long-context prices")}
       </summary>

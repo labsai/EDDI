@@ -228,6 +228,14 @@ public final class MemoryKeys {
     public static final String AUDIT_PRICING = "audit:pricing";
 
     /**
+     * What the step's spend events already reported of the step's accumulated
+     * unpriced-call and token totals ({@code unpricedCalls}, {@code inputTokens},
+     * {@code outputTokens}), so a pause-and-resume settles only the difference.
+     * Exact-key reads only, like {@link #AUDIT_METERED_COST}.
+     */
+    public static final String AUDIT_SPEND_REPORTED = "audit:spend_reported";
+
+    /**
      * Prefix of the guardrail evidence keys,
      * {@code audit:guardrail:<phase>:<type>}: a {@code List} of {@code {phase,
      * type, action, reason, retryCount, taskId}} records, one per time that
