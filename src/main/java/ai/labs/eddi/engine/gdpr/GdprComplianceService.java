@@ -1517,7 +1517,12 @@ public class GdprComplianceService {
      * caching is off and the caller should simply use its own store read.
      */
     private Boolean offerUnrestricted(String userId) {
-        return restrictionCache == null ? null : restrictionCache.putIfAbsent(userId, false);
+        // A read-through fill (the store said "not restricted"): not announced to the
+        // other
+        // nodes, which would otherwise evict their copy on every miss here. A
+        // "restricted"
+        // observation is still published with put, so it reaches every node at once.
+        return restrictionCache == null ? null : restrictionCache.fillIfAbsent(userId, false);
     }
 
     /**
