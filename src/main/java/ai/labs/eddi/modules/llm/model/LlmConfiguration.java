@@ -363,6 +363,17 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private ToolQuotaConfig toolQuotas;
 
         /**
+         * What a streaming client may be told about a call of each tool, keyed by tool
+         * name (like {@code toolQuotas}, the name the model invoked wins over the
+         * built-in slug): a static label and the values of a few allow-listed top-level
+         * arguments - see {@link ToolDisplayConfig}. Absent means a streamed tool call
+         * carries the tool name and call id only.
+         *
+         * @since 6.5.0
+         */
+        private Map<String, ToolDisplayConfig> toolDisplay;
+
+        /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
          * 120000 (two minutes).
          * <p>
@@ -1020,6 +1031,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public Map<String, ToolDisplayConfig> getToolDisplay() {
+            return toolDisplay;
+        }
+
+        public void setToolDisplay(Map<String, ToolDisplayConfig> toolDisplay) {
+            this.toolDisplay = toolDisplay;
         }
 
         public Integer getDefaultToolTimeoutMs() {

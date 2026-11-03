@@ -727,7 +727,7 @@ public class RestAgentEngine implements IRestAgentEngine {
             };
         }
         try {
-            Response immediate = resume(conversationId, decision, handler,
+            Response immediate = resume(conversationId, decision, handler, null,
                     returnDetailed != null ? returnDetailed : Boolean.FALSE,
                     returnCurrentStepOnly != null ? returnCurrentStepOnly : Boolean.TRUE,
                     returningFields != null ? returningFields : List.of());
@@ -745,7 +745,25 @@ public class RestAgentEngine implements IRestAgentEngine {
      * synchronous form of the endpoint.
      */
     public Response resumeConversation(String conversationId, HitlDecision decision) {
-        return resume(conversationId, decision, null, false, true, List.of());
+        return resume(conversationId, decision, null, null, false, true, List.of());
+    }
+
+    /**
+     * The admission half of {@code POST /agents/{id}/resume/stream}: the very same
+     * checks, decision handling and error mapping as the plain resume (this is the
+     * same method), for a client that watches the resumed turn live.
+     *
+     * @return {@code null} once the decision is committed - from then on
+     *         {@code streaming} is the only channel; otherwise the plain HTTP
+     *         answer to refuse the request with. Nothing has been sent to
+     *         {@code streaming} in that case.
+     */
+    public Response resumeStreaming(String conversationId, HitlDecision decision, StreamingResponseHandler streaming,
+                                    Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields) {
+        return resume(conversationId, decision, null, streaming,
+                returnDetailed != null ? returnDetailed : Boolean.FALSE,
+                returnCurrentStepOnly != null ? returnCurrentStepOnly : Boolean.TRUE,
+                returningFields != null ? returningFields : List.of());
     }
 
     /** Maximum length of an unverified approver claim recorded from the body. */
@@ -772,11 +790,12 @@ public class RestAgentEngine implements IRestAgentEngine {
     }
 
     /**
-     * @return the response to send now, or {@code null} when {@code handler} will
-     *         answer once the resumed turn has run
+     * @return the response to send now, or {@code null} when {@code handler} (or
+     *         {@code streaming}) will answer once the resumed turn has run
      */
-    private Response resume(String conversationId, HitlDecision decision, ConversationResponseHandler handler, Boolean returnDetailed,
-                            Boolean returnCurrentStepOnly, List<String> returningFields) {
+    private Response resume(String conversationId, HitlDecision decision, ConversationResponseHandler handler,
+                            StreamingResponseHandler streaming, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                            List<String> returningFields) {
         if (decision == null || decision.getVerdict() == null) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Request body must include a 'verdict' field (APPROVED or REJECTED)")
@@ -788,7 +807,7 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .build();
         }
         validateConversationOwnership(conversationId, true);
-        if (handler != null) {
+        if (handler != null || streaming != null) {
             // A reply is a read of the conversation, and resume admits approver-only
             // callers: the approver role decides a pause, it does not license reading
             // the conversation (approval-status limits an approver to the paused turn).
@@ -801,12 +820,15 @@ public class RestAgentEngine implements IRestAgentEngine {
         String principalName = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
         decision.setDecidedBy(resolveApprover(principalName, identity.isAnonymous(), decision.getDecidedBy()));
         try {
-            if (handler == null) {
+            if (streaming != null) {
+                conversationService.resumeConversationStreaming(conversationId, decision, streaming, returnDetailed, returnCurrentStepOnly,
+                        returningFields);
+            } else if (handler == null) {
                 conversationService.resumeConversation(conversationId, decision, null);
             } else {
                 conversationService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
             }
-            return handler == null ? Response.ok().build() : null;
+            return handler == null && streaming == null ? Response.ok().build() : null;
         } catch (ResourceNotFoundException e) {
             return Response.status(Response.Status.NOT_FOUND).type(TEXT_PLAIN)
                     .entity("Conversation not found.").build();

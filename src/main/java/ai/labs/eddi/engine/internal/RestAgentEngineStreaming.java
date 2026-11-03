@@ -23,6 +23,9 @@ import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.tenancy.rest.QuotaAccountingUnavailableExceptionMapper;
 
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.TurnError;
@@ -32,6 +35,7 @@ import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
@@ -49,6 +53,7 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -67,6 +72,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>{@code cascade_escalation} — a cascade step was rejected and escalated
  * ({@code fromStep}, {@code toStep}, {@code confidence}, {@code threshold},
  * {@code reason}, {@code durationMs})</li>
+ * <li>{@code tool_call} / {@code tool_result} — one tool call started /
+ * finished: name, call id, status and duration, never arguments or results (a
+ * designer's {@code toolDisplay} may add a label and a few allow-listed
+ * argument values to {@code tool_call})</li>
+ * <li>{@code hitl_resume} — {@code /resume/stream} only: the decision was
+ * committed</li>
+ * <li>{@code approval_required} — the turn ended waiting for a human; sent just
+ * before {@code done}</li>
  * <li>{@code done} — full conversation snapshot (final event)</li>
  * <li>{@code error} — error during processing</li>
  * </ul>
@@ -188,6 +201,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     @Inject
     ClientContextGuard clientContextGuard = ClientContextGuard.strict();
 
+    /**
+     * Admits a streamed resume with the plain {@code /resume}'s checks; nullable in
+     * unit tests that never resume.
+     */
+    @Inject
+    RestAgentEngine restAgentEngine;
+
     /** Reads {@code X-EDDI-Turn-Deadline-Ms}; nullable in unit tests. */
     @Inject
     TurnDeadlineHeaderReader turnDeadlineHeaderReader;
@@ -287,107 +307,182 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
         try {
             conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    new StreamingResponseHandler() {
-                        @Override
-                        public void onTaskStart(TaskId taskId, String taskType, int index) {
-                            stream.send("task_start",
-                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"index\":%d}", taskId.getIdentifier(), taskType, index));
-                        }
-
-                        @Override
-                        public void onToolCall(String toolName) {
-                            stream.send("tool_call",
-                                    String.format("{\"tool\":\"%s\"}", escapeJson(toolName)));
-                        }
-
-                        @Override
-                        public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
-                            var sb = new StringBuilder();
-                            sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId.getIdentifier(), taskType,
-                                    durationMs));
-                            if (summary.containsKey("actions")) {
-                                sb.append(",\"actions\":").append(toJsonArray(summary.get("actions")));
-                            }
-                            if (summary.containsKey("toolTrace")) {
-                                try {
-                                    sb.append(",\"toolTrace\":").append(
-                                            MAPPER.writeValueAsString(summary.get("toolTrace")));
-                                } catch (Exception ex) {
-                                    LOGGER.debugf("Failed to serialize toolTrace: %s", ex.getMessage());
-                                }
-                            }
-                            if (summary.containsKey("confidence")) {
-                                sb.append(",\"confidence\":").append(summary.get("confidence"));
-                            }
-                            sb.append("}");
-                            stream.send("task_complete", sb.toString());
-                        }
-
-                        @Override
-                        public void onToken(String token) {
-                            stream.send("token", token);
-                        }
-
-                        @Override
-                        public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
-                            stream.sendJson("cascade_step_start",
-                                    new CascadeStepStartEvent(stepIndex, modelType, modelName, totalSteps));
-                        }
-
-                        @Override
-                        public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason,
-                                                        long durationMs) {
-                            stream.sendJson("cascade_escalation",
-                                    new CascadeEscalationEvent(fromStep, toStep, finite(confidence), finite(threshold), reason, durationMs));
-                        }
-
-                        @Override
-                        public void onLlmRetry(String reason, int attempt) {
-                            stream.sendJson("llm_retry", new LlmRetryEvent(reason, attempt));
-                        }
-
-                        @Override
-                        public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
-                            stream.sendJson("guardrail_triggered", new GuardrailTriggeredEvent(type, phase, action, taskId));
-                        }
-
-                        @Override
-                        public void onComplete(SimpleConversationMemorySnapshot snapshot) {
-                            stream.markTerminal();
-                            try {
-                                // Send the final snapshot as JSON
-                                stream.send("done", toJson(snapshot));
-                            } finally {
-                                stream.close();
-                            }
-                        }
-
-                        @Override
-                        public void onError(Throwable error) {
-                            stream.markTerminal();
-                            try {
-                                stream.send("error", logAndBuildOpaqueErrorEvent(
-                                        "Streaming error for conversation " + safeConversationId, error));
-                            } finally {
-                                stream.close();
-                            }
-                        }
-
-                        @Override
-                        public void onTaskFailed(TaskId taskId, String taskType, long durationMs,
-                                                 String errorType, String errorSummary) {
-                            stream.send("task_failed",
-                                    String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d,\"errorType\":\"%s\",\"error\":\"%s\"}",
-                                            escapeJson(taskId.getIdentifier()), escapeJson(taskType), durationMs,
-                                            escapeJson(errorType), escapeJson(errorSummary)));
-                        }
-                    });
+                    turnHandler(stream, safeConversationId, false));
         } catch (Exception e) {
             stream.markTerminal();
             stream.send("error", buildKnownConditionOrOpaqueErrorEvent(
                     "Failed to start streaming for conversation " + safeConversationId, e));
             stream.close();
         }
+    }
+
+    @Override
+    public void resumeStreaming(String conversationId, HitlDecision decision, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                                List<String> returningFields, SseEventSink eventSink, Sse sse) {
+        final String safeConversationId = sanitize(conversationId);
+        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse);
+
+        // Admission is the plain /resume's, unchanged: the access checks, the decision
+        // checks and the pre-commit refusals (400/403/404/409/503, a pause that is no
+        // longer current, a secret-context error) all happen here, BEFORE the sink is
+        // touched, so each surfaces as the plain HTTP error it is on /resume rather
+        // than as an 'error' event on a 200 stream. The stream object only holds the
+        // sink; it writes nothing until its first send.
+        Response refusal = restAgentEngine.resumeStreaming(conversationId, decision,
+                turnHandler(stream, safeConversationId, true), returnDetailed, returnCurrentStepOnly, returningFields);
+        if (refusal != null) {
+            throw new WebApplicationException(refusal);
+        }
+        // The decision is committed: only now keep the connection warm. A turn that
+        // already finished stops the tick itself (it sees the terminal flag).
+        stream.startKeepAlive();
+    }
+
+    /**
+     * The events of one streamed turn, written to {@code stream}. Shared by a say
+     * and a resume; a resume additionally announces its accepted decision and
+     * answers a dropped resume with a typed error.
+     */
+    private StreamingResponseHandler turnHandler(SseStream stream, String safeConversationId, boolean resume) {
+        return new StreamingResponseHandler() {
+            @Override
+            public void onTaskStart(TaskId taskId, String taskType, int index) {
+                stream.send("task_start",
+                        String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"index\":%d}", taskId.getIdentifier(), taskType, index));
+            }
+
+            @Override
+            public void onToolCall(String toolName) {
+                stream.send("tool_call",
+                        String.format("{\"tool\":\"%s\"}", escapeJson(toolName)));
+            }
+
+            @Override
+            public void onToolCall(String toolName, String callId, ToolDisplay display) {
+                // Name, call id and - only when the designer configured toolDisplay - a
+                // label and a few allow-listed argument values. Never the arguments.
+                String displayName = display != null ? display.displayName() : null;
+                Map<String, String> fields = display != null && !display.fields().isEmpty() ? display.fields() : null;
+                stream.sendJson("tool_call", new ToolCallEvent(toolName, callId, displayName, fields));
+            }
+
+            @Override
+            public void onToolResult(String toolName, String callId, String status, long durationMs) {
+                stream.sendJson("tool_result", new ToolResultEvent(toolName, callId, status, durationMs));
+            }
+
+            @Override
+            public void onResumeAccepted(String pauseId, HitlDecision.HitlVerdict verdict) {
+                stream.sendJson("hitl_resume", new HitlResumeEvent(pauseId, verdict != null ? verdict.name() : null));
+            }
+
+            @Override
+            public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                if (!resume) {
+                    onComplete(snapshot);
+                    return;
+                }
+                // The accepted resume was dropped before it ran (cancelled, ended, busy):
+                // the plain /resume answers 410/409 for this; a stream that is already
+                // open says so as a typed error, with the codes the say stream uses.
+                stream.markTerminal();
+                try {
+                    stream.send("error", skippedResumeErrorEvent(snapshot));
+                } finally {
+                    stream.close();
+                }
+            }
+
+            @Override
+            public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
+                var sb = new StringBuilder();
+                sb.append(String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d", taskId.getIdentifier(), taskType,
+                        durationMs));
+                if (summary.containsKey("actions")) {
+                    sb.append(",\"actions\":").append(toJsonArray(summary.get("actions")));
+                }
+                if (summary.containsKey("toolTrace")) {
+                    try {
+                        sb.append(",\"toolTrace\":").append(
+                                MAPPER.writeValueAsString(summary.get("toolTrace")));
+                    } catch (Exception ex) {
+                        LOGGER.debugf("Failed to serialize toolTrace: %s", ex.getMessage());
+                    }
+                }
+                if (summary.containsKey("confidence")) {
+                    sb.append(",\"confidence\":").append(summary.get("confidence"));
+                }
+                sb.append("}");
+                stream.send("task_complete", sb.toString());
+            }
+
+            @Override
+            public void onToken(String token) {
+                stream.send("token", token);
+            }
+
+            @Override
+            public void onCascadeStepStart(int stepIndex, String modelType, String modelName, int totalSteps) {
+                stream.sendJson("cascade_step_start",
+                        new CascadeStepStartEvent(stepIndex, modelType, modelName, totalSteps));
+            }
+
+            @Override
+            public void onCascadeEscalation(int fromStep, int toStep, double confidence, double threshold, String reason,
+                                            long durationMs) {
+                stream.sendJson("cascade_escalation",
+                        new CascadeEscalationEvent(fromStep, toStep, finite(confidence), finite(threshold), reason, durationMs));
+            }
+
+            @Override
+            public void onLlmRetry(String reason, int attempt) {
+                stream.sendJson("llm_retry", new LlmRetryEvent(reason, attempt));
+            }
+
+            @Override
+            public void onGuardrailTriggered(String type, String phase, String action, String taskId) {
+                stream.sendJson("guardrail_triggered", new GuardrailTriggeredEvent(type, phase, action, taskId));
+            }
+
+            @Override
+            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                stream.markTerminal();
+                try {
+                    // A turn that ends waiting for a human says so, with the id the
+                    // decision must name, before the final snapshot.
+                    if (snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
+                        var pending = snapshot.getHitlPendingToolCalls();
+                        int callCount = pending != null && pending.getCalls() != null ? pending.getCalls().size() : 0;
+                        stream.sendJson("approval_required", new ApprovalRequiredEvent(
+                                HitlDecision.pauseIdOf(snapshot.getHitlPausedAt()), snapshot.getHitlPauseType(), callCount));
+                    }
+                    // Send the final snapshot as JSON
+                    stream.send("done", toJson(snapshot));
+                } finally {
+                    stream.close();
+                }
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                stream.markTerminal();
+                try {
+                    stream.send("error", logAndBuildOpaqueErrorEvent(
+                            "Streaming error for conversation " + safeConversationId, error));
+                } finally {
+                    stream.close();
+                }
+            }
+
+            @Override
+            public void onTaskFailed(TaskId taskId, String taskType, long durationMs,
+                                     String errorType, String errorSummary) {
+                stream.send("task_failed",
+                        String.format("{\"taskId\":\"%s\",\"taskType\":\"%s\",\"durationMs\":%d,\"errorType\":\"%s\",\"error\":\"%s\"}",
+                                escapeJson(taskId.getIdentifier()), escapeJson(taskType), durationMs,
+                                escapeJson(errorType), escapeJson(errorSummary)));
+            }
+        };
     }
 
     /**
@@ -757,6 +852,56 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                         safeConversationId, e.getMessage());
             }
         }
+    }
+
+    /**
+     * Payload of {@code tool_call}: the tool and the model's call id, plus - only
+     * for a tool the designer gave a {@code toolDisplay} - a label and the values
+     * of its allow-listed arguments.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record ToolCallEvent(String tool, String callId, String displayName, Map<String, String> display) {
+    }
+
+    /**
+     * Payload of {@code tool_result}: how the call ended, never what it returned.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record ToolResultEvent(String tool, String callId, String status, long durationMs) {
+    }
+
+    /** Payload of {@code hitl_resume}. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record HitlResumeEvent(String pauseId, String verdict) {
+    }
+
+    /** Payload of {@code approval_required}. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private record ApprovalRequiredEvent(String pauseId, String pauseType, int callCount) {
+    }
+
+    /**
+     * The typed error for a resume that was accepted and then dropped. Codes match
+     * the ones the say stream uses for the same conditions.
+     */
+    private String skippedResumeErrorEvent(SimpleConversationMemorySnapshot snapshot) {
+        ConversationState state = snapshot != null ? snapshot.getConversationState() : null;
+        String code;
+        String message;
+        if (state == ConversationState.ENDED) {
+            code = "conversation_ended";
+            message = "Conversation has ended";
+        } else if (state == ConversationState.AWAITING_HUMAN) {
+            code = "awaiting_approval";
+            message = "Conversation is awaiting human approval - your decision was not applied; decide again";
+        } else if (state == ConversationState.IN_PROGRESS) {
+            code = "conversation_busy";
+            message = "Conversation is processing another turn - your decision was not applied; retry shortly";
+        } else {
+            code = "resume_dropped";
+            message = "The conversation changed while your decision was queued - it was not applied; reload the conversation";
+        }
+        return String.format("{\"message\":\"%s\",\"code\":\"%s\"}", escapeJson(message), code);
     }
 
     /** Typed payload for the {@code cascade_step_start} SSE event. */
