@@ -38,7 +38,7 @@ public class RestAutonomy implements IRestAutonomy {
     public AutonomyService.CategoryView apply(String agentId, String category, ApplyRequest request) {
         access.requireEditor(agentId);
         String c = requireCategory(category);
-        if (request == null || request.recommendationId() == null) {
+        if (request == null || request.recommendationId() == null || request.expectedAgentVersion() == null) {
             throw OversightErrors.badRequest(OversightErrors.INVALID_PARAMETER, "recommendationId and expectedAgentVersion are required");
         }
         autonomy.apply(agentId, c, request.recommendationId(), request.expectedAgentVersion(), access.actor());

@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -97,7 +98,14 @@ public class ApprovalAnalyticsService {
 
     /** The summaries of the decisions matching the filter. */
     public ApprovalSummary.Result summarize(DecisionFilter filter, GroupBy groupBy) {
-        return cache.get(new CacheKey(filter, groupBy), key -> compute(filter, groupBy));
+        // A request without `to` resolves it to "now", which differs on every call; the
+        // minute
+        // truncation lets the default window share one cache entry for its 60 seconds.
+        DecisionFilter keyed = new DecisionFilter(filter.agentId(), filter.groupId(), filter.category(),
+                filter.from() != null ? filter.from().truncatedTo(ChronoUnit.MINUTES) : null,
+                filter.to() != null ? filter.to().truncatedTo(ChronoUnit.MINUTES) : null, filter.surface(), filter.pauseType(),
+                filter.channel(), filter.agentVersion());
+        return cache.get(new CacheKey(keyed, groupBy), key -> compute(keyed, groupBy));
     }
 
     /** A page of decision rows; {@code userId} only when {@code includeUserId}. */

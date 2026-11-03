@@ -103,7 +103,11 @@ public class HitlAutonomyMaintenanceService {
         int opened = 0;
         for (Map.Entry<String, Integer> agent : nextAgents()) {
             try {
-                opened += autonomy.evaluateAgent(agent.getKey(), agent.getValue(), configLookup.hitlConfig(agent.getKey(), agent.getValue()));
+                // Evaluate the newest STORED version, the one apply() builds on: a deployed
+                // version older than the stored one would open recommendations that every
+                // apply attempt rejects as AGENT_CHANGED and that maintenance never closes.
+                int version = latestVersionOrDeployed(agent.getKey(), agent.getValue());
+                opened += autonomy.evaluateAgent(agent.getKey(), version, configLookup.hitlConfig(agent.getKey(), version));
                 evaluated++;
             } catch (RuntimeException e) {
                 LOGGER.warnf("Earned-autonomy evaluation of agent %s failed: %s", sanitize(agent.getKey()), e.getMessage());
@@ -114,6 +118,14 @@ public class HitlAutonomyMaintenanceService {
         long samplesDeleted = sampleStore.deleteSampledBefore(now.minus(settings.samplesRetention()));
         boolean backfilled = initialBackfill(now);
         return new Result(expired, evaluated, opened, decisionsDeleted, samplesDeleted, backfilled);
+    }
+
+    private int latestVersionOrDeployed(String agentId, int deployedVersion) {
+        try {
+            return Math.max(deployedVersion, configLookup.currentVersion(agentId));
+        } catch (Exception e) {
+            return deployedVersion;
+        }
     }
 
     /**

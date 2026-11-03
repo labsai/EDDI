@@ -165,10 +165,28 @@ public final class PromotionPatchBuilder {
             changes.add("Add '" + pattern + "' to hitlConfig.toolApprovals.requireApproval");
         }
         toolApprovals.setRequireApproval(require);
+        for (String covering : coveringExemptions(hitlConfig, pattern)) {
+            changes.add("Not changed: the broader exempt entry '" + covering + "' still outranks the gate for '" + pattern + "'");
+        }
         if (changes.isEmpty()) {
             changes.add("The configuration already gates '" + pattern + "'; applying only clears the suspension");
         }
         return new Patch(after, List.copyOf(changes), false);
+    }
+
+    /**
+     * The {@code exempt} entries, other than {@code pattern} itself, that still
+     * match {@code pattern}. {@code exempt} outranks {@code requireApproval} at the
+     * gate, so while one of these remains a reverted pattern is not actually gated
+     * and a revert must not be reported as making the gate permanent. They are
+     * never removed automatically: such an entry may exempt other tools too.
+     */
+    public static List<String> coveringExemptions(AgentConfiguration.HitlConfig hitlConfig, String pattern) {
+        if (hitlConfig == null || hitlConfig.getToolApprovals() == null || hitlConfig.getToolApprovals().getExempt() == null) {
+            return List.of();
+        }
+        return hitlConfig.getToolApprovals().getExempt().stream()
+                .filter(e -> e != null && !e.equals(pattern) && ToolApprovalPatterns.matches(e, pattern)).toList();
     }
 
     private static void upsertSampleRule(AgentConfiguration.HitlConfig after, String category, String pattern, double rate,

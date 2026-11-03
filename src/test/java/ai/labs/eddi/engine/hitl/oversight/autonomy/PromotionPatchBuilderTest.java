@@ -168,6 +168,18 @@ class PromotionPatchBuilderTest {
         }
 
         @Test
+        @DisplayName("a broader exempt entry is reported, never removed, and coveringExemptions names it")
+        void broaderExemptionReported() {
+            var config = hitl(List.of("http.post:/crm/notes"), List.of("http.post:/crm/*"), null);
+
+            assertEquals(List.of("http.post:/crm/*"), PromotionPatchBuilder.coveringExemptions(config, "http.post:/crm/notes"));
+            var patch = PromotionPatchBuilder.revert(config, "http.post:/crm/notes");
+            assertEquals(List.of("http.post:/crm/*"), patch.after().getToolApprovals().getExempt());
+            assertTrue(patch.changes().stream().anyMatch(c -> c.contains("http.post:/crm/*") && c.startsWith("Not changed")),
+                    patch.changes().toString());
+        }
+
+        @Test
         @DisplayName("patternOf: tool:<p> → p; a rule's category → its match; RULE/group/legacy categories → null")
         void patternOf() {
             var config = hitl(List.of("http.post:*"), null, List.of(rule("http.post:*/comments", "github.reply")));

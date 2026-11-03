@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Check, Flag, ListChecks } from "lucide-react";
@@ -21,6 +21,14 @@ export function AuditSampleQueue({ agentId }: { agentId?: string }) {
   const { t } = useTranslation();
   const [page, setPage] = useState(0);
   const list = useAuditSamples(agentId, "PENDING", page * PAGE_SIZE, PAGE_SIZE);
+  // Reviewing the last row of the last page shrinks the total: step back instead of
+  // showing "no samples" while earlier pages still hold some.
+  const knownTotal = list.data?.total;
+  useEffect(() => {
+    if (knownTotal === undefined) return;
+    const lastPage = Math.max(0, Math.ceil(knownTotal / PAGE_SIZE) - 1);
+    if (page > lastPage) setPage(lastPage);
+  }, [knownTotal, page]);
 
   if (list.isLoading) {
     return (
@@ -103,7 +111,7 @@ function SampleRow({ sample }: { sample: AuditSample }) {
       <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
         <span className="font-medium text-foreground">
           {sample.toolName}
-          <span className="ml-2 font-mono text-xs text-muted-foreground">{sample.category}</span>
+          <span className="ms-2 font-mono text-xs text-muted-foreground">{sample.category}</span>
         </span>
         <span className="text-xs text-muted-foreground">
           {t("oversight.dueAt", { when: new Date(sample.reviewDueAt).toLocaleString(), defaultValue: "Review by {{when}}" })}

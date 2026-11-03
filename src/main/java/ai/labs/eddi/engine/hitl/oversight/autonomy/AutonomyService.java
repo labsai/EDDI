@@ -383,6 +383,13 @@ public class AutonomyService {
             evidence = now.evidence();
             patch = PromotionPatchBuilder.promote(hitl, category, recommendation.pattern(), policy.promotedSampleRate());
         } else {
+            List<String> covering = PromotionPatchBuilder.coveringExemptions(hitl, recommendation.pattern());
+            if (!covering.isEmpty()) {
+                // The suspension stays: lifting it would leave the pattern ungated.
+                throw OversightErrors.badRequest(OversightErrors.NOT_APPLICABLE, "The exempt entry " + covering
+                        + " still covers '" + recommendation.pattern() + "' and outranks requireApproval: narrow or remove it by hand,"
+                        + " then apply again. The suspension stays in force until then");
+            }
             patch = PromotionPatchBuilder.revert(hitl, recommendation.pattern());
         }
         try {

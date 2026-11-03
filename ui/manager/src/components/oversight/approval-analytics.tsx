@@ -36,7 +36,7 @@ export function ApprovalAnalytics({ query, tiers }: { query: OversightQuery; tie
     );
   }
   if (overall.isError || byCategory.isError) {
-    return <ErrorState message={t("common.error", "Something went wrong")} onRetry={() => void overall.refetch()} retryLabel={t("common.retry", "Retry")} />;
+    return <ErrorState message={t("common.error", "Something went wrong")} onRetry={() => void Promise.all([overall.refetch(), byCategory.refetch()])} retryLabel={t("common.retry", "Retry")} />;
   }
   const all = overall.data?.buckets[0];
   const categories = byCategory.data?.buckets ?? [];
@@ -82,7 +82,7 @@ export function ApprovalAnalytics({ query, tiers }: { query: OversightQuery; tie
       )}
       <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-sm" data-testid="oversight-category-table">
-          <thead className="bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
+          <thead className="bg-muted/50 text-start text-xs uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="px-3 py-2">{t("oversight.colCategory", "Category")}</th>
               <th className="px-3 py-2">{t("oversight.colTier", "Tier")}</th>
@@ -99,7 +99,7 @@ export function ApprovalAnalytics({ query, tiers }: { query: OversightQuery; tie
                 <td className="px-3 py-2 font-mono text-xs">
                   {row.key}
                   {row.legacy > 0 && (
-                    <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("oversight.legacy", "legacy")}</span>
+                    <span className="ms-2 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{t("oversight.legacy", "legacy")}</span>
                   )}
                 </td>
                 <td className="px-3 py-2">

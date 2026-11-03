@@ -41,7 +41,7 @@ export function OversightPage() {
   };
 
   const query = useMemo(
-    () => ({ agentId: agentId || undefined, from: new Date(now - days * 86_400_000).toISOString(), to: new Date(now).toISOString() }),
+    () => ({ agentId: agentId || undefined, from: new Date(now - days * 86_400_000).toISOString() }),
     [agentId, days, now],
   );
   const autonomy = useAutonomy(agentId || undefined, !needsAgent);

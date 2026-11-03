@@ -26,6 +26,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @DisplayName("approval analytics")
@@ -124,6 +126,23 @@ class ApprovalAnalyticsServiceTest {
         assertEquals(1, notes.samples().expired());
         assertEquals(1.0, notes.samples().expiredShare());
         assertEquals(0, result.buckets().getFirst().total(), "the sample-only category has no decisions");
+    }
+
+    @Test
+    @DisplayName("two requests whose default window ends a few seconds apart share one cached summary")
+    void defaultWindowSharesCacheEntry() {
+        IApprovalDecisionStore decisions = mock(IApprovalDecisionStore.class);
+        IAuditSampleStore samples = mock(IAuditSampleStore.class);
+        when(decisions.query(any(), anyInt(), anyInt())).thenReturn(List.of(decision("APPROVED", NOW)));
+        var service = new ApprovalAnalyticsService(decisions, samples);
+        Instant from = Instant.parse("2026-11-01T10:00:00Z");
+
+        service.summarize(new DecisionFilter("agent-1", null, null, from, Instant.parse("2026-11-02T10:00:07Z"), null, null, null, null),
+                GroupBy.NONE);
+        service.summarize(new DecisionFilter("agent-1", null, null, from, Instant.parse("2026-11-02T10:00:41Z"), null, null, null, null),
+                GroupBy.NONE);
+
+        verify(decisions, times(1)).query(any(), anyInt(), anyInt());
     }
 
     @Test

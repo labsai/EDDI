@@ -211,6 +211,21 @@ class AutonomyServiceTest {
         }
 
         @Test
+        @DisplayName("a revert is refused while a broader exempt entry still covers the pattern, and the suspension stays")
+        void revertRefusedWhileCovered() throws Exception {
+            AutonomyState suspended = service.onSampleFlagged(sample("s1").reviewed(AuditSample.Status.FLAGGED, "FALSE_CLAIM", null, "erin", NOW))
+                    .orElseThrow();
+            hitl.getToolApprovals().setExempt(List.of("http.post:/crm/*"));
+
+            var e = assertThrows(WebApplicationException.class,
+                    () -> service.apply(AGENT, CATEGORY, suspended.recommendation().id(), 3, "carol"));
+
+            assertEquals("NOT_APPLICABLE", code(e));
+            verify(restAgentStore, never()).updateAgent(anyString(), anyInt(), any(), any());
+            assertTrue(stateStore.read(AGENT, CATEGORY).orElseThrow().suspended());
+        }
+
+        @Test
         @DisplayName("409 RECOMMENDATION_CHANGED for an id that is not the open recommendation")
         void unknownRecommendation() {
             open();

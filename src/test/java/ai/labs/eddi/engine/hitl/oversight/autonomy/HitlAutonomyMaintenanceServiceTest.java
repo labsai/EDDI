@@ -29,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -43,6 +44,8 @@ class HitlAutonomyMaintenanceServiceTest {
     private ApprovalBackfillService backfill;
     private OversightMetrics metrics;
     private HitlAutonomyMaintenanceService service;
+    private OversightConfigLookup configLookup;
+    private AutonomyService autonomy;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -51,6 +54,8 @@ class HitlAutonomyMaintenanceServiceTest {
         deploymentStore = mock(IDeploymentStore.class);
         backfill = mock(ApprovalBackfillService.class);
         metrics = mock(OversightMetrics.class);
+        configLookup = mock(OversightConfigLookup.class);
+        autonomy = mock(AutonomyService.class);
         List<DeploymentInfo> infos = new ArrayList<>();
         for (String id : List.of("a", "b", "c", "d", "e")) {
             for (int v : List.of(1, 2)) {
@@ -66,7 +71,7 @@ class HitlAutonomyMaintenanceServiceTest {
         var settings = new OversightSettings(Duration.ofDays(400), Duration.ofDays(90), true, Duration.ofDays(180), Duration.ofHours(1),
                 Duration.ofSeconds(15), 2);
         service = new HitlAutonomyMaintenanceService(sampleStore, decisionStore, new InMemoryAutonomyStateStore(), deploymentStore,
-                mock(OversightConfigLookup.class), mock(AutonomyService.class), backfill, settings, metrics, Clock.fixed(NOW, ZoneOffset.UTC));
+                configLookup, autonomy, backfill, settings, metrics, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -90,5 +95,17 @@ class HitlAutonomyMaintenanceServiceTest {
         assertTrue(first.backfilled());
         assertFalse(second.backfilled());
         verify(backfill, times(1)).rebuild(NOW.minus(Duration.ofDays(90)), NOW);
+    }
+
+    @Test
+    @DisplayName("evaluates the newest STORED version, the one apply builds on, not an older deployed one")
+    void evaluatesNewestStoredVersion() throws Exception {
+        when(configLookup.currentVersion("a")).thenReturn(4);
+        when(configLookup.currentVersion("b")).thenThrow(new IllegalStateException("unreadable"));
+
+        service.run();
+
+        verify(autonomy).evaluateAgent(eq("a"), eq(4), any());
+        verify(autonomy).evaluateAgent(eq("b"), eq(2), any());
     }
 }

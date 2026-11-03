@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.AgentConfigurationCache;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.model.OversightConfig;
+import ai.labs.eddi.datastore.IResourceStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -65,6 +66,10 @@ public class OversightConfigLookup {
 
     /** The agent's newest stored version. */
     public int currentVersion(String agentId) throws Exception {
-        return agentStore.getCurrentResourceId(agentId).getVersion();
+        var resourceId = agentStore.getCurrentResourceId(agentId);
+        if (resourceId == null) {
+            throw new IResourceStore.ResourceNotFoundException("Agent not found: " + agentId);
+        }
+        return resourceId.getVersion();
     }
 }

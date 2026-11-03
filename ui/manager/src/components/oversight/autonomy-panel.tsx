@@ -120,7 +120,7 @@ function CategoryCard({ view }: { view: CategoryView }) {
             trigger: suspension.trigger,
             defaultValue: "'{{pattern}}' calls need approval again ({{trigger}}).",
           })}
-          {suspension.triggerRef && <span className="ml-1 font-mono text-xs">{suspension.triggerRef}</span>}
+          {suspension.triggerRef && <span className="ms-1 font-mono text-xs">{suspension.triggerRef}</span>}
         </p>
       )}
       {evidence && (
@@ -142,7 +142,7 @@ function CategoryCard({ view }: { view: CategoryView }) {
               ? t("oversight.promoteTitle", "Recommended: stop asking, sample instead")
               : t("oversight.revertTitle", "Recommended: make the suspension permanent")}
           </p>
-          <ul className="list-disc space-y-1 pl-5 text-sm" data-testid={`${testId}-changes`}>
+          <ul className="list-disc space-y-1 ps-5 text-sm" data-testid={`${testId}-changes`}>
             {recommendation.changes.map((change) => (
               <li key={change}>{change}</li>
             ))}
