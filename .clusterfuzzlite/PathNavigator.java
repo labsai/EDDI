@@ -25,8 +25,8 @@ import java.util.regex.Pattern;
  * </ul>
  * An expression that cannot be resolved yields {@code null} — including a
  * subtraction whose operands are not both numbers, which is how an absent
- * hyphenated key ({@code properties.my-key}) used to resolve to the value of a
- * shorter path that did exist.
+ * hyphenated key ({@code properties.my-key}) never resolves to the value of a
+ * shorter path that does exist.
  * <p>
  * Does NOT support method invocation, static class access, or object
  * instantiation.
@@ -162,8 +162,7 @@ public class PathNavigator {
      * unresolvable one means "not found", not "a bare string literal". And a fold
      * step that yields null ends the whole expression as null rather than carrying
      * on — {@link #applyOperator} answers a null left operand with the RIGHT one,
-     * which is how a failed subtraction used to disguise itself as a plausible
-     * value.
+     * which would let a failed subtraction pass itself off as a plausible value.
      * <p>
      * A blank operand is a malformed expression, never a value. With signs now
      * attached to their operand ({@link #tokenize}), the only way one can survive
@@ -388,10 +387,8 @@ public class PathNavigator {
 
         // String literal: 'some text'
         if (value.startsWith("'")) {
-            // An opening quote with no closing quote is a malformed literal. It used to
-            // fall through every branch below and be returned as raw text, which is how
-            // a broken expression turned into a plausible-looking value instead of a
-            // "not found".
+            // An opening quote with no closing quote is a malformed literal: it is
+            // "not found", never returned as raw text that looks like a value.
             return value.length() >= 2 && value.endsWith("'") ? value.substring(1, value.length() - 1) : null;
         }
 
