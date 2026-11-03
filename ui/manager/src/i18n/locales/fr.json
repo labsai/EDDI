@@ -1873,7 +1873,25 @@
     "grAddType": "Type de garde-fou à ajouter",
     "grAdd": "Ajouter un garde-fou",
     "grStreamingBuffered": "Le streaming est désactivé pour cette tâche : un garde-fou de sortie qui bloque, masque ou relance fait retenir la réponse jusqu'à son filtrage, et le client la reçoit d'un seul bloc. Utilisez Avertir pour conserver le streaming.",
-    "grStreamingNote": "Les tokens déjà diffusés ne peuvent pas être repris ; un garde-fou de sortie qui bloque, masque ou relance fait donc retenir la réponse de la tâche jusqu'à son filtrage. Les garde-fous qui ne font qu'avertir conservent le streaming."
+    "grStreamingNote": "Les tokens déjà diffusés ne peuvent pas être repris ; un garde-fou de sortie qui bloque, masque ou relance fait donc retenir la réponse de la tâche jusqu'à son filtrage. Les garde-fous qui ne font qu'avertir conservent le streaming.",
+    "agentOps": "Outils d'exploitation de l'agent",
+    "agentOpsDesc": "Outils permettant à un agent de lire les chiffres de son équipe, de demander du budget et de programmer ses propres rappels. Chacun est désactivé tant qu'il n'est pas coché ici, même si l'agent a tous les outils intégrés.",
+    "agentOpsScorecard": "Tableau de bord d'équipe (lecture seule)",
+    "agentOpsScorecardDesc": "Dépenses, budget restant, tâches terminées et échouées par semaine, résultats d'approbation avec codes de motif et leçons récentes des rétrospectives, pour l'équipe de l'agent et les équipes qu'il supervise. Uniquement les équipes que l'utilisateur de la conversation peut consulter.",
+    "agentOpsWeeks": "Semaines d'historique",
+    "agentOpsMaxLessons": "Leçons de rétro par équipe",
+    "agentOpsGroups": "ID d'équipes supplémentaires",
+    "agentOpsBudget": "Proposition de budget",
+    "agentOpsBudgetDesc": "Proposer de relever le plafond d'une équipe ou de transférer du budget entre équipes. Appliquée uniquement si un administrateur approuve l'appel. L'outil n'est proposé que si l'approbation des outils exige une approbation pour propose_team_budget_*.",
+    "agentOpsBudgetGateHint": "Ajoutez propose_team_budget_* à l'approbation des outils (niveau agent ou tâche), sinon l'agent n'obtiendra pas cet outil.",
+    "agentOpsPerTurn": "Appels par tour",
+    "agentOpsPerDay": "Appliquées par jour",
+    "agentOpsMaxAmount": "Montant max. par proposition ($)",
+    "agentOpsFollowUp": "Planification de rappels",
+    "agentOpsFollowUpDesc": "Programmer, lister et annuler des rappels ponctuels pour la conversation de l'agent ou une nouvelle. Chaque déclenchement a un plafond de coût.",
+    "agentOpsMaxPending": "En attente simultanément",
+    "agentOpsHorizon": "Horizon (jours, max. 90)",
+    "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)"
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -2591,7 +2609,8 @@
     "finishedOneShot": "Planification unique : elle s'est exécutée et est terminée.",
     "oneTimeHelpZone": "Se déclenche une seule fois à cet instant, puis se termine. Interprété à l'heure de {{zone}} (le fuseau horaire ci-dessous).",
     "openKnowledgeBase": "Ouvrir la base de connaissances",
-    "serverOwnedHint": "Exécutée par {{productName}} lui-même (nouvelles tentatives d'alerte, récapitulatifs et rétention). Elle ne peut être ni modifiée, ni désactivée, ni supprimée."
+    "serverOwnedHint": "Exécutée par {{productName}} lui-même (nouvelles tentatives d'alerte, récapitulatifs et rétention). Elle ne peut être ni modifiée, ni désactivée, ni supprimée.",
+    "typeFollowUp": "Rappel de l'agent"
   },
   "cascadeTrace": {
     "title": "Cascade de modèles",

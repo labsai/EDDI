@@ -85,6 +85,7 @@
 - [Audit Ledger](audit-ledger.md)
 - [Tenant Quotas](tenant-quotas.md)
   - [Team Budgets](team-budgets.md)
+  - [Agent Operations Tools](agent-ops-tools.md)
 - [GDPR / CCPA Compliance](gdpr-compliance.md)
 - [HIPAA Compliance](hipaa-compliance.md)
 - [Business Associate Agreement (BAA) Template](templates/baa-template.md)

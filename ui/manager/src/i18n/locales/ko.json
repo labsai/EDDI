@@ -1853,7 +1853,25 @@
     "grAddType": "추가할 가드레일 유형",
     "grAdd": "가드레일 추가",
     "grStreamingBuffered": "이 작업은 스트리밍이 꺼져 있습니다. 차단, 마스킹 또는 재프롬프트하는 출력 가드레일이 있으면 답변을 검사할 때까지 보류하므로 클라이언트는 답변을 한 번에 받습니다. 스트리밍을 유지하려면 경고를 사용하세요.",
-    "grStreamingNote": "이미 스트리밍된 토큰은 되돌릴 수 없으므로, 차단, 마스킹 또는 재프롬프트하는 출력 가드레일이 있으면 작업은 답변을 검사할 때까지 보류합니다. 경고만 하는 가드레일은 스트리밍을 유지합니다."
+    "grStreamingNote": "이미 스트리밍된 토큰은 되돌릴 수 없으므로, 차단, 마스킹 또는 재프롬프트하는 출력 가드레일이 있으면 작업은 답변을 검사할 때까지 보류합니다. 경고만 하는 가드레일은 스트리밍을 유지합니다.",
+    "agentOps": "에이전트 운영 도구",
+    "agentOpsDesc": "에이전트가 팀 수치를 읽고, 예산을 요청하고, 자신의 후속 확인을 예약할 수 있게 하는 도구입니다. 에이전트가 모든 내장 도구를 가지고 있어도 여기서 선택하지 않으면 각각 꺼져 있습니다.",
+    "agentOpsScorecard": "팀 스코어카드(읽기 전용)",
+    "agentOpsScorecardDesc": "에이전트 자신의 팀과 감독 대상 팀의 지출, 남은 예산, 주간 완료 및 실패 작업, 사유 코드가 있는 승인 결과, 최근 회고 교훈. 대화 사용자가 볼 수 있는 팀만 해당됩니다.",
+    "agentOpsWeeks": "기록 주 수",
+    "agentOpsMaxLessons": "팀당 회고 교훈 수",
+    "agentOpsGroups": "추가 팀 ID",
+    "agentOpsBudget": "예산 제안",
+    "agentOpsBudgetDesc": "팀 한도 인상 또는 팀 간 예산 이동을 제안합니다. 관리자가 호출을 승인한 경우에만 적용됩니다. 도구 승인에서 propose_team_budget_*에 승인을 요구하지 않으면 이 도구는 제공되지 않습니다.",
+    "agentOpsBudgetGateHint": "propose_team_budget_*를 도구 승인(에이전트 또는 작업 수준)에 추가하세요. 그렇지 않으면 에이전트가 이 도구를 받지 못합니다.",
+    "agentOpsPerTurn": "턴당 호출 수",
+    "agentOpsPerDay": "일일 적용 수",
+    "agentOpsMaxAmount": "제안당 최대 금액($)",
+    "agentOpsFollowUp": "후속 확인 예약",
+    "agentOpsFollowUpDesc": "에이전트 자신의 대화 또는 새 대화에 대한 일회성 후속 확인을 예약, 조회, 취소합니다. 각 실행에는 비용 상한이 있습니다.",
+    "agentOpsMaxPending": "동시 대기 수",
+    "agentOpsHorizon": "기간(일, 최대 90)",
+    "agentOpsCostPerFire": "실행당 비용 상한($)"
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -2561,7 +2579,8 @@
     "finishedOneShot": "일회성 일정: 실행되었고 완료되었습니다.",
     "oneTimeHelpZone": "이 시각에 한 번만 실행된 후 완료됩니다. {{zone}} 시간으로 해석됩니다(아래의 시간대).",
     "openKnowledgeBase": "지식 베이스 열기",
-    "serverOwnedHint": "{{productName}}가 직접 실행합니다(알림 재시도, 요약, 보존). 변경, 비활성화 또는 삭제할 수 없습니다."
+    "serverOwnedHint": "{{productName}}가 직접 실행합니다(알림 재시도, 요약, 보존). 변경, 비활성화 또는 삭제할 수 없습니다.",
+    "typeFollowUp": "에이전트 후속 확인"
   },
   "cascadeTrace": {
     "title": "모델 캐스케이드",

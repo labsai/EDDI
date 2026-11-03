@@ -1873,7 +1873,25 @@
     "grAddType": "Tipo de guardrail a adicionar",
     "grAdd": "Adicionar guardrail",
     "grStreamingBuffered": "O streaming está desativado nesta tarefa: um guardrail de saída que bloqueia, oculta ou repergunta faz a resposta ser retida até ser filtrada, e o cliente a recebe de uma só vez. Use avisar para manter o streaming.",
-    "grStreamingNote": "Tokens já enviados por streaming não podem ser retirados, então um guardrail de saída que bloqueia, oculta ou repergunta faz a tarefa reter sua resposta até ela ser filtrada. Guardrails que apenas avisam mantêm o streaming."
+    "grStreamingNote": "Tokens já enviados por streaming não podem ser retirados, então um guardrail de saída que bloqueia, oculta ou repergunta faz a tarefa reter sua resposta até ela ser filtrada. Guardrails que apenas avisam mantêm o streaming.",
+    "agentOps": "Ferramentas operacionais do agente",
+    "agentOpsDesc": "Ferramentas que permitem a um agente ler os números da sua equipa, pedir orçamento e agendar os seus próprios acompanhamentos. Cada uma está desativada a menos que seja marcada aqui, mesmo que o agente tenha todas as ferramentas integradas.",
+    "agentOpsScorecard": "Painel da equipa (só leitura)",
+    "agentOpsScorecardDesc": "Gastos, orçamento restante, tarefas concluídas e falhadas por semana, resultados de aprovação com códigos de motivo e lições recentes das retrospetivas, da equipa do agente e das equipas que supervisiona. Apenas equipas que o utilizador da conversa pode ver.",
+    "agentOpsWeeks": "Semanas de histórico",
+    "agentOpsMaxLessons": "Lições de retro por equipa",
+    "agentOpsGroups": "IDs de equipas adicionais",
+    "agentOpsBudget": "Proposta de orçamento",
+    "agentOpsBudgetDesc": "Propor aumentar o limite de uma equipa ou mover orçamento entre equipas. Só é aplicada se um administrador aprovar a chamada. A ferramenta só é oferecida se a aprovação de ferramentas exigir aprovação para propose_team_budget_*.",
+    "agentOpsBudgetGateHint": "Adicione propose_team_budget_* à aprovação de ferramentas (nível de agente ou tarefa) ou o agente não receberá esta ferramenta.",
+    "agentOpsPerTurn": "Chamadas por turno",
+    "agentOpsPerDay": "Aplicadas por dia",
+    "agentOpsMaxAmount": "Valor máx. por proposta ($)",
+    "agentOpsFollowUp": "Agendamento de acompanhamentos",
+    "agentOpsFollowUpDesc": "Marcar, listar e cancelar acompanhamentos pontuais para a conversa do agente ou uma nova. Cada execução tem um teto de custo.",
+    "agentOpsMaxPending": "Em espera em simultâneo",
+    "agentOpsHorizon": "Horizonte (dias, máx. 90)",
+    "agentOpsCostPerFire": "Teto de custo por execução ($)"
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -2591,7 +2609,8 @@
     "finishedOneShot": "Agendamento único: foi executado e está concluído.",
     "oneTimeHelpZone": "Dispara uma única vez neste momento e depois conclui. Interpretado no horário de {{zone}} (o fuso horário abaixo).",
     "openKnowledgeBase": "Abrir a base de conhecimento",
-    "serverOwnedHint": "Executada pelo próprio {{productName}} (novas tentativas de alertas, resumos e retenção). Não pode ser alterada, desativada nem excluída."
+    "serverOwnedHint": "Executada pelo próprio {{productName}} (novas tentativas de alertas, resumos e retenção). Não pode ser alterada, desativada nem excluída.",
+    "typeFollowUp": "Acompanhamento do agente"
   },
   "cascadeTrace": {
     "title": "Cascata de modelos",
