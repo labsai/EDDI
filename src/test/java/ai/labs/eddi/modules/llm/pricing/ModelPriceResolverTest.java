@@ -139,4 +139,21 @@ class ModelPriceResolverTest {
         assertEquals(PricedSpend.Source.MIXED, spend.source());
         assertEquals((10 * 3.0 + 10 * 15.0) / 1e6, spend.usd(), EPS);
     }
+
+    @Test
+    void aLegacyMapMergedWithAMeteredOneStaysAnUncataloguedCall() {
+        var metered = ToolContextBudget
+                .tokenUsageMap(UsageNormalizer.normalize(new TokenUsage(10, 10), "anthropic", null, "claude-x", CATALOG, true));
+        Map<String, Object> legacy = Map.of("inputTokens", 5, "outputTokens", 5);
+
+        Map<String, Object> meteredFirst = new HashMap<>();
+        UsageMaps.merge(meteredFirst, metered, ToolContextBudget.TOKEN_USAGE_FIELDS);
+        UsageMaps.merge(meteredFirst, legacy, ToolContextBudget.TOKEN_USAGE_FIELDS);
+        assertEquals(1, ModelPriceResolver.price(PriceOverride.NONE, meteredFirst, CATALOG).unpricedCalls(), "legacy delta counted");
+
+        Map<String, Object> legacyFirst = new HashMap<>();
+        UsageMaps.merge(legacyFirst, legacy, ToolContextBudget.TOKEN_USAGE_FIELDS);
+        UsageMaps.merge(legacyFirst, metered, ToolContextBudget.TOKEN_USAGE_FIELDS);
+        assertEquals(1, ModelPriceResolver.price(PriceOverride.NONE, legacyFirst, CATALOG).unpricedCalls(), "legacy total counted");
+    }
 }

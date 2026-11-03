@@ -70,6 +70,16 @@ describe("mergeReference", () => {
   });
 });
 
+describe("mergeReference sameness", () => {
+  it("does not read null-versus-absent or key order as a change", () => {
+    const edited = { provider: "openai", model: "gpt-4o", outputPricePer1M: 10, inputPricePer1M: 2.5, cacheReadPricePer1M: null, longContext: null, asOf: null };
+    const ref = { provider: "openai", model: "gpt-4o", inputPricePer1M: 2.5, outputPricePer1M: 10, asOf: undefined };
+    const merged = mergeReference([edited], [ref]);
+    expect(merged.unchanged).toBe(1);
+    expect(merged.changed).toHaveLength(0);
+  });
+});
+
 describe("parseCatalogImport", () => {
   it("reads an exported catalog and rejects anything else", () => {
     expect(parseCatalogImport('{"unpricedPolicy":"REFUSE","entries":[]}')).toEqual({ unpricedPolicy: "REFUSE", entries: [] });
