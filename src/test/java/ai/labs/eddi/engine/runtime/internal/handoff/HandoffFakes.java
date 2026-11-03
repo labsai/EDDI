@@ -117,7 +117,13 @@ final class HandoffFakes {
                 if (!stored.getRevision().equals(workspace.getRevision())) {
                     return false;
                 }
-                workspace.setRevision(Integer.toString(Integer.parseInt(workspace.getRevision()) + 1));
+                int current;
+                try {
+                    current = Integer.parseInt(workspace.getRevision());
+                } catch (NumberFormatException e) {
+                    throw new IResourceStore.ResourceStoreException("not a numeric revision: " + workspace.getRevision(), e);
+                }
+                workspace.setRevision(Integer.toString(current + 1));
                 docs.put(workspace.getGroupId(), write(workspace));
                 return true;
             }

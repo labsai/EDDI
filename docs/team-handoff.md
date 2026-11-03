@@ -85,7 +85,7 @@ The task also needs `enableBuiltInTools: true`; if it has a non-empty `builtInTo
 | Field | Default | Ceiling | Meaning |
 | --- | --- | --- | --- |
 | `targets[]` | | 20 | `alias` is `[a-z0-9-]{1,40}` and unique; `description` (at most 300 characters) is shown to the model; `defaultPriority` 0..10 (default 5). The group id is **not** checked at save time, so an agent ZIP that names a team this instance does not have still imports; an unresolvable target is dropped at runtime with one `WARN`. |
-| `toolParticipants` | `MODERATOR` | | Who gets the tool in a discussion: `ALL`, `MODERATOR` or `ROLE:<role>`. One filer per discussion is cheaper and less spammy. |
+| `toolParticipants` | `MODERATOR` | | Who gets the tool in a discussion: `ALL`, `MODERATOR` or `ROLE:<role>`. One filer per discussion is cheaper and less spammy. The group setting alone does not hand anyone the tool: each eligible member's LLM task also needs `enableBuiltInTools: true` and, if it has a non-empty `builtInToolsWhitelist`, `team_handoff` in that list. |
 | `maxPerTurn` | 2 | 5 | Accepted handoffs per member turn. |
 | `maxPerDiscussion` | 10 | 50 | Handoffs per discussion, atomic under parallel phases and persisted across pause and resume. |
 | `maxDescriptionChars` | 2000 | 4000 | |
@@ -98,7 +98,7 @@ A rule files a handoff when the discussion **completes** with a matching structu
 - Matches on the decision's `type` (`VERDICT`, `VOTE`, `AGREEMENT`, `AWARD`), never on the method that produced it, so a human tie-break (`tiePolicy`) or any future producer is handled alike.
 - `requireWinner` (default `true`) skips a tie instead of filing "Research account: ".
 - Templates support exactly `{decision.winner}`, `{decision.outcome}`, `{decision.type}`, `{decision.method}`, `{decision.phase}`, substituted in **one pass as data**. A winner string that contains braces or template syntax comes through literally and is never evaluated.
-- Idempotent: the dedupe key is `decision:<discussion>:<round>:<rule index>`, so a completion processed twice files once, and a new round is a new decision.
+- Idempotent while the handoff is retained: the dedupe key is `decision:<discussion>:<round>:<rule index>`, so a completion processed twice files once, and a new round is a new decision. The key lives with the task's origin, so deleting the backlog task (or declining its inbox item and letting the tombstone age out) forgets it, and processing the same decision again can file it again.
 - v1 files one task from `winner`. A "file every approved option" mode would need a tally contract and is not built.
 
 ## The tool
@@ -147,12 +147,12 @@ Every decision writes an audit entry (`taskId` `team.handoff.intake`) in the sha
 ## Observability
 
 - Metrics: `eddi_team_handoff_total{trigger, mode, outcome}`, `eddi_team_handoff_intake_total{outcome}`, `eddi_team_handoff_store_failures_total{operation}`. Tags never carry ids or text.
-- Audit: one `team.handoff` entry per attempt that passed the consent check (an unconsented probe is not audited), with handoff id, target, mode, outcome, dedupe key, hop, subject and a SHA-256 of the description; the description itself stays in the workspace. Plus one `team.handoff.intake` entry per decision.
+- Audit: submission is best effort and is skipped when the audit ledger is disabled, so an entry is not guaranteed for every attempt or decision. Where it is on, one `team.handoff` entry per attempt that passed the consent check (an unconsented probe is not audited), with handoff id, target, mode, outcome, dedupe key, hop, subject and a SHA-256 of the description; the description itself stays in the workspace. Plus one `team.handoff.intake` entry per decision.
 - SSE: a group discussion emits `team_handoff` (`handoffId`, target alias and id, outcome, mode, trigger, subject). Standalone conversations already stream `tool_call`.
 
 ## Operating notes
 
-- **Rolling upgrades.** An older pod that re-saves a workspace drops the unknown `handoffs` field, losing pending inbox items and origins (the same caveat as `reworkCounts`). The audit entry holds subject and source for recovery.
+- **Rolling upgrades.** An older pod that re-saves a workspace drops the unknown `handoffs` field, losing pending inbox items and origins (the same caveat as `reworkCounts`). Where the ledger is on, the audit entry holds the subject and source but only a hash of the description, so restore the lost text from a workspace backup or the source team; the entry alone cannot recover it.
 - **GDPR.** No end-user id is stored in the workspace. Task text can still contain personal data about a lead, exactly as REST-added backlog text can; redact before it crosses a team boundary (a `HandoffAdmission` or a guardrail).
 - **Lineage through delegation.** Work that a group member passes to a standalone agent through `converse_with_agent` loses its lineage; the day caps bound the residual loop risk.
 - **Worked examples.** *Signal Radar to Account Desk*: Radar's `onDecision` rule on a `VOTE`, Desk's `accept.from` listing `group:<radar>` in `AUTO`. *Inbound agent to Account Desk*: the agent's `teamHandoff` target, Desk listing `agent:<inbound>` in `REVIEW`. *Growth Board to every team*: the board's moderator holds the tool, each team lists `group:<board>`.

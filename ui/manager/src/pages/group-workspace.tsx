@@ -14,7 +14,9 @@ import { HandoffInbox } from "@/components/groups/handoff-inbox";
 import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
-import { useGroup } from "@/hooks/use-groups";
+import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
+import { useSpaces } from "@/hooks/use-spaces";
+import { accessForDetail } from "@/lib/access";
 import { useSchedules } from "@/hooks/use-schedules";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { useDeleteWorkspaceBacklogTask } from "@/hooks/use-team-handoffs";
@@ -97,6 +99,13 @@ export function GroupWorkspacePage() {
   const version = Number(searchParams.get("version")) || 1;
   const { data: groupConfig } = useGroup(groupId || "", version);
   const { data: workspace, isLoading, isError, error, refetch } = useGroupWorkspace(groupId);
+  // The handoff inbox decisions and the backlog delete need EDIT on the group; hide them when
+  // the caller is known to lack it. While the answer is not in (access.known false) the
+  // buttons stay, and the backend still refuses a caller without EDIT.
+  const { data: groupDescriptors } = useGroupDescriptors(10, 0, groupId ?? "");
+  const workspacesEnforced = useSpaces().enforcement;
+  const access = accessForDetail(groupDescriptors, groupId, workspacesEnforced);
+  const readOnly = access.known && !access.canEdit;
 
   /**
    * The schedule rows the cadences point at.
@@ -309,7 +318,7 @@ export function GroupWorkspacePage() {
       )}
 
       {/* Cross-team handoff: work other teams or agents want to hand to this one */}
-      <HandoffInbox groupId={groupId!} items={workspace.handoffs?.inbox ?? []} nameOf={nameOf} />
+      <HandoffInbox groupId={groupId!} items={workspace.handoffs?.inbox ?? []} nameOf={nameOf} readOnly={readOnly} />
 
       {/* Backlog */}
       <div className="rounded-xl border border-border bg-card p-4" data-testid="workspace-backlog">
@@ -342,16 +351,18 @@ export function GroupWorkspacePage() {
                   >
                     P{task.priority}
                   </span>
-                  <button
-                    type="button"
-                    className="text-muted-foreground hover:text-destructive"
-                    title={t("teamHandoff.deleteTask", "Delete this task")}
-                    aria-label={t("teamHandoff.deleteTask", "Delete this task")}
-                    onClick={() => setDeleteTaskTarget(task.id)}
-                    data-testid={`backlog-task-delete-${task.id}`}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
+                  {!readOnly && (
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-destructive"
+                      title={t("teamHandoff.deleteTask", "Delete this task")}
+                      aria-label={t("teamHandoff.deleteTask", "Delete this task")}
+                      onClick={() => setDeleteTaskTarget(task.id)}
+                      data-testid={`backlog-task-delete-${task.id}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
                 {task.description && <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>}
               </div>

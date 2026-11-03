@@ -70,6 +70,20 @@ describe("GroupWorkspacePage — cross-team handoff", () => {
     expect(screen.getByTestId("backlog-task-t2").querySelector('[data-testid^="handoff-origin-"]')).toBeNull();
   });
 
+  it("hides the inbox decisions and the backlog delete from a caller without EDIT", async () => {
+    server.use(
+      http.get("*/groupstore/groups/:groupId/workspace", () => HttpResponse.json(workspace(true))),
+      http.get("*/groupstore/groups/descriptors", () =>
+        HttpResponse.json([{ resource: "eddi://ai.labs.group/groupstore/groups/g1?version=1", callerLevel: "VIEW" }]),
+      ),
+    );
+    renderWorkspacePage();
+
+    await screen.findByTestId("workspace-handoff-inbox");
+    await waitFor(() => expect(screen.queryByTestId("backlog-task-delete-t1")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("handoff-accept")).not.toBeInTheDocument();
+  });
+
   it("renders as before for a backend that has no handoff state at all", async () => {
     server.use(http.get("*/groupstore/groups/:groupId/workspace", () => HttpResponse.json(workspace(false))));
     renderWorkspacePage();
