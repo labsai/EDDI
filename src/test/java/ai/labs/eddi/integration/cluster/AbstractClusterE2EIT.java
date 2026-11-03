@@ -352,10 +352,12 @@ abstract class AbstractClusterE2EIT {
         try {
             CompletableFuture<Turn> lingering = run.sayAsync(pool, 0, conv, "linger"); // 15 s at the LLM
             ClusterHarness.sleep(Duration.ofSeconds(3));
-            // 7 s covers at least one heartbeat (5 s) and stays below ttl - 2 x heartbeat
-            // (10 s)
+            // A lease is trusted for ttl - 2 x heartbeat (10 s) after the last
+            // renewal NATS acknowledged, possibly the acquire 3 s ago. Dropping
+            // replies for 4 s loses the renewal due at 3.75 s (applied by the
+            // server) and heals in time for the next one to adopt it.
             cluster.dropReplies(0);
-            ClusterHarness.sleep(Duration.ofSeconds(7));
+            ClusterHarness.sleep(Duration.ofSeconds(4));
             cluster.healAll();
             Turn holder = lingering.get(3, TimeUnit.MINUTES);
             long t0 = System.nanoTime();
