@@ -15,6 +15,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+
 /**
  * Pre-matching JAX-RS filter that rewrites legacy v5 REST paths and environment
  * segments to their v6 equivalents.
@@ -95,7 +97,7 @@ public class LegacyPathRewriteFilter implements ContainerRequestFilter {
 
         if (!rewritten.equals(path)) {
             String target = underRoot ? root + rewritten : rewritten;
-            LOGGER.debugv("Legacy path rewrite: {0} → {1}", fullPath, target);
+            LOGGER.debugv("Legacy path rewrite: {0} → {1}", sanitize(fullPath), sanitize(target));
             requestContext.setRequestUri(requestContext.getUriInfo().getBaseUri(),
                     UriBuilder.fromPath(target).replaceQuery(requestContext.getUriInfo().getRequestUri().getRawQuery()).build());
         }
