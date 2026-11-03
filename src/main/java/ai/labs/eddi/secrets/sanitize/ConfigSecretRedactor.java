@@ -384,7 +384,9 @@ public final class ConfigSecretRedactor {
         if (node instanceof ObjectNode object) {
             for (Map.Entry<String, JsonNode> field : object.properties()) {
                 JsonNode value = field.getValue();
-                if (value.isTextual()) {
+                // A number or boolean too: {"password": 1234} is sent as the password,
+                // and the shape scan, which reads only quoted values, never sees it.
+                if (isScalar(value)) {
                     if (isMaskableCredential(field.getKey(), value.asText())) {
                         field.setValue(new TextNode(REDACTED));
                         changed = true;
@@ -396,7 +398,7 @@ public final class ConfigSecretRedactor {
         } else if (node instanceof ArrayNode array) {
             for (int i = 0; i < array.size(); i++) {
                 JsonNode element = array.get(i);
-                if (element.isTextual()) {
+                if (isScalar(element)) {
                     if (isMaskableCredential(name, element.asText())) {
                         array.set(i, new TextNode(REDACTED));
                         changed = true;
@@ -407,6 +409,11 @@ public final class ConfigSecretRedactor {
             }
         }
         return changed;
+    }
+
+    /** A string, number or boolean — anything but a container or null. */
+    private static boolean isScalar(JsonNode node) {
+        return node.isValueNode() && !node.isNull();
     }
 
     private static boolean isMaskableCredential(String name, String value) {

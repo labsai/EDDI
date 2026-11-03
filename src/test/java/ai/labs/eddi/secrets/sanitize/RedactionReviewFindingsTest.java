@@ -238,6 +238,19 @@ class RedactionReviewFindingsTest {
         }
 
         @Test
+        @DisplayName("a number or boolean under a credential name in a JSON body is masked; an ordinary number stays")
+        void nonStringCredentialInJsonBody() {
+            String judged = ConfigSecretRedactor.judge("body", "request",
+                    "{\"password\":1234,\"auth\":{\"token\":true},\"pins\":{\"secret\":[5678]},\"count\":42}");
+
+            assertNotNull(judged, "the shape scan reads only quoted values, so the number was returned as written");
+            assertFalse(judged.contains("1234"), judged);
+            assertFalse(judged.contains("true"), judged);
+            assertFalse(judged.contains("5678"), judged);
+            assertTrue(judged.contains("\"count\":42"), judged);
+        }
+
+        @Test
         @DisplayName("a body that is more than one JSON document is never cut down to the first")
         void bodyWithTrailingContentIsNotTruncated() {
             String judged = ConfigSecretRedactor.judge("body", "request", "{\"password\":\"hunter2\"} {\"b\":1}");
