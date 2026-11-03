@@ -40,7 +40,18 @@ today's behaviour.
 - **[Clustering](../clustering.md#how-cluster-mode-is-tested)**: a new section, "How cluster mode is
   tested".
 
+### First local run, on `main` at `1e8ecd372` (Docker Desktop, Windows)
+
+On both databases, 6 of the 8 scenarios pass: ordering, latency, partition, SIGSTOP past the TTL,
+stream-leader failover and `kill -9`. The other two fail as the review predicted.
+
+- **A2**: the holder's healthy turn is answered 409 after 7 s of dropped NATS replies. The next turn
+  waits about 10–13 s.
+- **A1**: the holder on a half-open link answers 200 for a turn the takeover fenced off. The checker
+  reports it as `LOST`.
+
+On the SIGSTOP scenario, the frozen holder correctly answers 409 after it thaws.
+
 ### What's next
 
-Fill in the measured results here once the A–D workstreams land. The scenarios that name a finding
-should then turn green.
+Rerun once the A–D workstreams land. The two scenarios that name a finding should then pass.

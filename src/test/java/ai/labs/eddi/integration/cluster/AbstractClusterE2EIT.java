@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -445,7 +446,7 @@ abstract class AbstractClusterE2EIT {
         Run run = new Run(scenario(info));
         List<String> convs = List.of(run.conversation(0), run.conversation(1), run.conversation(2));
         AtomicBoolean stop = new AtomicBoolean();
-        List<String> stepDowns = new ArrayList<>();
+        List<String> stepDowns = new CopyOnWriteArrayList<>();
         Thread chaos = new Thread(() -> {
             while (!stop.get()) {
                 try {
@@ -465,7 +466,10 @@ abstract class AbstractClusterE2EIT {
                 String conv = convs.get(c);
                 clients.add(pool.submit(() -> {
                     List<Turn> last = new ArrayList<>();
-                    for (int i = 0; i < 12; i++) {
+                    // at least 12 turns each, and keep going until the leaders moved 4 times
+                    // (instant
+                    // turns finish 36 turns in a few seconds, inside the first step-down interval)
+                    for (int i = 0; i < 200 && (i < 12 || stepDowns.size() < 4); i++) {
                         last.add(run.sayWithRetry((first + i) % 3, conv, "fast", 5));
                     }
                     return last;
@@ -479,7 +483,7 @@ abstract class AbstractClusterE2EIT {
             chaos.join(10_000);
             run.facts.put("stepDowns", stepDowns);
             Report r = run.verify();
-            assertTrue(stepDowns.size() >= 3, "the leaders must actually have moved: " + stepDowns);
+            assertTrue(stepDowns.size() >= 4, "the leaders must actually have moved: " + stepDowns);
             assertClean(run, r);
             assertTrue(finals.stream().allMatch(t -> t.outcome() == Outcome.OK),
                     "every turn succeeds within 5 attempts across leader elections: "
