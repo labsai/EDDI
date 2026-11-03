@@ -227,7 +227,7 @@ arguments) counts differing leaf JSON paths. `editedText` (answer, task result, 
 is secret-redacted and capped at 32 KB; GDPR erasure redacts it with the rest of the entry's output. The original text
 is not in the entry: it is in the paused turn's LLM entry (rule pause) or the signed transcript (groups).
 
-**`hitl.edit.refused`**: `{schema: 2, decisionId, unitKind, reason: SCREENED_OUT | CONFIG_DRIFT, guardrail?}`. A unit
+**`hitl.edit.refused`**: `{schema: 2, decisionId, unitKind, reason: SCREENED_OUT | CONFIG_DRIFT | REDACTED_CONTENT, guardrail?}`. A unit
 with `APPROVED_EDITED` whose `decisionId` has such an entry was **not** applied; the same pause was followed by a new
 pause.
 

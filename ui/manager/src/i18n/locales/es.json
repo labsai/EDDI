@@ -4476,6 +4476,7 @@
     "editedAnswerLabel": "Respuesta final",
     "hideOriginal": "Ocultar el original",
     "lastEditDrift": "Tu último cambio no se pudo aplicar porque el agente cambió; la respuesta original vuelve a estar en revisión.",
+    "lastEditRedacted": "Su última edición no se aplicó: la respuesta contiene contenido oculto (censurado), por lo que solo puede aprobarse o rechazarse tal como está.",
     "lastEditScreenedOut": "Las salvaguardas de salida del agente bloquearon tu último cambio ({{guardrail}}); la respuesta original vuelve a estar en revisión.",
     "noReason": "Sin motivo",
     "reasonLabel": "Motivo (de un rechazo o un cambio)",

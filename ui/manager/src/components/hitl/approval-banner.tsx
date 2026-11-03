@@ -231,6 +231,8 @@ export function ApprovalBanner({
   const editableAnswer = surface === "regular" ? (rulePause?.editableAnswer ?? null) : null;
   const reasonCodes = (toolPause?.reasonCodes ?? rulePause?.reasonCodes ?? []);
   const isEditing = editing && !!editableAnswer;
+  // The same test handleSubmit applies: an editor opened and left as it was is a plain approval.
+  const hasEdit = isEditing && !!editableAnswer && editedAnswer !== editableAnswer.draft;
 
   // Every gated call must carry an explicit verdict before Approve is offered.
   // Checked against callStates directly (not toolDecisions, which is built only
@@ -408,7 +410,7 @@ export function ApprovalBanner({
               confirmLabel: t("hitl.approve", "Approve"),
               variant: "warning" as const,
             }
-          : isEditing
+          : hasEdit
             ? {
                 title: t("hitlReview.confirmApproveEditedTitle", "Approve with your edits?"),
                 description: t(
@@ -735,7 +737,9 @@ export function ApprovalBanner({
             ? t("hitlReview.lastEditScreenedOut", "Your last edit was blocked by the agent's output guardrails ({{guardrail}}) — the original answer is up for review again.", {
                 guardrail: rulePause.lastEditRefused.guardrail ?? "",
               })
-            : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
+            : rulePause.lastEditRefused.reason === "REDACTED_CONTENT"
+              ? t("hitlReview.lastEditRedacted", "Your last edit was not applied: the answer contains concealed (redacted) content, so it can only be approved or rejected as it is.")
+              : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
         </p>
       )}
       {editableAnswer && (
@@ -868,7 +872,7 @@ export function ApprovalBanner({
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           {perCallReview
             ? t("hitl.submitDecisions", "Submit decisions")
-            : isEditing
+            : hasEdit
               ? t("hitlReview.approveEdited", "Approve with edits")
               : t("hitl.approve", "Approve")}
         </button>
