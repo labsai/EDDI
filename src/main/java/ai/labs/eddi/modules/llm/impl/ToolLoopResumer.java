@@ -148,12 +148,10 @@ class ToolLoopResumer {
             return;
         }
         try {
-            // A tool_result always follows its tool_call in the same stream. A call that is
-            // settled here never reached the tool loop's own announcement (its tool_call,
-            // if
-            // any, was on the stream of the turn that paused), so announce it first, with
-            // the
-            // display resolved exactly as the loop resolves it.
+            // A tool_result always follows its tool_call in the same stream. A call
+            // settled here never reached the loop's own announcement (any tool_call
+            // was on the stream of the turn that paused), so announce it first, with
+            // the display resolved exactly as the loop resolves it.
             ToolDisplay display = task != null
                     ? ToolDisplayResolver.resolve(task.getToolDisplay(), c.getToolName(),
                             ToolNameResolver.canonical(c.getToolName(), toolCanonicalNames), c.getArgumentsRaw())
