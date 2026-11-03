@@ -76,6 +76,19 @@ final class GroupReviewEditor {
      */
     static GroupReviewEditor prepare(GroupConversation gc, GroupApprovalRequest request, AgentGroupConfiguration.HitlConfig hitlConfig,
                                      Supplier<List<DiscussionPhase>> phases) {
+        try {
+            return prepareChecked(gc, request, hitlConfig, phases);
+        } catch (ReviewRefusalException e) {
+            throw e;
+        } catch (IllegalArgumentException e) {
+            // every refusal raised by this validation is written for the caller; re-typed
+            // so REST can tell it from an unrelated IllegalArgumentException
+            throw new ReviewRefusalException(e.getMessage());
+        }
+    }
+
+    private static GroupReviewEditor prepareChecked(GroupConversation gc, GroupApprovalRequest request,
+                                                    AgentGroupConfiguration.HitlConfig hitlConfig, Supplier<List<DiscussionPhase>> phases) {
         GroupHitlReviewConfig review = hitlConfig != null ? hitlConfig.getReview() : null;
         Map<String, String> vocabulary = review != null ? review.getReasonCodes() : null;
         HitlDecision decision = request.getDecision();

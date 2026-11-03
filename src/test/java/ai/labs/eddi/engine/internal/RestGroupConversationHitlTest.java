@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
@@ -656,7 +657,7 @@ class RestGroupConversationHitlTest {
             asUser(OWNER_ID);
             when(groupService.readGroupConversation(GC_ID)).thenReturn(makeGc(OWNER_ID));
             when(groupService.resumeDiscussion(eq(GC_ID), any(), any()))
-                    .thenThrow(new IllegalArgumentException("editedAnswer is only valid with verdict APPROVED"));
+                    .thenThrow(new ReviewRefusalException("editedAnswer is only valid with verdict APPROVED"));
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
             decision.setVerdict(HitlVerdict.REJECTED);
@@ -697,11 +698,15 @@ class RestGroupConversationHitlTest {
         }
 
         @Test
-        @DisplayName("a long or empty message is capped / replaced by the generic hint, identically for both paths")
-        void capAndFallback() {
-            String capped = RestGroupConversation.invalidApprovalDetail(new IllegalArgumentException("x".repeat(500)));
+        @DisplayName("only the review validation's own refusal is shown: capped and control-stripped; any other IllegalArgumentException gets the fixed hint")
+        void curatedOnly() {
+            String capped = RestGroupConversation.invalidApprovalDetail(new ReviewRefusalException("x".repeat(500)));
             assertEquals("Invalid approval request: ".length() + 300, capped.length());
-            assertTrue(RestGroupConversation.invalidApprovalDetail(new IllegalArgumentException()).contains("unknown task id"));
+            assertEquals("Invalid approval request: a b",
+                    RestGroupConversation.invalidApprovalDetail(new ReviewRefusalException("a" + (char) 10 + "b")));
+            String fixed = RestGroupConversation.invalidApprovalDetail(new IllegalArgumentException("db host 10.0.0.5 refused"));
+            assertTrue(fixed.contains("unknown task id"), fixed);
+            assertFalse(fixed.contains("10.0.0.5"), fixed);
         }
     }
 

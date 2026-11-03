@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -286,17 +287,18 @@ public class RestGroupConversation implements IRestGroupConversation {
      * The 400 body of an invalid approval request, on both the plain and the
      * streaming path: which field was refused and why, because the caller needs it
      * to correct the request (a fixed "unknown task id" text named the wrong cause
-     * for every review-field refusal). The rule is the same for both: the engine's
-     * own refusal message (it may quote a caller-supplied task id), delivered as
-     * plain text or an SSE error string, never as markup, capped at 300 characters;
-     * a message-less exception gets the generic hint.
+     * for every review-field refusal). The rule is the same for both: only a
+     * {@link ReviewRefusalException} - the review validation's own message, written
+     * for the caller, control characters stripped and capped at 300 characters - is
+     * returned; any other {@code IllegalArgumentException} (its message was not
+     * written for a caller and may carry internal or request data) gets the fixed
+     * hint.
      */
     static String invalidApprovalDetail(IllegalArgumentException e) {
-        String message = e.getMessage();
-        String detail = message == null || message.isBlank()
-                ? "an unknown task id was referenced, or a task is not awaiting approval."
-                : message.length() > 300 ? message.substring(0, 300) : message;
-        return "Invalid approval request: " + detail;
+        if (e instanceof ReviewRefusalException && e.getMessage() != null && !e.getMessage().isBlank()) {
+            return "Invalid approval request: " + e.getMessage();
+        }
+        return "Invalid approval request: an unknown task id was referenced, or a task is not awaiting approval.";
     }
 
     @Override
