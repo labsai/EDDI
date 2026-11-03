@@ -6,6 +6,8 @@ package ai.labs.eddi.configs.rag.model;
 
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -74,6 +76,35 @@ public final class KnowledgeBaseStorage {
     private static final Pattern PLAIN_ES_INDEX = Pattern.compile("[a-z0-9][a-z0-9_.\\-]{0,254}");
 
     private KnowledgeBaseStorage() {
+    }
+
+    /**
+     * The storeParameters that say which server, database or tenant a store lives
+     * on — what, besides the store type, decides which store a location name opens
+     * (see {@code EmbeddingStoreFactory}).
+     */
+    static final Set<String> SERVER_PARAMETERS = Set.of("host", "port", "database", "databaseName", "connectionString", "serverUrl",
+            "baseUrl", "tenantName");
+
+    /**
+     * Whether an update points the knowledge base at another backend or another
+     * server, database or tenant of it.
+     */
+    public static boolean movesServer(RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || updated == null) {
+            return false;
+        }
+        if (!Objects.equals(previous.getStoreType(), updated.getStoreType())) {
+            return true;
+        }
+        Map<String, String> before = previous.getStoreParameters() == null ? Map.of() : previous.getStoreParameters();
+        Map<String, String> after = updated.getStoreParameters() == null ? Map.of() : updated.getStoreParameters();
+        for (String parameter : SERVER_PARAMETERS) {
+            if (!Objects.equals(before.get(parameter), after.get(parameter))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether the configuration uses the per-id layout. */
