@@ -225,20 +225,22 @@ class NatsTlsHandshakeTest {
                 plainOut.write(("INFO {\"server_id\":\"fake\",\"version\":\"2.11.0\",\"proto\":1,\"max_payload\":1048576,"
                         + "\"headers\":true,\"tls_required\":true}\r\n").getBytes(StandardCharsets.US_ASCII));
                 plainOut.flush();
-                SSLSocket tls = (SSLSocket) context.getSocketFactory().createSocket(plain, null, true);
-                tls.setUseClientMode(false);
-                tls.setNeedClientAuth(requireClientCertificate);
-                tls.startHandshake();
-                handshakes.add(requireClientCertificate
-                        ? String.valueOf(((X509Certificate) tls.getSession().getPeerCertificates()[0]).getSubjectX500Principal())
-                        : "ok");
-                BufferedReader in = new BufferedReader(new InputStreamReader(tls.getInputStream(), StandardCharsets.US_ASCII));
-                OutputStream out = tls.getOutputStream();
-                String line;
-                while ((line = in.readLine()) != null) {
-                    if (line.startsWith("PING")) {
-                        out.write("PONG\r\n".getBytes(StandardCharsets.US_ASCII));
-                        out.flush();
+                try (SSLSocket tls = (SSLSocket) context.getSocketFactory().createSocket(plain, null, true)) {
+                    tls.setUseClientMode(false);
+                    tls.setNeedClientAuth(requireClientCertificate);
+                    tls.startHandshake();
+                    handshakes.add(requireClientCertificate
+                            ? String.valueOf(((X509Certificate) tls.getSession().getPeerCertificates()[0]).getSubjectX500Principal())
+                            : "ok");
+                    try (BufferedReader in = new BufferedReader(new InputStreamReader(tls.getInputStream(), StandardCharsets.US_ASCII));
+                            OutputStream out = tls.getOutputStream()) {
+                        String line;
+                        while ((line = in.readLine()) != null) {
+                            if (line.startsWith("PING")) {
+                                out.write("PONG\r\n".getBytes(StandardCharsets.US_ASCII));
+                                out.flush();
+                            }
+                        }
                     }
                 }
             } catch (Exception e) {
