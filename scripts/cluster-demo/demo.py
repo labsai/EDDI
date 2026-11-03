@@ -190,6 +190,9 @@ class Infra:
             "EDDI_SCHEDULE_INSTANCE_ID": self.node(i),
             "EDDI_TOOLS_RATELIMIT_GLOBAL_ENABLED": "true",
             "EDDI_TOOLS_RATELIMIT_GLOBAL_LIMIT": "10",
+            # scenario 3 reads "nats" and "degraded" from the readiness check, which only
+            # carries that data when verbose (eddi.health.verbose, off by default)
+            "EDDI_HEALTH_VERBOSE": "true",
         }
         if cluster:
             env.update({
@@ -843,6 +846,9 @@ def main():
     ap.add_argument("--keep", action="store_true", help="leave the stack running")
     ap.add_argument("--external-mock", action="store_true", help="the mock LLM is already running on 18210")
     ap.add_argument("--reuse", action="store_true", help="run against the stack left by --keep instead of starting one; a fresh agent is set up, and the mock LLM must already run")
+    ap.add_argument("--exit-code", action="store_true",
+                    help="exit 1 when a scenario failed or the run crashed (for CI); N/A scenarios do not count")
+    ap.add_argument("--summary-md", help="also write a Markdown table of the verdicts to this file (e.g. $GITHUB_STEP_SUMMARY)")
     args = ap.parse_args()
     if not args.baseline and not args.app:
         ap.error("--app (or EDDI_APP) is required: without it the nodes would run the stock image")
@@ -850,6 +856,7 @@ def main():
     infra = Infra(args)
     suffix = "-baseline" if args.baseline else ("-s" + args.only.replace(",", "_") if args.only else "")
     out = os.path.join(HERE, f"results-{args.db}{suffix}.json")
+    crashed = None
     try:
         if not args.reuse:
             infra.up()
@@ -868,6 +875,9 @@ def main():
                     SCENARIOS[sid](infra, ctx)
                 except Exception as e:  # a crashed scenario is a failed one, and the rest still run
                     record(sid, SCENARIOS[sid].__doc__.strip().splitlines()[0], False, error=repr(e))
+    except BaseException as e:  # the stack did not come up, or the run was interrupted: still write what we have
+        crashed = e
+        raise
     finally:
         with open(out, "w", encoding="utf-8") as f:
             json.dump(RESULTS, f, indent=2)
@@ -881,8 +891,27 @@ def main():
                     f.write(infra.logs(i))
             except Exception as e:  # best effort: a node that is gone has no log to save
                 print(f"could not save the log of eddi-{i + 1}: {e!r}", file=sys.stderr)
+        if args.summary_md:
+            write_summary_md(args.summary_md, args, crashed)
         if not args.keep and not args.reuse:
             infra.down()
+    if args.exit_code and (not RESULTS or any(r["pass"] is False for r in RESULTS.values())):
+        sys.exit(1)
+
+
+def write_summary_md(path, args, crashed):
+    """Appends one Markdown table of the verdicts; CI points it at $GITHUB_STEP_SUMMARY."""
+    lines = [f"### Cluster demo ({args.db}{', baseline' if args.baseline else ''})", "",
+             "| # | Scenario | Verdict |", "|---|---|---|"]
+    for sid, r in RESULTS.items():
+        verdict = "N/A" if r["pass"] is None else ("PASS" if r["pass"] else "**FAIL**")
+        lines.append(f"| {sid} | {r['title'].replace('|', '/')} | {verdict} |")
+    if crashed is not None:
+        lines += ["", f"The run stopped early: `{crashed!r}`"[:500]]
+    if not RESULTS:
+        lines += ["", "No scenario ran."]
+    with open(path, "a", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 if __name__ == "__main__":
