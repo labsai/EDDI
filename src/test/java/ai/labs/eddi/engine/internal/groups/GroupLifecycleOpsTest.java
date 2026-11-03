@@ -36,6 +36,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -485,5 +486,32 @@ class GroupLifecycleOpsTest {
         assertEquals(0.25, gc.getTotalCost());
         assertEquals(List.of("sub-1"), List.copyOf(gc.getCreatedAgentIds()),
                 "a sub-agent created in a follow-up must be in the cleanup registry");
+    }
+
+    @Test
+    void followUp_chargesTheHarvestedCostToTheTeamRightAway() throws Exception {
+        var gc = completedGc();
+        var ops = followUpOps(gc);
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId("member-conv");
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationCost(0.4);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(followUpConversationService).say(any(), eq(AGENT_A), eq("member-conv"), any(), any(), any(), any(),
+                anyBoolean(), any());
+        var totalAtCharge = new AtomicReference<Double>();
+        doAnswer(inv -> {
+            totalAtCharge.set(inv.getArgument(0, GroupConversation.class).getTotalCost());
+            return null;
+        }).when(followUpFacade).chargeTeamBudget(any());
+
+        ops.followUpWithMember("gc-1", AGENT_A, "one more?");
+
+        // A follow-up starts no leg, so without this charge its spend reached the
+        // team only if the discussion was ever continued.
+        verify(followUpFacade).chargeTeamBudget(gc);
+        assertEquals(0.4, totalAtCharge.get(), 1e-12, "charged after the turn's cost was harvested");
     }
 }

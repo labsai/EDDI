@@ -68,6 +68,11 @@ public class GroupConversation {
     // human task-force tasks), both resume-consumed — an older pod resolving one
     // would re-run the vote's last repeat. Identity hop: a null detail is the
     // pre-v5 speaking turn.
+    // The same release's handoffState (cross-team handoff caps and lineage) and
+    // teamBudgetState (what a root run charged its team, and its ceiling) ride v5
+    // rather than a v6: they ship together with it, so no pod that predates them
+    // accepts a v5 document, and both default to null on older documents (hop 0,
+    // nothing charged yet) — identity hops, no migration entry.
     public static final int CURRENT_SCHEMA_VERSION = 5;
     /**
      * The version a stored document claims when its JSON carries no

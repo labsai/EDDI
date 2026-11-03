@@ -51,7 +51,9 @@ public class TeamBudgetService {
 
     /** Where an admission was asked; a metric tag. */
     public enum Surface {
-        DISCUSSION, CADENCE, FOLLOWUP
+        DISCUSSION, CADENCE, FOLLOWUP,
+        /** A cross-team handoff into a team that cannot pay for it. */
+        HANDOFF
     }
 
     /**

@@ -39,6 +39,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -2172,12 +2173,14 @@ public class GroupConversationService implements IGroupConversationService, User
     /**
      * The cost ceiling a follow-up turn runs under: the group's current
      * {@code protocol.maxCostPerDiscussion}, tightened by the budget a nested
-     * discussion inherited — the same resolution {@code executeDiscussion} applies
-     * to every phase turn. {@code null} means unlimited. A config that cannot be
-     * loaded is NOT treated as "no ceiling": the store failure (or a missing group)
-     * propagates, so a transient error cannot let a follow-up run a paid member
-     * turn unchecked. (resolveAgentTimeoutSeconds swallows its own lookup errors
-     * and falls back to a default, so it would not catch this either.)
+     * discussion inherited and by the team-budget ceiling of a root discussion
+     * ({@code teamBudgetState.ceilingUsd}) — the same resolution
+     * {@code executeDiscussion} and {@code TeamBudgetCeilings} apply to every phase
+     * turn. {@code null} means unlimited. A config that cannot be loaded is NOT
+     * treated as "no ceiling": the store failure (or a missing group) propagates,
+     * so a transient error cannot let a follow-up run a paid member turn unchecked.
+     * (resolveAgentTimeoutSeconds swallows its own lookup errors and falls back to
+     * a default, so it would not catch this either.)
      * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember.
      */
@@ -2189,7 +2192,14 @@ public class GroupConversationService implements IGroupConversationService, User
         }
         AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
         Double own = config != null ? resolveProtocol(config).maxCostPerDiscussion() : null;
-        return effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        // F6: and by the team ceiling the last leg left on the document, exactly as
+        // GroupCostLedger reads it for a phase turn — without it a follow-up on a
+        // discussion that already reached its team's budget ran one more paid turn.
+        TeamBudgetState teamState = gc.getTeamBudgetState();
+        Double team = teamState != null && teamState.getCeilingUsd() != null && !teamState.getCeilingUsd().isNaN()
+                ? teamState.getCeilingUsd()
+                : null;
+        return effectiveCostCeiling(effectiveCostCeiling(own, gc.getInheritedCostCeiling()), team);
     }
 
     /**
@@ -2438,6 +2448,14 @@ public class GroupConversationService implements IGroupConversationService, User
         taskForceEngine.executeTaskPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
     }
 
+    /**
+     * {@code speakers} is unused on purpose: EXECUTE assigns work from the task
+     * list (agents and, since the human-task-executor change, HUMAN members by
+     * explicit assignment), not from the phase's speaking order, so
+     * {@link TaskForceEngine#executeTaskExecutionPhase} no longer takes it. The
+     * parameter stays because this delegator keeps the signature every phase
+     * delegator shares, which the characterization tests resolve by reflection.
+     */
     private void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
                                            DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                            GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)

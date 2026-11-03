@@ -342,6 +342,11 @@ public class GroupLifecycleOps {
                         // keeps totalCost — and so the ceiling — honest.
                         propagateDynamicAgentTracking(snapshot, followUpGc);
                         GroupCostLedger.accumulateMemberCost(followUpGc, costKey, snapshot);
+                        // F6: charge the turn to the root discussion's team now, as a
+                        // phase turn does — a follow-up starts no new leg, so waiting
+                        // for the next leg's sweep would never charge it on a
+                        // discussion that is not continued.
+                        groupConversationService.chargeTeamBudget(followUpGc);
                         String response = groupConversationService.extractResponse(snapshot);
                         if ((response == null || response.isEmpty()) && snapshot != null
                                 && snapshot.getConversationState() == ConversationState.ERROR) {

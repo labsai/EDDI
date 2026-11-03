@@ -127,7 +127,7 @@ A gated tool call inside a group member's turn is **auto-rejected** by the HITL 
 
 ### The `HandoffAdmission` extension point
 
-Both entry points end in one method, `TeamHandoffService.file`. Beans implementing `ai.labs.eddi.engine.runtime.internal.handoff.HandoffAdmission` are consulted after the consent, loop and cap checks and may refuse a handoff (a budget gate on the receiving team) or replace the text (redaction). There are none by default. An implementation that throws counts as a refusal.
+Both entry points end in one method, `TeamHandoffService.file`. Beans implementing `ai.labs.eddi.engine.runtime.internal.handoff.HandoffAdmission` are consulted after the consent, loop and cap checks and may refuse a handoff (a budget gate on the receiving team) or replace the text (redaction). One ships: a target team with a [team budget](team-budgets.md) that is spent, or that cannot be read, refuses the handoff with the budget's own refusal text. An implementation that throws counts as a refusal.
 
 ## Reviewing the inbox
 
