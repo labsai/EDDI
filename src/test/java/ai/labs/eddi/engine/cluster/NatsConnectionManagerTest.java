@@ -27,13 +27,13 @@ import java.security.cert.CertificateException;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -66,23 +66,25 @@ class NatsConnectionManagerTest {
         @Test
         @DisplayName("a tls:// server gets EDDI's hostname-verifying context even without eddi.nats.tls.enabled")
         void tlsUrlAloneVerifiesTheHostName() throws Exception {
-            Options options = manager(nats("tls://nats.example.com:4222")).buildOptions();
-            assertInstanceOf(HostnameVerifyingSslContext.class, options.getSslContext(),
-                    "jnats' own fallback for tls:// is the JVM default context, which accepts a certificate for any host");
+            NatsConnectionManager manager = manager(nats("tls://nats.example.com:4222"));
+            assertNotNull(manager.buildOptions().getSslContext(), "EDDI's own context, not jnats' JVM-default fallback");
+            assertVerifies(manager, "nats.example.com");
         }
 
         @Test
         @DisplayName("a wss:// server too")
         void wssUrlVerifiesTheHostName() throws Exception {
-            Options options = manager(nats("wss://nats.example.com:443")).buildOptions();
-            assertInstanceOf(HostnameVerifyingSslContext.class, options.getSslContext());
+            NatsConnectionManager manager = manager(nats("wss://nats.example.com:443"));
+            assertNotNull(manager.buildOptions().getSslContext());
+            assertVerifies(manager, "nats.example.com");
         }
 
         @Test
         @DisplayName("one tls:// server in a list is enough")
         void mixedListUsesTls() throws Exception {
-            Options options = manager(nats("nats://a:4222,tls://b:4222")).buildOptions();
-            assertInstanceOf(HostnameVerifyingSslContext.class, options.getSslContext());
+            NatsConnectionManager manager = manager(nats("nats://a:4222,tls://b:4222"));
+            assertNotNull(manager.buildOptions().getSslContext());
+            assertVerifies(manager, "a", "b");
         }
 
         @Test
@@ -95,9 +97,9 @@ class NatsConnectionManagerTest {
         @DisplayName("verify-hostname=false is the explicit opt-out (and is warned about)")
         void optOut() throws Exception {
             ClusterConfig config = nats("tls://nats.example.com:4222").withTls(false, false, null, null);
-            Options options = manager(config).buildOptions();
-            assertNotNull(options.getSslContext());
-            assertFalse(options.getSslContext() instanceof HostnameVerifyingSslContext);
+            NatsConnectionManager manager = manager(config);
+            assertNotNull(manager.buildOptions().getSslContext());
+            assertFalse(Arrays.stream(manager.trustManagers()).anyMatch(ServerNameTrustManager.class::isInstance));
             assertTrue(config.validationWarnings().stream().anyMatch(w -> w.contains("verify-hostname=false")));
         }
 
@@ -113,8 +115,9 @@ class NatsConnectionManagerTest {
             assertEquals(1, store.size());
             assertEquals(ca, store.getCertificate(store.aliases().nextElement()));
 
-            Options options = manager(nats("tls://nats.example.com:4222").withTls(true, true, pem.toString(), null)).buildOptions();
-            assertInstanceOf(HostnameVerifyingSslContext.class, options.getSslContext());
+            NatsConnectionManager manager = manager(nats("tls://nats.example.com:4222").withTls(true, true, pem.toString(), null));
+            assertNotNull(manager.buildOptions().getSslContext());
+            assertVerifies(manager, "nats.example.com");
         }
 
         @Test
@@ -134,6 +137,12 @@ class NatsConnectionManagerTest {
             Files.writeString(pem, "", StandardCharsets.US_ASCII);
             assertThrows(CertificateException.class,
                     () -> NatsConnectionManager.loadTrustStore(pem.toString(), ""));
+        }
+
+        private void assertVerifies(NatsConnectionManager manager, String... hosts) throws Exception {
+            var verifying = Arrays.stream(manager.trustManagers()).filter(ServerNameTrustManager.class::isInstance).toList();
+            assertEquals(1, verifying.size(), "the X.509 trust manager must check the server's name");
+            assertEquals(List.of(hosts), ServerNameTrustManager.hostsOf(manager.config().natsServers()));
         }
 
         private X509Certificate anyTrustedCertificate() throws Exception {

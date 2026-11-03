@@ -700,7 +700,9 @@ its lease cannot overwrite the turn that ran after it (fencing). Shared security
 tool state lives in JetStream KV, caches are invalidated on every pod, and cancel,
 GDPR erasure, undeploy and HITL reach the pod that runs the work. When NATS is
 unreachable every pod keeps serving in a documented degraded mode — readiness stays
-UP. The guarantees, the failure modes and the runbook are in
+UP — except a pod that has never connected since it started, or whose connection
+fails on credentials or TLS: that one reports not-ready (it cannot take a lease).
+The guarantees, the failure modes and the runbook are in
 [Clustering](clustering.md).
 
 **Kustomize** — PostgreSQL, production hardening and cluster mode (three EDDI
@@ -710,9 +712,25 @@ kubectl apply -k k8s/examples/postgres-ha/
 ```
 
 The cluster part is the `k8s/overlays/nats` component; list it **after**
-`../../overlays/production`, whose replicas patch it overrides. It restricts the
-NATS ports with NetworkPolicies; for authentication and TLS on NATS itself use the
-Helm chart (or add them to the StatefulSet yourself).
+`../../overlays/production`, whose replicas patch it overrides. NATS clients and
+routes authenticate, with credentials from a `nats-auth` Secret you create first —
+the NATS pods do not start without it — and EDDI's user may touch only EDDI's
+subjects and never delete a stream:
+```bash
+EDDI_NATS_PW=$(openssl rand -hex 24)
+kubectl create secret generic nats-auth -n eddi \
+  --from-literal=eddi-password="$EDDI_NATS_PW" \
+  --from-literal=route-password="$(openssl rand -hex 24)"
+# and in eddi-secrets' application-secrets.properties:
+#   eddi.nats.username=eddi
+#   eddi.nats.password=<EDDI_NATS_PW>
+```
+The component also restricts the NATS ports with NetworkPolicies, pins the NATS
+image by digest, keeps one NATS pod per node (a cluster with fewer than three nodes
+needs that patched to `preferred`), leaves 20 % of the NATS volume free
+(`max_file_store`), sets `EDDI_CLUSTER_DEGRADED_TURNS=reject` and gives EDDI a 5 s
+`preStop` sleep. TLS on NATS itself is not configured — use the Helm chart's
+`nats.tls`, or patch a `tls {}` block into `nats-config`.
 
 **Helm** — three replicas, an in-chart three-node NATS cluster with authentication,
 and a PodDisruptionBudget:
@@ -730,18 +748,30 @@ helm install eddi ./helm/eddi \
 | Value | Default | In cluster mode |
 |---|---|---|
 | `eddi.replicas` | `1` | Any number; omitted while `autoscaling.enabled=true` |
-| `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %, memory 80 %) |
+| `autoscaling.enabled` | `false` | Renders an HPA (`minReplicas` 2, `maxReplicas` 6, CPU 70 %). `targetMemoryUtilizationPercentage` is `null` since chart 2.14.0: a JVM keeps the heap it grew to, so a memory target ratcheted the HPA up to `maxReplicas` |
 | `autoscaling.extraMetrics` / `autoscaling.behavior` | `[]` / `{}` | Further `autoscaling/v2` metrics and scaling behavior, as given. CPU is a weak signal for a node that mostly waits on LLMs; scale on in-flight turns instead — see [Clustering → Autoscaling](clustering.md#autoscaling). A target set to `null` drops that metric |
 | `eddi.updateStrategy` | `""` | Empty picks `RollingUpdate` (maxSurge 1, maxUnavailable 0); in-memory picks `Recreate`. A string, or the Deployment's own strategy object (`{type: RollingUpdate, rollingUpdate: {...}}`) |
 | `networkPolicy.natsEgressTo` | `[]` | With `networkPolicy.enabled` and `nats.externalUrl` the chart opens egress to the URL's port; this narrows the destination (NetworkPolicyPeers) |
-| `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the drain plus 3 s |
+| `eddi.terminationGracePeriodSeconds` | `""` | 75 s; the chart refuses a grace that does not exceed the `preStop` sleep plus the drain plus 3 s |
+| `eddi.preStopSleepSeconds` | `5` | A `preStop` sleep before SIGTERM, in every mode: Kubernetes removes the pod from the Service endpoints while it runs, and requests that still arrive are served. After SIGTERM EDDI still admits turns for its 3 s readiness grace. `0` renders no hook |
+| `eddi.cluster.degradedTurns` | `""` | `EDDI_CLUSTER_DEGRADED_TURNS` when set. **`reject` is recommended for production**: while NATS is unreachable a turn is answered 409 + `Retry-After` instead of running unfenced (the application default, `local`) |
 | `eddi.shutdownDrainTimeoutSeconds` | `""` | 65 s: a terminating pod lets its running turns finish |
 | `podDisruptionBudget.*` | off | `minAvailable: 1` when the release never runs fewer than two replicas (`eddi.replicas`, or `autoscaling.minReplicas` while autoscaling), so a drain never takes the last pod; `maxUnavailable: 1` otherwise |
-| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused. `externalUrl` must not carry credentials (an `@` is refused: it is written to a ConfigMap); put them in `nats.externalUsername` / `nats.externalPassword` (both or neither), which go to the Secret. With those set every server must be `tls://` (or `wss://`): EDDI then connects over TLS with the JVM's default trust store, and a `nats://` server is refused unless `nats.externalAllowPlaintext=true` (for a transport encrypted underneath EDDI, such as a service mesh). With `eddi.existingSecret` they are refused too: put `eddi.nats.username=` / `eddi.nats.password=` in that Secret, and use `tls://` |
+| `nats.enabled` / `nats.externalUrl` | off / `""` | One of the two is required; both at once is refused. `externalUrl` must not carry credentials (an `@` is refused: it is written to a ConfigMap); put them in `nats.externalUsername` / `nats.externalPassword` (both or neither), which go to the Secret. With those set every server must be `tls://` (or `wss://`): EDDI then connects over TLS, verifying the certificate and that it names the host, and a `nats://` server is refused unless `nats.externalAllowPlaintext=true` (for a transport encrypted underneath EDDI, such as a service mesh). With `eddi.existingSecret` they are refused too: put `eddi.nats.username=` / `eddi.nats.password=` in that Secret, and use `tls://` |
+| `nats.externalCaSecretName` | `""` | A Secret with the external NATS' CA as `ca.crt` (PEM), mounted into EDDI as its NATS trust store. Empty: the JVM's public CAs |
+| `nats.externalReplicas` | `3` | `EDDI_NATS_REPLICAS` for an external NATS — R3 buckets and streams on a JetStream cluster of three or more servers. Set `1` only for a single-server NATS. Before chart 2.14.0 an external NATS silently got R1 |
 | `nats.replicas`, `nats.cluster.enabled` | `3`, `true` | Three routed nodes, R3 buckets and streams |
 | `nats.cluster.routeUsername` / `routePassword` | `route` / `""` | The routes between the NATS nodes authenticate with their own credentials, which client permissions do not cover; `routePassword` is required whenever the in-chart NATS runs more than one node |
-| `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects |
-| `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide |
+| `nats.auth.*` | on, user `eddi` | `nats.auth.password` is required; the user may touch only EDDI's subjects, and may not delete streams or touch JetStream placement. `nats.auth.secondaryUsername` / `secondaryPassword` add a second user with the same permissions, for rotating the password without downtime: set the secondary to the new credentials and upgrade, swap it into `username`/`password` and upgrade (EDDI rolls onto it), then clear the secondary and upgrade |
+| `nats.isolation.*` | off | `enabled: true` puts EDDI's user in its own NATS account (`account`, default `EDDI`) with its own reply-subject prefix (`_INBOX_<account>`), named in its permissions — for a NATS that other tenants share. It moves the buckets and streams into the new account: enable it on a fresh install |
+| `nats.tls.*` | off | Client and route TLS from a `kubernetes.io/tls` Secret you provide (cert-manager's carry `tls.crt`, `tls.key` and `ca.crt`). The chart mounts its `ca.crt` — only that key — into EDDI as the trust store and connects over `tls://`; the certificate must name `*.<fullname>-nats` |
+| `nats.image.*` | `2.11.17-alpine` + digest | A full patch version pinned by digest |
+| `nats.antiAffinity` | `required` | One NATS pod per node (and spread over zones, best effort); `preferred` for a dev cluster with fewer nodes than `nats.replicas` |
+| `nats.goMemLimit` | `460MiB` | `GOMEMLIMIT` for the NATS server, ~90 % of its memory limit |
+| `nats.storage.maxFileStore` | `""` | JetStream's `max_file_store`; empty is 80 % of `nats.storage.size`, so JetStream refuses data before the volume is full |
+| `nats.metrics.*` | off | A `prometheus-nats-exporter` sidecar (`-varz -jsz=all`, port 7777), and a ServiceMonitor with `serviceMonitor.enabled`; the `eddi-cluster-nats` alerts read it |
+| `ingress.nginxDefaults` / `ingress.readTimeoutSeconds` | `true` / `300` | With `ingress.className: nginx`: no response buffering and a 300 s read timeout (SSE), and in cluster mode an `<release>-mcp` Ingress that hashes `/mcp` on the client address. Your own `ingress.annotations` win. Other controllers need the equivalent by hand |
+| `prometheusRule.enabled` | off | In cluster mode the PrometheusRule also carries the cluster alerts ([`eddi-cluster-alerts.yml`](monitoring/eddi-cluster-alerts.yml)) |
 
 The first switch of an existing release from in-memory to `nats` should roll out with
 `Recreate` — see [Clustering → Moving from one node to a cluster, and back](clustering.md#moving-from-one-node-to-a-cluster-and-back).
@@ -749,7 +779,8 @@ The first switch of an existing release from in-memory to `nats` should roll out
 Each replica's node id is its pod name (`EDDI_CLUSTER_NODE_ID`), and the pods are
 spread over nodes and zones. Every path balances freely except `/mcp`: an MCP session
 lives on the replica that opened it, so route `/mcp` with client or cookie affinity on
-your ingress (see [Clustering → Residual limitations](clustering.md#residual-limitations)). `nats.buildProfileImage` from charts before 2.7.0 is no
+your ingress — the chart's ingress does it for ingress-nginx (see
+[Clustering → Residual limitations](clustering.md#residual-limitations)). `nats.buildProfileImage` from charts before 2.7.0 is no
 longer read — the published image selects cluster mode at runtime.
 
 ## Monitoring

@@ -29,7 +29,9 @@ import org.jboss.logging.Logger;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLException;
+import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509ExtendedTrustManager;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
@@ -175,6 +177,8 @@ public class NatsConnectionManager {
      */
     private volatile ErrorCause misconfiguration;
     private volatile String misconfigurationDetail;
+    /** The last NATS error of any cause, for diagnostics. */
+    private volatile String lastError;
     private final Map<ErrorCause, Counter> errorCounters = new EnumMap<>(ErrorCause.class);
     private final Map<ErrorCause, AtomicLong> lastLoggedMillis = new EnumMap<>(ErrorCause.class);
     private volatile ScheduledExecutorService scheduler;
@@ -287,13 +291,8 @@ public class NatsConnectionManager {
         return builder.build();
     }
 
-    private SSLContext buildSslContext() throws IOException, GeneralSecurityException {
-        TrustManagerFactory tmf = null;
-        if (config.natsTlsTruststorePath().isPresent()) {
-            KeyStore trust = loadTrustStore(config.natsTlsTruststorePath().get(), config.natsTlsTruststorePassword().orElse(""));
-            tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
-            tmf.init(trust);
-        }
+    SSLContext buildSslContext() throws IOException, GeneralSecurityException {
+        TrustManager[] trustManagers = trustManagers();
         KeyManagerFactory kmf = null;
         if (config.natsTlsKeystorePath().isPresent()) {
             char[] password = config.natsTlsKeystorePassword().orElse("").toCharArray();
@@ -302,10 +301,36 @@ public class NatsConnectionManager {
             kmf.init(keys, password);
         }
         SSLContext context = SSLContext.getInstance("TLS");
-        context.init(kmf == null ? null : kmf.getKeyManagers(), tmf == null ? null : tmf.getTrustManagers(), null);
-        // jnats sets no endpoint identification algorithm, so without this the JDK
-        // accepts a trusted certificate issued for ANY host.
-        return config.natsTlsVerifyHostname() ? new HostnameVerifyingSslContext(context) : context;
+        context.init(kmf == null ? null : kmf.getKeyManagers(), trustManagers, null);
+        return context;
+    }
+
+    /**
+     * The trust store's managers (or the JVM's default CAs), each X.509 one wrapped
+     * so that the certificate must also name a configured NATS host
+     * ({@link ServerNameTrustManager}) unless
+     * {@code eddi.nats.tls.verify-hostname=false}. jnats sets no endpoint
+     * identification, and it dials — and hands TLS — the resolved IP, not the host
+     * name: without this, a certificate for ANY host the trust store accepts
+     * authenticated the broker.
+     */
+    TrustManager[] trustManagers() throws IOException, GeneralSecurityException {
+        TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        if (config.natsTlsTruststorePath().isPresent()) {
+            tmf.init(loadTrustStore(config.natsTlsTruststorePath().get(), config.natsTlsTruststorePassword().orElse("")));
+        } else {
+            tmf.init((KeyStore) null);
+        }
+        TrustManager[] trustManagers = tmf.getTrustManagers();
+        if (config.natsTlsVerifyHostname()) {
+            List<String> hosts = ServerNameTrustManager.hostsOf(config.natsServers());
+            for (int i = 0; i < trustManagers.length; i++) {
+                if (trustManagers[i] instanceof X509ExtendedTrustManager x509) {
+                    trustManagers[i] = new ServerNameTrustManager(x509, hosts);
+                }
+            }
+        }
+        return trustManagers;
     }
 
     /**
@@ -378,6 +403,7 @@ public class NatsConnectionManager {
      * does not flood the log, and the rest at DEBUG.
      */
     void recordError(ErrorCause cause, String message, Throwable error) {
+        lastError = cause.tag() + ": " + message;
         Counter counter = errorCounters.get(cause);
         if (counter != null) {
             counter.increment();
@@ -467,6 +493,11 @@ public class NatsConnectionManager {
             return Optional.of("not connected to NATS since boot");
         }
         return Optional.empty();
+    }
+
+    /** The last NATS error this node saw (any cause), or {@code null}. */
+    public String lastError() {
+        return lastError;
     }
 
     /** True once this node has been connected at least once since it booted. */

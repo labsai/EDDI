@@ -139,19 +139,22 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.node-id` | host name | This replica's id. Must be unique per replica; falls back to `eddi.schedule.instance-id`, then the host name. Helm and the Kustomize overlay set it from the pod name |
 | `eddi.nats.url` | `nats://localhost:4222` | NATS servers, comma-separated — list every member of the NATS cluster |
 | `eddi.nats.prefix` | `EDDI` | Prefix of every KV bucket, stream and subject (`eddi.<prefix>.…`), so two deployments can share one NATS cluster |
-| `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster. A bucket created with another value keeps it (logged as a warning) |
+| `eddi.nats.replicas` | `1` | JetStream replicas of every bucket and stream. `3` on a three-node NATS cluster — with `1`, leases, nonces, audit positions and dead letters live on one server and go with it; EDDI warns at connect when `1` meets three or more servers, or the value exceeds the servers it knows. The Helm chart sets it for the in-chart NATS and from `nats.externalReplicas` (default `3`) for an external one. A bucket created with another value keeps it (logged as a warning) |
 | `eddi.nats.dead-letter-stream-name` | `EDDI_DEAD_LETTERS` | Stream holding the dead letters of failed turns, readable, discardable and replayable from every node. While left at the default it follows `eddi.nats.prefix` (`<prefix>_DEAD_LETTERS` for any prefix other than `EDDI`), so deployments with different prefixes on one NATS cluster never share it |
-| `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials |
+| `eddi.nats.username` / `eddi.nats.password` | — | NATS user credentials. Only one authentication method may be set (user/password, token, creds file or nkey seed file); two at once fail the boot |
 | `eddi.nats.token` | — | NATS token authentication |
 | `eddi.nats.creds-file` | — | Path of a NATS `.creds` file (JWT + nkey) |
 | `eddi.nats.nkey-seed-file` | — | Path of an nkey seed file |
-| `eddi.nats.tls.enabled` | `false` | TLS to NATS |
+| `eddi.nats.tls.enabled` | `false` | TLS to every NATS server. TLS is also on for any `tls://` or `wss://` server in `eddi.nats.url`; either way EDDI verifies the certificate and its host name with its own context. `opentls://` (trust any certificate) fails the boot |
 | `eddi.nats.tls.verify-hostname` | `true` | Verify that the NATS server certificate was issued for the host(s) in `eddi.nats.url` (HTTPS-style endpoint identification; an IP address needs an IP SAN). `false` trusts any certificate the trust store accepts, for any host |
-| `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate (`.p12`/`.pfx` read as PKCS12, anything else as the JVM default type) |
+| `eddi.nats.tls.truststore-path` / `eddi.nats.tls.truststore-password` | — | Trust store for the NATS server certificate: PEM certificates (`.pem`/`.crt`/`.cer`, or any file starting with `-----BEGIN`, such as a cert-manager `ca.crt`; no password), `.p12`/`.pfx` as PKCS12, anything else as the JVM default type. Unset: the JVM's default CAs |
 | `eddi.nats.tls.keystore-path` / `eddi.nats.tls.keystore-password` | — | Client key store, for mutual TLS |
 | `eddi.nats.connection-timeout` | `2s` | Per-attempt connect timeout. The node never waits for NATS at boot: it connects in the background and serves in degraded mode until connected |
 | `eddi.nats.request-timeout` | `2s` | Timeout of every KV, JetStream and RPC call. While disconnected, calls fail at once instead |
 | `eddi.nats.reconnect-wait` | `1s` | Pause between reconnect attempts (plus jitter); reconnects never stop |
+| `eddi.nats.ping-interval` | `5s` | How often the client pings the server. A server lost without a TCP reset is noticed only through missed pings, after about `ping-interval` × `max-pings-out` (the jnats default of 2 min × 2 kept a dead connection "up" for minutes) |
+| `eddi.nats.max-pings-out` | `2` | Unanswered pings after which the connection is declared dead and the client reconnects |
+| `eddi.nats.inbox-prefix` | `_INBOX` | Prefix of this node's reply subjects, one subject token. A deployment that shares a NATS account with another sets its own and names `<prefix>.>` in its user's permissions, so neither can read the other's replies (see [Clustering](clustering.md#runbook)) |
 | `eddi.cluster.lease.ttl` | `20s` | A conversation lease that is not refreshed expires on the NATS server after this long — the longest a crashed node can keep a conversation |
 | `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
 | `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
@@ -159,10 +162,12 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.erasure-marker-ttl` | `P7D` | How long the cluster-wide GDPR erasure marker of a conversation lives. A node that kept a dead letter of the conversation locally while NATS was down discards it instead of forwarding it for as long as the marker exists; past it, only the check that the conversation still exists applies (see [GDPR](gdpr-compliance.md)) |
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
-| `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
+| `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` — **recommended for production** (Helm: `eddi.cluster.degradedTurns`; the Kustomize `nats` component sets it) |
 | `eddi.cluster.degraded.nonces` | `reject` | Signed-envelope replay protection when NATS is down: `reject` refuses signed envelopes with `503` (fail closed); `local` checks node-locally only |
 | `eddi.cluster.degraded.rate-limits` | `local-share` | `local-share`: each node enforces its share of a global tool limit (limit ÷ known members, never looser than configured); `reject`: rate-limited tools are refused |
 | `eddi.cluster.readiness.require-nats` | `false` | `true` reports the node not-ready while degraded. Off by default: a NATS blip must never empty the load balancer |
+| `eddi.cluster.readiness.require-first-connect` | `true` | Not ready until the node has connected to NATS once since boot: one that never connected cannot take a lease, so every turn it served ran unfenced. A later outage keeps it ready. `false` serves degraded from boot |
+| `eddi.cluster.readiness.fail-on-misconfiguration` | `true` | Not ready while the NATS connection fails for a reason retrying cannot heal — an authentication or authorization error, a TLS failure, client options that could not be built. The cause is logged at ERROR and counted in `eddi_cluster_nats_errors_total{cause}`. `false` restores running degraded (and unfenced) on such a node |
 | `eddi.cluster.events.max-age` | `1h` | Retention of the cluster event stream. A node disconnected for longer, or that sees a gap, flushes every invalidatable cache |
 | `eddi.cluster.activity.max-age` | `24h` | Retention of the cluster activity timeline (`<prefix>_ACTIVITY` stream, at most 10,000 entries) the cluster console shows: nodes joining and getting lost, lease takeovers, fenced writes, degraded mode, deployments and admin actions |
 | `eddi.cluster.events.outbox-size` | `10000` | Events kept for publishing while NATS is unreachable; on overflow the node asks every node to resync on reconnect |
@@ -174,6 +179,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.cost.ttl` | `30d` | How long a conversation's tool-cost total is kept in the shared bucket after its last update |
 | `eddi.coordinator.dead-letter.max-age` | `7d` | Retention of the dead-letter stream |
 | `eddi.coordinator.dead-letter.max-bytes` | `1073741824` | Size cap of the dead-letter stream in bytes (`<= 0`: none). When full, new dead letters are refused — the oldest are kept for the operator — and stay in the node-local ring (audit entries go to the JSONL file) until there is room |
+| `eddi.cluster.archives.max-bytes` | `1073741824` | Size cap of the `<prefix>_ARCHIVES` object store, where exported agent archives are shared between nodes (`<= 0`: none). It shares JetStream storage with the lease bucket, so an unbounded one could block lease creates; an export that does not fit stays on the node that made it. An existing bucket is given the cap on first use |
 | `eddi.coordinator.dead-letter.capture-input` | `true` | Record a failed turn's input and context in its dead letter, which is what makes it replayable. `false` keeps only the error. What is recorded passes through the secret redaction filter, and a turn flagged `secretInput` by the client — or addressed to an agent with any `scope: secret` property instruction — records neither input nor context |
 
 ---
