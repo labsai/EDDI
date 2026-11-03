@@ -235,9 +235,12 @@ final class GroupReviewEditor {
 
     private static String latestSynthesis(GroupConversation gc) {
         synchronized (gc.getTranscript()) {
-            for (int i = gc.getTranscript().size() - 1; i >= 0; i--) {
+            // the paused phase of the CURRENT round only: an earlier round's synthesis (or
+            // another phase's) is not the answer the reviewer is looking at
+            int roundStart = Math.max(0, Math.min(gc.getRoundStartTranscriptIndex(), gc.getTranscript().size()));
+            for (int i = gc.getTranscript().size() - 1; i >= roundStart; i--) {
                 TranscriptEntry entry = gc.getTranscript().get(i);
-                if (entry.type() == TranscriptEntryType.SYNTHESIS) {
+                if (entry.type() == TranscriptEntryType.SYNTHESIS && entry.phaseIndex() == gc.getPausedAtPhaseIndex()) {
                     return entry.content();
                 }
             }

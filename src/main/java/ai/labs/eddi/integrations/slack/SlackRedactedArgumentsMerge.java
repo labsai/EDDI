@@ -99,6 +99,14 @@ final class SlackRedactedArgumentsMerge {
             for (int i = 0; i < submitted.size(); i++) {
                 JsonNode rawChild = raw != null && raw.isArray() ? raw.get(i) : null;
                 JsonNode redactedChild = redacted != null && redacted.isArray() ? redacted.get(i) : null;
+                // An item that holds a redacted value is paired with its raw twin by index
+                // alone, so it may only be left exactly as shown: changing a visible field
+                // (a name, an id) of it would send the original item's secret along with
+                // the changed identity.
+                if (redactedChild != null && rawChild != null && !redactedChild.equals(rawChild) && !submitted.get(i).equals(redactedChild)) {
+                    throw new MergeException(
+                            path + "[" + i + "] holds a redacted secret, so the item cannot be changed in Slack — edit it in the Manager");
+                }
                 out.add(mergeNode(path + "[" + i + "]", rawChild, redactedChild, submitted.get(i)));
             }
             return out;
