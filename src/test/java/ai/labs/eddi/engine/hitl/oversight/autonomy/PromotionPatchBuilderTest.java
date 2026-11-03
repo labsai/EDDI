@@ -141,9 +141,9 @@ class PromotionPatchBuilderTest {
     @DisplayName("every promotion and revert yields a configuration HitlConfigValidation accepts")
     void alwaysValid(String name, AgentConfiguration.HitlConfig before, String pattern) {
         var promoted = PromotionPatchBuilder.promote(before, "tool:" + pattern, pattern, 0.1);
-        assertDoesNotThrow(() -> HitlConfigValidation.validate(promoted.after()), () -> "promote: " + promoted.changes());
+        assertDoesNotThrow(() -> HitlConfigValidation.validate(promoted.after()), () -> name + " promote: " + promoted.changes());
         var reverted = PromotionPatchBuilder.revert(promoted.after(), pattern);
-        assertDoesNotThrow(() -> HitlConfigValidation.validate(reverted.after()), () -> "revert: " + reverted.changes());
+        assertDoesNotThrow(() -> HitlConfigValidation.validate(reverted.after()), () -> name + " revert: " + reverted.changes());
     }
 
     @Nested

@@ -47,7 +47,7 @@ class PostgresOversightStoresIT extends PostgresTestBase {
 
     @Nested
     @DisplayName("approval_decisions")
-    class Decisions implements OversightStoreContracts.Decisions {
+    class DecisionStoreTests implements OversightStoreContracts.Decisions {
 
         private PostgresApprovalDecisionStore store;
 
@@ -74,7 +74,7 @@ class PostgresOversightStoresIT extends PostgresTestBase {
 
     @Nested
     @DisplayName("audit_samples")
-    class Samples implements OversightStoreContracts.Samples {
+    class SampleStoreTests implements OversightStoreContracts.Samples {
 
         private PostgresAuditSampleStore store;
 
@@ -100,7 +100,7 @@ class PostgresOversightStoresIT extends PostgresTestBase {
 
     @Nested
     @DisplayName("autonomy_state")
-    class States implements OversightStoreContracts.States {
+    class AutonomyStateTests implements OversightStoreContracts.States {
 
         private PostgresAutonomyStateStore store;
 

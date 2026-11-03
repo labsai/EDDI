@@ -36,7 +36,7 @@ class MongoOversightStoresIT extends MongoTestBase {
 
     @Nested
     @DisplayName("approval_decisions")
-    class Decisions implements OversightStoreContracts.Decisions {
+    class DecisionStoreTests implements OversightStoreContracts.Decisions {
 
         private IApprovalDecisionStore store;
 
@@ -61,7 +61,7 @@ class MongoOversightStoresIT extends MongoTestBase {
 
     @Nested
     @DisplayName("audit_samples")
-    class Samples implements OversightStoreContracts.Samples {
+    class SampleStoreTests implements OversightStoreContracts.Samples {
 
         private IAuditSampleStore store;
 
@@ -86,7 +86,7 @@ class MongoOversightStoresIT extends MongoTestBase {
 
     @Nested
     @DisplayName("autonomy_state")
-    class States implements OversightStoreContracts.States {
+    class AutonomyStateTests implements OversightStoreContracts.States {
 
         private IAutonomyStateStore store;
 

@@ -68,6 +68,8 @@ class ReservedPrincipalsTest {
             Map.entry("t:", "webhook signature digest tag"),
             Map.entry("event:", "webhook event dedup fallback key"),
             Map.entry("tool:", "tool quota counter name (ToolQuotaRules)"),
+            Map.entry("sample:", "sampled-audit daily cap counter name (SampledAuditRecorder)"),
+            Map.entry("suspended:", "gate refusal reason string (SuspendedGate.REASON_PREFIX)"),
             Map.entry("pool:", "tool quota counter name (ToolQuotaRules)"),
             Map.entry("rule:", "derived HITL approval category of a rule pause (ApprovalCategories)"),
             Map.entry("hitl:", "transcript speaker id of a reviewer's SYNTHESIS edit (GroupReviewEditor)"),
