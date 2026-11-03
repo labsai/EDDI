@@ -85,6 +85,8 @@ export function GroupHitlEditor({
     if (enabled) {
       phases = applyApprovalPhases(basePhases, [...approvalPhases]);
       hitlConfig = {
+        // keep every field this editor has no control for (e.g. `review`)
+        ...config.hitlConfig,
         // Only a finite timeout policy needs a duration — drop any leftover draft
         // when the policy was switched back to WAIT_INDEFINITELY (the field hides
         // but its draft state persists), so we don't persist an unused timeout.

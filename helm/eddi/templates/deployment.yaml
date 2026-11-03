@@ -150,6 +150,13 @@ spec:
           emptyDir: {}
         - name: eddi-data
           emptyDir: {}
+        {{- with ((.Values.eddi.branding | default dict).assets | default dict).configMap }}
+        # White-labeling images (eddi.branding.assets.configMap), read-only. EDDI
+        # reads them once at startup as the brand's seed images.
+        - name: branding-assets
+          configMap:
+            name: {{ . | quote }}
+        {{- end }}
       {{- if and .Values.mongodb.enabled (not .Values.mongodb.existingSecret) }}
       # EDDI connects to the in-chart MongoDB as mongodb.appUsername, not as root.
       # This creates that user, or resets its password and roles, before every
@@ -280,6 +287,12 @@ spec:
               mountPath: /deployments/tmp
             - name: eddi-data
               mountPath: /opt/eddi/data
+            {{- $brandAssets := (.Values.eddi.branding | default dict).assets | default dict }}
+            {{- if $brandAssets.configMap }}
+            - name: branding-assets
+              mountPath: {{ $brandAssets.mountPath | default "/deployments/branding" | quote }}
+              readOnly: true
+            {{- end }}
           {{- $startupProbe := .Values.eddi.startupProbe | default dict }}
           # Liveness, not readiness: see eddi.startupProbe in values.yaml.
           startupProbe:

@@ -99,7 +99,7 @@ describe("Sidebar is role-aware", () => {
     );
   }
 
-  const ADMIN_ONLY = ["/manage/logs", "/manage/audit", "/manage/secrets", "/manage/coordinator", "/manage/gdpr", "/manage/quotas", "/manage/orphans"];
+  const ADMIN_ONLY = ["/manage/logs", "/manage/audit", "/manage/secrets", "/manage/coordinator", "/manage/gdpr", "/manage/quotas", "/manage/orphans", "/manage/branding"];
 
   it("hides admin-only screens from an editor and keeps the rest", () => {
     const { container } = renderSidebar(as(["eddi-editor"]));

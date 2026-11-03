@@ -8,6 +8,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { ChatProvider } from "@/store/chat-store";
 import { ChatWidget } from "@/components/ChatWidget";
+import { ChatRoute } from "@/components/ChatRoute";
 import { initLocale } from "@/i18n";
 import "@/styles/chat.css";
 
@@ -24,15 +25,15 @@ function App() {
             path="/chat/managed/:intent/:userId"
             element={<ChatWidget />}
           />
-          {/* Direct agent route with userId */}
+          {/* Direct agent route with userId (ChatRoute: the demo is off under a brand) */}
           <Route
             path="/chat/:environment/:agentId/:userId"
-            element={<ChatWidget />}
+            element={<ChatRoute />}
           />
           {/* Direct agent route (userId via query param) */}
           <Route
             path="/chat/:environment/:agentId"
-            element={<ChatWidget />}
+            element={<ChatRoute />}
           />
           {/* Fallback */}
           <Route
