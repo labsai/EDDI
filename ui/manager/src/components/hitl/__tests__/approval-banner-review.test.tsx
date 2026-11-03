@@ -67,6 +67,24 @@ describe("ApprovalBanner — edit on approve and reason codes", () => {
     expect(screen.getByRole("dialog").textContent).toMatch(/replaces the agent's answer/i);
   });
 
+  it("blocks an edit that still carries the redaction marker, before any request", () => {
+    const onDecide = vi.fn();
+    renderWithProviders(
+      <ApprovalBanner
+        surface="regular"
+        pauseDetails={rulePause({ editableAnswer: { draft: "The key is sk-<REDACTED> today.", format: "text", maxChars: 200 } })}
+        onDecide={onDecide}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("edit-answer-toggle"));
+    fireEvent.change(screen.getByTestId("edited-answer"), { target: { value: "The key is sk-<REDACTED> tomorrow." } });
+    fireEvent.click(screen.getByTestId("approve-button"));
+    confirm();
+
+    expect(onDecide).not.toHaveBeenCalled();
+    expect(screen.getByTestId("approval-submit-error").textContent).toMatch(/redaction marker/i);
+  });
+
   it("explains a refusal for redacted content", () => {
     renderWithProviders(
       <ApprovalBanner

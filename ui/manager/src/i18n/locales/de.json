@@ -4476,6 +4476,7 @@
     "hideOriginal": "Original ausblenden",
     "lastEditDrift": "Ihre letzte Änderung konnte nicht übernommen werden, weil sich der Agent geändert hat — die ursprüngliche Antwort steht erneut zur Prüfung.",
     "lastEditRedacted": "Ihre letzte Änderung wurde nicht übernommen: Die Antwort enthält verborgene (geschwärzte) Inhalte und kann nur unverändert genehmigt oder abgelehnt werden.",
+    "redactedMarkerRemains": "Der Text enthält noch die Schwärzungsmarkierung <REDACTED>. Entfernen Sie sie oder genehmigen Sie ohne Änderungen: Der Server kann eine Änderung, die sie behält, nicht übernehmen.",
     "lastEditScreenedOut": "Ihre letzte Änderung wurde von den Ausgabe-Guardrails des Agenten blockiert ({{guardrail}}) — die ursprüngliche Antwort steht erneut zur Prüfung.",
     "noReason": "Kein Grund",
     "reasonLabel": "Grund (für eine Ablehnung oder Änderung)",
