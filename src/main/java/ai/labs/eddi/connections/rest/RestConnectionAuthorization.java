@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
@@ -331,11 +332,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             // somebody else's name.
             ConnectionGrant stored = tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token,
                     token.refreshToken());
-            if (!connectionStillTakesTheGrant(oauthState)) {
+            if (!connectionStillTakesTheGrant(oauthState) || !principalNotErasedMeanwhile(oauthState)) {
                 // An update changed the connection's authType or binding after the
-                // check above. See RestConnectionStore
-                // .deleteGrantsLinkedDuringTheUpdate for why re-reading HERE, after the
-                // grant is written, is what closes the race.
+                // check above, or the user was erased during the exchange. See
+                // RestConnectionStore.deleteGrantsLinkedDuringTheUpdate for why
+                // re-reading HERE, after the grant is written, is what closes the race.
                 discardGrant(oauthState, stored);
                 increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
                 return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
@@ -451,6 +452,36 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         } catch (Exception e) {
             LOGGER.warnf("Could not re-read connection '%s' after linking an account (%s), so the grant just stored cannot be shown to be "
                     + "usable and is discarded; the user must link again", sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /**
+     * Whether the claimed state row is still there — re-read AFTER the grant was
+     * written.
+     * <p>
+     * GDPR erasure deletes the principal's state rows (claimed ones included) and
+     * only then their grants. A callback whose token exchange was in flight across
+     * that cascade wrote its grant after the grant sweep, leaving a live refresh
+     * token for an erased identity. The order argument mirrors
+     * {@link #connectionStillTakesTheGrant}: either the state delete precedes this
+     * read, which then finds no row and the grant is discarded here; or it follows
+     * this read, hence the grant write, and the grant sweep after it deletes the
+     * grant. A claimed row is kept until it expires, so its absence is evidence.
+     * <p>
+     * A read that fails answers false, for the reason the other re-read gives.
+     */
+    private boolean principalNotErasedMeanwhile(OAuthState oauthState) {
+        try {
+            if (stateStore.exists(oauthState.getState())) {
+                return true;
+            }
+            LOGGER.warnf("The pending link for connection '%s' was withdrawn (the user was erased, or the flow purged) while its code was "
+                    + "being redeemed; the grant just stored is discarded", sanitize(oauthState.getConnectionName()));
+            return false;
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not re-read the pending link for connection '%s' after linking an account (%s), so the grant just stored is "
+                    + "discarded; the user must link again", sanitize(oauthState.getConnectionName()), e.getClass().getSimpleName());
             return false;
         }
     }
@@ -593,11 +624,18 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         if (name == null || name.isBlank()) {
             throw new ForbiddenException("The authenticated identity has no principal name.");
         }
+        if (ConnectionResolver.SERVICE_PRINCIPAL.equals(name)) {
+            // Service grants share the grant namespace under this name: a user the IdP
+            // happened to call that could list, link over or disconnect them.
+            throw new ForbiddenException("The principal name '" + name + "' is reserved for service grants.");
+        }
         return name;
     }
 
     private String resolveClientSecret(ConnectionConfiguration connection) {
-        return credentialReferenceResolver.resolveVaultBacked(connection.getOauth().getClientSecret(), connection.getName(), "client secret");
+        // Checked against the token endpoint, where the client secret is sent.
+        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
+                connection.getName(), "client secret");
     }
 
     /**

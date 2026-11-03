@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -159,11 +161,21 @@ class VaultHostAllowlistTest {
         }
 
         @Test
-        @DisplayName("a missing secret and a non-reference are left to the resolver")
-        void missingSecretAndNonReferencesAreSkipped() throws Exception {
+        @DisplayName("a missing secret is refused: deleted after resolution, it must not leave unchecked; a non-reference is skipped")
+        void missingSecretIsRefusedAndNonReferencesAreSkipped() throws Exception {
             when(provider.getMetadata(OPENAI)).thenThrow(new ISecretProvider.SecretNotFoundException("missing"));
-            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF, "not-a-reference"), "https://anywhere.example/", "x"));
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://anywhere.example/", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of("not-a-reference"), "https://anywhere.example/", "x"));
             assertDoesNotThrow(() -> allowlist.requireAllowed((Iterable<String>) null, "https://anywhere.example/", "x"));
+        }
+
+        @Test
+        @DisplayName("referencesIn finds every reference, and stays linear on a run of unterminated openers")
+        void referencesInIsLinear() {
+            assertEquals(Set.of(OPENAI_REF), VaultHostAllowlist.referencesIn(List.of("Bearer " + OPENAI_REF, "plain")));
+            String attack = "${vault:".repeat(200_000);
+            assertTimeoutPreemptively(Duration.ofSeconds(20), () -> assertTrue(VaultHostAllowlist.referencesIn(List.of(attack)).isEmpty()));
         }
 
         @Test
@@ -176,6 +188,73 @@ class VaultHostAllowlistTest {
                     () -> allowlist.requireAllowed(params, params.get("baseUrl"), "LLM provider 'openai'"));
             assertDoesNotThrow(() -> allowlist.requireAllowed(Map.of("modelName", "gpt-x"), "https://attacker.example/v1", "x"));
             verify(provider, never()).getMetadata(new SecretReference("default", "gpt-x"));
+        }
+    }
+
+    /**
+     * An entry names a host, not a scheme, so {@code http://api.openai.com} matched
+     * {@code api.openai.com} and the key went out unencrypted to the right host.
+     */
+    @Nested
+    @DisplayName("encrypted transport")
+    class EncryptedTransport {
+
+        @Test
+        @DisplayName("plain http or ws to an allowed remote host is refused for a restricted secret, naming the opt-out")
+        void plaintextToAllowedRemoteHostRefused() throws Exception {
+            secretAllowedAt(List.of("api.openai.com"));
+
+            var error = assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://api.openai.com/v1", "LLM provider 'openai'"));
+            assertTrue(error.getMessage().contains(VaultHostAllowlist.ALLOW_PLAINTEXT_PROPERTY), error.getMessage());
+            assertTrue(error.getMessage().contains("api.openai.com:80"), error.getMessage());
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "ws://api.openai.com/realtime", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://api.openai.com/v1", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "wss://api.openai.com/realtime", "x"));
+        }
+
+        @Test
+        @DisplayName("an explicit host:port entry does not admit plaintext either")
+        void explicitPortEntryStillNeedsEncryption() throws Exception {
+            secretAllowedAt(List.of("internal.example:8080"));
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://internal.example:8080/api", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "https://internal.example:8080/api", "x"));
+        }
+
+        @Test
+        @DisplayName("loopback is exempt: http://localhost never leaves the machine")
+        void loopbackExempt() throws Exception {
+            secretAllowedAt(List.of("localhost", "127.0.0.1", "[::1]"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://localhost:11434/v1", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://127.0.0.1:8080/", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://[::1]:8080/", "x"));
+        }
+
+        @Test
+        @DisplayName("a destination without an http-family scheme is not judged by scheme")
+        void bareHostPortAndOtherSchemesUnaffected() throws Exception {
+            secretAllowedAt(List.of("pg.internal:5432", "cluster0.example.net"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "pg.internal:5432", "x"));
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "mongodb+srv://cluster0.example.net/db", "x"));
+        }
+
+        @Test
+        @DisplayName("an unrestricted secret is unchanged — the rule follows the operator's restriction")
+        void unrestrictedSecretUnchanged() throws Exception {
+            secretAllowedAt(null);
+            assertDoesNotThrow(() -> allowlist.requireAllowed(List.of(OPENAI_REF), "http://anywhere.example/", "x"));
+        }
+
+        @Test
+        @DisplayName("eddi.vault.allow-plaintext-remote-hosts=true accepts plaintext to an allowed host, and still only an allowed one")
+        void deploymentOptOut() throws Exception {
+            var permissive = new VaultHostAllowlist(provider, true);
+            secretAllowedAt(List.of("api.openai.com"));
+            assertDoesNotThrow(() -> permissive.requireAllowed(List.of(OPENAI_REF), "http://api.openai.com/v1", "x"));
+            assertThrows(VaultHostAllowlist.HostNotAllowedException.class,
+                    () -> permissive.requireAllowed(List.of(OPENAI_REF), "http://attacker.example/v1", "x"));
         }
     }
 

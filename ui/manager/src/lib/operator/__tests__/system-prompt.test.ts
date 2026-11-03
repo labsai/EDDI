@@ -1,11 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import {
   buildOperatorSafetyPreamble,
   buildOperatorPromptBody,
   buildOperatorSystemPrompt,
   defaultOperatorPromptBody,
   safetyPreambleForScope,
+  promptSafeName,
 } from "../system-prompt";
+import { setBrand, DEFAULT_BRAND } from "@/lib/brand";
 import {
   READ_ENDPOINTS,
   WRITE_ENDPOINTS,
@@ -188,7 +190,7 @@ describe("buildOperatorPromptBody", () => {
 
   it("keeps the role and working style in both branches", () => {
     for (const body of [buildOperatorPromptBody(READ_ENDPOINTS), buildOperatorPromptBody(WITH_A_WRITE)]) {
-      expect(body).toContain("help an administrator understand and operate this EDDI");
+      expect(body).toContain("help an administrator understand and operate this\ndeployment");
       expect(body).toContain("How to work:");
       // The persona/formatting section — deleting it (or dropping its
       // insertion from buildOperatorPromptBody) must fail here.
@@ -640,6 +642,64 @@ describe("the app-context section — what screen the admin is on", () => {
     const start = body.indexOf("{#if context.screen}");
     const viewing = body.indexOf("currently viewing");
     expect(viewing).toBeGreaterThan(start);
+  });
+});
+
+/**
+ * White-label plan §4.7: the operator takes the deployment's product name, and
+ * names the engine exactly once — so it still finds the engine's documentation
+ * and `eddi.*` properties under a brand that never mentions EDDI.
+ */
+describe("the operator's persona follows the brand", () => {
+  /** "EDDI" as a word, minus technical identifiers (eddi.*, eddi://, EDDI_*). */
+  function engineMentions(text: string): number {
+    return (text.match(/\bEDDI\b/g) ?? []).length;
+  }
+
+  afterEach(() => setBrand(undefined));
+
+  it("is the EDDI Platform Operator when nothing is branded", () => {
+    expect(safetyPreambleForScope("read_only")).toMatch(/^You are the EDDI Platform Operator\. /);
+  });
+
+  it("takes the product name of the brand in effect", () => {
+    setBrand({ branded: true, productName: "Acme Assist" });
+    const preamble = safetyPreambleForScope("read_write");
+    expect(preamble).toMatch(/^You are the Acme Assist Platform Operator\. /);
+    expect(preamble).not.toContain("EDDI Platform Operator");
+  });
+
+  it("an explicit name wins over the brand, which is what the revision fingerprint relies on", () => {
+    setBrand({ branded: true, productName: "Acme Assist" });
+    expect(safetyPreambleForScope("read_only", DEFAULT_BRAND.productName)).toMatch(/^You are the EDDI Platform Operator/);
+  });
+
+  it("names the engine exactly once under a brand, in both scopes, with the default body", () => {
+    for (const scope of ["read_only", "read_write"] as const) {
+      const prompt = buildOperatorSystemPrompt(defaultOperatorPromptBody(scope), scope, "Acme Assist");
+      expect(engineMentions(prompt), scope).toBe(1);
+      expect(prompt).toContain("built on the EDDI engine; its documentation and `eddi.*` configuration properties use that name");
+      expect(prompt).not.toMatch(/this EDDI deployment/);
+    }
+  });
+
+  it("the default body does not depend on the brand, so a rebrand never marks it customized", () => {
+    const unbranded = defaultOperatorPromptBody("read_write");
+    setBrand({ branded: true, productName: "Acme Assist" });
+    expect(defaultOperatorPromptBody("read_write")).toBe(unbranded);
+  });
+
+  it("sends a rebrand request to the Branding page instead of a tool", () => {
+    const body = defaultOperatorPromptBody("read_write");
+    expect(body).toContain("Admin → Branding page (/manage/branding)");
+    expect(body).toMatch(/You have no tool for it, on purpose/);
+    expect(body).toMatch(/upgraded on the Operator page/);
+  });
+
+  it("drops braces from the name, because the prompt is a Qute template", () => {
+    expect(promptSafeName("Acme {vars.secret}")).toBe("Acme vars.secret");
+    expect(buildOperatorSafetyPreamble(READ_ENDPOINTS, "Acme {x}")).not.toContain("{x}");
+    expect(promptSafeName("{}")).toBe("EDDI");
   });
 });
 

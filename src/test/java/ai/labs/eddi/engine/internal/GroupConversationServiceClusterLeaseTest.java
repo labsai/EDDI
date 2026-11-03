@@ -165,7 +165,7 @@ class GroupConversationServiceClusterLeaseTest {
         service.cancelDiscussion(GC_ID, ControlSignal.CANCEL_GRACEFUL);
 
         verify(clusterRpc).call(eq("node-b"), eq(IClusterRpc.GROUP_CONTROL), anyMap());
-        verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+        verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), any());
         assertEquals(GroupConversationState.CANCELLED, gc.getState(), "the stale holder did not cancel it, so the database path must");
     }
 

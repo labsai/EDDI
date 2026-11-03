@@ -60,7 +60,7 @@ class RestConnectionStoreVaultBackedVarsTest {
         ISecretProvider secretProvider = mock(ISecretProvider.class);
         lenient().when(secretProvider.isAvailable()).thenReturn(true);
         rest = new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                mock(ConnectionRegistry.class), mock(IConnectionGrantStore.class), secretProvider, true, mock(ResourceAccessGuard.class),
+                mock(ConnectionRegistry.class), mock(IConnectionGrantStore.class), secretProvider, true, adminGuard(),
                 new InMemoryConnectionNameClaimStore(), new CredentialReferenceResolver(mock(SecretResolver.class), globalVariableResolver));
     }
 
@@ -137,5 +137,15 @@ class RestConnectionStoreVaultBackedVarsTest {
         var connection = oauthConnection(clientSecret);
         connection.setName(name);
         return connection;
+    }
+
+    /**
+     * Creating a connection is admin-only in the implementation too, not only on
+     * the REST interface, so these fixtures act as an administrator.
+     */
+    private static ResourceAccessGuard adminGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.isAdmin()).thenReturn(true);
+        return guard;
     }
 }

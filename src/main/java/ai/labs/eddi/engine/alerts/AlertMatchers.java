@@ -69,7 +69,7 @@ public final class AlertMatchers {
         return Optional.of(AlertMatch.error(outcome.kind()));
     }
 
-    private static boolean applies(AlertRule rule, AlertSource source, String agentId) {
+    static boolean applies(AlertRule rule, AlertSource source, String agentId) {
         return rule.enabled() && rule.source() == source && rule.scope() != null && rule.scope().covers(agentId);
     }
 

@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.node.TextNode;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -321,6 +322,13 @@ public final class ConfigSecretRedactor {
             return isLiteral(value) ? REDACTED : null;
         }
         String normalizedName = name == null ? "" : normalize(name);
+        if (normalizedName.endsWith("headers") || normalizedName.endsWith("queryparams")) {
+            // A header or query map stored as a JSON string, e.g. an LLM task's
+            // customHeaders / customQueryParams. Under a name that is neither a
+            // credential name nor a map container, its Authorization entry was
+            // returned to every reader as written.
+            return judgeEmbeddedMap(name, value);
+        }
         if (HAS_SCHEME.matcher(value).find() || URL_FIELD_NAMES.contains(normalizedName) || normalizedName.endsWith("url")) {
             return changedOrNull(value, redactUrl(value));
         }
@@ -330,6 +338,46 @@ public final class ConfigSecretRedactor {
         return null;
     }
 
+    /**
+     * A header or query-parameter map serialized into one string value: each entry
+     * judged as if it sat in a real {@code headers} / {@code queryParams} object. A
+     * value that is not a JSON object is shape-scanned as free text instead.
+     */
+    private static String judgeEmbeddedMap(String name, String value) {
+        JsonNode parsed = null;
+        if (value.stripLeading().startsWith("{")) {
+            try {
+                parsed = MAPPER.readTree(value);
+            } catch (JsonProcessingException notJson) {
+                // Fall through to the free-text scan.
+            }
+        }
+        if (!(parsed instanceof ObjectNode embedded)) {
+            return changedOrNull(value, scanText(value));
+        }
+        boolean changed = false;
+        for (Iterator<Map.Entry<String, JsonNode>> fields = embedded.fields(); fields.hasNext();) {
+            Map.Entry<String, JsonNode> entry = fields.next();
+            if (!entry.getValue().isTextual()) {
+                continue;
+            }
+            String replacement = judge(entry.getKey(), name, entry.getValue().asText());
+            if (replacement != null) {
+                entry.setValue(new TextNode(replacement));
+                changed = true;
+            }
+        }
+        if (!changed) {
+            return null;
+        }
+        try {
+            return MAPPER.writeValueAsString(embedded);
+        } catch (JsonProcessingException e) {
+            // Cannot happen for a tree just parsed; never hand the original back.
+            return REDACTED;
+        }
+    }
+
     private static String changedOrNull(String original, String redacted) {
         return redacted.equals(original) ? null : redacted;
     }
@@ -337,11 +385,30 @@ public final class ConfigSecretRedactor {
     /**
      * Whether a value in a credential field is a literal rather than references,
      * templates and scheme words.
+     * <p>
+     * Scheme words are scaffolding only <em>beside</em> a reference: a value with
+     * no reference at all is the credential itself, whatever it spells
+     * ({@code "token"} included). And only ASCII words, whitespace and the
+     * separators a scheme uses ({@code Basic ${vault:u}:${vault:p}}) count as
+     * scaffolding: a password made of symbols or non-ASCII letters splits into no
+     * word, and used to be left in clear for that reason alone.
      */
     static boolean isLiteral(String value) {
-        String remainder = REFERENCE_OR_TEMPLATE.matcher(value).replaceAll(" ");
+        Matcher references = REFERENCE_OR_TEMPLATE.matcher(value);
+        if (!references.find()) {
+            return true;
+        }
+        String remainder = references.replaceAll(" ");
         for (String word : NON_WORD.split(remainder)) {
             if (!word.isEmpty() && !SCHEME_WORDS.contains(word.toLowerCase(Locale.ROOT))) {
+                return true;
+            }
+        }
+        for (int i = 0; i < remainder.length(); i++) {
+            char c = remainder.charAt(i);
+            boolean scaffolding = Character.isWhitespace(c) || (c < 128 && (Character.isLetterOrDigit(c) || c == '-')) || c == ':'
+                    || c == ',' || c == ';' || c == '=';
+            if (!scaffolding) {
                 return true;
             }
         }
@@ -489,7 +556,9 @@ public final class ConfigSecretRedactor {
         if (rawValue.isEmpty() || isOnlySentinels(rawValue)) {
             return pair;
         }
-        if (isCredentialQueryName(name)) {
+        // Judged decoded: a server decodes the name before reading it, so
+        // %61pi_key is api_key and must not slip past the name rule.
+        if (isCredentialQueryName(name) || isCredentialQueryName(UriRedactor.decodeQueryComponent(name))) {
             return name + "=" + IN_STRING_REDACTED;
         }
         String decoded = rawValue;

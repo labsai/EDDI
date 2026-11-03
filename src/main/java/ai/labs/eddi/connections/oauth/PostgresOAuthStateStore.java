@@ -157,6 +157,23 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
     }
 
     @Override
+    public boolean exists(String state) {
+        createSchema();
+        if (state == null || state.isBlank()) {
+            return false;
+        }
+        try (Connection connection = dataSourceInstance.get().getConnection();
+                PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM connection_oauth_states WHERE state = ?")) {
+            statement.setString(1, state);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read an OAuth state", e);
+        }
+    }
+
+    @Override
     public int deleteByPrincipal(String principal) {
         createSchema();
         try (Connection connection = dataSourceInstance.get().getConnection();

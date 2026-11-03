@@ -37,10 +37,10 @@ export function EditorSection({
   const [open, setOpen] = useState(defaultOpen);
   const modifiedPill = modified && (
     <span
-      className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+      className="inline-flex items-center gap-1 rounded-full bg-warn-100 px-2 py-0.5 text-[10px] font-medium normal-case tracking-normal text-warn-800 dark:bg-warn-900/30 dark:text-warn-400"
       data-testid="section-modified"
     >
-      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden="true" />
+      <span className="h-1.5 w-1.5 rounded-full bg-warn-500" aria-hidden="true" />
       {t("editor.modified", "Modified")}
     </span>
   );

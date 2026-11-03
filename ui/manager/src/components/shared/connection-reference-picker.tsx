@@ -223,7 +223,7 @@ export function ConnectionReferenceButton({
           <p className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
             {t(
               "secretPicker.connectionHint",
-              "Inserts ${connection:name} as the whole value. EDDI resolves it to the credential on every request.",
+              "Inserts ${connection:name} as the whole value. {{productName}} resolves it to the credential on every request.",
             )}
           </p>
         </div>

@@ -221,6 +221,59 @@ class SelfUngatingGuardProtectionTest {
         assertNull(SelfUngatingGuard.refusal("PUT", "https://eddi/llmstore/llms/" + UNRELATED, MAPPER.valueToTree(Map.of("tasks", 1)).toString(), p));
     }
 
+    @Nested
+    @DisplayName("another LLM configuration's stored task gate")
+    class StoredLlmGates {
+
+        private final String storedWithGate = "{\"tasks\":[{\"id\":\"t\",\"toolApprovals\":{\"requireApproval\":[\"http:*\"]}}]}";
+        private final String url = "https://eddi/llmstore/llms/" + UNRELATED + "?version=3";
+
+        private Protection withStoredLlm(String json) {
+            return new Protection(AGENT, Set.of(WORKFLOW, LLM), false, null, (id, version) -> {
+                assertEquals(UNRELATED, id);
+                assertEquals(3, version);
+                return json == null ? null : MAPPER.readTree(json);
+            });
+        }
+
+        @Test
+        @DisplayName("a whole-document PUT that simply omits the stored gate is refused")
+        void omissionIsRefused() {
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[{\"id\":\"t\"}]}", withStoredLlm(storedWithGate)));
+        }
+
+        @Test
+        @DisplayName("a patch replacing the gated task (an ancestor of the gate) is refused; one beside it passes")
+        void ancestorPatch() {
+            Protection p = withStoredLlm(storedWithGate);
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0\",\"value\":{\"id\":\"t\"}}]", p));
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"remove\",\"path\":\"/tasks\"}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0/description\",\"value\":\"x\"}]", p));
+        }
+
+        @Test
+        @DisplayName("a version too long for an int is unverifiable (refused), not an exception")
+        void oversizedVersionIsUnverifiable() {
+            String huge = "https://eddi/llmstore/llms/" + UNRELATED + "?version=99999999999999999999";
+            Protection p = new Protection(AGENT, Set.of(WORKFLOW, LLM), false, null, (id, version) -> MAPPER.readTree(storedWithGate));
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON, SelfUngatingGuard.refusal("PUT", huge, "{\"tasks\":[]}", p));
+        }
+
+        @Test
+        @DisplayName("a stored document without a gate may be replaced; an unreadable one may not")
+        void noGateOrUnreadable() {
+            assertNull(SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[]}", withStoredLlm("{\"tasks\":[{\"id\":\"t\"}]}")));
+            Protection unreadable = new Protection(AGENT, Set.of(), false, null, (id, version) -> {
+                throw new IllegalStateException("store down");
+            });
+            assertEquals(SelfUngatingGuard.UNVERIFIABLE_REASON, SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[]}", unreadable));
+        }
+    }
+
     /**
      * The argument test used to search the raw text only, percent-decoded. A JSON
      * unicode escape survives that, and every JSON parser downstream — the MCP

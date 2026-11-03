@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -130,6 +131,16 @@ public class DreamService {
     @Inject
     TenantQuotaService tenantQuotaService;
 
+    /**
+     * The deploy-time vault-grant gate, re-run here because a Dream cycle is not a
+     * deployment: it reads any stored agent version — a pinned, never-deployed one
+     * included — and hands {@code dream.parameters} straight to the model registry,
+     * which resolves {@code ${vault:…}} without a grant check. Field-injected and
+     * null-checked so tests constructing the service directly need not provide it.
+     */
+    @Inject
+    VaultGrantGate vaultGrantGate;
+
     private Counter usersProcessedCounter;
     private Counter entriesPrunedCounter;
     private Counter contradictionsFoundCounter;
@@ -201,8 +212,9 @@ public class DreamService {
         }
 
         AgentConfiguration agentConfiguration;
+        int version;
         try {
-            int version = agentVersion != null && agentVersion > 0
+            version = agentVersion != null && agentVersion > 0
                     ? agentVersion
                     : currentVersionOf(agentId);
             if (version <= 0) {
@@ -231,6 +243,21 @@ public class DreamService {
         if (dreamConfig == null || !dreamConfig.isEnabled()) {
             return rejected(userId, start, "Agent '" + agentId + "' has dream consolidation disabled "
                     + "(userMemoryConfig.dream.enabled=false or absent), but a dream schedule fired for it.");
+        }
+
+        if (vaultGrantGate != null) {
+            var grantCheck = vaultGrantGate.check(agentId, version);
+            if (grantCheck.blocked()) {
+                return rejected(userId, start, grantCheck.toFailure(agentId, version).message()
+                        + " The dream cycle was not started.");
+            }
+            if (!grantCheck.ungranted().isEmpty()) {
+                // warn mode: the cycle runs, but operators trialling the gate
+                // (docs/secrets-vault.md)
+                // look for this line before switching to enforce.
+                LOGGER.warnf("[DREAM] %s Dream cycle allowed (eddi.vault.grant-enforcement=warn); set it to 'enforce' to block.",
+                        LogSanitizer.sanitize(grantCheck.toFailure(agentId, version).message()));
+            }
         }
 
         return process(userId, agentId, dreamConfig);
@@ -1038,7 +1065,7 @@ public class DreamService {
 
         if ("all".equals(config.getSummarizeGroupBy())) {
             // Single group
-            return splitSelfScopedGroupsByAgent(Map.of("all", new ArrayList<>(entries)));
+            return partitionByReadership(Map.of("all", new ArrayList<>(entries)));
         }
 
         // Default: group by category (null-safe — legacy entries may lack category)
@@ -1047,7 +1074,7 @@ public class DreamService {
                         e -> e.category() != null ? e.category() : "fact"));
 
         if (!config.isPreserveAgentProvenance()) {
-            return splitSelfScopedGroupsByAgent(byCategory);
+            return partitionByReadership(byCategory);
         }
 
         // Sub-group by agent within each category
@@ -1057,7 +1084,57 @@ public class DreamService {
                     .collect(Collectors.groupingBy(e -> e.sourceAgentId() != null ? e.sourceAgentId() : "unknown"))
                     .forEach((agentId, agentEntries) -> result.put(catGroup.getKey() + ":" + agentId, agentEntries));
         }
-        return splitSelfScopedGroupsByAgent(result);
+        return partitionByReadership(result);
+    }
+
+    /**
+     * The readership boundaries a consolidation must not cross: {@code self}
+     * memories per agent ({@link #splitSelfScopedGroupsByAgent}), then
+     * {@code group} memories per group set
+     * ({@link #splitGroupScopedGroupsByGroupIds}).
+     */
+    private static Map<String, List<UserMemoryEntry>> partitionByReadership(Map<String, List<UserMemoryEntry>> groups) {
+        return splitGroupScopedGroupsByGroupIds(splitSelfScopedGroupsByAgent(groups));
+    }
+
+    /**
+     * A {@code group}-scoped memory is readable by agents in its groups only. A
+     * consolidated entry is stamped with the union of its originals' group ids, so
+     * merging a group-A fact with a group-B fact made the A fact readable in B. A
+     * bucket whose most restrictive visibility is {@code group} is therefore split
+     * by each entry's normalised group-id set; entries that are not group-scoped
+     * (global ones) stay together in their own part, so nothing is widened and the
+     * union on each part is exactly that part's set.
+     */
+    static Map<String, List<UserMemoryEntry>> splitGroupScopedGroupsByGroupIds(Map<String, List<UserMemoryEntry>> groups) {
+        Map<String, List<UserMemoryEntry>> result = new LinkedHashMap<>();
+        for (var group : groups.entrySet()) {
+            List<UserMemoryEntry> groupEntries = group.getValue();
+            if (groupEntries.isEmpty() || mostRestrictiveVisibility(groupEntries) != Visibility.group) {
+                result.put(group.getKey(), groupEntries);
+                continue;
+            }
+            Map<String, List<UserMemoryEntry>> byReaders = groupEntries.stream()
+                    .collect(Collectors.groupingBy(DreamService::readershipKey, LinkedHashMap::new, Collectors.toList()));
+            if (byReaders.size() <= 1) {
+                result.put(group.getKey(), groupEntries);
+                continue;
+            }
+            LOGGER.infof("[DREAM] Group '%s' holds memories of %d different group readerships — consolidating each "
+                    + "separately so no group-scoped memory is widened.", LogSanitizer.sanitize(group.getKey()), byReaders.size());
+            byReaders.forEach((readers, part) -> result.put(group.getKey() + ":groups[" + readers + "]", part));
+        }
+        return result;
+    }
+
+    private static String readershipKey(UserMemoryEntry entry) {
+        if (entry.visibility() != Visibility.group) {
+            return "";
+        }
+        return entry.groupIds() == null
+                ? ""
+                : entry.groupIds().stream().filter(Objects::nonNull).distinct().sorted()
+                        .collect(Collectors.joining(","));
     }
 
     /**
@@ -1198,16 +1275,26 @@ public class DreamService {
      * the originals are deleted anyway.
      */
     static List<ConsolidatedEntry> mergeDuplicateKeys(List<ConsolidatedEntry> entries) {
-        Map<String, String> byKey = new LinkedHashMap<>();
+        // StringBuilder accumulation with the length checked on every append: merging
+        // by string concatenation copied the whole prefix per duplicate (quadratic in
+        // a response full of repeated keys) and only checked the cap at the end.
+        Map<String, StringBuilder> byKey = new LinkedHashMap<>();
         for (ConsolidatedEntry entry : entries) {
-            byKey.merge(entry.key(), entry.value(), (a, b) -> a.equals(b) ? a : a + "; " + b);
+            String value = entry.value() == null ? "" : entry.value();
+            StringBuilder merged = byKey.get(entry.key());
+            if (merged == null) {
+                merged = new StringBuilder(value);
+                byKey.put(entry.key(), merged);
+            } else if (!value.contentEquals(merged)) {
+                merged.append("; ").append(value);
+            }
+            if (merged.length() > MAX_VALUE_LENGTH) {
+                LOGGER.warnf("[DREAM] A consolidated value exceeds %d characters; keeping the originals rather than cutting it.",
+                        MAX_VALUE_LENGTH);
+                return List.of();
+            }
         }
-        if (byKey.values().stream().anyMatch(value -> value.length() > MAX_VALUE_LENGTH)) {
-            LOGGER.warnf("[DREAM] A consolidated value exceeds %d characters; keeping the originals rather than cutting it.",
-                    MAX_VALUE_LENGTH);
-            return List.of();
-        }
-        return byKey.entrySet().stream().map(e -> new ConsolidatedEntry(e.getKey(), e.getValue())).toList();
+        return byKey.entrySet().stream().map(e -> new ConsolidatedEntry(e.getKey(), e.getValue().toString())).toList();
     }
 
     /**

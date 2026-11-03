@@ -66,7 +66,17 @@ public class Dependency implements IRuleCondition {
 
         ExecutionState state = ExecutionState.NOT_EXECUTED;
         for (Rule behaviorRule : filteredRules) {
-            state = behaviorRule.execute(memory, trace);
+            // A rule reached along several dependency paths is evaluated once per
+            // evaluation: the trace only guards the active path, so without this a
+            // chain of rules that each depend twice on the previous one costs 2^n.
+            // A rule on the active trace is executed anyway, so its cycle check still
+            // fires: rule names need not be unique, and a cached rule of the same name
+            // as one on the trace would otherwise answer for it.
+            state = TemplateDataScope.ruleState(memory, behaviorRule);
+            if (state == null || trace.contains(behaviorRule)) {
+                state = behaviorRule.execute(memory, trace);
+                TemplateDataScope.rememberRuleState(memory, behaviorRule, state);
+            }
             if (state == ExecutionState.ERROR || state == ExecutionState.SUCCESS) {
                 break;
             } else {

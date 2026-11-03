@@ -264,12 +264,12 @@ export const SecurityIdentitySection = memo(function SecurityIdentitySection({
         {/* Inline warning when any flag is enabled */}
         {hasAnyFlagEnabled && (
           <div
-            className="flex items-start gap-2 rounded-lg border border-amber-400/30 bg-amber-50 px-3 py-2.5 dark:bg-amber-900/15 dark:border-amber-700/30"
+            className="flex items-start gap-2 rounded-lg border border-warn-400/30 bg-warn-50 px-3 py-2.5 dark:bg-warn-900/15 dark:border-warn-700/30"
             data-testid="security-flag-warning"
             role="alert"
           >
-            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-            <p className="text-[11px] text-amber-800 dark:text-amber-300 leading-relaxed">
+            <AlertTriangle className="h-4 w-4 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
+            <p className="text-[11px] text-warn-800 dark:text-warn-300 leading-relaxed">
               {t("agentDetail.securityFlagWarning", "Cryptographic signing is not yet available in this version. The backend will reject saves with these flags enabled (HTTP 400).")}
             </p>
           </div>
@@ -1356,7 +1356,7 @@ export const HitlConfigSection = memo(function HitlConfigSection({
     <EditorSection
       label={t("agentDetail.hitlConfig", "Human-in-the-Loop")}
       icon={Hand}
-      accent="text-amber-500"
+      accent="text-warn-500"
       variant="card"
       modified={modified}
       defaultOpen={enabled}
@@ -1810,7 +1810,7 @@ function SlackSetupGuide() {
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">2</span>
-              {t("agentDetail.slackStep2", "Copy the Bot Token (xoxb-…) and Signing Secret into the EDDI vault and configure channels below.")}
+              {t("agentDetail.slackStep2", "Copy the Bot Token (xoxb-…) and Signing Secret into the {{productName}} vault and configure channels below.")}
             </li>
             <li className="flex items-start gap-2">
               <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-indigo-500/10 text-[10px] font-bold text-indigo-500">3</span>
@@ -1823,7 +1823,7 @@ function SlackSetupGuide() {
           </ol>
 
           <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
-            {t("agentDetail.slackSetupNote", "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in EDDI.")}
+            {t("agentDetail.slackSetupNote", "Important: Configure the channel below before enabling Event Subscriptions — Slack sends a URL verification challenge that requires the signing secret to be configured in {{productName}}.")}
           </p>
 
           {/* Required scopes */}
@@ -1923,12 +1923,12 @@ function SlackChannelCard({
             disabled={disabled}
             placeholder="C0123ABCDEF"
             className={`h-8 w-full rounded-md border bg-background px-2.5 font-mono text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60 ${
-              channelIdValid ? "border-input" : "border-amber-500"
+              channelIdValid ? "border-input" : "border-warn-500"
             }`}
             data-testid={`channel-id-${index}`}
           />
           {!channelIdValid && (
-            <p className="mt-0.5 text-[10px] text-amber-600 dark:text-amber-400">
+            <p className="mt-0.5 text-[10px] text-warn-600 dark:text-warn-400">
               {t("agentDetail.channelIdHint", "Channel IDs start with C followed by uppercase alphanumeric characters")}
             </p>
           )}

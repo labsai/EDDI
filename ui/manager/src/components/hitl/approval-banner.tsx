@@ -409,15 +409,15 @@ export function ApprovalBanner({
       // min-w-0/max-w-full: a gated call's arguments are one long unbreakable
       // JSON line; without the width clamp the card's intrinsic width blew the
       // whole page out horizontally instead of scrolling inside its own <pre>.
-      className="min-w-0 max-w-full rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 backdrop-blur-sm"
+      className="min-w-0 max-w-full rounded-xl border border-warn-500/30 bg-warn-500/5 p-4 backdrop-blur-sm"
     >
       {/* Header */}
       <div className="mb-3 flex items-start gap-3">
-        <div className="rounded-lg bg-amber-500/10 p-2">
+        <div className="rounded-lg bg-warn-500/10 p-2">
           {isToolCall ? (
-            <Wrench className="h-5 w-5 text-amber-500" aria-hidden="true" />
+            <Wrench className="h-5 w-5 text-warn-500" aria-hidden="true" />
           ) : (
-            <Hand className="h-5 w-5 text-amber-500" aria-hidden="true" />
+            <Hand className="h-5 w-5 text-warn-500" aria-hidden="true" />
           )}
         </div>
         <div className="min-w-0 flex-1">
@@ -458,7 +458,7 @@ export function ApprovalBanner({
             "inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium",
             timeRemaining.overdue
               ? "bg-destructive/10 text-destructive"
-              : "bg-amber-500/10 text-amber-600",
+              : "bg-warn-500/10 text-warn-600",
           )}>
             <Clock className="h-3 w-3" aria-hidden="true" />
             {timeRemaining.overdue
@@ -494,7 +494,7 @@ export function ApprovalBanner({
                 className={cn(
                   "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
                   explicitReviewMissing
-                    ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                    ? "bg-warn-500/15 text-warn-700 dark:text-warn-400"
                     : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
                 )}
                 data-testid="per-call-progress"
@@ -556,7 +556,7 @@ export function ApprovalBanner({
               : t("hitl.toolApprovalHint", "Approve applies your per-call choices (calls you didn't change are approved). Reject rejects the whole batch.")}
           </p>
           {explicitReviewMissing && (
-            <p className="flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400" data-testid="explicit-review-missing">
+            <p className="flex items-center gap-1 text-xs text-warn-600 dark:text-warn-400" data-testid="explicit-review-missing">
               <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />
               {t("hitl.explicitReviewMissing", "Review every call above before approving.")}
             </p>
@@ -850,7 +850,7 @@ function ToolCallRow({
         // Approve button, so it is the thing that should catch the eye. Decided
         // rows fall back to the neutral card.
         awaitingDecision
-          ? "border-amber-500/40 bg-amber-500/[0.04]"
+          ? "border-warn-500/40 bg-warn-500/[0.04]"
           : "border-border bg-background/50",
       )}
       data-testid={`tool-call-${call.callId}`}
@@ -859,7 +859,7 @@ function ToolCallRow({
       <div className="mb-1.5 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-1.5">
-            <Wrench className="h-3.5 w-3.5 text-amber-500" aria-hidden="true" />
+            <Wrench className="h-3.5 w-3.5 text-warn-500" aria-hidden="true" />
             <span className="font-mono text-sm font-medium text-foreground">{call.toolName}</span>
             {call.source && (
               <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -867,7 +867,7 @@ function ToolCallRow({
               </span>
             )}
             {call.gateReason && (
-              <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-600" title={t("hitl.gateReason", "Matched pattern")}>
+              <span className="rounded bg-warn-500/10 px-1.5 py-0.5 text-[10px] font-medium text-warn-600" title={t("hitl.gateReason", "Matched pattern")}>
                 {call.gateReason}
               </span>
             )}

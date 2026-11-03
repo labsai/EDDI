@@ -102,7 +102,6 @@ class SanitizedLogSinksTest {
                     sink("Phase '%s' of group %s ended early after repeat %d: %s", "gc.getGroupId()", "outcome.reason()", "phase.name()"),
                     sink("Group discussion %s cancelled before HITL gate at phase %d", "gc.getId()"),
                     sink("(aborted wave) — pausing for human review instead of skipping them", "gc.getId()"),
-                    sink("Group discussion %s ending early after phase %d on an END_DISCUSSION signal", "gc.getId()"),
                     sink("Group %s hit its cost ceiling with no remaining SYNTHESIS phase — completing without an answer", "gc.getGroupId()"),
                     // H14a folded the completion CAS's two catch branches into stopAsSuperseded /
                     // stopAsDeleted, which every conditional leg write now shares; these are the
@@ -188,7 +187,7 @@ class SanitizedLogSinksTest {
         if (!failures.isEmpty()) {
             fail("CWE-117: " + failures.size() + " sanitized log sink(s) regressed:\n  - " + String.join("\n  - ", failures));
         }
-        assertTrue(checked == 38, "expected to check all 38 flagged sinks, checked " + checked
+        assertTrue(checked == 37, "expected to check all 37 flagged sinks, checked " + checked
                 + " — an entry was added or removed without updating this count");
     }
 

@@ -271,22 +271,31 @@ public class RestSecretStore implements IRestSecretStore {
                         before.lastRotatedAt(), before.checksum(), body.description() != null ? body.description() : before.description(),
                         grant, allowedHosts != null ? allowedHosts : before.allowedHosts());
             } else {
-                if (allowedHosts != null) {
-                    // Two independent writes, the host list FIRST. The precondition below
-                    // does not cover the hosts, and if the second write fails the row must
-                    // be left in its tighter state: a narrowed host list without the widened
-                    // grant is safe, a widened grant without the narrowed host list is not.
-                    secretProvider.updateAllowedHosts(ref, allowedHosts);
-                }
-                after = expected == null
-                        ? secretProvider.updateGrant(ref, grant, body.description())
-                        : secretProvider.updateGrant(ref, grant, body.description(), expected);
-                if (allowedHosts != null) {
-                    // Invalidated for the host list, unlike the grant below: the list is
-                    // checked when a model, embedding store or MCP client is BUILT, and
-                    // those are cached. Without the eviction their invalidation listeners
-                    // perform, a narrowed list would not reach a client already built.
-                    secretResolver.invalidateCache(ref);
+                boolean hostsWritten = false;
+                try {
+                    if (allowedHosts != null) {
+                        // Two independent writes, the host list FIRST. The precondition below
+                        // does not cover the hosts, and if the second write fails the row must
+                        // be left in its tighter state: a narrowed host list without the
+                        // widened grant is safe, a widened grant without the narrowed host
+                        // list is not.
+                        secretProvider.updateAllowedHosts(ref, allowedHosts);
+                        hostsWritten = true;
+                    }
+                    after = expected == null
+                            ? secretProvider.updateGrant(ref, grant, body.description())
+                            : secretProvider.updateGrant(ref, grant, body.description(), expected);
+                } finally {
+                    if (hostsWritten) {
+                        // Invalidated for the host list, unlike the grant below: the list is
+                        // checked when a model, embedding store or MCP client is BUILT, and
+                        // those are cached. Without the eviction their invalidation listeners
+                        // perform, a narrowed list would not reach a client already built.
+                        // In a finally: the host list is committed even when the grant write
+                        // after it is refused (409) or fails, and a narrowed list that only
+                        // reached new clients would be no narrowing at all.
+                        secretResolver.invalidateCache(ref);
+                    }
                 }
                 // For the agent grant alone, deliberately NOT invalidating the
                 // SecretResolver cache.

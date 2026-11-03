@@ -57,7 +57,7 @@ describe("SchedulesPage — why a schedule is disabled", () => {
   it("a disabled schedule without a reason was disabled by a person — and may be a 6.5 undeploy needing one enable", async () => {
     renderSchedules();
     const notice = await screen.findByTestId("disabled-by-person-sched-3");
-    expect(notice).toHaveTextContent(/before EDDI 6.6/);
+    expect(notice).toHaveTextContent(/before server version 6.6/);
     expect(screen.queryByTestId("disabled-reason-sched-3")).not.toBeInTheDocument();
   });
 

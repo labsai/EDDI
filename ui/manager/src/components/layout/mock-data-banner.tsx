@@ -24,17 +24,17 @@ export function MockDataBanner() {
   if (dismissed) return null;
 
   return (
-    <div className="relative flex items-center justify-center gap-2 bg-amber-500/90 px-4 py-1.5 text-xs font-medium text-amber-950 dark:bg-amber-600/90 dark:text-amber-50">
+    <div className="relative flex items-center justify-center gap-2 bg-warn-500/90 px-4 py-1.5 text-xs font-medium text-warn-950 dark:bg-warn-600/90 dark:text-warn-50">
       <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
       <span>
         {t(
           "mockBanner.message",
-          "Demo Mode — Displaying sample data. Connect an EDDI backend for real data.",
+          "Demo Mode — Displaying sample data. Connect an {{productName}} backend for real data.",
         )}
       </span>
       <button
         onClick={() => setDismissed(true)}
-        className="absolute inset-e-2 top-1/2 -translate-y-1/2 rounded p-0.5 hover:bg-amber-600/30 dark:hover:bg-amber-800/40 transition-colors"
+        className="absolute inset-e-2 top-1/2 -translate-y-1/2 rounded p-0.5 hover:bg-warn-600/30 dark:hover:bg-warn-800/40 transition-colors"
         aria-label={t("common.dismiss", "Dismiss")}
       >
         <X className="h-3.5 w-3.5" />

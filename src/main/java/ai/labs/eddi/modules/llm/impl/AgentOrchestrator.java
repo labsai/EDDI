@@ -256,6 +256,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
     private final IAgentFactory agentFactory;
     private final IAgentStore agentStore;
     private final IWorkflowStore workflowStore;
+    private final IResourceClientLibrary resourceClientLibrary;
 
     // Injected by the container after construction, past the constructor's
     // final-field freeze; `volatile` publishes these write-once fields to the
@@ -452,6 +453,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         this.agentFactory = agentFactory;
         this.agentStore = agentStore;
         this.workflowStore = workflowStore;
+        this.resourceClientLibrary = resourceClientLibrary;
         this.journalStore = journalStore;
         this.conversationHistoryBuilder = conversationHistoryBuilder;
         this.toolContextBudgetGuard = new ToolContextBudget(tokenCounterFactory);
@@ -1060,7 +1062,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
      * now (L13). See {@link ActingAgentResources}.
      */
     SelfUngatingGuard.Protection protectionFor(IConversationMemory memory) {
-        return ActingAgentResources.resolve(agentStore, workflowStore, memory.getAgentId(), memory.getAgentVersion());
+        return ActingAgentResources.resolve(agentStore, workflowStore, resourceClientLibrary, memory.getAgentId(), memory.getAgentVersion());
     }
 
     ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {

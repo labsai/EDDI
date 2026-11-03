@@ -8,6 +8,7 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { useTheme } from "@/components/layout/theme-provider";
 import { cn } from "@/lib/utils";
+import { cssHexColor } from "@/lib/css-color";
 import type { editor, languages } from "monaco-editor";
 import type Monaco from "monaco-editor";
 
@@ -109,18 +110,20 @@ function registerPromptLanguage(monaco: typeof Monaco) {
     },
   } as languages.IMonarchLanguage);
 
-  // Custom theme tokens
+  // Custom theme tokens. Template variables take their colour from index.css.
+  const templateVariable = cssHexColor("--editor-template-variable", "d4a843");
+  const templateVariableLight = cssHexColor("--editor-template-variable-light", "9c6b10");
   monaco.editor.defineTheme("prompt-dark", {
     base: "vs-dark",
     inherit: true,
     rules: [
       // Qute
-      { token: "variable.qute", foreground: "d4a843", fontStyle: "bold" },
+      { token: "variable.qute", foreground: templateVariable, fontStyle: "bold" },
       { token: "keyword.qute", foreground: "c586c0", fontStyle: "bold" },
       { token: "comment.qute", foreground: "6a9955", fontStyle: "italic" },
       { token: "string.qute", foreground: "ce9178" },
       // Legacy templates
-      { token: "variable.legacy", foreground: "d4a843" },
+      { token: "variable.legacy", foreground: templateVariable },
       // Standard
       { token: "string", foreground: "ce9178" },
       { token: "number", foreground: "b5cea8" },
@@ -137,12 +140,12 @@ function registerPromptLanguage(monaco: typeof Monaco) {
     inherit: true,
     rules: [
       // Qute
-      { token: "variable.qute", foreground: "9c6b10", fontStyle: "bold" },
+      { token: "variable.qute", foreground: templateVariableLight, fontStyle: "bold" },
       { token: "keyword.qute", foreground: "af00db", fontStyle: "bold" },
       { token: "comment.qute", foreground: "008000", fontStyle: "italic" },
       { token: "string.qute", foreground: "a31515" },
       // Legacy templates
-      { token: "variable.legacy", foreground: "9c6b10" },
+      { token: "variable.legacy", foreground: templateVariableLight },
       // Standard
       { token: "string", foreground: "a31515" },
       { token: "number", foreground: "098658" },

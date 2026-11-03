@@ -147,4 +147,27 @@ class ToolApprovalPatternsTest {
         assertTrue(trail.isPresent());
         assertTrue(trail.get().contains("colon"), trail.get());
     }
+
+    @Test
+    void matches_agreesWithTheRegexForm() {
+        String[][] cases = {{"delete_*", "delete_account"}, {"delete_*", "delete_"}, {"delete_*", "undelete_x"}, {"*", ""}, {"*", "anything"},
+                {"a.b", "axb"}, {"a.b", "a.b"}, {"*mid*", "xmidy"}, {"*mid*", "xmiy"}, {"http.*:/a/*/c", "http.post:/a/b/c"},
+                {"http.*:/a/*/c", "http.post:/a/b/d"}, {"a**b", "ab"}, {"a*b*c", "abcbc"}, {"a*b*c", "acb"}, {"Delete_*", "delete_account"}};
+        for (String[] c : cases) {
+            assertEquals(ToolApprovalPatterns.compile(c[0]).matcher(c[1]).matches(), ToolApprovalPatterns.matches(c[0], c[1]),
+                    c[0] + " vs " + c[1]);
+        }
+    }
+
+    /**
+     * One regex {@code .*} per wildcard backtracks combinatorially on a failing
+     * match; the glob matcher's work is bounded by pattern length times input
+     * length.
+     */
+    @Test
+    void matches_wildcardHeavyPatternAgainstALongNameFailsFast() {
+        String glob = "a*".repeat(100) + "b";
+        String name = "a".repeat(5_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(2), () -> assertFalse(ToolApprovalPatterns.matches(glob, name)));
+    }
 }

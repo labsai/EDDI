@@ -21,9 +21,8 @@ import { type DiscussionStyle } from "@/lib/api/groups";
 import { styleDisplay } from "@/lib/discussion-styles";
 import { getInitials } from "@/lib/utils";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
-// See the note in layout/sidebar.tsx — the wordmark is imported so Vite inlines
-// it, which also keeps the design-system bundle from shipping a broken image.
-import logoEddi from "@/assets/logo_eddi.png";
+import { BrandIcon, BrandWordmark } from "@/components/layout/brand-logo";
+import { useBrand } from "@/hooks/use-brand";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -44,6 +43,7 @@ export function WorkforceSidebar({
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
+  const { productName } = useBrand();
   const { theme, setTheme } = useTheme();
 
   const { data: boards } = useEnrichedGroupDescriptors(50);
@@ -77,20 +77,12 @@ export function WorkforceSidebar({
       )}>
         {!collapsed && (
           <Link to="/workforce" className="flex flex-1 items-center gap-2 truncate">
-            <img
-              src={logoEddi}
-              alt="EDDI"
-              className="h-6 w-auto"
-            />
+            <BrandWordmark className="h-6 w-auto" testId="workforce-sidebar-logo" />
           </Link>
         )}
         {collapsed && (
-          <Link to="/workforce" className="flex items-center justify-center" aria-label="EDDI">
-            <img
-              src="/eddi-icon.svg"
-              alt="EDDI"
-              className="h-10 w-10"
-            />
+          <Link to="/workforce" className="flex items-center justify-center" aria-label={productName}>
+            <BrandIcon className="h-10 w-10" alt="" testId="workforce-sidebar-icon" />
           </Link>
         )}
 

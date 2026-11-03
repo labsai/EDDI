@@ -281,4 +281,101 @@ class RestGroupConversationApproverScopeTest {
             verify(resourceAccessGuard).requireUseAccess(GROUP_ID, "group");
         }
     }
+
+    @Nested
+    @DisplayName("cancel / approve / human-input: what an authorized non-owner may do and read")
+    class ActionScope {
+
+        @Test
+        @DisplayName("an approver-only caller cannot stop another user's running discussion")
+        void approverCannotCancelRunningDiscussion() throws Exception {
+            gc(GroupConversationState.IN_PROGRESS);
+            as(APPROVER_ID, "eddi-approver");
+            when(groupService.cancelPausedDiscussion(eq(GC_ID), any())).thenReturn(false);
+
+            assertThrows(ForbiddenException.class, () -> rest.cancelDiscussion(GROUP_ID, GC_ID));
+            verify(groupService, never()).cancelDiscussion(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("an approver-only caller may cancel a paused discussion and gets a receipt, not the transcript")
+        void approverCancelsPausedDiscussionWithReceipt() throws Exception {
+            gc(GroupConversationState.AWAITING_APPROVAL);
+            as(APPROVER_ID, "eddi-approver");
+            when(groupService.cancelPausedDiscussion(eq(GC_ID), any())).thenReturn(true);
+
+            Response response = rest.cancelDiscussion(GROUP_ID, GC_ID);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(Map.of("state", "CANCELLED"), response.getEntity());
+            verify(groupService, never()).cancelDiscussion(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("the owner still cancels a running discussion and gets the conversation")
+        void ownerCancelsRunningDiscussion() throws Exception {
+            var gc = gc(GroupConversationState.IN_PROGRESS);
+            as(OWNER_ID);
+            when(groupService.cancelDiscussion(eq(GC_ID), any())).thenReturn(true);
+
+            Response response = rest.cancelDiscussion(GROUP_ID, GC_ID);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(gc, response.getEntity());
+            verify(groupService, never()).cancelPausedDiscussion(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("an approver-only caller's JSON approval returns a receipt, not the resumed conversation")
+        void approverApprovalReturnsReceipt() throws Exception {
+            gc(GroupConversationState.AWAITING_APPROVAL);
+            as(APPROVER_ID, "eddi-approver");
+            var resumed = new GroupConversation();
+            resumed.setUserId(OWNER_ID);
+            resumed.setState(GroupConversationState.IN_PROGRESS);
+            when(groupService.resumeDiscussion(eq(GC_ID), any(), any())).thenReturn(resumed);
+            var decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            var request = new GroupApprovalRequest();
+            request.setDecision(decision);
+
+            Response response = rest.approveGroupPhase(GROUP_ID, GC_ID, request);
+
+            assertEquals(200, response.getStatus());
+            assertEquals(Map.of("state", "IN_PROGRESS"), response.getEntity());
+        }
+
+        @Test
+        @DisplayName("the pending HUMAN member's submission returns a receipt, not the full conversation")
+        void memberSubmissionReturnsReceipt() throws Exception {
+            var gc = gc(GroupConversationState.AWAITING_HUMAN_INPUT);
+            gc.setPendingHumanInput(new PendingHumanInput(MEMBER_ID, "Member One", 0, 0, 0, "OPINION", PROMPT, "SKIP", Instant.now()));
+            as(MEMBER_ID);
+            var resumed = new GroupConversation();
+            resumed.setId(GC_ID);
+            resumed.setUserId(OWNER_ID);
+            resumed.setState(GroupConversationState.IN_PROGRESS);
+            when(groupService.submitHumanInput(eq(GC_ID), eq(MEMBER_ID), anyString(), anyString())).thenReturn(resumed);
+
+            Response response = rest.submitHumanInput(GROUP_ID, GC_ID,
+                    new IRestGroupConversation.HumanInputRequest(MEMBER_ID, "my answer"));
+
+            assertEquals(200, response.getStatus());
+            assertEquals(Map.of("groupConversationId", GC_ID, "accepted", true, "state", "IN_PROGRESS"), response.getEntity());
+        }
+
+        @Test
+        @DisplayName("the owner's own human-input submission still returns the conversation")
+        void ownerSubmissionReturnsConversation() throws Exception {
+            var gc = gc(GroupConversationState.AWAITING_HUMAN_INPUT);
+            gc.setPendingHumanInput(new PendingHumanInput(OWNER_ID, "Owner", 0, 0, 0, "OPINION", PROMPT, "SKIP", Instant.now()));
+            as(OWNER_ID);
+            when(groupService.submitHumanInput(eq(GC_ID), eq(OWNER_ID), anyString(), anyString())).thenReturn(gc);
+
+            Response response = rest.submitHumanInput(GROUP_ID, GC_ID,
+                    new IRestGroupConversation.HumanInputRequest(OWNER_ID, "my answer"));
+
+            assertEquals(gc, response.getEntity());
+        }
+    }
 }

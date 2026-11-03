@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -457,6 +458,7 @@ public class GroupConversation {
     }
     private String pausedPhaseName;
     private Instant pausedAt;
+    private String pauseId;
     private HitlPauseType hitlPauseType;
     /** Human-readable reason for the pause (from HITL gate). */
     private String hitlPauseReason;
@@ -1518,6 +1520,25 @@ public class GroupConversation {
 
     public void setPausedAt(Instant pausedAt) {
         this.pausedAt = pausedAt;
+        // Keep the persisted marker in lockstep: every pause/resume/terminal write
+        // that moves pausedAt moves the id with it, so no call site can forget.
+        this.pauseId = HitlDecision.pauseIdOf(pausedAt);
+    }
+
+    /**
+     * The id of the current pause ({@link HitlDecision#pauseIdOf} of
+     * {@link #getPausedAt()}), persisted as its own top-level string field so the
+     * store can bind a state transition to the pause it was issued for with a
+     * multi-field compare-and-set (state <em>and</em> pauseId) that behaves
+     * identically on MongoDB and PostgreSQL. {@code null} when not paused, and on
+     * documents written before the field existed.
+     */
+    public String getPauseId() {
+        return pauseId;
+    }
+
+    public void setPauseId(String pauseId) {
+        this.pauseId = pauseId;
     }
 
     public HitlPauseType getHitlPauseType() {

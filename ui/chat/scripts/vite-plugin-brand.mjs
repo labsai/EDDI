@@ -26,12 +26,14 @@ import { basename, extname } from "node:path";
  * (BrandDelivery.script). BrandDeliveryTest reads this line to keep the two equal.
  */
 export const DEFAULT_BRAND_SCRIPT =
-  'window.__EDDI_BRAND__={branded:false,revision:0,productName:"EDDI",shortName:"EDDI",tagline:null,poweredBy:true,showUpdateCheck:false,chat:{accent:null}};';
+  'window.__EDDI_BRAND__={branded:false,revision:0,productName:"EDDI",shortName:"EDDI",tagline:null,poweredBy:true,showUpdateCheck:false,chat:{accent:null},assets:{logo:false,logoDark:false,icon:false,favicon:false,ogImage:false}};';
 
 /** Per shell, what an unbranded EDDI substitutes (BrandedShell). */
 const SHELL_DEFAULTS = {
   "welcome.html": { tagline: "Open Source Conversational AI Platform", themeColor: "#111113" },
   "chat.html": { tagline: "Open Source Conversational AI", themeColor: "#1a1a1a" },
+  // The dev-server entry: the same head as chat.html, which production serves.
+  "index.html": { tagline: "Open Source Conversational AI", themeColor: "#1a1a1a" },
 };
 const FALLBACK_DEFAULTS = { tagline: "", themeColor: "#111113" };
 

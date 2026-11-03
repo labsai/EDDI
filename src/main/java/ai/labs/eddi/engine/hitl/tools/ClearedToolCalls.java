@@ -18,17 +18,20 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * The tool calls a human has already decided on during one resumed turn, so the
- * gate does not pause on them a second time if the model reissues them.
+ * The approved tool calls the resumer has already executed (or replayed from
+ * the journal) during one resumed turn, so the gate recognises a model that
+ * reissues one.
  * <p>
- * A clearance used to be the bare call id. Ids are minted by the model
- * provider, and some OpenAI-compatible servers reuse them ({@code call_1} on
- * every turn) or send an empty string, so "this id was approved" let a
- * <em>different</em> call that happened to carry the same id run without anyone
- * seeing it. A clearance now binds to the triple a human actually approved —
- * call id, tool name and a canonical fingerprint of the arguments — and is
- * consumed by the first call that matches it: the approval was for one
- * execution, not for a standing permission. A blank id never clears anything.
+ * A reissue is a request to run the call <em>again</em>. It used to be let
+ * through on the strength of the original approval, which executed it a second
+ * time; {@link ToolApprovalGate} now gates it as a repeat, so a human decides
+ * the second execution too. One approval authorises one execution.
+ * <p>
+ * An entry binds to the triple a human actually approved — call id, tool name
+ * and a canonical fingerprint of the arguments — because ids are minted by the
+ * model provider, and some OpenAI-compatible servers reuse them ({@code call_1}
+ * on every turn) or send an empty string. It is consumed by the first call that
+ * matches it. A blank id never matches anything.
  * <p>
  * Not thread-safe; one instance lives for one resumed tool loop.
  */

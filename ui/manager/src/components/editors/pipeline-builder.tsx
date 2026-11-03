@@ -257,7 +257,7 @@ function SortableExtensionItem({
         isDragging
           ? "bg-primary/5 shadow-lg rounded-lg"
           : isStale
-            ? "bg-amber-50/50 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20"
+            ? "bg-warn-50/50 dark:bg-warn-900/10 hover:bg-warn-50 dark:hover:bg-warn-900/20"
             : "hover:bg-secondary/50"
       }`}
       role="listitem"
@@ -298,7 +298,7 @@ function SortableExtensionItem({
           <p className="text-sm font-medium text-foreground">{label}</p>
           {isUnsaved && (
             <span
-              className="mt-0.5 inline-flex items-center rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+              className="mt-0.5 inline-flex items-center rounded-md bg-warn-100 px-1.5 py-0.5 text-[10px] font-semibold text-warn-800 dark:bg-warn-900/30 dark:text-warn-400"
               data-testid={`unsaved-step-${item.index}`}
             >
               {t("packageEditor.stepUnsaved", "Not saved yet")}
@@ -313,7 +313,7 @@ function SortableExtensionItem({
           <button
             onClick={handleUpdateVersion}
             disabled={disabled}
-            className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:hover:bg-amber-900/50 transition-colors shrink-0"
+            className="inline-flex items-center gap-1 rounded-md bg-warn-100 px-1.5 py-0.5 text-[10px] font-semibold text-warn-800 hover:bg-warn-200 dark:bg-warn-900/30 dark:text-warn-400 dark:hover:bg-warn-900/50 transition-colors shrink-0"
             title={t("packageEditor.updateToLatest", "Update to latest version")}
             data-testid={`update-version-${item.index}`}
           >

@@ -312,7 +312,7 @@ class GroupConversationServiceHitlTest {
                     casPausedAtWasNull.set(g.getPausedAt() == null);
                 }
                 return null;
-            }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+            }).when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
 
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
@@ -329,7 +329,7 @@ class GroupConversationServiceHitlTest {
             assertTrue(casPausedAtWasNull.get(), "pausedAt should be cleared at the resume CAS");
 
             // Verify updateIfState was called with AWAITING_APPROVAL (CAS)
-            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), any());
         }
 
         @Test
@@ -430,7 +430,7 @@ class GroupConversationServiceHitlTest {
 
             // Another resume already moved the state, so the CAS rejects this one.
             doThrow(new IResourceStore.ResourceModifiedException("Group conversation state has changed"))
-                    .when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+                    .when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
 
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
@@ -486,7 +486,7 @@ class GroupConversationServiceHitlTest {
                 GroupConversation g = inv.getArgument(0);
                 capturedTurnCount.compareAndSet(-1, g.getPausedTurnCount());
                 return null;
-            }).when(conversationStore).updateIfState(any(), eq(GroupConversationState.AWAITING_APPROVAL));
+            }).when(conversationStore).updateIfStateAndPause(any(), eq(GroupConversationState.AWAITING_APPROVAL), any());
 
             var request = new GroupApprovalRequest();
             var decision = new HitlDecision();
@@ -611,7 +611,7 @@ class GroupConversationServiceHitlTest {
                     "a declined recommendation is a decision, not a failure");
             assertNotEquals(GroupConversationState.FAILED, result.getState());
             assertNull(result.getPausedAt(), "pausedAt should be cleared after rejection");
-            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), any());
         }
 
         /**
@@ -744,7 +744,7 @@ class GroupConversationServiceHitlTest {
             assertEquals(GroupConversationState.CANCELLED, gc.getState(),
                     "Paused GC should be CANCELLED via DB write");
             // verify update was called (the DB-write branch)
-            verify(conversationStore).updateIfState(gc, GroupConversationState.AWAITING_APPROVAL);
+            verify(conversationStore).updateIfStateAndPause(eq(gc), eq(GroupConversationState.AWAITING_APPROVAL), any());
         }
     }
 
@@ -1151,6 +1151,7 @@ class GroupConversationServiceHitlTest {
             assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
             assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(), "pause must survive");
             verify(conversationStore, never()).updateIfState(any(), any());
+            verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
             verify(scheduleStore, never()).deleteSchedulesByName(anyString());
         }
 
@@ -1168,6 +1169,7 @@ class GroupConversationServiceHitlTest {
                             approvedRequest(Map.of(assignedTaskId, "APPROVED")), null));
             assertTrue(ex.getMessage().contains("not awaiting approval"), ex.getMessage());
             verify(conversationStore, never()).updateIfState(any(), any());
+            verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
         }
 
         @Test
@@ -1186,6 +1188,7 @@ class GroupConversationServiceHitlTest {
 
             assertTrue(gc.getTaskList().hasAwaitingApproval(), "no task may be mutated on a rejected request");
             verify(conversationStore, never()).updateIfState(any(), any());
+            verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
         }
 
         @Test
@@ -2042,6 +2045,7 @@ class GroupConversationServiceHitlTest {
                     || ex.getMessage().contains("PHASE granularity"), ex.getMessage());
             assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(), "pause must survive");
             verify(conversationStore, never()).updateIfState(any(), any());
+            verify(conversationStore, never()).updateIfStateAndPause(any(), any(), any());
         }
     }
 }
