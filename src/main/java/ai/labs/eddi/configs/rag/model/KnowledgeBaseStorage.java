@@ -7,7 +7,6 @@ package ai.labs.eddi.configs.rag.model;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -79,12 +78,20 @@ public final class KnowledgeBaseStorage {
     }
 
     /**
-     * The storeParameters that say which server, database or tenant a store lives
-     * on — what, besides the store type, decides which store a location name opens
-     * (see {@code EmbeddingStoreFactory}).
+     * Per store type, the storeParameters that say which server, database or tenant
+     * the store lives on — what, besides the store type, decides which store a
+     * location name opens — with the value {@code EmbeddingStoreFactory} uses when
+     * one is omitted ({@code ""} where there is none and the parameter is
+     * required). Keep in step with the factory: an omitted parameter and its
+     * default name the same server, and treating them as different would move a
+     * knowledge base onto an empty store.
      */
-    static final Set<String> SERVER_PARAMETERS = Set.of("host", "port", "database", "databaseName", "connectionString", "serverUrl",
-            "baseUrl", "tenantName");
+    static final Map<String, Map<String, String>> SERVER_PARAMETERS = Map.of(
+            "pgvector", Map.of("host", "localhost", "port", "5432", "database", "eddi"),
+            "mongodb-atlas", Map.of("connectionString", "", "databaseName", "eddi"),
+            "elasticsearch", Map.of("serverUrl", "http://localhost:9200"),
+            "qdrant", Map.of("host", "localhost", "port", "6334"),
+            "chroma", Map.of("baseUrl", "http://localhost:8000", "tenantName", "default_tenant", "databaseName", "default_database"));
 
     /**
      * Whether an update points the knowledge base at another backend or another
@@ -99,8 +106,10 @@ public final class KnowledgeBaseStorage {
         }
         Map<String, String> before = previous.getStoreParameters() == null ? Map.of() : previous.getStoreParameters();
         Map<String, String> after = updated.getStoreParameters() == null ? Map.of() : updated.getStoreParameters();
-        for (String parameter : SERVER_PARAMETERS) {
-            if (!Objects.equals(before.get(parameter), after.get(parameter))) {
+        // Compared as the factory resolves them: present, or else its default.
+        for (Map.Entry<String, String> parameter : SERVER_PARAMETERS.getOrDefault(updated.getStoreType(), Map.of()).entrySet()) {
+            String key = parameter.getKey();
+            if (!Objects.equals(before.getOrDefault(key, parameter.getValue()), after.getOrDefault(key, parameter.getValue()))) {
                 return true;
             }
         }

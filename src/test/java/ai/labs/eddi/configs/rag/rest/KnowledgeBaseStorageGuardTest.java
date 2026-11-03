@@ -274,6 +274,15 @@ class KnowledgeBaseStorageGuardTest {
         }
 
         @Test
+        @DisplayName("spelling out a server parameter's default is not a move: the factory already connected there")
+        void writingOutTheDefaultServerDoesNotMigrate() {
+            var previous = kb("alpha", null, null);
+            var explicitDefaults = kb("alpha", null, Map.of("host", "localhost", "port", "5432", "database", "eddi"));
+            guard.prepareUpdate(SELF, previous, explicitDefaults);
+            assertNull(explicitDefaults.getStoreNamespace(), "an omitted host is localhost; its documents must stay reachable");
+        }
+
+        @Test
         @DisplayName("an Elasticsearch index expression (wildcard, list, exclusion) is refused")
         void elasticsearchIndexExpressionRefused() {
             for (String index : List.of("*", "kb_a,kb_b", "-kb", "kb*", "remote:kb", "Kb", " team-docs", "team-docs ")) {
