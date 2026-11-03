@@ -10,6 +10,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
+import com.mongodb.ReadPreference;
 import com.mongodb.client.FindIterable;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -809,8 +810,8 @@ class MongoResourceStorageTest {
     void primaryReadsUsesPrimaryReadPreference() {
         MongoCollection<Document> primaryCurrent = mock(MongoCollection.class);
         MongoCollection<Document> primaryHistory = mock(MongoCollection.class);
-        when(currentCollection.withReadPreference(com.mongodb.ReadPreference.primary())).thenReturn(primaryCurrent);
-        when(historyCollection.withReadPreference(com.mongodb.ReadPreference.primary())).thenReturn(primaryHistory);
+        when(currentCollection.withReadPreference(ReadPreference.primary())).thenReturn(primaryCurrent);
+        when(historyCollection.withReadPreference(ReadPreference.primary())).thenReturn(primaryHistory);
         FindIterable<Document> found = mock(FindIterable.class);
         when(primaryCurrent.find(any(Document.class))).thenReturn(found);
         when(found.first())
