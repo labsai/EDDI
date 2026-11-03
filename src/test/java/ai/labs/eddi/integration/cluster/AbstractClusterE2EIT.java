@@ -114,7 +114,7 @@ abstract class AbstractClusterE2EIT {
     // bookkeeping
 
     /** The turns of one scenario and the conversations they touched. */
-    final class Run {
+    static final class Run {
         final String name;
         final ConcurrentLinkedQueue<Turn> turns = new ConcurrentLinkedQueue<>();
         final Set<String> conversations = new LinkedHashSet<>();
