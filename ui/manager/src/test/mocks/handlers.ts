@@ -3,6 +3,7 @@ import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
+import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
@@ -3149,6 +3150,7 @@ export const handlers = [
   http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
     return new HttpResponse(null, { status: 204 });
   }),
+  ...teamHandoffHandlers,
 
   // ── I10 — packaged group templates ──
 

@@ -67,6 +67,7 @@ import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.internal.GracefulShutdownService;
+import ai.labs.eddi.engine.runtime.internal.handoff.DecisionHandoffs;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.Counter;
@@ -264,6 +265,13 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     SummarizationService summarizationService;
+
+    /**
+     * Files {@code handoffConfig.onDecision} rules once a discussion completes.
+     * Null in tests that build the service by hand: no rules fire.
+     */
+    @Inject
+    DecisionHandoffs decisionHandoffs;
 
     // In-node fast-fail guard for concurrent post-discussion operations
     // (follow-up, continue, close) on the same conversation: a second
@@ -1537,6 +1545,13 @@ public class GroupConversationService implements IGroupConversationService, User
             // align the in-memory state with what the racing writer committed so
             // the finally cleans up ephemeral agents for a CANCELLED/FAILED outcome.
             persistWhileRunning(gc);
+
+            // Only past the CAS above: a discussion a human cancelled mid-flight must not
+            // file work for another team. Idempotent (deterministic dedupe keys), never
+            // throws.
+            if (decisionHandoffs != null) {
+                decisionHandoffs.afterCompleted(gc, config, listener);
+            }
 
             if (listener != null) {
                 listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer()));

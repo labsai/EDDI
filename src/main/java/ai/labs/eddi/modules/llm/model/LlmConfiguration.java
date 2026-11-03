@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.model;
 
 import ai.labs.eddi.configs.apicalls.model.PostResponse;
 import ai.labs.eddi.configs.apicalls.model.PreRequest;
+import ai.labs.eddi.configs.groups.model.HandoffPolicies;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
@@ -367,6 +368,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.5.0
          */
         private ToolQuotaConfig toolQuotas;
+
+        /**
+         * Cross-team handoff: the teams this agent may file tasks into through the
+         * {@code handoff_to_team} tool. Absent means the tool is never assembled. A
+         * target only receives when its own {@code handoffConfig.accept} lists this
+         * agent (two-sided consent) — see {@code docs/team-handoff.md}.
+         *
+         * @since 6.7.0
+         */
+        private HandoffPolicies.TeamHandoffConfig teamHandoff;
 
         /**
          * Wall-clock ceiling, in milliseconds, on a single tool execution. Default:
@@ -1034,6 +1045,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {
+            return teamHandoff;
+        }
+
+        public void setTeamHandoff(HandoffPolicies.TeamHandoffConfig teamHandoff) {
+            this.teamHandoff = teamHandoff;
         }
 
         public Integer getDefaultToolTimeoutMs() {

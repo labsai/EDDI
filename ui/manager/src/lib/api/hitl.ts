@@ -42,6 +42,7 @@ export const TOOL_SOURCES = [
   "dynamic",
   "memory",
   "recall",
+  "team",
 ] as const;
 
 // ── Field limits (mirror the backend save-time validators) ────────

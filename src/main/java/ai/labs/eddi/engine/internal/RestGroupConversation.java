@@ -1196,6 +1196,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
 
             @Override
+            public void onTeamHandoff(GroupConversationEventSink.TeamHandoffEvent event) {
+                // Not terminal — a handoff can happen at any turn or at completion.
+                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TEAM_HANDOFF, toJson(event));
+            }
+
+            @Override
             public void onCostUpdated(GroupConversationEventSink.CostUpdatedEvent event) {
                 // Not terminal — spend accrues for the whole run.
                 sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_COST_UPDATED, toJson(event));

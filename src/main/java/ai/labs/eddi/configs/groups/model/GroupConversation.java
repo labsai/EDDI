@@ -158,6 +158,12 @@ public class GroupConversation {
      * pause/resume keeps the table as it stood.
      */
     private NegotiationState negotiation;
+    /**
+     * Cross-team handoff state of this discussion: the lineage a cadence stamped,
+     * the per-run cap ledger and a bounded record of what was handed off.
+     * {@code null} until something needs it; an old document reads as hop 0.
+     */
+    private HandoffRunState handoffState;
     private int depth;
     /** Current discussion round (1-based). Incremented by continueDiscussion(). */
     private int round = 1;
@@ -1209,6 +1215,26 @@ public class GroupConversation {
 
     public void setNegotiation(NegotiationState negotiation) {
         this.negotiation = negotiation;
+    }
+
+    public HandoffRunState getHandoffState() {
+        return handoffState;
+    }
+
+    public void setHandoffState(HandoffRunState handoffState) {
+        this.handoffState = handoffState;
+    }
+
+    /**
+     * The handoff state, created on first use. Synchronized: PARALLEL members build
+     * their tools at the same time, and two of them must share ONE ledger.
+     */
+    @JsonIgnore
+    public synchronized HandoffRunState handoffStateOrCreate() {
+        if (handoffState == null) {
+            handoffState = new HandoffRunState();
+        }
+        return handoffState;
     }
 
     /** The negotiation state, created on first use (I11). */

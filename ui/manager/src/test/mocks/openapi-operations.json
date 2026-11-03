@@ -1,6 +1,6 @@
 {
   "//": "Generated. Do not edit by hand — run: node scripts/refresh-openapi-operations.mjs",
-  "eddiVersion": "6.6.0",
+  "eddiVersion": "6.7.0",
   "operations": [
     "DELETE /AgentTriggerStore/agenttriggers/{intent}",
     "DELETE /admin/gdpr/{userId}",
@@ -25,6 +25,7 @@
     "DELETE /descriptorstore/descriptors/{id}/shares",
     "DELETE /dictionarystore/dictionaries/{id}",
     "DELETE /groups/{groupId}/conversations/{groupConversationId}",
+    "DELETE /groupstore/groups/{groupId}/workspace/backlog/{taskId}",
     "DELETE /groupstore/groups/{groupId}/workspace/cadences/{cadenceId}",
     "DELETE /groupstore/groups/{id}",
     "DELETE /llm/tools/cache",
@@ -171,6 +172,7 @@
     "GET /groupstore/groups/styles",
     "GET /groupstore/groups/{groupId}/workspace",
     "GET /groupstore/groups/{groupId}/workspace/backlog",
+    "GET /groupstore/groups/{groupId}/workspace/handoffs",
     "GET /groupstore/groups/{id}",
     "GET /groupstore/groups/{id}/currentversion",
     "GET /groupstore/templates",
@@ -356,6 +358,8 @@
     "POST /groupstore/groups",
     "POST /groupstore/groups/{groupId}/workspace/backlog",
     "POST /groupstore/groups/{groupId}/workspace/cadences",
+    "POST /groupstore/groups/{groupId}/workspace/handoffs/{handoffId}/accept",
+    "POST /groupstore/groups/{groupId}/workspace/handoffs/{handoffId}/decline",
     "POST /groupstore/groups/{id}",
     "POST /groupstore/groups/{id}/currentversion",
     "POST /groupstore/templates/{templateId}/instantiate",
