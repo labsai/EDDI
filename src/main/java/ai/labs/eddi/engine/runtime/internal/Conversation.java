@@ -1373,16 +1373,22 @@ public class Conversation implements IConversation {
 
     private void executeWorkflows(List<IData<?>> data, List<String> lifecycleTaskTypes)
             throws LifecycleException, ConversationStopException, ConversationPauseException {
+        boolean first = true;
         for (IExecutableWorkflow executableWorkflow : executableWorkflows) {
             var step = conversationMemory.getCurrentStep();
             step.setCurrentWorkflowId(executableWorkflow.getWorkflowId());
-            // A datum an earlier workflow's task replaced stays replaced: re-storing
-            // the original put back the plaintext input a scope:secret instruction had
-            // just vaulted and scrubbed, and the step was persisted with it.
+            // The first workflow gets the supplied data as given — a rerun's step still
+            // holds the previous run's context, which a new value must replace. After
+            // that, a datum an earlier workflow's task replaced stays replaced:
+            // re-storing the original put back the plaintext input a scope:secret
+            // instruction had just vaulted and scrubbed, and the step was persisted
+            // with it.
+            boolean keepReplacements = !first;
             data.stream().filter(Objects::nonNull).forEach(datum -> {
-                IData<?> current = step.getData(datum.getKey());
+                IData<?> current = keepReplacements ? step.getData(datum.getKey()) : null;
                 step.storeData(current != null ? current : datum);
             });
+            first = false;
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }

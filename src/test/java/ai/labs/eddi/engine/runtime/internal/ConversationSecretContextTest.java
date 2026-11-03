@@ -306,6 +306,23 @@ class ConversationSecretContextTest {
     }
 
     @Test
+    @DisplayName("a rerun hands its first workflow the new context value, not the previous run's")
+    void rerunStoresTheSuppliedContext() throws Exception {
+        var seen = new ArrayList<Object>();
+        doAnswer(invocation -> {
+            IData<Context> language = memory.getCurrentStep().getLatestData("context:language");
+            seen.add(language == null ? null : language.getResult().getValue());
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+        var conversation = conversation();
+        conversation.say("hello", Map.of("language", new Context(Context.ContextType.string, "en")));
+
+        conversation.rerun(Map.of("language", new Context(Context.ContextType.string, "de")));
+
+        assertEquals(List.of("en", "de"), seen);
+    }
+
+    @Test
     @DisplayName("a secret that equals the turn's cost does not erase the spend record")
     void accountingIsNotScrubbed() throws Exception {
         doAnswer(invocation -> {
