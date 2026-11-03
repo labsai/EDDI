@@ -103,6 +103,7 @@ final class GroupReviewEditor {
             for (var entry : decisions.entrySet()) {
                 String field = "taskDecisions['" + entry.getKey() + "']";
                 TaskDecision task = entry.getValue();
+                boolean taskEdited = false;
                 if (task == null || task.getVerdict() == null) {
                     throw new IllegalArgumentException(field + ".verdict is required (APPROVED or REJECTED)");
                 }
@@ -115,14 +116,17 @@ final class GroupReviewEditor {
                     }
                     requireEditsAllowed(review);
                     HitlDecisionValidator.validateText(task.getEditedResult(), review.effectiveMaxEditChars(), field + ".editedResult");
-                    anyChange = true;
+                    // An edit that leaves the text as it was is a plain approval (approveEdited
+                    // skips it), so it must not unlock an edit reason code either.
+                    taskEdited = changesText(EditSummary.Kind.TASK_RESULT, originalResult(gc, entry.getKey()), task.getEditedResult());
+                    anyChange |= taskEdited;
                 }
                 if (task.getVerdict() == HitlVerdict.REJECTED) {
                     anyChange = true;
                 }
                 if (task.getReasonCode() != null) {
                     ReasonCodes.require(task.getReasonCode(), vocabulary, field + ".reasonCode");
-                    if (task.getVerdict() != HitlVerdict.REJECTED && task.getEditedResult() == null) {
+                    if (task.getVerdict() != HitlVerdict.REJECTED && !taskEdited) {
                         throw new IllegalArgumentException(field + ".reasonCode explains a rejection or an edit; a plain approval takes none");
                     }
                 }
@@ -142,7 +146,7 @@ final class GroupReviewEditor {
             requireEditsAllowed(review);
             HitlDecisionValidator.validateText(decision.getEditedAnswer(), review.effectiveMaxEditChars(), "editedAnswer");
             synthesisEdit = decision.getEditedAnswer();
-            anyChange = true;
+            anyChange |= changesText(EditSummary.Kind.SYNTHESIS, latestSynthesis(gc), synthesisEdit);
         }
         if (request.getTaskApprovals() != null && request.getTaskApprovals().values().stream().anyMatch("REJECTED"::equalsIgnoreCase)) {
             anyChange = true;
@@ -162,6 +166,15 @@ final class GroupReviewEditor {
             });
         }
         return editor;
+    }
+
+    private static boolean changesText(EditSummary.Kind kind, String original, String edited) {
+        return EditMetrics.ofText(kind, original, edited).changed();
+    }
+
+    private static String originalResult(GroupConversation gc, String taskId) {
+        var task = gc.getTaskList() != null ? gc.getTaskList().findById(taskId) : null;
+        return task != null ? task.result() : null;
     }
 
     private static void requireEditsAllowed(GroupHitlReviewConfig review) {
