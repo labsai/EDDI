@@ -236,6 +236,10 @@ class Infra:
         if os.path.exists(MOCK_LOG):
             os.remove(MOCK_LOG)
         env = dict(os.environ)
+        if not env.get("MOCK_LLM_BIND"):
+            # An exported empty value is "unset", not "every interface": passed on as it is, the
+            # mock would bind 0.0.0.0 and answer any peer on the network.
+            env.pop("MOCK_LLM_BIND", None)
         if sys.platform.startswith("linux") and "MOCK_LLM_BIND" not in env and not docker_desktop():
             # With Docker Engine on Linux, host.docker.internal resolves to the docker0 gateway,
             # an address of this host, so the mock binds there: reachable from the nodes, not

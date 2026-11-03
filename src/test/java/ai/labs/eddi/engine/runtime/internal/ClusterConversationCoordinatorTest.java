@@ -263,6 +263,8 @@ class ClusterConversationCoordinatorTest {
          * Runs after an entry was appended: the window a concurrent erasure can hit.
          */
         volatile Runnable afterAppend;
+        /** Makes {@link #purgeConversation} fail while set. */
+        volatile boolean failPurge;
         final AtomicInteger seq = new AtomicInteger();
 
         @Override
@@ -303,6 +305,9 @@ class ClusterConversationCoordinatorTest {
 
         @Override
         public int purgeConversation(String conversationId) {
+            if (failPurge) {
+                throw new ClusterUnavailableException("purge failed");
+            }
             int before = entries.size();
             entries.removeIf(e -> conversationId.equals(e.conversationId()));
             return before - entries.size();
@@ -723,6 +728,42 @@ class ClusterConversationCoordinatorTest {
 
         assertTrue(store.entries.isEmpty(), "the published copy of an erased turn is purged again");
         assertTrue(coordinator.getDeadLetters().isEmpty());
+    }
+
+    @Test
+    @DisplayName("a failed purge after the publish does not escape, and the published copy is purged on the next attempt")
+    void failedPurgeAfterPublishIsRetried() throws Exception {
+        keepLocally("conv-racing");
+        var tombstones = sharedTombstones();
+        coordinator.erasureTombstones = instanceOf(tombstones);
+        store.afterAppend = () -> tombstones.mark("conv-racing");
+        store.failPurge = true;
+
+        assertDoesNotThrow(() -> coordinator.forwardLocalDeadLetters());
+        assertEquals(1, store.entries.size(), "the erased turn is still published: the purge failed");
+
+        store.failPurge = false;
+        coordinator.forwardLocalDeadLetters();
+
+        assertTrue(store.entries.isEmpty(), "the retry purges it");
+    }
+
+    @Test
+    @DisplayName("a marker that cannot be read after the publish keeps the verification pending until it can")
+    void unreadableMarkerAfterPublishIsRetried() throws Exception {
+        keepLocally("conv-racing");
+        var tombstones = mock(ErasureTombstones.class);
+        // readable before the publish, unreadable right after it, erased by the time it
+        // can be read again
+        when(tombstones.isMarked("conv-racing")).thenReturn(false).thenThrow(new ClusterUnavailableException("kv down")).thenReturn(true);
+        coordinator.erasureTombstones = instanceOf(tombstones);
+
+        coordinator.forwardLocalDeadLetters();
+        assertEquals(1, store.entries.size(), "published, and its erasure could not be checked");
+
+        coordinator.forwardLocalDeadLetters();
+
+        assertTrue(store.entries.isEmpty(), "the later look found the erasure and purged");
     }
 
     @Test

@@ -34,6 +34,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletionException;
@@ -92,6 +95,23 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
     private final Duration acquireTimeout;
     private final ExecutorService continuations = Executors.newVirtualThreadPerTaskExecutor();
     private final List<Consumer<DeadLetterEntry>> deadLetterListeners = new CopyOnWriteArrayList<>();
+
+    /**
+     * Conversations whose dead letter this node has published to the shared stream
+     * but whose erasure marker it has not yet read back successfully afterwards. An
+     * erasure that wrote its marker and purged the stream between this node's check
+     * and its publish leaves the erased turn in the shared stream; only a second
+     * look after the publish finds it, so a look that could not be made is retried
+     * until it can be. One id per conversation, so it stays small.
+     */
+    private final Set<String> publishedUnverified = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Whether a retry of the forwarding is already scheduled: a run that defers
+     * schedules the next one, and several chains of such retries would each keep
+     * themselves alive for as long as the same marker stays unreadable.
+     */
+    private final AtomicBoolean forwardRetryScheduled = new AtomicBoolean();
     private volatile long cachedDeadLetterCount;
     private volatile long cachedTurnDeadLetters;
     private volatile long turnDeadLettersAt;
@@ -132,8 +152,13 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
         // next
         // disconnection to be shared.
         connections.scheduler().scheduleWithFixedDelay(() -> {
-            if (connections.isConnected() && localDeadLetterCount() > 0) {
-                forwardLocalDeadLetters();
+            try {
+                if (connections.isConnected() && (localDeadLetterCount() > 0 || !publishedUnverified.isEmpty())) {
+                    forwardLocalDeadLetters();
+                }
+            } catch (RuntimeException e) {
+                // An exception that leaves a fixed-delay task cancels every later run.
+                LOGGER.warnf(e, "Forwarding node-local dead letters failed; it is retried");
             }
         }, LOCAL_FORWARD_SECONDS, LOCAL_FORWARD_SECONDS, TimeUnit.SECONDS);
     }
@@ -279,18 +304,66 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      */
     private void scheduleForward() {
         ScheduledExecutorService scheduler = connections.scheduler();
-        if (scheduler == null) {
+        if (scheduler == null || !forwardRetryScheduled.compareAndSet(false, true)) {
             return;
         }
         try {
             scheduler.schedule(() -> {
-                if (connections.isConnected()) {
-                    forwardLocalDeadLetters();
+                forwardRetryScheduled.set(false);
+                try {
+                    if (connections.isConnected()) {
+                        forwardLocalDeadLetters();
+                    }
+                } catch (RuntimeException e) {
+                    LOGGER.warnf(e, "Retrying the forwarding of node-local dead letters failed; the periodic pass tries again");
                 }
             }, FORWARD_RETRY_SECONDS, TimeUnit.SECONDS);
         } catch (RejectedExecutionException shuttingDown) {
+            forwardRetryScheduled.set(false);
             // the reconnect path forwards them when this node comes back
         }
+    }
+
+    /**
+     * {@link #verifyPublished(String)} for every publication still unverified.
+     *
+     * @return whether none is left
+     */
+    private boolean verifyPublished() {
+        boolean allVerified = true;
+        for (String conversationId : List.copyOf(publishedUnverified)) {
+            allVerified &= verifyPublished(conversationId);
+        }
+        return allVerified;
+    }
+
+    /**
+     * The look after a publish: a conversation erased in the meantime has its
+     * shared dead letters purged again; one that is not is done with. A marker that
+     * cannot be read, or a purge that fails, leaves the conversation unverified for
+     * the next attempt instead of escaping into the caller.
+     *
+     * @return whether the publication is now verified
+     */
+    private boolean verifyPublished(String conversationId) {
+        Erasure state = erasureState(conversationId);
+        if (state == Erasure.UNKNOWN) {
+            return false;
+        }
+        if (state == Erasure.ERASED) {
+            try {
+                deadLetterStore.purgeConversation(conversationId);
+                LOGGER.infof("Purged the dead letters of conversation %s again: it was erased while they were published",
+                        sanitize(conversationId));
+            } catch (RuntimeException e) {
+                // ClusterUnavailableException, or the stream management failing mid-disconnect:
+                // either way the purge is retried, and the caller's pass goes on
+                LOGGER.debugf("Purging published dead letters of an erased conversation deferred: %s", e.getMessage());
+                return false;
+            }
+        }
+        publishedUnverified.remove(conversationId);
+        return true;
     }
 
     /** Called after every dead letter this node records (shared or local). */
@@ -314,7 +387,8 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
      */
     public synchronized int forwardLocalDeadLetters() {
         int forwarded = 0;
-        boolean deferred = false;
+        // Publications whose erasure check could not be completed last time come first
+        boolean deferred = !verifyPublished();
         for (DeadLetterEntry local : super.getDeadLetters()) {
             Erasure erasure = erasureState(local.conversationId());
             if (erasure == Erasure.UNKNOWN) {
@@ -354,14 +428,15 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             }
             // The marker may have been written between the check above and the append,
             // when the erasure's shared purge had already run: whatever was just
-            // published is purged again.
-            if (erasureState(local.conversationId()) == Erasure.ERASED) {
-                deadLetterStore.purgeConversation(local.conversationId());
-                LOGGER.infof("Purged forwarded dead letter %s again: its conversation was erased while it was published",
-                        sanitize(local.id()));
-            }
+            // published is purged again. The entry is in the shared stream now, so the
+            // local copy goes; what is left to do is remembered by id and retried when
+            // the marker cannot be read, or the purge cannot be made, right now.
+            publishedUnverified.add(local.conversationId());
             super.discardDeadLetter(local.id());
             forwarded++;
+            if (!verifyPublished(local.conversationId())) {
+                deferred = true;
+            }
         }
         if (deferred) {
             scheduleForward();

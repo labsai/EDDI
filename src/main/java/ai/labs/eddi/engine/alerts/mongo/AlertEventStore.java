@@ -209,17 +209,16 @@ public class AlertEventStore implements IAlertEventStore {
     }
 
     @Override
-    public List<String> findDigestPendingRuleIds(int limit) {
+    public List<String> findDigestPendingRuleIds(String afterRuleId, int limit) {
         List<String> ruleIds = new ArrayList<>();
         for (String ruleId : events.distinct("ruleId", eq("state", AlertEvent.State.DIGEST_PENDING.name()), String.class)) {
-            if (ruleId != null) {
+            // distinct() has no order or cursor: sorted here, so a bounded pass can resume
+            if (ruleId != null && (afterRuleId == null || ruleId.compareTo(afterRuleId) > 0)) {
                 ruleIds.add(ruleId);
-                if (ruleIds.size() >= limit) {
-                    break;
-                }
             }
         }
-        return ruleIds;
+        ruleIds.sort(null);
+        return ruleIds.size() > limit ? new ArrayList<>(ruleIds.subList(0, limit)) : ruleIds;
     }
 
     @Override

@@ -1,4 +1,4 @@
-import type { SyntheticEvent } from "react";
+import { useState } from "react";
 import { useBrand } from "@/hooks/use-brand";
 import { cn } from "@/lib/utils";
 import { brandAssetUrl } from "@/lib/brand";
@@ -8,12 +8,14 @@ import { brandAssetUrl } from "@/lib/brand";
 // (.design-sync/NOTES.md — keep this file importable).
 import logoEddi from "@/assets/logo_eddi.png";
 
-/** Swap a failed /branding/* image for the bundled wordmark, once. */
-function fallBackToBundled(event: SyntheticEvent<HTMLImageElement>) {
-  const img = event.currentTarget;
-  if (img.dataset.fallback) return;
-  img.dataset.fallback = "true";
-  img.src = logoEddi;
+/**
+ * Tracks which URL failed to load. Keyed to the URL, not stored on the DOM node,
+ * so a later brand revision (a new URL) gets its own chance to load and, failing
+ * that, its own fallback.
+ */
+function useFailedSrc(src: string) {
+  const [failed, setFailed] = useState<string | null>(null);
+  return [failed === src, () => setFailed(src)] as const;
 }
 
 interface BrandWordmarkProps {
@@ -45,6 +47,35 @@ function TextWordmark({ name, className, testId }: { name: string; className?: s
   );
 }
 
+interface WordmarkImageProps {
+  src: string;
+  name: string;
+  branded: boolean;
+  className?: string;
+  /** Treatment for the bundled EDDI wordmark shown when an unbranded image fails. */
+  fallbackClassName?: string;
+  testId?: string;
+}
+
+/**
+ * One wordmark `<img>`. When it fails to load: unbranded, the bundled EDDI
+ * wordmark (it is the product's own); branded, the product name as text —
+ * never EDDI's logo under another brand's name.
+ */
+function WordmarkImage({ src, name, branded, className, fallbackClassName, testId }: WordmarkImageProps) {
+  const [failed, onError] = useFailedSrc(src);
+  if (failed && branded) return <TextWordmark name={name} className={className} testId={testId} />;
+  return (
+    <img
+      src={failed ? logoEddi : src}
+      alt={name}
+      onError={failed ? undefined : onError}
+      className={cn(className, failed && fallbackClassName)}
+      data-testid={testId}
+    />
+  );
+}
+
 /**
  * The product's wordmark: `/branding/logo` in light mode, `/branding/logo-dark`
  * in dark mode (the server answers the light logo there when no dark one is
@@ -67,12 +98,12 @@ export function BrandWordmark({ className, invertInLight = false, testId }: Bran
 
   if (!branded) {
     return (
-      <img
+      <WordmarkImage
         src={brandAssetUrl("logo", brand)}
-        alt={productName}
-        onError={fallBackToBundled}
+        name={productName}
+        branded={false}
         className={cn(className, invertInLight && "invert dark:invert-0")}
-        data-testid={testId}
+        testId={testId}
       />
     );
   }
@@ -89,23 +120,23 @@ export function BrandWordmark({ className, invertInLight = false, testId }: Bran
   return (
     <>
       {lightImage ? (
-        <img
+        <WordmarkImage
           src={brandAssetUrl("logo", brand)}
-          alt={productName}
-          onError={fallBackToBundled}
+          name={productName}
+          branded
           className={cn(className, "dark:hidden")}
-          data-testid={testId}
+          testId={testId}
         />
       ) : (
         <TextWordmark name={productName} className={cn(className, "dark:hidden")} testId={testId} />
       )}
       {darkImage ? (
-        <img
+        <WordmarkImage
           src={brandAssetUrl("logo-dark", brand)}
-          alt={productName}
-          onError={fallBackToBundled}
+          name={productName}
+          branded
           className={cn(className, "hidden dark:block")}
-          data-testid={testId ? `${testId}-dark` : undefined}
+          testId={testId ? `${testId}-dark` : undefined}
         />
       ) : (
         <TextWordmark
@@ -133,10 +164,14 @@ interface BrandIconProps {
  */
 export function BrandIcon({ className, alt, testId }: BrandIconProps) {
   const brand = useBrand();
+  const src = brandAssetUrl("icon", brand);
+  const [failed, onError] = useFailedSrc(src);
   const decorative = alt === "";
   const label = alt ?? brand.productName;
 
-  if (brand.branded && !brand.assets.icon) {
+  // Branded without an icon of its own, or whose icon failed to load: the first
+  // letter on the primary colour. A branded deployment never shows EDDI's mark.
+  if (brand.branded && (!brand.assets.icon || failed)) {
     return (
       <span
         role={decorative ? undefined : "img"}
@@ -156,10 +191,13 @@ export function BrandIcon({ className, alt, testId }: BrandIconProps) {
 
   return (
     <img
-      src={brandAssetUrl("icon", brand)}
+      src={failed ? logoEddi : src}
       alt={decorative ? "" : label}
       aria-hidden={decorative ? true : undefined}
-      className={className}
+      // Unbranded, the one bundled image is the EDDI wordmark — a white glyph,
+      // so it is inverted on the light theme exactly as BrandWordmark does.
+      onError={failed ? undefined : onError}
+      className={cn(className, failed && "object-contain invert dark:invert-0")}
       data-testid={testId}
     />
   );

@@ -368,7 +368,7 @@ function SynthesisEntryCard({
     >
       <div className="flex items-center gap-2 mb-2">
         <Sparkles className="h-4 w-4 text-brand-600 dark:text-brand-400" />
-        <span className="text-sm font-semibold text-brand-700 dark:text-brand-300">
+        <span className="text-sm font-semibold text-foreground">
           {t("Workforce.history.synthesis", "Synthesis")}
         </span>
         {entry.speakerDisplayName && (
@@ -520,7 +520,7 @@ function SynthesizedAnswerFooter({ content }: { content: string }) {
     >
       <div className="flex items-center gap-2 mb-3">
         <Sparkles className="h-5 w-5 text-brand-600 dark:text-brand-400" />
-        <h3 className="text-sm font-bold text-brand-800 dark:text-brand-200">
+        <h3 className="text-sm font-bold text-foreground">
           {t("Workforce.history.finalAnswer", "Final Synthesized Answer")}
         </h3>
       </div>

@@ -1,6 +1,28 @@
 import { setBrand } from "./brand";
 
 /**
+ * Per document: how many calls there have been, and the newest brand whose
+ * script has loaded but was held back. An older call's script that loads late must not overwrite
+ * a newer call's brand, and if the newest call's script fails the page falls
+ * back to that loaded brand rather than to nothing.
+ */
+interface ReloadState {
+  calls: number;
+  /** The newest brand whose script loaded but was held back because a newer call was pending. */
+  held: { call: number; brand: unknown } | null;
+}
+const states = new WeakMap<Document, ReloadState>();
+
+function stateOf(doc: Document): ReloadState {
+  let state = states.get(doc);
+  if (!state) {
+    state = { calls: 0, held: null };
+    states.set(doc, state);
+  }
+  return state;
+}
+
+/**
  * Apply a brand the settings page just saved, without a reload (white-label
  * plan §4.3 item 4).
  *
@@ -19,6 +41,8 @@ import { setBrand } from "./brand";
  * effect untouched.
  */
 export function applyBrandRevision(revision: number, doc: Document = document): Promise<void> {
+  const state = stateOf(doc);
+  const call = ++state.calls;
   const query = `?r=${encodeURIComponent(String(revision))}`;
 
   const stylesheet = doc.querySelector<HTMLLinkElement>('link[rel="stylesheet"][href^="/branding/brand.css"]');
@@ -43,11 +67,26 @@ export function applyBrandRevision(revision: number, doc: Document = document): 
     script.dataset.brandReload = String(revision);
     script.onload = () => {
       script.remove();
-      setBrand(doc.defaultView?.__EDDI_BRAND__);
+      // Two saves in quick succession load two scripts, in no guaranteed order;
+      // only the newest may reach the subscribers.
+      const brand = doc.defaultView?.__EDDI_BRAND__;
+      if (call === state.calls) {
+        state.held = null;
+        setBrand(brand);
+      } else if (!state.held || call > state.held.call) {
+        state.held = { call, brand };
+      }
       resolve();
     };
     script.onerror = () => {
       script.remove();
+      // The newest call failed: apply the newest brand that did load but was
+      // held back for it, instead of applying nothing.
+      if (call === state.calls && state.held) {
+        const { brand } = state.held;
+        state.held = null;
+        setBrand(brand);
+      }
       reject(new Error("The brand script could not be loaded."));
     };
     doc.head.appendChild(script);

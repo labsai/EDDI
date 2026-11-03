@@ -67,6 +67,8 @@ export { ViewToggle } from "@/components/shared/view-toggle";
 // chat drawer, operator drawer and the onboarding tour, which drags Monaco and
 // the operator tool-scope graph into the bundle. Sidebar + TopBar are the parts
 // a design needs; compose them by hand around a page body.
+export { AboutDialog } from "@/components/layout/about-dialog";
+export { BrandIcon, BrandWordmark } from "@/components/layout/brand-logo";
 export { MockDataBanner } from "@/components/layout/mock-data-banner";
 export { PageLoader } from "@/components/layout/page-loader";
 export { PlatformStatus } from "@/components/layout/platform-status";

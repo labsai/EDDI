@@ -342,6 +342,22 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an oversized href whose tracking query canonicalizes short is still not followed")
+        void overlongLinkWithATrackingQueryIsNotFollowed() {
+            // canonicalize() strips utm_*, leaving a short id: the bound must see the URL
+            // that is fetched
+            String overlong = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(overlong)).page(overlong, "<html><body>Long</body></html>")
+                    .page(SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink();
+
+            new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertFalse(site.wasRequested(overlong));
+        }
+
+        @Test
         @DisplayName("a broken exclude pattern does not reduce the crawl to its seed")
         void brokenExcludeDoesNotBreakCrawl() {
             // The draft compiled patterns without escaping, and the resulting

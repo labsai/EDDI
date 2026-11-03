@@ -204,6 +204,12 @@ def undepth(body, where):
         if not target.startswith("../"):
             bad.append(target)
             return m.group(0)
+        if re.match(r"changelog\.d/\d{4}-\d{2}-\d{2}-[^/]+\.md", target[3:]):
+            # A link to another pending fragment: collation deletes its target, so the
+            # link would be broken in docs/changelog.md — and a collation-only PR skips
+            # the documentation-link test that would notice.
+            bad.append(target + " (a pending fragment, which collation deletes; link the README or write the entry's title instead)")
+            return m.group(0)
         return "](" + target[3:] + ")"
 
     out = _map_links(body, fix)

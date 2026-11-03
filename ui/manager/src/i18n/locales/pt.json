@@ -93,6 +93,8 @@
     "workspaces": "Espaços de trabalho",
     "breadcrumb": "Trilha de navegação",
     "checkingVersion": "Verificando a versão...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} Demonstração {{version}}",
     "expandSidebar": "Expandir a barra lateral",
     "collapseSidebar": "Recolher a barra lateral",
     "branding": "Marca",
@@ -6885,6 +6887,7 @@
     "sourceLabel": "A marca em vigor vem de:",
     "updated": "Guardado pela última vez {{when}} por {{who}}, revisão {{revision}}",
     "saveFailed": "A marca não foi guardada: {{reason}}",
+    "writeTimeout": "O servidor não respondeu a tempo. Recarregue a página para ver se a alteração foi aplicada.",
     "warningsTitle": "Guardado, com um aviso do servidor:",
     "toast": {
       "applyFailed": "Guardado, mas este separador não conseguiu carregar a nova marca. Recarregue a página para a ver.",
@@ -6987,12 +6990,12 @@
       "errorLocked": "A marca está bloqueada, por isso as imagens não podem ser alteradas aqui."
     },
     "loginTheme": {
-      "title": "Página de login",
-      "description": "Com o login pelo Keycloak, a página de login é um tema do Keycloak, que não consegue ler esta marca. Baixe-o como um tema com a marca salva aplicada, instale-o no Keycloak e defina os valores do realm indicados no README. Baixe-o novamente após uma mudança de marca.",
-      "download": "Baixar tema de login",
-      "downloading": "Preparando…",
-      "unsaved": "Ele contém a marca salva. Salve suas alterações primeiro para incluí-las.",
-      "failed": "Não foi possível baixar o tema de login: {{reason}}"
+      "title": "Página de início de sessão",
+      "description": "Com o início de sessão pelo Keycloak, a página de início de sessão é um tema do Keycloak, que não consegue ler esta marca. Descarregue-o como um tema com a marca guardada aplicada, instale-o no Keycloak e defina os valores do realm indicados no README. Descarregue-o novamente após uma alteração da marca.",
+      "download": "Descarregar tema de início de sessão",
+      "downloading": "A preparar…",
+      "unsaved": "Contém a marca guardada. Guarde primeiro as alterações para as incluir.",
+      "failed": "Não foi possível descarregar o tema de início de sessão: {{reason}}"
     },
     "resetDialog": {
       "title": "Repor a marca?",

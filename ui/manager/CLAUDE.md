@@ -42,8 +42,8 @@ the whole app gets it; don't patch it at the call site.
 ## Design system mirror
 
 The synced surface is whatever `.design-sync/config.json`'s `componentSrcMap` lists — most
-of `ui/` and `shared/` plus five pieces of chrome from `src/components/layout/` (`Sidebar`,
-`TopBar`, `PlatformStatus`, `PageLoader`, `MockDataBanner`). Read that map rather than a count
+of `ui/` and `shared/` plus eight pieces of chrome from `src/components/layout/` (`Sidebar`,
+`TopBar`, `PlatformStatus`, `PageLoader`, `MockDataBanner`, `AboutDialog`, `BrandWordmark`, `BrandIcon`). Read that map rather than a count
 here. `AppLayout` and `ConfigEditorLayout` are excluded on purpose — both pull Monaco into the
 bundle. Others are unsynced too: `UpdateCheckCard` and `UpdateBanner` are newer than the last
 sync, `ChipInput` and `StepDots` are left out deliberately (NOTES.md says why), and

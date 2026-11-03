@@ -59,4 +59,58 @@ describe("applyBrandRevision", () => {
     pendingScript().dispatchEvent(new Event("load"));
     await done;
   });
+
+  it("an older script that loads after a newer one does not overwrite the newer brand", async () => {
+    const first = applyBrandRevision(10);
+    const olderScript = pendingScript();
+    const second = applyBrandRevision(11);
+    const newerScript = [...document.head.querySelectorAll<HTMLScriptElement>("script[data-brand-reload]")].find(
+      (s) => s.dataset.brandReload === "11",
+    )!;
+
+    window.__EDDI_BRAND__ = { branded: true, revision: 11, productName: "Newer" };
+    newerScript.dispatchEvent(new Event("load"));
+    await second;
+
+    window.__EDDI_BRAND__ = { branded: true, revision: 10, productName: "Older" };
+    olderScript.dispatchEvent(new Event("load"));
+    await first;
+
+    expect(getBrand().productName).toBe("Newer");
+  });
+
+  it("when the newest script fails, applies the older brand that had loaded", async () => {
+    const older = applyBrandRevision(20);
+    const olderScript = pendingScript();
+    const newer = applyBrandRevision(21);
+    const newerScript = [...document.head.querySelectorAll<HTMLScriptElement>("script[data-brand-reload]")].find(
+      (s) => s.dataset.brandReload === "21",
+    )!;
+
+    window.__EDDI_BRAND__ = { branded: true, revision: 20, productName: "Older" };
+    olderScript.dispatchEvent(new Event("load"));
+    await older;
+    expect(getBrand().productName).not.toBe("Older"); // held back: a newer call is pending
+
+    newerScript.dispatchEvent(new Event("error"));
+    await expect(newer).rejects.toThrow();
+    expect(getBrand().productName).toBe("Older");
+  });
+
+  it("keeps calls on different documents apart", async () => {
+    const other = document.implementation.createHTMLDocument("other");
+    const first = applyBrandRevision(30);
+    const firstScript = pendingScript();
+    const second = applyBrandRevision(31, other);
+    const secondScript = other.head.querySelector<HTMLScriptElement>("script[data-brand-reload]")!;
+
+    // The other document's call must not count as "newer" for this one.
+    window.__EDDI_BRAND__ = { branded: true, revision: 30, productName: "Mine" };
+    firstScript.dispatchEvent(new Event("load"));
+    await first;
+    expect(getBrand().productName).toBe("Mine");
+
+    secondScript.dispatchEvent(new Event("error"));
+    await expect(second).rejects.toThrow();
+  });
 });

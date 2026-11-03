@@ -459,11 +459,19 @@ public class ConversationMemoryUtilities {
         // each side can be paired with the other — but only when the two lists agree:
         // on a drifted document an index names different turns on each side.
         boolean paired = allOutputs.size() == allSteps.size();
-        var conversationOutputs = returnCurrentStepOnly ? List.of(allOutputs.getLast()) : allOutputs;
-        var conversationSteps = returnCurrentStepOnly ? List.of(allSteps.getLast()) : allSteps;
+        // A drifted document can hold outputs and no steps (or the reverse): each side
+        // is
+        // taken on its own, so the one that is empty yields nothing instead of failing
+        // the read.
+        List<ConversationOutput> conversationOutputs = returnCurrentStepOnly ? lastOnly(allOutputs) : allOutputs;
+        List<ConversationStepSnapshot> conversationSteps = returnCurrentStepOnly ? lastOnly(allSteps) : allSteps;
         return convertSimpleConversationMemory(conversationMemorySnapshot, conversationOutputs, conversationSteps, paired, allSteps.size() > 1,
                 !conversationMemorySnapshot.getRedoCache().isEmpty(), conversationCost(allSteps, conversationMemorySnapshot.getRedoCache()),
                 returnDetailed);
+    }
+
+    private static <T> List<T> lastOnly(List<T> list) {
+        return list.isEmpty() ? List.of() : List.of(list.getLast());
     }
 
     /**
@@ -472,13 +480,13 @@ public class ConversationMemoryUtilities {
      * {@link #convertSimpleConversationMemory(ConversationMemorySnapshot, boolean, boolean)}
      * gives with {@code returnCurrentStepOnly} for the full snapshot of the same
      * conversation, built from its last step and output plus the totals the tail
-     * carries. An empty conversation fails exactly as the full projection does
-     * ({@link NoSuchElementException} from {@code getLast()}).
+     * carries. A list that is empty (a drifted document) contributes nothing, as in
+     * the full projection.
      */
     static SimpleConversationMemorySnapshot convertSimpleConversationMemory(ConversationMemoryTail tail, boolean returnDetailed) {
         var snapshot = tail.snapshot();
-        var lastOutput = List.of(snapshot.getConversationOutputs().getLast());
-        var lastStep = List.of(snapshot.getConversationSteps().getLast());
+        var lastOutput = lastOnly(snapshot.getConversationOutputs());
+        var lastStep = lastOnly(snapshot.getConversationSteps());
         return convertSimpleConversationMemory(snapshot, lastOutput, lastStep, tail.outputCount() == tail.stepCount(), tail.stepCount() > 1,
                 tail.redoCount() > 0, tail.conversationCost(), returnDetailed);
     }

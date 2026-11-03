@@ -93,6 +93,8 @@
     "workspaces": "Espaces de travail",
     "breadcrumb": "Fil d'Ariane",
     "checkingVersion": "Vérification de la version...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} Démo {{version}}",
     "expandSidebar": "Développer la barre latérale",
     "collapseSidebar": "Réduire la barre latérale",
     "branding": "Image de marque",
@@ -178,7 +180,7 @@
     },
     "linkedAccounts": {
       "title": "Comptes liés",
-      "subtitle": "Les services qu'{{productName}} est autorisé à utiliser en votre nom"
+      "subtitle": "Les services que vous autorisez {{productName}} à utiliser en votre nom"
     }
   },
   "common": {
@@ -572,7 +574,7 @@
   },
   "setupWizard": {
     "baseUrlHintCloud": "Nécessaire uniquement si vous utilisez un proxy, un déploiement privé ou un endpoint Azure OpenAI",
-    "jlamaNoteTitle": "Jlama s'exécute à l'intérieur d'{{productName}}",
+    "jlamaNoteTitle": "Jlama s'exécute directement dans {{productName}}",
     "jlamaNoteBody": "Il n'y a aucun serveur de modèle à désigner — {{productName}} charge le modèle dans son propre processus et télécharge les poids depuis Hugging Face à la première utilisation ; le premier message peut donc prendre un certain temps.",
     "jlamaNoteTuning": "{{productName}} tourne dans un conteneur ? Ouvrez ensuite la configuration LLM de l'agent et définissez modelCachePath sur un volume monté — le cache par défaut réside sur la couche éphémère du conteneur, le modèle peut donc être retéléchargé après la suppression ou le remplacement du conteneur. quantizeModelAtRuntime, workingDirectory et workingQuantizedType s'y règlent également.",
     "baseUrlHintLocal": "Requis — l'URL où votre serveur de modèle local s'exécute",
@@ -641,7 +643,7 @@
     "structuredOutputDesc": "Le LLM répond avec un objet JSON au lieu de texte brut",
     "structuredOutputInfo": "L'activation modifie le mode de réponse du LLM : au lieu de texte brut, il retourne un objet JSON avec des champs structurés. Un schéma JSON est ajouté au prompt système et le modèle passe en mode réponse JSON.",
     "builtInTools": "Outils intégrés",
-    "builtInToolsDesc": "Activer la bibliothèque d'outils intégrés d'{{productName}} (calculatrice, date/heure, etc.)",
+    "builtInToolsDesc": "Activer la bibliothèque d'outils intégrés fournie avec {{productName}} (calculatrice, date/heure, etc.)",
     "toolsWhitelist": "Whitelist (vide = tous les outils)",
     "mcpServers": "Serveurs MCP",
     "mcpServersDesc": "Serveurs Model Context Protocol pour outils externes",
@@ -4521,7 +4523,7 @@
     "userLookup": "Recherche d'utilisateur",
     "exportIncomplete": "Téléchargé, mais ce paquet n’est PAS complet — ne l’envoyez pas comme une demande Art. 15/20 satisfaite.",
     "exportIncompleteTitle": "Paquet d’export incomplet",
-    "exportIncompleteBody": "Ce paquet ne couvre pas tout ce qu’{{productName}} conserve sur cet utilisateur. Il ne doit pas être remis comme une demande Art. 15/20 satisfaite.",
+    "exportIncompleteBody": "Ce paquet ne couvre pas tout ce que conserve {{productName}} sur cet utilisateur. Il ne doit pas être remis comme une demande Art. 15/20 satisfaite.",
     "omittedCategories": "Non exporté",
     "resultsPartialTitle": "Effacement incomplet",
     "resultsPartialBody": "Une partie des données de cet utilisateur peut encore exister. Ne déclarez pas l’effacement satisfait tant que ces étapes n’ont pas abouti.",
@@ -5663,7 +5665,7 @@
   },
   "updates": {
     "title": "Mises à jour {{productName}}",
-    "description": "Vérifiez si une version plus récente d'{{productName}} est disponible. Rien n'est envoyé tant que vous ne le demandez pas.",
+    "description": "Vérifiez si {{productName}} dispose d'une version plus récente. Rien n'est envoyé tant que vous ne le demandez pas.",
     "installed": "Installée",
     "githubRelease": "Version GitHub",
     "dockerImage": "Image Docker",
@@ -5909,7 +5911,7 @@
     "removeOrigin": "Retirer {{origin}}",
     "moreOrigins": "+{{more}}",
     "mineTitle": "Vos comptes liés",
-    "mineSubtitle": "Les services qu'{{productName}} est autorisé à utiliser en votre nom. Personne d'autre ne peut s'en servir, et {{productName}} ne vous montre jamais les informations d'authentification.",
+    "mineSubtitle": "Les services que vous autorisez {{productName}} à utiliser en votre nom. Personne d'autre ne peut s'en servir, et {{productName}} ne vous montre jamais les informations d'authentification.",
     "noneLinked": "Aucun compte lié",
     "noneLinkedDesc": "Lorsqu'un agent aura besoin d'agir en votre nom dans un autre service, il vous demandera de le connecter. Les comptes que vous liez apparaissent ici et vous pouvez les délier à tout moment.",
     "connect": "Connecter",
@@ -5937,7 +5939,7 @@
       "active": "Fonctionne normalement.",
       "connectedOn": "Connecté le {{date}}.",
       "expired": "Le jeton d'accès a expiré et sera renouvelé automatiquement à la prochaine utilisation — vous n'avez rien à faire.",
-      "revoked": "Cet accès a été révoqué. Reconnectez-vous si vous souhaitez qu'{{productName}} continue à l'utiliser.",
+      "revoked": "Cet accès a été révoqué. Reconnectez-vous si vous souhaitez que {{productName}} continue à l'utiliser.",
       "refreshFailed": "Le service n'accepte plus les informations d'authentification enregistrées. Reconnectez-vous pour accorder de nouveau l'accès.",
       "expiresAt": "Jeton d'accès valable jusqu'au {{date}}"
     },
@@ -6885,6 +6887,7 @@
     "sourceLabel": "L’image de marque active provient de :",
     "updated": "Dernier enregistrement {{when}} par {{who}}, révision {{revision}}",
     "saveFailed": "L’image de marque n’a pas été enregistrée : {{reason}}",
+    "writeTimeout": "Le serveur n'a pas répondu à temps. Rechargez la page pour voir si la modification a été appliquée.",
     "warningsTitle": "Enregistré, avec un avertissement du serveur :",
     "toast": {
       "applyFailed": "Enregistré, mais cet onglet n’a pas pu charger la nouvelle image de marque. Rechargez la page pour la voir.",

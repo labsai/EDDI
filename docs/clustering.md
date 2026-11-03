@@ -208,7 +208,9 @@ NATS ports with a NetworkPolicy (the Helm chart and the `nats` overlay do), and 
 **NATS TLS verifies the broker's host name** (`eddi.nats.tls.verify-hostname`, default
 `true`). Before this check existed, any certificate the trust store accepted was
 accepted for any host. On upgrade, the broker certificate must name every host in
-`eddi.nats.url` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. With
+`eddi.nats.url` as a SAN: a DNS SAN for a host name, an IP SAN for an IP address. The client
+also reconnects to broker addresses it learns from NATS cluster discovery, and checks the
+certificate against each address it connects to, so the certificate must name those too. With
 the Helm chart's in-cluster NATS those hosts are `<fullname>-nats-<n>.<fullname>-nats` (the chart's full name), so a
 `*.<fullname>-nats` SAN covers them, while a certificate issued only for the fully qualified
 `…svc.cluster.local` names does not. A node whose broker certificate does not match cannot connect

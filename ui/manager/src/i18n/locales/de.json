@@ -93,6 +93,8 @@
     "workspaces": "Arbeitsbereiche",
     "breadcrumb": "Brotkrümelnavigation",
     "checkingVersion": "Version wird geprüft...",
+    "versionLabel": "{{productName}} Version {{version}}",
+    "versionLabelDemo": "{{productName}} Demoversion {{version}}",
     "expandSidebar": "Seitenleiste erweitern",
     "collapseSidebar": "Seitenleiste einklappen",
     "branding": "Markenauftritt",
@@ -6814,6 +6816,7 @@
     "sourceLabel": "Der aktive Markenauftritt stammt aus:",
     "updated": "Zuletzt gespeichert {{when}} von {{who}}, Revision {{revision}}",
     "saveFailed": "Der Markenauftritt wurde nicht gespeichert: {{reason}}",
+    "writeTimeout": "Der Server hat nicht rechtzeitig geantwortet. Laden Sie die Seite neu, um zu sehen, ob die Änderung übernommen wurde.",
     "warningsTitle": "Gespeichert, mit einer Warnung des Servers:",
     "toast": {
       "applyFailed": "Gespeichert, aber dieser Tab konnte den neuen Markenauftritt nicht laden. Laden Sie die Seite neu, um ihn zu sehen.",

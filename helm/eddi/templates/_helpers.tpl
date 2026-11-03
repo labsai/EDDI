@@ -154,3 +154,16 @@ the root credential. Hex, so it needs no URI encoding.
 {{- printf "eddi-app:%s" (required "mongodb.rootPassword is required when mongodb.enabled=true" .Values.mongodb.rootPassword) | sha256sum -}}
 {{- end -}}
 {{- end }}
+
+{{- /*
+  A value written into a Java properties file (application-secrets.properties):
+  a backslash starts an escape and a line break ends the entry, so a credential
+  holding either would be read back changed, or inject another property. SmallRye
+  Config then expands "${...}" in the value (written "$${" to stay literal), and
+  Properties.load drops leading blanks (a leading one is written "\ ").
+*/}}
+{{- define "eddi.propertyValue" -}}
+{{- $v := . | toString | replace "\\" "\\\\" | replace "${" "$${" | replace "\n" "\\n" | replace "\r" "\\r" -}}
+{{- if or (hasPrefix " " $v) (hasPrefix "\t" $v) }}{{ "\\" }}{{ end -}}
+{{- $v -}}
+{{- end }}
