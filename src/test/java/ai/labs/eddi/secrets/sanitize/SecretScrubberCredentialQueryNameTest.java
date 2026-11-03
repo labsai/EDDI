@@ -56,11 +56,12 @@ class SecretScrubberCredentialQueryNameTest {
         // query-name rule (key, signature, accessKey, ...) used to compare the encoded
         // spelling only. (%73ig was already caught: sig is a header word too.)
         String path = scrubbedField("""
-                {"request":{"path":"/container/blob?sv=2022-11-02&%6Bey=abcdEFGH1234"}}""", "/request/path");
+                {"request":{"path":"/container/blob?sv=2022-11-02&%6Bey=fixturefixturefixture"}}""", "/request/path");
         String url = scrubbedField("""
                 {"targetServerUrl":"https://maps.example.com/api?%6Bey=plainkey1&zoom=3"}""", "/targetServerUrl");
 
-        assertFalse(path.contains("abcdEFGH1234"), path);
+        // A zero-entropy value, so only the name rule can redact it.
+        assertFalse(path.contains("fixturefixturefixture"), path);
         assertTrue(path.contains("%6Bey=" + SecretScrubber.REDACTED), path);
         assertFalse(url.contains("plainkey1"), url);
         assertTrue(url.contains("%6Bey=") && url.contains("zoom=3"), url);
