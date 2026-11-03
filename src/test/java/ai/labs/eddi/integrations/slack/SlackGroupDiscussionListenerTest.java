@@ -401,7 +401,8 @@ class SlackGroupDiscussionListenerTest {
                 "C_APPROVAL", "U1,U2", "acme-int", records);
         withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
 
-        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+        // With its pause identity: a card that does not know its pause gets no buttons.
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase", Instant.ofEpochMilli(7_000L)));
 
         var blocksCaptor = org.mockito.ArgumentCaptor.forClass(List.class);
         verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());

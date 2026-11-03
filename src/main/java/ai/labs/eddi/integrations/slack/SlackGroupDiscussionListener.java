@@ -436,6 +436,10 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // only produce refusals.
             String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(event.pausedAt());
             boolean recorded = false;
+            if (includeButtons && ISlackApprovalRecordStore.UNKNOWN_PAUSE.equals(pauseEpoch)) {
+                // A card that does not know its pause matches none (see matchesPause).
+                includeButtons = false;
+            }
             if (includeButtons) {
                 if (approvalRecords == null || !SlackHitlSupport.isBindableIntegrationName(integrationName)) {
                     if (integrationName != null && integrationName.contains("|")) {

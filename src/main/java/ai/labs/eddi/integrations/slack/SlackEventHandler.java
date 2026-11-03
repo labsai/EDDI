@@ -919,10 +919,12 @@ public class SlackEventHandler {
      * Build the in-thread pause notice, appending the pause reason from the HITL
      * bookmark when available.
      */
-    private String buildPauseNotice(ConversationMemorySnapshot bookmark) {
+    static String buildPauseNotice(ConversationMemorySnapshot bookmark) {
         String reason = bookmark != null ? bookmark.getHitlPauseReason() : null;
         if (reason != null && !reason.isBlank()) {
-            return SlackHitlSupport.PAUSE_NOTICE + "\n> " + reason;
+            // Escaped like the approval card's reason: it is posted under EDDI's own
+            // notice, so a <!channel> or <url|label> in it must stay literal text.
+            return SlackHitlSupport.PAUSE_NOTICE + "\n> " + SlackMrkdwn.escape(reason);
         }
         return SlackHitlSupport.PAUSE_NOTICE;
     }
@@ -958,9 +960,10 @@ public class SlackEventHandler {
         // conversationId alone — so a second distinct pause in the same conversation
         // (pause → resume → pause) is NOT suppressed, and a card can only ever
         // resolve the pause it was posted for. When the best-effort bookmark load
-        // returns a non-AWAITING snapshot (hitlPausedAt null) the record carries
-        // UNKNOWN_PAUSE rather than blocking the card; such a record matches only a
-        // pause that began before it was written. A normal-turn pause and an
+        // returns a non-AWAITING snapshot (hitlPausedAt null) the card is posted as a
+        // notification without buttons and nothing is recorded: a card that does not
+        // know its pause could otherwise approve a later one, and the next message in
+        // the paused thread posts a card for the real pause. A normal-turn pause and an
         // init-turn pause detected on the next say both route here — the first wins
         // the record; re-message-while-paused is a no-op. The record is removed
         // below if delivery fails. The record also carries a fresh card id that goes
@@ -978,6 +981,10 @@ public class SlackEventHandler {
                 LOGGER.warnf("Slack integration '%s' has a name containing '|', which approval buttons cannot carry "
                         + "— posting the approval card without buttons; rename the integration", sanitize(integrationName));
             }
+            includeButtons = false;
+        } else if (ISlackApprovalRecordStore.UNKNOWN_PAUSE.equals(pauseEpoch)) {
+            LOGGER.warnf("The pause of %s could not be read yet — posting its approval card without buttons",
+                    sanitize(conversationId));
             includeButtons = false;
         } else {
             try {

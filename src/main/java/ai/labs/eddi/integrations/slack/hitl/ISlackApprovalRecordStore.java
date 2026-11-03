@@ -55,9 +55,9 @@ public interface ISlackApprovalRecordStore {
 
     /**
      * Pause identity used when the pause timestamp is not known at posting time
-     * (the bookmark had not been persisted yet). Such a record only matches a pause
-     * that began at or before the record was written — see
-     * {@link SlackApprovalRecord#matchesPause}.
+     * (the bookmark had not been persisted yet). Such a record matches no pause —
+     * see {@link SlackApprovalRecord#matchesPause} — so a card whose pause is not
+     * known is posted without buttons and not recorded at all.
      */
     String UNKNOWN_PAUSE = "";
 
@@ -97,21 +97,19 @@ public interface ISlackApprovalRecordStore {
         }
 
         /**
-         * Whether this card was posted for the pause that began at {@code pausedAt}. An
-         * exact pause-epoch match always qualifies. A record written without a known
-         * pause ({@link #UNKNOWN_PAUSE}) qualifies only if it was written at or after
-         * the pause began — a card posted before a pause existed cannot have been
-         * posted for it.
+         * Whether this card was posted for the pause that began at {@code pausedAt}:
+         * only an exact pause-epoch match qualifies. A record written without a known
+         * pause ({@link #UNKNOWN_PAUSE}, from before cards of an unknown pause stopped
+         * being recorded) matches nothing. It used to match any pause that began before
+         * the record was written, but the record is written after delivery work, so a
+         * card delayed past a resume and a new pause could approve that newer pause
+         * without its approver ever having seen it.
          */
         public boolean matchesPause(Instant pausedAt) {
             if (pausedAt == null) {
                 return false;
             }
-            if (String.valueOf(pausedAt.toEpochMilli()).equals(pauseEpoch)) {
-                return true;
-            }
-            return UNKNOWN_PAUSE.equals(pauseEpoch) && createdAt != null
-                    && !createdAt.isBefore(pausedAt);
+            return String.valueOf(pausedAt.toEpochMilli()).equals(pauseEpoch);
         }
     }
 
