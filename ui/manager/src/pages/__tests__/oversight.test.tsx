@@ -37,6 +37,12 @@ describe("OversightPage", () => {
     expect(within(screen.getByTestId(`oversight-category-${LOOKUP_CATEGORY}`)).getByTestId("oversight-tier-SUSPENDED")).toBeInTheDocument();
   });
 
+  it("falls back to 30 days for a ?days= value that is not an offered period instead of throwing", async () => {
+    renderOversight("/manage/oversight?days=1000000000");
+    expect(await screen.findByTestId("oversight-analytics")).toBeInTheDocument();
+    expect(screen.getByRole("combobox")).toHaveValue("30");
+  });
+
   it("warns when more than a fifth of the samples expire unreviewed", async () => {
     server.use(
       http.get("*/hitl/analytics/summary", () =>

@@ -28,7 +28,9 @@ export function OversightPage() {
   const [params, setParams] = useSearchParams();
   const tab = (TABS as string[]).includes(params.get("tab") ?? "") ? (params.get("tab") as OversightTab) : "analytics";
   const agentId = params.get("agentId") ?? "";
-  const days = Number(params.get("days")) || 30;
+  // Only the offered periods: an arbitrary ?days= (e.g. 1000000000) would make new Date(...).toISOString() throw.
+  const requestedDays = Number(params.get("days"));
+  const days = (PERIODS as readonly number[]).includes(requestedDays) ? requestedDays : 30;
   const seesAll = useMayUse()([ROLE_ADMIN, ROLE_APPROVER]);
   const needsAgent = !seesAll && !agentId;
   const [now] = useState(() => Date.now());
