@@ -12,6 +12,7 @@ import {
   Square,
   Trash2,
   Users,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
@@ -25,6 +26,7 @@ import { AgentWorkforceCard } from "@/components/workforce/agent-workforce-card"
 import { KnowledgeHealthCard } from "@/components/workforce/knowledge-health-card";
 import { QuickActions } from "@/components/workforce/quick-actions";
 import { OnboardingHero } from "@/components/workforce/onboarding-hero";
+import { useRecentAgents } from "@/hooks/use-recent-agents";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
 import { TemplatesPanel } from "@/components/workforce/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
@@ -199,17 +201,29 @@ function MobileFab() {
 
 // ─── Workforce Section ───────────────────────────────────────────
 
+/** Agents shown before the section offers "Show all" (about two rows). */
+const WORKFORCE_COLLAPSED_COUNT = 12;
+
 function WorkforceSection() {
   const { t } = useTranslation();
-  const { data: agentsRaw } = useAgentDescriptors(50);
+  const [expanded, setExpanded] = useState(false);
+  const orderByRecentUse = useRecentAgents();
+  // Descriptors are per version; fetch enough that grouping by agent id still
+  // yields every agent, and show them all rather than a fixed top-10.
+  const { data: agentsRaw } = useAgentDescriptors(200);
   const navigate = useNavigate();
 
   const agents = useMemo(
-    () => (agentsRaw ? groupAgentsByName(agentsRaw).slice(0, 10) : []),
-    [agentsRaw],
+    // Most recently used by this user first, then the rest by last modified.
+    () => (agentsRaw ? orderByRecentUse(groupAgentsByName(agentsRaw)) : []),
+    [agentsRaw, orderByRecentUse],
   );
 
   if (!agents.length) return null;
+
+  const collapsible = agents.length > WORKFORCE_COLLAPSED_COUNT;
+  const visible =
+    collapsible && !expanded ? agents.slice(0, WORKFORCE_COLLAPSED_COUNT) : agents;
 
   return (
     <section
@@ -228,8 +242,15 @@ function WorkforceSection() {
         </span>
       </div>
 
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 pb-2">
-        {agents.map((agent) => {
+      <div
+        data-testid="workforce-agent-grid"
+        className={cn(
+          "grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-2 pb-2",
+          // Keep a very large workforce from pushing the rest of the page away.
+          expanded && "max-h-[28rem] overflow-y-auto pe-1",
+        )}
+      >
+        {visible.map((agent) => {
           const idMatch = agent.resource?.match(
             /\/agentstore\/agents\/([^?]+)/,
           );
@@ -246,6 +267,26 @@ function WorkforceSection() {
           );
         })}
       </div>
+
+      {collapsible && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mt-1 text-muted-foreground"
+          aria-expanded={expanded}
+          data-testid="workforce-toggle-all"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded
+            ? t("workforce.showLess", "Show fewer")
+            : t("workforce.showAll", "Show all {{total}}", {
+                total: agents.length,
+              })}
+          <ChevronDown
+            className={cn("ms-1 h-4 w-4 transition-transform", expanded && "rotate-180")}
+          />
+        </Button>
+      )}
     </section>
   );
 }

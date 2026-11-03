@@ -5805,6 +5805,8 @@
     "addAgent": "Implantar agente",
     "count": "{{count}} especialistas",
     "ready": "Pronto",
+    "showAll": "Mostrar todos ({{total}})",
+    "showLess": "Mostrar menos",
     "title": "Sua equipa digital",
     "unnamed": "Agente sem nome"
   },

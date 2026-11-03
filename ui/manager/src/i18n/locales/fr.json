@@ -5805,6 +5805,8 @@
     "addAgent": "Déployer un agent",
     "count": "{{count}} experts",
     "ready": "Prêt",
+    "showAll": "Tout afficher ({{total}})",
+    "showLess": "Afficher moins",
     "title": "Votre effectif numérique",
     "unnamed": "Agent sans nom"
   },

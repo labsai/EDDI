@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { markAgentUsed } from "@/hooks/use-recent-agents";
 import { usePersistedBoolean } from "@/hooks/use-persisted-boolean";
 import { Link, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -25,6 +27,11 @@ export function WorkforceChat() {
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedAgentName = useChatStore((s) => s.selectedAgentName);
   const effectiveAgentId = selectedAgentId || searchParams.get("agentId") || null;
+
+  // Feeds the "last used" ordering on the Workforce dashboard.
+  useEffect(() => {
+    if (effectiveAgentId) markAgentUsed(effectiveAgentId);
+  }, [effectiveAgentId]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">

@@ -5745,6 +5745,8 @@
     "addAgent": "Deploy Agent",
     "count": "{{count}} experts",
     "ready": "Ready",
+    "showAll": "Show all {{total}}",
+    "showLess": "Show fewer",
     "title": "Your Digital Workforce",
     "unnamed": "Unnamed Agent"
   },

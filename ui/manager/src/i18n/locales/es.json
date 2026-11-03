@@ -5805,6 +5805,8 @@
     "addAgent": "Desplegar agente",
     "count": "{{count}} expertos",
     "ready": "Listo",
+    "showAll": "Mostrar todos ({{total}})",
+    "showLess": "Mostrar menos",
     "title": "Tu plantilla digital",
     "unnamed": "Agente sin nombre"
   },

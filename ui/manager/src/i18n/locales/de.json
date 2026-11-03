@@ -5745,6 +5745,8 @@
     "addAgent": "Agent bereitstellen",
     "count": "{{count}} Experten",
     "ready": "Bereit",
+    "showAll": "Alle {{total}} anzeigen",
+    "showLess": "Weniger anzeigen",
     "title": "Ihre digitale Belegschaft",
     "unnamed": "Unbenannter Agent"
   },

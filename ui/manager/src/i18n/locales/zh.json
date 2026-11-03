@@ -5745,6 +5745,8 @@
     "addAgent": "部署代理",
     "count": "{{count}} 位专家",
     "ready": "就绪",
+    "showAll": "显示全部 {{total}} 个",
+    "showLess": "收起",
     "title": "您的数字团队",
     "unnamed": "未命名代理"
   },

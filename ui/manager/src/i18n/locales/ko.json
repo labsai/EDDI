@@ -5745,6 +5745,8 @@
     "addAgent": "에이전트 배포",
     "count": "전문가 {{count}}명",
     "ready": "준비됨",
+    "showAll": "전체 {{total}}개 보기",
+    "showLess": "간단히 보기",
     "title": "나의 디지털 워크포스",
     "unnamed": "이름 없는 에이전트"
   },
