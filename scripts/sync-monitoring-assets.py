@@ -5,7 +5,8 @@ docs/monitoring/ holds the one editable copy of the alert rules and the Grafana
 dashboards. Two delivery paths cannot read it:
 
   - Helm only reads files inside the chart, so the PrometheusRule template reads
-    helm/eddi/files/eddi-alerts.yml.
+    helm/eddi/files/eddi-alerts.yml (and, in cluster mode,
+    helm/eddi/files/eddi-cluster-alerts.yml).
   - kustomize refuses files outside the kustomization root, so the monitoring
     component's configMapGenerator reads k8s/overlays/monitoring/eddi-alerts.yml
     and k8s/overlays/monitoring/dashboards/*.json.
@@ -32,6 +33,9 @@ from pathlib import Path
 
 SOURCE = Path("docs/monitoring")
 ALERTS = "eddi-alerts.yml"
+# Cluster-mode rules: Helm only. The chart's PrometheusRule appends their groups in
+# cluster mode; the kustomize monitoring component serves single-node EDDI.
+CLUSTER_ALERTS = "eddi-cluster-alerts.yml"
 DASHBOARDS = ("eddi-operations-dashboard.json", "eddi-grafana-dashboard.json")
 # Copied to Kubernetes in two parts; see split_dashboard.
 SPLIT_DASHBOARD = "eddi-full-metrics-dashboard.json"
@@ -91,6 +95,7 @@ def targets() -> dict:
     wanted = {
         HELM_FILES / ALERTS: alerts,
         K8S / ALERTS: alerts,
+        HELM_FILES / CLUSTER_ALERTS: (SOURCE / CLUSTER_ALERTS).read_bytes(),
     }
     for name in DASHBOARDS:
         wanted[K8S / "dashboards" / name] = minified(SOURCE / name)

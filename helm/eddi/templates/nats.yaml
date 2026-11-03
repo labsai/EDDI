@@ -5,11 +5,40 @@
 {{- if and .Values.nats.tls.enabled (not .Values.nats.tls.secretName) }}
 {{- fail "nats.tls.enabled=true needs nats.tls.secretName: a kubernetes.io/tls Secret with tls.crt, tls.key and ca.crt." }}
 {{- end }}
+{{- if and .Values.nats.auth.secondaryUsername (eq .Values.nats.auth.secondaryUsername .Values.nats.auth.username) }}
+{{- fail "nats.auth.secondaryUsername must differ from nats.auth.username: NATS refuses a configuration with two users of one name." }}
+{{- end }}
+{{- if and .Values.nats.isolation.enabled (not .Values.nats.auth.enabled) }}
+{{- fail "nats.isolation.enabled=true needs nats.auth.enabled=true: the account and the scoped permissions belong to EDDI's NATS user." }}
+{{- end }}
+{{- $inbox := include "eddi.natsInboxPrefix" . }}
+{{- /*
+  max_file_store below the volume size, so JetStream refuses new data before the
+  filesystem is full: 80 % of nats.storage.size unless nats.storage.maxFileStore
+  says otherwise.
+*/}}
+{{- $maxFileStore := .Values.nats.storage.maxFileStore }}
+{{- if not $maxFileStore }}
+{{- $size := .Values.nats.storage.size | toString }}
+{{- $num := regexFind "^[0-9]+" $size | int }}
+{{- $unit := regexFind "[KMGT]i?$" $size }}
+{{- $mb := 0 }}
+{{- if hasPrefix "T" $unit }}{{- $mb = mul $num 1048576 }}
+{{- else if hasPrefix "G" $unit }}{{- $mb = mul $num 1024 }}
+{{- else if hasPrefix "M" $unit }}{{- $mb = $num }}
+{{- else }}{{- fail (printf "nats.storage.size %q: use Mi, Gi or Ti, or set nats.storage.maxFileStore explicitly" $size) }}
+{{- end }}
+{{- $maxFileStore = printf "%dM" (div (mul $mb 8) 10) }}
+{{- end }}
 {{- /*
   nats.conf, rendered into a Secret because it carries the EDDI user's
   password. The `eddi` user may only touch EDDI's own subjects: its events, RPC
   and dead letters (eddi.>), the JetStream API (including acks and the flow
-  control of ordered consumers), KV buckets and reply inboxes.
+  control of ordered consumers), KV buckets, the object store and reply inboxes
+  — and never delete a stream or touch the servers' JetStream placement: one
+  shared credential is held by every EDDI pod, and with $JS.API.> unrestricted it
+  could delete the lease, nonce and audit-position buckets of the whole cluster.
+  EDDI itself never deletes a stream (it purges dead letters, which stays allowed).
 */}}
 apiVersion: v1
 kind: Secret
@@ -26,21 +55,45 @@ stringData:
     http_port: 8222
     jetstream {
       store_dir: /data
-      max_file_store: {{ .Values.nats.storage.size | replace "Gi" "G" | replace "Mi" "M" }}
+      max_file_store: {{ $maxFileStore }}
     }
     {{- if .Values.nats.auth.enabled }}
+    {{- $password := required "nats.auth.password is required when nats.enabled=true and nats.auth.enabled=true. Generate one: openssl rand -base64 24" .Values.nats.auth.password }}
+    {{- $permissions := printf `permissions: { publish: { allow: ["eddi.>", "$JS.API.>", "$KV.*.>", "$O.*.>", "$JS.ACK.>", "$JS.FC.>", "%s.>"], deny: ["$JS.API.STREAM.DELETE.>", "$JS.API.SERVER.>", "$JS.API.META.>", "$JS.API.ACCOUNT.PURGE.>"] }, subscribe: ["eddi.>", "$JS.API.>", "$KV.*.>", "%s.>"] }` $inbox $inbox }}
+    {{- $users := list (dict "user" .Values.nats.auth.username "password" $password) }}
+    {{- if .Values.nats.auth.secondaryUsername }}
+    {{- $users = append $users (dict "user" .Values.nats.auth.secondaryUsername "password" (required "nats.auth.secondaryPassword is required with nats.auth.secondaryUsername" .Values.nats.auth.secondaryPassword)) }}
+    {{- end }}
+    {{- if .Values.nats.isolation.enabled }}
+    # One account per deployment: another tenant of this NATS cannot see this
+    # deployment's streams, buckets or replies, whatever its own permissions.
+    accounts {
+      {{ include "eddi.natsAccount" . }}: {
+        jetstream: enabled
+        users: [
+          {{- range $users }}
+          {
+            user: {{ .user | quote }}
+            password: {{ .password | quote }}
+            {{ $permissions }}
+          }
+          {{- end }}
+        ]
+      }
+    }
+    {{- else }}
     authorization {
       users: [
+        {{- range $users }}
         {
-          user: {{ .Values.nats.auth.username | quote }}
-          password: {{ required "nats.auth.password is required when nats.enabled=true and nats.auth.enabled=true. Generate one: openssl rand -base64 24" .Values.nats.auth.password | quote }}
-          permissions: {
-            publish: ["eddi.>", "$JS.API.>", "$KV.*.>", "$O.*.>", "$JS.ACK.>", "$JS.FC.>", "_INBOX.>"]
-            subscribe: ["eddi.>", "$JS.API.>", "$KV.*.>", "_INBOX.>"]
-          }
+          user: {{ .user | quote }}
+          password: {{ .password | quote }}
+          {{ $permissions }}
         }
+        {{- end }}
       ]
     }
+    {{- end }}
     {{- end }}
     {{- if .Values.nats.tls.enabled }}
     tls {
@@ -109,8 +162,12 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      # One NATS pod per node (nats.antiAffinity), so a node failure costs at most
+      # one of them and R3 keeps quorum; spread over zones where there are any.
+      {{- $antiAffinity := toString (default "required" .Values.nats.antiAffinity) }}
       affinity:
         podAntiAffinity:
+          {{- if eq $antiAffinity "preferred" }}
           preferredDuringSchedulingIgnoredDuringExecution:
             - weight: 100
               podAffinityTerm:
@@ -119,15 +176,37 @@ spec:
                   matchLabels:
                     app.kubernetes.io/name: {{ $fullname }}-nats
                     app.kubernetes.io/component: messaging
+          {{- else if eq $antiAffinity "required" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - topologyKey: kubernetes.io/hostname
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/name: {{ $fullname }}-nats
+                  app.kubernetes.io/component: messaging
+          {{- else }}
+          {{- fail (printf "nats.antiAffinity must be \"required\" or \"preferred\", got %q" $antiAffinity) }}
+          {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ $fullname }}-nats
+              app.kubernetes.io/component: messaging
       containers:
         - name: nats
-          image: "{{ .Values.nats.image.repository }}:{{ .Values.nats.image.tag }}"
+          image: "{{ .Values.nats.image.repository }}:{{ .Values.nats.image.tag }}{{ with .Values.nats.image.digest }}@{{ . }}{{ end }}"
           args: ["--config", "/etc/nats/nats.conf"]
           env:
             - name: POD_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
+            {{- with .Values.nats.goMemLimit }}
+            - name: GOMEMLIMIT
+              value: {{ . | quote }}
+            {{- end }}
           ports:
             - containerPort: 4222
               name: client
@@ -174,6 +253,23 @@ spec:
               path: /healthz?js-server-only=true
               port: monitoring
             periodSeconds: 10
+        {{- if .Values.nats.metrics.enabled }}
+        # The NATS server's own metrics (JetStream storage, streams, slow
+        # consumers) for the eddi-cluster-nats alert group.
+        - name: metrics
+          image: "{{ .Values.nats.metrics.image.repository }}:{{ .Values.nats.metrics.image.tag }}{{ with .Values.nats.metrics.image.digest }}@{{ . }}{{ end }}"
+          args: ["-port", "7777", "-varz", "-jsz=all", "-connz", "-healthz", "http://localhost:8222"]
+          ports:
+            - containerPort: 7777
+              name: metrics
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            {{- toYaml .Values.nats.metrics.resources | nindent 12 }}
+        {{- end }}
       volumes:
         - name: nats-config
           secret:
@@ -218,6 +314,34 @@ spec:
     - name: monitoring
       port: 8222
       targetPort: monitoring
+    {{- if .Values.nats.metrics.enabled }}
+    - name: metrics
+      port: 7777
+      targetPort: metrics
+    {{- end }}
+{{- if and .Values.nats.metrics.enabled .Values.serviceMonitor.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $fullname }}-nats
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+    app.kubernetes.io/component: messaging
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "eddi.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: messaging
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.serviceMonitor.scrapeTimeout }}
+{{- end }}
 {{- if gt $replicas 1 }}
 ---
 apiVersion: policy/v1

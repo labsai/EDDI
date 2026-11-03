@@ -125,18 +125,59 @@ mode; empty (the application default) otherwise.
 
 {{/*
 NATS servers for EDDI: the in-chart StatefulSet's pods (all of them, so the
-client fails over without DNS) or nats.externalUrl.
+client fails over without DNS) or nats.externalUrl. tls:// when the in-chart
+NATS runs TLS, so the scheme says what the connection is; EDDI verifies the
+certificate's host names against these pod names
+(<fullname>-nats-<i>.<fullname>-nats — a SAN of *.<fullname>-nats covers them).
 */}}
 {{- define "eddi.natsUrl" -}}
 {{- if .Values.nats.enabled -}}
 {{- $fullname := include "eddi.fullname" . -}}
+{{- $scheme := ternary "tls" "nats" (and .Values.nats.tls.enabled true) -}}
 {{- $urls := list -}}
 {{- range $i := until (int .Values.nats.replicas) -}}
-{{- $urls = append $urls (printf "nats://%s-nats-%d.%s-nats:4222" $fullname $i $fullname) -}}
+{{- $urls = append $urls (printf "%s://%s-nats-%d.%s-nats:4222" $scheme $fullname $i $fullname) -}}
 {{- end -}}
 {{- join "," $urls -}}
 {{- else -}}
 {{- .Values.nats.externalUrl -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The NATS account of the in-chart NATS under nats.isolation (default EDDI).
+*/}}
+{{- define "eddi.natsAccount" -}}
+{{- $account := .Values.nats.isolation.account | default "EDDI" | toString -}}
+{{- if not (regexMatch "^[A-Za-z0-9_-]+$" $account) -}}
+{{- fail (printf "nats.isolation.account %q may only contain letters, digits, '_' and '-'" $account) -}}
+{{- end -}}
+{{- $account -}}
+{{- end }}
+
+{{/*
+EDDI's reply-subject prefix (EDDI_NATS_INBOX_PREFIX): _INBOX_<account> under
+nats.isolation, so the user's subscribe permission can name it; jnats' default
+_INBOX otherwise, which every existing permission set allows.
+*/}}
+{{- define "eddi.natsInboxPrefix" -}}
+{{- if and .Values.nats.enabled .Values.nats.isolation.enabled -}}
+_INBOX_{{ include "eddi.natsAccount" . }}
+{{- else -}}
+_INBOX
+{{- end -}}
+{{- end }}
+
+{{/*
+The CA EDDI trusts for NATS, as a Secret name with key ca.crt: the in-chart NATS'
+TLS Secret, or nats.externalCaSecretName for an external NATS. Empty: the JVM's
+default CAs.
+*/}}
+{{- define "eddi.natsCaSecret" -}}
+{{- if and .Values.nats.enabled .Values.nats.tls.enabled -}}
+{{- .Values.nats.tls.secretName -}}
+{{- else if and (not .Values.nats.enabled) .Values.nats.externalUrl -}}
+{{- .Values.nats.externalCaSecretName -}}
 {{- end -}}
 {{- end }}
 

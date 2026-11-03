@@ -65,6 +65,24 @@ eddi:
   # application default (20 s) otherwise.
   shutdownDrainTimeoutSeconds: ""
 
+  # preStop sleep before SIGTERM reaches EDDI. Kubernetes removes a terminating
+  # pod from the Service endpoints at the same moment it runs preStop, and the
+  # ingress controllers and kube-proxy take a few seconds to notice; requests
+  # still routed to the pod in that window used to be refused with 503 on every
+  # rolling update and HPA scale-in. EDDI keeps admitting turns for its readiness
+  # grace (3 s) after SIGTERM as well. Counts against the termination grace,
+  # which the chart checks. 0 renders no preStop hook.
+  preStopSleepSeconds: 5
+
+  # Cluster-mode behaviour while NATS is unreachable, rendered only when set
+  # (EDDI_CLUSTER_DEGRADED_TURNS). The application default is "local": turns keep
+  # running with node-local ordering only — UNFENCED, so two turns of one
+  # conversation on two nodes can overwrite each other's properties. "reject"
+  # answers 409 + Retry-After instead and is the recommended production value
+  # (docs/clustering.md, "Degraded mode").
+  cluster:
+    degradedTurns: ""
+
   # Vault master key — encrypts API keys and secrets. REQUIRED, unless
   # existingSecret below supplies it.
   # ⚠️  If you lose this key, encrypted secrets are UNRECOVERABLE
@@ -428,11 +446,27 @@ nats:
   # externalUrl must be tls:// (or wss://). EDDI then connects over TLS, trusting
   # the JVM's default CAs. Credentials in eddi.existingSecret are invisible to the
   # chart, so use tls:// there yourself.
+  #
+  # Over tls:// EDDI always verifies the server certificate AND that it was issued
+  # for the host in externalUrl (HTTPS-style). A private CA goes in
+  # externalCaSecretName.
   externalUsername: ""
   externalPassword: ""
   # Accept nats:// servers with credentials anyway - only when the transport is
   # encrypted underneath EDDI (a service mesh with mTLS, for instance).
   externalAllowPlaintext: false
+  # A Secret with the CA certificate (PEM, key ca.crt) of an external NATS over
+  # tls://, mounted into EDDI as its NATS trust store. Empty: the JVM's default
+  # CAs (a public CA). cert-manager's kubernetes.io/tls Secrets carry ca.crt.
+  externalCaSecretName: ""
+  # JetStream replicas of EDDI's buckets and streams on an EXTERNAL NATS
+  # (EDDI_NATS_REPLICAS). 3 for a JetStream cluster of three or more servers —
+  # with 1, the leases, nonces, audit positions and dead letters live on one
+  # server and are lost or unavailable with it. Set 1 only for a single-server
+  # NATS (EDDI warns at boot when the count exceeds the servers it knows). A
+  # bucket that already exists keeps its replica count. The in-chart NATS derives
+  # it from nats.replicas.
+  externalReplicas: 3
   # JetStream nodes. 3 gives R3 buckets and streams that survive the loss of one
   # node; 1 is a development setup.
   replicas: 3
@@ -448,8 +482,21 @@ nats:
     routePassword: ""
   image:
     repository: nats
-    # 2.11+: KV limit markers; 2.10 works with poll-only lease takeover.
-    tag: "2.11-alpine"
+    # 2.11+: KV limit markers; 2.10 works with poll-only lease takeover. A full
+    # patch version, pinned by digest like every third-party image the repository
+    # ships: a floating tag changes under a deployment without a diff. Resolve a
+    # new digest with `docker pull nats:<tag>` + `docker inspect`.
+    tag: "2.11.17-alpine"
+    digest: "sha256:e4bf19f15fd3218814a4e3c9e0064e1334bd8aa20d5984b9f1a0afd084f8cc00"
+  # "required": no two NATS pods on one node (a node failure costs at most one
+  # of the three, and R3 keeps quorum). "preferred" lets them share a node — for
+  # a dev cluster with fewer nodes than nats.replicas, where "required" leaves
+  # pods Pending. Zones are spread as well, best effort.
+  antiAffinity: required
+  # GOMEMLIMIT for the NATS server: a soft heap limit below
+  # nats.resources.limits.memory, so the Go GC works harder before the kernel
+  # OOM-kills the pod. Keep it at ~90 % of the memory limit.
+  goMemLimit: "460MiB"
   auth:
     # User/password authentication for EDDI. The user may publish and subscribe
     # only to eddi.>, $JS.*, $KV.*, $O.* (the archive object store) and _INBOX.>.
@@ -458,6 +505,23 @@ nats:
     # REQUIRED when nats.enabled=true and auth.enabled=true — no default is
     # shipped. Generate: openssl rand -base64 24
     password: ""
+    # A second user with the same permissions, so the password can be rotated
+    # without downtime: set secondaryUsername/secondaryPassword to the new
+    # credentials and upgrade (NATS accepts both); swap them into
+    # username/password and upgrade (EDDI rolls onto the new ones); clear the
+    # secondary and upgrade. See docs/kubernetes.md.
+    secondaryUsername: ""
+    secondaryPassword: ""
+  # Per-deployment isolation on a NATS shared with other tenants. Off by default
+  # because it moves EDDI's buckets and streams into a new NATS account: an
+  # existing release starts with empty buckets (leases are rebuilt, but dead
+  # letters and archives in the old account are left behind) — enable it on a
+  # fresh install. On: the user is placed in its own account (account, default
+  # EDDI), EDDI uses its own reply-subject prefix (_INBOX_<account>) and the
+  # user's permissions name that prefix instead of _INBOX.>.
+  isolation:
+    enabled: false
+    account: ""
   tls:
     # TLS for clients and routes from a kubernetes.io/tls Secret (tls.crt,
     # tls.key, ca.crt) you provide, e.g. from cert-manager.
@@ -465,6 +529,10 @@ nats:
     secretName: ""
   storage:
     size: 5Gi
+    # JetStream's max_file_store. Empty: 80 % of size, so JetStream refuses new
+    # data before the volume itself is full (a full filesystem corrupts the store
+    # and blocks lease creates). Any NATS size string, e.g. "4G".
+    maxFileStore: ""
   resources:
     requests:
       cpu: 50m
@@ -472,6 +540,22 @@ nats:
     limits:
       cpu: 500m
       memory: 512Mi
+  # prometheus-nats-exporter as a sidecar of every NATS pod (port 7777, -varz
+  # -jsz=all), plus a ServiceMonitor for it when serviceMonitor.enabled. The
+  # eddi-cluster-nats alert group (JetStream storage, a full dead-letter stream,
+  # slow consumers) reads these series.
+  metrics:
+    enabled: false
+    image:
+      repository: natsio/prometheus-nats-exporter
+      tag: "0.17.3"
+      digest: "sha256:26c826662ac8424597cc9bdf89ea5b606eb66e3c11db9b1215c27d2076bbb01b"
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        memory: 64Mi
 
 # ── Keycloak ───────────────────────────────────────────────
 
@@ -558,7 +642,15 @@ ingress:
   enabled: false
   # className: nginx
   annotations: {}
-    # nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  # With className "nginx" (ingress-nginx) the chart adds what EDDI needs from
+  # the controller: no response buffering and a read timeout of
+  # readTimeoutSeconds on every path (SSE turns and the coordinator stream;
+  # the controller's 60 s default cuts them off) and, in cluster mode, a second
+  # Ingress for /mcp that routes by client address — an MCP session lives on the
+  # replica that opened it. Your own annotations win. Other controllers need the
+  # equivalent settings by hand: see docs/kubernetes.md.
+  nginxDefaults: true
+  readTimeoutSeconds: 300
   hosts:
     - host: eddi.example.com
       paths:
@@ -591,7 +683,11 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 6
   targetCPUUtilizationPercentage: 70
-  targetMemoryUtilizationPercentage: 80
+  # Off by default. A JVM keeps the heap it has grown to, so a memory target
+  # (80 % of a 3Gi request) is reached once and then never released: the HPA
+  # ratchets up to maxReplicas and stays there. Set a value only if you size
+  # the heap so that it shrinks.
+  targetMemoryUtilizationPercentage: null
   # Further autoscaling/v2 metric entries, appended as given. Example, with a
   # prometheus-adapter rule that exposes eddi_runtime_executor_active{pool="turn"}
   # as the pod metric eddi_turns_in_flight:
