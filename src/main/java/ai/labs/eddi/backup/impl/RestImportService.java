@@ -1212,7 +1212,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         int documents = 0;
         try (var directoryStream = Files.newDirectoryStream(dir,
                 wfFilePath -> wfFilePath.toString().endsWith(".workflow.json") || wfFilePath.toString().endsWith(".package.json"))) {
-            for (Path ignored : directoryStream) {
+            var documentPaths = directoryStream.iterator();
+            while (documentPaths.hasNext()) {
+                documentPaths.next();
                 documents++;
             }
         }
