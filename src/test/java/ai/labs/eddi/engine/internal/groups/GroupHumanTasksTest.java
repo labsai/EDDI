@@ -125,7 +125,7 @@ class GroupHumanTasksTest {
     }
 
     private PhaseExecutionEngine.HumanTurnRequired runUntilPause(GroupConversation gc, AgentGroupConfiguration config) {
-        return assertThrows(PhaseExecutionEngine.HumanTurnRequired.class, () -> engine.executeTaskExecutionPhase(gc, config, List.of(),
+        return assertThrows(PhaseExecutionEngine.HumanTurnRequired.class, () -> engine.executeTaskExecutionPhase(gc, config,
                 EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(), 20));
     }
 
@@ -162,7 +162,7 @@ class GroupHumanTasksTest {
             var turn = runUntilPause(gc, config);
 
             GroupHumanTasks.applyResult(gc, config, EXECUTE, pendingFor(turn), "Approved with edits", null);
-            engine.executeTaskExecutionPhase(gc, config, List.of(), EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(), 20);
+            engine.executeTaskExecutionPhase(gc, config, EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(), 20);
 
             assertEquals(TaskStatus.COMPLETED, byName(gc, "Sign-off").status());
             assertEquals("Approved with edits", byName(gc, "Sign-off").result());
@@ -175,7 +175,7 @@ class GroupHumanTasksTest {
         void reworkDoesNotPause() throws Exception {
             var gc = board();
 
-            engine.executeTaskExecutionPhase(gc, config(), List.of(), EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(), 20,
+            engine.executeTaskExecutionPhase(gc, config(), EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(), 20,
                     false);
 
             assertEquals(TaskStatus.ASSIGNED, byName(gc, "Sign-off").status());
@@ -190,7 +190,7 @@ class GroupHumanTasksTest {
                 gc.getTaskList().completeTask(t.id(), "x");
             });
 
-            engine.executeTaskExecutionPhase(gc, config(), List.of(), EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(20), 20);
+            engine.executeTaskExecutionPhase(gc, config(), EXECUTE, protocol(), "Launch?", 1, null, new AtomicInteger(20), 20);
 
             assertEquals(TaskStatus.ASSIGNED, byName(gc, "Sign-off").status());
         }

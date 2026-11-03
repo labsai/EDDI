@@ -117,7 +117,7 @@ public class TaskForceEngine {
 
         switch (phase.type()) {
             case PLAN -> executeTaskPlanPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
-            case EXECUTE -> executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
+            case EXECUTE -> executeTaskExecutionPhase(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
             case VERIFY -> executeTaskVerificationPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns);
             default -> LOGGER.warnf("Unexpected phase type %s routed to executeTaskPhase", phase.type());
         }
@@ -324,11 +324,11 @@ public class TaskForceEngine {
      * agent's pipeline. Tasks for different agents execute in parallel; tasks for
      * the same agent execute sequentially within a single CompletableFuture.
      */
-    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config,
                                           DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                           GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns)
             throws GroupDiscussionException {
-        executeTaskExecutionPhase(gc, config, speakers, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, true);
+        executeTaskExecutionPhase(gc, config, phase, protocol, question, phaseIdx, listener, turnCounter, maxTurns, true);
     }
 
     /**
@@ -337,7 +337,7 @@ public class TaskForceEngine {
      * VERIFY rework passes {@code false}, because a pause from inside VERIFY would
      * replay the whole verification pass on resume.
      */
-    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config, List<GroupMember> speakers,
+    public void executeTaskExecutionPhase(GroupConversation gc, AgentGroupConfiguration config,
                                           DiscussionPhase phase, ProtocolConfig protocol, String question, int phaseIdx,
                                           GroupDiscussionEventListener listener, AtomicInteger turnCounter, int maxTurns,
                                           boolean allowHumanPause)
@@ -857,7 +857,7 @@ public class TaskForceEngine {
                 addVerificationNote(gc, phase, phaseIdx, "Returned for rework (%d/%d): %s — %s".formatted(
                         gc.getTaskList().reworkCount(failed.id()), maxReworks, failed.subject(), feedback));
             }
-            executeTaskExecutionPhase(gc, config, speakers, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
+            executeTaskExecutionPhase(gc, config, executePhase, protocol, question, phaseIdx, listener, turnCounter, maxTurns,
                     false);
             // A rework that did not get to run (budget, cancel, a wave error) ends FAILED,
             // never stranded ASSIGNED.
