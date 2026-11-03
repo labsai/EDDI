@@ -316,6 +316,17 @@ eddi_team_handoff_intake_total{outcome}      # Intake decisions: approved, appro
 eddi_team_handoff_store_failures_total{operation}  # Store failures while handing off
 ```
 
+### Team Budget Metrics
+
+Per-team monthly budgets ([Team Budgets](team-budgets.md)). All counters are registered at 0, so a
+panel shows "no refusals" rather than "no data".
+
+```text
+eddi_team_budget_metering_total             # Charges of root-discussion spend to the owning team; tags: outcome (recorded|unavailable|error)
+eddi_team_budget_refusals_total             # New work refused for a spent budget; tags: surface (discussion|cadence|followup), reason (exhausted|tenant|unavailable)
+eddi_team_budget_adjustments_total          # Admin changes to a month's cap; tags: kind (set|transfer)
+```
+
 ### Scheduled Trigger Metrics
 
 ```text

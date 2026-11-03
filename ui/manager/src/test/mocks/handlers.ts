@@ -6,6 +6,7 @@ import { alertHandlers } from "./alert-handlers";
 import { modelPriceHandlers } from "./model-prices-handlers";
 import { teamHandoffHandlers } from "./team-handoff-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
+import { teamBudgetHandlers } from "./team-budget-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
@@ -906,6 +907,8 @@ export const handlers = [
   ...alertHandlers,
   // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
   ...modelPriceHandlers,
+  // Per-team monthly budgets: /groupstore/groups/{id}/budget* and /administration/team-budgets*.
+  ...teamBudgetHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI

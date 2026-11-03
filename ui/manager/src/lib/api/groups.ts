@@ -631,6 +631,18 @@ export interface AgentGroupConfiguration {
    * group neither sends nor receives.
    */
   handoffConfig?: import("./team-handoffs").GroupHandoffConfig | null;
+  /**
+   * Monthly dollar budget for the team (docs/team-budgets.md). Declared so a save that
+   * spreads the loaded config sends it back unchanged; only an administrator can change it.
+   */
+  teamBudget?: TeamBudgetConfig | null;
+}
+
+/** Backend `TeamBudgetConfig`. */
+export interface TeamBudgetConfig {
+  monthlyBudgetUsd: number;
+  onExhausted?: CostPolicy | null;
+  oversight?: { teams: string[] } | null;
 }
 
 /**

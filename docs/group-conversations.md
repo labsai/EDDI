@@ -603,6 +603,12 @@ combines `requiresApproval` phases with `WAIT_INDEFINITELY` logs a warning —
 that combination is what makes the backstop reachable — but is not rejected: it
 is legitimate for a team whose approver really is always available.
 
+**Monthly budget.** A team can also carry a calendar-month dollar cap, `teamBudget`, that covers
+its cadence runs and its ad-hoc discussions alike: a fire of a team whose budget is spent is
+skipped (not failed), and the run that reaches the cap finishes through the synthesis exemption when the
+group's cost policy is `SYNTHESIZE_NOW`; under `ABORT` it stops instead.
+See [Team Budgets](team-budgets.md).
+
 **Creation is atomic.** The workspace is created on first use, and that first use
 can happen on several pods at once (two backlog adds, a cadence fire and a
 read). It is written with an insert-only write under the group's id, so the
