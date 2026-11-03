@@ -274,10 +274,11 @@ can then be deleted (`nats stream rm <prefix>_EVENTS`, `<prefix>_DEAD_LETTERS`, 
 ## How cluster mode is tested
 
 Unit tests and `ClusterCoordinatorIT` (one JVM, one NATS server) cover the logic. Three
-heavier layers cover what only several processes show. They run nightly in
+heavier layers cover what only several processes show. The end-to-end suite and the cluster
+demo run nightly in
 [`cluster-e2e-nightly.yml`](../.github/workflows/cluster-e2e-nightly.yml), which uploads
-their results as artifacts. They are not part of the normal build and not a required
-check.
+their results as artifacts; the soak and scale harness has no workflow job and is run by
+hand. None of them is part of the normal build or a required check.
 
 - **The end-to-end suite** (`src/test/java/ai/labs/eddi/integration/cluster`). It starts
   three EDDI processes from the packaged app, a three-server NATS cluster at R3, a real
