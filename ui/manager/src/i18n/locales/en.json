@@ -4586,6 +4586,7 @@
     "unpricedTitle": "Unpriced models seen (this node)",
     "unpricedDesc": "Model calls that had no price, on the node serving this page since it started. They cost $0 against every budget.",
     "unpricedNone": "None seen.",
+    "unpricedError": "The list of unpriced models could not be loaded.",
     "sightingDetail": "{{n}} calls · {{site}}",
     "sheetTitle": "Model price",
     "modelHint": "Exact name, or * at the start and/or end. The longest match wins; the model the provider reported is tried before the one requested.",

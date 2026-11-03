@@ -71,7 +71,10 @@ Bedrock cache tokens and Gemini thinking tokens are counted — see
 [What the providers report](model-pricing.md#what-the-providers-report).
 
 Group transcript window summaries and stance summaries are charged to the tenant too, and are
-skipped (plain truncation, an extracted stance) once the budget is spent.
+skipped (plain truncation, an extracted stance) once the budget is spent. If the quota store is
+unreadable when one is charged, the amount is carried to the next group system charge on that node
+and its spend event is withheld until the tenant counter takes it; a carried amount is held in memory,
+so a node that restarts before the store recovers loses it.
 
 These calls are **not** metered today, priced or not:
 

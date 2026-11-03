@@ -4595,6 +4595,7 @@
     "unpricedTitle": "Modèles sans prix observés (ce nœud)",
     "unpricedDesc": "Appels de modèle sans prix, sur le nœud qui sert cette page depuis son démarrage. Ils coûtent 0 $ face à chaque budget.",
     "unpricedNone": "Aucun observé.",
+    "unpricedError": "La liste des modèles sans prix n'a pas pu être chargée.",
     "sightingDetail": "{{n}} appels · {{site}}",
     "sheetTitle": "Prix du modèle",
     "modelHint": "Nom exact, ou * au début et/ou à la fin. La correspondance la plus longue l'emporte ; le modèle signalé par le fournisseur est essayé avant celui demandé.",

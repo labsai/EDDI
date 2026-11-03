@@ -4545,6 +4545,7 @@
     "unpricedTitle": "已发现的未定价模型（本节点）",
     "unpricedDesc": "自启动以来，提供此页面的节点上没有价格的模型调用。它们对任何预算都计为 $0。",
     "unpricedNone": "未发现。",
+    "unpricedError": "无法加载未定价模型列表。",
     "sightingDetail": "{{n}} 次调用 · {{site}}",
     "sheetTitle": "模型价格",
     "modelHint": "精确名称，或在开头和/或结尾使用 *。最长匹配优先；先尝试提供商报告的模型，再尝试请求的模型。",
