@@ -42,14 +42,19 @@ import static org.junit.jupiter.api.Assertions.*;
 class KvLeaseManagerTest {
 
     /**
-     * Delivers release notifications to every manager sharing it, like core NATS.
+     * Core NATS between the managers sharing it: broadcasts reach every manager,
+     * addressed notifications only the manager of the node they name.
      */
     static final class Bus implements KvLeaseManager.LeaseNotifier {
         final List<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
+        final Map<String, KvLeaseManager.AddressedListener> nodes = new ConcurrentHashMap<>();
+        final AtomicInteger broadcasts = new AtomicInteger();
+        final Map<String, AtomicInteger> releasesTo = new ConcurrentHashMap<>();
         volatile boolean deliver = true;
 
         @Override
         public void publishReleased(String key) {
+            broadcasts.incrementAndGet();
             if (deliver) {
                 listeners.forEach(l -> l.accept(key));
             }
@@ -58,6 +63,33 @@ class KvLeaseManagerTest {
         @Override
         public void onReleased(Consumer<String> listener) {
             listeners.add(listener);
+        }
+
+        @Override
+        public void publishReleasedTo(String toNode, String key, long deleteRevision) {
+            releasesTo.computeIfAbsent(toNode, n -> new AtomicInteger()).incrementAndGet();
+            KvLeaseManager.AddressedListener listener = nodes.get(toNode);
+            if (deliver && listener != null) {
+                listener.released(key, deleteRevision);
+            }
+        }
+
+        @Override
+        public void publishWaiting(String toNode, String key, String fromNode) {
+            KvLeaseManager.AddressedListener listener = nodes.get(toNode);
+            if (deliver && listener != null) {
+                listener.waiting(key, fromNode);
+            }
+        }
+
+        @Override
+        public void onAddressed(String nodeId, KvLeaseManager.AddressedListener listener) {
+            nodes.put(nodeId, listener);
+        }
+
+        int releasesTo(String node) {
+            AtomicInteger n = releasesTo.get(node);
+            return n == null ? 0 : n.get();
         }
     }
 
@@ -227,17 +259,31 @@ class KvLeaseManagerTest {
     }
 
     @Test
-    @DisplayName("a heartbeat that cannot reach NATS keeps the lease (the DB fence decides)")
-    void heartbeatIoFailureKeepsLease() throws Exception {
+    @DisplayName("a heartbeat that cannot reach NATS keeps the lease only until its validity (ttl - 2 x heartbeat) runs out")
+    void heartbeatIoFailureKeepsLeaseOnlyUntilItsValidityRunsOut() throws Exception {
+        // Rewritten: this test used to assert that an unreachable NATS never cost the
+        // lease ("the DB fence decides"). That let a holder cut off from NATS run on
+        // past the TTL while another node had taken the conversation over (review A1).
         InMemorySharedKv backing = new InMemorySharedKv("LEASES", Duration.ofSeconds(20));
         AtomicBoolean down = new AtomicBoolean();
         ISharedKv flaky = new FlakyKv(backing, down);
         KvLeaseManager a = manager(flaky, "a", "a1");
         LeaseHandle lease = get(a.acquire("conv1", Duration.ofSeconds(1)));
+        AtomicBoolean lostFired = new AtomicBoolean();
+        lease.onLost(() -> lostFired.set(true));
         down.set(true);
         a.heartbeatAll();
-        assertFalse(lease.isLost());
+        assertFalse(lease.isLost(), "one missed renewal is within the margin");
         assertEquals(1, a.heldCount());
+        // test config: ttl 400 ms, heartbeat 100 ms -> validity 200 ms
+        Thread.sleep(250);
+        assertTrue(lease.isLost(), "no renewal acknowledged for ttl - 2 x heartbeat: the lease cannot be trusted any more");
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (!lostFired.get() && System.nanoTime() < deadline) {
+            Thread.sleep(5);
+        }
+        assertTrue(lostFired.get(), "the lost callbacks fire, so the turn is cancelled");
+        assertEquals(0, a.heldCount());
     }
 
     @Test
@@ -490,6 +536,12 @@ class KvLeaseManagerTest {
                 pause(millis);
                 return super.delete(key, expectedRevision);
             }
+
+            @Override
+            public OptionalLong deleteReturningRevision(String key, long expectedRevision) {
+                pause(millis);
+                return super.deleteReturningRevision(key, expectedRevision);
+            }
         };
     }
 
@@ -622,6 +674,7 @@ class KvLeaseManagerTest {
         };
         KvLeaseManager a = manager(stalled, "a", "a1");
         get(a.acquire("conv1", Duration.ofSeconds(1)));
+        Thread.sleep(90); // the tick renews leases whose last renewal is 3/4 heartbeat (75 ms) old
         try {
             long start = System.nanoTime();
             a.dispatchHeartbeat();
@@ -729,6 +782,24 @@ class KvLeaseManagerTest {
         }
 
         @Override
+        public OptionalLong deleteReturningRevision(String key, long expectedRevision) {
+            check();
+            return delegate.deleteReturningRevision(key, expectedRevision);
+        }
+
+        @Override
+        public Latest latest(String key) {
+            check();
+            return delegate.latest(key);
+        }
+
+        @Override
+        public Optional<Versioned> getConsistent(String key) {
+            check();
+            return delegate.getConsistent(key);
+        }
+
+        @Override
         public void delete(String key) {
             check();
             delegate.delete(key);
@@ -738,6 +809,12 @@ class KvLeaseManagerTest {
         public List<String> keys() {
             check();
             return delegate.keys();
+        }
+
+        @Override
+        public List<Entry> entries(String prefix, int max) {
+            check();
+            return delegate.entries(prefix, max);
         }
     }
 }
