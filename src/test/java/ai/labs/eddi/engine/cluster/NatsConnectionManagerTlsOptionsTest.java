@@ -58,9 +58,15 @@ class NatsConnectionManagerTlsOptionsTest {
     }
 
     @Test
-    @DisplayName("a mix with a plain nats:// server is not forced onto TLS")
-    void mixedSchemesAreNotForced() throws Exception {
-        assertFalse(optionsFor(false, "tls://nats-0:4222", "nats://nats-1:4222").getSslContext() instanceof HostnameVerifyingSslContext);
+    @DisplayName("a mix of tls:// and nats:// servers is verified too: jnats uses one context for the whole connection")
+    void mixedSchemesAreVerified() throws Exception {
+        assertInstanceOf(HostnameVerifyingSslContext.class, optionsFor(false, "tls://nats-0:4222", "nats://nats-1:4222").getSslContext());
+    }
+
+    @Test
+    @DisplayName("an opentls:// server anywhere in the list keeps the trust-all opt-in")
+    void opentlsInAMixIsNotTouched() throws Exception {
+        assertFalse(optionsFor(false, "tls://nats-0:4222", "opentls://nats-1:4222").getSslContext() instanceof HostnameVerifyingSslContext);
     }
 
     @Test

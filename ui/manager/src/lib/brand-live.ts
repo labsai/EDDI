@@ -10,13 +10,17 @@ interface ReloadState {
   calls: number;
   /** The newest brand whose script loaded but was held back because a newer call was pending. */
   held: { call: number; brand: unknown } | null;
+  /** The call number of the brand last handed to `setBrand`; a load older than it is discarded. */
+  applied: number;
+  /** The call number of the newest call whose script failed, once it has. */
+  failed: number;
 }
 const states = new WeakMap<Document, ReloadState>();
 
 function stateOf(doc: Document): ReloadState {
   let state = states.get(doc);
   if (!state) {
-    state = { calls: 0, held: null };
+    state = { calls: 0, held: null, applied: 0, failed: 0 };
     states.set(doc, state);
   }
   return state;
@@ -70,8 +74,13 @@ export function applyBrandRevision(revision: number, doc: Document = document): 
       // Two saves in quick succession load two scripts, in no guaranteed order;
       // only the newest may reach the subscribers.
       const brand = doc.defaultView?.__EDDI_BRAND__;
-      if (call === state.calls) {
+      if (call < state.applied) {
+        // Older than a brand already applied: never held, never applied.
+      } else if (call === state.calls || state.failed === state.calls) {
+        // The newest call, or an older one that is now the best there is because
+        // the newest already failed.
         state.held = null;
+        state.applied = call;
         setBrand(brand);
       } else if (!state.held || call > state.held.call) {
         state.held = { call, brand };
@@ -82,10 +91,14 @@ export function applyBrandRevision(revision: number, doc: Document = document): 
       script.remove();
       // The newest call failed: apply the newest brand that did load but was
       // held back for it, instead of applying nothing.
-      if (call === state.calls && state.held) {
-        const { brand } = state.held;
-        state.held = null;
-        setBrand(brand);
+      if (call === state.calls) {
+        state.failed = call;
+        if (state.held) {
+          const held = state.held;
+          state.held = null;
+          state.applied = held.call;
+          setBrand(held.brand);
+        }
       }
       reject(new Error("The brand script could not be loaded."));
     };

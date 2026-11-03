@@ -197,24 +197,27 @@ public class NatsConnectionManager {
             String seed = Files.readString(Path.of(config.natsNkeySeedFile().get()), StandardCharsets.UTF_8).trim();
             builder.authHandler(Nats.staticCredentials(null, seed.toCharArray()));
         }
-        if (config.natsTlsEnabled() || everyServerIsTls()) {
+        if (config.natsTlsEnabled() || anyServerIsTls()) {
             builder.sslContext(buildSslContext());
         }
         return builder.build();
     }
 
     /**
-     * Whether every configured server names TLS in its URL ({@code tls://} or
-     * {@code wss://}). Left to itself jnats builds its own context for those, with
-     * no host name check, so the one built here (which verifies the host name
-     * unless {@code eddi.nats.tls.verify-hostname=false}) is used for them as well.
-     * An {@code opentls://} server is the explicit trust-all opt-in and is left to
-     * jnats.
+     * Whether a configured server names TLS in its URL ({@code tls://} or
+     * {@code wss://}) and none is {@code opentls://}. jnats applies one SSL context
+     * to the whole connection once any server asks for TLS, and builds its own,
+     * with no host name check, when none is supplied; so a list that mixes
+     * {@code tls://} and {@code nats://} servers needs the context built here
+     * (which verifies the host name unless
+     * {@code eddi.nats.tls.verify-hostname=false}) just as an all-TLS list does. An
+     * {@code opentls://} server is the explicit trust-all opt-in and is left to
+     * jnats whatever else is listed.
      */
-    private boolean everyServerIsTls() {
-        var servers = config.natsServers();
-        return !servers.isEmpty() && servers.stream().map(s -> s.trim().toLowerCase(Locale.ROOT))
-                .allMatch(s -> s.startsWith("tls://") || s.startsWith("wss://"));
+    private boolean anyServerIsTls() {
+        var servers = config.natsServers().stream().map(s -> s.trim().toLowerCase(Locale.ROOT)).toList();
+        return servers.stream().noneMatch(s -> s.startsWith("opentls://"))
+                && servers.stream().anyMatch(s -> s.startsWith("tls://") || s.startsWith("wss://"));
     }
 
     private SSLContext buildSslContext() throws IOException, GeneralSecurityException {

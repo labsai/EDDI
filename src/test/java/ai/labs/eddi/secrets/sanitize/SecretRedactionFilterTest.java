@@ -687,6 +687,11 @@ class SecretRedactionFilterTest {
         }
 
         @Test
+        void anApostropheInsideAQuotedCookieValueIsRedactedWithTheRest() {
+            assertEquals("Cookie: sid=\"<REDACTED>\"; theme=<REDACTED>", redactTwice("Cookie: sid=\"abc'def123456\"; theme=dark"));
+        }
+
+        @Test
         void aQuotedCookieValueInsideAJsonCarrierIsRedacted() {
             String redacted = redactTwice("{\"h\":\"Cookie: sid=\\\"abc123session\\\"\"}");
             assertEquals("{\"h\":\"Cookie: sid=\\\"<REDACTED>\\\"\"}", redacted);

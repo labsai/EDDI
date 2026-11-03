@@ -476,7 +476,7 @@ bound form. Until a grant has been rewritten or swept, it can still be opened
 unbound — run a DEK rotation if you want that window closed now.
 
 *Retiring the fallback.* Every attempt that needed the unbound form, secret or sealed
-data, is counted in `eddi.vault.legacy.unbound.opened.count` — a cumulative counter,
+data, is counted in `eddi_vault_legacy_unbound_opened_count_total` (Micrometer name `eddi.vault.legacy.unbound.opened.count`) — a cumulative counter,
 and one that is refused once the fallback is off still counts. `rotate-dek` itself opens
 legacy rows, so it raises the counter; take a baseline after the rotation has finished
 on every tenant, and once the counter's rate stays at zero over your observation period, set `eddi.vault.accept-unbound-legacy-data=false`

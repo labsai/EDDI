@@ -906,7 +906,7 @@ public final class SecretRedactionFilter {
                     // own closing quote (Cookie: sid=" ...) is never read as an opening one; a
                     // run that starts with ':' is a JSON key's closing quote before its value.
                     int close = valueStart + open;
-                    while (close < length && isCookieValueChar(text.charAt(close))) {
+                    while (close < length && isQuotedCookieValueChar(text.charAt(close))) {
                         close++;
                     }
                     boolean closed = open == 1
@@ -919,7 +919,7 @@ public final class SecretRedactionFilter {
                 }
                 boolean quoted = closeLength > 0;
                 int valueEnd = valueStart;
-                while (valueEnd < length && isCookieValueChar(text.charAt(valueEnd))) {
+                while (valueEnd < length && (quoted ? isQuotedCookieValueChar(text.charAt(valueEnd)) : isCookieValueChar(text.charAt(valueEnd)))) {
                     valueEnd++;
                 }
                 boolean attribute = setCookie && COOKIE_ATTRIBUTES.contains(name);
@@ -961,6 +961,11 @@ public final class SecretRedactionFilter {
     private static boolean isCookieNameChar(char c) {
         return c > ' ' && c < 0x7f && c != '=' && c != ';' && c != ',' && c != '"' && c != '\'' && c != '\\' && c != '{' && c != '}'
                 && c != '[' && c != ']';
+    }
+
+    /** Inside a double-quoted value RFC 6265 also allows an apostrophe. */
+    private static boolean isQuotedCookieValueChar(char c) {
+        return isCookieValueChar(c) || c == '\'';
     }
 
     private static boolean isCookieValueChar(char c) {

@@ -358,7 +358,7 @@ public class ClusterConversationCoordinator extends AbstractQueuedConversationCo
             } catch (RuntimeException e) {
                 // ClusterUnavailableException, or the stream management failing mid-disconnect:
                 // either way the purge is retried, and the caller's pass goes on
-                LOGGER.debugf("Purging published dead letters of an erased conversation deferred: %s", e.getMessage());
+                LOGGER.warnf("Purging the published dead letters of an erased conversation failed; it is retried: %s", e.getMessage());
                 return false;
             }
         }

@@ -113,4 +113,50 @@ describe("applyBrandRevision", () => {
     secondScript.dispatchEvent(new Event("error"));
     await expect(second).rejects.toThrow();
   });
+
+  /** The pending reload script for a revision. */
+  function script(revision: number): HTMLScriptElement {
+    const found = [...document.head.querySelectorAll<HTMLScriptElement>("script[data-brand-reload]")].find(
+      (el) => el.dataset.brandReload === String(revision),
+    );
+    if (!found) throw new Error(`no script for revision ${revision}`);
+    return found;
+  }
+  const load = (script: HTMLScriptElement, name: string, revision: number) => {
+    window.__EDDI_BRAND__ = { branded: true, revision, productName: name };
+    script.dispatchEvent(new Event("load"));
+  };
+
+  it("never applies a brand older than one already applied, even after a later failure", async () => {
+    const r10 = applyBrandRevision(40);
+    const r11 = applyBrandRevision(41);
+    const r12 = applyBrandRevision(42);
+    load(script(41), "Rev41", 41); // held: 42 is pending
+    expect(getBrand().productName).not.toBe("Rev41");
+    // 42 loads first and is applied, then 40 arrives late and must be discarded.
+    load(script(42), "Rev42", 42);
+    await r12;
+    load(script(40), "Rev40", 40);
+    await r10;
+    await r11;
+    expect(getBrand().productName).toBe("Rev42");
+
+    // A later failing call must not resurrect the discarded brand.
+    const r13 = applyBrandRevision(43);
+    script(43).dispatchEvent(new Event("error"));
+    await expect(r13).rejects.toThrow();
+    expect(getBrand().productName).toBe("Rev42");
+  });
+
+  it("applies an older successful load that arrives after the newest call already failed", async () => {
+    const older = applyBrandRevision(50);
+    const newer = applyBrandRevision(51);
+    script(51).dispatchEvent(new Event("error"));
+    await expect(newer).rejects.toThrow();
+    expect(getBrand().productName).not.toBe("Late");
+
+    load(script(50), "Late", 50);
+    await older;
+    expect(getBrand().productName).toBe("Late");
+  });
 });

@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
+import ai.labs.eddi.engine.memory.model.Data;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
@@ -162,6 +163,11 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
             recordedInputs.clear();
         }
         boolean secretInput = inputWasScrubbed(memory);
+        // A turn that failed a task and then paused resumes in a NEW buffer with no
+        // entries; the
+        // step carries the fact across, or the resume would hand over what the ledger
+        // never got.
+        boolean retainedEarlier = evidenceRetained(memory);
         boolean allAccepted = true;
         // A failed task's entry is built without llmDetail, so a task that wrote the
         // compiled
@@ -190,7 +196,29 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                         sanitize(entry.taskId()), sanitize(entry.conversationId()));
             }
         }
-        return allAccepted && !recordsFailure;
+        if (recordsFailure) {
+            retainEvidence(memory);
+        }
+        return allAccepted && !recordsFailure && !retainedEarlier;
+    }
+
+    /**
+     * Step marker: this step's prompt and model response are in no audit entry (a
+     * task failed after writing them), so no later flush may hand them over.
+     * {@code audit:} keys are not part of any client projection.
+     */
+    static final String EVIDENCE_RETAINED_KEY = "audit:evidence_retained";
+
+    private static boolean evidenceRetained(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        return step != null && step.getLatestData(EVIDENCE_RETAINED_KEY) != null;
+    }
+
+    private static void retainEvidence(IConversationMemory memory) {
+        var step = memory.getCurrentStep();
+        if (step != null) {
+            step.storeData(new Data<>(EVIDENCE_RETAINED_KEY, Boolean.TRUE));
+        }
     }
 
     private static boolean isFailureEntry(AuditEntry entry) {

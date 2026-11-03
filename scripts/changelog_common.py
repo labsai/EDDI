@@ -27,6 +27,7 @@ example, and reading a `## ` inside it as a heading splits an entry in half.
 import datetime
 import io
 import os
+import posixpath
 import re
 import sys
 
@@ -178,6 +179,16 @@ def redepth(body):
     return _map_links(body, fix)
 
 
+_PENDING_FRAGMENT = re.compile(r"(?:^|/)changelog\.d/\d{4}-\d{2}-\d{2}-[^/]+\.md$")
+
+
+def _is_pending_fragment(target):
+    """Whether a link target, once its dots and slashes are resolved, names a dated
+    fragment under docs/changelog.d/ — the files collation deletes."""
+    path = target.split("#", 1)[0].split("?", 1)[0]
+    return bool(_PENDING_FRAGMENT.search(posixpath.normpath(path)))
+
+
 def undepth(body, where):
     """Remove one '../' from each relative link — text moving one directory up.
 
@@ -194,6 +205,14 @@ def undepth(body, where):
 
     def fix(m):
         target = m.group(1)
+        if _is_pending_fragment(target):
+            # A link to another pending fragment: collation deletes its target, so the
+            # link would be broken in docs/changelog.md — and a collation-only PR skips
+            # the documentation-link test that would notice. Judged on the resolved path
+            # (".././changelog.d/x.md" and a root-relative "/docs/changelog.d/x.md" are
+            # the same file as "../changelog.d/x.md").
+            bad.append(target + " (a pending fragment, which collation deletes; link the README or write the entry's title instead)")
+            return m.group(0)
         if target.startswith("/"):
             return m.group(0)  # repo-root-relative: depth does not affect it
         if target == "../":
@@ -203,12 +222,6 @@ def undepth(body, where):
             return m.group(0)
         if not target.startswith("../"):
             bad.append(target)
-            return m.group(0)
-        if re.match(r"changelog\.d/\d{4}-\d{2}-\d{2}-[^/]+\.md", target[3:]):
-            # A link to another pending fragment: collation deletes its target, so the
-            # link would be broken in docs/changelog.md — and a collation-only PR skips
-            # the documentation-link test that would notice.
-            bad.append(target + " (a pending fragment, which collation deletes; link the README or write the entry's title instead)")
             return m.group(0)
         return "](" + target[3:] + ")"
 
