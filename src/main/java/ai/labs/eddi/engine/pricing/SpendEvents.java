@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.pricing;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.model.Context;
@@ -41,6 +42,22 @@ public final class SpendEvents {
                 input = asLong(tokens.get("inputTokens"));
                 output = asLong(tokens.get("outputTokens"));
             }
+        }
+        if (step != null) {
+            // the step totals are accumulated; report only what earlier settles of this
+            // step (a pause and resume) did not
+            long[] reported = new long[3];
+            if (step.getData(MemoryKeys.AUDIT_SPEND_REPORTED) != null
+                    && step.getData(MemoryKeys.AUDIT_SPEND_REPORTED).getResult() instanceof Map<?, ?> prior) {
+                reported[0] = asLong(prior.get("unpricedCalls"));
+                reported[1] = asLong(prior.get("inputTokens"));
+                reported[2] = asLong(prior.get("outputTokens"));
+            }
+            step.storeData(new Data<>(MemoryKeys.AUDIT_SPEND_REPORTED,
+                    Map.of("unpricedCalls", (long) unpriced, "inputTokens", input, "outputTokens", output)));
+            unpriced = (int) Math.max(0L, unpriced - reported[0]);
+            input = Math.max(0L, input - reported[1]);
+            output = Math.max(0L, output - reported[2]);
         }
         return new SpendEvent(tenantId, memory.getConversationId(), memory.getAgentId(), memory.getAgentVersion(), memory.getUserId(), groupId,
                 groupConversationId, SpendEvent.Kind.TURN, null, usd, unpriced, input, output, Instant.now());

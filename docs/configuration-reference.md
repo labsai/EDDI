@@ -156,6 +156,7 @@ contract and the operator runbook are in [Clustering](clustering.md).
 | `eddi.cluster.lease.heartbeat-interval` | `5s` | How often a node refreshes the leases of its running turns. At most half the TTL (checked at boot) |
 | `eddi.cluster.lease.acquire-timeout` | `45s` | How long a turn waits for a lease another node holds before it is answered `409` with `Retry-After` (its input was not consumed). Keep it below `systemRuntime.agentTimeoutInSeconds` |
 | `eddi.cluster.lease.handoff-grace` | `25ms` | A node that releases a lease another node is waiting for holds back its own next acquire this long, so a busy node cannot starve the others |
+| `eddi.cluster.erasure-marker-ttl` | `P7D` | How long the cluster-wide GDPR erasure marker of a conversation lives. A node that kept a dead letter of the conversation locally while NATS was down discards it instead of forwarding it for as long as the marker exists; past it, only the check that the conversation still exists applies (see [GDPR](gdpr-compliance.md)) |
 | `eddi.cluster.presence.interval` | `10s` | How often a node writes its presence record (members expire after three intervals) |
 | `eddi.cluster.degraded.grace` | `5s` | A NATS outage shorter than this is ridden out; longer, each area applies its degraded policy |
 | `eddi.cluster.degraded.turns` | `local` | `local`: turns run with node-local ordering, unfenced (no loss — appends merge — but concurrent turns on different nodes may miss each other's context). `reject`: `409` with `Retry-After` |
@@ -230,7 +231,8 @@ Full narrative and metrics: [scheduling.md → Deployment Configuration](schedul
 |---|---|---|
 | `eddi.schedule.enabled` | `true` | Master switch for the poller |
 | `eddi.schedule.poll-interval` | `15s` | How often due schedules are looked for — the floor on firing punctuality |
-| `eddi.schedule.poll-batch-size` | `100` | Schedules claimed per cycle |
+| `eddi.schedule.poll-batch-size` | `100` | Schedules looked at per cycle |
+| `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll claims no more schedules than there are free slots and never waits for its fires, so a long fire does not delay claiming other due schedules |
 | `eddi.schedule.lease-timeout` | `10m` | Claim lease before another instance may re-claim. Must outlast `fire-timeout` + 30 s, or a running fire becomes reclaimable and executes twice; a shorter value is raised at startup (to `fire-timeout + 30s + 1m`) with a warning |
 | `eddi.schedule.max-retries` | `5` | Attempts before `DEAD_LETTERED` |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` |
@@ -349,7 +351,9 @@ Full guide: [secrets-vault.md](secrets-vault.md).
 |---|---|---|
 | `eddi.vault.master-key` | *(empty)* | KEK source. **Empty means the vault is inactive.** A `scope: "secret"` property setter then scrubs the plaintext, logs an ERROR and **fails the turn** with a `LifecycleException` naming `EDDI_VAULT_MASTER_KEY` — it never persists the value. (`AgentSetupService`'s own `vaultApiKey` path is the exception and still degrades; see [secrets-vault.md](secrets-vault.md).) |
 | `eddi.vault.grant-enforcement` | `enforce` | `off`, `warn` or `enforce`. An unrecognised value fails startup rather than silently disabling the check |
+| `eddi.vault.allow-plaintext-remote-hosts` | `false` | A secret with an `allowedHosts` list is refused for `http://` or `ws://` to any host but loopback, even a listed one. `true` admits plaintext to a **listed** host, for an internal service reached over plain http; never to an unlisted one. See [secrets-vault.md](secrets-vault.md#destination-allow-list-allowedhosts) |
 | `eddi.vault.allow-weak-master-key` | `false` | Opt-out for the startup master-key strength gate, mirroring `eddi.security.allow-unauthenticated`. A weak or publicly-known master key (too short, too low-entropy, or a known demo/placeholder) normally **fails startup in production**; setting this `true` downgrades that to a WARN so a deployment already on a weak key can boot, rotate to a strong key via `POST /secretstore/secrets/admin/rotate-kek`, then remove the flag. Dev/test always warn regardless |
+| `eddi.vault.accept-unbound-legacy-data` | `true` | Whether a value sealed before ciphertexts were bound to their rows (no AAD) still opens through the legacy fallback. Every such open is counted in the `eddi_vault_legacy_unbound_opened_count_total` metric; once that stays at zero after a `POST /secretstore/secrets/{tenantId}/rotate-dek` on every tenant, set this `false` and an unbound value fails like any tampered ciphertext. See [secrets-vault.md](secrets-vault.md) |
 | `eddi.vault.cache-ttl-minutes` | `5` | Resolved-secret cache lifetime |
 | `eddi.vault.cache-max-size` | `1000` | Resolved-secret cache entries |
 | `eddi.setup.vault-key-reuse` | `checksum` | `checksum` reuses an existing vault entry when the value matches; `never` always writes a new one. A typo fails startup |
@@ -406,6 +410,7 @@ Full guide: [hitl.md](hitl.md).
 | `eddi.hitl.tool.enabled` | `true` | Per-tool-call approval gating |
 | `eddi.hitl.tool.task-approvals.mode` | `strict` | `strict` unions `requireApproval` patterns, ignores task-level `exempt`, and demotes task-level `AUTO_APPROVE` — a task cannot loosen its agent's gate. `replace` restores pre-6.3.0 behaviour where a task config fully replaces the agent gate |
 | `eddi.hitl.tool.journal-retention` | `30d` | How long completed tool-approval journal entries are kept. A claim left `EXECUTING` by a crash inside the tool is kept until its conversation is deleted, so a later approval of the same pause cannot run the call again |
+| `eddi.hitl.tool.journal-reconcile-interval` | `15m` | How often the MongoDB journal's retention index is checked for a stale unfiltered TTL index (recreated by an old pod during a rolling update) and repaired |
 | `eddi.hitl.tool.transcript-max-bytes` | `2000000` | Cap on a stored approval transcript |
 | `eddi.hitl.revision.transcript-max-bytes` | `262144` | Cap on the request an answer keeps for a reviewer's revision (`hitlConfig.onRejection: REVISE`); it is stored in the paused step. An answer over the cap has nothing to revise, and a rejection skips |
 | `eddi.hitl.pending.max-age` | *(empty)* | Auto-cancel pending approvals older than this ISO-8601 duration. Empty = never auto-cancel, so approvals wait indefinitely |
@@ -685,6 +690,8 @@ The brand is normally edited at runtime (`/administration/branding`, `eddi-admin
 | `eddi.branding.powered-by` | *(unset: `true`)* | Show "Powered by EDDI" |
 | `eddi.branding.show-update-check` | *(unset: `false`)* | Keep the Manager's update check UI while branded |
 | `eddi.branding.assets-dir` | *(unset)* | Directory of brand images under fixed names (`logo.svg\|png\|webp`, `logo-dark.*`, `icon.*`, `favicon.ico\|png\|svg`, `og-image.*`), each checked like an upload. A missing directory or a refused file fails startup |
+
+The Helm chart sets each of these from its `eddi.branding.*` values, and mounts a ConfigMap of images as `assets-dir` ([White-Labeling → Helm](white-labeling.md#helm)). The MCP server's `serverInfo` follows the product name unless `quarkus.mcp.server.server-info.name` is set.
 
 ---
 

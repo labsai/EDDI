@@ -375,7 +375,7 @@ export function ParserEditor({ data, onChange, readOnly }: ParserEditorProps) {
       <Section
         label={t("parserEditor.dictionaries", "Dictionaries")}
         icon={BookOpen}
-        accent="text-amber-500"
+        accent="text-ochre-500"
         badge={dictionaries.length}
         testId="parser-dictionaries-section"
       >

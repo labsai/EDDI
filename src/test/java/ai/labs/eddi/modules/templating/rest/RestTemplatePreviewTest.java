@@ -386,6 +386,35 @@ class RestTemplatePreviewTest {
         }
 
         @Test
+        @DisplayName("snippet contents the conversation conversion supplied are redacted even when getAll() is empty")
+        void shouldRedactConvertedSnippetsWhateverGetAllReturns() throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setConversationId("conv-123");
+            snapshot.setAgentId("agent-1");
+            snapshot.setAgentVersion(1);
+            when(conversationMemoryStore.loadConversationMemorySnapshot("conv-123")).thenReturn(snapshot);
+
+            Map<String, Object> converted = new LinkedHashMap<>();
+            converted.put("snippets", new LinkedHashMap<>(Map.of("private", "Bob's proprietary prompt.")));
+            when(memoryItemConverter.convert(any(IConversationMemory.class))).thenReturn(converted);
+            when(promptSnippetService.getAll()).thenReturn(Map.of());
+            when(resourceAccessGuard.seesEverything()).thenReturn(false);
+
+            Map<String, Object> rendered = new LinkedHashMap<>();
+            when(templatingEngine.processTemplate(eq("{snippets.private}"), anyMap())).thenAnswer(inv -> {
+                rendered.putAll(inv.getArgument(1));
+                return "irrelevant";
+            });
+
+            TemplatePreviewResponse response = restTemplatePreview.previewTemplate(new TemplatePreviewRequest("{snippets.private}", "conv-123"));
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> renderedSnippets = (Map<String, Object>) rendered.get("snippets");
+            assertEquals("<redacted>", renderedSnippets.get("private"));
+            assertEquals("<redacted>", response.variableValues().get("snippets.private"));
+        }
+
+        @Test
         void shouldNotAddSnippetsKeyWhenSnippetsAreEmpty() throws Exception {
             when(promptSnippetService.getAll()).thenReturn(Map.of());
             when(templatingEngine.processTemplate(eq("test"), anyMap()))

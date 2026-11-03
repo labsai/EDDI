@@ -159,7 +159,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
             {
               "models": "^(o\\d|gpt-5(?!.*chat)|gpt-6)",
               "effect": "rejected",
-              "note": "Reasoning models reject maxTokens; EDDI sends its value as maxCompletionTokens instead (unless that is set).",
+              "note": "Reasoning models reject maxTokens; the server sends its value as maxCompletionTokens instead (unless that is set).",
               "migrateTo": "maxCompletionTokens"
             }
           ],
@@ -1227,7 +1227,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "type": "string",
           "group": "model",
           "label": "Underlying model",
-          "description": "The model your deployment runs, such as gpt-4.1; EDDI uses it only to know which settings that model accepts.",
+          "description": "The model your deployment runs, such as gpt-4.1; the server uses it only to know which settings that model accepts.",
           "source": "https://learn.microsoft.com/en-us/azure/foundry/openai/how-to/reasoning"
         },
         {
@@ -1388,7 +1388,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
             {
               "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6)",
               "effect": "rejected",
-              "note": "Reasoning models reject maxTokens; EDDI sends its value as maxCompletionTokens instead (unless that is set).",
+              "note": "Reasoning models reject maxTokens; the server sends its value as maxCompletionTokens instead (unless that is set).",
               "migrateTo": "maxCompletionTokens"
             }
           ],

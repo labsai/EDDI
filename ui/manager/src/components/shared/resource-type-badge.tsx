@@ -2,8 +2,8 @@
 const colors: Record<string, string> = {
   agent: "bg-purple-500/10 text-purple-500",
   workflow: "bg-blue-500/10 text-blue-500",
-  behavior: "bg-amber-500/10 text-amber-500",
-  rules: "bg-amber-500/10 text-amber-500",
+  behavior: "bg-ochre-500/10 text-ochre-500",
+  rules: "bg-ochre-500/10 text-ochre-500",
   httpcalls: "bg-green-500/10 text-green-500",
   apicalls: "bg-green-500/10 text-green-500",
   langchain: "bg-pink-500/10 text-pink-500",

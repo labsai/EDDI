@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.secrets;
 
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -20,7 +22,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -45,6 +46,19 @@ import java.util.regex.Pattern;
  * admit {@code api.example.com}, and nothing admits
  * {@code example.com.attacker.net}. A secret without a list may go anywhere,
  * which is what every secret stored before the list existed does.
+ * <p>
+ * <b>Encrypted transport.</b> An entry names a host, not a scheme, so on its
+ * own it would admit {@code http://api.openai.com} as readily as
+ * {@code https://api.openai.com} — and an editor who may change the URL can
+ * pick the plaintext one, sending the key across the network in the clear to
+ * the right host. A restricted secret is therefore refused for {@code http} or
+ * {@code ws} to a host other than loopback ({@code localhost},
+ * {@code 127.0.0.1}, {@code [::1]}), unless the deployment says otherwise with
+ * {@value #ALLOW_PLAINTEXT_PROPERTY} — the same rule, and the same loopback
+ * exemption, as a connection's {@code allowPlaintextRemoteOrigins}. A
+ * destination without an http-family scheme (a bare {@code host:port}, a
+ * {@code mongodb://} string) is not judged here: its transport security is the
+ * client's configuration, not something the scheme reveals.
  * <p>
  * <b>Failure is closed.</b> A reference whose metadata cannot be read is
  * refused: a key that cannot be checked is not a key that may go anywhere. A
@@ -71,11 +85,25 @@ public class VaultHostAllowlist {
      */
     public static final int MAX_ALLOWED_HOSTS = 100;
 
+    /**
+     * Deployment opt-out for the encrypted-transport rule in
+     * {@link #requireAllowed(Iterable, String, String)}.
+     */
+    public static final String ALLOW_PLAINTEXT_PROPERTY = "eddi.vault.allow-plaintext-remote-hosts";
+
     private final ISecretProvider secretProvider;
+    private final boolean allowPlaintextRemoteHosts;
 
     @Inject
-    public VaultHostAllowlist(ISecretProvider secretProvider) {
+    public VaultHostAllowlist(ISecretProvider secretProvider,
+            @ConfigProperty(name = ALLOW_PLAINTEXT_PROPERTY, defaultValue = "false") boolean allowPlaintextRemoteHosts) {
         this.secretProvider = secretProvider;
+        this.allowPlaintextRemoteHosts = allowPlaintextRemoteHosts;
+    }
+
+    /** With the shipped default: plaintext to a remote host is refused. */
+    public VaultHostAllowlist(ISecretProvider secretProvider) {
+        this(secretProvider, false);
     }
 
     /**
@@ -182,7 +210,13 @@ public class VaultHostAllowlist {
             try {
                 allowedHosts = secretProvider.getMetadata(ref).allowedHosts();
             } catch (ISecretProvider.SecretNotFoundException e) {
-                continue; // The resolver fails closed on a missing secret.
+                // Fail closed. This used to be skipped on the grounds that the resolver
+                // refuses a missing secret, but this check runs AFTER resolution on the
+                // API-call path: a secret deleted in between (or served from the
+                // resolver's cache) would leave with no host check at all. Before
+                // resolution, the request fails on the missing secret anyway.
+                throw new HostNotAllowedException(usedFor + " uses " + reference + ", which does not exist (it may just have been "
+                        + "deleted), so its allowedHosts cannot be checked and the request is refused.");
             } catch (ISecretProvider.SecretProviderException e) {
                 LOGGER.errorf("Could not read the allowed hosts of %s for %s: %s", sanitize(reference), sanitize(usedFor), e.getMessage());
                 throw new HostNotAllowedException("The allowed hosts of " + reference + " could not be read, so " + usedFor
@@ -199,7 +233,21 @@ public class VaultHostAllowlist {
                         + "/grant {\"allowedHosts\": [...]} (an eddi-admin call that needs no secret value), or point the configuration at an "
                         + "allowed host.");
             }
+            if (target.plaintext() && !allowPlaintextRemoteHosts && !isLoopback(target.host())) {
+                throw new HostNotAllowedException(usedFor + " sends " + reference + " to " + target + " over unencrypted "
+                        + target.scheme() + ". The host is on that secret's allowedHosts, but allowedHosts names a host, not a "
+                        + "transport, and the secret would cross the network in the clear. Use https (or wss), or set "
+                        + ALLOW_PLAINTEXT_PROPERTY + "=true to accept an unencrypted secret to a remote host deliberately.");
+            }
         }
+    }
+
+    /**
+     * {@code localhost}, {@code 127.0.0.1} or {@code ::1} — the set a connection's
+     * plaintext rule exempts, for the same reason: it never leaves the machine.
+     */
+    static boolean isLoopback(String host) {
+        return "localhost".equals(host) || "127.0.0.1".equals(host) || "[::1]".equals(host) || "::1".equals(host);
     }
 
     /**
@@ -213,17 +261,19 @@ public class VaultHostAllowlist {
         requireAllowed(referencesIn(params.values()), destination, usedFor);
     }
 
-    /** Every vault reference string occurring in {@code values}, de-duplicated. */
+    /**
+     * Every vault reference string occurring in {@code values}, de-duplicated.
+     * Found with the linear {@link SecretReference#scanner()}, not the regex, whose
+     * {@code find()} rescans the rest of the text at each unterminated opener.
+     */
     public static Set<String> referencesIn(Iterable<String> values) {
         var references = new LinkedHashSet<String>();
-        Pattern pattern = SecretReference.compiledPattern();
         for (String value : values) {
-            if (value == null || !SecretReference.isVaultReference(value)) {
+            if (value == null) {
                 continue;
             }
-            Matcher matcher = pattern.matcher(value);
-            while (matcher.find()) {
-                references.add(matcher.group());
+            for (ReferenceScanner.Match match : SecretReference.scanner().findAll(value)) {
+                references.add(match.text());
             }
         }
         return references;
@@ -244,9 +294,16 @@ public class VaultHostAllowlist {
 
     /**
      * A destination reduced to what the list is compared against. {@code port} is
-     * the explicit or scheme-default port, or -1 when neither is known.
+     * the explicit or scheme-default port, or -1 when neither is known;
+     * {@code scheme} is the URL's, lower-cased, or {@code null} for a bare
+     * {@code host[:port]}.
      */
-    record HostPort(String host, int port) {
+    record HostPort(String host, int port, String scheme) {
+
+        /** Whether the scheme says the request goes out unencrypted. */
+        boolean plaintext() {
+            return "http".equals(scheme) || "ws".equals(scheme);
+        }
 
         static HostPort of(String destination) {
             if (destination == null || destination.isBlank()) {
@@ -254,19 +311,21 @@ public class VaultHostAllowlist {
             }
             String value = destination.trim();
             try {
-                URI uri = value.contains("://") ? new URI(value) : new URI("placeholder://" + value);
+                boolean hasScheme = value.contains("://");
+                URI uri = hasScheme ? new URI(value) : new URI("placeholder://" + value);
                 if (uri.getHost() == null) {
                     return null;
                 }
+                String scheme = hasScheme && uri.getScheme() != null ? uri.getScheme().toLowerCase(Locale.ROOT) : null;
                 int port = uri.getPort();
-                if (port < 0 && uri.getScheme() != null) {
-                    port = switch (uri.getScheme().toLowerCase(Locale.ROOT)) {
+                if (port < 0 && scheme != null) {
+                    port = switch (scheme) {
                         case "https", "wss" -> 443;
                         case "http", "ws" -> 80;
                         default -> -1;
                     };
                 }
-                return new HostPort(uri.getHost().toLowerCase(Locale.ROOT), port);
+                return new HostPort(uri.getHost().toLowerCase(Locale.ROOT), port, scheme);
             } catch (URISyntaxException e) {
                 return null;
             }

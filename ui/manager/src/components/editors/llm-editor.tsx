@@ -913,7 +913,7 @@ function TaskEditor({
 
                 {/* Info callout about defaults — shown only when both sources are enabled */}
                 {(task.enableHttpCallTools ?? true) && (task.enableMcpCallTools ?? true) && (
-                  <div className="flex items-start gap-2 rounded-md bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400" data-testid="tool-sources-info">
+                  <div className="flex items-start gap-2 rounded-md bg-warn-500/10 px-3 py-2 text-[11px] text-warn-700 dark:text-warn-400" data-testid="tool-sources-info">
                     <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                     <span>
                       {t(
@@ -1342,9 +1342,9 @@ function TaskEditor({
 
                     {/* Strict mode info */}
                     {task.counterweight?.level === "strict" && (
-                      <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-50 p-3 dark:bg-amber-900/15 dark:border-amber-700/30">
-                        <Info className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                        <p className="text-[10px] text-amber-800 dark:text-amber-300 leading-relaxed">
+                      <div className="flex items-start gap-2 rounded-md border border-warn-400/30 bg-warn-50 p-3 dark:bg-warn-900/15 dark:border-warn-700/30">
+                        <Info className="h-3.5 w-3.5 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
+                        <p className="text-[10px] text-warn-800 dark:text-warn-300 leading-relaxed">
                           {t(
                             "llmEditor.counterweightStrictNote",
                             "Strict mode is automatically downgraded to Cautious during scheduled/batch execution to prevent destructive \"one step at a time\" behavior."
@@ -1359,9 +1359,9 @@ function TaskEditor({
                         {t("llmEditor.counterweightCustom", "Custom Instructions")}
                       </label>
                       {(task.counterweight?.customInstructions ?? []).length > 0 && (
-                        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border border-amber-400/30 bg-amber-50 px-2 py-1.5 dark:bg-amber-900/15 dark:border-amber-700/30">
-                          <Info className="h-3 w-3 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                          <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                        <div className="mb-1.5 flex items-start gap-1.5 rounded-md border border-warn-400/30 bg-warn-50 px-2 py-1.5 dark:bg-warn-900/15 dark:border-warn-700/30">
+                          <Info className="h-3 w-3 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
+                          <p className="text-[10px] text-warn-800 dark:text-warn-300">
                             {t(
                               "llmEditor.counterweightCustomOverride",
                               "Custom instructions override the preset level text entirely."
@@ -1488,9 +1488,9 @@ function TaskEditor({
                   <div className="space-y-2 ps-5">
                     {/* Validation warning: enabled but no rules */}
                     {(task.identityMasking?.rules ?? []).filter(r => r.trim()).length === 0 && (
-                      <div className="flex items-start gap-2 rounded-md border border-amber-400/30 bg-amber-50 p-3 dark:bg-amber-900/15 dark:border-amber-700/30">
-                        <Info className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
-                        <p className="text-[10px] text-amber-800 dark:text-amber-300">
+                      <div className="flex items-start gap-2 rounded-md border border-warn-400/30 bg-warn-50 p-3 dark:bg-warn-900/15 dark:border-warn-700/30">
+                        <Info className="h-3.5 w-3.5 text-warn-600 dark:text-warn-400 mt-0.5 shrink-0" />
+                        <p className="text-[10px] text-warn-800 dark:text-warn-300">
                           {t(
                             "llmEditor.identityMaskingEmptyWarning",
                             "Masking is enabled but has no rules. Add at least one rule for masking to take effect."
@@ -1593,7 +1593,7 @@ function TaskEditor({
           <EditorSection
             label={t("llmEditor.budgetCosts", "Budget & Costs")}
             icon={DollarSign}
-            accent="text-amber-500"
+            accent="text-ochre-500"
             defaultOpen={false}
           >
             <div className="space-y-3">

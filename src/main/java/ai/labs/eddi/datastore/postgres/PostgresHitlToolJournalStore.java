@@ -93,16 +93,19 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
             return;
         }
         // Postgres has no TTL index. Run a one-shot, best-effort cleanup at startup
-        // to bound growth (a continuous sweep is out of scope). Anchored on
-        // claimed_at so both completed entries and crash-orphaned EXECUTING claims
-        // are purged after the retention window.
+        // to bound growth (a continuous sweep is out of scope). Completed entries
+        // only: a crash-orphaned EXECUTING claim is the one record that the tool may
+        // already have run, and its approval can still be pending — purging it let a
+        // later approval claim the call afresh and run it again. It stays until the
+        // conversation is deleted (deleteByConversationId).
         cleanupExpired();
     }
 
     private void cleanupExpired() {
         long cutoff = Instant.now().toEpochMilli() - retentionMillis;
         try (Connection conn = dataSourceInstance.get().getConnection();
-                PreparedStatement ps = conn.prepareStatement("DELETE FROM hitl_tool_execution_journal WHERE claimed_at < ?")) {
+                PreparedStatement ps = conn
+                        .prepareStatement("DELETE FROM hitl_tool_execution_journal WHERE claimed_at < ? AND status <> 'EXECUTING'")) {
             ps.setLong(1, cutoff);
             int deleted = ps.executeUpdate();
             if (deleted > 0) {

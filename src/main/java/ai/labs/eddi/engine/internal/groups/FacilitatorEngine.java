@@ -597,7 +597,7 @@ public class FacilitatorEngine {
         }
         JsonNode node = readJson(reply);
         if (node == null) {
-            node = readJson(embeddedJson(reply));
+            node = EmbeddedJson.soleObjectWithAnyField(reply, FacilitatorEngine::readJson, "move");
         }
         if (node == null || !node.isObject() || !node.path("move").isTextual()) {
             return null;
@@ -631,12 +631,6 @@ public class FacilitatorEngine {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    private static String embeddedJson(String content) {
-        int start = content.indexOf('{');
-        int end = content.lastIndexOf('}');
-        return start >= 0 && end > start ? content.substring(start, end + 1) : null;
     }
 
     // =================================================================

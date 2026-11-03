@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.alerts.AlertRuleCache;
 import ai.labs.eddi.engine.alerts.AlertRuleValidator;
 import ai.labs.eddi.engine.alerts.AlertSenders;
 import ai.labs.eddi.engine.alerts.AlertSenders.AlertDeliveryException;
+import ai.labs.eddi.engine.alerts.IAlertEventStore;
 import ai.labs.eddi.engine.alerts.IAlertRuleStore;
 import ai.labs.eddi.engine.alerts.model.AlertEvent;
 import ai.labs.eddi.engine.alerts.model.AlertMatch;
@@ -44,6 +45,7 @@ public class RestAlertRules implements IRestAlertRules {
     static final int MAX_PAGE_SIZE = 100;
 
     private final IAlertRuleStore ruleStore;
+    private final IAlertEventStore eventStore;
     private final AlertRuleCache ruleCache;
     private final AlertAccess access;
     private final AlertSenders senders;
@@ -51,14 +53,15 @@ public class RestAlertRules implements IRestAlertRules {
     private final Clock clock;
 
     @Inject
-    public RestAlertRules(IAlertRuleStore ruleStore, AlertRuleCache ruleCache, AlertAccess access, AlertSenders senders,
-            AlertMaintenanceSchedule maintenanceSchedule) {
-        this(ruleStore, ruleCache, access, senders, maintenanceSchedule, Clock.systemUTC());
+    public RestAlertRules(IAlertRuleStore ruleStore, IAlertEventStore eventStore, AlertRuleCache ruleCache, AlertAccess access,
+            AlertSenders senders, AlertMaintenanceSchedule maintenanceSchedule) {
+        this(ruleStore, eventStore, ruleCache, access, senders, maintenanceSchedule, Clock.systemUTC());
     }
 
-    RestAlertRules(IAlertRuleStore ruleStore, AlertRuleCache ruleCache, AlertAccess access, AlertSenders senders,
+    RestAlertRules(IAlertRuleStore ruleStore, IAlertEventStore eventStore, AlertRuleCache ruleCache, AlertAccess access, AlertSenders senders,
             AlertMaintenanceSchedule maintenanceSchedule, Clock clock) {
         this.ruleStore = ruleStore;
+        this.eventStore = eventStore;
         this.ruleCache = ruleCache;
         this.access = access;
         this.senders = senders;
@@ -118,6 +121,11 @@ public class RestAlertRules implements IRestAlertRules {
             throw AlertErrors.notFound(AlertErrors.RULE_NOT_FOUND, "Alert rule not found");
         }
         ruleCache.invalidate();
+        if (!updated.enabled() || updated.effectiveDigest() == AlertRule.DigestMode.NONE) {
+            // The maintenance pass digests enabled digest rules only; what this rule
+            // held back would otherwise stay DIGEST_PENDING until retention.
+            eventStore.releaseDigestPending(updated.id());
+        }
         maintenanceSchedule.ensure();
         LOGGER.infof("[ALERTS] '%s' updated alert rule %s", sanitize(caller), sanitize(ruleId));
         return access.redact(updated);
@@ -129,6 +137,7 @@ public class RestAlertRules implements IRestAlertRules {
         access.requireWritable(current);
         ruleStore.delete(current.id());
         ruleCache.invalidate();
+        eventStore.releaseDigestPending(current.id());
         LOGGER.infof("[ALERTS] '%s' deleted alert rule %s", sanitize(access.caller()), sanitize(ruleId));
         return Response.noContent().build();
     }

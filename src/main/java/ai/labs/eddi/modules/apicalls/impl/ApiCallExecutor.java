@@ -32,6 +32,7 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
+import ai.labs.eddi.secrets.model.ReferenceScanner;
 import ai.labs.eddi.secrets.model.SecretReference;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -59,7 +60,6 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.regex.Matcher;
 
 import java.io.IOException;
 import static ai.labs.eddi.utils.MatchingUtilities.executeValuePath;
@@ -537,6 +537,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return result;
             }
         } catch (Exception e) {
+            if (e instanceof InterruptedException) {
+                // The wait (a delay or backoff on this thread) was cancelled; the step
+                // fails, but whoever interrupted the turn must still see the flag.
+                Thread.currentThread().interrupt();
+            }
             RuntimeException safe = withoutSecrets(e, substitutedSecrets);
             if (safe != null) {
                 LOGGER.error(safe.getMessage(), safe);
@@ -1252,8 +1257,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         try {
             tree = jsonSerialization.deserialize(rawBody, Object.class);
         } catch (IOException jsonEx) {
+            // Jackson quotes the offending token, which may be a resolved credential the
+            // server echoed back; remove every substituted value before logging.
             LOGGER.warnf("ApiCall (%s) returned application/json but body is not valid JSON, falling back to raw string: %s", callName,
-                    jsonEx.getMessage());
+                    RequestRedactor.redactResolvedSecrets(jsonEx.getMessage(), resolvedSecrets));
             return truncateResponseBody(redactSuccessText(rawBody, resolvedSecrets), maxResponseSize, callName);
         }
         Object redacted = redactSuccessTree(tree, resolvedSecrets);
@@ -1283,11 +1290,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     private IResponse executeRequest(IRequest request, int delay) throws IRequest.HttpRequestException, ExecutionException, InterruptedException {
 
+        // The caller is a turn (or retry) thread that would block on the result
+        // anyway, so the delay is spent right here. Handing the send to the single
+        // shared "eddi-scheduler" thread made every delayed call in the node queue
+        // behind one blocking HTTP round trip, and a cancelled wait left the queued
+        // send to fire later. An interrupt during the sleep now ends the wait
+        // before anything is sent.
         if (delay > 0) {
-            return runtime.getScheduledExecutorService().schedule((Callable<IResponse>) request::send, delay, TimeUnit.MILLISECONDS).get();
-        } else {
-            return request.send();
+            Thread.sleep(delay);
         }
+        return request.send();
     }
 
     private boolean retryCall(HttpPostResponse postResponse, Map<String, Object> conversationValues, int amountOfExecutions, int httpCode,
@@ -1617,7 +1629,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Judged by the reference, not by the resolved set growing: a secret the
             // URL or body already resolved is in the set before this header is
             // reached, so a header reusing it added nothing and went unflagged.
-            boolean headerReferencesVault = headerValue != null && SecretReference.compiledPattern().matcher(headerValue).find();
+            boolean headerReferencesVault = SecretReference.scanner().containsReference(headerValue);
             headerValue = resolveSecrets(headerValue, resolvedSecrets, "header '" + headerName + "'");
             if (headerReferencesVault) {
                 // A vault ${secret} was substituted into this header.
@@ -1702,7 +1714,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
         if (headerCarriesCredential) {
             request.setFollowRedirects(false);
         }
-
         Map<String, String> queryParams = requestConfig.getQueryParams();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
@@ -1716,6 +1727,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
             qpValue = callerIdentityResolver.resolveValue(qpValue, targetUri);
             rejectExpiredSecretContext(qpValue, "query parameter '" + queryParam + "'");
             request.setQueryParam(queryParam, qpValue);
+        }
+        // A vault secret resolved into the URL, the body or a query value is just as
+        // replayable: the redirect handler re-sends the body on a 307/308, and the
+        // secret's allowedHosts policy below only judged the FIRST destination.
+        if (!headerCarriesCredential && !resolvedSecrets.vaultReferences().isEmpty()) {
+            request.setFollowRedirects(false);
         }
         // Last, with every reference the request carries collected and the target
         // fully resolved: a secret whose allowedHosts does not name this host is
@@ -1821,11 +1838,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         if (value == null) {
             return null;
         }
-        Matcher references = SecretReference.compiledPattern().matcher(value);
+        // The linear scanner, not the regex: a body carrying many unterminated
+        // openers would make find() rescan the remaining text at every one.
         StringBuilder resolved = new StringBuilder();
         String unresolved = null;
-        while (references.find()) {
-            String reference = references.group();
+        int copied = 0;
+        for (ReferenceScanner.Match match : SecretReference.scanner().findAll(value)) {
+            String reference = match.text();
             resolvedSecrets.vaultReferences().add(reference);
             String plaintext = secretResolver.resolveValue(reference);
             if (plaintext == null || plaintext.equals(reference)) {
@@ -1835,9 +1854,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // every character boundary in the request with the marker.
                 resolvedSecrets.add(plaintext);
             }
-            references.appendReplacement(resolved, Matcher.quoteReplacement(plaintext == null ? reference : plaintext));
+            resolved.append(value, copied, match.start()).append(plaintext == null ? reference : plaintext);
+            copied = match.end();
         }
-        references.appendTail(resolved);
+        resolved.append(value, copied, value.length());
         if (unresolved != null) {
             throw new IllegalArgumentException(location + " references " + unresolved
                     + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"

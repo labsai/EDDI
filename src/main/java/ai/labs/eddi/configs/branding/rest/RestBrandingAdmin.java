@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.branding.rest;
 import ai.labs.eddi.configs.branding.BrandRequest;
 import ai.labs.eddi.configs.branding.BrandingException;
 import ai.labs.eddi.configs.branding.BrandingService;
+import ai.labs.eddi.configs.branding.KeycloakThemeExport;
 import ai.labs.eddi.configs.branding.model.BrandAssetSlot;
 import ai.labs.eddi.configs.branding.model.BrandUpdate;
 import ai.labs.eddi.configs.branding.model.BrandingView;
@@ -30,18 +31,31 @@ import java.util.function.Supplier;
 @ApplicationScoped
 public class RestBrandingAdmin implements IRestBrandingAdmin {
 
+    /** The download's file name: the theme inside is called {@code brand}. */
+    static final String THEME_FILE_NAME = "brand-keycloak-theme.zip";
+
     private final BrandingService branding;
+    private final KeycloakThemeExport keycloakTheme;
     private final SecurityIdentity identity;
 
     @Inject
-    public RestBrandingAdmin(BrandingService branding, SecurityIdentity identity) {
+    public RestBrandingAdmin(BrandingService branding, KeycloakThemeExport keycloakTheme, SecurityIdentity identity) {
         this.branding = branding;
+        this.keycloakTheme = keycloakTheme;
         this.identity = identity;
     }
 
     @Override
     public BrandingView readBrand() {
         return branding.view(BrandRequest.NONE);
+    }
+
+    @Override
+    public Response downloadKeycloakTheme() {
+        return Response.ok(keycloakTheme.export(BrandRequest.NONE), "application/zip")
+                .header("Content-Disposition", "attachment; filename=\"" + THEME_FILE_NAME + "\"")
+                .header("X-Content-Type-Options", "nosniff")
+                .build();
     }
 
     @Override

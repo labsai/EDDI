@@ -74,7 +74,7 @@ class AlertPrivacyRaceTest {
         delivery = mock(AlertDeliveryService.class);
         ratings = mock(IConversationRatingStore.class);
         review = mock(ConversationReviewPolicy.class);
-        engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()), review, ratings,
+        engine = new AlertEngine(cache, store, delivery, AlertSettings.defaults(), new AlertMetrics(new SimpleMeterRegistry()), review, ratings, null,
                 Clock.fixed(NOW, ZoneOffset.UTC));
         when(store.insert(any())).thenAnswer(inv -> Optional.of(((AlertEvent) inv.getArgument(0)).withId(EVENT_ID)));
         when(store.updateDelivery(any(), anyLong())).thenAnswer(inv -> Optional.of(inv.getArgument(0)));
@@ -291,6 +291,18 @@ class AlertPrivacyRaceTest {
             clockNow = NOW.plus(AlertErasureFence.FENCE_TTL);
             assertFalse(fence.covers(OWNER, NOW.minusSeconds(1)));
             assertFalse(fence.covers("someone-else", NOW.minusSeconds(1)));
+        }
+
+        @Test
+        @DisplayName("content queued longer than a fence lives is never stored: an expired fence could have hidden an erasure")
+        void outlivedFence() {
+            // An erasure fenced the user, its fence expired, and only then the old
+            // snapshot reaches the worker: covers() no longer says anything.
+            clockNow = NOW.plus(AlertErasureFence.FENCE_TTL).plusSeconds(1);
+            engine.evaluateOutput(capturedAt(NOW));
+            AlertEvent event = inserted();
+            assertNull(event.match().value());
+            assertNull(event.subjectUserId());
         }
 
         @Test

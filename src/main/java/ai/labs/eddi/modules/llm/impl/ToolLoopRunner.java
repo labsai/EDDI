@@ -309,9 +309,9 @@ class ToolLoopRunner {
      * retry can never re-execute a tool that already ran. Used by the live path
      * (start iteration 0, no cleared calls) and by {@link #resumeToolLoop} (start
      * iteration {@code batch.getIterationIndex()+1}, {@code clearedCalls} = the
-     * calls a human approved, so an identical reissue is not re-gated). A fresh
-     * gated batch throws {@link ToolApprovalRequiredException} to re-pause — it
-     * escapes unchanged.
+     * approved calls the resumer already ran, so an identical reissue is gated
+     * again as a repeat). A fresh gated batch throws
+     * {@link ToolApprovalRequiredException} to re-pause — it escapes unchanged.
      *
      * @param initialMessages
      *            the message list the loop starts from (defensively copied inside);
@@ -536,8 +536,9 @@ class ToolLoopRunner {
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
-                    // calls. clearedCalls carries the calls a human approved on resume
-                    // (bound to id + tool + arguments, each usable once). Inert when
+                    // calls. clearedCalls carries the approved calls the resumer already
+                    // ran (bound to id + tool + arguments); a reissue of one is gated
+                    // again as a repeat. Inert when
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
                     var screened = refuseDoomedGatedCalls(

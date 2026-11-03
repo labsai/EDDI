@@ -45,8 +45,9 @@ export function ModelPricesPage() {
   useUnsavedChangesGuard(dirty);
 
   useEffect(() => {
-    if (view && !dirty) setForm(view.catalog);
-  }, [view, dirty]);
+    // an older view (the refetch after a save has not landed yet) must not overwrite a newer form
+    if (view && !dirty && (!form || view.catalog.revision >= form.revision)) setForm(view.catalog);
+  }, [view, dirty, form]);
 
   useEffect(() => {
     if (wantReference && reference.data && form) {

@@ -80,6 +80,27 @@ class TurnCostMeterSpendSinkTest {
     }
 
     @Test
+    void tokensAndUnpricedCallsAreDeltasToo() {
+        IConversationMemory paused = memoryWithCost(0.30);
+        paused.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_TOKEN_USAGE, Map.of("inputTokens", 100, "outputTokens", 40)));
+        paused.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PRICING, Map.of("unpricedCalls", 1)));
+        meter.meterSettledStep(paused);
+        IConversationMemory resumed = ConversationMemoryUtilities
+                .convertConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(paused));
+        resumed.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_COST, 0.45));
+        resumed.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_TOKEN_USAGE, Map.of("inputTokens", 150, "outputTokens", 70)));
+        resumed.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PRICING, Map.of("unpricedCalls", 3)));
+        meter.meterSettledStep(resumed);
+
+        assertEquals(2, events.size());
+        assertEquals(100, events.get(0).inputTokens());
+        assertEquals(1, events.get(0).unpricedCalls());
+        assertEquals(50, events.get(1).inputTokens());
+        assertEquals(30, events.get(1).outputTokens());
+        assertEquals(2, events.get(1).unpricedCalls());
+    }
+
+    @Test
     void aGroupMemberTurnCarriesTheGroupFromItsContext() {
         IConversationMemory memory = memoryWithCost(0.10);
         memory.getCurrentStep().storeData(new Data<>("context:groupId", new Context(Context.ContextType.string, "team-a")));

@@ -76,7 +76,7 @@ export function StrategyStep({
           value="upgrade"
           current={strategy}
           onChange={onStrategyChange}
-          icon={<Upload className="h-4 w-4 text-amber-500" />}
+          icon={<Upload className="h-4 w-4 text-ochre-500" />}
           label={t("importDialog.upgradeExisting", "Upgrade existing agent")}
           desc={t("importDialog.upgradeDesc", "Match resources structurally against a target agent. Best for promoting across environments.")}
           testId="strategy-upgrade"
@@ -88,7 +88,7 @@ export function StrategyStep({
           onChange={onStrategyChange}
           icon={<Globe className="h-4 w-4 text-violet-500" />}
           label={t("importDialog.syncRemote", "Sync from remote instance")}
-          desc={t("importDialog.syncDesc", "Connect to another EDDI instance and sync a specific agent live.")}
+          desc={t("importDialog.syncDesc", "Connect to another {{productName}} instance and sync a specific agent live.")}
           testId="strategy-sync"
         />
       </fieldset>

@@ -17,6 +17,7 @@ import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Locale;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,7 +80,7 @@ final class PricingAudit {
                 String provider = slash > 0 ? pricingModel.substring(0, slash) : "unknown";
                 String model = slash >= 0 ? pricingModel.substring(slash + 1) : pricingModel;
                 Metrics.globalRegistry.counter("eddi.llm.cost.usd", "provider", provider, "model", UnpricedSightings.tag(model), "source",
-                        source.toLowerCase()).increment(costUsd);
+                        source.toLowerCase(Locale.ROOT)).increment(costUsd);
             }
         } catch (RuntimeException e) {
             LOGGER.debugf("Pricing audit not recorded: %s", e.getMessage());

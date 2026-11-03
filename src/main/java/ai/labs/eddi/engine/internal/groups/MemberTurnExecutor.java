@@ -351,7 +351,10 @@ public class MemberTurnExecutor {
         synchronized (gc.getTranscript()) {
             transcriptSnapshot = List.copyOf(gc.getTranscript());
         }
-        context.put("groupTranscript", new Context(Context.ContextType.object, transcriptSnapshot));
+        // Scoped like the rendered prompt: this key reaches every template in the
+        // member's workflow, so it may not show what the phase's contextScope hides.
+        context.put("groupTranscript", new Context(Context.ContextType.object,
+                contextBuilder.scopedTranscript(transcriptSnapshot, phase, phaseIdx, member)));
         context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         context.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
@@ -362,36 +365,7 @@ public class MemberTurnExecutor {
                     .forEach((key, value) -> context.put(key, new Context(Context.ContextType.object, value)));
         }
 
-        // Pass group-level dynamic agent guardrails to member agents so that
-        // AgentOrchestrator can enforce caps, allowed providers/models, etc.
-        // Injected even when the group configured none, and that is the point. A
-        // member turn that finds no dynamicAgentConfig in its context falls back to
-        // DynamicAgentToolsProvider's STANDALONE default, which is fully permissive
-        // (creation, recruitment and delegation all on). That default exists for a
-        // lone agent with those tools whitelisted; inheriting it inside a group means
-        // a discussion whose operator never wrote a dynamicAgents block silently
-        // permits roster mutation. An absent group config means "not opted in", so
-        // send an explicitly disabled one rather than nothing.
-        var dynamicAgentConfig = gc.getDynamicAgentConfig() != null
-                ? gc.getDynamicAgentConfig()
-                : new AgentGroupConfiguration.DynamicAgentConfig();
-        context.put("dynamicAgentConfig", new Context(Context.ContextType.object, dynamicAgentConfig));
-
-        // The discussion-wide created-agent total, so maxCreatedAgentsPerDiscussion
-        // bounds the DISCUSSION rather than each member conversation independently.
-        //
-        // DynamicAgentToolsProvider.seedCreatedAgentIds has always read this context
-        // key, but nothing wrote it: it could only see the ids in the member's OWN
-        // conversation memory, so a 5-member group with the default cap of 5 could
-        // deploy 25 agents to production per discussion while both the field name and
-        // docs/group-conversations.md promised 5. gc.getCreatedAgentIds() is the real
-        // total — propagateDynamicAgentTracking folds every member's creations into it
-        // at the end of each turn.
-        //
-        // Snapshot, not the live CopyOnWriteArrayList: this rides into another
-        // conversation's memory and gets serialised there.
-        context.put("dynamicCreatedAgentIds",
-                new Context(Context.ContextType.object, List.copyOf(gc.getCreatedAgentIds())));
+        putDynamicAgentContext(gc, context);
 
         // Share discussion attachments with this member on its first turn: grant the
         // member conversation access to group-owned blobs and inject attachment_*.
@@ -634,6 +608,44 @@ public class MemberTurnExecutor {
     }
 
     /**
+     * The group's dynamic-agent policy and the discussion-wide creation total, for
+     * a member conversation's context — on every turn and at its start, since a
+     * startup workflow (CONVERSATION_START) can run an LLM task too.
+     */
+    private static void putDynamicAgentContext(GroupConversation gc, Map<String, Context> context) {
+        // Pass group-level dynamic agent guardrails to member agents so that
+        // AgentOrchestrator can enforce caps, allowed providers/models, etc.
+        // Injected even when the group configured none, and that is the point. A
+        // member turn that finds no dynamicAgentConfig in its context falls back to
+        // DynamicAgentToolsProvider's STANDALONE default, which is fully permissive
+        // (creation, recruitment and delegation all on). That default exists for a
+        // lone agent with those tools whitelisted; inheriting it inside a group means
+        // a discussion whose operator never wrote a dynamicAgents block silently
+        // permits roster mutation. An absent group config means "not opted in", so
+        // send an explicitly disabled one rather than nothing.
+        var dynamicAgentConfig = gc.getDynamicAgentConfig() != null
+                ? gc.getDynamicAgentConfig()
+                : new AgentGroupConfiguration.DynamicAgentConfig();
+        context.put("dynamicAgentConfig", new Context(Context.ContextType.object, dynamicAgentConfig));
+
+        // The discussion-wide created-agent total, so maxCreatedAgentsPerDiscussion
+        // bounds the DISCUSSION rather than each member conversation independently.
+        //
+        // DynamicAgentToolsProvider.seedCreatedAgentIds has always read this context
+        // key, but nothing wrote it: it could only see the ids in the member's OWN
+        // conversation memory, so a 5-member group with the default cap of 5 could
+        // deploy 25 agents to production per discussion while both the field name and
+        // docs/group-conversations.md promised 5. gc.getCreatedAgentIds() is the real
+        // total — propagateDynamicAgentTracking folds every member's creations into it
+        // at the end of each turn.
+        //
+        // Snapshot, not the live CopyOnWriteArrayList: this rides into another
+        // conversation's memory and gets serialised there.
+        context.put("dynamicCreatedAgentIds",
+                new Context(Context.ContextType.object, List.copyOf(gc.getCreatedAgentIds())));
+    }
+
+    /**
      * Start the member's private conversation for this discussion and record it on
      * the group conversation under {@code convKey}.
      */
@@ -642,6 +654,10 @@ public class MemberTurnExecutor {
         groupContext.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
         groupContext.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
         groupContext.put("groupDepth", new Context(Context.ContextType.string, String.valueOf(gc.getDepth())));
+        // Without these the startup step's LLM task fell back to the permissive
+        // STANDALONE dynamic-agent default — creation enabled though the group
+        // forbids it.
+        putDynamicAgentContext(gc, groupContext);
         var result = conversationService.startConversation(DEFAULT_ENV, member.agentId(), gc.getUserId(), groupContext);
         String conversationId = result.conversationId();
         gc.getMemberConversationIds().put(convKey, conversationId);

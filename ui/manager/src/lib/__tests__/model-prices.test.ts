@@ -76,4 +76,10 @@ describe("parseCatalogImport", () => {
     expect(() => parseCatalogImport('{"foo":1}')).toThrow();
     expect(() => parseCatalogImport("not json")).toThrow();
   });
+
+  it("rejects entries without a provider and model", () => {
+    expect(() => parseCatalogImport('{"entries":[null]}')).toThrow();
+    expect(() => parseCatalogImport('{"entries":[{"model":"m"}]}')).toThrow();
+    expect(() => parseCatalogImport('{"entries":[{"provider":"p","model":"m","asOf":5}]}')).toThrow();
+  });
 });

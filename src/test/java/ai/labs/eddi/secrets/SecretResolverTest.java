@@ -35,6 +35,26 @@ class SecretResolverTest {
     }
 
     @Test
+    @DisplayName("a value read while an invalidation ran is not cached: the next read goes back to the vault")
+    void resolutionInFlightAcrossAnInvalidationIsNotCached() throws Exception {
+        var ref = new SecretReference("default", "rotating-key");
+        int[] calls = {0};
+        when(secretProvider.resolve(ref)).thenAnswer(invocation -> {
+            calls[0]++;
+            if (calls[0] == 1) {
+                // The rotation (or delete) lands while the old value is being read.
+                resolver.invalidateLocal(ref);
+                return "old-value";
+            }
+            return "new-value";
+        });
+
+        assertEquals("old-value", resolver.resolveValue("${vault:rotating-key}"), "the in-flight read itself returns what it read");
+        assertEquals("new-value", resolver.resolveValue("${vault:rotating-key}"),
+                "the stale value must not have been cached for the whole TTL");
+    }
+
+    @Test
     void requireResolved_unresolvableReferenceFailsClosedNamingTheReferenceOnly() throws Exception {
         var ref = new SecretReference("default", "missing-key");
         when(secretProvider.resolve(ref)).thenThrow(new ISecretProvider.SecretNotFoundException("not found"));

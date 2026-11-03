@@ -11,10 +11,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -301,5 +303,29 @@ class ConfigReferenceGuardTest {
         String echoed = "{\"tasks\":[{\"parameters\":{\"apiKey\":\"${vault:anthropic-api-key}\"}}]}";
         assertThrows(IllegalArgumentException.class,
                 () -> ConfigReferenceGuard.requireConfiguredReferences("{requestBody}", echoed, "a request body", DATA, VAULTED));
+    }
+
+    @Test
+    @DisplayName("findReferences returns whole references up to the first closing brace, like the former regex")
+    void findReferencesMatchesTheFormerRegex() {
+        String[] openers = {"${vault:", "${eddivault:", "${connection:", "${caller:"};
+        assertEquals(List.of("${vault:a}", "${caller:token}", "${connection:}"),
+                ConfigReferenceGuard.findReferences("x ${vault:a} ${vars:v} ${caller:token} ${connection:} y", openers));
+        // a nested opener is part of the body
+        assertEquals(List.of("${vault:x${vault:y}"), ConfigReferenceGuard.findReferences("${vault:x${vault:y} tail", openers));
+        // unterminated: nothing
+        assertEquals(List.of(), ConfigReferenceGuard.findReferences("${vault:never closed", openers));
+        assertEquals(List.of(), ConfigReferenceGuard.findReferences(null, openers));
+    }
+
+    @Test
+    @DisplayName("many unterminated openers are scanned in linear time")
+    void unterminatedOpenersAreLinear() {
+        String text = "${vault:".repeat(150_000);
+        long start = System.nanoTime();
+        assertEquals(List.of(), ConfigReferenceGuard.findReferences(text, new String[]{"${vault:", "${caller:"}));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+        // The regex needed seconds for this input; one pass needs milliseconds.
+        assertTrue(elapsedMs < 1_000, "scan took " + elapsedMs + "ms");
     }
 }

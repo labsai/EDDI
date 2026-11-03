@@ -38,6 +38,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -480,6 +481,12 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.status(Response.Status.BAD_GATEWAY).type(TEXT_PLAIN)
                     .entity("The follow-up could not be completed because the member agent could not be reached.")
                     .build();
+        } catch (IGroupConversationService.GroupCostCeilingExceededException e) {
+            LOGGER.infof("Follow-up on %s refused: the discussion's cost ceiling is spent", sanitize(gcId));
+            return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
+                    .entity("The follow-up was refused: this discussion has already reached its cost ceiling "
+                            + "(protocol.maxCostPerDiscussion).")
+                    .build();
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // Base type now means only a state / concurrency conflict.
             LOGGER.infof("Follow-up on %s conflicted: %s", sanitize(gcId), sanitize(e.getMessage()));
@@ -498,8 +505,23 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public Response cancelDiscussion(String groupId, String gcId) {
-        validateGroupConversationOwnership(groupId, gcId);
+        String ownerId = hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
         try {
+            if (!hitlAccessGuard.mayCancelExecuting(ownerId)) {
+                // A caller who is only an approver: the role decides pauses, it does
+                // not stop another user's running discussion (parity with the 1:1
+                // surface). The paused-only cancel is one CAS on the paused state, so
+                // a resume landing in between cannot turn it into a stop of a running
+                // discussion. And the approver gets a receipt, not the transcript —
+                // their full-read window is the approval pause, which is now over.
+                if (!groupConversationService.cancelPausedDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL)) {
+                    LOGGER.warnf("Cancel of group conversation %s refused: the caller holds only the approver role "
+                            + "and the discussion is not awaiting a decision", sanitize(gcId));
+                    throw new ForbiddenException(
+                            "Access denied: an approver may only cancel a group discussion that is awaiting a decision");
+                }
+                return Response.ok(stateReceipt(GroupConversation.GroupConversationState.CANCELLED)).build();
+            }
             boolean cancelled = groupConversationService.cancelDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL);
             if (!cancelled) {
                 // Terminal state or lost a concurrent state race — report honestly
@@ -510,6 +532,8 @@ public class RestGroupConversation implements IRestGroupConversation {
             }
             var gc = groupConversationService.readGroupConversation(gcId);
             return Response.ok(gc).build();
+        } catch (ForbiddenException e) {
+            throw e;
         } catch (IResourceStore.ResourceNotFoundException
                 | IGroupConversationStore.GroupConversationGoneException e) {
             // Curated body: GroupConversationGoneException embeds the caller-supplied
@@ -550,7 +574,10 @@ public class RestGroupConversation implements IRestGroupConversation {
         setDecidedByFromIdentity(request);
         try {
             var gc = groupConversationService.resumeDiscussion(gcId, request, null);
-            return Response.ok(gc).build();
+            // The result is re-read after the resume was enqueued, so it can already
+            // hold member turns produced after the approval — outside an approver-only
+            // caller's read window (the streaming twin draws the same line).
+            return Response.ok(readableResult(gc)).build();
         } catch (IResourceStore.ResourceModifiedException e) {
             // Curated bodies throughout (parity with RestAgentEngine): the HTTP status
             // carries the outcome; the raw exception text (and any caller-supplied id
@@ -610,16 +637,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                 : "anonymous";
         try {
             var gc = groupConversationService.submitHumanInput(gcId, request.memberId(), request.content(), submittedBy);
-            // Submitting a turn is not reading the discussion: the pending member is
-            // refused the full status view, so the response must not hand it over.
-            if (hitlAccessGuard.mayReadResumedDiscussion(gc.getUserId())) {
-                return Response.ok(gc).build();
-            }
-            var acknowledgement = new LinkedHashMap<String, Object>();
-            acknowledgement.put("groupConversationId", gcId);
-            acknowledgement.put("accepted", true);
-            acknowledgement.put("state", gc.getState() != null ? gc.getState().name() : "");
-            return Response.ok(acknowledgement).build();
+            // The pending member may speak, but the full conversation is not theirs
+            // to read (approval-status withholds it from them too).
+            return Response.ok(readableSubmission(gc)).build();
         } catch (IResourceStore.ResourceModifiedException e) {
             // Double-submit or a concurrent cancel won the CAS.
             return Response.status(Response.Status.CONFLICT).type(TEXT_PLAIN)
@@ -990,6 +1010,39 @@ public class RestGroupConversation implements IRestGroupConversation {
      */
     private void validateGroupConversationOwnership(String groupId, String gcId) {
         hitlAccessGuard.requireGroupConversationHitlAccess(groupId, gcId);
+    }
+
+    /**
+     * The full conversation for its owner or an admin; a state-only receipt for
+     * anyone else whose action was authorized (an approver, a pending HUMAN member)
+     * but whose read authority does not extend past that action.
+     */
+    private Object readableResult(GroupConversation gc) {
+        if (gc == null || hitlAccessGuard.mayReadResumedDiscussion(gc.getUserId())) {
+            return gc;
+        }
+        return stateReceipt(gc.getState());
+    }
+
+    /**
+     * A submitted turn answers the owner or an admin with the conversation; anyone
+     * else gets the acknowledgement {@code {groupConversationId, accepted, state}}.
+     */
+    private Object readableSubmission(GroupConversation gc) {
+        if (gc == null || hitlAccessGuard.mayReadResumedDiscussion(gc.getUserId())) {
+            return gc;
+        }
+        var acknowledgement = new LinkedHashMap<String, Object>();
+        acknowledgement.put("groupConversationId", gc.getId());
+        acknowledgement.put("accepted", true);
+        acknowledgement.put("state", gc.getState() != null ? gc.getState().name() : "");
+        return acknowledgement;
+    }
+
+    private static Map<String, Object> stateReceipt(GroupConversation.GroupConversationState state) {
+        var receipt = new LinkedHashMap<String, Object>();
+        receipt.put("state", state != null ? state.name() : null);
+        return receipt;
     }
 
     /**

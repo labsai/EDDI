@@ -903,7 +903,10 @@ a minority report exists to prevent.
 The TASK_FORCE style uses a 4-phase pipeline: **Plan → Execute → Verify → Synthesize**.
 
 1. **PLAN** — The moderator decomposes the goal into actionable tasks and assigns each to an agent
-2. **EXECUTE** — Agents execute their assigned tasks in parallel (each sees only `TASK_ONLY` or `TASK_WITH_DEPS` context)
+2. **EXECUTE** — Agents execute their assigned tasks in parallel (each sees only `TASK_ONLY` or `TASK_WITH_DEPS` context).
+   A member turn that produces no result — skipped (timed out, unavailable, paused) or errored under
+   `onAgentFailure: SKIP` — **fails** its task rather than completing it empty, so tasks that depend on it do not
+   run without its output. Under `ABORT` the member's remaining tasks in that wave are not started.
 3. **VERIFY** — The moderator reviews each task result against the original goal
 4. **SYNTHESIS** — The moderator combines all verified results into a coherent final deliverable
 
@@ -941,7 +944,8 @@ same wave once its dependency completes, and is verified with it.
   member already reads its peers' contributions. It is never template source.
 
 **An unparseable verdict** (the verifier did not return the JSON array) still auto-verifies every task of that
-pass, as before. It is no longer silent: it is logged as a warning naming the group and counted by
+pass, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
+including bracketed asides such as `Checked [details]: [...]` — no longer makes it unparseable. It is no longer silent: it is logged as a warning naming the group and counted by
 `eddi_group_verify_unparseable_total`. A steady rate means the moderator's model ignores the verdict format.
 
 #### Pre-Configured Tasks
@@ -1233,14 +1237,14 @@ summarizer's.
 | `DELETE` | `/groups/{groupId}/conversations/{id}` | Delete (artifacts + ephemeral agents; members **ended**) |
 | `GET` | `/groupstore/groups/jsonSchema` | JSON schema for the group config |
 | `POST` | `/groups/{groupId}/conversations/stream` | Start discussion, stream events over SSE |
-| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up. Like a continuation it needs the transcript's owner (or an admin) **and** current USE on the group: owning the transcript does not keep a member runnable after the group was unshared (`403`; the MCP `followup_with_member` refuses the same way) |
+| `POST` | `/groups/{groupId}/conversations/{id}/followup` | Ask one member a follow-up. Like a continuation it needs the transcript's owner (or an admin) **and** current USE on the group: owning the transcript does not keep a member runnable after the group was unshared (`403`; the MCP `followup_with_member` refuses the same way). A follow-up is a paid member turn: it is refused (`409`) once the discussion has spent its `maxCostPerDiscussion`, its cost is added to the discussion's total, and sub-agents it creates are cleaned up with the discussion |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
-| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running discussion |
+| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion. A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
-| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`) |
+| `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{"state": …}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
 | `GET` | `/groups/{groupId}/conversations/{id}/approval-status` | Pause coordinates (`detail=full` for approvers) |
 | `GET` | `/groups/{groupId}/conversations/pending-approvals` | This group's discussions awaiting a decision |
 | `GET` | `/groups/pending-approvals` | Every group discussion awaiting a decision, across all groups |

@@ -391,7 +391,7 @@ function StaticBindingChooser({
                   {binding === "CALLER_SUPPLIED"
                     ? t(
                         "connections.bindingChoice.callerSuppliedBody",
-                        "EDDI stores nothing. The system calling EDDI sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary.",
+                        "{{productName}} stores nothing. The system calling {{productName}} sends each user's own credential with every request, so the agent can do only what that user can do — the target's own permissions are the boundary.",
                       )
                     : t(
                         "connections.bindingChoice.serviceBody",
@@ -454,7 +454,7 @@ function CallerSuppliedNotice({
       <p className="text-muted-foreground">
         {t(
           "connections.callerSuppliedNeedsAuth",
-          "The caller must be signed in to EDDI. A request without the credential fails rather than going out unauthenticated — including when a paused tool call is resumed — and this connection is withheld from MCP and A2A discovery.",
+          "The caller must be signed in to {{productName}}. A request without the credential fails rather than going out unauthenticated — including when a paused tool call is resumed — and this connection is withheld from MCP and A2A discovery.",
         )}
       </p>
     </div>

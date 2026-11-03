@@ -66,6 +66,24 @@ public interface IGroupConversationStore {
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException;
 
     /**
+     * As {@link #updateIfState}, but the write also requires the stored
+     * {@link GroupConversation#getPauseId() pauseId} to equal
+     * {@code expectedPauseId} — ONE atomic multi-field compare-and-set. A
+     * state-only CAS cannot tell the pause a decision was issued for from a NEWER
+     * pause of the same state (resume then re-pause lands between the read and the
+     * write: ABA), so a stale approve/reject/cancel/timeout would act on a pause it
+     * never saw; this one conflicts instead. {@code null} {@code expectedPauseId}
+     * degrades to the plain state CAS (the caller names no pause). Documents
+     * persisted before the field existed carry no pauseId; for them the id is
+     * matched as absent, which is safe because any later write stamps it.
+     * <p>
+     * Same zero-match contract as {@link #updateIfState}.
+     */
+    void updateIfStateAndPause(GroupConversation gc, GroupConversation.GroupConversationState expectedState,
+                               String expectedPauseId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException;
+
+    /**
      * The group conversation targeted by a conditional update no longer exists.
      * Unchecked so existing CAS call sites keep compiling; surfaces that expose the
      * operation should map it to 404 rather than a 409 conflict.

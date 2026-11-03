@@ -9,6 +9,7 @@ import {
   safetyPreambleForScope,
 } from "./system-prompt";
 import { toVaultRef } from "./vault-ref";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { getProviderConfig } from "@/lib/api/agent-setup";
 import { isBaseUrlRequired, isProvisionableBySetup } from "@/lib/model-suggestions";
 import type { OperatorConfig } from "@/lib/api/operator";
@@ -48,8 +49,12 @@ const SCOPES: readonly OperatorScope[] = ["read_only", "read_write"];
  * provisioning derives from Manager code rather than from the admin's choices.
  *
  * Deliberately excluded: the model, provider, credential, environment, base URL
- * and auth mode (admin choices, carried across an upgrade unchanged) and the
- * tool-iteration budget (a backend-ceiling constant, not operator knowledge).
+ * and auth mode (admin choices, carried across an upgrade unchanged), the
+ * tool-iteration budget (a backend-ceiling constant, not operator knowledge) and
+ * the deployment's brand. The preamble names the product, so it is hashed with
+ * the EDDI default: a rebrand is a deployment's own choice, not a change to what
+ * this Manager provisions, and it must not make the fingerprint depend on
+ * whichever brand the test (or the browser) happens to run under.
  */
 export function operatorProvisioningSource(): string {
   return JSON.stringify({
@@ -57,7 +62,7 @@ export function operatorProvisioningSource(): string {
     scopes: SCOPES.map((scope) => ({
       scope,
       endpoints: endpointsForScope(scope),
-      preamble: safetyPreambleForScope(scope),
+      preamble: safetyPreambleForScope(scope, DEFAULT_BRAND.productName),
       defaultBody: defaultOperatorPromptBody(scope),
     })),
   });

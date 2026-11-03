@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
+import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
 import io.quarkus.runtime.LaunchMode;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
@@ -27,6 +28,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Cookie;
 import jakarta.ws.rs.core.HttpHeaders;
@@ -154,6 +156,8 @@ class RestConnectionAuthorizationCallbackTest {
         grantsStoredFor.clear();
         codesRedeemed.clear();
         stateStore = mock(IOAuthStateStore.class);
+        // A claimed row stays until it expires; only an erasure removes it early.
+        doReturn(true).when(stateStore).exists(anyString());
         grantStore = mock(IConnectionGrantStore.class);
         tokenClient = mock(OAuthTokenClient.class);
         tokenService = mock(OAuthTokenService.class);
@@ -165,7 +169,7 @@ class RestConnectionAuthorizationCallbackTest {
 
         doReturn(principal).when(securityIdentity).getPrincipal();
         doReturn(PRINCIPAL).when(principal).getName();
-        doReturn(CLIENT_SECRET).when(credentialReferenceResolver).resolveVaultBacked(anyString(), anyString(), anyString());
+        doReturn(CLIENT_SECRET).when(credentialReferenceResolver).resolveVaultBackedFor(anyString(), anyString(), anyString(), anyString());
         // Stubbed permissively so a wrong argument shows up as a failed verify below
         // rather than as a NullPointerException three frames away.
         doAnswer(invocation -> {
@@ -856,5 +860,35 @@ class RestConnectionAuthorizationCallbackTest {
         public Counter counter(String name, String... tags) {
             throw new IllegalArgumentException("registration failure for meter '" + name + "'");
         }
+    }
+
+    @Test
+    @DisplayName("a user erased during the token exchange: the grant just stored is deleted")
+    void grantStoredForAPrincipalErasedMeanwhileIsDeleted() throws Exception {
+        // GDPR erasure deletes the state rows, then the grants. A callback already
+        // past its claim writes its grant after the grant sweep; the re-read of the
+        // state row is what catches it.
+        var registry = new SimpleMeterRegistry();
+        RestConnectionAuthorization resource = resource(registry);
+        StartedFlow flow = startFlow(resource, "/manage/connections");
+        onGrantStored(() -> doReturn(false).when(stateStore).exists(flow.row().getState()));
+
+        Response response = resource.callback(CODE, flow.row().getState(), null, browserWith(flow.cookie()));
+
+        verify(grantStore).deleteIfSealedWith(TENANT, CONNECTION_NAME, PRINCIPAL, STORED_IV);
+        assertEquals(URI.create("/manage/connections?error=exchange_failed"), response.getLocation());
+        assertEquals(null, registry.find(CALLBACK_METRIC).tag("outcome", "success").counter(), "not a success");
+    }
+
+    @Test
+    @DisplayName("an identity named like the service principal cannot start a link or see service grants")
+    void servicePrincipalNameIsReserved() {
+        doReturn(ConnectionResolver.SERVICE_PRINCIPAL).when(principal).getName();
+        RestConnectionAuthorization resource = resource(new SimpleMeterRegistry());
+
+        assertThrows(ForbiddenException.class, resource::listMine);
+        assertThrows(ForbiddenException.class, () -> resource.disconnect(CONNECTION_NAME));
+        verify(grantStore, never()).findByPrincipal(any(), any());
+        verify(grantStore, never()).delete(any(), any(), any());
     }
 }

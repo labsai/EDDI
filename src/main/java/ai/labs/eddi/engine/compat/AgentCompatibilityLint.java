@@ -153,7 +153,7 @@ public class AgentCompatibilityLint {
             String location = "llm task '" + (task.getId() != null ? task.getId() : "?") + "'";
             findings.addAll(CompatibilityRules.lintLlmTask(location, task, hasApiCalls, hasMcpCalls));
             CompatibilityRules.scanTemplates(location, asTree(task), templatingEngine::validateTemplate, findings);
-            PricingLint.lint(location, task, ModelPriceCatalogs.current()).forEach(m -> findings.add(new Finding(PricingLint.CODE, location, m)));
+            PricingLint.lint(task, ModelPriceCatalogs.current()).forEach(m -> findings.add(new Finding(PricingLint.CODE, location, m)));
         }
     }
 

@@ -14,6 +14,8 @@ import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
+
 /**
  * The opt-in strict mode for unpriced model calls (docs/model-pricing.md).
  * Decided <em>before</em> the call, against the requested model — the model
@@ -83,7 +85,7 @@ public final class UnpricedCallPolicy {
             }
             String detail = "The model '" + provider + "/" + model + "' has no price and unpricedPolicy=" + policy
                     + " refuses unpriced calls; add a price to the config or the Model Prices catalog.";
-            Metrics.globalRegistry.counter("eddi.llm.pricing.refused", "site", site, "reason", policy.name().toLowerCase()).increment();
+            Metrics.globalRegistry.counter("eddi.llm.pricing.refused", "site", site, "reason", policy.name().toLowerCase(Locale.ROOT)).increment();
             LOGGER.warnf("Refused an unpriced model call at %s: %s/%s (policy %s)", site, provider, model, policy);
             return new LlmSpendGate.Refusal(REASON, detail);
         } catch (RuntimeException e) {

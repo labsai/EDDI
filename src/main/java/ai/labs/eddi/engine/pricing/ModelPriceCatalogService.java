@@ -149,7 +149,10 @@ public class ModelPriceCatalogService {
         if (!violations.isEmpty()) {
             throw new ModelPriceCatalogException(ModelPriceCatalogException.INVALID, "The price catalog was rejected.", violations, null);
         }
-        ModelPriceCatalog next = document.stamped(expectedRevision + 1, clock.instant().toString(), user);
+        if (expectedRevision < 0 || expectedRevision >= Long.MAX_VALUE) {
+            throw new ModelPriceCatalogException(ModelPriceCatalogException.INVALID, "The expected revision is out of range.", List.of(), null);
+        }
+        ModelPriceCatalog next = document.stamped(Math.addExact(expectedRevision, 1L), clock.instant().toString(), user);
         if (!store.compareAndSet(expectedRevision, next)) {
             long current = read().revision();
             throw new ModelPriceCatalogException(ModelPriceCatalogException.CONFLICT,

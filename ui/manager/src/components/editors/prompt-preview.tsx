@@ -28,7 +28,7 @@ const VARIABLE_GROUPS: Record<string, { labelKey: string; fallback: string; colo
   properties: { labelKey: "promptPreview.varProperties", fallback: "Properties", color: "text-emerald-600 dark:text-emerald-400" },
   memory: { labelKey: "promptPreview.varMemory", fallback: "Memory", color: "text-blue-600 dark:text-blue-400" },
   context: { labelKey: "promptPreview.varContext", fallback: "Context", color: "text-violet-600 dark:text-violet-400" },
-  snippets: { labelKey: "promptPreview.varSnippets", fallback: "Snippets", color: "text-amber-600 dark:text-amber-400" },
+  snippets: { labelKey: "promptPreview.varSnippets", fallback: "Snippets", color: "text-ochre-600 dark:text-ochre-400" },
   userInfo: { labelKey: "promptPreview.varUserInfo", fallback: "User Info", color: "text-cyan-600 dark:text-cyan-400" },
   conversationInfo: { labelKey: "promptPreview.varConversationInfo", fallback: "Conversation Info", color: "text-pink-600 dark:text-pink-400" },
   input: { labelKey: "promptPreview.varInput", fallback: "Input", color: "text-orange-600 dark:text-orange-400" },

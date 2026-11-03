@@ -37,7 +37,7 @@ public final class PricingLint {
     public static final String CODE = "unpriced-model";
 
     /** The warning messages for one task, against {@code catalog}. */
-    public static List<String> lint(String location, LlmConfiguration.Task task, PriceCatalogSnapshot catalog) {
+    public static List<String> lint(LlmConfiguration.Task task, PriceCatalogSnapshot catalog) {
         Set<String> warnings = new LinkedHashSet<>();
         if (task == null) {
             return List.of();
@@ -49,7 +49,7 @@ public final class PricingLint {
         boolean cascading = cascade != null && cascade.isEnabled() && cascade.getSteps() != null && !cascade.getSteps().isEmpty();
 
         if (!cascading) {
-            check(location, "model", taskType, taskModel, PriceOverride.of(task.getInputPricePer1M(), task.getOutputPricePer1M()), catalog, suffix,
+            check("model", taskType, taskModel, PriceOverride.of(task.getInputPricePer1M(), task.getOutputPricePer1M()), catalog, suffix,
                     warnings);
         } else {
             for (int i = 0; i < cascade.getSteps().size(); i++) {
@@ -60,12 +60,12 @@ public final class PricingLint {
                 String type = step.getType() != null ? step.getType() : taskType;
                 Double in = step.getInputPricePer1M() != null ? step.getInputPricePer1M() : cascade.getInputPricePer1M();
                 Double out = step.getOutputPricePer1M() != null ? step.getOutputPricePer1M() : cascade.getOutputPricePer1M();
-                check(location, "cascade step " + i, type, modelOf(step.getParameters(), type), PriceOverride.of(in, out), catalog, suffix,
+                check("cascade step " + i, type, modelOf(step.getParameters(), type), PriceOverride.of(in, out), catalog, suffix,
                         warnings);
             }
             LlmConfiguration.JudgeModelConfig judge = cascade.getJudgeModel();
             if (judge != null && judge.getType() != null) {
-                check(location, "cascade judge", judge.getType(), modelOf(judge.getParameters(), judge.getType()),
+                check("cascade judge", judge.getType(), modelOf(judge.getParameters(), judge.getType()),
                         PriceOverride.of(judge.getInputPricePer1M(), judge.getOutputPricePer1M()), catalog, suffix, warnings);
             }
         }
@@ -76,7 +76,7 @@ public final class PricingLint {
             String model = summary.getLlmModel() != null && !summary.getLlmModel().isBlank() ? summary.getLlmModel() : taskModel;
             boolean sameModel = type != null && type.equalsIgnoreCase(taskType) && model != null && model.equalsIgnoreCase(taskModel);
             PriceOverride own = sameModel ? PriceOverride.of(task.getInputPricePer1M(), task.getOutputPricePer1M()) : PriceOverride.NONE;
-            check(location, "conversation summary", type, model, own, catalog, suffix, warnings);
+            check("conversation summary", type, model, own, catalog, suffix, warnings);
         }
 
         if (task.getToolResponseLimits() != null && task.getToolResponseLimits().getSummarizerModel() != null
@@ -85,12 +85,12 @@ public final class PricingLint {
             PriceOverride own = model.equalsIgnoreCase(taskModel)
                     ? PriceOverride.of(task.getInputPricePer1M(), task.getOutputPricePer1M())
                     : PriceOverride.NONE;
-            check(location, "tool summarizer", taskType, model, own, catalog, suffix, warnings);
+            check("tool summarizer", taskType, model, own, catalog, suffix, warnings);
         }
         return new ArrayList<>(warnings);
     }
 
-    private static void check(String location, String what, String type, String model, PriceOverride own, PriceCatalogSnapshot catalog,
+    private static void check(String what, String type, String model, PriceOverride own, PriceCatalogSnapshot catalog,
                               String suffix, Set<String> warnings) {
         if (own.inputPer1M() != null || own.outputPer1M() != null) {
             return;

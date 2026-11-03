@@ -39,6 +39,9 @@ export function ModelPriceEntrySheet({ entry, others, knownProviders, readOnly, 
 
   useEffect(() => {
     closeRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };

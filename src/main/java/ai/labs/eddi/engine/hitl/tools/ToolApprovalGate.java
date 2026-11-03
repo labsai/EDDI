@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * Splits an LLM tool-call batch into gated (requires human approval) and
@@ -25,6 +24,9 @@ import java.util.regex.Pattern;
  * patterns.
  */
 public class ToolApprovalGate {
+
+    /** Why a reissue of an already-executed approved call is gated again. */
+    public static final String REPEAT_REASON = "repeat of an approved call that has already been executed";
 
     public record GateResult(List<ToolExecutionRequest> gated,
             List<ToolExecutionRequest> allowed,
@@ -51,10 +53,11 @@ public class ToolApprovalGate {
      * @param toolEndpoints
      *            tool name to {@code method:path}; empty for non-http tools
      * @param cleared
-     *            calls a human already decided this pause. A call is let through on
-     *            a clearance only when its id, tool name AND arguments match one,
-     *            and the clearance is used up by it — an id alone proves nothing,
-     *            because providers reuse ids
+     *            calls a human approved this pause and the resumer has already
+     *            executed or replayed. A model that reissues one — same id, tool
+     *            name AND arguments — is asking to run it again: the repeat is
+     *            gated with {@link #REPEAT_REASON}, never let through, because one
+     *            approval authorises one execution
      */
     public GateResult classify(List<ToolExecutionRequest> batch, Map<String, String> toolSources,
                                Map<String, String> toolEndpoints, ToolApprovalsConfig cfg, ClearedToolCalls cleared) {
@@ -69,7 +72,11 @@ public class ToolApprovalGate {
         Map<String, String> reasons = new HashMap<>();
         for (ToolExecutionRequest request : batch) {
             if (cleared != null && cleared.consume(request)) {
-                allowed.add(request); // this exact call was already approved by a human
+                // This exact call was approved once and has ALREADY been executed (or
+                // replayed from the journal) by the resumer. Letting the repeat through
+                // ran it a second time on one approval; it goes back to a human instead.
+                gated.add(request);
+                reasons.put(request.id(), REPEAT_REASON);
                 continue;
             }
             if (request.name() == null) {
@@ -132,14 +139,14 @@ public class ToolApprovalGate {
         return addresses;
     }
 
-    private record CompiledPattern(String raw, Pattern pattern) {
+    private record CompiledPattern(String raw) {
     }
 
     private static List<CompiledPattern> compileAll(List<String> globs) {
         if (globs == null) {
             return List.of();
         }
-        return globs.stream().map(g -> new CompiledPattern(g, ToolApprovalPatterns.compile(g))).toList();
+        return globs.stream().map(CompiledPattern::new).toList();
     }
 
     /**
@@ -156,7 +163,7 @@ public class ToolApprovalGate {
     private static CompiledPattern firstMatch(List<CompiledPattern> patterns, List<String> addresses) {
         for (CompiledPattern cp : patterns) {
             for (String address : addresses) {
-                if (cp.pattern().matcher(address).matches()) {
+                if (ToolApprovalPatterns.matches(cp.raw(), address)) {
                     return cp;
                 }
             }

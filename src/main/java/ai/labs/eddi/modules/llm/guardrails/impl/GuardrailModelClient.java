@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.impl.ChatModelRegistry;
 import ai.labs.eddi.modules.llm.impl.LlmTask;
 import ai.labs.eddi.modules.llm.impl.TokenPricing;
+import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
 import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
 import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
@@ -207,7 +208,8 @@ final class GuardrailModelClient {
             // budget before it starts, like the task's own model call — for every
             // model-backed guardrail type. Refused, it is not made: "could not decide",
             // so failMode applies.
-            try (PaidCallGate.PaidCall paid = context.spend().begin(expectedCost(messages, context))) {
+            try (PaidCallGate.PaidCall paid = context.spend()
+                    .begin(expectedCost(messages, context, providerTag, LlmTask.resolveModelName(modelParameters, providerTag)))) {
                 if (!paid.admitted()) {
                     outcome = PaidCallGate.REASON_SPEND_REFUSED;
                     LOGGER.infof("%s of task '%s' skipped: %s", name, context.taskId(), paid.refusalReason());
@@ -368,7 +370,20 @@ final class GuardrailModelClient {
      * the guardrail is unpriced.
      */
     static double expectedCost(List<ChatMessage> messages, GuardrailContext context) {
+        return expectedCost(messages, context, null, null);
+    }
+
+    /**
+     * As {@link #expectedCost(List, GuardrailContext)}, falling back to the
+     * catalog's input price for {@code provider}/{@code modelName} when the
+     * guardrail names none, so the reservation matches what {@link #cost} later
+     * charges.
+     */
+    static double expectedCost(List<ChatMessage> messages, GuardrailContext context, String provider, String modelName) {
         Double inputPrice = price(context, PARAM_INPUT_PRICE);
+        if (inputPrice == null && provider != null && modelName != null) {
+            inputPrice = ModelPriceResolver.resolve(provider, modelName).map(e -> e.inputPricePer1M()).orElse(null);
+        }
         if (inputPrice == null || messages == null) {
             return 0.0;
         }
