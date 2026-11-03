@@ -171,6 +171,19 @@ class VaultLegacySealingRetirementTest {
     }
 
     @Test
+    @DisplayName("an ordinary rotation, to the same value and grant, is an update and succeeds")
+    void sameValueRotationSucceeds() throws Exception {
+        var scoped = new SecretReference("acme", "same");
+        provider.store(scoped, "same-value", null, List.of("agent-one"), List.of("api.example.com"));
+
+        assertDoesNotThrow(() -> provider.store(scoped, "same-value", null, null, null));
+        assertDoesNotThrow(() -> provider.store(scoped, "same-value", null, List.of("agent-one"), List.of("api.example.com")));
+
+        assertEquals("same-value", provider.resolve(scoped));
+        assertEquals(List.of("api.example.com"), persistence.secrets.get("acme/same").getAllowedHosts());
+    }
+
+    @Test
     @DisplayName("a rotation that restates the agent grant but no host list is not turned into a create of an any-host key")
     void rotationWithAGrantRacingADeleteDoesNotRecreateTheRow() throws Exception {
         // The Manager's rotate dialog sends the stored allowedAgents and no hosts. As a
