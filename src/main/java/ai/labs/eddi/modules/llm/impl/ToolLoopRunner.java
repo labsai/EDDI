@@ -1469,7 +1469,10 @@ class ToolLoopRunner {
                 Supplier<String> execution = mock != null
                         ? () -> mockingExecutor.executeMocked(toolRequest, mock)
                         : () -> executor.execute(toolRequest, null);
-                boolean trackCost = enableCostTracking && mock == null;
+                // An enforced ceiling is checked against the tracker above, so its
+                // charges are recorded whatever enableCostTracking says — otherwise
+                // turning the reporting off would leave the ceiling counting nothing.
+                boolean trackCost = (enableCostTracking || (enforceBudget && maxBudget != null)) && mock == null;
                 // Without a quota gate the call takes exactly the path it always took.
                 toolResult = quotaGate == null
                         ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,

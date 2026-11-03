@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
+import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -870,6 +871,10 @@ public class EmbeddingStoreFactory {
                 .databaseName(databaseName)
                 .collectionName(collectionName)
                 .apiVersion(version)
+                // The store is cached; its JDK client re-checks the destination on every
+                // request, so a baseUrl validated once above cannot be re-resolved to a
+                // private address later (DNS rebinding).
+                .httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy))
                 .build();
     }
 
@@ -938,11 +943,11 @@ public class EmbeddingStoreFactory {
                     : ChromaApiVersion.valueOf(apiVersionStr);
             return chromaApiVersion;
         } catch (IllegalArgumentException e) {
+            // Neither the value nor the cause (whose message quotes it): vault
+            // references are resolved by now and this message reaches ingestion
+            // status and RAG search responses.
             throw new IllegalArgumentException(
-                    String.format("Invalid '%s' ChromaApiVersion. Valid ChromaApiVersion '%s'",
-                            apiVersionStr,
-                            Arrays.toString(ChromaApiVersion.values())),
-                    e);
+                    "Invalid storeParameters.apiVersion for chroma. Valid values: " + Arrays.toString(ChromaApiVersion.values()));
         }
     }
 
@@ -1106,6 +1111,13 @@ public class EmbeddingStoreFactory {
         }
         for (String hostAndPort : parsed.getHosts()) {
             guardStoreHost(hostAndPort, "mongodb-atlas");
+        }
+        // A proxyHost option makes the driver dial the proxy, not the seeds: it is a
+        // destination of its own.
+        String proxyHost = parsed.getProxyHost();
+        if (proxyHost != null && !proxyHost.isBlank()) {
+            Integer proxyPort = parsed.getProxyPort();
+            guardStoreHost(proxyPort != null ? proxyHost + ":" + proxyPort : proxyHost, "mongodb-atlas");
         }
     }
 
