@@ -717,13 +717,13 @@ routes authenticate, with credentials from a `nats-auth` Secret you create first
 the NATS pods do not start without it — and EDDI's user may touch only EDDI's
 subjects and never delete a stream:
 ```bash
-EDDI_NATS_PW=$(openssl rand -hex 24)
+NATS_USER_PW=$(openssl rand -hex 24)
 kubectl create secret generic nats-auth -n eddi \
-  --from-literal=eddi-password="$EDDI_NATS_PW" \
+  --from-literal=eddi-password="$NATS_USER_PW" \
   --from-literal=route-password="$(openssl rand -hex 24)"
 # and in eddi-secrets' application-secrets.properties:
 #   eddi.nats.username=eddi
-#   eddi.nats.password=<EDDI_NATS_PW>
+#   eddi.nats.password=<NATS_USER_PW>
 ```
 The component also restricts the NATS ports with NetworkPolicies, pins the NATS
 image by digest, keeps one NATS pod per node (a cluster with fewer than three nodes

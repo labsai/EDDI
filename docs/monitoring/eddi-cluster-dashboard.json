@@ -752,6 +752,75 @@
         "overrides": []
       },
       "options": {}
+    },
+    {
+      "type": "row",
+      "title": "NATS connection errors",
+      "id": 300,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 110
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 301,
+      "title": "NATS errors by cause",
+      "type": "timeseries",
+      "description": "`eddi_cluster_nats_errors_total` - NATS errors of this node by cause (auth, tls, config, permission, timeout, io, slow_consumer, server, other).",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 111
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_nats_errors_total{job=~\"$job\"}[$__rate_interval])) by (cause)",
+          "legendFormat": "{{cause}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 302,
+      "title": "NATS misconfigured",
+      "type": "timeseries",
+      "description": "`eddi_cluster_nats_misconfigured` - 1 while the connection fails for a reason retrying cannot heal (auth, TLS, client options); the node is not ready.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 111
+      },
+      "targets": [
+        {
+          "expr": "max(eddi_cluster_nats_misconfigured{job=~\"$job\"}) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
     }
   ],
   "schemaVersion": 39,
