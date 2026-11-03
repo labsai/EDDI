@@ -56,6 +56,15 @@ export const MAX_PAUSE_REASON_LENGTH = 500;
 /** amendedArguments byte cap — PendingToolCallBatch.AMENDED_ARGS_MAX_BYTES. */
 export const AMENDED_ARGS_MAX_BYTES = 32_768;
 
+/**
+ * Request header that tells EDDI which client made a HITL decision, recorded
+ * as `channel: MANAGER` in the `hitl.approval` audit entry. A claim for
+ * analytics only — the server never authorizes on it.
+ */
+export const HITL_CLIENT_HEADER = "X-EDDI-Client";
+/** Headers every Manager HITL decision carries. */
+export const HITL_CLIENT_HEADERS: Record<string, string> = { [HITL_CLIENT_HEADER]: "manager" };
+
 // ── DTOs ──────────────────────────────────────────────────────────
 
 /** Per-tool-call verdict inside a TOOL_CALL resume body. Calls not listed in
@@ -66,6 +75,8 @@ export interface ToolCallDecision {
   verdict: HitlVerdict;
   note?: string;
   amendedArguments?: string;
+  /** Why this call was rejected or amended (`pauseDetails.reasonCodes`). */
+  reasonCode?: string;
 }
 
 /** Human decision on a paused conversation or group discussion. */
@@ -84,6 +95,42 @@ export interface HitlDecision {
    * See `lib/hitl-pause-binding.ts`.
    */
   pauseId?: string;
+  /**
+   * APPROVED only: the final answer in place of the model's draft — a RULE pause
+   * whose `pauseDetails.editableAnswer` is present (agents with
+   * `hitlConfig.review.allowAnswerEdits`), or a group SYNTHESIS phase.
+   */
+  editedAnswer?: string;
+  /** Why the request was rejected or edited (`pauseDetails.reasonCodes`). */
+  reasonCode?: string;
+}
+
+/** The review fields a decision may carry beyond verdict and note. */
+export interface DecisionReview {
+  editedAnswer?: string;
+  reasonCode?: string;
+}
+
+/** One task's decision in a group TASK approval (`taskDecisions`). */
+export interface TaskDecision {
+  verdict: HitlVerdict;
+  note?: string;
+  /** APPROVED only — replaces the task's result (`review.allowResultEdits`). */
+  editedResult?: string;
+  reasonCode?: string;
+}
+
+/** One entry of a reason-code vocabulary. */
+export interface ReasonCodeOption {
+  code: string;
+  label: string;
+}
+
+/** The model's draft an approver may edit before approving a RULE pause. */
+export interface EditableAnswer {
+  draft: string;
+  format: "text" | "json";
+  maxChars: number;
 }
 
 /** Summary of a conversation awaiting human approval.
@@ -116,6 +163,8 @@ export interface GroupApprovalRequest {
   decision: HitlDecision;
   /** taskId → "APPROVED" | "REJECTED" (for TASK granularity). */
   taskApprovals?: Record<string, string>;
+  /** taskId → verdict, note, edited result, reason — exclusive with `taskApprovals`. */
+  taskDecisions?: Record<string, TaskDecision>;
 }
 
 // ── approval-status / pauseDetails types ──────────────────────────
@@ -169,6 +218,8 @@ export interface PendingToolCallView {
   requestPinned: boolean;
   /** The redacted resolved request, when determinable ahead of execution. */
   requestPreview?: ResolvedRequestPreview | null;
+  /** The audit category of this call (`rules[].approvalCategory` or `tool:<pattern>`). */
+  approvalCategory?: string | null;
 }
 
 /** pauseDetails for a gated-tool-call pause. */
@@ -179,6 +230,8 @@ export interface ToolCallPauseDetails {
   executedUngatedCalls: string[];
   /** callIds whose prior approval crashed mid-execution — outcome unknown. */
   outcomeUnknown: string[];
+  /** The reason-code vocabulary for rejections and amendments. */
+  reasonCodes?: ReasonCodeOption[];
 }
 
 /** pauseDetails for a behavior-rule pause (also legacy null-pauseType snapshots). */
@@ -186,6 +239,14 @@ export interface RulePauseDetails {
   type: "RULE";
   reason?: string | null;
   actions?: string[];
+  /** The audit category of the pause. */
+  approvalCategory?: string | null;
+  /** The reason-code vocabulary for rejections and edits. */
+  reasonCodes?: ReasonCodeOption[];
+  /** Present when the agent lets approvers edit the answer before approving. */
+  editableAnswer?: EditableAnswer | null;
+  /** The engine refused the last approved edit (a guardrail, or a changed config). */
+  lastEditRefused?: { reason: string; guardrail?: string | null; at?: string } | null;
 }
 
 export type PauseDetails = ToolCallPauseDetails | RulePauseDetails;
@@ -346,7 +407,7 @@ export function resumeConversation(
   conversationId: string,
   decision: HitlDecision,
 ): Promise<void> {
-  return api.post(`/agents/${seg(conversationId)}/resume`, decision);
+  return api.post(`/agents/${seg(conversationId)}/resume`, decision, HITL_CLIENT_HEADERS);
 }
 
 /** Get the approval status of a paused conversation (summary view, incl.
@@ -396,6 +457,7 @@ export function approveGroupPhase(
   return api.post(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approve`,
     request,
+    HITL_CLIENT_HEADERS,
   );
 }
 

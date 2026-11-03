@@ -4444,6 +4444,24 @@
     "groupReviewLoadError": "चर्चा लोड नहीं हो सकी।",
     "groupReviewNoEntries": "अभी तक कुछ नहीं कहा गया है।"
   },
+  "hitlReview": {
+    "approveEdited": "बदलावों के साथ स्वीकृत करें",
+    "confirmApproveEditedDescription": "आपका टेक्स्ट एजेंट के उत्तर की जगह लेगा और बातचीत फिर से शुरू होगी।",
+    "confirmApproveEditedTitle": "अपने बदलावों के साथ स्वीकृत करें?",
+    "discardEdit": "मेरे बदलाव हटाएँ",
+    "editAnswer": "स्वीकृति से पहले उत्तर संपादित करें",
+    "editEmpty": "उत्तर खाली नहीं हो सकता।",
+    "editNotJson": "यह एजेंट JSON में उत्तर देता है — उत्तर एक JSON ऑब्जेक्ट होना चाहिए।",
+    "editTooLong": "उत्तर {{max}} अक्षरों से लंबा है।",
+    "editedAnswerLabel": "अंतिम उत्तर",
+    "hideOriginal": "मूल छिपाएँ",
+    "lastEditDrift": "एजेंट बदल जाने के कारण आपका पिछला बदलाव लागू नहीं हो सका — मूल उत्तर फिर से समीक्षा के लिए है।",
+    "lastEditScreenedOut": "आपके पिछले बदलाव को एजेंट के आउटपुट गार्डरेल ({{guardrail}}) ने रोक दिया — मूल उत्तर फिर से समीक्षा के लिए है।",
+    "noReason": "कोई कारण नहीं",
+    "reasonLabel": "कारण (अस्वीकृति या बदलाव के लिए)",
+    "reviewerEdit": "समीक्षक का बदलाव",
+    "showOriginal": "मूल दिखाएँ"
+  },
   "chatDrawer": {
     "deploying": "एजेंट Deploy हो रहा है…",
     "error": "कुछ गलत हो गया",

@@ -262,6 +262,24 @@ public final class SlackHitlSupport {
                                                                 String title, String subjectLabel, String subjectId, String agentLabel,
                                                                 String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
                                                                 String pauseType, PendingToolCallBatch pendingToolCalls) {
+        return buildApprovalBlocks(title, subjectLabel, subjectId, agentLabel, pauseReason, timeoutInfo, actionValue, includeButtons,
+                pauseType, pendingToolCalls, SlackHitlEditModal.CardEdits.NONE);
+    }
+
+    /**
+     * As above, with the card's edit controls (6.7): "✏️ Edit &amp; approve" and
+     * "Reject with reason…" join Approve and Reject in the {@code actions} block,
+     * which stays the LAST block of the card; a hint line goes right above it.
+     *
+     * @param edits
+     *            see {@link SlackHitlEditModal#forCard}; {@code CardEdits.NONE}
+     *            renders the pre-6.7 card
+     */
+    public static List<Map<String, Object>> buildApprovalBlocks(
+                                                                String title, String subjectLabel, String subjectId, String agentLabel,
+                                                                String pauseReason, String timeoutInfo, String actionValue, boolean includeButtons,
+                                                                String pauseType, PendingToolCallBatch pendingToolCalls,
+                                                                SlackHitlEditModal.CardEdits edits) {
 
         var blocks = new ArrayList<Map<String, Object>>();
 
@@ -288,11 +306,22 @@ public final class SlackHitlSupport {
         }
 
         if (includeButtons) {
+            SlackHitlEditModal.CardEdits cardEdits = edits != null ? edits : SlackHitlEditModal.CardEdits.NONE;
+            if (cardEdits.hint() != null && !cardEdits.hint().isBlank()) {
+                blocks.add(context(safe(cardEdits.hint())));
+            }
+            var elements = new ArrayList<Map<String, Object>>();
+            elements.add(button("✅ Approve", ACTION_APPROVE, actionValue, "primary"));
+            if (cardEdits.edit()) {
+                elements.add(button("✏️ Edit & approve", SlackHitlEditModal.ACTION_EDIT, actionValue, null));
+            }
+            elements.add(button("⛔ Reject", ACTION_REJECT, actionValue, "danger"));
+            if (cardEdits.rejectWithReason()) {
+                elements.add(button("Reject with reason…", SlackHitlEditModal.ACTION_REJECT_REASON, actionValue, null));
+            }
             var actions = new LinkedHashMap<String, Object>();
             actions.put("type", "actions");
-            actions.put("elements", List.of(
-                    button("✅ Approve", ACTION_APPROVE, actionValue, "primary"),
-                    button("⛔ Reject", ACTION_REJECT, actionValue, "danger")));
+            actions.put("elements", elements);
             blocks.add(actions);
         } else {
             blocks.add(context(

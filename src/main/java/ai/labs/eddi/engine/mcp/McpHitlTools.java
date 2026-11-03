@@ -236,22 +236,44 @@ public class McpHitlTools {
     }
 
     /**
+     * {@code resume_conversation} without the review arguments (6.7).
+     */
+    public String resumeConversation(String conversationId, String verdict, String note, String pauseId) {
+        return resumeConversation(conversationId, verdict, note, pauseId, null, null, null);
+    }
+
+    /**
      * {@code pauseId} is optional. Passed, the decision applies only to that pause:
      * a conversation that has since been resumed and paused again answers
      * {@code PAUSE_CHANGED} instead of approving a request the caller never saw.
+     * {@code editedAnswer}, {@code reasonCode} and {@code toolDecisionsJson} (6.7)
+     * are the REST resume body's fields, validated the same way before the pause is
+     * consumed.
      */
     @Tool(name = "resume_conversation",
           description = "Resume a paused regular conversation with a human decision. verdict=APPROVED or REJECTED "
                   + "(case-insensitive). Resolves both RULE and TOOL_CALL pauses. The decision is attributed to the "
                   + "authenticated caller. Pass pauseId (from get_approval_status) to bind the decision to the pause "
                   + "you reviewed: if the conversation has since paused again on a different request, the decision "
-                  + "is refused with errorCode PAUSE_CHANGED.")
+                  + "is refused with errorCode PAUSE_CHANGED. Optional: editedAnswer approves a RULE pause with your "
+                  + "own final answer (agents with hitlConfig.review.allowAnswerEdits); reasonCode explains a rejection "
+                  + "or an edit; toolDecisionsJson decides TOOL_CALL pauses per call "
+                  + "({\"<callId>\":{\"verdict\":\"APPROVED\",\"amendedArguments\":{...},\"reasonCode\":\"TONE\"}}). "
+                  + "Tool arguments are logged by MCP clients — use the REST resume endpoint for long or sensitive edits.")
     public String resumeConversation(
                                      @ToolArg(description = "Conversation ID awaiting approval") String conversationId,
                                      @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
                                      @ToolArg(description = "Reviewer note, max 4096 chars (optional)", required = false) String note,
                                      @ToolArg(description = "pauseId from get_approval_status — the pause this decision is for",
-                                              required = false) String pauseId) {
+                                              required = false) String pauseId,
+                                     @ToolArg(description = "APPROVED only: your final answer in place of the model's draft "
+                                             + "(RULE pauses of agents with hitlConfig.review.allowAnswerEdits)",
+                                              required = false) String editedAnswer,
+                                     @ToolArg(description = "Reason code for a rejection or an edit (pauseDetails.reasonCodes)",
+                                              required = false) String reasonCode,
+                                     @ToolArg(description = "TOOL_CALL pauses: JSON object of callId to {verdict, note, "
+                                             + "amendedArguments, reasonCode}",
+                                              required = false) String toolDecisionsJson) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
@@ -275,6 +297,8 @@ public class McpHitlTools {
             decision.setNote(note);
             decision.setDecidedBy(principalWithMcpPrefix());
             decision.setPauseId(pauseId != null && !pauseId.isBlank() ? pauseId.trim() : null);
+            McpReviewArguments.applyReview(decision, editedAnswer, reasonCode);
+            decision.setToolDecisions(McpReviewArguments.toolDecisions(jsonSerialization, toolDecisionsJson));
             conversationService.resumeConversation(conversationId, decision, null);
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "regular", "verdict", parsed.name()).increment();
             return "{\"status\":\"RESUMED\",\"conversationId\":\"" + escapeJsonString(conversationId)
@@ -286,6 +310,12 @@ public class McpHitlTools {
         } catch (IConversationService.PauseMismatchException e) {
             return errorJson("The pending approval changed since this decision was made — re-read get_approval_status "
                     + "and decide again", "PAUSE_CHANGED", null);
+        } catch (McpReviewArguments.BadArgument e) {
+            return errorJson(e.getMessage(), "BAD_REQUEST", null);
+        } catch (IllegalArgumentException e) {
+            // The service's pre-CAS validation (tool decisions, edit, reason code):
+            // nothing was consumed. Its messages name fields and codes, never values.
+            return errorJson("Invalid decision: " + e.getMessage(), "BAD_REQUEST", null);
         } catch (IllegalStateException e) {
             String state;
             try {
@@ -472,9 +502,19 @@ public class McpHitlTools {
     }
 
     /**
+     * {@code approve_group_phase} without the review arguments (6.7).
+     */
+    public String approveGroupPhase(String groupId, String conversationId, String verdict, String note, String taskApprovalsJson,
+                                    String pauseId) {
+        return approveGroupPhase(groupId, conversationId, verdict, note, taskApprovalsJson, pauseId, null, null, null);
+    }
+
+    /**
      * {@code pauseId} is optional. Passed, the decision applies only to that pause:
      * a discussion that has since been resumed and paused again answers
      * {@code PAUSE_CHANGED} instead of approving something the caller never saw.
+     * {@code editedAnswer}, {@code reasonCode} and {@code taskDecisionsJson} (6.7)
+     * are the REST approve body's fields.
      */
     @Tool(name = "approve_group_phase",
           description = "Approve or reject a paused group discussion phase (or specific tasks for TASK-granularity). "
@@ -483,7 +523,11 @@ public class McpHitlTools {
                   + "and only the resulting state to an approver-only caller. The decision is attributed "
                   + "to the authenticated caller. Pass pauseId (from get_group_approval_status) to bind the decision "
                   + "to the pause you reviewed: if the discussion has since paused again, the decision is refused "
-                  + "with errorCode PAUSE_CHANGED.")
+                  + "with errorCode PAUSE_CHANGED. Optional (groups with hitlConfig.review.allowResultEdits): "
+                  + "taskDecisionsJson decides tasks with an edited result "
+                  + "({\"<taskId>\":{\"verdict\":\"APPROVED\",\"editedResult\":\"...\",\"reasonCode\":\"SCOPE\"}}, "
+                  + "instead of taskApprovals); editedAnswer replaces a SYNTHESIS phase's output; reasonCode explains a "
+                  + "rejection or an edit.")
     @SuppressWarnings("unchecked")
     public String approveGroupPhase(
                                     @ToolArg(description = "Group ID") String groupId,
@@ -493,7 +537,13 @@ public class McpHitlTools {
                                     @ToolArg(description = "JSON object mapping task-id to APPROVED/REJECTED, e.g. {\"t1\":\"APPROVED\"} (optional)",
                                              required = false) String taskApprovalsJson,
                                     @ToolArg(description = "pauseId from get_group_approval_status — the pause this decision is for",
-                                             required = false) String pauseId) {
+                                             required = false) String pauseId,
+                                    @ToolArg(description = "APPROVED only: replaces the output of a SYNTHESIS phase",
+                                             required = false) String editedAnswer,
+                                    @ToolArg(description = "Reason code for a rejection or an edit", required = false) String reasonCode,
+                                    @ToolArg(description = "JSON object of task-id to {verdict, note, editedResult, reasonCode}; "
+                                            + "exclusive with taskApprovals",
+                                             required = false) String taskDecisionsJson) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
         String disabled = disabledIfMutationsOff();
         if (disabled != null) {
@@ -551,6 +601,8 @@ public class McpHitlTools {
             GroupApprovalRequest request = new GroupApprovalRequest();
             request.setDecision(decision);
             request.setTaskApprovals(taskApprovals);
+            McpReviewArguments.applyReview(decision, editedAnswer, reasonCode);
+            request.setTaskDecisions(McpReviewArguments.taskDecisions(jsonSerialization, taskDecisionsJson));
             GroupConversation result = groupConversationService.resumeDiscussion(conversationId, request, null);
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", parsed.name()).increment();
             return readableGroupResult(result);
@@ -569,9 +621,10 @@ public class McpHitlTools {
         } catch (IGroupConversationService.GroupDiscussionException e) {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
                     + "or already approved", "WRONG_STATE", null);
+        } catch (McpReviewArguments.BadArgument e) {
+            return errorJson(e.getMessage(), "BAD_REQUEST", null);
         } catch (IllegalArgumentException e) {
-            return errorJson("Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
-                    + "approval", "BAD_REQUEST", null);
+            return errorJson("Invalid approval request: " + e.getMessage(), "BAD_REQUEST", null);
         } catch (Exception e) {
             LOGGER.warn("MCP approve_group_phase failed", e);
             return errorJson("Failed to approve group phase", "INTERNAL", null);

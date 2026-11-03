@@ -55,6 +55,9 @@ import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
+import ai.labs.eddi.engine.lifecycle.model.ReviewerEditRequest;
+import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
+import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -100,7 +103,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * </ul>
  */
 @ApplicationScoped
-public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
+public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEditingTask {
     public static final String ID = "ai.labs.llm";
     public static final TaskId TASK_ID = new TaskId(ID);
 
@@ -2504,10 +2507,15 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                                          boolean toolTranscript, Integer cascadeStepIndex, String answer, boolean addedToOutput,
                                          int outputMark, int quickRepliesMark) {
         var policy = memory.getHitlRevisionPolicy();
-        if (policy == null || !policy.revise()) {
+        if (policy == null || !(policy.revise() || policy.captureDraft())) {
             return;
         }
         var candidate = new HitlRevisionCandidate();
+        candidate.setEditable(policy.captureDraft());
+        // An approver's edit must keep the answer's shape: JSON for a convertToObject
+        // task.
+        candidate.setAnswerFormat(task.getParameters() != null && Boolean.parseBoolean(String.valueOf(task.getParameters().get(
+                KEY_CONVERT_TO_OBJECT)).trim()) ? HitlRevisionCandidate.FORMAT_JSON : HitlRevisionCandidate.FORMAT_TEXT);
         candidate.setLlmTaskId(task.getId());
         candidate.setLlmTaskIndex(llmTaskIndex);
         candidate.setCascadeStepIndex(cascadeStepIndex);
@@ -2516,7 +2524,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         candidate.setAddedToOutput(addedToOutput);
         candidate.setOutputMark(outputMark);
         candidate.setQuickRepliesMark(quickRepliesMark);
-        if (base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
+        // The request is frozen only for a revision; an edit needs the draft alone.
+        if (policy.revise() && base != null && !base.isEmpty() && !isNullOrEmpty(answer)) {
             var serialized = revisionTranscriptCodec.serialize(base, revisionTranscriptMaxBytes);
             candidate.setTranscriptJson(serialized.omitted() ? null : serialized.json());
         }
@@ -2604,6 +2613,44 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
         return true;
+    }
+
+    /**
+     * {@code hitlConfig.review.allowAnswerEdits}: an approver's edit replaces the
+     * draft. Screened, when asked, by the task's own output guardrails with no
+     * reprompter — a {@code reprompt} finding cannot ask the human again, so it
+     * blocks; {@code redact} rewrites the text. The guardrails' paid calls are
+     * admitted against the conversation's spend like a live answer's. Stored in
+     * place by {@link LlmAnswerEditor}; {@code postResponse} and later tasks do not
+     * run.
+     */
+    @Override
+    public ReviewerEditRequest.Outcome replaceAnswer(IConversationMemory memory, Object component, ReviewerEditRequest request)
+            throws LifecycleException {
+        if (!(component instanceof LlmConfiguration llmConfig) || request == null || request.candidate() == null) {
+            return ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_CONFIG_DRIFT, null);
+        }
+        HitlRevisionCandidate candidate = request.candidate();
+        Task task = LlmAnswerEditor.taskOf(llmConfig, candidate);
+        if (task == null) {
+            LOGGER.warnf("hitl.edit.config_drift: the answer of task '%s' cannot be replaced in conversation '%s' — the LLM configuration "
+                    + "changed since the pause", sanitize(candidate.getLlmTaskId()), sanitize(memory.getConversationId()));
+            return ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_CONFIG_DRIFT, null);
+        }
+        IWritableConversationStep currentStep = memory.getCurrentStep();
+        String text = request.editedText();
+        if (request.screen() && guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails())) {
+            var screened = guardrailService.runOutput(task.getOutputGuardrails(), text, null,
+                    guardrailContext(memory, task, List.of()).withSpend(TaskSpend.of(spendGate, memory)),
+                    outcome -> recordGuardrailOutcome(memory, currentStep, task, outcome));
+            accumulateCost(currentStep, screened.costUsd());
+            if (screened.isBlocked()) {
+                return ReviewerEditRequest.Outcome.refused(HitlApprovalAudit.REFUSED_SCREENED_OUT, screened.blocked().type());
+            }
+            text = screened.text();
+        }
+        LlmAnswerEditor.apply(currentStep, task, candidate, text, dataFactory);
+        return ReviewerEditRequest.Outcome.applied(text);
     }
 
     /** The revised answer, or null when it cannot be produced or fails a check. */

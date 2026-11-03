@@ -4636,6 +4636,24 @@
     "groupReviewLoadError": "تعذّر تحميل المناقشة.",
     "groupReviewNoEntries": "لم يُقل أي شيء بعد."
   },
+  "hitlReview": {
+    "approveEdited": "الموافقة مع التعديلات",
+    "confirmApproveEditedDescription": "يحلّ نصك محل إجابة الوكيل وتُستأنف المحادثة.",
+    "confirmApproveEditedTitle": "الموافقة مع تعديلاتك؟",
+    "discardEdit": "تجاهل تعديلاتي",
+    "editAnswer": "تعديل الإجابة قبل الموافقة",
+    "editEmpty": "يجب ألا تكون الإجابة فارغة.",
+    "editNotJson": "يجيب هذا الوكيل بصيغة JSON — يجب أن تكون الإجابة كائن JSON.",
+    "editTooLong": "الإجابة أطول من {{max}} حرفًا.",
+    "editedAnswerLabel": "الإجابة النهائية",
+    "hideOriginal": "إخفاء الأصل",
+    "lastEditDrift": "تعذّر تطبيق تعديلك الأخير لأن الوكيل تغيّر — الإجابة الأصلية معروضة للمراجعة مرة أخرى.",
+    "lastEditScreenedOut": "حظرت ضوابط مخرجات الوكيل تعديلك الأخير ({{guardrail}}) — الإجابة الأصلية معروضة للمراجعة مرة أخرى.",
+    "noReason": "بدون سبب",
+    "reasonLabel": "السبب (للرفض أو التعديل)",
+    "reviewerEdit": "تعديل المراجِع",
+    "showOriginal": "عرض الأصل"
+  },
   "chatDrawer": {
     "deploying": "جارٍ نشر الوكيل…",
     "error": "حدث خطأ ما",

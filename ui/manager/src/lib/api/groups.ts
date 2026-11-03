@@ -1,4 +1,5 @@
 import { api } from "../api-client";
+import { HITL_CLIENT_HEADERS } from "./hitl";
 import { deleteAgent, type AgentDescriptor } from "./agents";
 import { parseSseFrame } from "./sse-utils";
 import { repairNegotiationArbitration } from "../hitl-config";
@@ -1907,11 +1908,17 @@ async function streamRefusalMessage(response: Response): Promise<string> {
 }
 
 /** POST a JSON body to an SSE endpoint (shared auth/header scaffolding). */
-function postSSE(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
+function postSSE(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  extraHeaders?: Record<string, string>,
+): Promise<Response> {
   return fetch(`${api.getBaseUrl()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...extraHeaders,
       ...api.getAuthHeader(),
     },
     body: JSON.stringify(body),
@@ -1979,6 +1986,7 @@ export async function* streamGroupApproval(
     `/groups/${seg(groupId)}/conversations/${seg(gcId)}/approve/stream`,
     request,
     signal,
+    HITL_CLIENT_HEADERS,
   );
   yield* readGroupSSE(response);
 }
