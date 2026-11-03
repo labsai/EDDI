@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
-import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
+import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
@@ -208,9 +208,10 @@ function WorkforceSection() {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const orderByRecentUse = useRecentAgents();
-  // Descriptors are per version; fetch enough that grouping by agent id still
-  // yields every agent, and show them all rather than a fixed top-10.
-  const { data: agentsRaw } = useAgentDescriptors(200);
+  // Descriptors are per version, so a single page can hold fewer distinct agents
+  // than its size. Page through all of them so no agent is ever missing.
+  const { data: agentPages } = useAllAgentDescriptors();
+  const agentsRaw = useMemo(() => agentPages?.pages.flat(), [agentPages]);
   const navigate = useNavigate();
 
   const agents = useMemo(

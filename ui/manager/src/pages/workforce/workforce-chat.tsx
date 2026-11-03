@@ -28,10 +28,15 @@ export function WorkforceChat() {
   const selectedAgentName = useChatStore((s) => s.selectedAgentName);
   const effectiveAgentId = selectedAgentId || searchParams.get("agentId") || null;
 
-  // Feeds the "last used" ordering on the Workforce dashboard.
+  // Feeds the "last used" ordering on the Workforce dashboard. While a deep link
+  // names a different agent than the one still selected, ChatPanel has not
+  // resolved it yet; recording now would credit the previous agent.
+  const urlAgentId = searchParams.get("agentId");
   useEffect(() => {
-    if (effectiveAgentId) markAgentUsed(effectiveAgentId);
-  }, [effectiveAgentId]);
+    if (!selectedAgentId) return;
+    if (urlAgentId && urlAgentId !== selectedAgentId) return;
+    markAgentUsed(selectedAgentId);
+  }, [selectedAgentId, urlAgentId]);
 
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
