@@ -1224,6 +1224,18 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
+    public boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence) {
+        if (!isStorableId(conversationId)) {
+            return false;
+        }
+        var filter = withFence(Filters.and(
+                Filters.eq(OBJECT_ID, new ObjectId(conversationId)),
+                Filters.eq(KEY_CONVERSATION_STATE, expected.name())), fence);
+        var update = new Document("$set", new Document(KEY_CONVERSATION_STATE, target.name()));
+        return conversationCollectionDocument.updateOne(filter, update).getMatchedCount() > 0;
+    }
+
+    @Override
     public List<String> findConversationIdsByState(ConversationState state) {
         List<String> ids = new ArrayList<>();
         conversationCollectionDocument.find(Filters.eq(KEY_CONVERSATION_STATE, state.name()))

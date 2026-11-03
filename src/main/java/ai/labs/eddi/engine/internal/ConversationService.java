@@ -3180,6 +3180,15 @@ public class ConversationService implements IConversationService, UserErasurePar
         return conversationStepRunner.waitForExecutionFinishOrTimeout(loggingContext, conversationId, memory, future);
     }
 
+    /** See {@link ConversationStepRunner#fenceRaised}. */
+    boolean fenceRaised(String conversationId, LeaseHandle lease) {
+        return conversationStepRunner.fenceRaised(conversationId, lease);
+    }
+
+    void refreshCachedState(String conversationId) {
+        conversationStepRunner.refreshCachedState(conversationId);
+    }
+
     ConversationState committedStateOrError(String conversationId) {
         return conversationStepRunner.committedStateOrError(conversationId);
     }

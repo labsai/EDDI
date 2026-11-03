@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.security.CallerIdentity;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -556,6 +557,10 @@ class ConversationHitlService {
             // Whether the caller's handler has been given (or is holding) its answer, so a
             // failure path can tell "nothing delivered yet" from "already answered".
             final AtomicBoolean replyDelivered = new AtomicBoolean(false);
+            // Cluster mode: set when the lease this resume runs under is lost (A5).
+            final AtomicBoolean resumeLeaseLost = new AtomicBoolean(false);
+            // Cluster mode: the resume's commit was refused by the fence (A5/A6).
+            final AtomicReference<ConversationFencedException> resumeFenced = new AtomicReference<>();
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     returnMemory -> {
@@ -566,6 +571,17 @@ class ConversationHitlService {
                         // resume (timeout policy) spends just the same.
                         conversationService.meterTurnCost(returnMemory);
                         if (handler == null) {
+                            return;
+                        }
+                        if (resumeLeaseLost.get() || returnMemory.isLeaseLost()) {
+                            // Cluster mode (A1/A5): this node lost the lease while the resume
+                            // ran. It is not stored and is dead-lettered, so its caller is told
+                            // it was not applied (409) instead of getting the reply of a resume
+                            // that will not exist.
+                            if (replyDelivered.compareAndSet(false, true)) {
+                                deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly,
+                                        returningFields);
+                            }
                             return;
                         }
                         var memorySnapshot = convertSimpleConversationMemorySnapshot(returnMemory, returnDetailed, returnCurrentStepOnly,
@@ -706,7 +722,18 @@ class ConversationHitlService {
                         if (!rePaused) {
                             conversationService.decideContinuation(memory);
                         }
-                        boolean persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        boolean persisted;
+                        try {
+                            persisted = conversationService.storeConversationMemoryIfState(memory, environment, ConversationState.IN_PROGRESS);
+                        } catch (ConversationFencedException e) {
+                            // A6: another node holds the conversation now and has started on
+                            // it. Not an ERROR (the document is the newer holder's): the resume
+                            // is dead-lettered by its task (see call()).
+                            conversationService.counterFenceRejected();
+                            resumeFenced.set(e);
+                            LOGGER.errorf("Resume of conversation %s was NOT persisted: %s", sanitize(conversationId), e.getMessage());
+                            return;
+                        }
                         if (!persisted) {
                             LOGGER.infof("Resume of conversation %s not persisted: a concurrent writer moved it off "
                                     + "IN_PROGRESS or rewrote the document — discarding the resumed outcome so the "
@@ -793,17 +820,27 @@ class ConversationHitlService {
 
                 public Void call() {
                     LeaseHandle held = lease;
-                    if (held != null && held.fence() != null) {
-                        // Same fencing as a say turn: the resumed turn's write is refused if
-                        // another node took the conversation over, and losing the lease
-                        // cancels it at the next task boundary.
-                        memory.setFenceToken(held.fence());
-                        try {
-                            conversationMemoryStore.raiseFence(conversationId, held.fence());
-                        } catch (Exception e) {
-                            LOGGER.warnf("Could not raise the fence of conversation %s: %s", conversationId, e.getMessage());
+                    boolean fenced = held != null && held.fence() != null;
+                    if (fenced) {
+                        // Same fencing as a say turn: the fence goes up before the resume runs
+                        // (A3), the resumed turn's write is refused if another node took the
+                        // conversation over, and losing the lease cancels it at the next task
+                        // boundary. A resume that cannot raise the fence does not run: the pause
+                        // is restored, so the approval can be given again.
+                        if (!conversationService.fenceRaised(conversationId, held)) {
+                            inFlightConversations.remove(conversationId, memory);
+                            restorePauseAfterFailedResume(conversationId, memory, true);
+                            if (replyDelivered.compareAndSet(false, true)) {
+                                deliverSkipped(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            }
+                            return null;
                         }
-                        held.onLost(() -> memory.setCancelled(true));
+                        memory.setFenceToken(held.fence());
+                        memory.setLeaseLostCheck(held::isLost);
+                        held.onLost(() -> {
+                            resumeLeaseLost.set(true);
+                            memory.setCancelled(true);
+                        });
                     }
                     try {
                         // The identities were captured on the REST request thread
@@ -829,7 +866,46 @@ class ConversationHitlService {
                         // value-conditional: never evict a newer execution's registration
                         inFlightConversations.remove(conversationId, memory);
                     }
+                    if (fenced) {
+                        settleLostResume(held.fence());
+                    }
                     return null;
+                }
+
+                /**
+                 * Cluster mode (A5): a resume that lost its lease, or whose commit the fence
+                 * refused, stored nothing. Before, only the cancel flag went up and the
+                 * conversation stayed IN_PROGRESS (the resume's own CAS) with nothing to move
+                 * it: say, undo and redo were refused and crash recovery restored the pause
+                 * only minutes later, with no trace of the decision. Now the pause is restored
+                 * at once, with a fenced CAS, so it stands only while no node that took the
+                 * conversation over has started on it; and the resume is thrown to the
+                 * coordinator, which dead-letters it with its fencing token.
+                 */
+                private void settleLostResume(long fence) {
+                    ConversationFencedException refused = resumeFenced.get();
+                    boolean lost = resumeLeaseLost.get() || memory.isLeaseLost();
+                    if (refused == null && (!lost || committedResumeState.get() != null)) {
+                        return; // committed, or never lost: nothing to settle
+                    }
+                    try {
+                        if (conversationMemoryStore.compareAndSetStateFenced(conversationId, ConversationState.IN_PROGRESS,
+                                ConversationState.AWAITING_HUMAN, fence)) {
+                            conversationService.cacheConversationState(conversationId, ConversationState.AWAITING_HUMAN);
+                            scheduleHitlTimeout(conversationId, memory);
+                            LOGGER.warnf("Resume of conversation %s lost its lease — the pause is restored (AWAITING_HUMAN) and the "
+                                    + "resume is dead-lettered; the decision has to be given again", sanitize(conversationId));
+                        } else {
+                            conversationService.refreshCachedState(conversationId);
+                        }
+                    } catch (Exception e) {
+                        LOGGER.errorf(e, "Could not restore the pause of conversation %s after its resume lost the lease",
+                                sanitize(conversationId));
+                    }
+                    if (refused != null) {
+                        throw new IllegalStateException(refused.getMessage(), refused);
+                    }
+                    throw new ConversationStepRunner.TurnLeaseLostException(conversationId, fence);
                 }
 
                 /**

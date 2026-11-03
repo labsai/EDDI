@@ -1273,6 +1273,28 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
+    public boolean compareAndSetStateFenced(String conversationId, ConversationState expected, ConversationState target, long fence)
+            throws IResourceStore.ResourceStoreException {
+        if (!PostgresIds.isStorableId(conversationId)) {
+            return false;
+        }
+        ensureSchema();
+        String sql = "UPDATE conversation_memories SET conversation_state = ?, "
+                + "data = jsonb_set(data, '{conversationState}', to_jsonb(?::text)) "
+                + "WHERE id = ?::uuid AND conversation_state = ?" + FENCE_CLAUSE;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, target.name());
+            ps.setString(2, target.name());
+            ps.setString(3, conversationId);
+            ps.setString(4, expected.name());
+            ps.setLong(5, fence);
+            return ps.executeUpdate() > 0;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to compare-and-set conversation state", e);
+        }
+    }
+
+    @Override
     public List<String> findConversationIdsByState(ConversationState state) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         String sql = "SELECT id FROM conversation_memories WHERE conversation_state = ?";

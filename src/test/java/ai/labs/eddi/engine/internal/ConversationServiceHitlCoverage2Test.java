@@ -22,6 +22,8 @@ import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.ToolCallDecision;
+import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
@@ -37,6 +39,7 @@ import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.IConversationSetup;
+import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
@@ -48,19 +51,23 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -344,6 +351,112 @@ class ConversationServiceHitlCoverage2Test {
                     CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
             // CAS-restore missed → the re-arm branch is skipped even though rearm=true.
             verify(scheduleStore, never()).createSchedule(any());
+        }
+    }
+
+    // =========================================================================
+    // Cluster mode: a resume under a lease (A3, A5, A6)
+    // =========================================================================
+
+    @Nested
+    @DisplayName("resume under a cluster lease")
+    class ResumeUnderLease {
+
+        private final List<Runnable> lostCallbacks = new ArrayList<>();
+        private final AtomicBoolean leaseLost = new AtomicBoolean();
+
+        private LeaseHandle lease() {
+            LeaseHandle lease = mock(LeaseHandle.class);
+            lenient().when(lease.fence()).thenReturn(9L);
+            lenient().when(lease.isLost()).thenAnswer(inv -> leaseLost.get());
+            lenient().doAnswer(inv -> lostCallbacks.add(inv.getArgument(0))).when(lease).onLost(any());
+            return lease;
+        }
+
+        /**
+         * Accepts a resume of a RULE pause and returns its queued task, bound to a
+         * lease.
+         */
+        private ILeaseAwareTask acceptedResume() throws Exception {
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            var snapshot = rulePauseSnapshot();
+            snapshot.setConversationState(ConversationState.IN_PROGRESS);
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            IAgent agent = mock(IAgent.class);
+            doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
+            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            List<Callable<Void>> queued = new ArrayList<>();
+            doAnswer(inv -> queued.add(inv.getArgument(1))).when(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
+
+            HitlDecision decision = new HitlDecision();
+            decision.setVerdict(HitlVerdict.APPROVED);
+            conversationService.resumeConversation(CONVERSATION_ID, decision, null);
+            assertEquals(1, queued.size());
+            ILeaseAwareTask task = (ILeaseAwareTask) queued.get(0);
+            task.bindLease(lease());
+            return task;
+        }
+
+        @Test
+        @DisplayName("A5: a resume that loses its lease restores the pause under its fence and is dead-lettered")
+        void lostLeaseRestoresThePauseAndDeadLetters() throws Exception {
+            ILeaseAwareTask task = acceptedResume();
+            doAnswer(inv -> {
+                // the lease goes while the resumed pipeline runs
+                leaseLost.set(true);
+                lostCallbacks.forEach(Runnable::run);
+                IRuntime.IFinishedExecution<Void> done = inv.getArgument(1);
+                done.onComplete(null);
+                return CompletableFuture.completedFuture(null);
+            }).when(runtime).submitCallable(any(), any(), any());
+            doReturn(true).when(conversationMemoryStore).compareAndSetStateFenced(CONVERSATION_ID, ConversationState.IN_PROGRESS,
+                    ConversationState.AWAITING_HUMAN, 9L);
+
+            assertThrows(ConversationStepRunner.TurnLeaseLostException.class, task::call,
+                    "a lease-lost resume must reach the coordinator as a failure, so it is dead-lettered");
+
+            InOrder order = inOrder(conversationMemoryStore);
+            order.verify(conversationMemoryStore).raiseFence(CONVERSATION_ID, 9L);
+            order.verify(conversationMemoryStore).compareAndSetStateFenced(CONVERSATION_ID, ConversationState.IN_PROGRESS,
+                    ConversationState.AWAITING_HUMAN, 9L);
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshotIfState(any(), any());
+        }
+
+        @Test
+        @DisplayName("A6: a resume whose commit the fence refuses is dead-lettered as fenced, never flipped to ERROR")
+        void fencedResumeIsDeadLettered() throws Exception {
+            ILeaseAwareTask task = acceptedResume();
+            doAnswer(inv -> {
+                IRuntime.IFinishedExecution<Void> done = inv.getArgument(1);
+                done.onComplete(null);
+                return CompletableFuture.completedFuture(null);
+            }).when(runtime).submitCallable(any(), any(), any());
+            doThrow(new ConversationFencedException(CONVERSATION_ID, 9L, 12L)).when(conversationMemoryStore)
+                    .storeConversationMemorySnapshotIfState(any(), eq(ConversationState.IN_PROGRESS));
+
+            var failure = assertThrows(IllegalStateException.class, task::call);
+            assertInstanceOf(ConversationFencedException.class, failure.getCause());
+            verify(conversationMemoryStore, never()).compareAndSetState(CONVERSATION_ID, ConversationState.IN_PROGRESS,
+                    ConversationState.ERROR);
+            verify(conversationMemoryStore).compareAndSetStateFenced(CONVERSATION_ID, ConversationState.IN_PROGRESS,
+                    ConversationState.AWAITING_HUMAN, 9L);
+        }
+
+        @Test
+        @DisplayName("A3: a resume that cannot raise the fence does not run; the pause is restored")
+        void raiseFailureRestoresThePause() throws Exception {
+            ILeaseAwareTask task = acceptedResume();
+            doThrow(new ResourceStoreException("db down")).when(conversationMemoryStore).raiseFence(CONVERSATION_ID, 9L);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN);
+
+            task.call();
+
+            verify(runtime, never()).submitCallable(any(), any(), any());
+            verify(conversationMemoryStore).compareAndSetState(CONVERSATION_ID, ConversationState.IN_PROGRESS,
+                    ConversationState.AWAITING_HUMAN);
         }
     }
 
