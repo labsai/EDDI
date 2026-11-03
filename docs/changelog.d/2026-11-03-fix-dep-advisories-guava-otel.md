@@ -8,6 +8,6 @@
 - Whole family at 1.67.0 (BOM imports): `NoSuchMethodError: io.opentelemetry.exporter.internal.ExporterBuilderUtil.validateEndpoint(String)`, because `quarkus-opentelemetry` calls an internal exporter method that 1.67 changed.
 - API line only (`opentelemetry-api`, `-context`, `-common`) at 1.67.0 with SDK and exporter at 1.62.0: `NoClassDefFoundError: io.opentelemetry.api.internal.ConfigUtil`, which 1.67 removed and the 1.62 SDK still uses.
 
-Both pass every unit test, so only a real boot shows it. Revisit when a Quarkus platform manages OpenTelemetry 1.67.0 or later. Until then the exposure is a long inbound `tracestate` header; capping header size at the proxy (or `quarkus.http.limits.max-header-size`) bounds it.
+Neither showed up in the unit tests run locally (the tracing, style and repo-guard tests; the full suite was not run), so only a real boot shows it. Revisit when a Quarkus platform manages OpenTelemetry 1.67.0 or later. Until then the exposure is a long inbound `tracestate` header; capping header size at the proxy (or `quarkus.http.limits.max-header-size`) bounds it.
 
 The `minimatch` advisory (GHSA-g3hv-75wg-m249, dev tooling only) is handled in a separate PR.
