@@ -284,7 +284,9 @@ public class SecretPropertyVault {
         var conversationOutput = currentStep.getConversationOutput();
         if (conversationOutput != null) {
             for (var outputEntry : conversationOutput.entrySet()) {
-                Object cleaned = SecretValueScrubber.scrubAll(outputEntry.getValue(), needles, SECRET_INPUT_PLACEHOLDER);
+                // Deep: an entry is often a typed output item (a TextOutputItem holding an
+                // LLM reply), which the shallow walk cannot enter.
+                Object cleaned = SecretValueScrubber.scrubDeep(outputEntry.getValue(), needles, SECRET_INPUT_PLACEHOLDER);
                 if (cleaned != null) {
                     outputEntry.setValue(cleaned);
                     anythingScrubbed = true;
@@ -340,7 +342,7 @@ public class SecretPropertyVault {
      * what a configured parser normalizer produces — the resolved secret is the
      * NORMALIZED input, never byte-identical to the raw one.
      */
-    private static boolean carriesSecret(String value, String plaintext) {
+    static boolean carriesSecret(String value, String plaintext) {
         if (isNullOrEmpty(value)) {
             return false;
         }

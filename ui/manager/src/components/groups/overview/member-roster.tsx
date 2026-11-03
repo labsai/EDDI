@@ -168,7 +168,7 @@ function StatusChip({ member }: { member: DigestMember }) {
   }
   if (member.status === "awaiting") {
     return (
-      <span className="ms-auto shrink-0 text-[11px] text-amber-600 dark:text-amber-400">
+      <span className="ms-auto shrink-0 text-[11px] text-warn-600 dark:text-warn-400">
         {t("groups.overview.statusAwaiting", "your turn")}
       </span>
     );
@@ -183,7 +183,7 @@ function StatusChip({ member }: { member: DigestMember }) {
   }
   if (member.status === "dissented") {
     return (
-      <span className="ms-auto flex shrink-0 items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+      <span className="ms-auto flex shrink-0 items-center gap-1 text-[11px] text-warn-600 dark:text-warn-400">
         <AlertTriangle className="h-3 w-3" aria-hidden="true" />
         {t("groups.overview.statusDissented", "dissent")}
       </span>

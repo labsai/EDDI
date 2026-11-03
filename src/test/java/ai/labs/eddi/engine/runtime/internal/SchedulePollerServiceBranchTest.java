@@ -68,7 +68,7 @@ class SchedulePollerServiceBranchTest {
     }
 
     @Nested
-    @DisplayName("pollDueSchedules — error handling")
+    @DisplayName("pollAndAwait — error handling")
     class PollErrors {
 
         @Test
@@ -77,7 +77,7 @@ class SchedulePollerServiceBranchTest {
             when(scheduleStore.findDueSchedules(any(), any(), anyInt()))
                     .thenThrow(new RuntimeException("db error"));
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
     }
 
@@ -94,7 +94,7 @@ class SchedulePollerServiceBranchTest {
             when(scheduleStore.tryClaim(any(), any(), any(), any())).thenReturn(true);
             when(fireExecutor.fire(any(), any(), anyInt())).thenThrow(new RuntimeException("fire exploded"));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
         }
@@ -109,7 +109,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt())).thenThrow(new RuntimeException("fire error"));
             doThrow(new RuntimeException("mark failed error")).when(scheduleStore).markFailed(any(), any(), any());
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
     }
 
@@ -127,7 +127,7 @@ class SchedulePollerServiceBranchTest {
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
             doThrow(new RuntimeException("mark error")).when(scheduleStore).markCompleted(any(), any(), any());
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
     }
 
@@ -145,7 +145,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markCompleted(eq("sched-1"), any(), any());
         }
@@ -159,7 +159,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markCompleted(eq("sched-1"), any(), isNull());
         }
@@ -173,7 +173,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markCompleted(eq("sched-1"), any(), isNull());
         }
@@ -188,7 +188,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markCompleted(eq("hb-1"), any(), isNull());
         }
@@ -203,7 +203,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             // nextFire should be non-null (from cron parser)
             verify(scheduleStore).markCompleted(eq("hb-1"), any(), argThat(next -> next != null));
@@ -219,7 +219,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("hb-1", FireStatus.COMPLETED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markCompleted(eq("hb-1"), any(), isNull());
         }
@@ -239,7 +239,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
 
         @Test
@@ -252,7 +252,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
 
         @Test
@@ -265,7 +265,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.COMPLETED.name()));
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
     }
 
@@ -284,7 +284,7 @@ class SchedulePollerServiceBranchTest {
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
             doThrow(new RuntimeException("mark error")).when(scheduleStore).markFailed(any(), any(), any());
 
-            assertDoesNotThrow(() -> poller.pollDueSchedules());
+            assertDoesNotThrow(() -> poller.pollAndAwait());
         }
 
         @Test
@@ -297,7 +297,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markDeadLettered(eq("sched-1"), any());
             verify(scheduleStore, never()).markFailed(any(), any(), any());
@@ -313,7 +313,7 @@ class SchedulePollerServiceBranchTest {
             when(fireExecutor.fire(any(), any(), anyInt()))
                     .thenReturn(makeFireLog("sched-1", FireStatus.FAILED.name()));
 
-            poller.pollDueSchedules();
+            poller.pollAndAwait();
 
             verify(scheduleStore).markFailed(eq("sched-1"), any(), any());
             verify(scheduleStore, never()).markDeadLettered(any(), any());

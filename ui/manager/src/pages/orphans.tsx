@@ -122,7 +122,7 @@ export function OrphansPage() {
           toast.error(
             t(
               "orphans.purgeIncompleteScan",
-              "Nothing was deleted: EDDI could not finish checking which resources are still in use. Re-scan and try again.",
+              "Nothing was deleted: {{productName}} could not finish checking which resources are still in use. Re-scan and try again.",
             ),
             { description: getErrorMessage(err) },
           );

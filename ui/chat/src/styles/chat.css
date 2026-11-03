@@ -91,6 +91,14 @@ a:hover { opacity: 0.85; }
   letter-spacing: 0.02em;
 }
 
+/* A brand without an uploaded logo: its product name stands where the logo
+   would, so the agent name keeps its place beside it. */
+.chat-header__title--wordmark {
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .chat-header__actions {
   display: flex;
   align-items: center;

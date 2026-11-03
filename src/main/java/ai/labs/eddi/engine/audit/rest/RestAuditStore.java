@@ -176,7 +176,7 @@ public class RestAuditStore implements IRestAuditStore {
         var undelivered = new ArrayList<Long>();
         var duplicates = new ArrayList<Long>();
         ChainStatus chainStatus = checkChain
-                ? checkChain(entries, missing, undelivered, duplicates, expectRunFromOrigin, undeliveredFor(scopeId))
+                ? checkChain(entries, missing, undelivered, duplicates, expectRunFromOrigin, undeliveredFor(scopeId), signingEnabled)
                 : ChainStatus.NOT_APPLICABLE;
 
         return new AuditVerificationReport(scope, scopeId, signingEnabled, entries.size(), valid, recovered,
@@ -193,6 +193,16 @@ public class RestAuditStore implements IRestAuditStore {
     }
 
     private static final Logger LOGGER = Logger.getLogger(RestAuditStore.class);
+
+    /**
+     * False only for an entry SIGNED by a version whose payload leaves out the
+     * {@code sequence} (v1, v2). An unsigned entry is reported as such on its own
+     * and keeps its position.
+     */
+    private static boolean signsSequence(AuditEntry entry) {
+        String version = AuditHmac.versionOf(entry.hmac());
+        return !"v1".equals(version) && !"v2".equals(version);
+    }
 
     /**
      * First sequence number a conversation is assigned. {@code AuditLedgerService}
@@ -227,10 +237,22 @@ public class RestAuditStore implements IRestAuditStore {
      * reported by {@code AuditLedgerService.undeliveredSequences}) is listed
      * separately and downgrades the verdict to {@code INCOMPLETE} instead of
      * accusing the deployment of deletion.</li>
+     * <li>With signing on, a position counts as present only when the entry
+     * claiming it signs its sequence (v3 and later). v1/v2 signatures do not cover
+     * the field, so such a row's sequence could be rewritten to fill a deletion's
+     * hole without failing its own HMAC.</li>
+     * <li>Unsequenced rows (written before sequences existed, or while the shared
+     * counter was unreachable) no longer make the whole window unjudgeable: the
+     * sequenced rows are still checked for holes between them — which proves a
+     * deletion — and only a window without holes is reported {@code UNAVAILABLE},
+     * since its prefix cannot be anchored.</li>
      * </ul>
+     * Deleting the <em>newest</em> entries, or a conversation's entire trail, is
+     * not detectable from the rows alone; that needs an anchored head outside the
+     * trail (see the changelog's open items).
      */
-    private static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> undelivered, List<Long> duplicates,
-                                          boolean expectRunFromOrigin, Set<Long> knownUndelivered) {
+    static ChainStatus checkChain(List<AuditEntry> entries, List<Long> missing, List<Long> undelivered, List<Long> duplicates,
+                                  boolean expectRunFromOrigin, Set<Long> knownUndelivered, boolean signingEnabled) {
         if (entries.isEmpty()) {
             return ChainStatus.INTACT;
         }
@@ -243,11 +265,17 @@ public class RestAuditStore implements IRestAuditStore {
         // the deployment of deleting audit records it never had. Unsequenced rows also
         // make a genuine deletion undetectable, so the honest answer for a mixed window
         // is that the chain cannot be established.
-        if (entries.stream().anyMatch(e -> e.sequence() < 0)) {
+        boolean mixed = entries.stream().anyMatch(e -> e.sequence() < 0);
+        List<Long> sequences = entries.stream().filter(e -> e.sequence() >= 0).filter(e -> !signingEnabled || signsSequence(e))
+                .map(AuditEntry::sequence).sorted().toList();
+        if (sequences.isEmpty()) {
             return ChainStatus.UNAVAILABLE;
         }
-
-        List<Long> sequences = entries.stream().map(AuditEntry::sequence).sorted().toList();
+        if (mixed) {
+            // Never anchor a mixed window at the origin (see above); holes BETWEEN the
+            // sequenced rows still prove a deletion.
+            expectRunFromOrigin = false;
+        }
 
         Set<Long> seen = new HashSet<>();
         for (Long sequence : sequences) {
@@ -295,6 +323,10 @@ public class RestAuditStore implements IRestAuditStore {
         // INTACT here would hand an auditor a false assurance.
         if (!missing.isEmpty() || !duplicates.isEmpty()) {
             return ChainStatus.BROKEN;
+        }
+        if (mixed || sequences.size() < entries.stream().filter(e -> e.sequence() >= 0).count()) {
+            // No hole, but part of the window could not be placed on the chain.
+            return ChainStatus.UNAVAILABLE;
         }
         // Nothing unaccounted for is missing. Gaps the ledger itself caused leave the
         // record incomplete without being evidence of deletion.

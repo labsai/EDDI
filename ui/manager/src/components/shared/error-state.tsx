@@ -44,7 +44,7 @@ export function ErrorState({
   let headline = message ?? t("common.error", "Something went wrong");
   switch (status) {
     case 0:
-      headline = t("common.errors.network", "Can't reach EDDI. Check your connection and try again.");
+      headline = t("common.errors.network", "Can't reach {{productName}}. Check your connection and try again.");
       break;
     case 401:
       headline = t("common.errors.unauthorized", "Your session has expired. Sign in again.");

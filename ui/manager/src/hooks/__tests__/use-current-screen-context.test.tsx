@@ -90,6 +90,7 @@ describe("useCurrentScreenContext", () => {
     expect(renderAt("/manage/agents").result.current).toEqual({ screen: "agents" });
     expect(renderAt("/manage/operator").result.current).toEqual({ screen: "operator" });
     expect(renderAt("/manage/updates").result.current).toEqual({ screen: "updates" });
+    expect(renderAt("/manage/branding").result.current).toEqual({ screen: "branding" });
     expect(renderAt("/workforce").result.current).toEqual({ screen: "workforce-dashboard" });
   });
 

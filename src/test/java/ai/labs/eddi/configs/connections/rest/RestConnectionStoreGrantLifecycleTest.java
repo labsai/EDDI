@@ -66,7 +66,7 @@ class RestConnectionStoreGrantLifecycleTest {
 
     private RestConnectionStore rest() {
         return new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class), connectionRegistry,
-                grantStore, secretProvider, true, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore(),
+                grantStore, secretProvider, true, adminGuard(), new InMemoryConnectionNameClaimStore(),
                 mock(CredentialReferenceResolver.class));
     }
 
@@ -218,7 +218,7 @@ class RestConnectionStoreGrantLifecycleTest {
     @DisplayName("a PER_USER connection cannot be created where no identity is verified")
     void refusesPerUserWithoutAuthorization() {
         var rest = new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
-                connectionRegistry, grantStore, secretProvider, false, mock(ResourceAccessGuard.class), new InMemoryConnectionNameClaimStore(),
+                connectionRegistry, grantStore, secretProvider, false, adminGuard(), new InMemoryConnectionNameClaimStore(),
                 mock(CredentialReferenceResolver.class));
         var connection = connection("drive", "acme");
         connection.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
@@ -283,5 +283,15 @@ class RestConnectionStoreGrantLifecycleTest {
         oauth.setClientId("client");
         oauth.setClientSecret("${vault:client-secret}");
         return oauth;
+    }
+
+    /**
+     * Creating a connection is admin-only in the implementation too, not only on
+     * the REST interface, so these fixtures act as an administrator.
+     */
+    private static ResourceAccessGuard adminGuard() {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        lenient().when(guard.isAdmin()).thenReturn(true);
+        return guard;
     }
 }

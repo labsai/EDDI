@@ -1050,6 +1050,18 @@ class AuditLedgerServiceTest {
         verify(auditStore, never()).appendBatch(anyList());
     }
 
+    @Test
+    @DisplayName("submit reports whether the ledger took the entry, so a caller can keep its own copy of a dropped one")
+    void submitReportsAcceptance() {
+        var svc = AuditLedgerService.createForTesting(auditStore, true, 60, null, meterRegistry, 2);
+        svc.init();
+
+        assertTrue(svc.submit(entry("id-1", "conv-1", "agent-1")));
+        assertTrue(svc.submit(entry("id-2", "conv-1", "agent-1")));
+        assertFalse(svc.submit(entry("id-3", "conv-1", "agent-1")), "the queue is full: the entry was dropped");
+        assertFalse(svc.submit(null));
+    }
+
     /**
      * The drop counter only moves once the queue is already full. Depth against
      * capacity is the warning before it, and an alert rule divides one by the other

@@ -67,16 +67,6 @@ public class AlertEngine {
     }
 
     AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, Clock clock) {
-        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, null, null, clock);
-    }
-
-    AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
-            AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, Clock clock) {
-        this(ruleCache, eventStore, deliveryService, settings, metrics, reviewPolicy, ratingStore, null, clock);
-    }
-
-    AlertEngine(AlertRuleCache ruleCache, IAlertEventStore eventStore, AlertDeliveryService deliveryService, AlertSettings settings,
             AlertMetrics metrics, ConversationReviewPolicy reviewPolicy, IConversationRatingStore ratingStore, AlertErasureFence erasureFence,
             Clock clock) {
         this.erasureFence = erasureFence;
@@ -137,13 +127,7 @@ public class AlertEngine {
         // yet: the conditional redaction cannot be skipped, and nothing waits on
         // itself.
         eventStore.redactRatingComment(stored.id(), clock.instant());
-        AlertMatch m = stored.match();
-        AlertMatch blanked = new AlertMatch(m.matched(), m.errorKind(), m.ratingId(), m.stepIndex(), m.scale(), m.score(), m.normalizedScore(),
-                m.tags(), null, m.value());
-        return new AlertEvent(stored.id(), stored.ruleId(), stored.ruleName(), stored.source(), stored.kind(), stored.agentId(),
-                stored.agentVersion(), stored.conversationId(), stored.firedAt(), stored.summary(), blanked, stored.deliveries(), stored.state(),
-                stored.nextAttemptAt(), stored.dedupeKey(), stored.duplicates(), stored.digestCount(), stored.digestItems(), stored.acknowledgedBy(),
-                stored.acknowledgedAt(), stored.version(), stored.subjectUserId(), stored.digestEventIds());
+        return stored.withMatch(stored.match().withoutCommentExcerpt(), stored.subjectUserId());
     }
 
     public void evaluateTurn(TurnOutcome outcome) {
@@ -162,15 +146,17 @@ public class AlertEngine {
     public void evaluateOutput(TurnSnapshot snapshot) {
         ruleCache.loadOutputNeeds(snapshot.agentId());
         for (AlertRule rule : ruleCache.rulesFor(snapshot.agentId())) {
-            if (!rule.enabled() || rule.source() != AlertSource.OUTPUT_MATCH || rule.scope() == null
-                    || !rule.scope().covers(snapshot.agentId()) || rule.condition() == null
+            if (!AlertMatchers.applies(rule, AlertSource.OUTPUT_MATCH, snapshot.agentId()) || rule.condition() == null
                     || !OutputMatcher.matches(rule.condition(), snapshot)) {
                 continue;
             }
             String value = null;
-            // Content captured before an erasure of its user started is never stored.
+            // Content captured before an erasure of its user started is never stored —
+            // and neither is content older than the fence can vouch for: a fence lasts
+            // FENCE_TTL, so a snapshot that waited in the queue longer than that could
+            // predate an erasure whose fence has already expired.
             if (Boolean.TRUE.equals(rule.condition().includeValue()) && reviewEnabled(snapshot)
-                    && !fenced(snapshot.userId(), snapshot.capturedAt())) {
+                    && !fenced(snapshot.userId(), snapshot.capturedAt()) && fenceVouchesFor(snapshot.capturedAt())) {
                 value = OutputMatcher.resolve(rule.condition().path(), snapshot)
                         .map(v -> OutputMatcher.render(v, AlertMatch.MAX_COMMENT_EXCERPT)).orElse(null);
             }
@@ -194,17 +180,15 @@ public class AlertEngine {
         }
         // Before delivery, as above: no send claim on this event can exist yet.
         eventStore.redactOutputValues(snapshot.userId(), clock.instant());
-        AlertMatch m = stored.match();
-        AlertMatch blanked = new AlertMatch(m.matched(), m.errorKind(), m.ratingId(), m.stepIndex(), m.scale(), m.score(), m.normalizedScore(),
-                m.tags(), m.commentExcerpt(), null);
-        return new AlertEvent(stored.id(), stored.ruleId(), stored.ruleName(), stored.source(), stored.kind(), stored.agentId(),
-                stored.agentVersion(), stored.conversationId(), stored.firedAt(), stored.summary(), blanked, stored.deliveries(), stored.state(),
-                stored.nextAttemptAt(), stored.dedupeKey(), stored.duplicates(), stored.digestCount(), stored.digestItems(), stored.acknowledgedBy(),
-                stored.acknowledgedAt(), stored.version(), null, stored.digestEventIds());
+        return stored.withMatch(stored.match().withoutValue(), null);
     }
 
     private boolean fenced(String userId, Instant capturedAt) {
         return erasureFence != null && erasureFence.covers(userId, capturedAt);
+    }
+
+    private boolean fenceVouchesFor(Instant capturedAt) {
+        return erasureFence == null || erasureFence.vouchesFor(capturedAt);
     }
 
     private boolean reviewEnabled(TurnSnapshot snapshot) {

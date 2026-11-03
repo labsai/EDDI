@@ -186,7 +186,8 @@ final class InMemorySecretPersistence implements ISecretPersistence {
     }
 
     @Override
-    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv,
+                                       String checksum) {
         resealInPlaceCalls++;
         if (beforeResealInPlace != null) {
             beforeResealInPlace.run();
@@ -197,6 +198,27 @@ final class InMemorySecretPersistence implements ISecretPersistence {
         }
         stored.setEncryptedValue(encryptedValue);
         stored.setIv(iv);
+        if (checksum != null) {
+            stored.setChecksum(checksum);
+        }
+        return true;
+    }
+
+    /**
+     * When set, runs at the start of {@link #updateSecretIfPresent} — a concurrent
+     * delete, say.
+     */
+    Runnable beforeUpdateIfPresent;
+
+    @Override
+    public boolean updateSecretIfPresent(EncryptedSecret secret) {
+        if (beforeUpdateIfPresent != null) {
+            beforeUpdateIfPresent.run();
+        }
+        if (!secrets.containsKey(key(secret.getTenantId(), secret.getKeyName()))) {
+            return false;
+        }
+        upsertSecret(secret);
         return true;
     }
 

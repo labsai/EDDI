@@ -108,7 +108,7 @@ public final class RetroEngine {
         }
         JsonNode node = readJson(content);
         if (node == null) {
-            node = readJson(embeddedJson(content));
+            node = EmbeddedJson.soleObjectWithAnyField(content, RetroEngine::readJson, "lessons");
         }
         if (node == null || !node.path("lessons").isArray()) {
             return List.of();
@@ -257,9 +257,4 @@ public final class RetroEngine {
         }
     }
 
-    private static String embeddedJson(String content) {
-        int start = content.indexOf('{');
-        int end = content.lastIndexOf('}');
-        return start >= 0 && end > start ? content.substring(start, end + 1) : null;
-    }
 }

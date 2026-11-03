@@ -554,6 +554,10 @@ altogether. The shipped defaults cover
 > `checksum/secret` annotations, so a ConfigMap or Secret change alters the
 > Deployment spec and `helm upgrade` rolls the pod.
 
+### White-labeling (Helm)
+
+`eddi.branding.*` in `values.yaml` seeds the deployment's brand: product name, tagline, colours, the Powered-by and update-check toggles, `locked` (the values become the whole brand and the Manager's Branding page turns read-only) and `assets.configMap`, an existing ConfigMap of images mounted read-only as `eddi.branding.assets-dir`. Everything is empty by default and an empty value is not rendered. The chart does not mount a login theme into its in-cluster Keycloak; the theme ZIP the Branding page offers has to reach Keycloak the way you manage it. See [White-Labeling → Helm](white-labeling.md#helm).
+
 ### Pod Security
 
 EDDI runs as non-root user (UID 185) and is compatible with `restricted` Pod Security Standards:

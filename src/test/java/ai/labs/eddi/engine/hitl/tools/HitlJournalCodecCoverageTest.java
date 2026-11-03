@@ -57,7 +57,7 @@ import static org.mockito.MockitoAnnotations.openMocks;
 class HitlJournalCodecCoverageTest {
 
     private static final String COLLECTION_NAME = "hitltoolexecutionjournal";
-    private static final String TTL_INDEX_NAME = "idx_journal_ttl_claimed";
+    private static final String TTL_INDEX_NAME = "idx_journal_ttl_completed";
 
     @Mock
     private MongoDatabase database;
@@ -327,14 +327,15 @@ class HitlJournalCodecCoverageTest {
         }
 
         @Test
-        @DisplayName("cleared callId is never re-gated (approved by a human)")
-        void clearedCallIdAllowed() {
+        @DisplayName("a reissue of an already-executed approved call is gated again as a repeat")
+        void clearedCallIdRegatedAsRepeat() {
             var gate = new ToolApprovalGate();
             var batch = List.of(req("1", "delete_account"));
             var result = gate.classify(batch, Map.of("delete_account", "http"),
                     cfg(List.of("delete_*"), null), cleared("1", "delete_account", "{}"));
-            assertTrue(result.gated().isEmpty());
-            assertEquals(1, result.allowed().size());
+            assertEquals(1, result.gated().size());
+            assertTrue(result.allowed().isEmpty());
+            assertEquals(ToolApprovalGate.REPEAT_REASON, result.gateReasonByCallId().get("1"));
         }
 
         @Test

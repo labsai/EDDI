@@ -128,7 +128,7 @@ function TaskCard({
         // Status-specific styles
         status === "pending" && "bg-secondary/30 border-border",
         status === "in-progress" &&
-          "bg-amber-500/10 border-amber-500/40 animate-[pulse-border_2s_ease-in-out_infinite]",
+          "bg-warn-500/10 border-warn-500/40 animate-[pulse-border_2s_ease-in-out_infinite]",
         status === "awaiting-approval" &&
           "bg-orange-500/10 border-orange-500/40",
         status === "completed" && "bg-sky-500/10 border-sky-500/40",
@@ -424,8 +424,8 @@ export function TaskBoard({
     {
       key: "in-progress" as const,
       label: t("taskBoard.inProgress", "Active"),
-      icon: <Zap className="h-4 w-4 text-amber-500" />,
-      colorClass: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
+      icon: <Zap className="h-4 w-4 text-warn-500" />,
+      colorClass: "bg-warn-500/15 text-warn-700 dark:text-warn-300",
       tasks: inProgress,
     },
     {

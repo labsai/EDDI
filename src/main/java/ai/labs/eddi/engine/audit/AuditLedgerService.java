@@ -536,10 +536,12 @@ public class AuditLedgerService implements UserErasureParticipant {
      *
      * @param entry
      *            the entry to persist (hmac field will be computed)
+     * @return true when the entry was queued; false when the ledger is disabled or
+     *         dropped it because its queue was full
      */
-    public void submit(AuditEntry entry) {
+    public boolean submit(AuditEntry entry) {
         if (!enabled || entry == null)
-            return;
+            return false;
         entry = pseudonymiseIfErased(entry, false);
 
         // Take the queue slot BEFORE a chain position is consumed. G18 puts the
@@ -551,7 +553,7 @@ public class AuditLedgerService implements UserErasureParticipant {
         // records it had discarded on its own. Reserving first means a refused
         // entry never occupies a position in the chain at all.
         if (!reserveQueueSlot(entry.conversationId())) {
-            return;
+            return false;
         }
 
         // Make room in the sequence table BEFORE taking the assignment lock —
@@ -625,6 +627,7 @@ public class AuditLedgerService implements UserErasureParticipant {
                 queueSize.decrementAndGet();
             }
         }
+        return true;
     }
 
     /**

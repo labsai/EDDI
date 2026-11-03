@@ -95,7 +95,7 @@ export function ConnectionCard({
           cannot see is one they cannot delete either, and an empty card is a
           better answer than a missing one. */}
       {connection.unreadable ? (
-        <p className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-400">
+        <p className="flex items-center gap-1.5 text-xs text-warn-600 dark:text-warn-400">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {t("connections.unreadable", "This connection could not be read.")}
         </p>

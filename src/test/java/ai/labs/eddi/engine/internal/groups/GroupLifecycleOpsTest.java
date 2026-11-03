@@ -19,6 +19,12 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.ConversationStepData;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot.SimpleConversationStep;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
@@ -27,7 +33,9 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -404,5 +412,78 @@ class GroupLifecycleOpsTest {
     @Test
     void constructedWithMockedCollaborators_doesNotThrow() {
         assertDoesNotThrow(this::ops);
+    }
+
+    // =================================================================
+    // followUpWithMember — budget and bookkeeping like a phase turn
+    // =================================================================
+
+    private IConversationService followUpConversationService;
+    private GroupConversationService followUpFacade;
+
+    private GroupLifecycleOps followUpOps(GroupConversation stored) throws Exception {
+        conversationStore = mock(IGroupConversationStore.class);
+        followUpConversationService = mock(IConversationService.class);
+        followUpFacade = Mockito.mock(GroupConversationService.class);
+        when(conversationStore.read("gc-1")).thenReturn(stored);
+        when(conversationStore.compareAndSetState(eq("gc-1"), any(), any())).thenReturn(true);
+        when(followUpFacade.resolveAgentTimeoutSeconds(any())).thenReturn(5);
+        when(followUpFacade.extractResponse(any())).thenReturn("the answer");
+        when(followUpFacade.resolveEffectiveCostCeiling(any())).thenReturn(null); // unlimited unless a test says so
+        return new GroupLifecycleOps(conversationStore, mock(IAgentGroupStore.class), followUpConversationService,
+                mock(IAgentFactory.class), mock(IAgentStore.class), mock(IDeploymentStore.class),
+                mock(ISharedArtifactStore.class), mock(IAttachmentStore.class), ConcurrentHashMap.newKeySet(),
+                new ConcurrentHashMap<String, DiscussionControlToken>(), followUpFacade,
+                new SimpleMeterRegistry().counter("test.followup"), new SimpleMeterRegistry().counter("test.continue"),
+                new SimpleMeterRegistry().counter("test.close"), new SimpleMeterRegistry().counter("test.failure"));
+    }
+
+    private GroupConversation completedGc() {
+        var gc = new GroupConversation();
+        gc.setId("gc-1");
+        gc.setGroupId("group-1");
+        gc.setState(GroupConversationState.COMPLETED);
+        gc.getMemberConversationIds().put(AGENT_A, "member-conv");
+        gc.setMemberDisplayNames(Map.of(AGENT_A, "Agent A"));
+        return gc;
+    }
+
+    @Test
+    void followUp_pastTheCostCeiling_isRefusedBeforeTheMemberRuns() throws Exception {
+        var gc = completedGc();
+        gc.setTotalCost(2.0);
+        var ops = followUpOps(gc);
+        when(followUpFacade.resolveEffectiveCostCeiling(any())).thenReturn(1.0);
+
+        assertThrows(IGroupConversationService.GroupCostCeilingExceededException.class,
+                () -> ops.followUpWithMember("gc-1", AGENT_A, "one more?"));
+
+        verify(followUpConversationService, never()).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    @Test
+    void followUp_harvestsCostAndPropagatesCreatedAgents() throws Exception {
+        var gc = completedGc();
+        var ops = followUpOps(gc);
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationId("member-conv");
+        snapshot.setConversationState(ConversationState.READY);
+        snapshot.setConversationCost(0.25);
+        var step = new SimpleConversationStep();
+        step.getConversationStep().add(new ConversationStepData(MemoryKeys.DYNAMIC_CREATED_AGENT_IDS,
+                new CopyOnWriteArrayList<>(List.of("sub-1")), null, null));
+        snapshot.getConversationSteps().add(step);
+        doAnswer(inv -> {
+            inv.getArgument(8, IConversationService.ConversationResponseHandler.class).onComplete(snapshot);
+            return null;
+        }).when(followUpConversationService).say(any(), eq(AGENT_A), eq("member-conv"), any(), any(), any(), any(),
+                anyBoolean(), any());
+
+        ops.followUpWithMember("gc-1", AGENT_A, "one more?");
+
+        assertEquals(0.25, gc.getMemberCosts().get(AGENT_A));
+        assertEquals(0.25, gc.getTotalCost());
+        assertEquals(List.of("sub-1"), List.copyOf(gc.getCreatedAgentIds()),
+                "a sub-agent created in a follow-up must be in the cleanup registry");
     }
 }

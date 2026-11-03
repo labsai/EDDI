@@ -253,7 +253,16 @@ public final class GroupCostLedger {
      * is not the same event as a phase running out of budget.
      */
     public static boolean wouldExceedCeiling(GroupConversation gc, ProtocolConfig protocol) {
-        Double ceiling = protocol != null ? protocol.maxCostPerDiscussion() : null;
+        return exceedsCeiling(gc, protocol != null ? protocol.maxCostPerDiscussion() : null);
+    }
+
+    /**
+     * {@link #wouldExceedCeiling(GroupConversation, ProtocolConfig)} against an
+     * already-resolved ceiling ({@code null} = unlimited) — for callers outside the
+     * phase loop, such as a follow-up, that resolve the effective ceiling (own vs.
+     * inherited) themselves.
+     */
+    public static boolean exceedsCeiling(GroupConversation gc, Double ceiling) {
         if (ceiling == null) {
             return false;
         }

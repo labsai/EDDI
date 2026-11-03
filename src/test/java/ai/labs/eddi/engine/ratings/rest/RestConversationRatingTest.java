@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.ratings.rest;
 
+import ai.labs.eddi.engine.alerts.AlertErasureRedactor;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.CommentSettings;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.ConversationRatingSettings;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.MessageRatingSettings;
@@ -56,6 +57,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -420,6 +422,24 @@ class RestConversationRatingTest {
             assertEquals(204, rest.withdrawStepRating(CONVERSATION, 4).getStatus());
             verify(store).delete(CONVERSATION, 4);
             assertEquals(1.0, registry.get("eddi.conversation.ratings.withdrawn").tag("kind", "conversation").counter().count());
+        }
+
+        @Test
+        @DisplayName("withdrawing first blanks the comment excerpts alerts copied from that rating — erasure could not find them later")
+        void withdrawRedactsAlertExcerpts() {
+            ConversationRating conversation = new ConversationRating("a", CONVERSATION, -1, AGENT, 1, null, "api", OWNER, Scale.THUMBS, 0,
+                    0.0, List.of(), "call me on 555-0100", NOW, NOW);
+            ConversationRating step = new ConversationRating("b", CONVERSATION, 2, AGENT, 1, null, "api", OWNER, Scale.THUMBS, 0, 0.0,
+                    List.of(), null, NOW, NOW);
+            when(store.readByConversation(CONVERSATION)).thenReturn(List.of(conversation, step));
+            var redactor = mock(AlertErasureRedactor.class);
+            rest.alertRedactor = redactor;
+
+            rest.withdrawConversationRating(CONVERSATION);
+
+            var order = inOrder(redactor, store);
+            order.verify(redactor).redactRatingComments(List.of("a"));
+            order.verify(store).delete(CONVERSATION, -1);
         }
 
         @Test

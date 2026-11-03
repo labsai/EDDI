@@ -154,34 +154,51 @@ public class MongoSecretPersistence implements ISecretPersistence {
         RuntimeUtilities.checkNotNull(secret, "secret");
         try {
             var filter = and(eq(FIELD_TENANT_ID, secret.getTenantId()), eq(FIELD_KEY_NAME, secret.getKeyName()));
-
-            var updates = new ArrayList<Bson>(List.of(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()),
-                    Updates.set(FIELD_IV, secret.getIv()), Updates.set(FIELD_DEK_ID, secret.getDekId()),
-                    Updates.set(FIELD_CHECKSUM, secret.getChecksum()),
-                    Updates.set(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt())),
-                    Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
-                    Updates.setOnInsert(FIELD_TENANT_ID, secret.getTenantId()), Updates.setOnInsert(FIELD_KEY_NAME, secret.getKeyName()),
-                    Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt()))));
-            // Null means "not supplied" — see ISecretPersistence#upsertSecret. Only an
-            // insert gets the defaults; an update leaves a grant or description it was
-            // not given exactly as it is.
-            if (secret.getDescription() != null) {
-                updates.add(Updates.set(FIELD_DESCRIPTION, secret.getDescription()));
-            }
-            updates.add(secret.getAllowedAgents() != null
-                    ? Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents())
-                    : Updates.setOnInsert(FIELD_ALLOWED_AGENTS, List.of(SecretMetadata.WILDCARD_AGENT)));
-            // Same contract: null is "not supplied". An insert without a host list gets
-            // none, which means any destination — the shape every pre-existing row has.
-            if (secret.getAllowedHosts() != null) {
-                updates.add(Updates.set(FIELD_ALLOWED_HOSTS, secret.getAllowedHosts()));
-            }
-            var update = Updates.combine(updates);
-
-            secretsCollection.updateOne(filter, update, new UpdateOptions().upsert(true));
+            secretsCollection.updateOne(filter, secretWrite(secret), new UpdateOptions().upsert(true));
         } catch (MongoException e) {
             throw new PersistenceException("Failed to upsert secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
         }
+    }
+
+    @Override
+    public boolean updateSecretIfPresent(EncryptedSecret secret) {
+        RuntimeUtilities.checkNotNull(secret, "secret");
+        try {
+            var filter = and(eq(FIELD_TENANT_ID, secret.getTenantId()), eq(FIELD_KEY_NAME, secret.getKeyName()));
+            // The same update, without upsert: the $setOnInsert defaults never apply.
+            return secretsCollection.updateOne(filter, secretWrite(secret)).getMatchedCount() == 1;
+        } catch (MongoException e) {
+            throw new PersistenceException("Failed to update secret " + secret.getTenantId() + "/" + secret.getKeyName(), e);
+        }
+    }
+
+    /**
+     * The update document {@link #upsertSecret} and {@link #updateSecretIfPresent}
+     * write.
+     */
+    private static Bson secretWrite(EncryptedSecret secret) {
+        var updates = new ArrayList<Bson>(List.of(Updates.set(FIELD_ENCRYPTED_VALUE, secret.getEncryptedValue()),
+                Updates.set(FIELD_IV, secret.getIv()), Updates.set(FIELD_DEK_ID, secret.getDekId()),
+                Updates.set(FIELD_CHECKSUM, secret.getChecksum()),
+                Updates.set(FIELD_LAST_ACCESSED_AT, instantToString(secret.getLastAccessedAt())),
+                Updates.set(FIELD_LAST_ROTATED_AT, instantToString(secret.getLastRotatedAt())),
+                Updates.setOnInsert(FIELD_TENANT_ID, secret.getTenantId()), Updates.setOnInsert(FIELD_KEY_NAME, secret.getKeyName()),
+                Updates.setOnInsert(FIELD_CREATED_AT, instantToString(secret.getCreatedAt()))));
+        // Null means "not supplied" — see ISecretPersistence#upsertSecret. Only an
+        // insert gets the defaults; an update leaves a grant or description it was
+        // not given exactly as it is.
+        if (secret.getDescription() != null) {
+            updates.add(Updates.set(FIELD_DESCRIPTION, secret.getDescription()));
+        }
+        updates.add(secret.getAllowedAgents() != null
+                ? Updates.set(FIELD_ALLOWED_AGENTS, secret.getAllowedAgents())
+                : Updates.setOnInsert(FIELD_ALLOWED_AGENTS, List.of(SecretMetadata.WILDCARD_AGENT)));
+        // Same contract: null is "not supplied". An insert without a host list gets
+        // none, which means any destination — the shape every pre-existing row has.
+        if (secret.getAllowedHosts() != null) {
+            updates.add(Updates.set(FIELD_ALLOWED_HOSTS, secret.getAllowedHosts()));
+        }
+        return Updates.combine(updates);
     }
 
     @Override
@@ -265,12 +282,16 @@ public class MongoSecretPersistence implements ISecretPersistence {
     }
 
     @Override
-    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv) {
+    public boolean resealSecretInPlace(String tenantId, String keyName, String dekId, String expectedIv, String encryptedValue, String iv,
+                                       String checksum) {
         try {
             // Guarded on the IV the reader saw (and the generation, which the AAD
             // names): a concurrent store draws a new IV, so it is never overwritten.
             var filter = and(eq(FIELD_TENANT_ID, tenantId), eq(FIELD_KEY_NAME, keyName), eq(FIELD_DEK_ID, dekId), eq(FIELD_IV, expectedIv));
-            var update = Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, encryptedValue), Updates.set(FIELD_IV, iv));
+            var update = checksum == null
+                    ? Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, encryptedValue), Updates.set(FIELD_IV, iv))
+                    : Updates.combine(Updates.set(FIELD_ENCRYPTED_VALUE, encryptedValue), Updates.set(FIELD_IV, iv),
+                            Updates.set(FIELD_CHECKSUM, checksum));
             return secretsCollection.updateOne(filter, update).getMatchedCount() == 1;
         } catch (MongoException e) {
             throw new PersistenceException("Failed to re-seal secret " + tenantId + "/" + keyName, e);

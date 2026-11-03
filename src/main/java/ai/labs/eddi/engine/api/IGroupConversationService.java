@@ -161,6 +161,31 @@ public interface IGroupConversationService {
     boolean cancelDiscussion(String conversationId, ControlSignal mode)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
 
+    /**
+     * Cancel a group discussion only while it is paused (awaiting an approval or a
+     * HUMAN member's turn) — never a running one. The entitlement check and the
+     * cancel are one compare-and-set on the paused state. This is the cancel an
+     * approver who is neither the owner nor an admin may make.
+     *
+     * @return true if the paused discussion was cancelled; false if it was not
+     *         paused (running, terminal, or a concurrent state change won)
+     * @throws IResourceStore.ResourceNotFoundException
+     *             if no group conversation with that id exists
+     * @throws IResourceStore.ResourceStoreException
+     *             on persistence failures
+     */
+    boolean cancelPausedDiscussion(String conversationId, ControlSignal mode)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
+    /**
+     * {@link #cancelPausedDiscussion(String, ControlSignal)} bound to one pause:
+     * nothing is cancelled unless the stored pause's id equals
+     * {@code expectedPauseId} (when non-null). Used by HITL timeouts, which must
+     * only ever end the pause they were armed for.
+     */
+    boolean cancelPausedDiscussion(String conversationId, ControlSignal mode, String expectedPauseId)
+            throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException;
+
     GroupConversation resumeDiscussion(String groupConversationId,
                                        GroupApprovalRequest request,
                                        GroupDiscussionEventListener listener)
@@ -201,9 +226,15 @@ public interface IGroupConversationService {
     /**
      * SKIP_TURN resolution of an expired human turn (I6): records a SKIPPED entry
      * for the pending member and resumes the discussion. Called by the HITL timeout
-     * scheduler; never throws — an already-resolved turn is a no-op.
+     * scheduler. An already-resolved turn — or, with a non-null
+     * {@code expectedPauseId}, a later pause than the one the timeout was armed for
+     * — is a no-op.
+     *
+     * @throws IllegalStateException
+     *             if the skip could not be applied (the scheduler then decides
+     *             whether to re-arm the timeout)
      */
-    void skipHumanTurnOnTimeout(String groupConversationId);
+    void skipHumanTurnOnTimeout(String groupConversationId, String expectedPauseId);
 
     /**
      * List group conversations currently awaiting human approval, as bounded
@@ -292,6 +323,17 @@ public interface IGroupConversationService {
      */
     class GroupPauseMismatchException extends GroupDiscussionException {
         public GroupPauseMismatchException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * The discussion has already spent its configured
+     * {@code protocol.maxCostPerDiscussion} — a further paid member turn (a
+     * follow-up) is refused rather than run over budget.
+     */
+    class GroupCostCeilingExceededException extends GroupDiscussionException {
+        public GroupCostCeilingExceededException(String message) {
             super(message);
         }
     }

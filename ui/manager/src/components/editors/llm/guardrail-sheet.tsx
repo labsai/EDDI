@@ -79,7 +79,7 @@ function Field({
 function Warning({ children, testId }: { children: ReactNode; testId?: string }) {
   return (
     <p
-      className="flex items-start gap-1.5 text-[10px] text-amber-700 dark:text-amber-400"
+      className="flex items-start gap-1.5 text-[10px] text-warn-700 dark:text-warn-400"
       role="status"
       data-testid={testId}
     >
@@ -1237,7 +1237,7 @@ function JudgeFields({
       <p className="text-[10px] leading-relaxed text-muted-foreground">
         {t(
           "llmEditor.grJudgeNote",
-          "Asks a model to grade the answer after it is written: one extra model call per answer, and one more per reprompt. EDDI adds the reply format itself; the judge may only name the issue codes below, and a reprompt tells the model only your fix texts. Any other model parameter your provider takes can be added in the JSON view.",
+          "Asks a model to grade the answer after it is written: one extra model call per answer, and one more per reprompt. {{productName}} adds the reply format itself; the judge may only name the issue codes below, and a reprompt tells the model only your fix texts. Any other model parameter your provider takes can be added in the JSON view.",
         )}
       </p>
 

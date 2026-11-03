@@ -109,6 +109,17 @@ class RestSemanticParserTest {
         }
 
         @Test
+        @DisplayName("an id that smuggles a query string is refused before it is authorized or used")
+        void refusesAnIdThatIsNotAStoreId() {
+            String smuggled = "aabbccdd11223344eeff5566?version=3&x=";
+
+            assertThrows(BadRequestException.class, () -> restSemanticParser.parse(smuggled, 1, "hello", asyncResponse));
+
+            verify(resourceAccessGuard, never()).requireAccess(any(), any(), any());
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
+        }
+
+        @Test
         @DisplayName("should resume async response with BadRequestException on IllegalArgumentException")
         void shouldResumeBadRequestOnIllegalArgument() throws Exception {
             doReturn(mock(Future.class)).when(runtime).submitCallable(any(Callable.class), any());

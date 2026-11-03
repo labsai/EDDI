@@ -6,7 +6,9 @@ package ai.labs.eddi.modules.rules.impl.conditions;
 
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
+import ai.labs.eddi.modules.rules.impl.Rule;
 
+import java.util.IdentityHashMap;
 import java.util.Map;
 
 /**
@@ -34,6 +36,7 @@ public final class TemplateDataScope {
     private static final class Cache {
         private final IConversationMemory memory;
         private Map<String, Object> templateData;
+        private final Map<Rule, IRuleCondition.ExecutionState> ruleStates = new IdentityHashMap<>();
 
         private Cache(IConversationMemory memory) {
             this.memory = memory;
@@ -60,5 +63,35 @@ public final class TemplateDataScope {
             }
         }
         return converter.convert(memory);
+    }
+
+    /**
+     * The state a rule already settled on in the open evaluation scope of
+     * {@code memory}, or {@code null}. Memory does not change during an evaluation,
+     * so a rule's outcome cannot either; {@code dependency} conditions use this to
+     * evaluate a shared rule once instead of once per path leading to it, which for
+     * rules that each depend twice on the previous one is the difference between
+     * linear and exponential work.
+     */
+    public static IRuleCondition.ExecutionState ruleState(IConversationMemory memory, Rule rule) {
+        if (CURRENT.isBound()) {
+            Cache cache = CURRENT.get();
+            if (cache.memory == memory) {
+                return cache.ruleStates.get(rule);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Remembers {@code state} for {@code rule}; a no-op outside a matching scope.
+     */
+    public static void rememberRuleState(IConversationMemory memory, Rule rule, IRuleCondition.ExecutionState state) {
+        if (CURRENT.isBound()) {
+            Cache cache = CURRENT.get();
+            if (cache.memory == memory) {
+                cache.ruleStates.put(rule, state);
+            }
+        }
     }
 }

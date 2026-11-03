@@ -476,7 +476,7 @@ function McpMaxResponseSize({
       <p id={hintId} className="text-[10px] text-muted-foreground">
         {t(
           "mcpcallsEditor.maxResponseSizeHint",
-          "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs EDDI 6.6 or later.",
+          "A longer tool result is cut to this many characters before it is saved in conversation memory (a warning is logged). Blank, 0 or less uses the default of 2,000,000 (about 2 MB). Needs server version 6.6 or later.",
         )}
       </p>
     </div>
@@ -683,7 +683,7 @@ function McpCallEditor({
             <ChevronRight className="h-4 w-4 rtl:rotate-180" />
           )}
         </button>
-        <Zap className="h-4 w-4 text-amber-500" />
+        <Zap className="h-4 w-4 text-ochre-500" />
         <input
           type="text"
           value={call.name ?? ""}
@@ -898,7 +898,7 @@ function McpCallEditor({
                 className="h-3.5 w-3.5 rounded border-input accent-primary"
                 data-testid="mcp-continue-on-error"
               />
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+              <AlertTriangle className="h-3.5 w-3.5 text-warn-500" />
               {t("mcpcallsEditor.continueOnError", "Continue on Error")}
             </label>
             {call.continueOnError && (

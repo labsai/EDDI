@@ -9,6 +9,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -39,7 +40,18 @@ public final class UriRedactor {
      * catches the run-together spellings ({@code mytoken}, {@code xapikey}) a
      * word-by-word test would miss.
      */
-    private static final List<String> CREDENTIAL_WORDS = List.of("token", "secret", "credential", "password", "passwd", "apikey");
+    private static final List<String> CREDENTIAL_WORDS = List.of("token", "secret", "credential", "password", "passwd", "apikey", "cookie",
+            "signature");
+
+    /**
+     * Credential words too short or too common to match inside another word
+     * ({@code sig} sits in {@code signal}, {@code design}), so they count only as a
+     * whole word of the name: {@code X-Amz-Sig}, {@code session}, {@code sid}.
+     * Before these and {@code cookie} / {@code signature}, a literal {@code Cookie}
+     * header or a signed URL's {@code sig} parameter was stored in conversation
+     * request records as written.
+     */
+    private static final Set<String> CREDENTIAL_WHOLE_WORDS = Set.of("sig", "session", "sessionid", "sid");
 
     /**
      * The auth family, matched as a whole WORD ending rather than as a substring.
@@ -104,6 +116,9 @@ public final class UriRedactor {
             }
         }
         for (String word : words) {
+            if (CREDENTIAL_WHOLE_WORDS.contains(word)) {
+                return true;
+            }
             for (String ending : AUTH_WORD_ENDINGS) {
                 if (word.endsWith(ending)) {
                     return true;
@@ -387,9 +402,26 @@ public final class UriRedactor {
                 continue;
             }
             String name = pair.substring(0, eq);
-            redactedQuery.append(name).append('=').append(redactQueryValue(name, pair.substring(eq + 1), marker));
+            // Classified decoded: a server reads %61pi_key as api_key.
+            redactedQuery.append(name).append('=').append(redactQueryValue(decodeQueryComponent(name), pair.substring(eq + 1), marker));
         }
         return beforeQuery + "?" + redactedQuery + fragment;
+    }
+
+    /**
+     * A query name or value percent-decoded, or the input itself when an escape is
+     * malformed. Names are classified in this form, so an encoded {@code %61pi_key}
+     * is judged as the {@code api_key} the server will read.
+     */
+    static String decodeQueryComponent(String component) {
+        if (component == null || (component.indexOf('%') < 0 && component.indexOf('+') < 0)) {
+            return component;
+        }
+        try {
+            return URLDecoder.decode(component, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException malformedEscape) {
+            return component;
+        }
     }
 
     /** Whether a value is, in full, an unresolved template placeholder. */

@@ -28,11 +28,8 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.util.*;
 import java.util.ArrayList;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -1114,25 +1111,45 @@ class ApiCallExecutorTest {
     // ==================== PreRequest Delay Tests ====================
 
     @Test
-    void execute_preRequestDelay_schedulesWithDelay() throws Exception {
+    void execute_preRequestDelay_doesNotUseTheSharedScheduler() throws Exception {
         ApiCall call = createSimpleApiCall("delay-call", false);
         var preRequest = new HttpPreRequest();
         preRequest.setDelayBeforeExecutingInMillis(100);
         call.setPreRequest(preRequest);
 
-        var scheduledExecutor = mock(ScheduledExecutorService.class);
-        @SuppressWarnings("unchecked")
-        var future = mock(ScheduledFuture.class);
-        when(future.get()).thenReturn(mockResponse);
-        when(scheduledExecutor.schedule(any(Callable.class), eq(100L), eq(TimeUnit.MILLISECONDS)))
-                .thenReturn(future);
-        when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
+        setupSuccessResponse(200, "ok", "text/plain");
+
+        long start = System.nanoTime();
+        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+        long elapsedMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+        // The delay is served on the calling thread; the single eddi-scheduler
+        // thread must never carry a blocking HTTP send.
+        verify(runtime, never()).getScheduledExecutorService();
+        verify(mockRequest).send();
+        assertTrue(elapsedMs >= 90, "the configured delay must still be honoured, was " + elapsedMs + "ms");
+    }
+
+    @Test
+    void execute_preRequestDelay_interruptedWaitSendsNothing() throws Exception {
+        ApiCall call = createSimpleApiCall("delay-call", false);
+        var preRequest = new HttpPreRequest();
+        preRequest.setDelayBeforeExecutingInMillis(60_000);
+        call.setPreRequest(preRequest);
 
         setupSuccessResponse(200, "ok", "text/plain");
 
-        executor.execute(call, memory, new HashMap<>(), "http://example.com");
+        Thread.currentThread().interrupt();
+        boolean stillInterrupted;
+        try {
+            // the interrupt surfaces as a failure of the step, not as a send
+            assertThrows(LifecycleException.class, () -> executor.execute(call, memory, new HashMap<>(), "http://example.com"));
+        } finally {
+            stillInterrupted = Thread.interrupted();
+        }
 
-        verify(scheduledExecutor).schedule(any(Callable.class), eq(100L), eq(TimeUnit.MILLISECONDS));
+        verify(mockRequest, never()).send();
+        assertTrue(stillInterrupted, "the interrupt flag must be restored for whoever cancelled the turn");
     }
 
     // ==================== Retry with Exponential Backoff Tests
@@ -1149,34 +1166,21 @@ class ApiCallExecutorTest {
         postResponse.setRetryApiCallInstruction(retryInstruction);
         call.setPostResponse(postResponse);
 
-        var scheduledExecutor = mock(ScheduledExecutorService.class);
-        @SuppressWarnings("unchecked")
-        var future = mock(ScheduledFuture.class);
-        when(runtime.getScheduledExecutorService()).thenReturn(scheduledExecutor);
-
-        // Use a flag to switch from 503 to 200; toggled when the scheduler is invoked.
-        var retried = new AtomicBoolean(false);
-        when(mockResponse.getHttpCode()).thenAnswer(inv -> retried.get() ? 200 : 503);
-        when(mockResponse.getContentAsString()).thenAnswer(inv -> retried.get() ? "ok" : "retry");
-        when(mockResponse.getHttpCodeMessage()).thenAnswer(inv -> retried.get() ? "OK" : "Service Unavailable");
+        // First attempt answers 503, the retry answers 200.
+        var sends = new AtomicInteger();
+        when(mockRequest.send()).thenAnswer(inv -> {
+            sends.incrementAndGet();
+            return mockResponse;
+        });
+        when(mockResponse.getHttpCode()).thenAnswer(inv -> sends.get() > 1 ? 200 : 503);
+        when(mockResponse.getContentAsString()).thenAnswer(inv -> sends.get() > 1 ? "ok" : "retry");
+        when(mockResponse.getHttpCodeMessage()).thenAnswer(inv -> sends.get() > 1 ? "OK" : "Service Unavailable");
         when(mockResponse.getHttpHeader()).thenReturn(new HashMap<>());
-
-        // When the scheduled executor is invoked (retry with delay), flip the flag,
-        // execute the callable, and return a future whose get() yields the result.
-        doAnswer(inv -> {
-            retried.set(true);
-            @SuppressWarnings("unchecked")
-            Callable<IResponse> callable = inv.getArgument(0);
-            IResponse result = callable.call();
-            when(future.get()).thenReturn(result);
-            return future;
-        }).when(scheduledExecutor).schedule(any(Callable.class), anyLong(), any());
 
         executor.execute(call, memory, new HashMap<>(), "http://example.com");
 
-        verify(scheduledExecutor, times(1)).schedule(
-                any(Callable.class), eq(50L),
-                eq(TimeUnit.MILLISECONDS));
+        assertEquals(2, sends.get());
+        verify(runtime, never()).getScheduledExecutorService();
     }
 
     // ==================== Null PostResponse RetryInstruction Tests

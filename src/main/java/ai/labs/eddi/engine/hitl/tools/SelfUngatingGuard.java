@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -87,6 +88,9 @@ public final class SelfUngatingGuard {
      */
     private static final Pattern AGENT_STORE_TARGET = Pattern
             .compile("/(?:agentstore/agents|botstore/bots)/([0-9a-f]{24}|" + UUID_ID + ")(?:[/?#]|$)");
+    private static final Pattern LLM_STORE_TARGET = Pattern
+            .compile("/(?:llmstore/llms|langchainstore/langchains)/([0-9a-f]{24}|" + UUID_ID + ")(?:[/?#]|$)");
+    private static final Pattern VERSION_PARAM = Pattern.compile("[?&]version=([0-9]+)");
     /** Every configuration store answers under {@code /<name>store/}. */
     private static final Pattern CONFIG_STORE_PATH = Pattern.compile("/[a-z]+store/");
     private static final String TOOL_APPROVALS_KEY = "toolApprovals";
@@ -98,6 +102,8 @@ public final class SelfUngatingGuard {
     public static final String GATE_WRITE_REASON = "an agent may not write a tool-approval gate (toolApprovals) into an LLM configuration";
     public static final String GUARDRAIL_WRITE_REASON = "an agent may not write tool-call guardrails (toolCallGuardrails) into an LLM "
             + "configuration";
+    public static final String LLM_GATE_REMOVAL_REASON = "an agent may not remove or replace a tool-approval gate (toolApprovals) "
+            + "stored in an LLM configuration";
     public static final String GATE_REMOVAL_REASON = "an agent may not remove or change another agent's tool-approval gate (hitlConfig)";
     public static final String PATCH_OP_REASON = "a configuration patch may only use add, replace, remove and test operations";
     private static final Set<String> PATCH_OPS = Set.of("add", "replace", "remove", "test");
@@ -125,6 +131,22 @@ public final class SelfUngatingGuard {
     }
 
     /**
+     * Reads a stored LLM configuration, so a write to the LLM store can be checked
+     * for dropping a task gate by omission (a whole-document {@code PUT} without
+     * it) or by replacing an ancestor (a patch on {@code /tasks/0}).
+     */
+    @FunctionalInterface
+    public interface StoredLlmLookup {
+        /**
+         * @return the stored configuration as JSON, {@code null} when there is none
+         * @throws Exception
+         *             when it cannot be read — the write is then refused as
+         *             unverifiable, never admitted
+         */
+        JsonNode llmConfigOf(String llmId, Integer version) throws Exception;
+    }
+
+    /**
      * What the gate protects for one approved execution.
      *
      * @param actingAgentId
@@ -138,16 +160,24 @@ public final class SelfUngatingGuard {
      *            agent's own from another's
      * @param storedGates
      *            lookup of another agent's stored gate; nullable
+     * @param storedLlms
+     *            lookup of a stored LLM configuration; nullable — without one, an
+     *            LLM-store write is refused only when its body names the gate
      */
-    public record Protection(String actingAgentId, Set<String> ownResourceIds, boolean resourcesUnresolved, StoredGateLookup storedGates) {
+    public record Protection(String actingAgentId, Set<String> ownResourceIds, boolean resourcesUnresolved, StoredGateLookup storedGates,
+            StoredLlmLookup storedLlms) {
 
         public Protection {
             ownResourceIds = ownResourceIds == null ? Set.of() : Set.copyOf(ownResourceIds);
         }
 
+        public Protection(String actingAgentId, Set<String> ownResourceIds, boolean resourcesUnresolved, StoredGateLookup storedGates) {
+            this(actingAgentId, ownResourceIds, resourcesUnresolved, storedGates, null);
+        }
+
         /** The agent id alone — what the guard knew before L13. */
         public static Protection ofAgent(String actingAgentId) {
-            return new Protection(actingAgentId, Set.of(), false, null);
+            return new Protection(actingAgentId, Set.of(), false, null, null);
         }
     }
 
@@ -182,7 +212,8 @@ public final class SelfUngatingGuard {
             return UNRESOLVED_RESOURCES_REASON;
         }
         if (LLM_STORE_PATHS.stream().anyMatch(decodedUri::contains)) {
-            return llmStoreRefusal(method, body);
+            String refusal = llmStoreRefusal(method, body);
+            return refusal != null ? refusal : storedLlmGateRefusal(method, body, decodedUri, p.storedLlms());
         }
         Matcher agentTarget = AGENT_STORE_TARGET.matcher(decodedUri);
         if (agentTarget.find()) {
@@ -212,6 +243,85 @@ public final class SelfUngatingGuard {
             return containsKey(tree, TOOL_CALL_GUARDRAILS_KEY) ? GUARDRAIL_WRITE_REASON : null;
         } catch (JsonProcessingException e) {
             return UNVERIFIABLE_REASON;
+        }
+    }
+
+    /**
+     * The half of the LLM-store rule the body alone cannot show: a write that drops
+     * a gate already stored. A whole document replaces every stored task, so it is
+     * refused whenever the stored document carries a gate (a body that re-states it
+     * was refused above for writing one); a patch is refused when one of its
+     * operations targets a stored gate or one of its ancestors.
+     */
+    private static String storedLlmGateRefusal(String method, String body, String decodedUri, StoredLlmLookup storedLlms) {
+        if (storedLlms == null || body == null || body.isBlank()) {
+            return null;
+        }
+        Matcher target = LLM_STORE_TARGET.matcher(decodedUri);
+        if (!target.find()) {
+            return null;
+        }
+        Matcher version = VERSION_PARAM.matcher(decodedUri);
+        Integer versionNumber;
+        try {
+            versionNumber = version.find() ? Integer.valueOf(version.group(1)) : null;
+        } catch (NumberFormatException e) {
+            // A digit run too long for an int names no version we could look up; the
+            // stored gate cannot be compared, so the write is refused like any other
+            // unverifiable one.
+            return UNVERIFIABLE_REASON;
+        }
+        List<String> gatePaths = new ArrayList<>();
+        try {
+            collectKeyPaths(storedLlms.llmConfigOf(target.group(1), versionNumber), TOOL_APPROVALS_KEY, "", gatePaths);
+        } catch (Exception e) {
+            return UNVERIFIABLE_REASON;
+        }
+        if (gatePaths.isEmpty()) {
+            return null;
+        }
+        JsonNode tree;
+        try {
+            tree = MAPPER.readTree(body);
+        } catch (JsonProcessingException e) {
+            return UNVERIFIABLE_REASON;
+        }
+        if (!(tree.isArray() && isPatch(method))) {
+            return LLM_GATE_REMOVAL_REASON;
+        }
+        for (JsonNode operation : tree) {
+            String path = operation.path("path").asText("");
+            for (String gatePath : gatePaths) {
+                if (path.isEmpty() || gatePath.equals(path) || gatePath.startsWith(path + "/")) {
+                    return LLM_GATE_REMOVAL_REASON;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Adds the JSON pointer of every {@code key} member at any depth of
+     * {@code node}.
+     */
+    static void collectKeyPaths(JsonNode node, String key, String pointer, List<String> paths) {
+        if (node == null) {
+            return;
+        }
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+                String child = pointer + "/" + field.getKey().replace("~", "~0").replace("/", "~1");
+                if (key.equals(field.getKey()) && !field.getValue().isNull()) {
+                    paths.add(child);
+                }
+                collectKeyPaths(field.getValue(), key, child, paths);
+            }
+        } else if (node.isArray()) {
+            for (int i = 0; i < node.size(); i++) {
+                collectKeyPaths(node.get(i), key, pointer + "/" + i, paths);
+            }
         }
     }
 

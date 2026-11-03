@@ -369,7 +369,7 @@ a configuration that saves cleanly but leaves part of the feature unable to work
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `enabled` | `false` | Master switch. Off by default, matching the `openai-compat` precedent: a surface that stores refresh tokens is one somebody turns on deliberately. |
+| `enabled` | `false` | Master switch for **account linking**: the `authorize`, `callback`, `mine` and `disconnect` endpoints and the OAuth state maintenance. Off by default, matching the `openai-compat` precedent: a surface that stores refresh tokens is one somebody turns on deliberately. It does **not** stop `${connection:…}` references from resolving: a `STATIC` or `BASIC` connection, or an OAuth connection whose grant is already stored, keeps working with it off. To stop a connection being used, delete it. |
 | `publicBaseUrl` | none | EDDI's own public origin. The OAuth `redirect_uri` is built from it, and the provider matches that **exactly** — so it is configured rather than derived from an inbound request, where a `Host` header could steer it. |
 | `credentialEndpointAllowlist` | empty | Origins a **client secret** may be sent to. Empty means no OAuth connection resolves. See [Two allowlists](#two-allowlists-and-why-they-are-separate). |
 | `allowPlaintextRemoteOrigins` | `false` | See [Plaintext origins](#plaintext-origins). |
@@ -859,7 +859,8 @@ the target.
 On import, a connection is created only when the target holds **no connection of that
 name**. An existing one is **never overwritten** — it is a live credential configuration,
 possibly with linked accounts filed under that name — whatever the import strategy. The
-create runs through the same gate as `POST /connectionstore/connections`: structural
+create runs through the same gate as `POST /connectionstore/connections`: the `eddi-admin`
+role (an `eddi-editor` may run an import, but its connections are skipped), structural
 validation, the deployment checks (`PER_USER` and `CALLER_SUPPLIED` need OIDC, OAuth needs
 an active vault, a remote `http://` origin needs `allowPlaintextRemoteOrigins`)
 and the name claim. A document the deployment refuses is
