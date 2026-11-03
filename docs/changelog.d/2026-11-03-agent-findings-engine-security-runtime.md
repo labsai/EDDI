@@ -12,7 +12,10 @@ the unmerged #1234). Plus the CodeRabbit outside-diff finding on #1208.
 - **NATS TLS** — a `tls://` / `wss://` URL turned TLS on inside jnats with `SSLContext.getDefault()`, skipping the host-name
   check that `eddi.nats.tls.enabled` installs; the verifying context is now built for those URLs too. The
   `createSocket(Socket, InputStream, boolean)` overload of `HostnameVerifyingSslContext` now returns a verifying socket like
-  every other overload.
+  every other overload. Review follow-up: without an EDDI trust or key store the JVM default context is the base (a
+  `javax.net.ssl.keyStore` client certificate still goes out for mTLS), and with host-name verification on the node dials
+  the host name (`HappyEyeballs`) — jnats' default resolution dialled the resolved IP, so the check compared the
+  certificate with the address, not the name in `eddi.nats.url`.
 - **HITL** — the batch timeout policy no longer treats a rule shadowed by an earlier rule with the same match as speaking for
   a call (a policy-less task rule could let another call's `AUTO_APPROVE` decide the whole batch). The group pending-approval
   retention sweep cancels only the pause it found expired (`cancelPausedDiscussion` with the pause id), not a discussion an

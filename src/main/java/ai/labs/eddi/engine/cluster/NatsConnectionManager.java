@@ -202,6 +202,14 @@ public class NatsConnectionManager {
         // context for those URLs too, not only when the flag is set.
         if (config.natsTlsEnabled() || anyUrlRequestsTls(config.natsServers())) {
             builder.sslContext(buildSslContext());
+            if (config.natsTlsVerifyHostname()) {
+                // jnats' default (ResolveToAll) dials the resolved IP addresses, and the
+                // TLS upgrade then names the IP, so the host-name check compared the
+                // certificate with the address instead of the name in eddi.nats.url.
+                // HappyEyeballs dials the name itself and still falls back across
+                // addresses.
+                builder.hostnameResolveMode(Options.HostnameResolveMode.HappyEyeballs);
+            }
         }
         return builder.build();
     }
@@ -216,6 +224,23 @@ public class NatsConnectionManager {
     }
 
     private SSLContext buildSslContext() throws IOException, GeneralSecurityException {
+        SSLContext context = baseSslContext();
+        // jnats sets no endpoint identification algorithm, so without this the JDK
+        // accepts a trusted certificate issued for ANY host.
+        return config.natsTlsVerifyHostname() ? new HostnameVerifyingSslContext(context) : context;
+    }
+
+    /**
+     * The JVM's default context when no EDDI trust or key store is configured: it
+     * carries the {@code javax.net.ssl.keyStore} client certificate and the trust
+     * store a {@code tls://} URL used before EDDI built the context. A fresh
+     * context initialised with no key managers would drop that certificate and
+     * break mTLS.
+     */
+    SSLContext baseSslContext() throws IOException, GeneralSecurityException {
+        if (config.natsTlsTruststorePath().isEmpty() && config.natsTlsKeystorePath().isEmpty()) {
+            return SSLContext.getDefault();
+        }
         TrustManagerFactory tmf = null;
         if (config.natsTlsTruststorePath().isPresent()) {
             KeyStore trust = loadKeyStore(config.natsTlsTruststorePath().get(), config.natsTlsTruststorePassword().orElse(""));
@@ -231,9 +256,7 @@ public class NatsConnectionManager {
         }
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(kmf == null ? null : kmf.getKeyManagers(), tmf == null ? null : tmf.getTrustManagers(), null);
-        // jnats sets no endpoint identification algorithm, so without this the JDK
-        // accepts a trusted certificate issued for ANY host.
-        return config.natsTlsVerifyHostname() ? new HostnameVerifyingSslContext(context) : context;
+        return context;
     }
 
     private static KeyStore loadKeyStore(String path, String password) throws IOException, GeneralSecurityException {
