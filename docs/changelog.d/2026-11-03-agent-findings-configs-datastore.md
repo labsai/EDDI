@@ -90,3 +90,20 @@ document was served to any authenticated token through a suffix URL. Docs:
   read.
 - The knowledge-base collision check does not see locations used by older, still-pinned versions.
 - Uploads are not fenced against a concurrent conversation erasure (MongoDB and PostgreSQL).
+
+### Follow-up: review findings on the parse path and the connection lookup
+
+- **Standalone parse checks a parser document's `config.uri` per request.** Parser documents saved
+  before the save-time check can still name another owner's parser, and `RestSemanticParser` loaded
+  them unchecked. The cache entry now records the parser documents `config.uri` named when it was
+  built, and every request requires `VIEW` on each of them on the request thread, hit or miss, with the
+  same rule `RestParserStore` applies on save. The cache stays shared and the document is still read
+  once per cached parser. The parser is now resolved on the request thread instead of the pool thread,
+  so that the check has the caller's identity. Not done: a one-off scan or migration of stored legacy
+  parsers, and the same per-request check for dictionary references in `extensions`.
+- **The connection lookup reads from the primary.** `IResourceStorage.primaryReads()` returns a view
+  served by the authoritative copy: on MongoDB the same collections with `ReadPreference.primary()`,
+  on PostgreSQL the storage itself. `ConnectionStore` resolves the current version and fetches the
+  connection through it, so a lagging secondary cannot hand the registry a connection whose
+  `allowedHosts` was just narrowed. Every other store keeps `nearest`. Authorization descriptor reads
+  are unchanged and remain the open decision above.
