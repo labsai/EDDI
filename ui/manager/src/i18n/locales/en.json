@@ -4023,7 +4023,7 @@
     "wizardLink": "Open the group wizard"
   },
   "groupTieBreak": {
-    "bannerTitle": "The vote is tied — {{name}}, you decide",
+    "bannerTitle": "The vote needs a decision — {{name}}, you decide",
     "chooseOne": "Choose one option",
     "rationalePlaceholder": "Why (optional)",
     "inboxBadge": "Tie-break",

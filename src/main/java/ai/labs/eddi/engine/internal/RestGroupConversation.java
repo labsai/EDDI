@@ -986,10 +986,11 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (gc.getPendingHumanInput() != null) {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
-                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                boolean mayReadPrompt = hitlAccessGuard.mayReadPendingHumanPrompt(gc);
+                if (mayReadPrompt) {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
-                PendingHumanInputView.addTo(summary, gc);
+                PendingHumanInputView.addTo(summary, gc, mayReadPrompt);
             }
             return Response.ok(summary).build();
         } catch (IResourceStore.ResourceNotFoundException e) {

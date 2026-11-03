@@ -4197,7 +4197,7 @@
     "wizardLink": "그룹 마법사 열기"
   },
   "groupTieBreak": {
-    "bannerTitle": "투표가 동률입니다 — {{name}}님이 결정하세요",
+    "bannerTitle": "투표에 결정이 필요합니다 — {{name}}님이 결정하세요",
     "chooseOne": "옵션을 하나 선택하세요",
     "rationalePlaceholder": "이유 (선택)",
     "inboxBadge": "동률 결정",

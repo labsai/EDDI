@@ -447,10 +447,11 @@ public class McpHitlTools {
                 summary.put("pendingMemberId", gc.getPendingHumanInput().memberId());
                 summary.put("pendingMemberDisplayName", gc.getPendingHumanInput().displayName());
                 // Same rule as the REST summary — see HitlAccessGuard.
-                if (hitlAccessGuard.mayReadPendingHumanPrompt(gc)) {
+                boolean mayReadPrompt = hitlAccessGuard.mayReadPendingHumanPrompt(gc);
+                if (mayReadPrompt) {
                     summary.put("pendingHumanPrompt", gc.getPendingHumanInput().renderedPrompt());
                 }
-                PendingHumanInputView.addTo(summary, gc);
+                PendingHumanInputView.addTo(summary, gc, mayReadPrompt);
             }
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {

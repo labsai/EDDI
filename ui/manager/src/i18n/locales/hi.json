@@ -4197,7 +4197,7 @@
     "wizardLink": "समूह विज़ार्ड खोलें"
   },
   "groupTieBreak": {
-    "bannerTitle": "मतदान बराबरी पर है — {{name}}, फ़ैसला आपका",
+    "bannerTitle": "मतदान में निर्णय की आवश्यकता है — {{name}}, फ़ैसला आपका",
     "chooseOne": "एक विकल्प चुनें",
     "rationalePlaceholder": "कारण (वैकल्पिक)",
     "inboxBadge": "टाई-ब्रेक",
