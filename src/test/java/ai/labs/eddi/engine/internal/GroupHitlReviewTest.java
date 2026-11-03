@@ -54,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -286,6 +287,42 @@ class GroupHitlReviewTest {
         assertEquals(DecisionOutcome.APPROVED_EDITED, unit.decisionOutcome());
         assertEquals(EditSummary.Kind.SYNTHESIS, unit.edit().kind());
         assertEquals("Synthesis", unit.unitId());
+    }
+
+    @Test
+    @DisplayName("a resume that fails after the SYNTHESIS edit was appended leaves no reviewer edit behind")
+    void failedResumeRemovesTheSynthesisEdit() throws Exception {
+        groupConfig(true, List.of(new DiscussionPhase("Synthesis", PhaseType.SYNTHESIS)));
+        var gc = phasePause("Synthesis");
+        doReturn(gc).when(conversationStore).read(GC_ID);
+        // The decision is validated against the real config on the calling thread; the
+        // resume work then re-reads a config whose phase at that index has been
+        // renamed.
+        var original = groupStore.read(GROUP_ID, 1);
+        var drifted = new AgentGroupConfiguration();
+        drifted.setName("Review");
+        drifted.setStyle(DiscussionStyle.CUSTOM);
+        drifted.setPhases(List.of(new DiscussionPhase("Renamed", PhaseType.SYNTHESIS)));
+        drifted.setMembers(original.getMembers());
+        drifted.setHitlConfig(original.getHitlConfig());
+        final Thread caller = Thread.currentThread();
+        doAnswer(inv -> Thread.currentThread() == caller ? original : drifted).when(groupStore).read(GROUP_ID, 1);
+        var decision = approved();
+        decision.setEditedAnswer("Option B wins, because of cost.");
+        var request = new GroupApprovalRequest();
+        request.setDecision(decision);
+
+        service.resumeDiscussion(GC_ID, request, null);
+
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (System.currentTimeMillis() < deadline
+                && gc.getTranscript().stream().noneMatch(e -> e.type() == TranscriptEntryType.ERROR)) {
+            Thread.sleep(25);
+        }
+        assertTrue(gc.getTranscript().stream().anyMatch(e -> e.type() == TranscriptEntryType.ERROR), "the drift rolled the resume back");
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState());
+        assertTrue(gc.getTranscript().stream().noneMatch(e -> "reviewer-edit".equals(e.errorReason())),
+                "the failed attempt's edit must not survive for the next approval to build on");
     }
 
     @Test
