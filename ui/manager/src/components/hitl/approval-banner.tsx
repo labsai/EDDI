@@ -337,7 +337,14 @@ export function ApprovalBanner({
       // An edit identical to the draft is a plain approval - and is not held to the
       // edit limits (a blank or over-long draft can still be approved as it stands).
       const changed = editedAnswer !== editableAnswer.draft;
-      const error = changed ? validateEditedAnswer(t, editedAnswer, editableAnswer) : null;
+      const error = changed
+        ? editedAnswer.includes("<REDACTED>")
+          ? t(
+              "hitlReview.redactedMarkerRemains",
+              "The text still contains the redaction marker <REDACTED>. Remove it, or approve without edits: the server cannot apply an edit that keeps it.",
+            )
+          : validateEditedAnswer(t, editedAnswer, editableAnswer)
+        : null;
       if (error) {
         setSubmitError(error);
         return;

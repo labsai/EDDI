@@ -81,7 +81,7 @@ All checks run **before** the pause is consumed: a malformed edit is a `400` and
 `POST /agents/{conversationId}/resume`
 
 ```json
-{ "verdict": "APPROVED", "editedAnswer": "The release is Monday.", "reasonCode": "FACTUAL_ERROR", "pauseId": "1762077600000" }
+{ "verdict": "APPROVED", "editedAnswer": "The release is Monday.", "reasonCode": "FALSE_CLAIM", "pauseId": "1762077600000" }
 ```
 
 - Valid only with `APPROVED`, on a **rule** pause, when the agent version the conversation is pinned to allows it.
@@ -103,7 +103,8 @@ reprompter: a `reprompt` finding cannot ask the human again, so it acts as `bloc
 `block` refuses it. Guardrail calls that cost money are admitted against the conversation's spend like a live
 answer's.
 
-**A refused edit** (blocked by a guardrail, or the LLM configuration changed since the pause) cannot be applied, but
+**A refused edit** (blocked by a guardrail, the LLM configuration changed since the pause, or the edit still carries a
+redaction placeholder: `REDACTED_CONTENT`) cannot be applied, but
 the human's decision stands: the turn **pauses again** on the same task with the unchanged draft and a new
 `pauseId`, the next `approval-status` carries `pauseDetails.lastEditRefused = {reason, guardrail, at}`, and the
 ledger records a `hitl.edit.refused` entry.
@@ -242,8 +243,10 @@ Right after an entry with at least one unit is submitted, the engine fires the C
 `fireAsync` — observe it with `@ObservesAsync`. Each `HitlDecisionUnit` is self-contained (decision context repeated
 on every unit: conversation, agent or group, user, pause, latency, decider, channel, category, outcome, reason, edit).
 Delivery is best-effort; a consumer that must not miss a decision rebuilds from the ledger
-(`IAuditStore.getEntriesByTask("hitl.approval", …)` + `HitlApprovalAudit.parse`), which yields the same units. No
-event is fired when the ledger is disabled.
+(`IAuditStore.getEntriesByTask("hitl.approval", …)` + `HitlApprovalAudit.parse`), which yields the same units. The
+ledger's own submission is a bounded queue: when it is full the entry is dropped (logged by the ledger) while the event
+is still fired, so the ledger is a fallback for a consumer that was down, not a no-miss guarantee. No event is fired
+when the ledger is disabled.
 
 ### Metrics
 

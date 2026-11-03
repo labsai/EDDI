@@ -252,6 +252,7 @@ class HitlApprovalAuditTest {
             var pause = new HitlDecisionRecords.GroupPause("TASK", "Execution", Instant.now().minusSeconds(5), null, List.of("t1", "t2"), "r");
             var outcomes = new LinkedHashMap<String, HitlDecisionRecords.TaskOutcome>();
             outcomes.put("t1", new HitlDecisionRecords.TaskOutcome(HitlVerdict.REJECTED, null, null));
+            outcomes.put("t2", new HitlDecisionRecords.TaskOutcome(HitlVerdict.APPROVED, null, null));
             var decision = decision(HitlVerdict.APPROVED, "bob");
             decision.setReasonCode("SCOPE");
             audit.write(HitlDecisionRecords.groupDecision("gc1", "g1", "owner", decision, null, pause, outcomes, null));
@@ -261,24 +262,35 @@ class HitlApprovalAuditTest {
         }
 
         @Test
-        @DisplayName("a TASK decision lists every awaiting task; unlisted tasks take the top-level verdict")
+        @DisplayName("an approve-all or reject-all TASK decision lists every awaiting task under the top-level verdict")
         void taskUnits() {
             var pause = new HitlDecisionRecords.GroupPause("TASK", "Execution", Instant.now().minusSeconds(5), null, List.of("t1", "t2"), "r");
-            var outcomes = new LinkedHashMap<String, HitlDecisionRecords.TaskOutcome>();
-            outcomes.put("t1", new HitlDecisionRecords.TaskOutcome(HitlVerdict.REJECTED, "SCOPE", null));
-            audit.write(HitlDecisionRecords.groupDecision("gc1", "g1", "owner", decision(HitlVerdict.APPROVED, "bob"), null, pause, outcomes,
+            audit.write(HitlDecisionRecords.groupDecision("gc1", "g1", "owner", decision(HitlVerdict.APPROVED, "bob"), null, pause, Map.of(),
                     null));
             AuditEntry entry = submitted();
             assertEquals("g1", entry.agentId(), "the agentId column of a group entry carries the groupId, as before");
             assertEquals("group", entry.output().get("surface"));
             List<HitlDecisionUnit> units = events.get(0).units();
             assertEquals(2, units.size());
-            assertEquals(DecisionOutcome.REJECTED, units.get(0).decisionOutcome());
-            assertEquals("SCOPE", units.get(0).reasonCode());
+            assertEquals(DecisionOutcome.APPROVED, units.get(0).decisionOutcome());
             assertEquals(DecisionOutcome.APPROVED, units.get(1).decisionOutcome());
             assertEquals("group:g1:task:Execution", units.get(1).approvalCategory());
             assertEquals("g1", units.get(1).groupId());
             assertNull(units.get(1).agentId());
+        }
+
+        @Test
+        @DisplayName("explicit per-task decisions record only those tasks: an undecided task is not audited as approved")
+        void partialDecisionRecordsOnlyWhatWasDecided() {
+            var pause = new HitlDecisionRecords.GroupPause("TASK", "Execution", Instant.now().minusSeconds(5), null, List.of("t1", "t2"), "r");
+            var outcomes = new LinkedHashMap<String, HitlDecisionRecords.TaskOutcome>();
+            outcomes.put("t1", new HitlDecisionRecords.TaskOutcome(HitlVerdict.REJECTED, "SCOPE", null));
+            audit.write(HitlDecisionRecords.groupDecision("gc1", "g1", "owner", decision(HitlVerdict.APPROVED, "bob"), null, pause, outcomes,
+                    null));
+            List<HitlDecisionUnit> units = events.get(0).units();
+            assertEquals(1, units.size(), "t2 stays awaiting approval and is decided by a later decision");
+            assertEquals(DecisionOutcome.REJECTED, units.get(0).decisionOutcome());
+            assertEquals("SCOPE", units.get(0).reasonCode());
         }
 
         @Test

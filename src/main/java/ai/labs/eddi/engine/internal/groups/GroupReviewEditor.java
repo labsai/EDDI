@@ -23,6 +23,10 @@ import ai.labs.eddi.engine.internal.TaskDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 
+import ai.labs.eddi.utils.LogSanitizer;
+
+import org.jboss.logging.Logger;
+
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -48,6 +52,8 @@ import java.util.function.Supplier;
  * @since 6.7.0
  */
 final class GroupReviewEditor {
+
+    private static final Logger LOGGER = Logger.getLogger(GroupReviewEditor.class);
 
     /** Speaker id prefix of a reviewer's transcript entry. */
     static final String REVIEWER_SPEAKER_PREFIX = "hitl:";
@@ -81,9 +87,19 @@ final class GroupReviewEditor {
         } catch (ReviewRefusalException e) {
             throw e;
         } catch (IllegalArgumentException e) {
-            // every refusal raised by this validation is written for the caller; re-typed
-            // so REST can tell it from an unrelated IllegalArgumentException
-            throw new ReviewRefusalException(e.getMessage());
+            // A refusal written in this code base is written for the caller; re-typed so
+            // REST can tell
+            // it from an unrelated IllegalArgumentException. One thrown by the JDK or a
+            // library
+            // (its top frame is outside ai.labs.eddi) could carry text that was never meant
+            // for a
+            // client, so that case answers with a fixed message.
+            StackTraceElement[] frames = e.getStackTrace();
+            if (frames.length > 0 && frames[0].getClassName().startsWith("ai.labs.eddi.")) {
+                throw new ReviewRefusalException(e.getMessage());
+            }
+            LOGGER.warnf("Unexpected IllegalArgumentException while validating a review: %s", LogSanitizer.sanitize(e.getMessage()));
+            throw new ReviewRefusalException("the review fields could not be validated");
         }
     }
 

@@ -685,7 +685,7 @@ eddi_hitl_rule_matched_total                # Approval rules that matched; tag: 
 eddi_hitl_revision_total                    # Rejected rule pauses under onRejection: REVISE; tag: outcome
 eddi_hitl_decision_total                    # Decided HITL units (answer, tool call, phase, task); tags: surface, outcome, channel
 eddi_hitl_edit_chars                        # Summary: characters an approver changed per edit; tag: kind
-eddi_hitl_answer_edit_total                 # Approved rule-pause answer edits; tag: outcome (applied, screened_out, config_drift)
+eddi_hitl_answer_edit_total                 # Approved rule-pause answer edits; tag: outcome (applied, screened_out, config_drift, redacted_content)
 eddi_hitl_approval_context_render_total     # approvalContext blocks rendered at pause commit; tags: outcome (ok, empty, failed, too_large), surface (regular, group)
 eddi_mcp_hitl_pending_listed_total          # Pending approvals listed via MCP; tag: surface
 eddi_mcp_hitl_decision_total                # Decisions via MCP; tags: surface, verdict

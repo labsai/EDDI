@@ -4477,6 +4477,7 @@
     "hideOriginal": "Ocultar o original",
     "lastEditDrift": "Sua última alteração não pôde ser aplicada porque o agente mudou — a resposta original está novamente em revisão.",
     "lastEditRedacted": "A sua última edição não foi aplicada: a resposta contém conteúdo oculto (censurado), por isso só pode ser aprovada ou rejeitada tal como está.",
+    "redactedMarkerRemains": "O texto ainda contém o marcador de censura <REDACTED>. Remova-o ou aprove sem edições: o servidor não consegue aplicar uma edição que o mantenha.",
     "lastEditScreenedOut": "Sua última alteração foi bloqueada pelas proteções de saída do agente ({{guardrail}}) — a resposta original está novamente em revisão.",
     "noReason": "Sem motivo",
     "reasonLabel": "Motivo (de uma rejeição ou alteração)",

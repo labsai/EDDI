@@ -121,7 +121,8 @@ public final class HitlApprovalAudit {
             }
             return id;
         } catch (RuntimeException e) {
-            LOGGER.warnf("Failed to submit HITL decision audit entry for %s: %s", record.conversationId, e.getMessage());
+            LOGGER.warnf("Failed to submit HITL decision audit entry for %s: %s", LogSanitizer.sanitize(record.conversationId),
+                    LogSanitizer.sanitize(e.getMessage()));
             return null;
         }
     }
