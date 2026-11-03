@@ -606,12 +606,15 @@ public class RestGroupConversation implements IRestGroupConversation {
                             + "or already approved.")
                     .build();
         } catch (IllegalArgumentException e) {
-            // #13: invalid taskApprovals (unknown taskId / task not awaiting) → 400. Do
-            // not reflect the caller-supplied taskId; keep the hint generic.
-            LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), e.getMessage());
+            // #13: an invalid approval request (unknown taskId / task not awaiting, or a
+            // review field the editor refused) → 400. The message says which field and
+            // why - the caller needs it to correct the request; it is plain text, capped.
+            LOGGER.infof("Approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
+            String detail = e.getMessage() == null || e.getMessage().isBlank()
+                    ? "an unknown task id was referenced, or a task is not awaiting approval."
+                    : e.getMessage().length() > 300 ? e.getMessage().substring(0, 300) : e.getMessage();
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
-                    .entity("Invalid approval request: an unknown task id was referenced, or a task is not awaiting "
-                            + "approval.")
+                    .entity("Invalid approval request: " + detail)
                     .build();
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);

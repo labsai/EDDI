@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.hitl.audit.HitlDecisionUnit.UnitKind;
 import ai.labs.eddi.engine.hitl.review.ApprovalCategories;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
@@ -194,7 +195,10 @@ public final class HitlApprovalAudit {
                 u.put("approvalCategory", category.category());
                 u.put("approvalCategorySource", category.source().name());
             }
-            String reasonCode = unit.reasonCode() != null ? unit.reasonCode() : r.reasonCode;
+            // the decision-level code explains only what changed or was rejected - a unit
+            // approved as it stood takes none
+            boolean unchanged = unit.outcome() == DecisionOutcome.APPROVED || unit.outcome() == DecisionOutcome.AUTO_APPROVED;
+            String reasonCode = unit.reasonCode() != null ? unit.reasonCode() : unchanged ? null : r.reasonCode;
             if (reasonCode != null) {
                 u.put("reasonCode", reasonCode);
             }
@@ -309,7 +313,7 @@ public final class HitlApprovalAudit {
         try {
             return parseOutput(entry);
         } catch (RuntimeException e) {
-            LOGGER.debugf("Unparseable hitl.approval entry %s: %s", entry.id(), e.getMessage());
+            LOGGER.debugf("Unparseable hitl.approval entry %s: %s", LogSanitizer.sanitize(entry.id()), LogSanitizer.sanitize(e.getMessage()));
             return List.of();
         }
     }

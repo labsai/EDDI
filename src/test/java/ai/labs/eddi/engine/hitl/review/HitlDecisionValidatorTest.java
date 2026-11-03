@@ -117,6 +117,8 @@ class HitlDecisionValidatorTest {
         assertDoesNotThrow(() -> HitlDecisionValidator.validate(approveWith("{\"a\":2}"), snapshot, editsAllowed(100)));
         assertThrows(IllegalArgumentException.class, () -> HitlDecisionValidator.validate(approveWith("[1]"), snapshot, editsAllowed(100)));
         assertThrows(IllegalArgumentException.class, () -> HitlDecisionValidator.validate(approveWith("not json"), snapshot, editsAllowed(100)));
+        assertThrows(IllegalArgumentException.class,
+                () -> HitlDecisionValidator.validate(approveWith("{\"a\":2} trailing text"), snapshot, editsAllowed(100)), "trailing tokens");
     }
 
     @Test

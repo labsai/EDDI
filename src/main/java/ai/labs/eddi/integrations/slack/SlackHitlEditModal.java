@@ -95,7 +95,9 @@ public final class SlackHitlEditModal {
         if (SlackHitlSupport.PAUSE_TYPE_TOOL_CALL.equals(pauseType)) {
             var calls = batch != null && batch.getCalls() != null ? batch.getCalls() : List.<PendingToolCallBatch.PendingToolCall>of();
             if (calls.size() == 1 && calls.get(0) != null && !calls.get(0).isArgsTruncated()) {
-                String shown = shownArguments(calls.get(0));
+                // the same pretty-printed text the modal will show, so the button never
+                // appears for a modal that would not open
+                String shown = pretty(shownArguments(calls.get(0)));
                 if (shown != null && shown.length() <= SLACK_INPUT_MAX) {
                     return new CardEdits(true, true, null);
                 }

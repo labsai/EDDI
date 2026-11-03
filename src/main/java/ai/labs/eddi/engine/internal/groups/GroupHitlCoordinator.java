@@ -327,6 +327,8 @@ public class GroupHitlCoordinator {
         // The realistic post-commit thrower is the listener: an SSE sink on a closed
         // stream. It used to sit inside this try.
         final GroupConversation.PendingHumanInput savedPending = gc.getPendingHumanInput();
+        // The audit entry names the cancelled pause, which setPausedAt(null) clears.
+        final Instant cancelledPausedAt = gc.getPausedAt();
         try {
             gc.setState(GroupConversationState.CANCELLED);
             gc.setPausedAt(null);
@@ -357,7 +359,7 @@ public class GroupHitlCoordinator {
         // change the state the cleanup paths will read. The first two swallow their
         // own exceptions already; the listener is wrapped here for the same reason.
         deleteGroupHitlTimeoutSchedule(gc.getId());
-        auditHitlCancellation(gc, token.getSignal());
+        auditHitlCancellation(gc, token.getSignal(), cancelledPausedAt);
         LOGGER.infof("Cancel signal landed while pausing GC %s — converted pause to CANCELLED", LogSanitizer.sanitize(gc.getId()));
         try {
             notifyCancelled(gc, listener);
@@ -747,7 +749,10 @@ public class GroupHitlCoordinator {
 
         // An approved SYNTHESIS edit becomes the phase's latest synthesis — appended
         // (unsigned, reviewer speaker) before the resume persists, never rewritten.
-        reviewEditor.appendSynthesisEdit(gc, decision != null ? decision.getDecidedBy() : null);
+        final TranscriptEntry appendedSynthesisEdit = reviewEditor.appendSynthesisEdit(gc, decision != null ? decision.getDecidedBy() : null);
+        // Every rollback below restores the pause; the edit belongs to the attempt that
+        // failed, so it is removed first (by identity - a drift error may follow it).
+        final Runnable dropSynthesisEdit = () -> reviewEditor.removeSynthesisEdit(gc, appendedSynthesisEdit);
 
         // Clear pause state but preserve pausedTurnCount — it seeds turnCounter on
         // resume (M3)
@@ -869,6 +874,7 @@ public class GroupHitlCoordinator {
                                 TranscriptEntryType.ERROR, Instant.now(), driftMessage, null));
                         // Restore the pause instead of destroying the approval: the
                         // operator can fix the config and approve again, or cancel.
+                        dropSynthesisEdit.run();
                         restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig,
                                 savedTimeoutPolicy, savedApprovalTimeout);
                         // A cancel signalled in this window must win over the restore —
@@ -923,6 +929,7 @@ public class GroupHitlCoordinator {
                                 driftMessage,
                                 savedResumePoint.phaseIdx(), savedPhaseName != null ? savedPhaseName : "n/a",
                                 TranscriptEntryType.ERROR, Instant.now(), driftMessage, null));
+                        dropSynthesisEdit.run();
                         restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, groupConfig,
                                 savedTimeoutPolicy, savedApprovalTimeout);
                         removeTokenAndConvertIfSignalled(gc, listener);
@@ -937,6 +944,7 @@ public class GroupHitlCoordinator {
                 // Transient failure BEFORE executeDiscussion (store hiccup, config
                 // unreadable): restore the pause instead of failing the discussion
                 // terminally — symmetric with the regular surface.
+                dropSynthesisEdit.run();
                 restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
                         savedTimeoutPolicy, savedApprovalTimeout);
                 // A cancel signalled in this window must win over the restore —
@@ -972,6 +980,7 @@ public class GroupHitlCoordinator {
             // Executor saturated/shut down — no thread will run the resume. The CAS
             // above already consumed the pause; restore it so the approval remains
             // actionable instead of leaving an IN_PROGRESS zombie.
+            dropSynthesisEdit.run();
             restoreGroupPause(gc, savedPhaseIndex, savedPhaseName, savedPauseType, savedPausedAt, null,
                     savedTimeoutPolicy, savedApprovalTimeout);
             // Remove-and-recheck like every other rollback path — a plain remove
