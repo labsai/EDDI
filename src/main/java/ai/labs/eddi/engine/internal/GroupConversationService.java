@@ -503,7 +503,7 @@ public class GroupConversationService implements IGroupConversationService, User
      * discussion had left when it dispatched this one. Either side may be
      * {@code null} (unlimited); {@code null} only wins when BOTH are null.
      */
-    static Double effectiveCostCeiling(Double own, Double inherited) {
+    public static Double effectiveCostCeiling(Double own, Double inherited) {
         if (own == null) {
             return inherited;
         }
