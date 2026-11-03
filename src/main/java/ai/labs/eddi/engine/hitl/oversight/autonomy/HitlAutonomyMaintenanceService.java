@@ -173,12 +173,23 @@ public class HitlAutonomyMaintenanceService {
         if (stateStore.read(AutonomyState.SYSTEM_AGENT_ID, BACKFILL_MARKER).isPresent()) {
             return false;
         }
-        // Claim first: a second node seeing the marker skips; a failed run is repaired
-        // by POST /hitl/analytics/rebuild.
-        if (stateStore.save(AutonomyState.initial(AutonomyState.SYSTEM_AGENT_ID, BACKFILL_MARKER), 0L).isEmpty()) {
+        // The marker is written only after a COMPLETE rebuild: a truncated one (page
+        // limit,
+        // unsupported store), a failed one and a skipped one leave it absent, so the
+        // next run
+        // retries. Two nodes may rebuild the same window at once; that is harmless,
+        // because
+        // the projection inserts only rows that are not there yet.
+        ApprovalBackfillService.Result result = backfill.rebuild(now.minus(settings.initialBackfill()), now);
+        if (result == null) {
             return false;
         }
-        ApprovalBackfillService.Result result = backfill.rebuild(now.minus(settings.initialBackfill()), now);
-        return result != null;
+        if (result.truncated()) {
+            LOGGER.warnf("Initial approval analytics backfill stopped before the start of its window (read %d, stored %d); "
+                    + "it will be retried on the next run", result.entriesRead(), result.unitsStored());
+        } else {
+            stateStore.save(AutonomyState.initial(AutonomyState.SYSTEM_AGENT_ID, BACKFILL_MARKER), 0L);
+        }
+        return true;
     }
 }
