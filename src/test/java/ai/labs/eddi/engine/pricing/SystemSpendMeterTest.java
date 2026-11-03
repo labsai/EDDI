@@ -82,6 +82,26 @@ class SystemSpendMeterTest {
     }
 
     @Test
+    void aCarriedChargeIsReportedUnderTheGroupThatIncurredIt() {
+        when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("store down"), QuotaCheckResult.OK);
+        var other = new GroupConversation();
+        other.setId("gc-2");
+        other.setGroupId("team-b");
+
+        SystemSpendMeter.charge(gc, "system:summarizer:full:10", PriceOverride.of(1.0, 2.0), usage(1_000_000, 500_000), "w");
+        SystemSpendMeter.charge(other, "system:summarizer:full:10", PriceOverride.of(1.0, 2.0), usage(1_000_000, 0), "w");
+
+        verify(quota).recordCost("default", 3.0);
+        assertEquals(2, events.size());
+        assertEquals("team-a", events.get(0).groupId());
+        assertEquals(2.0, events.get(0).usd(), 1e-12);
+        assertEquals(500_000, events.get(0).outputTokens());
+        assertEquals("team-b", events.get(1).groupId());
+        assertEquals(1.0, events.get(1).usd(), 1e-12);
+        assertEquals(0, events.get(1).outputTokens());
+    }
+
+    @Test
     void aChargeTheStoreCouldNotTakeIsCarriedAndTheTenantThenSeesTheFullAmount() {
         when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("store down"), QuotaCheckResult.OK);
 
@@ -91,8 +111,9 @@ class SystemSpendMeterTest {
 
         verify(quota).recordCost("default", 2.0);
         verify(quota).recordCost("default", 3.0);
-        assertEquals(1, events.size());
-        assertEquals(3.0, events.getFirst().usd(), 1e-12, "the carried $2 plus the new $1");
+        assertEquals(2, events.size(), "one event per charge, each with its own amount");
+        assertEquals(2.0, events.get(0).usd(), 1e-12, "the carried $2");
+        assertEquals(1.0, events.get(1).usd(), 1e-12, "the new $1");
     }
 
     @Test
