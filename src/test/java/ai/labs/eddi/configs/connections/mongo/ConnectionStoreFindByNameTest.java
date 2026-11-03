@@ -171,9 +171,27 @@ class ConnectionStoreFindByNameTest {
      * Everything else — the descriptor scan, the id and version parsing, the
      * tenant-and-name match — is the production code under test.
      */
+    @Test
+    @DisplayName("a name resolves to the live version, not the one a not-yet-advanced descriptor names")
+    void resolvesTheLiveVersionNotTheDescriptors() throws Exception {
+        // The descriptor still says version 1: the update that wrote version 2 has
+        // returned and invalidated the registry, but the response filter that advances
+        // the descriptor has not run yet. A lookup now must not cache version 1.
+        indexed(CONNECTION_ID);
+        var before = connection("jira", "default");
+        before.setDescription("allows the old host");
+        var after = connection("jira", "default");
+        after.setDescription("allows only the new host");
+        store.holdingVersion(CONNECTION_ID, 1, before);
+        store.holdingVersion(CONNECTION_ID, 2, after);
+
+        assertEquals("allows only the new host", store.readByName("default", "jira").getDescription());
+    }
+
     private static final class ProbeConnectionStore extends ConnectionStore {
 
         private final Map<String, ConnectionConfiguration> documents = new LinkedHashMap<>();
+        private final Map<String, Map<Integer, ConnectionConfiguration>> versions = new LinkedHashMap<>();
         private final Set<String> unreadable = new LinkedHashSet<>();
 
         private ProbeConnectionStore(IDocumentDescriptorStore descriptorStore) {
@@ -188,12 +206,31 @@ class ConnectionStoreFindByNameTest {
             unreadable.add(id);
         }
 
+        /**
+         * Holds {@code connection} as version {@code version} of {@code id}, the live
+         * one when it is the highest.
+         */
+        private void holdingVersion(String id, int version, ConnectionConfiguration connection) {
+            versions.computeIfAbsent(id, ignored -> new LinkedHashMap<>()).put(version, connection);
+        }
+
+        @Override
+        public IResourceStore.IResourceId getCurrentResourceId(String id) throws ResourceNotFoundException {
+            Map<Integer, ConnectionConfiguration> held = versions.get(id);
+            int live = held == null ? 1 : held.keySet().stream().max(Integer::compare).orElse(1);
+            var resourceId = mock(IResourceStore.IResourceId.class);
+            when(resourceId.getId()).thenReturn(id);
+            when(resourceId.getVersion()).thenReturn(live);
+            return resourceId;
+        }
+
         @Override
         public ConnectionConfiguration read(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
             if (unreadable.contains(id)) {
                 throw new ResourceStoreException("the database blinked");
             }
-            ConnectionConfiguration document = documents.get(id);
+            Map<Integer, ConnectionConfiguration> held = versions.get(id);
+            ConnectionConfiguration document = held != null ? held.get(version) : documents.get(id);
             if (document == null) {
                 throw new ResourceNotFoundException("Resource not found. (id=" + id + ", version=" + version + ")");
             }
