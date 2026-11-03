@@ -7,6 +7,7 @@ import { ModelPriceEntrySheet } from "@/components/model-prices/model-price-entr
 import { useModelPrices, useReferencePrices, useSaveModelPrices, useUnpricedSightings } from "@/hooks/use-model-prices";
 import { useIsAdminOrUnknown } from "@/hooks/use-auth";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
+import { Skeleton } from "@/components/ui/skeleton";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import {
   UNPRICED_POLICIES,
@@ -143,8 +144,8 @@ export function ModelPricesPage() {
   if (isLoading || (!form && !isError)) {
     return (
       <div className="space-y-4" data-testid="model-prices-loading">
-        <div className="h-10 w-64 animate-pulse rounded-md bg-muted" />
-        <div className="h-48 animate-pulse rounded-xl bg-muted" />
+        <Skeleton className="h-10 w-64" />
+        <Skeleton className="h-48 rounded-xl" />
       </div>
     );
   }

@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.pricing;
 import ai.labs.eddi.engine.internal.groups.GroupCostLedger;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
+import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
 import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.modules.llm.pricing.PricedSpend;
@@ -147,7 +148,16 @@ public class SystemSpendMeter {
         try {
             if (tenantQuotaService != null) {
                 tenantId = tenantQuotaService.getDefaultTenantId();
-                tenantQuotaService.recordCost(tenantId, delta);
+                QuotaCheckResult result = tenantQuotaService.recordCost(tenantId, delta);
+                if (result != null && result.accountingUnavailable()) {
+                    // An unreadable quota store is a returned result, not an exception. The tenant
+                    // counter did not take the charge, so no sink may see it ("a sink sees exactly
+                    // the charges the tenant counter saw"). The group's own ledger keeps the cost,
+                    // so its ceilings stay honest; the tenant-side amount is the one that is lost.
+                    LOGGER.warnf("Group %s: system spend of $%.6f was not charged to the tenant — quota accounting unavailable",
+                            LogSanitizer.sanitize(gc.getId()), delta);
+                    return;
+                }
             }
         } catch (RuntimeException e) {
             // The work already ran; a denied or unavailable result must not fail it.
