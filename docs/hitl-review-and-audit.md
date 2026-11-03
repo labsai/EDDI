@@ -251,7 +251,7 @@ when the ledger is disabled.
 ### Metrics
 
 `eddi_hitl_decision_total{surface, outcome, channel}` (one per unit), `eddi_hitl_edit_chars{kind}` (distribution of
-`charsChanged`) and `eddi_hitl_answer_edit_total{outcome}` (applied, screened_out, config_drift). Categories stay out
+`charsChanged`) and `eddi_hitl_answer_edit_total{outcome}` (applied, screened_out, config_drift, redacted_content). Categories stay out
 of metric tags because their cardinality is configurable.
 
 ## Worked example — a GitHub reply with one-click Slack approval

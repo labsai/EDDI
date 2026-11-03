@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.hitl.review;
 
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.model.HitlReviewConfig;
+import ai.labs.eddi.engine.hitl.audit.EditMetrics;
+import ai.labs.eddi.engine.hitl.audit.EditSummary;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
@@ -69,8 +71,14 @@ public final class HitlDecisionValidator {
                 && decision.getToolDecisions().values().stream().anyMatch(d -> d != null && d.getAmendedArguments() != null);
         if (decision.getReasonCode() != null) {
             ReasonCodes.require(decision.getReasonCode(), vocabulary, "reasonCode");
-            boolean explainsAChange = verdict == HitlVerdict.REJECTED || decision.getEditedAnswer() != null || anyAmended
-                    || anyCallRejected(decision);
+            // An edit identical to the draft changes nothing (the audit classifies it as a
+            // plain
+            // approval), so it cannot carry a reason code either.
+            HitlRevisionCandidate candidate = candidateOf(snapshot);
+            boolean answerEdited = decision.getEditedAnswer() != null
+                    && EditMetrics.ofText(EditSummary.Kind.ANSWER, candidate != null ? candidate.getDraft() : null, decision.getEditedAnswer())
+                            .changed();
+            boolean explainsAChange = verdict == HitlVerdict.REJECTED || answerEdited || anyAmended || anyCallRejected(decision);
             if (!explainsAChange) {
                 throw new IllegalArgumentException("reasonCode explains a rejection or an edit; a plain approval takes none");
             }
