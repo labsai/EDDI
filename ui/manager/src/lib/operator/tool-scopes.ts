@@ -331,6 +331,65 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /alerts/events/unacknowledged-count",
   "GET /alerts/rules",
   "GET /alerts/rules/{ruleId}",
+  // Cost and prices (EDDI 6.7.0+): the deployment's price catalog with its
+  // effective unpriced-call policy, which entry prices a given model, the models
+  // called without any price on this node, and one tenant's usage against its
+  // monthly cost budget. "Why does my budget never stop anything?" is usually an
+  // unpriced model, and these reads are how the operator sees it.
+  //
+  // Deliberately NOT granted:
+  // - `PUT /administration/model-prices` and `GET …/model-prices/reference`: a
+  //   price is a budget lever — a $0 price raises every budget that model counts
+  //   against — so price edits stay a human's, on the Manager's Model Prices page;
+  //   the reference list is only useful for such an edit.
+  // - `POST /administration/quotas/{tenantId}/usage/reset` and
+  //   `PUT /administration/quotas/{tenantId}`: resetting usage or changing a quota
+  //   is a spending decision, as before.
+  "GET /administration/model-prices",
+  "GET /administration/model-prices/resolve",
+  "GET /administration/model-prices/unpriced",
+  "GET /administration/quotas/{tenantId}/usage",
+  // Cross-team handoff intake (EDDI 6.7.0+): a standing team's inbox of handoffs
+  // waiting for review and where each handed-off backlog task came from — the read
+  // that answers "why didn't Account Desk get the lead?". The backend checks VIEW
+  // on the group, as the Manager's workspace page does.
+  //
+  // Deliberately NOT granted: `POST …/handoffs/{handoffId}/accept`, `…/decline`
+  // and `DELETE …/backlog/{taskId}`. An intake decision is a human decision — the
+  // REVIEW mode exists so a person looks at work crossing a team boundary — and an
+  // operator accepting through its own approval pause would launder one approval
+  // through another. The workspace read itself (`GET …/workspace`) is not needed
+  // for this and stays out.
+  "GET /groupstore/groups/{groupId}/workspace/handoffs",
+  // Team budgets (EDDI 6.7.0+): one team's budget this month and its history, and
+  // the cross-team listing. Counters and adjustment reasons only, no conversation
+  // content; VIEW on each group is checked by the backend.
+  //
+  // Deliberately NOT granted: `PUT /groupstore/groups/{groupId}/budget/current-month`
+  // and `POST /administration/team-budgets/transfers`. Money moves stay with the
+  // administrator, exactly like tenant quotas: the operator explains the refusal
+  // and gives the exact call, the admin makes it.
+  "GET /groupstore/groups/{groupId}/budget",
+  "GET /groupstore/groups/{groupId}/budget/history",
+  "GET /administration/team-budgets",
+  // HITL oversight (EDDI 6.7.0+): approval analytics, earned-autonomy states and
+  // one category's evidence, and the sampled-audit queue's size. "Which approval
+  // categories are close to autonomy?" is answered from these.
+  //
+  // Deliberately NOT granted:
+  // - `GET /hitl/samples` and `GET /hitl/samples/{sampleId}`: a sample carries a
+  //   user's redacted tool arguments (and, with includeResult, the result), which
+  //   would go to the operator's model provider. The count answers "how many wait".
+  // - `GET /hitl/analytics/decisions`: per-row conversation ids and deciders.
+  // - Every write: `PATCH /hitl/samples/{sampleId}` (a verdict is evidence),
+  //   `POST /hitl/autonomy/{agentId}/apply|dismiss|suspend|lift` (ungating, or
+  //   re-gating, an agent) and `POST /hitl/analytics/rebuild`. The backend refuses
+  //   them anyway when they come from an agent's tool call (403
+  //   AGENT_ORIGINATED); the operator does not even hold them.
+  "GET /hitl/analytics/summary",
+  "GET /hitl/autonomy",
+  "GET /hitl/autonomy/{agentId}/category",
+  "GET /hitl/samples/pending-count",
 ] as const;
 
 /**
@@ -824,6 +883,57 @@ export function grantsAlertReads(endpoints: readonly string[]): boolean {
     set.has("GET /alerts/rules") &&
     set.has("GET /alerts/rules/{ruleId}")
   );
+}
+
+/** The price-catalog reads the prompt's cost section uses. */
+const MODEL_PRICE_READS = [
+  "GET /administration/model-prices",
+  "GET /administration/model-prices/resolve",
+  "GET /administration/model-prices/unpriced",
+] as const;
+
+/**
+ * Whether the price-catalog reads are granted — the catalog, a model's resolution
+ * and the unpriced sightings. One predicate for all three, as for the ratings.
+ */
+export function grantsModelPriceReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return MODEL_PRICE_READS.every((entry) => set.has(entry));
+}
+
+/** Whether a standing team's handoff intake inbox can be read. */
+export function grantsTeamHandoffReads(endpoints: readonly string[]): boolean {
+  return new Set(endpoints).has("GET /groupstore/groups/{groupId}/workspace/handoffs");
+}
+
+/** The team-budget reads the prompt's budget section uses. */
+const TEAM_BUDGET_READS = [
+  "GET /groupstore/groups/{groupId}/budget",
+  "GET /groupstore/groups/{groupId}/budget/history",
+  "GET /administration/team-budgets",
+] as const;
+
+/** Whether the team-budget reads are granted — one team, its history, several teams. */
+export function grantsTeamBudgetReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return TEAM_BUDGET_READS.every((entry) => set.has(entry));
+}
+
+/** The oversight reads the prompt's oversight section uses. */
+const OVERSIGHT_READS = [
+  "GET /hitl/analytics/summary",
+  "GET /hitl/autonomy",
+  "GET /hitl/autonomy/{agentId}/category",
+  "GET /hitl/samples/pending-count",
+] as const;
+
+/**
+ * Whether the HITL oversight reads are granted — the analytics summary, the
+ * earned-autonomy states, one category's evidence and the sample count.
+ */
+export function grantsOversightReads(endpoints: readonly string[]): boolean {
+  const set = new Set(endpoints);
+  return OVERSIGHT_READS.every((entry) => set.has(entry));
 }
 
 /** Whether an upload source's stored files can be listed. */

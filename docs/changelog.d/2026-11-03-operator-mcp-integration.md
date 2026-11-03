@@ -56,3 +56,28 @@ skill teaches the new tools (`SKILL.md`, `references/groups.md`, `references/des
 `catch (Exception)` and answered **500** to a caller without access to the group, over REST and MCP alike; its test
 threw the JAX-RS `ForbiddenException`, which the guard never throws. It now rethrows the Quarkus exception (403), and
 the test uses the real type. `RestGroupWorkspace` on `main` has the same pattern and is left for its own fix.
+
+### Platform Operator (revision 52 → 53)
+
+- **Allow-list** (`tool-scopes.ts`), reads only, each with the exclusions written next to it: the price catalog,
+  model resolution and unpriced sightings, and one tenant's usage (`PUT …/model-prices`, the reference list and every
+  quota write stay out — a price is a budget lever); a team's handoff intake inbox (accept, decline and backlog
+  delete stay out — an intake decision is a person's); a team's budget, its history and the cross-team listing (the
+  cap change and the transfer stay out); the approval analytics summary, the earned-autonomy states, one category's
+  evidence and the sample count (the sample list, the per-decision rows and every oversight write stay out). Four
+  new predicates gate the matching prompt sections, so a deployment without one of the reads is not told about it.
+- **Prompt** (`system-prompt.ts`): sections on cost and prices (resolution order, unpriced models and the strict
+  policy, where cost shows), cross-team handoff (two-sided consent, REVIEW vs AUTO, why group handoffs are gated on
+  the receiving side, every refusal), team budgets (window, who pays, every refusal, the admin-only calls to give)
+  and approval oversight (tiers, `sampledAudit`, `autonomyPolicy`, the 409s); and quick-reference entries for the
+  SERVICE judge, human tie-breaks, humans in task forces, tool-call guardrails, edit-on-approve with the decision
+  audit, and approval card context, plus their documentation pages. The operator is told it never answers a
+  tie-break or a human task, never decides an intake item, and never changes a price, a cap or an oversight state.
+- **Gate guard** (`gate-guard.ts`): an LLM-config write that sets `toolCallGuardrails` — in a PUT body at any depth,
+  or a patch path, `from` or value — is refused in the approval UI with the new reason `carries-guardrails` (string
+  `operator.approval.blockedGuardrailCarrying`, all 11 locales), mirroring the backend's `SelfUngatingGuard`. The
+  agent-store oversight fields the approval-analytics follow-up asked for need no rule: the operator holds no
+  agent-store write.
+
+The ten `planning/operator-followups/*.md` notes stay: planning documents are kept in this repository after they
+are done, and these record why each read was granted or left out.
