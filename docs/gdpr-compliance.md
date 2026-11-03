@@ -80,7 +80,12 @@ principal, not a user: erasing or exporting it is refused with 400.
    the data back seconds after the erasure reported success. In cluster mode
    (`eddi.messaging.type=nats`, see [Clustering](clustering.md)) the stop is also
    sent to every other replica — keyed by a hash of the user id, never the id
-   itself — and the user's dead letters are removed. Each conversation is first
+   itself, and that hash sealed (AES-GCM) with `eddi.cluster.signing.key` when one is set, since
+   a plain SHA-256 of an e-mail address can be reversed from a list of addresses — and the
+   user's dead letters are removed. The erasure waits up to `eddi.cluster.gdpr-stop-timeout`
+   (10 s) for every replica of a member count read at that moment; a replica that does not
+   confirm, or cannot open the sealed hash (it has a different key), marks the step
+   incomplete. Each conversation is first
    marked as erased in a cluster-wide marker (`ERASED` bucket, expiring after
    `eddi.cluster.erasure-marker-ttl`, default `P7D`), then its dead letters are
    purged. A node that was cut off from NATS and kept a dead letter of that

@@ -1076,6 +1076,8 @@ eddi_cluster_nats_connected                 # 1 while this node is connected to 
 eddi_cluster_degraded                       # 1 while degraded: NATS unreachable for longer than the grace (gauge)
 eddi_cluster_nats_reconnects_total          # Reconnects of this node
 eddi_cluster_members                        # Members in the presence bucket (gauge)
+eddi_cluster_node_duplicate                 # 1 while another live JVM uses this node's id; readiness is DOWN (gauge)
+eddi_cluster_versions                       # Distinct EDDI version/payload-protocol pairs among the live members; >1 during a rolling upgrade (gauge)
 eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
 eddi_cluster_lease_held                     # Leases this node holds (gauge)
 eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released}
@@ -1090,11 +1092,16 @@ eddi_cluster_events_publish_failed_total    # Events that went to the outbox ins
 eddi_cluster_events_outbox                  # Events waiting in the outbox (gauge)
 eddi_cluster_events_resync_total            # Full local cache flushes after possibly missed events
 eddi_cluster_events_resync_coalesced_total  # Resync requests that joined one already queued (N nodes asking at once flush each node once more, not N times)
+eddi_cluster_events_dispatch_queue          # Received events waiting to be handled on this node, both lanes (gauge)
+eddi_cluster_events_dropped_total           # Received events a full dispatch lane could not take (each one triggers a resync)
+eddi_cluster_signing_rejected_total         # Cluster messages refused {kind=rpc|rpc-reply|event, reason=unsigned|malformed|unknown_key|bad_signature|expired|replayed}
+eddi_cluster_signing_unsigned_total         # Unsigned cluster messages accepted because eddi.cluster.signing.required=false {kind}
+eddi_cluster_payload_newer_total            # Messages of a newer payload version than this node knows {kind}
 eddi_cluster_rpc_seconds                    # Node RPCs {op, outcome} (timer)
 eddi_cluster_degraded_decisions_total       # Degraded-mode decisions {area, action}
 eddi_cluster_ratelimit_decisions_total      # Cluster-wide tool rate-limit decisions {scope, outcome=allowed|denied|degraded}
 eddi_cluster_ratelimit_cas_retries_total    # Lost compare-and-sets on a shared rate-limit bucket (retried)
-eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|unsequenced|conflict}
+eddi_cluster_audit_sequence_total           # Audit chain positions {outcome=allocated|seeded|unsequenced|conflict}; seeded = a counter (re)started from the store's highest position
 eddi_agent_nonce_unavailable_total          # Signed envelopes refused: the shared nonce store was unreachable (fail closed)
 eddi_cluster_admin_actions_total            # Recovery actions from the cluster console {action, outcome}
 ```
@@ -1102,7 +1109,8 @@ eddi_cluster_admin_actions_total            # Recovery actions from the cluster 
 Alert on `eddi_cluster_degraded == 1` for 5 minutes, any increase of
 `eddi_cluster_fence_rejected_total`, a rising
 `eddi_cluster_lease_acquire_seconds_count{outcome="timeout"}` and
-`eddi_coordinator_dead_letters > 0` — the rules ship in
+`eddi_coordinator_dead_letters > 0`, `eddi_cluster_node_duplicate == 1`, any increase of
+`eddi_cluster_signing_rejected_total` (someone publishes on NATS without the key) — the rules ship in
 `docs/monitoring/eddi-cluster-alerts.yml`. See [Clustering](clustering.md).
 
 ### JVM & HTTP Server (auto-exposed)

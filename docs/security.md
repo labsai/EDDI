@@ -469,6 +469,21 @@ Tool *arguments* are governed at the tool-execution layer, tool *results* by the
 
 ---
 
+### Cluster control plane (NATS)
+
+In cluster mode the nodes steer each other over NATS: node RPCs (cancel, drain, GDPR stop,
+forwarding of dead letters) and cluster events (deployments, secret rotations, cache
+evictions). Every node holds the same NATS credentials, so without more those credentials
+alone control every node. Set `eddi.cluster.signing.key` — a random value of at least 32
+characters, the same on every node and kept outside NATS — and every RPC, reply and event is
+signed with HMAC-SHA256 over its subject, a timestamp, a nonce and its body hash; a node
+refuses what does not verify (constant-time comparison), what is older than the window, and a
+nonce it has already seen. `eddi.cluster.signing.required=true` also refuses unsigned
+messages once every node signs. Without a key a WARN is logged at boot and nothing changes
+for existing installs. Webhook delivery de-duplication fails closed while NATS is unreachable
+(`eddi.cluster.degraded.nonces=reject`, the default). Details, the threat model and the
+rolling-upgrade order: [Clustering](clustering.md#signed-control-plane).
+
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
 **Applies to:** apicall headers, and an MCP server's `apiKey`, that reference `${caller:token}` / `${caller:userId}`.
