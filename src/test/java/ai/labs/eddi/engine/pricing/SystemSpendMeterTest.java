@@ -72,6 +72,16 @@ class SystemSpendMeterTest {
     }
 
     @Test
+    void anUnavailableQuotaStoreShowsNoSpendEventButTheLedgerKeepsTheCost() {
+        when(quota.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.unavailable("store down"));
+
+        SystemSpendMeter.charge(gc, "system:summarizer:full:10", PriceOverride.of(1.0, 2.0), usage(1_000_000, 500_000), "w");
+
+        assertEquals(0, events.size(), "the tenant counter did not take the charge, so no sink sees it");
+        assertEquals(2.0, gc.getMemberCosts().get("system:summarizer:full:10"), 1e-12);
+    }
+
+    @Test
     void aReRunOfTheSameOperationChargesOnlyTheIncrease() {
         SystemSpendMeter.charge(gc, "k", PriceOverride.of(1.0, null), usage(1_000_000, 0), "w");
         SystemSpendMeter.charge(gc, "k", PriceOverride.of(1.0, null), usage(1_000_000, 0), "w");
