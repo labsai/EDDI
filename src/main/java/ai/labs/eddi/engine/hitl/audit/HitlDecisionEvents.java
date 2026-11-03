@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.hitl.audit;
 
+import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkus.arc.Arc;
 import io.quarkus.arc.ArcContainer;
 import org.jboss.logging.Logger;
@@ -38,7 +39,8 @@ public final class HitlDecisionEvents {
             }
             container.beanManager().getEvent().select(HitlDecisionRecorded.class).fireAsync(event);
         } catch (RuntimeException e) {
-            LOGGER.warnf("Could not fire HitlDecisionRecorded for audit entry %s: %s", event.auditEntryId(), e.getMessage());
+            LOGGER.warnf("Could not fire HitlDecisionRecorded for audit entry %s: %s", LogSanitizer.sanitize(event.auditEntryId()),
+                    LogSanitizer.sanitize(e.getMessage()));
         }
     }
 }

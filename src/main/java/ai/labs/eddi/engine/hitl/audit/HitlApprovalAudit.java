@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.hitl.audit.HitlDecisionUnit.UnitKind;
 import ai.labs.eddi.engine.hitl.review.ApprovalCategories;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
+import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
@@ -309,7 +310,7 @@ public final class HitlApprovalAudit {
         try {
             return parseOutput(entry);
         } catch (RuntimeException e) {
-            LOGGER.debugf("Unparseable hitl.approval entry %s: %s", entry.id(), e.getMessage());
+            LOGGER.debugf("Unparseable hitl.approval entry %s: %s", LogSanitizer.sanitize(entry.id()), LogSanitizer.sanitize(e.getMessage()));
             return List.of();
         }
     }
