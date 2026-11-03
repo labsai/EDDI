@@ -57,7 +57,7 @@ import static org.mockito.Mockito.when;
 class JetStreamEventBusHardeningTest {
 
     private static final ObjectMapper JSON = new ObjectMapper();
-    private static final String KEY = "0123456789abcdef0123456789abcdef-test-key";
+    private static final String KEY = "fixturefixturefixturefixturefixture-test-key";
 
     private NatsConnectionManager connections;
     private JetStreamManagement jsm;

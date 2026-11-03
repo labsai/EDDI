@@ -41,7 +41,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("CacheFactory — cluster replay protection and keyed eviction hashes")
 class ClusterCacheProtectionTest {
 
-    private static final String KEY = "0123456789abcdef0123456789abcdef-seal-key";
+    private static final String KEY = "fixturefixturefixturefixturefixture-seal-key";
 
     @SuppressWarnings("unchecked")
     private static <T> Instance<T> instance(T value) {
