@@ -17,7 +17,10 @@ import java.util.Map;
  * overrides winning), only this method body changes — the judge and its tests
  * keep calling the same signature, so the two changes can merge in either
  * order. That is also why {@code provider} and {@code model} are parameters
- * although the current body does not read them.
+ * although the current body does not read them: they are reserved for the
+ * catalog resolver ({@code ModelPriceResolver}) that the cost-accounting change
+ * (https://github.com/labsai/EDDI/pull/1222) introduces, which prices a call by
+ * provider and model. Do not remove them as unused.
  */
 public final class JudgeCallPricing {
 
