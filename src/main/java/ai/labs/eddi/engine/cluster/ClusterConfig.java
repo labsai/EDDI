@@ -217,6 +217,16 @@ public class ClusterConfig {
     @ConfigProperty(name = "eddi.coordinator.dead-letter.max-bytes", defaultValue = "1073741824")
     long deadLetterMaxBytes = 1L << 30;
 
+    /**
+     * Size cap of the {@code <prefix>_ARCHIVES} object store (agent exports shared
+     * between nodes) in bytes; {@code <= 0} for none. It shares JetStream storage
+     * with the lease and nonce buckets, so an unbounded one let a few large exports
+     * fill the store and block lease creates. An export that does not fit stays on
+     * the node that made it.
+     */
+    @ConfigProperty(name = "eddi.cluster.archives.max-bytes", defaultValue = "1073741824")
+    long archivesMaxBytes = 1L << 30;
+
     /** Every value as documented, for tests and for code paths without CDI. */
     public static ClusterConfig defaults() {
         return new ClusterConfig();
@@ -566,6 +576,10 @@ public class ClusterConfig {
 
     public long deadLetterMaxBytes() {
         return deadLetterMaxBytes;
+    }
+
+    public long archivesMaxBytes() {
+        return archivesMaxBytes;
     }
 
     // ---- mutators for tests and the in-JVM cluster ITs ----
