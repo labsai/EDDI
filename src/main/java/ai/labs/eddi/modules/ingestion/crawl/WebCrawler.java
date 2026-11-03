@@ -119,6 +119,13 @@ public class WebCrawler {
      */
     private static final int MAX_QUEUED_URLS = 100_000;
 
+    /**
+     * Characters of URL text the link frontier may retain over a crawl, the
+     * canonical id and the fetch URL together. {@link #MAX_QUEUED_URLS} bounds the
+     * count; this bounds the size, which a long base URL multiplies.
+     */
+    static final long MAX_FRONTIER_CHARS = 64_000_000L;
+
     /** Cap on the robots.txt and sitemap bodies. */
     private static final long MAX_METADATA_BYTES = 1024L * 1024;
 
@@ -418,8 +425,16 @@ public class WebCrawler {
             if (!isInScope(canonical, seedHost, request, excludes)) {
                 continue;
             }
+            // Both strings are retained, and a short relative link inherits the whole of
+            // a long base URL: the count cap alone lets one page pin gigabytes.
+            String fetchUrl = CrawlUrls.stripFragment(href);
+            long cost = (long) canonical.length() + fetchUrl.length();
+            if (frontier.queuedChars + cost > MAX_FRONTIER_CHARS) {
+                break;
+            }
+            frontier.queuedChars += cost;
             queued.add(canonical);
-            queue.add(new Candidate(CrawlUrls.stripFragment(href), canonical, depth, false));
+            queue.add(new Candidate(fetchUrl, canonical, depth, false));
         }
     }
 
@@ -1032,6 +1047,8 @@ public class WebCrawler {
          */
         private final Set<String> queued = new HashSet<>();
         private final Set<String> visited = new HashSet<>();
+        /** URL characters admitted by link discovery so far; see MAX_FRONTIER_CHARS. */
+        private long queuedChars;
         /** Document ids this crawl has reported, as a page or as unchanged. */
         private final Set<String> delivered = new HashSet<>();
         private final Map<String, List<Candidate>> deferredTo = new HashMap<>();

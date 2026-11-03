@@ -1110,9 +1110,14 @@ public class IngestionPipeline {
                         .map(active -> !runId.equals(active.runId()))
                         .orElse(true);
             } catch (RuntimeException e) {
-                // A store that cannot answer has not taken the run away. The writes
-                // themselves are fenced; this only decides whether to keep working.
-                return true;
+                // A store that cannot answer has not taken the run away, so the run is not
+                // marked superseded and keeps going. But the checks made with {@code now}
+                // guard a vector write that no fence covers: publishing on an unverified
+                // answer could make a removed source's text retrievable again, so those
+                // refuse until the store can say. The document is not recorded, and the
+                // next run takes it.
+                LOGGER.debugf(e, "Could not verify that run %s still owns its source", LogSanitizer.sanitize(runId));
+                return !now;
             }
             if (superseded) {
                 LOGGER.warnf("Ingestion run %s of source '%s' no longer owns its source — it was purged, removed "

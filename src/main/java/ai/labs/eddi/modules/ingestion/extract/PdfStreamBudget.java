@@ -86,6 +86,7 @@ public final class PdfStreamBudget {
         int endstream = -2;
         int lastObj = -1;
         int objScannedTo = 0;
+        int lastDictionaryObj = -1;
         while ((keyword = indexOf(pdf, STREAM_KEYWORD, from, pdf.length)) >= 0) {
             from = keyword + STREAM_KEYWORD.length;
             if (isEndstream(pdf, keyword)) {
@@ -106,6 +107,14 @@ public final class PdfStreamBudget {
                 lastObj = found;
             }
             objScannedTo = keyword;
+            if (lastObj >= 0 && lastObj == lastDictionaryObj) {
+                // Another "stream" inside the same object: its dictionary was read at the
+                // first one, and reading it again copied up to MAX_DICTIONARY_BYTES per
+                // keyword — a file that is mostly the word "stream" cost the square of
+                // its size.
+                continue;
+            }
+            lastDictionaryObj = lastObj;
             List<String> filters = filtersOf(dictionaryBefore(pdf, lastObj, keyword));
             if (filters == null) {
                 continue;

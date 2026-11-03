@@ -90,4 +90,22 @@ class MergedTermsCorrectionTest {
         // refused before a single substring was looked up
         verify(dictionary, never()).lookupTerm(anyString());
     }
+
+    @Test
+    void correctWord_retriesShareOneTimeBudget() {
+        // Every lookup is individually bounded and a miss, so only a budget across the
+        // retries stops a slow dictionary from being asked once per prefix and suffix.
+        var slow = mock(IDictionary.class);
+        when(slow.lookupTerm(anyString())).thenAnswer(invocation -> {
+            Thread.sleep(40);
+            return IDictionary.NO_WORDS_FOUND;
+        });
+        correction.init(List.of(slow));
+
+        var result = correction.correctWord("a".repeat(ICorrection.MAX_CORRECTABLE_LENGTH), null, Collections.emptyList());
+
+        assertTrue(result.isEmpty());
+        // 100 prefixes plus 100 suffixes would be 8 s of lookups; the budget is 200 ms
+        verify(slow, atMost(12)).lookupTerm(anyString());
+    }
 }

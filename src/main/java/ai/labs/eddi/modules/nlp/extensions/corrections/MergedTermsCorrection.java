@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.nlp.extensions.corrections;
 
 import ai.labs.eddi.modules.nlp.extensions.dictionaries.IDictionary;
+import ai.labs.eddi.modules.nlp.model.RegEx;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
@@ -26,10 +27,17 @@ public class MergedTermsCorrection implements ICorrection {
         if (word.length() > MAX_CORRECTABLE_LENGTH) {
             return IDictionary.NO_WORDS_FOUND;
         }
+        // One budget for every retry of this word. Each lookup has its own regex
+        // deadline and treats expiry as a miss, so a word of N characters could cost
+        // up to 2N of those; past this, the word is simply not corrected.
+        final long deadline = System.nanoTime() + RegEx.MATCH_BUDGET_NANOS;
         List<IDictionary.IFoundWord> possibleTerms = new ArrayList<>();
         String part;
         String tmpWord = word;
         for (int i = tmpWord.length(); i > 0; i--) {
+            if (System.nanoTime() > deadline) {
+                return IDictionary.NO_WORDS_FOUND;
+            }
             part = tmpWord.substring(0, i);
             List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries);
             if (match.size() > 0) {
@@ -42,6 +50,9 @@ public class MergedTermsCorrection implements ICorrection {
         if (!tmpWord.isEmpty()) {
             possibleTerms.clear();
             for (int i = 0; i < tmpWord.length(); i++) {
+                if (System.nanoTime() > deadline) {
+                    return IDictionary.NO_WORDS_FOUND;
+                }
                 part = tmpWord.substring(i);
                 List<IDictionary.IFoundWord> match = matchWord(part, userLanguage, temporaryDictionaries);
                 if (match.size() > 0) {

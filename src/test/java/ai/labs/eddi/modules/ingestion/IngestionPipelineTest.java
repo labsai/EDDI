@@ -43,6 +43,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -638,6 +639,35 @@ class IngestionPipelineTest {
             assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
             assertTrue(exploding.activeRun(IngestionPipeline.stateKey(KB_RESOURCE_ID, source())).isEmpty(),
                     "the run must be closed even when the failure came from the state store");
+        }
+
+        @Test
+        @DisplayName("vectors are not published when run ownership cannot be verified after the embedding call")
+        void unverifiableOwnershipDoesNotPublish() {
+            var down = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<IngestionRun> activeRun(String sourceId) {
+                    if (down[0]) {
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.activeRun(sourceId);
+                }
+            };
+            // The store goes away while the provider is computing the embeddings.
+            doAnswer(invocation -> {
+                down[0] = true;
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            var pipeline = new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", pageWith("x"))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry());
+
+            pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+
+            assertTrue(embeddingStore.segments().isEmpty(),
+                    "a run that cannot confirm it still owns its source must not publish vectors");
         }
 
         @Test

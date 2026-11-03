@@ -411,6 +411,29 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("short relative links under a long base URL cannot pin more than the frontier's character budget")
+        void frontierIsBoundedInCharacters() {
+            // Each "<a href=l1>" is a few bytes, but resolves against a ~7,000-character
+            // base into two retained strings of that length.
+            String base = SITE + "/" + "d".repeat(7_000) + "/";
+            StringBuilder html = new StringBuilder("<html><body>");
+            int links = 20_000;
+            for (int i = 0; i < links; i++) {
+                html.append("<a href=\"l").append(i).append("\">x</a>");
+            }
+            FakeSite site = new FakeSite().page(base, html.append("</body></html>").toString());
+
+            new WebCrawler(site).crawl(
+                    request(base, Scope.defaults(),
+                            new Limits(links * 2, links * 3, 0, 0, Duration.ofMinutes(1), Duration.ofSeconds(5))),
+                    new RecordingSink());
+
+            long admitted = site.requestedUrls().size() - 1L;
+            assertTrue(admitted > 0 && admitted < links,
+                    "the frontier admitted " + admitted + " of " + links + " links, 2 x 7,000 characters each");
+        }
+
+        @Test
         @DisplayName("an unreachable seed is not coverage, although the crawl completed")
         void unreachableSeedIsNotCoverage() {
             FakeSite site = new FakeSite().failure(SITE + "/", "connection refused");
