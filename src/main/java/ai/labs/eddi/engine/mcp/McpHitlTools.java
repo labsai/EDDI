@@ -608,7 +608,7 @@ public class McpHitlTools {
             request.setDecision(decision);
             request.setTaskApprovals(taskApprovals);
             McpReviewArguments.applyReview(decision, editedAnswer, reasonCode);
-            request.setTaskDecisions(McpReviewArguments.taskDecisions(jsonSerialization, taskDecisionsJson));
+            request.setTaskDecisions(McpReviewArguments.taskDecisions(taskDecisionsJson));
             GroupConversation result = groupConversationService.resumeDiscussion(conversationId, request, null);
             meterRegistry.counter("eddi.mcp.hitl.decision", "surface", "group", "verdict", parsed.name()).increment();
             return readableGroupResult(result);
