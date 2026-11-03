@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.ServiceJudgeConfig;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.CostUpdatedEvent;
@@ -35,6 +36,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -230,6 +232,39 @@ class ServiceConvergenceJudgeTest {
             assertFalse(verdict.get().converged());
             assertTrue((System.nanoTime() - start) / 1_000_000 < 5_000, "returned at the deadline, not when the call finished");
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
+        }
+
+        @Test
+        @DisplayName("a grant narrowed after the save fails the judge, never resolves the secret, and never throws")
+        void narrowedGrantFailsTheJudge() {
+            var grants = mock(ServiceJudgeVaultGrants.class);
+            when(grants.firstProblem(any())).thenReturn(Optional.of("service.parameters.apiKey references vault secret x"));
+            var judge = new ServiceConvergenceJudge(() -> summarizer, meters, () -> grants);
+            var convergence = serviceConvergence(SERVICE);
+
+            var verdict = judge.judge(gc, phase(convergence), 0, 1, convergence, "MEMBER {text}",
+                    out -> ConvergenceDetector.parseJudgeVerdict(out, 0.8), null);
+
+            assertTrue(verdict.isPresent());
+            assertFalse(verdict.get().converged());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
+            assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "error").timers().size());
+            assertTrue(gc.getMemberCosts() == null || gc.getMemberCosts().isEmpty());
+        }
+
+        @Test
+        @DisplayName("a still-granted secret lets the judge run")
+        void grantedSecretRuns() {
+            var grants = mock(ServiceJudgeVaultGrants.class);
+            when(grants.firstProblem(any())).thenReturn(Optional.empty());
+            judgeReplies("{\"agreementScore\":0.2}", 1, 1);
+            var judge = new ServiceConvergenceJudge(() -> summarizer, meters, () -> grants);
+            var convergence = serviceConvergence(SERVICE);
+
+            judge.judge(gc, phase(convergence), 0, 1, convergence, "MEMBER {text}", out -> ConvergenceDetector.parseJudgeVerdict(out, 0.8),
+                    null);
+
+            verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         }
 
         @Test

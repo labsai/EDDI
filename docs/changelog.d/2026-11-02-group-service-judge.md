@@ -34,6 +34,10 @@ instead of a full moderator-agent turn, and it works in a group that has no mode
   one line in `AgentGroupStore.memberAndLimitProblems`: a plaintext credential in `service.parameters`, a
   `${connection:...}` reference (the model registry refuses those) and a half-named provider/model are 400s.
   `SERVICE` without a model and an unknown `judge` value are warnings only, so stored configs keep saving.
+- **Vault grants** — [`ServiceJudgeVaultGrants`](../../src/main/java/ai/labs/eddi/configs/groups/validation/ServiceJudgeVaultGrants.java):
+  a `${vault:...}` reference in `service.parameters` is refused at group save unless the secret exists and its
+  grant contains `"*"` (a group has no agent identity for a narrower grant), and re-checked before the judge
+  resolves its parameters; a narrowed grant fails that judge with `outcome=error`, not the discussion.
 - **Metrics** — timer `eddi.group.convergence.judge.duration{judge=service, mode, outcome}`.
 - **Manager** — the phase editor shows provider, model, API key reference, prices and timeout when Judge is
   Service (`service-judge-fields.tsx`); `normalizeConvergence` carries the block through. New i18n namespace
@@ -54,6 +58,7 @@ new block.
   [`planning/operator-followups/group-service-judge.md`](../../planning/operator-followups/group-service-judge.md).
 
 ```decision-log
+| 2026-11-03 | Vault references in a SERVICE judge's parameters need a secret granted to all agents ("*") and are re-checked at run time | A group has no agent identity, so the deploy-time VaultGrantChecker cannot apply; an editor could otherwise aim any vault key at an endpoint of their choosing | A group-level grant model; restricting parameters to ${vars:...} |
 | 2026-11-02 | The SERVICE judge calls SummarizationService.summarizeWithUsage, not GuardrailModelClient | GuardrailModelClient is package-private and bound to an LLM task's GuardrailContext/PaidCallGate, which a group does not have; the group summarizers already price and book through SummarizationService + TokenPricing + GroupCostLedger | Reusing the guardrail client; a new model client |
 | 2026-11-02 | The judge's parameters accept vault/vars references only for credential keys, and refuse ${connection:...} | A group config must not become a plaintext key store, and ChatModelRegistry rejects connection references for model parameters at call time | Accepting literals with a warning; resolving connections for the judge |
 ```

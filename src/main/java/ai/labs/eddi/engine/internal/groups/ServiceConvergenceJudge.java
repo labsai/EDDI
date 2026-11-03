@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ConvergenceConf
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.ServiceJudgeConfig;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.internal.groups.ConvergenceDetector.ConvergenceVerdict;
@@ -91,6 +92,7 @@ public class ServiceConvergenceJudge {
 
     private final Supplier<SummarizationService> summarizationService;
     private final MeterRegistry meterRegistry;
+    private final Supplier<ServiceJudgeVaultGrants> vaultGrants;
 
     /**
      * @param summarizationService
@@ -101,8 +103,22 @@ public class ServiceConvergenceJudge {
      *            where the duration timer is recorded; {@code null} records nothing
      */
     public ServiceConvergenceJudge(Supplier<SummarizationService> summarizationService, MeterRegistry meterRegistry) {
+        this(summarizationService, meterRegistry, null);
+    }
+
+    /**
+     * @param vaultGrants
+     *            supplies the rule that re-checks, just before the parameters are
+     *            resolved, that every vault reference is still granted to all
+     *            agents; a supplier because the group service field-injects it, and
+     *            {@code null} (or a supplier returning {@code null}) skips the
+     *            check
+     */
+    public ServiceConvergenceJudge(Supplier<SummarizationService> summarizationService, MeterRegistry meterRegistry,
+            Supplier<ServiceJudgeVaultGrants> vaultGrants) {
         this.summarizationService = summarizationService;
         this.meterRegistry = meterRegistry;
+        this.vaultGrants = vaultGrants;
     }
 
     /**
@@ -133,6 +149,18 @@ public class ServiceConvergenceJudge {
         if (summarizer == null) {
             record(mode, OUTCOME_ERROR, System.nanoTime() - start);
             return Optional.of(ConvergenceVerdict.notConverged(FAILED_SUMMARY));
+        }
+        // A grant narrowed after the group was saved: fail this judge (outcome=error,
+        // not converged), never the discussion, and never resolve the secret.
+        var grants = vaultGrants != null ? vaultGrants.get() : null;
+        if (grants != null) {
+            var ungranted = grants.firstProblem(service.parameters());
+            if (ungranted.isPresent()) {
+                LOGGER.warnf("Group %s phase '%s': the service convergence judge is not run — %s", LogSanitizer.sanitize(gc.getId()),
+                        LogSanitizer.sanitize(phaseName(phase)), ungranted.get());
+                record(mode, OUTCOME_ERROR, System.nanoTime() - start);
+                return Optional.of(ConvergenceVerdict.notConverged(FAILED_SUMMARY));
+            }
         }
         SummarizationService.SummarizationResult result;
         try {
