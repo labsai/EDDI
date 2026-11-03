@@ -75,6 +75,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -994,17 +995,22 @@ public class ClusterAdminService implements ClusterStartable {
             if (!localReplayClaims.add(id)) {
                 return new ItemOutcome(id, "IN_PROGRESS", "another administrator is replaying this entry right now");
             }
-        } else {
+        }
+        SharedReplayClaim shared = null;
+        if (!local) {
             try {
-                if (claims().create(claimKey, nodeName().getBytes(StandardCharsets.UTF_8)).isEmpty()) {
+                OptionalLong created = claims().create(claimKey, nodeName().getBytes(StandardCharsets.UTF_8));
+                if (created.isEmpty()) {
                     return new ItemOutcome(id, "IN_PROGRESS", "another administrator is replaying this entry right now");
                 }
+                shared = new SharedReplayClaim(id, claimKey, created.getAsLong());
             } catch (ClusterUnavailableException e) {
                 LOGGER.warnf("Replay claim of dead letter %s failed: %s", sanitize(id), e.getMessage());
                 return new ItemOutcome(id, "UNAVAILABLE", "NATS is unreachable — try again when the cluster is connected");
             }
         }
-        Runnable releaseClaim = () -> releaseReplayClaim(id, local, claimKey);
+        SharedReplayClaim claim = shared;
+        Runnable releaseClaim = local ? () -> localReplayClaims.remove(id) : claim::release;
         boolean handedOver = false;
         try {
             ReplaySubmission submission = replayClaimed(id, releaseClaim);
@@ -1017,15 +1023,63 @@ public class ClusterAdminService implements ClusterStartable {
         }
     }
 
-    private void releaseReplayClaim(String id, boolean local, String claimKey) {
-        if (local) {
-            localReplayClaims.remove(id);
-            return;
+    /**
+     * How often a pending replay renews its shared claim: three times per bucket
+     * TTL.
+     */
+    long replayClaimRenewMillis = TimeUnit.SECONDS.toMillis(CLAIM_TTL_SECONDS) / 3;
+
+    /**
+     * The shared claim of one replay. The {@code ADMIN} bucket's TTL
+     * ({@value #CLAIM_TTL_SECONDS} s) is shorter than a replay may wait for its
+     * turn's answer and commit, so the claim is renewed, at the revision this
+     * replay wrote, until the replay settles: expired, another administrator could
+     * claim and replay the entry a second time. It is released at that revision
+     * too, so a late settlement never deletes a later replay's claim.
+     */
+    private final class SharedReplayClaim {
+        private final String id;
+        private final String key;
+        private long revision;
+        private boolean released;
+
+        SharedReplayClaim(String id, String key, long revision) {
+            this.id = id;
+            this.key = key;
+            this.revision = revision;
+            scheduleRenewal();
         }
-        try {
-            claims().delete(claimKey);
-        } catch (ClusterUnavailableException e) {
-            LOGGER.debugf("Replay claim %s not released (expires with the TTL): %s", sanitize(id), e.getMessage());
+
+        private void scheduleRenewal() {
+            CompletableFuture.runAsync(this::renew,
+                    CompletableFuture.delayedExecutor(replayClaimRenewMillis, TimeUnit.MILLISECONDS, replayCompletions));
+        }
+
+        private synchronized void renew() {
+            if (released) {
+                return;
+            }
+            try {
+                OptionalLong next = claims().update(key, nodeName().getBytes(StandardCharsets.UTF_8), revision);
+                if (next.isEmpty()) {
+                    LOGGER.warnf("Replay claim of dead letter %s was lost while its turn ran (it expired or was taken)",
+                            sanitize(id));
+                    return;
+                }
+                revision = next.getAsLong();
+            } catch (ClusterUnavailableException e) {
+                LOGGER.debugf("Replay claim %s not renewed (retried): %s", sanitize(id), e.getMessage());
+            }
+            scheduleRenewal();
+        }
+
+        synchronized void release() {
+            released = true;
+            try {
+                claims().delete(key, revision);
+            } catch (ClusterUnavailableException e) {
+                LOGGER.debugf("Replay claim %s not released (expires with the TTL): %s", sanitize(id), e.getMessage());
+            }
         }
     }
 
@@ -1112,7 +1166,11 @@ public class ClusterAdminService implements ClusterStartable {
 
                 @Override
                 public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
-                    answered.complete(false);
+                    // A duplicate of a turn another node already committed under this key is
+                    // answered as skipped: with idempotency on, the settlement finds that
+                    // record and deletes the entry. Without it a skip is not looked into, as
+                    // a revision that moved meanwhile could be anybody's write.
+                    answered.complete(turnIdempotency != null && turnIdempotency.isEnabled());
                 }
 
                 @Override

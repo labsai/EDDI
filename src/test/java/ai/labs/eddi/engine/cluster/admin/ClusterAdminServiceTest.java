@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.cluster.admin;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.internal.TurnIdempotencyService;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
@@ -72,6 +73,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 @DisplayName("ClusterAdminService")
@@ -614,6 +616,65 @@ class ClusterAdminServiceTest {
             assertEquals("REPLAYED", service.replayOne("10").outcome());
             assertEquals("IN_PROGRESS", service.replayOne("10").outcome(), "a second replay must not run it again meanwhile");
             verify(coordinator, never()).replayDeadLetter("10");
+        }
+
+        @Test
+        @DisplayName("A7: a pending replay renews its shared claim, which would otherwise expire before the turn answers")
+        void pendingReplayRenewsItsClaim() throws Exception {
+            service.replayClaimRenewMillis = 50;
+            when(coordinator.getDeadLetter("11")).thenReturn(Optional.of(entry("11", "failed", "n1", turn("a1", "x"))));
+            assertEquals("REPLAYED", service.replayOne("11").outcome());
+            var kv = shared.bucket(ClusterAdminService.ADMIN_BUCKET);
+            long first = kv.get("replay.11").orElseThrow().revision();
+            long deadline = System.currentTimeMillis() + 3000;
+            while (kv.get("replay.11").orElseThrow().revision() == first && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(kv.get("replay.11").orElseThrow().revision() > first, "the claim was renewed while the turn ran");
+        }
+
+        @Test
+        @DisplayName("A7: a replay that settles late does not release a claim a later replay took meanwhile")
+        void lateSettlementKeepsALaterClaim() throws Exception {
+            AtomicReference<ConversationResponseHandler> handler = new AtomicReference<>();
+            when(coordinator.getDeadLetter("12")).thenReturn(Optional.of(entry("12", "failed", "n1", turn("a1", "x"))));
+            when(memoryStore.getRevision("conv-12")).thenReturn(3L);
+            doAnswer(i -> {
+                handler.set(i.getArgument(6));
+                return null;
+            }).when(conversationService).say(eq("conv-12"), any(), any(), any(), any(), anyBoolean(), any());
+            assertEquals("REPLAYED", service.replayOne("12").outcome());
+            var kv = shared.bucket(ClusterAdminService.ADMIN_BUCKET);
+            // the first claim is gone and another administrator claimed the entry
+            kv.delete("replay.12");
+            kv.create("replay.12", "other".getBytes(StandardCharsets.UTF_8));
+
+            handler.get().onSkipped(new SimpleConversationMemorySnapshot());
+
+            assertEquals("other", new String(kv.get("replay.12").orElseThrow().value(), StandardCharsets.UTF_8),
+                    "the late settlement must leave the later replay's claim alone");
+        }
+
+        @Test
+        @DisplayName("A7: with idempotency on, a replay skipped as the duplicate of a committed turn deletes the entry")
+        void skippedDuplicateOfACommittedTurnDeletesTheEntry() throws Exception {
+            TurnIdempotencyService idempotency = mock(TurnIdempotencyService.class);
+            when(idempotency.isEnabled()).thenReturn(true);
+            ConversationMemorySnapshot stored = new ConversationMemorySnapshot();
+            when(memoryStore.loadConversationMemorySnapshot("conv-13")).thenReturn(stored);
+            when(idempotency.isRecordedIn(stored, ClusterAdminService.replayIdempotencyKey("13"))).thenReturn(true);
+            service.turnIdempotency = idempotency;
+            when(coordinator.getDeadLetter("13")).thenReturn(Optional.of(entry("13", "failed", "n1", turn("a1", "x"))));
+            doAnswer(i -> {
+                // another node committed this replay's key first: this one is answered as a
+                // skip
+                ConversationResponseHandler h = i.getArgument(6);
+                h.onSkipped(new SimpleConversationMemorySnapshot());
+                return null;
+            }).when(conversationService).say(eq("conv-13"), any(), any(), any(), any(), anyBoolean(), any());
+
+            assertEquals("REPLAYED", service.replayOne("13").outcome());
+            verify(coordinator).replayDeadLetter("13");
         }
 
         @Test
