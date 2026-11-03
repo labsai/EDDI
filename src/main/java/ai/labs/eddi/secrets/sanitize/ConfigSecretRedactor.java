@@ -333,9 +333,84 @@ public final class ConfigSecretRedactor {
             return changedOrNull(value, redactUrl(value));
         }
         if ("body".equals(normalizedName)) {
-            return changedOrNull(value, scanText(value));
+            String scanned = scanText(value);
+            String structured = maskCredentialFieldsOfJsonBody(scanned);
+            return changedOrNull(value, structured != null ? structured : scanned);
         }
         return null;
+    }
+
+    /**
+     * A request body that is one JSON document, with every literal under a
+     * credential-named field masked whole — or {@code null} when the body is not
+     * JSON or has no such field.
+     * <p>
+     * The shape scan above keeps values shorter than eight characters legible,
+     * which suits prose and log lines: there a short value after "token" is mostly
+     * not one. In a body the field name is structure, not prose, so
+     * {@code {"password": "hunter2"}} is a password however short, and the scan
+     * returned it to every editor as written.
+     */
+    private static String maskCredentialFieldsOfJsonBody(String body) {
+        String trimmed = body.strip();
+        if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) {
+            return null;
+        }
+        JsonNode tree;
+        try {
+            // One document only: a re-serialized prefix would drop whatever follows it.
+            tree = MAPPER.readerFor(JsonNode.class).with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).readTree(trimmed);
+        } catch (JsonProcessingException notOneDocument) {
+            return null;
+        }
+        if (!maskCredentialFields(tree, null)) {
+            return null;
+        }
+        try {
+            return MAPPER.writeValueAsString(tree);
+        } catch (JsonProcessingException e) {
+            // Cannot happen for a tree just parsed; never hand the original back.
+            return REDACTED;
+        }
+    }
+
+    /**
+     * Masks, in place, every literal string under a credential-named field (or in a
+     * credential-named array) at any depth. A value the shape scan already marked
+     * is left as it is.
+     */
+    private static boolean maskCredentialFields(JsonNode node, String name) {
+        boolean changed = false;
+        if (node instanceof ObjectNode object) {
+            for (Map.Entry<String, JsonNode> field : object.properties()) {
+                JsonNode value = field.getValue();
+                if (value.isTextual()) {
+                    if (isMaskableCredential(field.getKey(), value.asText())) {
+                        field.setValue(new TextNode(REDACTED));
+                        changed = true;
+                    }
+                } else if (maskCredentialFields(value, field.getKey())) {
+                    changed = true;
+                }
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (int i = 0; i < array.size(); i++) {
+                JsonNode element = array.get(i);
+                if (element.isTextual()) {
+                    if (isMaskableCredential(name, element.asText())) {
+                        array.set(i, new TextNode(REDACTED));
+                        changed = true;
+                    }
+                } else if (maskCredentialFields(element, name)) {
+                    changed = true;
+                }
+            }
+        }
+        return changed;
+    }
+
+    private static boolean isMaskableCredential(String name, String value) {
+        return !value.isBlank() && !value.contains(MARKER_PREFIX) && isCredentialName(name) && isLiteral(value);
     }
 
     /**
@@ -358,7 +433,9 @@ public final class ConfigSecretRedactor {
         boolean changed = false;
         for (Iterator<Map.Entry<String, JsonNode>> fields = embedded.fields(); fields.hasNext();) {
             Map.Entry<String, JsonNode> entry = fields.next();
-            if (!entry.getValue().isTextual()) {
+            // A number or boolean too, judged as the text the request builder sends it
+            // as: {"X-Api-Key": 12345678} is a credential however it is spelled.
+            if (!entry.getValue().isValueNode() || entry.getValue().isNull()) {
                 continue;
             }
             String replacement = judge(entry.getKey(), name, entry.getValue().asText());

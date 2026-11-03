@@ -520,7 +520,9 @@ public class SecretScrubber {
             boolean pointer = WHOLE_POINTER.matcher(decoded).matches();
             boolean credential = !decoded.isEmpty() && !pointer
                     && (isSecretFieldName(name, null) || isSecretFieldName(decodedName, null) || UriRedactor.isSensitiveHeaderName(decodedName)
-                            || (queryString && ConfigSecretRedactor.isCredentialQueryName(name)) || redactFreeText(decoded) != null);
+                            || (queryString && (ConfigSecretRedactor.isCredentialQueryName(name)
+                                    || ConfigSecretRedactor.isCredentialQueryName(decodedName)))
+                            || redactFreeText(decoded) != null);
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return out.toString();
@@ -702,8 +704,10 @@ public class SecretScrubber {
             } catch (IllegalArgumentException malformedEscape) {
                 decoded = rawValue;
             }
+            // Classified decoded as well: a server reads %73ig as sig.
             boolean credential = !decoded.isEmpty() && !WHOLE_POINTER.matcher(decoded).matches()
-                    && ConfigSecretRedactor.isCredentialQueryName(name);
+                    && (ConfigSecretRedactor.isCredentialQueryName(name)
+                            || ConfigSecretRedactor.isCredentialQueryName(UriRedactor.decodeQueryComponent(name)));
             out.append(name).append('=').append(credential ? REDACTED : rawValue);
         }
         return url.substring(0, queryStart) + "?" + out + fragment;

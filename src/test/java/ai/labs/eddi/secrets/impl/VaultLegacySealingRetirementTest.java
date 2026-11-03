@@ -154,7 +154,7 @@ class VaultLegacySealingRetirementTest {
     }
 
     @Test
-    @DisplayName("a rotation racing a delete is refused as a create without a grant, never re-created with the wildcard default")
+    @DisplayName("a rotation racing a delete is refused, never re-created with the wildcard default")
     void rotationRacingADeleteDoesNotRecreateTheRowOpen() throws Exception {
         var racing = new InMemorySecretPersistence();
         // The delete lands between store()'s read and its write.
@@ -165,9 +165,28 @@ class VaultLegacySealingRetirementTest {
         var scoped = new SecretReference("acme", "scoped");
         racingProvider.store(scoped, "v1", null, List.of("agent-one"));
 
-        assertThrows(IllegalArgumentException.class, () -> racingProvider.store(scoped, "v2", null, null));
+        assertThrows(ISecretProvider.SecretProviderException.class, () -> racingProvider.store(scoped, "v2", null, null));
 
         assertFalse(racing.secrets.containsKey("acme/scoped"), "the rotation must not resurrect the deleted row with allowedAgents [*]");
+    }
+
+    @Test
+    @DisplayName("a rotation that restates the agent grant but no host list is not turned into a create of an any-host key")
+    void rotationWithAGrantRacingADeleteDoesNotRecreateTheRow() throws Exception {
+        // The Manager's rotate dialog sends the stored allowedAgents and no hosts. As a
+        // create that passed the provider's grant rule, and the row came back with no
+        // host restriction — the creation checks of the endpoint had never run.
+        var racing = new InMemorySecretPersistence();
+        var racingProvider = new VaultSecretProvider(Optional.of(MASTER), racing, new VaultSaltManager(racing), new SimpleMeterRegistry(), null);
+        racingProvider.initMetrics();
+        racingProvider.onStartup(mock(StartupEvent.class));
+        var scoped = new SecretReference("acme", "scoped");
+        racingProvider.store(scoped, "v1", null, List.of("agent-one"), List.of("api.example.com"));
+        racing.beforeUpdateIfPresent = () -> racing.secrets.remove("acme/scoped");
+
+        assertThrows(ISecretProvider.SecretProviderException.class, () -> racingProvider.store(scoped, "v2", null, List.of("agent-one"), null));
+
+        assertFalse(racing.secrets.containsKey("acme/scoped"), "the delete wins; the rotation must not re-create the key without its host list");
     }
 
     @Test
