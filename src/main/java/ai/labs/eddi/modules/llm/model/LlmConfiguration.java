@@ -337,6 +337,12 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          */
         private Double outputPricePer1M;
 
+        /**
+         * Cache and long-context prices for this task's model (docs/model-pricing.md).
+         * Null = from the catalog.
+         */
+        private ModelPricing pricing;
+
         /** Enable cost tracking */
         private Boolean enableCostTracking = true;
 
@@ -972,6 +978,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setOutputPricePer1M(Double outputPricePer1M) {
             this.outputPricePer1M = outputPricePer1M;
+        }
+
+        public ModelPricing getPricing() {
+            return pricing;
+        }
+
+        public void setPricing(ModelPricing pricing) {
+            this.pricing = pricing;
         }
 
         public Boolean getEnableCostTracking() {
@@ -2355,6 +2369,11 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Double outputPricePer1M;
 
         /**
+         * Cache and long-context prices for this step's model. Null = from the catalog.
+         */
+        private ModelPricing pricing;
+
+        /**
          * Overrides {@code responseValidation.maxRetries} for this step: how many
          * corrective same-model re-asks it gets before the cascade escalates. 0 for an
          * expensive last-resort model. Null inherits the task's value. Clamped to 0..3.
@@ -2413,6 +2432,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public Double getOutputPricePer1M() {
             return outputPricePer1M;
+        }
+
+        public ModelPricing getPricing() {
+            return pricing;
+        }
+
+        public void setPricing(ModelPricing pricing) {
+            this.pricing = pricing;
         }
 
         public void setOutputPricePer1M(Double outputPricePer1M) {

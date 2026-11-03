@@ -218,6 +218,8 @@ not-ready first, waits for the load balancer to notice, then drains in-flight co
 | `eddi.llm.tool-loop.streaming.enabled` | `true` | Stream tokens during tool-calling turns rather than falling back to a single chunk |
 | `eddi.llm.max-response-bytes` | `33554432` (32 MB) | Most bytes one LLM provider response may deliver to the OpenAI, Anthropic, Gemini, Mistral and Ollama clients (a streaming response counts over the whole stream). Past it the call fails instead of reading on |
 | `eddi.llm.parameter-catalog.drop-rejected` | `true` | Remove an LLM task parameter the catalog says the configured model rejects before the model is built (with a WARN); `false` only warns and still sends it. See [LLM Parameters Reference](llm-parameters.md) |
+| `eddi.llm.pricing.unpriced-policy-floor` | `ALLOW` | The loosest the price catalog's `unpricedPolicy` may be: `ALLOW`, `REFUSE_WHEN_BUDGETED` or `REFUSE`. The effective policy is the stricter of the two, so neither a catalog edit nor a store outage goes below it; an unparseable value reads as `REFUSE`. See [Model Pricing](model-pricing.md#strict-mode) |
+| `eddi.llm.pricing.provider-normalization` | `true` | Normalize provider token usage before pricing (Anthropic/Bedrock cache tokens added to input, Gemini thinking to output). `false` restores the pre-catalog counts. See [Model Pricing](model-pricing.md#what-the-providers-report) |
 
 ---
 

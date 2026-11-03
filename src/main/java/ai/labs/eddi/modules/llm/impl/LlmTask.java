@@ -412,6 +412,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * ({@link #recordFailedPhaseSpend}).
      */
     private void recordSpend(IWritableConversationStep currentStep, Map<?, ?> tokenUsage, double costUsd) {
+        recordSpend(currentStep, tokenUsage, costUsd, null);
+    }
+
+    /**
+     * As above, with the phase's prices when known — so {@code audit:pricing} can
+     * tell unpriced from free.
+     */
+    private void recordSpend(IWritableConversationStep currentStep, Map<?, ?> tokenUsage, double costUsd, ModelPrices prices) {
         if (currentStep == null) {
             return;
         }
@@ -419,6 +427,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             accumulateTokenUsage(currentStep, tokenUsage);
         }
         accumulateCost(currentStep, costUsd);
+        PricingAudit.record(currentStep, tokenUsage, costUsd, prices);
     }
 
     /**
@@ -788,6 +797,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // that call reached.
         if (spendRefusal == null && screenInput && spendGate != null) {
             spendRefusal = spendGate.check(memory);
+        }
+        if (spendRefusal == null && !cascadeActive) {
+            spendRefusal = UnpricedCallPolicy.check(ModelPrices.ofTask(task).override(), resolvedType,
+                    resolveModelNameOf(processedParams, resolvedType), memory, false, "llm_task");
         }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
@@ -1263,7 +1276,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
                         historicInputScreen(memory, task), summaryAdmission(memory));
-                recordSpend(currentStep, summaryUsage, ModelPrices.ofTask(task).cost(summaryUsage));
+                recordSpend(currentStep, summaryUsage, ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
+                        effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel()).cost(summaryUsage));
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
@@ -1656,7 +1670,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (responseMetadata == null) {
             return;
         }
-        recordSpend(currentStep, responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null, pricedCost(responseMetadata, task));
+        recordSpend(currentStep, responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null, pricedCost(responseMetadata, task),
+                responseMetadata.containsKey("cascadeCostUsd") ? null : ModelPrices.ofTask(task));
     }
 
     /**

@@ -268,6 +268,11 @@ public class ConversationSummarizer {
                     inheritedParameters);
             summary = result.summary() != null ? result.summary() : "";
             usage = tokenUsage(result.inputTokens(), result.outputTokens());
+            if (!usage.isEmpty()) {
+                // the metered map, so the summary is priced at its own model
+                usage = new LinkedHashMap<>(result.tokenUsage());
+                usage.putIfAbsent("totalTokens", result.inputTokens() + result.outputTokens());
+            }
         } catch (RuntimeException e) {
             // Logged by the service; a failed call is retried next turn, as before.
             LOGGER.warnf("[SUMMARY] Summarization failed for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
