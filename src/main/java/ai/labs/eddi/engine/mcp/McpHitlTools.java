@@ -14,6 +14,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlAccessGuard;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.internal.GroupApprovalRequest;
 import ai.labs.eddi.engine.internal.groups.HumanTieBreakEngine;
 import ai.labs.eddi.engine.internal.groups.PendingHumanInputView;
@@ -203,7 +204,7 @@ public class McpHitlTools {
                 // every MCP caller the gate above admits.
                 return jsonSerialization.serialize(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot));
             }
-            Map<String, String> summary = new LinkedHashMap<>();
+            Map<String, Object> summary = new LinkedHashMap<>();
             summary.put("conversationId", conversationId);
             summary.put("state", snapshot.getConversationState() != null ? snapshot.getConversationState().name() : "");
             // pauseType distinguishes a RULE (PAUSE_CONVERSATION) pause from a TOOL_CALL
@@ -219,6 +220,8 @@ public class McpHitlTools {
             summary.put("pauseReason", paused && snapshot.getHitlPauseReason() != null ? snapshot.getHitlPauseReason() : "");
             summary.put("timeoutPolicy", paused && snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : "");
             summary.put("approvalTimeout", paused && snapshot.getHitlApprovalTimeout() != null ? snapshot.getHitlApprovalTimeout() : "");
+            // The same view REST serves: rendered once at pause commit, re-redacted now.
+            summary.put("approvalContext", paused ? ApprovalContextViews.toView(snapshot.getHitlApprovalContext()) : null);
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);
@@ -451,6 +454,7 @@ public class McpHitlTools {
                     return errorJson("Full approval status is available to approvers only while the group conversation "
                             + "is awaiting approval — use the summary view", "FORBIDDEN", null);
                 }
+                gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
                 return jsonSerialization.serialize(gc);
             }
             List<String> awaitingTaskIds = paused && gc.getTaskList() != null
@@ -482,6 +486,11 @@ public class McpHitlTools {
                 }
                 PendingHumanInputView.addTo(summary, gc);
             }
+            // Same view and audience as the REST summary.
+            summary.put("approvalContext",
+                    awaitingApproval && hitlAccessGuard.mayReadPendingHumanPrompt(gc)
+                            ? ApprovalContextViews.toView(gc.getHitlApprovalContext())
+                            : null);
             return jsonSerialization.serialize(summary);
         } catch (ForbiddenException e) {
             return errorJson("Access denied", "FORBIDDEN", null);

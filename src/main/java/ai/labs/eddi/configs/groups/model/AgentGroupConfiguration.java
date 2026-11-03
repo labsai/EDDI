@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.groups.model;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
 import ai.labs.eddi.configs.hitl.model.GroupHitlReviewConfig;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
@@ -1746,6 +1747,23 @@ public class AgentGroupConfiguration {
 
         public void setReview(GroupHitlReviewConfig review) {
             this.review = review;
+        }
+
+        /**
+         * Context rendered for the approver when a phase or task pauses (see
+         * {@link ApprovalContextBlock}); {@code group.*} is available. Rendered once
+         * when the pause is committed. Absent = no context.
+         *
+         * @since 6.7.0
+         */
+        private List<ApprovalContextBlock> approvalContext;
+
+        public List<ApprovalContextBlock> getApprovalContext() {
+            return approvalContext;
+        }
+
+        public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
+            this.approvalContext = approvalContext;
         }
     }
 

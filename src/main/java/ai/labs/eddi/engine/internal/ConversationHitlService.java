@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.context.ApprovalContextRenderer;
 import ai.labs.eddi.engine.hitl.review.HitlDecisionRecords;
 import ai.labs.eddi.engine.hitl.review.HitlDecisionValidator;
 import ai.labs.eddi.engine.events.HitlResumeCompletedEvent;
@@ -1697,6 +1698,35 @@ class ConversationHitlService {
      * WAIT_INDEFINITELY (the default).
      */
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
+        populateTimeoutBookmark(memory);
+        renderApprovalContext(memory);
+    }
+
+    /**
+     * Renders the agent's {@code approvalContext} blocks (and the matched tool
+     * rules' {@code context}) once, for this pause, onto the memory — persisted
+     * with the pause by the caller. Overwrites the previous pause's context; a
+     * failure leaves none and never fails the pause.
+     */
+    private void renderApprovalContext(IConversationMemory memory) {
+        try {
+            memory.setHitlApprovalContext(null);
+            ApprovalContextRenderer renderer = conversationService.approvalContextRenderer();
+            if (renderer == null) {
+                return;
+            }
+            AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());
+            AgentConfiguration.HitlConfig hitlConfig = agentConfig != null ? agentConfig.getHitlConfig() : null;
+            if (hitlConfig == null) {
+                return;
+            }
+            memory.setHitlApprovalContext(renderer.renderForConversation(memory, hitlConfig.getApprovalContext(), hitlConfig.getToolApprovals()));
+        } catch (Exception e) {
+            LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
+        }
+    }
+
+    private void populateTimeoutBookmark(IConversationMemory memory) {
         try {
             memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.WAIT_INDEFINITELY);
             AgentConfiguration agentConfig = readAgentConfigPinned(memory.getAgentId(), memory.getAgentVersion());

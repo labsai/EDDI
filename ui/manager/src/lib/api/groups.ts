@@ -1150,6 +1150,8 @@ export interface GroupConversation {
   hitlPauseReason?: string;
   hitlTimeoutPolicy?: import("./hitl").HitlTimeoutPolicy;
   hitlApprovalTimeout?: string;
+  /** The group's `approvalContext` rendered when this pause was committed; `null` when none is configured. */
+  hitlApprovalContext?: import("./hitl").ApprovalContextView | null;
   /** Where inside a SEQUENTIAL phase the pause landed, so a resume skips what already ran (F2). */
   resumePoint?: ResumePoint | null;
   /**

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.groups.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -488,6 +489,14 @@ public class GroupConversation {
      * 6d).
      */
     private String hitlApprovalTimeout;
+    /**
+     * The approval-card context rendered once when the current pause was committed
+     * ({@code hitlConfig.approvalContext}); {@code null} when none is configured.
+     * Display only: nothing resume-time depends on it, so it does <b>not</b> bump
+     * {@link #CURRENT_SCHEMA_VERSION} — an older pod re-saving the document drops
+     * it and loses nothing but the card text. Cleared with the pause bookmark.
+     */
+    private RenderedApprovalContext hitlApprovalContext;
     /**
      * Fingerprint of the task state at the previous TASK-granularity pause (#4). A
      * resume that re-pauses at the SAME phase with an identical fingerprint made no
@@ -1627,6 +1636,14 @@ public class GroupConversation {
 
     public void setHitlApprovalTimeout(String hitlApprovalTimeout) {
         this.hitlApprovalTimeout = hitlApprovalTimeout;
+    }
+
+    public RenderedApprovalContext getHitlApprovalContext() {
+        return hitlApprovalContext;
+    }
+
+    public void setHitlApprovalContext(RenderedApprovalContext hitlApprovalContext) {
+        this.hitlApprovalContext = hitlApprovalContext;
     }
 
     public String getHitlLastPauseFingerprint() {
