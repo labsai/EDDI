@@ -45,6 +45,8 @@ public final class ServiceJudgeValidation {
 
     private static final String CONNECTION_REFERENCE = "${connection:";
 
+    private static final String[] REFERENCE_PREFIXES = {"${vault:", "${eddivault:", "${vars:"};
+
     private ServiceJudgeValidation() {
     }
 
@@ -121,7 +123,16 @@ public final class ServiceJudgeValidation {
             return false;
         }
         String trimmed = value.trim();
-        return (trimmed.startsWith("${vault:") || trimmed.startsWith("${eddivault:") || trimmed.startsWith("${vars:"))
-                && trimmed.endsWith("}") && trimmed.indexOf('}') == trimmed.length() - 1;
+        if (!trimmed.endsWith("}") || trimmed.indexOf('}') != trimmed.length() - 1) {
+            return false;
+        }
+        for (String prefix : REFERENCE_PREFIXES) {
+            // A reference must name something: "${vault:}" never resolves and "${vars:}" is
+            // left unchanged, so either would reach the judge as a literal.
+            if (trimmed.startsWith(prefix) && !trimmed.substring(prefix.length(), trimmed.length() - 1).isBlank()) {
+                return true;
+            }
+        }
+        return false;
     }
 }

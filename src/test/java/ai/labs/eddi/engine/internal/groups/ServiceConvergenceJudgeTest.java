@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.ServiceJudgeConfig;
+import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink.CostUpdatedEvent;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
@@ -109,7 +110,7 @@ class ServiceConvergenceJudgeTest {
     }
 
     private void judgeReplies(String reply, int in, int out) {
-        when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any())).thenReturn(
+        when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any())).thenReturn(
                 new SummarizationResult(reply, in, out));
     }
 
@@ -139,14 +140,14 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(null), 1, null);
 
             assertFalse(outcome.isContinue());
-            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+            verify(summarizer, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "fallback_moderator").timers().size());
         }
 
         @Test
         @DisplayName("a judge that throws never ends the phase, and its error text stays out of the transcript")
         void failureIsNotConverged() {
-            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+            when(summarizer.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
                     .thenThrow(new IllegalStateException("401 for key sk-should-not-leak"));
 
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
@@ -172,13 +173,39 @@ class ServiceConvergenceJudgeTest {
             check(serviceConvergence(SERVICE), 1, listener);
             check(serviceConvergence(SERVICE), 2, listener);
 
-            assertEquals(4.0, gc.getMemberCosts().get("system:judge:0:1"), 1e-9, "1M in at $2 + 0.5M out at $4");
-            assertEquals(4.0, gc.getMemberCosts().get("system:judge:0:2"), 1e-9);
+            assertEquals(4.0, gc.getMemberCosts().get("system:judge:1:0:1"), 1e-9, "1M in at $2 + 0.5M out at $4");
+            assertEquals(4.0, gc.getMemberCosts().get("system:judge:1:0:2"), 1e-9);
             assertEquals(8.0, gc.getTotalCost(), 1e-9, "two checks, two charges");
             var events = ArgumentCaptor.forClass(CostUpdatedEvent.class);
             verify(listener, times(2)).onCostUpdated(events.capture());
-            assertEquals("system:judge:0:1", events.getAllValues().getFirst().attributionKey());
+            assertEquals("system:judge:1:0:1", events.getAllValues().getFirst().attributionKey());
             assertEquals(ServiceConvergenceJudge.DISPLAY_NAME, events.getAllValues().getFirst().displayName());
+        }
+
+        @Test
+        @DisplayName("a continuation round does not overwrite the earlier round's charge")
+        void continuationRoundKeepsEarlierSpend() {
+            judgeReplies("{\"agreementScore\":0.2}", 1_000_000, 500_000);
+
+            check(serviceConvergence(SERVICE), 1, null);
+            gc.setRound(2);
+            check(serviceConvergence(SERVICE), 1, null);
+
+            assertEquals(4.0, gc.getMemberCosts().get("system:judge:1:0:1"), 1e-9);
+            assertEquals(4.0, gc.getMemberCosts().get("system:judge:2:0:1"), 1e-9);
+            assertEquals(8.0, gc.getTotalCost(), 1e-9, "the same phase and repeat in round 2 adds, it does not replace");
+        }
+
+        @Test
+        @DisplayName("the judge call is a single attempt, so one check cannot outlast its timeout")
+        void singleAttempt() {
+            judgeReplies("{\"agreementScore\":0.2}", 1, 1);
+
+            check(serviceConvergence(SERVICE), 1, null);
+
+            var retry = ArgumentCaptor.forClass(RetryConfiguration.class);
+            verify(summarizer).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), retry.capture());
+            assertEquals(1, retry.getValue().getMaxAttempts());
         }
 
         @Test
@@ -189,7 +216,7 @@ class ServiceConvergenceJudgeTest {
             PhaseOutcome outcome = check(serviceConvergence(SERVICE), 1, null);
 
             assertTrue(outcome.isContinue());
-            assertEquals(2.0, gc.getMemberCosts().get("system:judge:0:1"), 1e-9);
+            assertEquals(2.0, gc.getMemberCosts().get("system:judge:1:0:1"), 1e-9);
             assertEquals(1, meters.get(ServiceConvergenceJudge.METRIC_DURATION).tag("outcome", "unparseable").timers().size());
         }
 
@@ -225,7 +252,7 @@ class ServiceConvergenceJudgeTest {
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Map<String, String>> params = ArgumentCaptor.forClass(Map.class);
             verify(summarizer).summarizeWithUsage(eq("MEMBER {text}"), eq(ServiceConvergenceJudge.JUDGE_INSTRUCTIONS), eq("openai"),
-                    eq("gpt-4o-mini"), params.capture());
+                    eq("gpt-4o-mini"), params.capture(), any(RetryConfiguration.class));
             assertEquals("5000", params.getValue().get("timeout"), "the judge's own bound wins over the parameter map");
             assertEquals("0", params.getValue().get("temperature"));
         }

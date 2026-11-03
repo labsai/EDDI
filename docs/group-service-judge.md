@@ -70,7 +70,7 @@ exactly as for an LLM task. See [Secrets Vault](secrets-vault.md).
 
 - Every check is **one** call. It counts against `protocol.maxTurns` and is skipped once the discussion has
   reached its cost ceiling, the same two gates the moderator judge has.
-- The cost is booked on the discussion's ledger under `system:judge:<phaseIndex>:<repeat>` and announced with a
+- The cost is booked on the discussion's ledger under `system:judge:<round>:<phaseIndex>:<repeat>` and announced with a
   `cost_updated` event (display name `Convergence Judge`), so it shows in `memberCosts` and `totalCost` next to
   the members' own spend. A reply that cannot be read was still paid for and is still booked.
 - The judge **never ends a phase on doubt**. A provider error, a timeout or a reply that is not the expected
