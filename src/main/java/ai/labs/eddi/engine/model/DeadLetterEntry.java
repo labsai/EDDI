@@ -73,6 +73,17 @@ public record DeadLetterEntry(String id, String conversationId, String error, lo
     public static final String NOT_REPLAYABLE_NOT_CAPTURED = "INPUT_NOT_CAPTURED";
     /** Not replayable: not a conversation turn (HITL resume, group member turn). */
     public static final String NOT_REPLAYABLE_NOT_A_TURN = "NOT_A_TURN";
+    /**
+     * Not replayable: the turn never ran, and its caller was told so and to retry
+     * (409 + {@code Retry-After}). A replay on top of that retry would run it
+     * twice; the entry is kept as a trace only.
+     */
+    public static final String NOT_REPLAYABLE_ANSWERED_RETRY = "ANSWERED_RETRY";
+    /**
+     * Turn-descriptor flag: the caller of the turn was answered "not processed,
+     * retry" — see {@link #NOT_REPLAYABLE_ANSWERED_RETRY}.
+     */
+    public static final String TURN_ANSWERED_RETRY = "answeredRetry";
 
     /** The shape before the turn descriptor existed. */
     public DeadLetterEntry(String id, String conversationId, String error, long timestamp, String payload) {
@@ -95,6 +106,9 @@ public record DeadLetterEntry(String id, String conversationId, String error, lo
         if (turn == null || turn.get("agentId") == null) {
             return NOT_REPLAYABLE_NOT_A_TURN;
         }
+        if (Boolean.TRUE.equals(turn.get(TURN_ANSWERED_RETRY))) {
+            return NOT_REPLAYABLE_ANSWERED_RETRY;
+        }
         if (Boolean.TRUE.equals(turn.get("secretInput"))) {
             return NOT_REPLAYABLE_SECRET;
         }
@@ -104,6 +118,7 @@ public record DeadLetterEntry(String id, String conversationId, String error, lo
     /** Whether a replay can rebuild the turn: it needs the agent and the input. */
     @JsonIgnore
     public boolean isReplayable() {
-        return turn != null && turn.get("input") != null && turn.get("agentId") != null;
+        return turn != null && turn.get("input") != null && turn.get("agentId") != null
+                && !Boolean.TRUE.equals(turn.get(TURN_ANSWERED_RETRY));
     }
 }

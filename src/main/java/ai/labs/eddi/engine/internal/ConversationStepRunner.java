@@ -200,6 +200,9 @@ class ConversationStepRunner {
              */
             private volatile Map<String, Object> failure;
 
+            /** Whether {@link #call()} was entered: the turn started running. */
+            private volatile boolean started;
+
             @Override
             public void bindLease(LeaseHandle lease) {
                 this.lease = lease;
@@ -208,6 +211,15 @@ class ConversationStepRunner {
             @Override
             public Map<String, Object> describe() {
                 Map<String, Object> why = failure;
+                if (turnDescriptor != null && lease != null && !started) {
+                    // A9: dead-lettered although it never ran (the runtime refused it after
+                    // its lease was granted). Its caller is answered busy, retry (see
+                    // onDiscarded), so a replay of this entry would run it a second time on
+                    // top of that retry. Kept as a trace, not as something to replay.
+                    Map<String, Object> described = new LinkedHashMap<>(turnDescriptor);
+                    described.put(DeadLetterEntry.TURN_ANSWERED_RETRY, true);
+                    return described;
+                }
                 if (why == null || turnDescriptor == null) {
                     return turnDescriptor;
                 }
@@ -218,6 +230,7 @@ class ConversationStepRunner {
 
             @Override
             public Void call() throws Exception {
+                started = true;
                 try {
                     Void result = runConversationStep(environment, conversationMemory, conversationId, loggingContext,
                             identityBoundExecution,
@@ -292,6 +305,14 @@ class ConversationStepRunner {
                         // REST answers 409 with Retry-After; the input was not consumed.
                         LOGGER.warnf("Turn of conversation %s not run: %s — reporting it as busy; the input was not consumed",
                                 sanitize(conversationId), busy.getMessage());
+                        conversationMemory.setConversationState(ConversationState.IN_PROGRESS);
+                    } else if (lease != null) {
+                        // Cluster mode (A9): refused by the runtime after the lease was granted.
+                        // The input was not consumed, so the caller is told to retry, and the
+                        // dead letter the coordinator wrote for it is marked not replayable
+                        // (see describe()), so the retry and a replay cannot both run it.
+                        LOGGER.warnf("Turn of conversation %s not run: %s — reporting it as busy; the input was not consumed "
+                                + "(its dead letter is kept as a trace only)", sanitize(conversationId), cause.getMessage());
                         conversationMemory.setConversationState(ConversationState.IN_PROGRESS);
                     } else {
                         LOGGER.errorf(cause, "Queued turn of conversation %s was dropped before it ran — reporting it as "

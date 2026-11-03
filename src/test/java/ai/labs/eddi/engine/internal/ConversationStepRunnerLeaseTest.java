@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 
@@ -435,6 +436,34 @@ class ConversationStepRunnerLeaseTest {
         assertEquals("hello", deadLetter.get("input"), "replayable: the input travels with it");
         verify(store, never()).compareAndSetState(anyString(), any(), any());
         verify(store, never()).storeConversationMemorySnapshot(any());
+    }
+
+    @Test
+    @DisplayName("A9: a turn the runtime refused after its lease was granted is answered busy, and its dead letter cannot be replayed")
+    void refusedAfterLeaseIsNotReplayable() throws Exception {
+        ConversationService service = mock(ConversationService.class);
+        setFinal(service, "conversationHitlService", mock(ConversationHitlService.class));
+        setFinal(service, "contextLogger", mock(IContextLogger.class));
+        setFinal(service, "callerIdentityContext", new CallerIdentityContext(null, null));
+        @SuppressWarnings("unchecked")
+        ICache<String, ConversationState> stateCache = mock(ICache.class);
+        var turnRunner = new ConversationStepRunner(service, store, mock(IConversationDescriptorStore.class), runtime, stateCache,
+                new ConcurrentHashMap<>(), 60);
+        List<IConversationMemory> answered = new CopyOnWriteArrayList<>();
+        var task = (ConversationStepRunner.TurnTask) turnRunner.processConversationStep(Environment.production, memory, ID, Map.of(),
+                m -> () -> null, false, answered::add, processingTurn(), Map.of("input", "hello", "agentId", "agent1"));
+        task.bindLease(new TestLease(42L));
+
+        // the coordinator dead-letters it first (describe), then tells it it was
+        // dropped
+        Map<String, Object> deadLetter = task.describe();
+        assertFalse(new DeadLetterEntry("1", ID, "refused", 1, null, deadLetter).isReplayable(),
+                "a replay on top of the caller's retry would run the turn twice");
+        assertEquals(DeadLetterEntry.NOT_REPLAYABLE_ANSWERED_RETRY,
+                new DeadLetterEntry("1", ID, "refused", 1, null, deadLetter).notReplayableReason());
+        task.onDiscarded(new RejectedExecutionException("runtime full"));
+        assertEquals(List.of(memory), answered);
+        verify(memory).setConversationState(ConversationState.IN_PROGRESS);
     }
 
     @Test
