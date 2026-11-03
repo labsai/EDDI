@@ -319,7 +319,8 @@ class KvLeaseManagerTest {
         var aAgain = a.acquire("conv1", Duration.ofSeconds(5)).toCompletableFuture();
         bus.deliver = true;
         bus.publishReleased("c.conv1");
-        // generous: b's poll fallback is the only timing here, and a loaded CI runner can stall it
+        // generous: b's poll fallback is the only timing here, and a loaded CI runner
+        // can stall it
         LeaseHandle bLease = bWaiting.get(10, TimeUnit.SECONDS);
         assertNotNull(bLease);
         assertFalse(aAgain.isDone(), "a must not re-acquire ahead of the waiting node");
