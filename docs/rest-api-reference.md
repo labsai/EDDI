@@ -61,6 +61,7 @@ for anything this page does not cover.
 | `DELETE /conversationstore/conversations/{conversationId}` | Delete a conversation | `204` |
 | `GET /conversationstore/conversations/active/{agentId}` | Open conversations of an agent (admin, editor) | `200` list |
 | `POST /conversationstore/conversations/end` | End a list of conversations (admin, editor) | `200` |
+| `POST /conversationstore/conversations/end-inactive` | End conversations idle for `inactiveForDays` (admin; optional `agentId`, `dryRun`) | `200` |
 
 The agent must be **deployed** to the environment you start in — see
 [Deployment management](deployment-management-of-agents.md).
@@ -105,6 +106,8 @@ key, on this call and on every `say`. The usual cause is wrapping the map in
 deployed and `READY` in that environment.
 
 ## Sending a message
+
+**Retrying safely.** Send an `Idempotency-Key` (or `X-EDDI-Request-Id`; the former wins) header on `POST /agents/{conversationId}` and its `/stream` twin so a retried request does not run the turn twice. A duplicate of a turn still in flight answers `409` with `Retry-After`. See [conversations.md](conversations.md#idempotent-turns) and `eddi.turns.idempotency.ttl-seconds`.
 
 The same path takes plain text or JSON.
 
@@ -164,7 +167,7 @@ the turn produced any, sits next to it. Query parameters, shared by this call,
 
 | Parameter | Default | Effect |
 | --- | --- | --- |
-| `returnDetailed` | `false` | `true` returns every memory entry of the step. By default only the client-facing keys are returned: `input:initial`, `actions*`, `output*`, `quickReplies*` |
+| `returnDetailed` | `false` | `true` returns the step's other memory entries too, except `audit:*`, `*:trace:*` and `*Error` keys, which are withheld (values are redacted). By default only the client-facing keys are returned: `input:initial`, `actions*`, `output*`, `quickReplies*` |
 | `returnCurrentStepOnly` | `true` | `false` returns all turns since the start |
 | `returningFields` | — | Repeatable; restricts the snapshot to the named top-level fields |
 
@@ -475,7 +478,9 @@ delete a conversation they do not own.
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
 | `410` | `Conversation has ended` | Message to an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
+| `408` | `caller_timed_out` | The caller's wait for the turn ran out (see [metrics.md](metrics.md)) |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
+| `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |
 
 For symptoms and fixes beyond the status code, see

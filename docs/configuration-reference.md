@@ -45,7 +45,7 @@ Quarkus profiles prefix the key: `%dev.eddi.usermemories.deleteOlderThanDays=-1`
 applies in dev mode only.
 
 > **Empty is not the same as unset.** Several properties ship deliberately empty
-> (`eddi.vault.master-key`, `eddi.deployment.env`). An empty value is a real
+> (`eddi.vault.master-key`, `eddi.openai-compat.api-key`). An empty value is a real
 > value that disables or defaults the feature; it is not an error, and startup
 > will not complain.
 
@@ -720,6 +720,19 @@ The Helm chart sets each of these from its `eddi.branding.*` values, and mounts 
 | `quarkus.thread-pool.max-threads` | `max(8 × CPUs, 200)` | Size of the worker pool conversation turns run on, reported as `eddi_runtime_executor_max_threads`. Raise it when `eddi_runtime_executor_queued` stays above zero (alert `EddiExecutorSaturated`) |
 
 ---
+
+## Other keys EDDI reads
+
+Outside the `eddi.*` namespace, EDDI reads a few keys of its own from `application.properties`:
+
+| Property | Default | Meaning |
+|----------|---------|---------|
+| `httpClient.maxConnectionPerRoute` | `200` | Legacy HTTP client: connections per route |
+| `httpClient.connectTimeoutInMillis` | `10000` | Legacy HTTP client: connect timeout |
+| `httpClient.idleTimeoutInMillis` | `60000` | Legacy HTTP client: idle connection timeout |
+| `httpClient.maxRedirects` | `5` | Legacy HTTP client: redirects followed |
+
+Standard Quarkus keys (for example `quarkus.http.ssl.certificate.*` for TLS on the HTTPS port, `quarkus.http.non-application-root-path`, `quarkus.oidc.*`) are documented by Quarkus and are not repeated here.
 
 ## Migration
 

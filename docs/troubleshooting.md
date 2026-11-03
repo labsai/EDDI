@@ -12,7 +12,7 @@ The detailed pages are linked from each section. Start with [Collecting diagnost
 | --- | --- | --- |
 | Readiness | `GET /q/health/ready` | Readable without authentication. Lists each readiness check by name: `Agents are ready health check` (with `agentsInErrorCount`), `Graceful shutdown readiness check`, `PostgreSQL connection` on the postgres profile, and the MongoDB extension's check on the default profile. |
 | Liveness | `GET /q/health/live` | Readable without authentication. |
-| Metrics | `GET /q/metrics` | Requires authentication by default (`eddi.metrics.http-policy=authenticated`). With OIDC on, a scraper without a token gets 401. See [Monitoring](monitoring/monitoring-guide.md) and [Metrics](metrics.md). |
+| Metrics | `GET /q/metrics` | Requires the `eddi-admin` or `eddi-metrics` role by default (`eddi.metrics.http-policy=eddi-metrics-reader`; `authenticated` and `permit` are the alternatives). With OIDC on, a scraper without a token gets 401 and a token without one of those roles gets 403. See [Monitoring](monitoring/monitoring-guide.md) and [Metrics](metrics.md). |
 | Vault status | `GET /secretstore/secrets/health` | `200` with `"status": "UP"` when the vault is active, `503` with `"status": "DOWN"` when it is not. |
 | Deployment status | `GET /administration/{environment}/deploymentstatus/{agentId}?version={n}` | Returns `{"status": "READY"}`, `IN_PROGRESS`, `NOT_FOUND` or `ERROR`. `GET /administration/{environment}/deploymentstatus` lists every deployed agent. `environment` is `production` or `test`. |
 | Recent logs | `GET /administration/logs?level=WARN&conversationId=...` | Admin only. See [Log Administration](log-administration.md). |
@@ -287,7 +287,7 @@ See [Scheduling](scheduling.md).
 - **Log:** `[SCHEDULE] Schedule '<name>' (id=...) failed (attempt n/5), retry at <time>`, and after the last attempt `[SCHEDULE] Schedule '<name>' (id=...) dead-lettered after 5 retries`.
 - **Inspect:** `GET /schedulestore/schedules/{scheduleId}/fires` for one schedule's fire log, `GET /schedulestore/schedules/admin/failed` for every failed and dead-lettered fire.
 - **Recover:** `POST /schedulestore/schedules/{scheduleId}/retry` requeues a dead-lettered schedule; `POST /schedulestore/schedules/{scheduleId}/dismiss` drops it. Retries back off exponentially (`eddi.schedule.backoff-base-seconds`, `eddi.schedule.backoff-multiplier`); `eddi.schedule.max-retries` sets the limit.
-- **Cluster:** A claimed schedule is leased for `eddi.schedule.lease-timeout` (5m); if the instance dies, another instance reclaims it after the lease expires. A fire that outlives its lease logs `[SCHEDULE] Dispatched fire task exceeded the batch lease deadline` and is cancelled.
+- **Cluster:** A claimed schedule is leased for `eddi.schedule.lease-timeout` (10m); if the instance dies, another instance reclaims it after the lease expires. A fire that outlives its lease logs `[SCHEDULE] Dispatched fire task exceeded the batch lease deadline` and is cancelled.
 
 ---
 
@@ -329,6 +329,11 @@ See [Deployment management](deployment-management-of-agents.md).
 ### Readiness DOWN with `agentsInErrorCount`
 
 - **Cause:** `Agents are ready health check` is DOWN while any agent's deployment is in `ERROR`. The check reports only the count; the ids are in the log and in `GET /administration/{environment}/deploymentstatus`.
+
+### Container flagged unhealthy while a 5.x migration runs
+
+- **Cause:** The image's own `HEALTHCHECK` probes `/q/health/ready` with a 30 s start period and 3 retries. Readiness stays DOWN for minutes during a 5.x migration, so plain `docker run` or Compose users can see the container marked `unhealthy` even though the migration is progressing.
+- **Fix:** Wait for the migration to finish (watch the log), or override the health check to liveness with a longer start period, as the [AWS guide](setup-eddi-on-aws-with-mongodb-atlas.md) does. Kubernetes ignores the image `HEALTHCHECK`; see [Kubernetes](kubernetes.md) for the probes.
 
 ### Undeploy answers 409
 

@@ -110,14 +110,14 @@ public class RestSemanticParser implements IRestSemanticParser {
     }
 
     @Override
-    public void parse(String configId, Integer version, String sentence, AsyncResponse asyncResponse) {
+    public void parse(String parserId, Integer version, String sentence, AsyncResponse asyncResponse) {
         asyncResponse.setTimeout(30, TimeUnit.SECONDS);
 
         // The id is authorized as written and then spliced into a resource URI that
         // is parsed again (RestUtilities.extractResourceId cuts at the first '?'), so
         // an id such as "<other>?version=3&x=" would be authorized as one resource
         // and loaded as another. Only a real store id may pass.
-        if (!RestUtilities.isValidId(configId)) {
+        if (!RestUtilities.isValidId(parserId)) {
             throw new BadRequestException("Invalid parser id.");
         }
 
@@ -125,11 +125,11 @@ public class RestSemanticParser implements IRestSemanticParser {
         // ResourceAccessGuard reads the request-scoped SecurityIdentity, which is not
         // available on the runtime pool thread the parse itself runs on. A refusal
         // (ForbiddenException) propagates synchronously and maps to 403.
-        resourceAccessGuard.requireAccess(configId, AccessLevel.VIEW, "parser configuration");
+        resourceAccessGuard.requireAccess(parserId, AccessLevel.VIEW, "parser configuration");
 
         runtime.submitCallable((Callable<Void>) () -> {
             try {
-                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId + IRestParserStore.versionQueryParam + version);
+                URI resourceUri = URI.create(IRestParserStore.resourceURI + parserId + IRestParserStore.versionQueryParam + version);
                 IInputParser inputParser = getParser(resourceUri);
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);

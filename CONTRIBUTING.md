@@ -96,7 +96,7 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 ./mvnw clean verify -DskipITs
 
 # Integration tests (requires Docker)
-./mvnw verify
+./mvnw verify -DskipITs=false
 
 # Build Docker image
 ./mvnw clean package -DskipTests '-Dquarkus.container-image.build=true'
@@ -112,10 +112,10 @@ directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
 
 - **Language**: Java 25 — use modern Java features (records, sealed classes, pattern matching)
 - **Framework**: Quarkus + CDI — prefer `@Inject` over manual instantiation
-- **Line length**: 120 characters max
+- **Line length**: 150 characters max (the Eclipse formatter wraps at 150; Checkstyle `LineLength` is advisory at 150)
 - **Checkstyle**: Run `./mvnw validate` to check style before submitting
 - **No `@author` tags** in new code — Git history tracks authorship
-- **No `System.out.println`** — use `java.util.logging` or Quarkus logging
+- **No `System.out.println`** — use the JBoss `Logger`
 
 ### Architecture Principles
 
@@ -124,7 +124,7 @@ EDDI follows a strict [project philosophy](docs/project-philosophy.md). Key poin
 - **Configuration is logic, Java is the engine** — agent behavior belongs in JSON, not Java code
 - **Security as architecture** — no `eval()`, no `ScriptEngine`, no dynamic code execution
 - **Stateless tasks** — `ILifecycleTask` implementations must be stateless singletons
-- **URL validation** — all external calls must use `UrlValidationUtils.validateUrl()`
+- **URL validation** — all outbound HTTP must go through `OutboundHttp` (SSRF policy, redirects, body caps built in)
 
 ### What to Avoid
 
@@ -188,6 +188,8 @@ chore(deps): bump Quarkus to 3.33.0
    ./mvnw clean verify -DskipITs
    ```
 
+   Once per clone, activate the pre-push hook with `git config core.hooksPath .githooks`. Add a changelog fragment as a new file under `docs/changelog.d/` (`YYYY-MM-DD-<slug>.md`, see its README); never edit `docs/changelog.md` by hand.
+
 5. **Push** and open a Pull Request against `main`
 
 6. **Wait for CI** — all automated checks must pass before review
@@ -207,7 +209,7 @@ Every PR runs through these automated gates:
 
 | Check                 | What It Does                                         | Must Pass?     |
 | --------------------- | ---------------------------------------------------- | -------------- |
-| **Build + Tests**     | `mvnw clean verify` with Java 25                     | ✅ Yes         |
+| **Build + Tests**     | `mvnw clean test` plus packaging with Java 25                   | ✅ Yes         |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
 | **UI Manager Checks** | Manager audit, lint, i18n, typecheck, Vitest with coverage — when `ui/` changes | Blocks publishing |
 | **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
@@ -216,7 +218,7 @@ Every PR runs through these automated gates:
 | **Auth E2E (Keycloak)** | The same image with OIDC **enforced**, behind Keycloak: which token is accepted, and which role opens which door. The only job where `@RolesAllowed` is not a no-op | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
-| **Checkstyle**        | Java code style validation                           | ⚠️ Warnings    |
+| **Checkstyle**        | Import rules (unused/redundant imports) fail the build; length rules are advisory | ✅ Yes (imports) |
 | **JaCoCo**            | Code coverage report                                 | 📊 Report only |
 
 ## Security

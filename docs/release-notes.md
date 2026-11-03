@@ -16,6 +16,7 @@ what to read before upgrading.
 | From | Guide |
 | --- | --- |
 | 6.4.x to 6.5 | [Upgrading from 6.4](upgrading-from-6.4.md) — read section 2 first: several defaults now fail closed |
+| 6.5.x to 6.6 and later | [Upgrading from 6.5](upgrading-from-6.5.md) — authorization defaults and other changes a working 6.5 client notices |
 | 5.x to 6.x | [Upgrading from 5.x](upgrading-from-5x.md) — the first 6.x boot migrates the database in place |
 
 Between other 6.x releases there is no separate guide; the breaking changes are
@@ -25,6 +26,7 @@ listed in each release's GitHub notes.
 
 | Version | Released | Headline | Notes |
 | --- | --- | --- | --- |
+| **6.6.0** | see GitHub | See the GitHub release notes and the [changelog](changelog.md) | [GitHub](https://github.com/labsai/EDDI/releases/tag/6.6.0) · [Upgrading from 6.5](upgrading-from-6.5.md) |
 | **6.5.0** | 2026-10-02 | The Manager and the Chat UI move into this repository (`ui/`) and are built by Maven; knowledge-base sources and an ingestion pipeline for RAG (crawler, uploaded documents, schedules); secret context values; access-token audience validation; MCP advertised as an OAuth protected resource | [GitHub](https://github.com/labsai/EDDI/releases/tag/6.5.0) · [Upgrading from 6.4](upgrading-from-6.4.md) · [changelog](changelog.md) |
 | **6.4.0** | 2026-09-15 | Multi-user: per-user workspaces with ownership and sharing (off by default); Connections as one credential model for outbound calls; `/mcp` and `/secretstore` need an explicit opt-in to run unauthenticated; Slack Observe Mode; UBI 10 base image | [GitHub](https://github.com/labsai/EDDI/releases/tag/6.4.0) · [changelog 2026-09](changelog/2026-09.md) |
 | **6.3.0** | 2026-08-20 | Group conversations become a collaboration platform (voting, shared artifacts, bid-based tasks, standing teams, facilitator, humans as members, NEGOTIATION style); the Platform Operator replaces the Agent Father; OpenAI-compatible `/v1` API | [GitHub](https://github.com/labsai/EDDI/releases/tag/6.3.0) · [changelog 2026-08](changelog/2026-08.md) |

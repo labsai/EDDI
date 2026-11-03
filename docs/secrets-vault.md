@@ -31,7 +31,7 @@ EDDI includes a built-in secrets vault for managing sensitive values like API ke
 | `IRestSecretStore` / `RestSecretStore` | `secrets.rest`     | JAX-RS endpoints for secret CRUD and key rotation               |
 | `SecretScrubber`                       | `secrets.sanitize` | Removes plaintext secrets from export payloads (leaves `${vault:...}` references intact) |
 | `SecretRedactionFilter`                | `secrets.sanitize` | Regex-based log redaction for API keys and tokens                |
-| `ISecretPersistence`                   | `secrets.persist.` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
+| `ISecretPersistence`                   | `secrets.persistence` | DB abstraction (MongoDB default, PostgreSQL via profile)        |
 
 ## Secret References
 
@@ -527,6 +527,8 @@ bash install.sh --vault-key=your-strong-passphrase-here
 .\install.ps1 -VaultKey "your-strong-passphrase-here"
 ```
 
+**Master key requirements.** In production, startup is refused for a master key shorter than 16 characters, with too few distinct characters, or equal to a known demo value, unless `eddi.vault.allow-weak-master-key=true` is set. Dev and test profiles are not held to this, which is why a short `%dev.` passphrase boots.
+
 Re-running the installer preserves your existing key — it reads from `~/.eddi/.env` and never overwrites it.
 
 #### Manual Configuration
@@ -770,11 +772,11 @@ All endpoints are under the base path `/secretstore/secrets`. All endpoints requ
 | `GET`    | `/{tenantId}`                | List all secrets for a tenant (metadata only)          |
 | `GET`    | `/health`                    | Vault health check (provider status)                   |
 | `POST`   | `/{tenantId}/rotate-dek`     | Install the tenant's next DEK generation and sweep rows onto it |
-| `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — **TLS required**         |
+| `POST`   | `/admin/rotate-kek`          | Rotate the Master Key (KEK) — send over TLS only (EDDI does not enforce this) |
 | `POST`   | `/{tenantId}/reset?confirm=true` | Delete **ALL** secrets and the DEK for a tenant — destructive; use when the master key changed and the old key is unavailable. Without `confirm=true` it is a `400` and nothing is deleted |
 | `POST`   | `/admin/adopt-master-key?confirm=true` | Make the configured master key the vault's after the previous one was **lost** — never during an unfinished rotation. Lists the tenants that still need a reset |
 
-> **⚠️ Important:** The `GET` endpoints return **metadata only** (`keyName`, `createdAt`, `lastAccessedAt`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
+> **⚠️ Important:** The `GET` endpoints return **metadata only** (`tenantId`, `keyName`, `createdAt`, `lastAccessedAt`, `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`, `unrestrictedDestination`, `referencedBy`). Secret values are **write-only** — they can be stored and used by the engine but never retrieved via API. The integrity **checksum is not returned over REST**: it is a value keyed to the plaintext, and exposing it would give an offline attacker a target to test guesses against. It is kept internally only for de-duplication and value-match.
 
 ### Response Examples
 
@@ -812,6 +814,8 @@ It returns the vault reference:
 ]
 ```
 
+The real response also carries `lastRotatedAt`, `description`, `allowedAgents`, `allowedHosts`, `unrestrictedDestination` and `referencedBy` (see [Destination allow-list](#destination-allow-list-allowedhosts)); the example shows only the first fields.
+
 > The stored integrity checksum is a **keyed** HMAC of the plaintext (not a plain SHA-256), so it cannot be brute-forced offline by anyone with database access and does not reveal equal values across rows or tenants. It is used only internally for de-duplication and value-match and is **never** included in an API response. A row written before the keyed form still carries a bare SHA-256; the next `POST /{tenantId}/rotate-dek` replaces it with the keyed form as it re-seals the row.
 
 **`GET /health`** — returns vault provider status:
@@ -823,6 +827,8 @@ It returns the vault reference:
   "available": true
 }
 ```
+
+When the vault is disabled or unavailable the endpoint answers `503` with the same body shape and `status: DOWN`.
 
 **`POST /{tenantId}/reset?confirm=true`** — deletes every secret and the DEK for the tenant (without `confirm=true`: `400`, `{"error": "confirm=true is required", …}`):
 
@@ -861,7 +867,7 @@ Request body:
 ```json
 {
   "oldMasterKey": "current-master-key",
-  "newMasterKey": "new-master-key-at-least-8-chars"
+  "newMasterKey": "a-new-master-key-16-chars-or-more"
 }
 ```
 
@@ -873,7 +879,7 @@ Response:
 }
 ```
 
-> **⚠️ Warning:** The `rotate-kek` endpoint transmits master keys in the request body. Ensure TLS is enabled. After rotation, update `EDDI_VAULT_MASTER_KEY` and restart.
+> **⚠️ Warning:** The `rotate-kek` endpoint transmits master keys in the request body. EDDI does not check that the request arrived over TLS, so make sure your ingress terminates TLS. The endpoint itself accepts a new key of 8 or more characters, but in production a key that fails the strength check (under 16 characters, or low-entropy) is refused. After rotation, update `EDDI_VAULT_MASTER_KEY` and restart.
 
 ### Key Rotation
 
@@ -1143,28 +1149,3 @@ Both MongoDB and PostgreSQL persistence implementations wrap all database except
 - Consistent error handling across database backends
 - No silent failures — all persistence errors surface to the caller
 - Clear error messages with context (tenant ID, key name, operation)
-
-## Testing
-
-~100 tests across backend and frontend:
-
-### Backend (~80 tests)
-
-| Test Class                    | Tests | Coverage                                                                                           |
-| ----------------------------- | ----- | -------------------------------------------------------------------------------------------------- |
-| `SecretVaultIntegrationTest`  | 22    | Full round-trip, negative caching, DEK/KEK rotation, metrics, exceptions                          |
-| `VaultSecretProviderTest`     | 11    | Store, resolve, delete, metadata, list, unavailable states                                         |
-| `SecretResolverTest`          | 10    | Single/multiple/nested resolution, caching, passthrough, auto-vault keys                           |
-| `RestSecretStoreTest`         | 22    | All endpoints, validation, error codes, vault unavailable, rotation                                |
-| `EnvelopeCryptoTest`          | 9     | Encrypt/decrypt, key rotation, wrong key, tampering, large payloads                                |
-| `SecretRedactionFilterTest`   | 6     | All 5 regex patterns, null/empty, safe messages                                                    |
-| `SecretScrubberTest`          | 4     | Nested object scrubbing, preservation of non-secret fields                                         |
-| `SecretReferenceTest`         | 6+    | Parsing, equality, hash, invalid references                                                        |
-| `ConversationSecretInputTest` | 5     | Secret context scrubbing, normal passthrough, false flag, empty context, output vs. lifecycle data |
-
-### Frontend (17 tests)
-
-| Test File                       | Tests | Coverage                                                                                                                |
-| ------------------------------- | ----- | ----------------------------------------------------------------------------------------------------------------------- |
-| `secrets.test.tsx` (Manager)    | 12    | Page render, tenant inputs, vault health, create dialog (password, autocomplete, eye toggle), delete confirmation       |
-| `chat-store.test.tsx` (Chat UI) | 5     | `SET_INPUT_FIELD`, `CLEAR_INPUT_FIELD`, `TOGGLE_SECRET_MODE`, `CLEAR_MESSAGES` reset, initial defaults                  |

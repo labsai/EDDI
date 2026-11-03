@@ -195,7 +195,7 @@ code that applied it.)
                          └───────────────────────┘
 ```
 
-The `LogCaptureFilter` captures **every** log record (all levels) into the ring buffer for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
+The `LogCaptureFilter` captures every record the logger emits into the ring buffer (INFO and above unless `quarkus.log.min-level` is lowered, see above) for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
 
 ### What the filter rewrites on the way out
 

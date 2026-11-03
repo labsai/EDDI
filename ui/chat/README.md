@@ -4,11 +4,11 @@
 
 > Embeddable chat widget for [**EDDI**](https://github.com/labsai/EDDI) — the open-source multi-agent orchestration middleware for conversational AI.
 
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-420%2B-brightgreen)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://github.com/labsai/EDDI/blob/main/LICENSE) ![Tests](https://img.shields.io/badge/tests-500%2B-brightgreen)
 
 EDDI Chat UI is a standalone, themeable React chat widget that connects to any EDDI agent. It ships **inside** the EDDI Docker image and can also be embedded as an `<iframe>` in any web page. Supports SSE streaming, rich Markdown, LaTeX math, code highlighting, quick replies, and full conversation control — all configurable via URL parameters or a typed config object.
 
-**🌐 Website:** [eddi.labs.ai](https://eddi.labs.ai/) · **📖 Docs:** [docs.labs.ai](https://docs.labs.ai/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
+**🌐 Website:** [eddi.technology](https://eddi.technology/) · **📖 Docs:** [docs.eddi.technology](https://docs.eddi.technology/) · **🐳 Docker:** [hub.docker.com/r/labsai/eddi](https://hub.docker.com/r/labsai/eddi)
 
 ---
 
@@ -30,7 +30,7 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 
 ## ✨ Features
 
-- 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and raw HTML
+- 💬 **Rich Markdown** — Tables, code blocks, bold/italic, links, lists, and sanitised HTML
 - 🌊 **SSE Streaming** — Real-time token-by-token agent responses with thinking indicator
 - 🧮 **LaTeX Math** — KaTeX rendering for mathematical expressions (`$$…$$`, inline or on its own lines; a single `$` stays a dollar sign)
 - 🎨 **Syntax Highlighting** — Code blocks with language-aware highlighting via `rehype-highlight`
@@ -99,6 +99,12 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 | `hideNewConversation` | `?hideNewConversation=true` | Hide restart button                |
 | `hideLogo`            | `?hideLogo=true`            | Show the text title (default: the brand's product name, else "EDDI") instead of the logo |
 | `hideQuickReplies`    | `?hideQuickReplies=true`    | Hide quick reply buttons           |
+| `hideStreaming`       | `?hideStreaming=true`       | Turn off token streaming           |
+| `hideAgentName`       | `?hideAgentName=true`       | Hide the agent name                |
+| `userId`              | `?userId=alice`             | User id to chat as (when the host page does not set one) |
+| `apiServer`           | `?apiServer=https://eddi.example.com` | EDDI server to talk to; defaults to the serving origin |
+
+Further colour and font parameters (such as `accentHover`) are listed in `COLOR_PARAM_MAP` in `src/components/ChatWidget.tsx`.
 
 <details>
 <summary><strong>Programmatic configuration (ChatConfig)</strong></summary>

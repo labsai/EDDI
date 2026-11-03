@@ -1,8 +1,7 @@
 # Upgrading from EDDI 6.5
 
-This guide is for an existing **EDDI 6.5.x deployment** moving to the next release. It
-collects the changes that a working 6.5 client notices. It is written as the changes land, so
-read it again before you upgrade. For an older deployment, start with
+This guide is for an existing **EDDI 6.5.x deployment** moving to 6.6 and later. It
+collects the changes that a working 6.5 client notices. Re-read it before you upgrade. For an older deployment, start with
 [Upgrading from 6.4](upgrading-from-6.4.md).
 
 ---

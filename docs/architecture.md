@@ -539,7 +539,7 @@ Two services modify the system prompt before it is sent to the LLM. Both are con
 
 **Execution order**: Identity masking → Counterweight → LLM call.
 
-Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight-cautious`, `counterweight-strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
+Counterweight presets are resolved from [Prompt Snippets](prompt-snippets-guide.md) first (`counterweight_cautious`, `counterweight_strict`), falling back to built-in defaults. This ensures admins can customize safety language without code changes.
 
 See [LLM Integration — Behavioral Safety](langchain.md#behavioral-safety-counterweight--identity-masking) for configuration details.
 
@@ -796,7 +796,7 @@ graph TD
 
 | Level          | Purpose                                                                                                                        |
 | -------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| **Agent**      | List of workflow URIs + channels. The top-level container.                                                                      |
+| **Agent**      | List of workflow URIs (plus channel integrations, configured separately). The top-level container.                                                                      |
 | **Workflow**   | Ordered list of workflow extensions — each extension = one lifecycle task type. **Order matters**: tasks execute sequentially. |
 | **Extension**  | The actual configuration that drives each `ILifecycleTask`. Referenced by URI from the workflow.                                |
 | **Descriptor** | Metadata (name, description, timestamps) for any resource. Not functional, purely for UI/management.                           |

@@ -178,8 +178,9 @@ Three SSE event types provide real-time visibility, emitted through `Conversatio
 |---|---|
 | `cascade_step_start` | `stepIndex`, `modelType`, `modelName`, `totalSteps` |
 | `cascade_escalation` | `fromStep`, `toStep`, `confidence`, `threshold`, `reason`, `durationMs` |
+| `llm_retry` | `reason`, `attempt` (sent before a same-model re-ask, see [Format recovery and escalation](#format-recovery-and-escalation)) |
 
-`reason` is one of `low_confidence`, `timeout`, `error`, `retryable_error`, `invalid_output`. A third event, `llm_retry` (`reason`, `attempt`), is sent before a same-model re-ask (see [Format recovery and escalation](#format-recovery-and-escalation)).
+`reason` on `cascade_escalation` is one of `low_confidence`, `timeout`, `error`, `retryable_error`, `invalid_output`, `circuit_open`.
 
 ## Streaming the Final Step
 
@@ -215,7 +216,7 @@ trace of a clamped step carries `modelTimeoutClampedMs`.
 
 ### Metrics (Micrometer, `/q/metrics`)
 
-`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`|`cost`), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
+`eddi.llm.cascade.executions` (tag `agentMode`), `eddi.llm.cascade.escalations` (tag `reason`), `eddi.llm.cascade.accepted.step` (tag `step`), `eddi.llm.cascade.step.latency` (timer, tag `provider`), `eddi.llm.cascade.confidence` (distribution), `eddi.llm.cascade.step.errors` (tags `provider`, `type`), `eddi.llm.failure` (tags `class` = the failure class, `model` = the step's model name; one count per failed step), `eddi.llm.cascade.tokens` / `eddi.llm.cascade.cost` (tag `provider`), `eddi.llm.cascade.ceiling.exceeded` (tag `kind` = `duration`, `cost` or `spend`; `spend` means the conversation or tenant budget refused an escalation), `eddi.llm.turn.deadline.exceeded` (tag `stage`), `eddi.llm.cancelled` (tag `scope`).
 
 ## Audit Trail
 
@@ -233,7 +234,12 @@ When the audit collector is active, the cascade writes:
 
 When `enableInAgentMode` is `true` (default), the cascade also works when tools (built-in, MCP, HTTP calls, A2A) are configured — each step can independently invoke the tool-calling loop. Because the `structured_output` wrapper cannot be injected around the tool loop, agent-mode confidence uses `judge_model` (if configured) or `heuristic`.
 
-**Escalation does not replay tools.** When a step that ran tools escalates, the next step receives those tool calls and their results (`carryToolResultsOnEscalation`, default `true`) and continues from them, so a tool that already ran is not executed again just because a stronger model took over. The returned tool trace covers the calls of every step that *returned*, not only the winning step's, and a tool-approval pause raised by a later step carries those earlier steps' calls in its trace too. **The same holds for a step that times out or fails.** Its answer is lost, but the tools it had already completed are not: the tool loop records each call together with its result as the result arrives, and when the step times out or throws, the next step receives those completed calls (after anything that step was itself handed) and does not run them again. The step's trace entry records how many messages it contributed as `completedToolMessages`; its tool **cost** is counted toward `maxCostPerRun` as before. Its tool **trace** entries are not kept: the returned trace does not list the calls of a timed-out or failed step, even though the next step received them. For an audit of what ran, read `completedToolMessages` on that step's cascade trace entry alongside the returned tool trace. Only complete pairs are carried — if a model asked for two tools and the step died after the first, the next step sees the first call and its result, never an unanswered call. What is still *not* carried: a tool that was still **executing** when the step was cancelled. Its outcome is unknown, so the next step may run it again. A step that failed before any tool ran carries nothing, and a tool-approval pause is not a failure — it pauses the turn as described in [HITL](hitl.md).
+**Escalation does not replay tools.**
+
+- **Carried:** when a step that ran tools escalates, the next step receives those tool calls and their results (`carryToolResultsOnEscalation`, default `true`) and continues from them, so a tool that already ran is not executed again just because a stronger model took over. The returned tool trace covers the calls of every step that *returned*, not only the winning step's, and a tool-approval pause raised by a later step carries those earlier steps' calls in its trace too.
+- **Timed-out or failed steps:** the same holds. Its answer is lost, but the tools it had already completed are not: the tool loop records each call together with its result as the result arrives, and when the step times out or throws, the next step receives those completed calls (after anything that step was itself handed) and does not run them again. The step's trace entry records how many messages it contributed as `completedToolMessages`; its tool **cost** is counted toward `maxCostPerRun` as before. Its tool **trace** entries are not kept: the returned trace does not list the calls of a timed-out or failed step, even though the next step received them. For an audit of what ran, read `completedToolMessages` on that step's cascade trace entry alongside the returned tool trace.
+- **Complete pairs only:** if a model asked for two tools and the step died after the first, the next step sees the first call and its result, never an unanswered call.
+- **Not carried:** a tool that was still **executing** when the step was cancelled. Its outcome is unknown, so the next step may run it again. A step that failed before any tool ran carries nothing, and a tool-approval pause is not a failure — it pauses the turn as described in [HITL](hitl.md).
 
 **Across providers.** A carried call always has an id — calls from bindings that pass a null id through (Ollama, Gemini) get a synthetic one, paired with its result, because OpenAI and Anthropic reject a tool call without an id. A provider can still refuse another provider's transcript (a Gemini 3 model expects thought signatures other providers never produce, and gateways have their own rules). When a step that was handed a carried exchange has its **first** model request rejected as a bad request (HTTP 400/422, langchain4j `InvalidRequestException`), the cascade retries that step **once from the conversation alone** — the pre-carry behaviour, so its tools may run again — logs a WARN, records `carriedToolExchangeRejected` on the step's trace entry and counts `eddi.llm.cascade.step.errors{type="carried_exchange_rejected"}`. Nothing else triggers that retry: not a failure after the step's first request was answered (its tools may already have run, and a retry could repeat their side effects), not an authentication failure, an unknown model or a content filter (a retry cannot fix those and would hide them), and not a timeout or a transient (429/5xx) failure.
 
@@ -249,15 +255,10 @@ When `enableInAgentMode` is `false`, cascading is skipped in agent mode and the 
 
 Cascade configs are validated at deploy (`LlmTask.configure`), in two tiers so an upgrade never stops a previously-loading agent from deploying:
 
-- **Hard error (deployment fails)** — only the **new** numeric fields, since no stored config predating this release can contain them: non-positive `maxTotalDurationMs`, negative `maxCostPerRun`, negative per-step / cascade `inputPricePer1M` / `outputPricePer1M`.
-- **Warning (logged, deployment proceeds)** — conditions older releases tolerated at load and that still fail/degrade at runtime exactly as before: empty steps, unknown `strategy`, unknown `evaluationStrategy`, `judge_model` without a `judgeModel`, `confidenceThreshold` outside `[0.0, 1.0]`, a non-last step with a null threshold (dead-step trap), non-positive `timeoutMs`, a cross-provider step/judge missing its own `apiKey`, and `convertToObject: true` with `structured_output` (auto-downgraded at runtime).
+- **Hard error (deployment fails)** — only the numeric budget and pricing fields: non-positive `maxTotalDurationMs`, negative `maxCostPerRun`, negative per-step / cascade `inputPricePer1M` / `outputPricePer1M`.
+- **Warning (logged, deployment proceeds)** — everything else; these conditions still fail or degrade at runtime: empty steps, unknown `strategy`, unknown `evaluationStrategy`, `judge_model` without a `judgeModel`, `confidenceThreshold` outside `[0.0, 1.0]`, a non-last step with a null threshold (dead-step trap), non-positive `timeoutMs`, a cross-provider step/judge missing its own `apiKey`, and `convertToObject: true` with `structured_output` (auto-downgraded at runtime). `maxFormatRetries` is not validated; it is clamped to `0..3`.
 
-## Backward Compatibility
-
-- Configs without `modelCascade` work exactly as before.
-- `enabled: false` (default) keeps standard execution.
-- All new config fields are optional with today's behavior as defaults.
-- The cascade lives entirely within `LlmTask`; `StreamingResponseHandler`'s cascade methods are `default`, so other implementers are unaffected.
+Configs without `modelCascade`, or with `enabled: false` (the default), use standard single-model execution. Every cascade field is optional.
 
 ## Example: Cost Optimization
 
@@ -286,7 +287,7 @@ A 3-tier cascade for a customer support agent, with pricing so savings are measu
       },
       {
         "type": "anthropic",
-        "parameters": { "modelName": "claude-sonnet-4-20250514" },
+        "parameters": { "modelName": "claude-sonnet-4-6" },
         "confidenceThreshold": null,
         "timeoutMs": 30000,
         "inputPricePer1M": 3.00,

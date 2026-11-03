@@ -1,5 +1,7 @@
 # Input Pattern Matching for Agent Routing
 
+> **In short:** the parser step turns raw user input into expression strings such as `category(billing)` by looking words up in dictionaries (with fuzzy corrections). Behavior rules then match those expressions with `inputmatcher` and emit actions. Action names are arbitrary strings: they only do something when an output set, HTTP call, LLM task or other step lists them in its own `actions`. Authors looking for the parser step options, dictionary types and corrections can jump to the configuration sections further down.
+
 ## Overview
 
 The **Pattern Matcher** (historically called "Semantic Parser") is EDDI's input classification system that transforms raw user input into **structured expressions** for agent routing and orchestration decisions.
@@ -104,7 +106,7 @@ Brittle, hard to maintain, requires code changes for new routing rules!
           "configs": { "expressions": "category(billing)" }
         }
       ],
-      "actions": ["agent(billing-specialist)"]
+      "actions": ["route_to_billing"]
     },
     {
       "name": "Route to Technical Agent",
@@ -114,7 +116,7 @@ Brittle, hard to maintain, requires code changes for new routing rules!
           "configs": { "expressions": "category(technical)" }
         }
       ],
-      "actions": ["agent(technical-expert)"]
+      "actions": ["route_to_technical"]
     }
   ]
 }
@@ -177,7 +179,7 @@ Brittle, hard to maintain, requires code changes for new routing rules!
       }
     }
   ],
-  "actions": ["route_to_billing_agent"]
+  "actions": ["route_to_billing"]
 }
 ```
 
@@ -579,7 +581,7 @@ Let's build an agent routing system for customer service:
       "configs": { "expressions": "category(billing)" }
     }
   ],
-  "actions": ["agent(billing-specialist)", "set_priority(high)"]
+  "actions": ["route_to_billing", "flag_high_priority"]
 }
 ```
 
@@ -608,7 +610,7 @@ Let's build an agent routing system for customer service:
 **Solution**: Add more words to dictionary or enable fuzzy corrections
 
 **Problem**: Multiple agents triggered for same input  
-**Solution**: Make conditions more specific or add rule priority
+**Solution**: Make conditions more specific, or put the rules in one behavior group, where only the first matching rule fires (rules have no priority field)
 
 **Problem**: Corrections too aggressive (wrong routing)  
 **Solution**: Reduce Levenshtein distance or disable specific corrections

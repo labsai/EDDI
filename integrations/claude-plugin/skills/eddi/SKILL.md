@@ -50,7 +50,7 @@ What your account can do depends on its EDDI role:
 | `eddi-user` | Find and talk to agents, group discussions, own conversations and memories, docs; decide pauses in its own conversations |
 | `eddi-viewer` | The same reading and talking, but no approval decisions; plus the audit trail of its own conversations |
 | `eddi-approver` | Decide approvals in anyone's conversations (`list_pending_approvals`, `resume_conversation`, …) and read docs |
-| `eddi-editor`, `eddi-admin` | All of the above plus authoring — see the `eddi-admin` skill |
+| `eddi-editor`, `eddi-admin` | All of the above except the audit trail (`read_audit_trail` needs `eddi-viewer`, or `eddi-admin`), plus authoring — see the `eddi-admin` skill |
 
 ## Find the right agent
 

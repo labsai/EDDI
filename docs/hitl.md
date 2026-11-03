@@ -582,13 +582,13 @@ Every HITL decision — human or automated — writes an immutable `hitl.approva
 
 ## Crash Recovery
 
-On startup, `HitlCrashRecoveryObserver` **repairs** HITL state; it never destroys a legitimate pause. The sweep runs on a background thread (application readiness does not block on it) and reads bounded projected summaries, not full conversation documents:
+With `eddi.messaging.type=in-memory` (a single node), `HitlCrashRecoveryObserver` **repairs** HITL state on startup; it never destroys a legitimate pause. In NATS cluster mode there is no startup pass: a leader-elected `ClusterHitlRecovery` sweep does the same work periodically (`eddi.cluster.hitl-recovery.interval`, `min-age`; see [clustering.md](clustering.md)), which avoids the rolling-restart race a per-node startup pass has. The sweep runs on a background thread (application readiness does not block on it) and reads bounded projected summaries, not full conversation documents:
 
 - Paused conversations with a **finite** policy get their one-shot timeout schedule idempotently re-armed at the original due time (or shortly after startup if overdue). After creating the schedule the pause state is re-checked — if a resume/cancel landed in the window, the schedule is withdrawn.
 - `WAIT_INDEFINITELY` pauses are left untouched (and skipped without any further read).
 - Regular conversations stuck `IN_PROGRESS` with an intact HITL bookmark (pod died mid-resume) are restored to `AWAITING_HUMAN` so the approval can be re-issued.
 
-Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-recovery.recover-in-progress` (default `true`; consider `false` in multi-pod deployments — see the class Javadoc for the rolling-restart caveat).
+Config: `eddi.hitl.crash-recovery.enabled` (default `true`), `eddi.hitl.crash-recovery.recover-in-progress` (default `true`; applies to the single-node startup pass only, since cluster mode has none).
 
 ## Operations
 

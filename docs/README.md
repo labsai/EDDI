@@ -30,6 +30,8 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 | **[Manager Dashboard](agent-manager-gui.md)**             | A tour of the admin UI, including the Platform Operator       |
 | **[Architecture Overview](architecture.md)**              | The lifecycle pipeline and the configuration model            |
 | **[Putting It All Together](putting-it-all-together.md)** | A worked example: a hotel booking agent                       |
+| **[Troubleshooting](troubleshooting.md)**                 | Diagnose common failures                                      |
+| **[Upgrading from 6.5](upgrading-from-6.5.md)**           | What a working 6.5 deployment notices on upgrade              |
 
 ---
 
@@ -38,14 +40,14 @@ Built with **Java 25** and **Quarkus**. Ships as a **Red Hat-certified Docker im
 ### Multi-Agent Orchestration
 
 - **19 LLM Providers** — OpenAI, Anthropic, Google Gemini, Mistral AI, Azure OpenAI, Amazon Bedrock, Oracle GenAI, Vertex AI, Ollama, Jlama, Hugging Face, xAI, DeepSeek, Kimi, Qwen, GLM, MiniMax, OpenRouter, Groq, plus any OpenAI-compatible endpoint
-- **[Group Conversations](group-conversations.md)** — Multi-agent debates, voting, shared artifacts, and standing teams across 7 discussion styles (Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, Negotiation)
+- **[Group Conversations](group-conversations.md)** — Multi-agent debates, voting, shared artifacts, and standing teams across 7 preset discussion styles plus `CUSTOM` (Round Table, Peer Review, Devil's Advocate, Delphi, Debate, Task Force, Negotiation)
 - **[Managed Agents](managed-agents.md)** — Intent-based auto-routing with one conversation per user per intent
 - **[Model Cascading](model-cascade.md)** — Cost-optimized multi-model routing with confidence-based escalation
 - **[Platform Operator](agent-manager-gui.md)** — An opt-in agent that inspects and operates the deployment through an allow-list of EDDI's own REST endpoints, including creating other agents; every write it makes pauses for human approval. An admin activates it at `/manage/operator`; the form-based wizard at `/manage/agents/wizard` is the alternative for creating agents
 
 ### Protocols & Interoperability
 
-- **[MCP Server](mcp-server.md)** — 80+ tools for managing agents and holding conversations from Claude Desktop, IDE plugins, or any MCP client
+- **[MCP Server](mcp-server.md)** — 96 tools for managing agents and holding conversations from Claude Desktop, IDE plugins, or any MCP client
 - **[MCP Client](mcp-client.md)** — Point an agent at somebody else's MCP server, including stdio servers via a bridge sidecar
 - **[A2A Protocol](a2a-protocol.md)** — Agent-to-Agent peer communication with skill discovery
 - **[Connections](connections.md)** — One credential model for every outbound call: static keys, HTTP Basic, OAuth service accounts, and per-end-user OAuth
