@@ -150,6 +150,22 @@ class InfraReviewHardeningTest {
     }
 
     @Test
+    @DisplayName("both installers give a FRESH install its own MONGO_APP_PASSWORD and never invent one for an existing .env")
+    void installersGenerateMongoAppPasswordOnlyForFreshInstalls() throws IOException {
+        String sh = read("install.sh");
+        assertTrue(sh.contains("MONGO_APP_PASSWORD=$(env_file_value MONGO_APP_PASSWORD)"), "a stored value must be carried forward");
+        assertTrue(sh.contains(
+                "if [[ \"${DB_CHOICE:-1}\" != \"2\" && -z \"$MONGO_APP_PASSWORD\" && ! -f \"$EDDI_DIR/.env\" ]]; then\n    MONGO_APP_PASSWORD=$(generate_password)"),
+                "generated only when there is no .env at all");
+        assertTrue(sh.contains("echo \"MONGO_APP_PASSWORD='${MONGO_APP_PASSWORD}'\" >> \"$EDDI_DIR/.env\""));
+        String ps1 = read("install.ps1");
+        assertTrue(ps1.contains("$script:MongoAppSecret = Get-EnvFileValue \"MONGO_APP_PASSWORD\""));
+        assertTrue(ps1.contains(
+                "-not $script:MongoAppSecret -and -not (Test-Path (Join-Path -Path $EddiDir -ChildPath \".env\"))) {\n        $script:MongoAppSecret = Get-StackPassword"));
+        assertTrue(ps1.contains("$publishedPorts[\"MONGO_APP_PASSWORD\"] = \"'$($script:MongoAppSecret)'\""));
+    }
+
+    @Test
     @DisplayName("provision-vm.sh sends Keycloak admin credentials only to the port Docker reports, and the token not in argv")
     void provisionVmKeycloakCallsAreScoped() throws IOException {
         String sh = read("gcp/provision-vm.sh");

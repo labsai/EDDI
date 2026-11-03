@@ -673,10 +673,19 @@ function Resolve-StackCredential {
     if ($Database -eq "postgres" -and -not $script:PostgresSecret) {
         $script:PostgresSecret = Get-StackPassword
     }
+    # EDDI's own MongoDB user. docker-compose.yml falls back to the ROOT password when
+    # MONGO_APP_PASSWORD is unset, which hands the app root's credential under another
+    # name. A fresh install (no .env yet) gets its own; an existing one never does: its
+    # app user already exists with the old password, so a stored value is carried
+    # forward and an absent one stays absent (the compose fallback keeps it working).
+    if (-not $script:MongoAppSecret) { $script:MongoAppSecret = Get-EnvFileValue "MONGO_APP_PASSWORD" }
+    if ($Database -ne "postgres" -and -not $script:MongoAppSecret -and -not (Test-Path (Join-Path -Path $EddiDir -ChildPath ".env"))) {
+        $script:MongoAppSecret = Get-StackPassword
+    }
     # Written single-quoted into .env, where compose reads the value literally.
-    foreach ($value in @($script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret, $script:PostgresSecret)) {
+    foreach ($value in @($script:MongoAppSecret, $script:KeycloakAdminUser, $script:KeycloakAdminSecret, $script:GrafanaAdminUser, $script:GrafanaAdminSecret, $script:PostgresSecret)) {
         if ($value -and $value.Contains("'")) {
-            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
+            Write-Fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD, MONGO_APP_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
         }
     }
 }
@@ -1150,6 +1159,11 @@ EDDI_VERSION=$EddiVersion
     # so a later switch back to PostgreSQL finds the volume's password.
     if ($script:PostgresSecret) {
         $publishedPorts["POSTGRES_PASSWORD"] = "'$($script:PostgresSecret)'"
+    }
+    # EDDI's MongoDB user password (see Resolve-StackCredential): written only when
+    # one is known, so an existing install without one keeps its root-password fallback.
+    if ($script:MongoAppSecret) {
+        $publishedPorts["MONGO_APP_PASSWORD"] = "'$($script:MongoAppSecret)'"
     }
     if ($WithMonitoring) {
         $publishedPorts["GRAFANA_PORT"] = $GrafanaPort

@@ -805,10 +805,19 @@ resolve_stack_passwords() {
   if [[ "${DB_CHOICE:-1}" == "2" && -z "$POSTGRES_PASSWORD" ]]; then
     POSTGRES_PASSWORD=$(generate_password)
   fi
+  # EDDI's own MongoDB user. docker-compose.yml falls back to the ROOT password when
+  # MONGO_APP_PASSWORD is unset, which hands the app root's credential under another
+  # name. A fresh install (no .env yet) gets its own; an existing one never does:
+  # its app user already exists with the old password, so a stored value is carried
+  # forward and an absent one stays absent (the compose fallback keeps it working).
+  [[ -n "${MONGO_APP_PASSWORD:-}" ]] || MONGO_APP_PASSWORD=$(env_file_value MONGO_APP_PASSWORD)
+  if [[ "${DB_CHOICE:-1}" != "2" && -z "$MONGO_APP_PASSWORD" && ! -f "$EDDI_DIR/.env" ]]; then
+    MONGO_APP_PASSWORD=$(generate_password)
+  fi
   # Written single-quoted into .env, where compose reads the value literally;
   # a single quote is the one character that cannot be carried that way.
   local value
-  for value in "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD" "$POSTGRES_PASSWORD"; do
+  for value in "$MONGO_APP_PASSWORD" "$KC_BOOTSTRAP_ADMIN_USERNAME" "$KC_BOOTSTRAP_ADMIN_PASSWORD" "$GRAFANA_ADMIN_USER" "$GRAFANA_ADMIN_PASSWORD" "$POSTGRES_PASSWORD"; do
     if [[ "$value" == *"'"* ]]; then
       fail "KC_BOOTSTRAP_ADMIN_USERNAME, KC_BOOTSTRAP_ADMIN_PASSWORD, GRAFANA_ADMIN_USER, GRAFANA_ADMIN_PASSWORD and POSTGRES_PASSWORD must not contain a single quote (')."
     fi
@@ -1321,6 +1330,11 @@ EOF
   # MongoDB, so a later switch back finds the volume's password).
   if [[ -n "${POSTGRES_PASSWORD:-}" ]]; then
     echo "POSTGRES_PASSWORD='${POSTGRES_PASSWORD}'" >> "$EDDI_DIR/.env"
+  fi
+  # EDDI's MongoDB user password (see resolve_stack_passwords): written only when
+  # one is known, so an existing install without one keeps its root-password fallback.
+  if [[ -n "${MONGO_APP_PASSWORD:-}" ]]; then
+    echo "MONGO_APP_PASSWORD='${MONGO_APP_PASSWORD}'" >> "$EDDI_DIR/.env"
   fi
   # Host ports for the containers the selected compose files publish. Only the
   # components that are part of this install get a line -- a stale KEYCLOAK_PORT

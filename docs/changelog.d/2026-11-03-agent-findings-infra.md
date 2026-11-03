@@ -27,6 +27,11 @@ pass (#1185); the rest are fixed here or recorded as accepted risk or open decis
 - **`application.properties`**: a comment says the metrics permission path is literal and must
   be repeated if the endpoint is relocated.
 
+- **`install.sh` / `install.ps1`** (PR #1099 review): a fresh install (no `.env` yet) now
+  generates its own `MONGO_APP_PASSWORD`, so EDDI no longer connects to MongoDB with the
+  root password under another name. An existing `.env` is never given one (its app user
+  already exists with the old password); a stored value is carried forward as before.
+
 ### Verdicts (35 findings)
 
 FIXED 13, ALREADY_FIXED 14, ACCEPTED_RISK 4, NEEDS_DECISION 4 (the Copilot auto-approve
