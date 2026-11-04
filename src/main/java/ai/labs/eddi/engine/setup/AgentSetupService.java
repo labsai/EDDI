@@ -2666,11 +2666,12 @@ public class AgentSetupService {
                 // agent first") and the generic branch would hide it behind "check the
                 // logs", leaving an agent designer or a sub-agent-creating model unable
                 // to self-correct.
-                LOGGER.warn("Deploy refused by quota layer for Agent " + agentId + ": " + deployError.getMessage());
+                LOGGER.warn("Deploy refused by quota layer for Agent " + LogSanitizer.sanitize(agentId) + ": "
+                        + LogSanitizer.sanitize(deployError.getMessage()));
                 result.put("deployed", false);
                 result.put("deployError", deployError.getMessage());
             } else {
-                LOGGER.warn("Deploy failed for Agent " + agentId, deployError);
+                LOGGER.warn("Deploy failed for Agent " + LogSanitizer.sanitize(agentId), deployError);
                 result.put("deployed", false);
                 result.put("deployError", "Deployment failed. Check server logs for details.");
             }
