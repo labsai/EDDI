@@ -48,7 +48,14 @@ public record WorkspaceNotification(String id, String recipient, Type type, Stri
          */
         SHARED_WITH_YOU,
         /** Somebody asked the recipient, as owner, for access to a resource. */
-        ACCESS_REQUESTED
+        ACCESS_REQUESTED,
+        /**
+         * A newer EDDI release exists. Addressed to
+         * {@link WorkspaceNotifications#SYSTEM_ADMINS}, not to a person:
+         * {@code resourceId} and {@code resourceName} carry the version,
+         * {@code resourceUri} the release page.
+         */
+        UPDATE_AVAILABLE
     }
 
     /** Whether the recipient has not dismissed it yet. */

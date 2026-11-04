@@ -344,6 +344,28 @@ class AgentOrchestratorAnswerToolTest {
     }
 
     @Test
+    @DisplayName("a plain-text answer with onInvalidJson wrap + wrapField ends up as the wrapped object (the shared rescue path)")
+    void textAnswerIsWrapped() throws Exception {
+        var task = task(true);
+        var validation = new LlmConfiguration.ResponseValidation();
+        validation.setEnabled(true);
+        validation.setOnInvalidJson("wrap");
+        validation.setWrapField("htmlResponseText");
+        task.setResponseValidation(validation);
+
+        var result = run(model(AiMessage.from("<p>plain html</p>")), task, null, "ollama");
+
+        // LlmTask hands the loop's answer to convertResponseToObject with
+        // RescueOptions.of(task),
+        // exactly as in text mode; the parser call below is that conversion.
+        var parsed = new ModelOutputParser(new JsonSerialization(new ObjectMapper())).parse(result.response(), true, SCHEMA, null, "t",
+                RescueOptions.of(task));
+        assertEquals(ModelOutputParser.Kind.VALID, parsed.kind(), parsed.reason());
+        assertTrue(parsed.wrapped());
+        assertEquals(Map.of("htmlResponseText", "<p>plain html</p>"), parsed.value());
+    }
+
+    @Test
     @DisplayName("reply arguments that violate the responseSchema are a schema_mismatch, as a JSON text reply would be")
     void schemaMismatchInReplyArguments() throws Exception {
         var result = run(model(AiMessage.from(List.of(reply("r1", "{\"quickReplies\":[\"x\"]}")))), task(true), null, "gemini");

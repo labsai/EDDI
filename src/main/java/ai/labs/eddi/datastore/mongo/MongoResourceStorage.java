@@ -12,6 +12,7 @@ import ai.labs.eddi.utils.StringUtilities;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoException;
 import com.mongodb.MongoWriteException;
+import com.mongodb.ReadPreference;
 import com.mongodb.WriteConcern;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -72,6 +73,9 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
     protected MongoCollection<Document> historyCollection;
     protected IDocumentBuilder documentBuilder;
 
+    /** Lazily built {@link #primaryReads()} view; {@code null} until asked for. */
+    private volatile MongoResourceStorage<T> primaryView;
+
     public MongoResourceStorage(MongoDatabase database, String collectionName, IDocumentBuilder documentBuilder, Class<T> documentType) {
         this(database, collectionName, documentBuilder, documentType, new String[0]);
     }
@@ -99,6 +103,33 @@ public class MongoResourceStorage<T> implements IResourceStorage<T> {
             ensureIndex(database, currentCollection, Indexes.ascending(index), false);
             ensureIndex(database, historyCollection, Indexes.ascending(index), false);
         });
+    }
+
+    /**
+     * The view returned by {@link #primaryReads()}: same documents, other read
+     * preference.
+     */
+    private MongoResourceStorage(MongoResourceStorage<T> source) {
+        this.documentType = source.documentType;
+        this.documentBuilder = source.documentBuilder;
+        this.currentCollection = source.currentCollection.withReadPreference(ReadPreference.primary());
+        this.historyCollection = source.historyCollection.withReadPreference(ReadPreference.primary());
+        this.primaryView = this;
+    }
+
+    /**
+     * The same collections read with {@link ReadPreference#primary()}. The client
+     * default is {@code nearest()} (PersistenceModule), which can serve a lagging
+     * secondary. Indexes are not re-ensured: the source already did.
+     */
+    @Override
+    public IResourceStorage<T> primaryReads() {
+        MongoResourceStorage<T> view = primaryView;
+        if (view == null) {
+            view = new MongoResourceStorage<>(this);
+            primaryView = view;
+        }
+        return view;
     }
 
     /**

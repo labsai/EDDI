@@ -150,7 +150,7 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     @Override
     public Response patchApiCalls(String id, Integer version, String jsonPatch) {
         // The same pre-write check updateApiCalls runs.
-        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, patched -> {
+        return restVersionInfo.patch(id, version, jsonPatch, ApiCallsConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
             requireMayAuthorCallerToken(patched);
             return validateBatchLimits(patched);
         });

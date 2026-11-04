@@ -314,6 +314,11 @@ public final class CronParser {
             if (!months.contains(date.getMonthValue()) || !dayMatches(date, daysOfMonth, daysOfWeek, bothDayFieldsRestricted)) {
                 continue;
             }
+            // A date the zone skips (Pacific/Apia lost 2011-12-30) has no fire times of
+            // its own: they land on the next date, and counting both gave a gap of 0.
+            if (!ZonedDateTime.of(date, LocalTime.ofSecondOfDay(firstOfDay), zoneId).toLocalDate().equals(date)) {
+                continue;
+            }
             if (previousMatch != null) {
                 min = Math.min(min, epochSecondAt(date, firstOfDay, zoneId) - epochSecondAt(previousMatch, lastOfDay, zoneId));
             }

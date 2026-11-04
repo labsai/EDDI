@@ -68,6 +68,9 @@ import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.MongoTenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.PostgresTenantQuotaStore;
+import ai.labs.eddi.engine.pricing.IModelPriceCatalogStore;
+import ai.labs.eddi.engine.pricing.mongo.MongoModelPriceCatalogStore;
+import ai.labs.eddi.datastore.postgres.PostgresModelPriceCatalogStore;
 import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.MongoToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.PostgresToolQuotaStore;
@@ -105,6 +108,9 @@ import ai.labs.eddi.engine.security.spaces.notifications.PostgresWorkspaceNotifi
 import ai.labs.eddi.engine.security.spaces.settings.IWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.MongoWorkspaceSettingsStore;
 import ai.labs.eddi.engine.security.spaces.settings.PostgresWorkspaceSettingsStore;
+import ai.labs.eddi.engine.updatecheck.ISystemSettingStore;
+import ai.labs.eddi.engine.updatecheck.MongoSystemSettingStore;
+import ai.labs.eddi.engine.updatecheck.PostgresSystemSettingStore;
 import ai.labs.eddi.secrets.persistence.ISecretPersistence;
 import ai.labs.eddi.secrets.persistence.MongoSecretPersistence;
 import ai.labs.eddi.secrets.persistence.PostgresSecretPersistence;
@@ -331,6 +337,13 @@ public class DataStoreProducers {
 
     @Produces
     @ApplicationScoped
+    public IModelPriceCatalogStore modelPriceCatalogStore(Instance<MongoModelPriceCatalogStore> mongo,
+                                                          Instance<PostgresModelPriceCatalogStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
     public IUserDirectoryStore userDirectoryStore(Instance<MongoUserDirectoryStore> mongo, Instance<PostgresUserDirectoryStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
@@ -346,6 +359,12 @@ public class DataStoreProducers {
     @ApplicationScoped
     public IWorkspaceSettingsStore workspaceSettingsStore(Instance<MongoWorkspaceSettingsStore> mongo,
                                                           Instance<PostgresWorkspaceSettingsStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ISystemSettingStore systemSettingStore(Instance<MongoSystemSettingStore> mongo, Instance<PostgresSystemSettingStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 
