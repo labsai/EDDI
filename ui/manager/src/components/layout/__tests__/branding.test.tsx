@@ -12,7 +12,6 @@ import { WorkforceSidebar } from "@/components/workforce/workforce-sidebar";
 import { LandingPage } from "@/pages/landing-page";
 import { App } from "@/app";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { AUTO_UPDATE_CHECK_KEY } from "@/hooks/use-update-check";
 import { setBrand } from "@/lib/brand";
 import { useOnboarding } from "@/hooks/use-onboarding";
 
@@ -252,7 +251,6 @@ describe("version and About", () => {
 describe("update UI (R5)", () => {
   it("branded: no Updates nav entry, no banner, and no request to GitHub even with auto-check on", async () => {
     setBrand(ZEBRA);
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     let githubCalls = 0;
     server.use(
       http.get(LATEST_URL, () => {
@@ -276,7 +274,6 @@ describe("update UI (R5)", () => {
 
   it("branded with showUpdateCheck: the update UI is back", async () => {
     setBrand({ ...ZEBRA, showUpdateCheck: true });
-    localStorage.setItem(AUTO_UPDATE_CHECK_KEY, "true");
     renderWithProviders(
       <>
         <Sidebar collapsed={false} onToggle={() => {}} />

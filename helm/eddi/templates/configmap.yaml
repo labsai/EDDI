@@ -208,6 +208,9 @@ data:
   {{- with (.Values.eddi.chat | default dict).frameAncestors }}
   EDDI_CHAT_FRAME_ANCESTORS: {{ . | quote }}
   {{- end }}
+  {{- if kindIs "bool" (.Values.eddi.updateCheck | default dict).enabled }}
+  EDDI_UPDATE_CHECK_ENABLED: {{ .Values.eddi.updateCheck.enabled | quote }}
+  {{- end }}
   {{- /*
     White-labeling seed (eddi.branding.*). Only values that are set are
     rendered, so an unset one keeps EDDI's default, and EDDI validates each at

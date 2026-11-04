@@ -285,6 +285,16 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
     }
 
+    /**
+     * Adds the resource a {@code config} map names in its {@code uri}, keyed as
+     * {@link #referencedResources} keys them — for a document whose own
+     * {@code config.uri} the engine follows (a parser document's names another
+     * parser).
+     */
+    public static void addConfigReference(Map<?, ?> config, Map<String, URI> references) {
+        addReference(config, references);
+    }
+
     private static void addReference(Map<?, ?> config, Map<String, URI> references) {
         Object raw = config == null ? null : config.get(KEY_URI);
         if (raw == null) {
@@ -299,9 +309,10 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         }
         // Not filtered on a literal "eddi://" prefix: the engine resolves a step by
         // URI.create + host and never looks at the scheme, so "Eddi://ai.labs.llm/…"
-        // or "x://ai.labs.llm/…" runs exactly the configuration "eddi://…" does, and
-        // so does the scheme-less "//ai.labs.llm/…". A reference the check skipped
-        // but the engine executes was a way round it.
+        // or "x://ai.labs.llm/…" runs exactly the configuration "eddi://…" does. A
+        // reference the check skipped but the engine executes was a way round it.
+        // Nor on having a scheme at all: a scheme-relative "//ai.labs.output/…" has
+        // the same host and id, and the engine loads it just the same.
         if (uri.getHost() == null) {
             return;
         }

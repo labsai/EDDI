@@ -299,4 +299,37 @@ class TurnAuditBufferTest {
         assertEquals("<p>", redacted.output().get("echo"));
         assertEquals("order 14711", redacted.output().get("note"));
     }
+
+    @Test
+    @DisplayName("a secret number inside a JSON string is redacted by value, and unrelated decimals keep their text")
+    void embeddedJsonDecimalsStayExact() {
+        String json = "{\"a\":\"12345678.00\",\"b\":12345678.00,\"c\":1.00,\"e\":12345678.0,\"d\":0.1234567890123456789}";
+        var entry = new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "task", "type", 0, 1L, Map.of("userInput", "hi"),
+                Map.of("o", "x"), Map.of("raw", json), null, List.of(), 0.0, Instant.now(), null, null);
+
+        String redacted = String.valueOf(TurnAuditBuffer.redactValues(entry, List.of("12345678.00"), "<p>").llmDetail().get("raw"));
+
+        assertTrue(redacted.contains("\"a\":\"<p>\",\"b\":\"<p>\""), redacted);
+        assertTrue(redacted.contains("\"c\":1.00,\"e\":\"<p>\""), redacted);
+        assertTrue(redacted.contains("0.1234567890123456789"), redacted);
+    }
+
+    /** A payload object that is not a map, list or string — an output item. */
+    public record OutputItem(String text) {
+    }
+
+    @Test
+    @DisplayName("a secret in a payload object, or in a JSON string's escaped form, is redacted too")
+    void secretsInObjectsAndEscapedJsonAreRedacted() {
+        String secret = "line1\"quoted\"\\end";
+        String escaped = "{\"arguments\":\"line1\\\"quoted\\\"\\\\end\"}";
+        var entry = new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "task", "type", 0, 1L, Map.of("userInput", "hi"),
+                Map.of("item", new OutputItem("say " + secret)), Map.of("raw", escaped), null, List.of(), 0.0, Instant.now(), null, null);
+
+        AuditEntry redacted = TurnAuditBuffer.redactValues(entry, List.of(secret), "<p>");
+
+        assertFalse(String.valueOf(redacted.output().get("item")).contains("quoted"), "the object's field must be scrubbed");
+        assertFalse(String.valueOf(redacted.llmDetail().get("raw")).contains("quoted"), "the decoded JSON value must be scrubbed");
+        assertTrue(String.valueOf(redacted.llmDetail().get("raw")).contains("<p>"));
+    }
 }

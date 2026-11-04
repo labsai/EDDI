@@ -314,35 +314,20 @@ public final class TurnAuditBuffer implements IAuditEntryCollector {
                 redactMap(entry.llmDetail(), needles, placeholder), redactMap(entry.toolCalls(), needles, placeholder));
     }
 
+    /**
+     * Through {@link SecretValueScrubber#scrubDeep}, the walk the turn-end scrub of
+     * the stored step uses: a payload object that is not a string, number, map or
+     * list is scrubbed through its JSON form, and a string holding serialized JSON
+     * (a model response, a tool call's arguments) is decoded first — a secret with
+     * a quote, backslash or newline in it does not occur verbatim in the encoded
+     * text.
+     */
     @SuppressWarnings("unchecked")
     private static Map<String, Object> redactMap(Map<String, Object> map, List<String> needles, String placeholder) {
-        return map == null || needles.isEmpty() ? map : (Map<String, Object>) redactValue(map, needles, placeholder);
-    }
-
-    private static Object redactValue(Object value, List<String> needles, String placeholder) {
-        if (value instanceof String text) {
-            return redactText(text, needles, placeholder);
+        if (map == null || needles.isEmpty()) {
+            return map;
         }
-        if (value instanceof Number number) {
-            // A number cannot hold part of a secret without being the secret.
-            return needles.contains(String.valueOf(number)) ? placeholder : number;
-        }
-        if (value instanceof Map<?, ?> map) {
-            Map<String, Object> copy = new LinkedHashMap<>();
-            map.forEach((key, nested) -> copy.put(redactText(String.valueOf(key), needles, placeholder), redactValue(nested, needles, placeholder)));
-            return copy;
-        }
-        if (value instanceof List<?> list) {
-            return list.stream().map(nested -> redactValue(nested, needles, placeholder)).toList();
-        }
-        return value;
-    }
-
-    private static String redactText(String text, List<String> needles, String placeholder) {
-        String redacted = text;
-        for (String needle : needles) {
-            redacted = redacted.replace(needle, placeholder);
-        }
-        return redacted;
+        Object cleaned = SecretValueScrubber.scrubDeep(map, needles, placeholder);
+        return cleaned instanceof Map<?, ?> cleanedMap ? (Map<String, Object>) cleanedMap : map;
     }
 }

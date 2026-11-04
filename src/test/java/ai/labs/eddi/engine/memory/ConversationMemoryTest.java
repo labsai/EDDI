@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
+import java.util.Map;
 
 /**
  * @author ginccc
@@ -233,6 +234,29 @@ public class ConversationMemoryTest {
         memory.redoLastStep();
         Assertions.assertEquals(0.40, (Double) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_COST).getResult(),
                 "the redone step owes the newer charge, not its own older 0.0");
+    }
+
+    @Test
+    @DisplayName("undo and redo carry the pending charge's attribution with it, a zero marker included")
+    public void undoAndRedoCarryThePendingAttribution() {
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.50));
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND,
+                Map.of("unpricedCalls", 2L, "inputTokens", 100L, "outputTokens", 40L)));
+        memory.startNextStep();
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.0));
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND,
+                Map.of("unpricedCalls", 0L, "inputTokens", 0L, "outputTokens", 0L)));
+
+        memory.undoLastStep();
+        Assertions.assertEquals(0L, ((Map<?, ?>) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_SPEND).getResult())
+                .get("inputTokens"), "the recovery's zero marker must shadow the older attribution");
+
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, 0.40));
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND,
+                Map.of("unpricedCalls", 1L, "inputTokens", 7L, "outputTokens", 3L)));
+        memory.redoLastStep();
+        Assertions.assertEquals(7L, ((Map<?, ?>) memory.getCurrentStep().getData(MemoryKeys.AUDIT_PENDING_SPEND).getResult())
+                .get("inputTokens"));
     }
 
     @Test

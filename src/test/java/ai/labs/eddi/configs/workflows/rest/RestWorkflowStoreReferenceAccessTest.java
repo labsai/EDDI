@@ -219,6 +219,7 @@ class RestWorkflowStoreReferenceAccessTest {
         var config = new WorkflowConfiguration();
         for (String uri : List.of("Eddi://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1",
                 "x://ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1",
+                // scheme-relative: no scheme at all, the same host and id
                 "//ai.labs.llm/llmstore/llms/" + FOREIGN_LLM + "?version=1")) {
             var step = new WorkflowStep();
             step.setConfig(new HashMap<>(Map.of("uri", uri)));
