@@ -993,8 +993,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                     toolTrace = outcome.trace();
                     responseMetadata = outcome.responseMetadata();
                     usedToolMode = true;
-                } else if (eventSink != null) {
-                    // Legacy mode with streaming — try to get a streaming model
+                } else if (eventSink != null && !addToOutputExplicitlyFalse) {
+                    // Legacy mode with streaming — try to get a streaming model.
+                    // Not with addToOutput=false: the postResponse decides what the
+                    // caller sees, and a streamed token of the raw answer cannot be
+                    // taken back — that task takes the plain path below.
                     // R5: a task that may re-ask its model is buffered, never streamed — the
                     // tokens of an attempt that is then retried cannot be taken back. The same
                     // holds for an output guardrail that can change the answer (WS4).
@@ -1010,7 +1013,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                                 currentStep, circuitGate, memory.getTurnDeadline());
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
-                        if (!addToOutputExplicitlyFalse && !bufferOutput) {
+                        if (!bufferOutput) {
                             eventSink.onToken(responseContent);
                         }
                     }
@@ -2866,6 +2869,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
     public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
+     * The namespaces of {@link #CONFIG_REF_MENTION}, each with its colon, for the
+     * forward scan in {@link #escapeConfigReferenceMentions}. Kept in the pattern's
+     * order; {@code LlmTaskVaultMentionTest} derives the namespaces from the
+     * pattern and fails if one is not escaped.
+     */
+    private static final List<String> CONFIG_REF_OPENERS = List.of("vault:", "eddivault:", "vars:", "connection:", "caller:");
+
+    /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
      * against — the cheap pre-check, so the common no-reference value never pays
      * for a regex.
@@ -2917,12 +2928,58 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * Known limit: a mention already inside a {@code {|raw|}} section would be
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
+     * <p>
+     * A forward scan, not {@code CONFIG_REF_MENTION.replaceAll}: the regex retried
+     * {@code [^}]*} to the end of the value from every opener that has no closing
+     * brace, so an editor-written prompt full of unclosed {@code {vault:} openers
+     * cost quadratic CPU on every turn, before any template limit applies. Here an
+     * opener without a later {@code }} ends the scan — no later opener can close
+     * either. Same matches as the pattern, and a mention is copied literally (the
+     * regex replacement also read {@code $} and {@code \} inside one as group
+     * references).
      */
     static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        StringBuilder escaped = null;
+        int copied = 0;
+        int from = 0;
+        while (true) {
+            int open = value.indexOf('{', from);
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = openerEnd(value, open + 1);
+            if (bodyStart < 0) {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', bodyStart);
+            if (close < 0) {
+                break;
+            }
+            if (escaped == null) {
+                escaped = new StringBuilder(value.length() + 16);
+            }
+            escaped.append(value, copied, open).append("{|").append(value, open, close + 1).append("|}");
+            copied = close + 1;
+            from = close + 1;
+        }
+        return escaped == null ? value : escaped.append(value, copied, value.length()).toString();
+    }
+
+    /**
+     * Where a mention's body starts when a namespace opener begins at
+     * {@code start}, else -1.
+     */
+    private static int openerEnd(String value, int start) {
+        for (String opener : CONFIG_REF_OPENERS) {
+            if (value.startsWith(opener, start)) {
+                return start + opener.length();
+            }
+        }
+        return -1;
     }
 
     /**
