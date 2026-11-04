@@ -186,12 +186,12 @@ class GroupConversationServiceToolPauseTest {
             IConversationService.ConversationResponseHandler handler = inv.getArgument(2);
             handler.onComplete(answerSnapshot("I cannot delete the database, but here is my opinion."));
             return null;
-        }).when(conversationService).resumeConversation(eq("member-conv"), any(), any());
+        }).when(conversationService).resumeConversation(eq("member-conv"), any(), any(), any(), any(), any());
 
         GroupConversation gc = service.discuss(GROUP_ID, "Question?", USER_ID, 0);
 
         // The resume was invoked with a REJECTED, system:group decision (not a cancel).
-        verify(conversationService).resumeConversation(eq("member-conv"), any(), any());
+        verify(conversationService).resumeConversation(eq("member-conv"), any(), any(), any(), any(), any());
         assertNotNull(rejectDecision.get(), "resume must carry a decision");
         assertEquals(HitlDecision.HitlVerdict.REJECTED, rejectDecision.get().getVerdict(),
                 "the group must reject the tool call, not approve it");
@@ -243,7 +243,7 @@ class GroupConversationServiceToolPauseTest {
             IConversationService.ConversationResponseHandler handler = inv.getArgument(2);
             handler.onComplete(toolCallPausedSnapshot());
             return null;
-        }).when(conversationService).resumeConversation(eq("member-conv"), any(), any());
+        }).when(conversationService).resumeConversation(eq("member-conv"), any(), any(), any(), any(), any());
 
         GroupConversation gc = service.discuss(GROUP_ID, "Question?", USER_ID, 0);
 
@@ -292,7 +292,7 @@ class GroupConversationServiceToolPauseTest {
 
         // A RULE pause needs a real human — the group must NOT attempt a graceful
         // rejection resume. It stays exactly as before: SKIP + cancel + skip metric.
-        verify(conversationService, never()).resumeConversation(any(), any(), any());
+        verify(conversationService, never()).resumeConversation(any(), any(), any(), any(), any(), any());
         verify(conversationService).cancelConversation(eq("member-conv"),
                 eq(ControlSignal.CANCEL_GRACEFUL), eq("system:group"));
         assertEquals(1.0, skippedCount(), "a RULE member pause still counts a skip");

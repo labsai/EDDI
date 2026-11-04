@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.runtime.LogRecordRedactor;
+import ai.labs.eddi.modules.llm.pricing.UsageMetering;
 import dev.langchain4j.model.ModelProvider;
 import dev.langchain4j.model.chat.Capability;
 import dev.langchain4j.model.chat.ChatModel;
@@ -150,6 +151,7 @@ public class ObservableChatModel implements ChatModel {
         } else {
             response = delegate.chat(chatRequest);
         }
+        response = UsageMetering.meter(response, modelType, chatRequest);
 
         long elapsedMs = System.currentTimeMillis() - startMs;
 

@@ -491,6 +491,14 @@ public class GroupConversation {
      * cleared on successful completion.
      */
     private String hitlLastPauseFingerprint;
+    /**
+     * I1: the cost ceiling fired under {@code SYNTHESIZE_NOW} in this round, so
+     * only SYNTHESIS phases still run. Persisted because a synthesis phase that
+     * requires approval pauses the run: the resumed leg must keep skipping the
+     * remaining work phases (and their approval gates) instead of starting over
+     * with the skip-ahead off. Cleared on completion and at a round's start.
+     */
+    private boolean costCeilingSkipAhead;
     private Instant created;
     private Instant lastModified;
 
@@ -1611,5 +1619,13 @@ public class GroupConversation {
 
     public void setHitlLastPauseFingerprint(String hitlLastPauseFingerprint) {
         this.hitlLastPauseFingerprint = hitlLastPauseFingerprint;
+    }
+
+    public boolean isCostCeilingSkipAhead() {
+        return costCeilingSkipAhead;
+    }
+
+    public void setCostCeilingSkipAhead(boolean costCeilingSkipAhead) {
+        this.costCeilingSkipAhead = costCeilingSkipAhead;
     }
 }
