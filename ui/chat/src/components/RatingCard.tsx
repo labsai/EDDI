@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
-import { commentOffered, type RatingInput, type RatingProfile, type StoredRating } from "@/api/rating-api";
+import { commentOffered, type RatingInput, type RatingProfile, type StoredRating } from "@eddi/core";
 import { t } from "@/i18n";
 
 interface RatingCardProps {

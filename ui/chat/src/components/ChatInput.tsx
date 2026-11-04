@@ -21,8 +21,8 @@ import {
   deleteAttachment,
   MAX_ATTACHMENTS_PER_TURN,
   type AttachmentResult,
-} from "@/api/attachments-api";
-import { ApiError, errorPayload } from "@/api/http";
+} from "@eddi/core";
+import { ApiError, errorPayload } from "@eddi/core";
 
 /** Delay before the one retry of a failed background attachment delete. */
 export const DISCARD_RETRY_MS = 2_000;

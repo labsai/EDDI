@@ -29,15 +29,12 @@
 
 ```
 src/
-├── api/            # API layer
-│   ├── http.ts             # Status-aware fetch core, ApiError, errorPayload, auth token, 401 retry hook
+├── api/            # The widget's own API layer — the backend contract itself is @eddi/core
 │   ├── embed-auth.ts       # postMessage token hand-off with the host page (docs/chat-ui-embedding.md)
-│   ├── chat-api.ts         # Conversation lifecycle (start, read, send, stream, undo, redo)
-│   ├── hitl-api.ts         # Approval status, cancel, deadline maths, poll cadence
-│   ├── attachments-api.ts  # Upload/delete + attachment_N context construction
-│   ├── sse-events.ts       # Pure interpretation of SSE payloads
-│   ├── snapshot.ts         # Snapshot steps → messages (masks secret input)
-│   ├── rating-api.ts       # Conversation/reply ratings, profile `rating` parsing, error-code copy
+│   ├── chat-config.ts      # Operator settings chat.html loads before the widget; the URL token
+│   ├── brand.ts            # The deployment brand and per-agent appearance layers
+│   ├── hitl-api.ts         # pauseHeadline() — the widget's words for a pause
+│   ├── rating-api.ts       # RATING_CHANNEL, httpRatingClient, ratingErrorMessage() (the widget's copy)
 │   └── demo-api.ts         # Mock API for demo mode (incl. an in-memory rating backend)
 ├── components/     # UI components
 │   ├── ChatApp.tsx         # Picks the screen for the URL; unknown paths → /chat/production/default
@@ -69,85 +66,28 @@ src/
 ├── i18n.ts             # String tables (en/de/fr/es), t(), initLocale() — ALL widget-owned text goes through t()
 ├── ime.ts              # isImeComposing(): Enter that confirms an IME candidate is not "send"
 ├── location.ts         # The three URL shapes (parseChatPath), useChatRoute() — there is no router
-├── rating-steps.ts     # Which conversation step a message belongs to (reply ratings are keyed by step)
+├── turn-notices.ts     # skippedTurnMessage() — the widget's words for a dropped turn
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
 ```
 
-### Backend contract (verified against EDDI source — do not guess these)
+### Where the API and SSE code lives: `@eddi/core`
 
-- **`ConversationState` has SIX values**: `READY`, `IN_PROGRESS`, `ENDED`,
-  `EXECUTION_INTERRUPTED`, `ERROR`, `AWAITING_HUMAN`.
-- **Nine SSE events** (`RestAgentEngineStreaming`): `task_start`, `task_complete`,
-  `task_failed`, `token`, `tool_call`, `cascade_step_start`, `cascade_escalation`,
-  `done`, `error`. There is **no `thinking` event** — the backend never emits one.
-- **`tool_call` is `{"tool":"<name>"}`, sent right before each tool runs** —
-  the name only; arguments reach the client later, redacted, in
-  `task_complete`'s `toolTrace`. There is **no "tool finished" event**: the
-  widget shows "Using {tool}…" (the Manager's wording) until the next `token`,
-  a `task_failed`, an escalation, or the end of the turn clears it. It is not token-gated — a
-  model can write a sentence and then call a tool.
-- **`error` payload is JSON** `{"message":"…"}`, not a bare string. A turn
-  refused BEFORE it ran — every condition the non-streaming endpoint answers with a
-  typed status (409, 410, 404, 413, 429, 403, 503) — also carries a `code`
-  (`awaiting_approval`, `conversation_ended`, …, pinned in
-  `UNCONSUMED_STREAM_ERROR_CODES` against `RestAgentEngineStreaming`): treat it like
-  a 409 — withdraw the bubble and restore the draft. Branch on `code`, show `message`.
-- **Every `data:` line carries one delimiter space** —
-  `RestAgentEngineStreaming.padDataLines` writes it. Strip exactly one; a
-  token's own leading space follows it.
-- **`inputField` arrives on `done` too.** Read it from every transport, not
-  only the non-streaming snapshot.
-- **The route's environment must be sent** as `?environment=` on start; the
-  backend defaults a missing one to production.
-- **The turn output's `input` is the masked display copy** — `<secret input>`
-  for a turn sent with `secretInput`. Use it when rebuilding. The engine scrubs
-  a secret turn when it ends and masks older stored ones on read, so
-  `input:initial` also reads `<secret input>`; the client-side mask is a
-  second line of defence, not the only one.
-- **Math is `$$…$$` only.** Single dollars are prices, not formulas.
-- **`done` is a trimmed snapshot** — only `conversationState` and
-  `conversationOutputs`. It omits `undoAvailable`/`redoAvailable`, so re-read
-  the snapshot to refresh them.
-- **`output[]` entries are not uniformly objects** — HITL writes its
-  pending-approval placeholder and rejection message as bare strings.
-- **Attachments reach the model ONLY via `attachment_N` context keys** whose
-  `value` is an object carrying `storageRef`. A ref in the message text is
-  silently ignored. Omit `fileName` when empty — the extractor backfills the
-  stored name only when the key is **absent** (`getFileName() == null`); `""` is
-  a String and suppresses the fallback.
-- **The per-turn cap of 5 is a default, not a contract** —
-  `eddi.attachments.max-per-turn` is a `@ConfigProperty` and no endpoint exposes
-  the effective value. Same for the 20 MiB upload / 10 MiB forward caps. Do not
-  write client code that treats any of them as fixed truth.
-- **Upload cap ≠ forward cap.** A file in between is stored, returns 201, and is
-  skipped at forward time — but the model is **not** left unaware: the forwarder
-  substitutes a text note (`AttachmentForwarder` → `TextContent.from(...)`)
-  saying the file was not sent and that `readAttachment` can fetch it. Surface
-  `forwardableInline` so the user knows the bytes were not inlined, but do not
-  claim the agent cannot see the file. Note it is an incomplete signal: a
-  separate `max-forward-aggregate-bytes` cap can skip a file that reported
-  `true`.
-- **`setPublic(false)` is NOT a wire filter.** `isPublic()` is never read as a
-  predicate anywhere in the backend — it is only copied into the snapshot. What
-  actually keeps a key out of the response is the key-prefix allowlist in
-  `ConversationMemoryUtilities.convertSimpleConversationMemory`, and
-  `returnDetailed=true` bypasses it entirely. This client asks for
-  `returnDetailed=false`, which is a client choice.
-- **Failures answer `{error, code}`** — parse both (`errorPayload` in `http.ts`).
-  `ATTACHMENT_REJECTED` is a catch-all: a declared-vs-detected MIME **mismatch**
-  (there is no type allowlist — an unknown type passes), the per-conversation
-  file/byte quotas, empty files, and on Postgres any wrapped `SQLException`, so
-  a database outage also arrives as a 400 "rejection". Only `error` says which.
-  A body-less 413 from Quarkus is possible but not the normal path — this repo
-  raises `max-body-size` to 25M precisely so in-cap uploads do not hit it.
-- **A 409 means the input was never consumed** — restore it, do not leave it in
-  the transcript as if sent.
-- **The rating endpoints answer `{error: "<CODE>", message}`** — the stable code is
-  in `error` (`RATING_WINDOW_CLOSED`, `RATING_DISABLED`, …), unlike the `{error,
-  code}` envelope above; `rating-api.ts` parses it. Reply ratings are keyed by
-  **step** (`/agents/{conversationId}/steps/{stepIndex}/rating`), step 0 being the
-  greeting — see `rating-steps.ts`.
+HTTP (`ApiError`, `errorPayload`, the auth token and the 401 hook), the SSE parser and
+reader, the conversation API (start, read, send, stream, undo, redo, rerun, managed,
+profile), HITL status and cancel, attachments, ratings, rating steps, snapshot → messages
+and the contract types are in [`ui/packages/core`](../packages/core/README.md), shared with
+the Manager. Import them from `@eddi/core`; `@/types` re-exports the contract types next
+to the widget's own `ChatMessage` and `ChatConfig`. The widget drives core's default
+client: `setBaseUrl`, `setAuthToken` and `setUnauthorizedHandler` (installed by
+`embed-auth.ts`).
+
+**The backend contract list — the rules verified against EDDI's source (six states, ten SSE
+events, `inputField` on `done`, the 409 that restores the draft, the attachment context
+keys, the rating envelope, …) — is now [`ui/packages/core/README.md`](../packages/core/README.md),
+each rule with the test that pins it.** Read it before touching the turn loop. A contract
+change goes into `@eddi/core`, with a test there; what the widget *says* about it (copy
+through `t()`) stays here.
 
 ---
 
@@ -155,7 +95,7 @@ src/
 
 1. **CSS** — BEM naming: `.chat-header__logo`, `.message--user`, `.quick-replies__btn`. No Tailwind.
 2. **State** — `ChatProvider` → `useChatState()` / `useChatDispatch()`. No prop drilling.
-3. **API** — Pure `fetch` in `chat-api.ts`. SSE streaming uses `AsyncGenerator`.
+3. **API** — `@eddi/core` (see above). SSE streaming uses its `AsyncGenerator` (`sendMessageStreaming`). Tests that need the network replace `globalThis.fetch` (`src/test-utils/sse.ts`); a test that mocks an API function mocks `@eddi/core` with `importActual` and overrides only that function (see `ChatInput.test.tsx`).
 4. **Testing** — Wrap components in `<ChatProvider>`, and anything that reads the route in `<ChatLocationProvider initialPath="/chat/production/agent-1?…">` (the in-memory location that replaced `MemoryRouter`). Mock `window.matchMedia` in `test-setup.ts`.
 4a. **No router** — react-router was 92 KB of first load for three path shapes. `src/location.ts` parses `/chat/managed/:intent/:userId`, `/chat/:environment/:agentId/:userId` and `/chat/:environment/:agentId` with react-router's matching rules (case-insensitive literals, `managed` beats `:environment`, trailing slashes ignored, params decoded); `location.test.tsx` pins them — these URLs are a public contract for embedders. Do not add a router back for a fourth shape; extend `parseChatPath`.
 4b. **Keep heavy renderers lazy** — KaTeX, highlight.js and the raw-HTML parser (`rehype-raw` → parse5) load only when a message needs them (`markdown-plugins.ts`); `npm run budget` fails CI when the first load grows past `ui/bundle-budget.json`. Raw HTML is still rendered (sanitised) for every agent until the per-agent `rawHtml` setting exists (frontend unification plan, D9).

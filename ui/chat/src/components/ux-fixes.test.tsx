@@ -10,7 +10,7 @@ import { MessageBubble } from "./MessageBubble";
 import { PausedCard } from "./PausedCard";
 import { ChatProvider } from "@/store/chat-store";
 import { isImeComposing } from "@/ime";
-import type { ApprovalStatus } from "@/api/hitl-api";
+import type { ApprovalStatus } from "@eddi/core";
 
 afterEach(() => {
   vi.restoreAllMocks();

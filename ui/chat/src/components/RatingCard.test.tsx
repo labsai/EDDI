@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RatingCard } from "./RatingCard";
-import { parseRatingProfile, type RatingProfile } from "@/api/rating-api";
+import { parseRatingProfile, type RatingProfile } from "@eddi/core";
 
 const stars = (extra: Record<string, unknown> = {}): RatingProfile =>
   parseRatingProfile({ scale: "FIVE_STAR", reasonTags: ["Helpful", "Too slow"], comment: true, ...extra })!;

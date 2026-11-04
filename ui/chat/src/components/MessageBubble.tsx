@@ -16,7 +16,7 @@ import ReactMarkdown, { type Components, type Options } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSanitize from "rehype-sanitize";
 import type { ChatMessage } from "@/types";
-import type { RatingInput, RatingProfile, StoredRating } from "@/api/rating-api";
+import type { RatingInput, RatingProfile, StoredRating } from "@eddi/core";
 import { StepRating } from "./StepRating";
 import { useRichPlugins } from "./markdown-plugins";
 import { t } from "@/i18n";

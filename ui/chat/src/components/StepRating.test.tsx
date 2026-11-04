@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { StepRating } from "./StepRating";
-import { parseRatingProfile, type RatingProfile } from "@/api/rating-api";
+import { parseRatingProfile, type RatingProfile } from "@eddi/core";
 
 const profile = (extra: Record<string, unknown> = {}): RatingProfile =>
   parseRatingProfile({ messageRating: true, reasonTags: ["Wrong answer", "Too slow"], comment: true, ...extra })!;
