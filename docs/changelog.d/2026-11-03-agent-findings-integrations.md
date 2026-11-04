@@ -15,8 +15,8 @@ were real and are fixed here:
   no pause identity and matched any pause that began before the record was written — so a delayed card could
   approve a later pause it does not show. Such a card is now posted without buttons and not recorded, and a
   record without a pause epoch matches nothing (`ISlackApprovalRecordStore.matchesPause`, `notifyApprovers`,
-  the group listener). The next message in the paused thread posts a card with buttons
-  ([hitl.md](../hitl.md)).
+  the group listener). The card says why it has no buttons; for a conversation, its own user writing in the
+  thread again posts a card with buttons, and a group pause is decided through REST/MCP ([hitl.md](../hitl.md)).
 - **Slack pause notice escaping.** The in-thread pause notice appended the pause reason as raw mrkdwn; it is
   escaped like the approval card's reason.
 - **Email, duplicate Message-ID.** A mail from another sender carrying the Message-ID of a mail waiting for its
@@ -25,10 +25,13 @@ were real and are fixed here:
 - **Email, group reply retries.** A cached group reply was retried to its stored recipient without the recipient
   rules being applied again, so turning `honorReplyTo` off did not stop a pending reply to a `Reply-To`. The
   retry now decides again, as every other reply kind does ([email-integration.md](../email-integration.md)
-  already promised this).
+  already promised this), and renders the mail again under the row's Message-ID, so a changed `address` is
+  its `From` as well as the envelope sender.
 - **Legacy Slack connector `groupId`.** A `channels[].config.groupId` on an agent became a standing route into
   that group once deployed, with no check that the deployer may use it. `deployAgent` now requires USE on it,
-  the rule the channel API applies to a group target ([slack-integration.md](../slack-integration.md)).
+  the rule the channel API applies to a group target ([slack-integration.md](../slack-integration.md)). The
+  check fails closed: when the agent's configuration cannot be read, the deploy is refused with a retryable 503
+  instead of going ahead unchecked (it used to proceed on a store outage).
 
 Verdicts: 6 fixed, 7 already fixed, 1 false positive, 4 accepted risk, 5 need a decision (Slack approval records
 keyed by the mutable integration name; editor-declared Slack `teamId` as the identity namespace; space

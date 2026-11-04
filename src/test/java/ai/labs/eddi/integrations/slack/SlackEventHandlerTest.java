@@ -325,6 +325,9 @@ class SlackEventHandlerTest {
         List<Map<String, Object>> known = blocks.getAllValues().get(1);
         assertFalse(unknown.stream().anyMatch(block -> "actions".equals(block.get("type"))), "no buttons without a known pause");
         assertTrue(known.stream().anyMatch(block -> "actions".equals(block.get("type"))), "the real pause gets its buttons");
+        // It says why, and what to do - not that no approvers are configured.
+        assertTrue(unknown.toString().contains(SlackHitlSupport.UNKNOWN_PAUSE_NOTE), unknown.toString());
+        assertFalse(unknown.toString().contains(SlackHitlSupport.NO_APPROVERS_NOTE));
     }
 
     /**

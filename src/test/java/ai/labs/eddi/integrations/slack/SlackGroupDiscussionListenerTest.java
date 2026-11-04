@@ -391,6 +391,21 @@ class SlackGroupDiscussionListenerTest {
     }
 
     @Test
+    void onHitlPause_unknownPause_noButtonsAndSaysToUseTheApi() {
+        var withHitl = new SlackGroupDiscussionListener(slackApi, AUTH_TOKEN, CHANNEL, USER_THREAD,
+                "C_APPROVAL", "U1,U2", "acme-int", new InMemorySlackApprovalRecordStore());
+        withHitl.onGroupStart(groupStart("ROUND_TABLE", 2));
+
+        withHitl.onHitlPause(new GroupConversationEventSink.HitlPauseEvent(0, "Phase 1", "sign-off", "phase"));
+
+        var blocksCaptor = ArgumentCaptor.forClass(List.class);
+        verify(slackApi).postBlocksMessage(eq(AUTH_TOKEN), eq("C_APPROVAL"), isNull(), blocksCaptor.capture(), anyString());
+        String posted = blocksCaptor.getValue().toString();
+        assertFalse(posted.contains("\"actions\"") || posted.contains("type=actions"), posted);
+        assertTrue(posted.contains(SlackHitlSupport.UNKNOWN_GROUP_PAUSE_NOTE), posted);
+    }
+
+    @Test
     void onHitlPause_withIntegrationName_buttonValueBindsIntegration() {
         // H2/H1: the group approval button value carries
         // "<integrationName>|group:<gcId>|<cardId>"

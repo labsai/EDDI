@@ -962,8 +962,9 @@ public class SlackEventHandler {
         // resolve the pause it was posted for. When the best-effort bookmark load
         // returns a non-AWAITING snapshot (hitlPausedAt null) the card is posted as a
         // notification without buttons and nothing is recorded: a card that does not
-        // know its pause could otherwise approve a later one, and the next message in
-        // the paused thread posts a card for the real pause. A normal-turn pause and an
+        // know its pause could otherwise approve a later one. The conversation's own
+        // user writing in the thread again posts a card for the real pause. A
+        // normal-turn pause and an
         // init-turn pause detected on the next say both route here — the first wins
         // the record; re-message-while-paused is a no-op. The record is removed
         // below if delivery fails. The record also carries a fresh card id that goes
@@ -974,6 +975,7 @@ public class SlackEventHandler {
         String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(
                 bookmark != null ? bookmark.getHitlPausedAt() : null);
         boolean recorded = false;
+        String noButtonsNote = null;
         if (!SlackHitlSupport.isBindableIntegrationName(integrationName)) {
             // Unbindable — a decision on it would be refused. A name containing '|'
             // (stored before the save-time rule) would split the button value.
@@ -985,6 +987,9 @@ public class SlackEventHandler {
         } else if (ISlackApprovalRecordStore.UNKNOWN_PAUSE.equals(pauseEpoch)) {
             LOGGER.warnf("The pause of %s could not be read yet — posting its approval card without buttons",
                     sanitize(conversationId));
+            if (includeButtons) {
+                noButtonsNote = SlackHitlSupport.UNKNOWN_PAUSE_NOTE;
+            }
             includeButtons = false;
         } else {
             try {
@@ -1016,7 +1021,7 @@ public class SlackEventHandler {
         var blocks = SlackHitlSupport.buildApprovalBlocks(
                 "⏸️ Conversation awaiting approval", "Conversation", conversationId,
                 agentId, pauseReason, timeoutInfo, actionValue, includeButtons,
-                pauseType, pendingToolCalls);
+                pauseType, pendingToolCalls, noButtonsNote);
         String fallback = "Conversation " + conversationId + " is awaiting human approval.";
 
         // H6: never send "Bearer null". Only the originating integration's own token

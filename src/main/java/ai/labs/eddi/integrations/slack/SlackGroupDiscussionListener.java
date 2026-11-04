@@ -436,9 +436,11 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             // only produce refusals.
             String pauseEpoch = ISlackApprovalRecordStore.pauseEpochOf(event.pausedAt());
             boolean recorded = false;
+            String noButtonsNote = null;
             if (includeButtons && ISlackApprovalRecordStore.UNKNOWN_PAUSE.equals(pauseEpoch)) {
                 // A card that does not know its pause matches none (see matchesPause).
                 includeButtons = false;
+                noButtonsNote = SlackHitlSupport.UNKNOWN_GROUP_PAUSE_NOTE;
             }
             if (includeButtons) {
                 if (approvalRecords == null || !SlackHitlSupport.isBindableIntegrationName(integrationName)) {
@@ -464,7 +466,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
             var blocks = SlackHitlSupport.buildApprovalBlocks(
                     "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                     phase, event.reason(), null,
-                    actionValue, includeButtons);
+                    actionValue, includeButtons, null, null, noButtonsNote);
             String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
             try {
                 slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);

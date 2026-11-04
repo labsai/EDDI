@@ -46,8 +46,9 @@ import java.util.List;
  * <p>
  * Records expire after {@code eddi.slack.hitl.approval-record-retention}
  * (default 30 days). A decision on a card older than that is refused; the pause
- * can still be resolved through REST or MCP, and a new message in the paused
- * thread posts a fresh card.
+ * can still be resolved through REST or MCP, and for a conversation a new
+ * message from its own user in the paused thread posts a fresh card (a group's
+ * card is not posted again by a reply in its thread).
  *
  * @since 6.5.0
  */
