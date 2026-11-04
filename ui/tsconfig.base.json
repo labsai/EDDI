@@ -1,0 +1,16 @@
+{
+  // The compiler options every TypeScript project under ui/ sets identically:
+  // module resolution for Vite, and the strictness the apps are written to. Each
+  // tsconfig.*.json in ui/manager and ui/chat extends this and keeps its own
+  // target, lib, emit and path settings, which differ on purpose.
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}
