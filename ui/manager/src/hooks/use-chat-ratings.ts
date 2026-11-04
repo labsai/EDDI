@@ -13,7 +13,7 @@ import {
   type RatingInput,
   type RatingProfile,
 } from "@/lib/api/ratings";
-import { agentReplyCount } from "@/lib/chat-rating-steps";
+import { agentReplyCount } from "@eddi/core";
 import type { ChatMessage } from "@/lib/api/chat";
 
 /** The card offered for a conversation that was just ended — it outlives the cleared transcript. */
