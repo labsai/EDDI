@@ -174,12 +174,14 @@ for (const [surfaceId, surface] of Object.entries(SURFACES) as [SurfaceId, Surfa
           await cell.check(page);
         });
       } else if (cell.status === "unit") {
+        // eslint-disable-next-line no-restricted-syntax -- a matrix cell, not a hidden failure: MSW has no fixture for it and the reason names the unit tests that cover it
         test.skip(
           title,
           { annotation: { type: "unit-tested", description: cell.reason } },
           () => {},
         );
       } else {
+        // eslint-disable-next-line no-restricted-syntax -- a matrix cell recording a capability the surface lacks today; it becomes an assertion when a phase adds it
         test.fixme(
           title,
           { annotation: { type: "unsupported", description: cell.reason } },
