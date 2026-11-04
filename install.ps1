@@ -270,6 +270,9 @@ $GrafanaAdminUser = $env:GRAFANA_ADMIN_USER
 $GrafanaAdminSecret = $env:GRAFANA_ADMIN_PASSWORD
 # The PostgreSQL password docker-compose.postgres-only.yml requires (no default).
 $PostgresSecret = $env:POSTGRES_PASSWORD
+# EDDI's MongoDB user password. An exported value wins (Compose reads the environment
+# before .env), so it is also what Resolve-StackCredential persists to .env.
+$MongoAppSecret = $env:MONGO_APP_PASSWORD
 # One entry per realm account this run looked at: Account, and Secret (empty
 # when the account already had a password and was left alone).
 $FirstLogins = @()

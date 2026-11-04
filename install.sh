@@ -1517,7 +1517,7 @@ compose_service_running() {
 kc_password_token() {
   local kc_base="$1" json_tool="$2" realm="$3" user="$4" password="$5" token=""
   compose_service_running keycloak "${kc_base##*:}" || return 0
-  token=$(printf '%s' "$password" | curl -sf -X POST \
+  token=$(printf '%s' "$password" | curl --noproxy 127.0.0.1 -sf -X POST \
     --data-urlencode "client_id=admin-cli" \
     --data-urlencode "grant_type=password" \
     --data-urlencode "username=${user}" \
@@ -1540,7 +1540,7 @@ kc_authed_curl() {
   [[ "$token" =~ ^[A-Za-z0-9._~+/=-]+$ ]] || return 1
   cfg=$(umask 077; mktemp "${TMPDIR:-/tmp}/eddi-kc-auth.XXXXXX") || return 1
   printf 'header = "Authorization: Bearer %s"\n' "$token" > "$cfg"
-  curl -K "$cfg" "$@"
+  curl --noproxy 127.0.0.1 -K "$cfg" "$@"
   rc=$?
   rm -f "$cfg"
   return $rc
@@ -1774,7 +1774,7 @@ ensure_stack_passwords_for_running_install() {
       fi
       # Built into a header rather than a curl -u literal (see confirm_grafana_login).
       legacy_auth=$(printf '%s:%s' "$g_user" admin | base64 | tr -d '\n')
-      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+      g_status=$(printf '%s' "$body" | curl --noproxy 127.0.0.1 -s -o /dev/null -w "%{http_code}" -X PUT \
         -H "Authorization: Basic ${legacy_auth}" \
         -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
     else
@@ -2356,7 +2356,7 @@ grafana_login_status() {
   local g_base="$1" credentials status=""
   credentials=$(printf '%s:%s' "$2" "$3" | base64 | tr -d '\n')
   status=$(printf 'header = "Authorization: Basic %s"\n' "$credentials" \
-    | curl -s -o /dev/null -w "%{http_code}" -K - "${g_base}/api/user" 2>/dev/null) || status="000"
+    | curl --noproxy 127.0.0.1 -s -o /dev/null -w "%{http_code}" -K - "${g_base}/api/user" 2>/dev/null) || status="000"
   printf '%s' "${status:-000}"
 }
 
@@ -2409,7 +2409,7 @@ confirm_grafana_login() {
       # curl -u literal, which secret scanners report as a leaked credential.
       local legacy_auth
       legacy_auth=$(printf '%s:%s' "$g_user" admin | base64 | tr -d '\n')
-      g_status=$(printf '%s' "$body" | curl -s -o /dev/null -w "%{http_code}" -X PUT \
+      g_status=$(printf '%s' "$body" | curl --noproxy 127.0.0.1 -s -o /dev/null -w "%{http_code}" -X PUT \
         -H "Authorization: Basic ${legacy_auth}" \
         -H "Content-Type: application/json" --data-binary @- "${g_base}/api/user/password" 2>/dev/null) || g_status="000"
       if [[ "$g_status" == "200" ]]; then

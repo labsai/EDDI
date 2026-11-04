@@ -35,7 +35,7 @@ class InfraReviewHardeningTest {
         // 0600 config file.
         long occurrences = sh.lines().filter(l -> l.contains("Authorization: Bearer")).count();
         assertTrue(occurrences == 1, "only kc_authed_curl may build the header, found " + occurrences);
-        assertTrue(sh.contains("curl -K \"$cfg\""), "the header must travel in a curl config file");
+        assertTrue(sh.contains("curl --noproxy 127.0.0.1 -K \"$cfg\""), "the header must travel in a curl config file");
         assertFalse(sh.contains("-H \"Authorization: Bearer"), "-H puts the token in argv");
     }
 
@@ -163,6 +163,34 @@ class InfraReviewHardeningTest {
         assertTrue(ps1.contains(
                 "-not $script:MongoAppSecret -and -not (Test-Path (Join-Path -Path $EddiDir -ChildPath \".env\"))) {\n        $script:MongoAppSecret = Get-StackPassword"));
         assertTrue(ps1.contains("$publishedPorts[\"MONGO_APP_PASSWORD\"] = \"'$($script:MongoAppSecret)'\""));
+    }
+
+    @Test
+    @DisplayName("PR #1239 review: EDDI_DIR is set before the Keycloak port lookup, credential curls bypass proxies, an exported Mongo password wins")
+    void reviewFollowUps() throws IOException {
+        String vm = read("gcp/provision-vm.sh");
+        int dir = vm.indexOf("  EDDI_DIR=\"/root/.eddi\"\n");
+        int lookup = vm.indexOf("KC_PORT=\\$(grep -m1 '^KEYCLOAK_PORT='");
+        assertTrue(dir > 0 && lookup > dir, "the lookup would read /.env and always fall back to 8180");
+        assertTrue(vm.indexOf("  EDDI_DIR=\"/root/.eddi\"\n", dir + 1) < 0, "assigned once");
+
+        String sh = read("install.sh");
+        assertTrue(sh.split("curl --noproxy 127.0.0.1 ", -1).length - 1 == 5,
+                "password grant, kc_authed_curl, Grafana status and both Grafana PUTs must bypass a configured proxy");
+
+        assertTrue(read("install.ps1").contains("$MongoAppSecret = $env:MONGO_APP_PASSWORD"),
+                "an exported value is what Compose uses, so it is what must be written to .env");
+
+        String driver = read("scripts/loadtest/drivers/stream_driver.py");
+        assertFalse(driver.contains("readexactly(size)"), "a whole peer-declared chunk would be allocated at once");
+        assertTrue(driver.contains("readexactly(min(65536, left))"));
+
+        String lt = read("scripts/loadtest/loadtest.py");
+        assertFalse(lt.contains("os.chmod(tmp"), "chmod by pathname follows a symlink swapped in at the temp name");
+        assertTrue(lt.contains("os.fchmod(f.fileno(), mode)") && lt.contains("mode = 0o666 & ~umask"));
+
+        assertTrue(read("docs/kubernetes.md").contains("`namespaceSelector` **in the same `from` entry**"));
+        assertTrue(read("src/main/resources/application.properties").contains("answered anonymously for GET"));
     }
 
     @Test

@@ -64,9 +64,14 @@ class Response:
                 if size == 0:
                     await self.reader.readline()
                     return
-                data = await self.reader.readexactly(size)
+                # In bounded pieces: reading the whole declared chunk at once would allocate a
+                # peer-chosen size before text() or the SSE parser could stop reading.
+                left = size
+                while left > 0:
+                    data = await self.reader.readexactly(min(65536, left))
+                    left -= len(data)
+                    yield data
                 await self.reader.readline()  # CRLF after the chunk
-                yield data
         elif self.remaining is not None:
             while self.remaining > 0:
                 data = await self.reader.read(min(65536, self.remaining))

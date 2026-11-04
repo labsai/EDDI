@@ -32,6 +32,14 @@ pass (#1185); the rest are fixed here or recorded as accepted risk or open decis
   root password under another name. An existing `.env` is never given one (its app user
   already exists with the old password); a stored value is carried forward as before.
 
+- **PR #1239 review follow-ups:** the GCP startup script now sets `EDDI_DIR` before it reads
+  Keycloak's port (it read `/.env` and always fell back to 8180); the credential-bearing
+  `curl` calls in `install.sh` pass `--noproxy 127.0.0.1`; `install.ps1` takes an exported
+  `MONGO_APP_PASSWORD` as the value it persists; the stream driver reads a chunked body in
+  64 KiB pieces; `write_text_atomic` sets the mode with `fchmod` on the open descriptor and
+  keeps an existing file's mode or the umask default; the NetworkPolicy and metrics-path
+  notes are corrected.
+
 ### Verdicts (35 findings)
 
 FIXED 13, ALREADY_FIXED 14, ACCEPTED_RISK 4, NEEDS_DECISION 4 (the Copilot auto-approve

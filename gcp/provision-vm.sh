@@ -589,6 +589,9 @@ if [[ "\${HTTPS_ENABLED}" == "true" ]]; then
   echo "[6/6] Configuring nginx HTTPS reverse proxy..."
 
   CERT_DIR="/etc/letsencrypt/live/\${EDDI_DOMAIN}"
+  # Set here, before the .env lookups below (it used to be assigned further down, so
+  # the Keycloak port lookup read "/.env" and always fell back to 8180).
+  EDDI_DIR="/root/.eddi"
 
   # Keycloak's published port as install.sh recorded it (it leaves 8180 when that is
   # taken); nginx and the admin calls below must use the same one.
@@ -712,7 +715,6 @@ NGINX_TMPL
   echo "nginx configured for HTTPS."
 
   # ── docker-compose override: point Keycloak URLs to HTTPS domains ─────────────
-  EDDI_DIR="/root/.eddi"
   EDDI_CONFIG="\${EDDI_DIR}/.eddi-config"
 
   cat > "\${EDDI_DIR}/docker-compose.override.yml" <<OVERRIDE_EOF

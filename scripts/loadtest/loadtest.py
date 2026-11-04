@@ -26,6 +26,7 @@ import platform
 from http.client import HTTPConnection  # the module name would clash with http() below
 import re
 import shlex
+import stat
 # The driver's job is to run `docker compose`, `docker` and `git`: fixed argument lists, no shell.
 import subprocess  # nosec B404
 import sys
@@ -189,8 +190,21 @@ def write_text_atomic(path, text):
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-        if os.name == "posix":
-            os.chmod(tmp, 0o644)  # mkstemp's 0600 would hide the report from the people it is for
+            if os.name == "posix":
+                # mkstemp's 0600 would hide the report from the people it is for. The mode is
+                # what a plain open() would have given: an existing regular file keeps its own,
+                # a new one gets 0666 minus the umask. fchmod acts on the open descriptor, so a
+                # symlink swapped in at the temp name cannot redirect it (a chmod by pathname would follow it).
+                try:
+                    st = os.lstat(path)
+                    mode = stat.S_IMODE(st.st_mode) if stat.S_ISREG(st.st_mode) else None
+                except FileNotFoundError:
+                    mode = None
+                if mode is None:
+                    umask = os.umask(0)
+                    os.umask(umask)
+                    mode = 0o666 & ~umask
+                os.fchmod(f.fileno(), mode)
         os.replace(tmp, path)
     except BaseException:
         try:
