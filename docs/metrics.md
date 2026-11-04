@@ -197,6 +197,7 @@ eddi_tool_execution_ratelimited_total       # Rate-limited executions
 eddi_tool_execution_timeout_total           # Executions abandoned at their per-tool timeout
 eddi_tool_execution_abandoned               # Timed-out workers still running, nobody waiting (gauge)
 eddi_tool_repeat_refused_total             # Repeated identical failing calls refused without running (tags: source, reason)
+eddi_tool_arguments_refused_total          # Calls refused before the approval gate because their arguments violate the tool's argumentSchema (tag: source)
 eddi_tool_quota_decisions_total            # toolQuotas decisions per call (tags: tool, outcome = allowed | refused | precheck_refused | unavailable | released)
 eddi_tool_quota_store_failures_total      # toolQuotas counter-store operations that failed, calls refused fail closed (tag: operation = reserve | precheck | release)
 eddi_tool_execution_duration_seconds        # Execution duration (timer)
