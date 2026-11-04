@@ -755,6 +755,159 @@
     },
     {
       "type": "row",
+      "title": "Lease hardening",
+      "id": 100,
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 70
+      },
+      "panels": []
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 101,
+      "title": "Lease handoffs",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_handoffs_total` - leases passed straight to the next turn queued on this node without a release.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_lease_handoffs_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 102,
+      "title": "Lease renewals that failed",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_renew_failures_total` - renewals that could not reach NATS. A sustained rise precedes leases lost.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_lease_renew_failures_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 103,
+      "title": "Leases adopted after a lost reply",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_adopted_total` - writes of this node that NATS applied although the reply was lost, recognised and kept.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 16,
+        "y": 71
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_lease_adopted_total{job=~\"$job\"}[$__rate_interval])) by (op)",
+          "legendFormat": "{{op}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 104,
+      "title": "Orphan leases deleted",
+      "type": "timeseries",
+      "description": "`eddi_cluster_lease_orphans_deleted_total` - leases this process wrote but never took, deleted instead of blocking the conversation for the TTL.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 0,
+        "y": 78
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_lease_orphans_deleted_total{job=~\"$job\"}[$__rate_interval])) by (instance)",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "id": 105,
+      "title": "KV bucket handle reopens",
+      "type": "timeseries",
+      "description": "`eddi_cluster_kv_reopens_total` - KV bucket handles (re)opened. A steady rise means calls keep failing on stale handles.",
+      "gridPos": {
+        "h": 7,
+        "w": 8,
+        "x": 8,
+        "y": 78
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(eddi_cluster_kv_reopens_total{job=~\"$job\"}[$__rate_interval])) by (bucket)",
+          "legendFormat": "{{bucket}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "type": "row",
       "title": "NATS connection errors",
       "id": 300,
       "collapsed": false,

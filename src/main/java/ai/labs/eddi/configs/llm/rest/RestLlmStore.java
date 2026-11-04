@@ -133,7 +133,7 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response patchLlm(String id, Integer version, String jsonPatch) {
-        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, patched -> {
+        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
             // The same pre-write checks updateLlm runs.
             requireMayAuthorCallerToken(patched);
             warnOnPlaintextSecrets(patched);

@@ -554,6 +554,10 @@ altogether. The shipped defaults cover
 > `checksum/secret` annotations, so a ConfigMap or Secret change alters the
 > Deployment spec and `helm upgrade` rolls the pod.
 
+### Update check (Helm)
+
+`eddi.updateCheck.enabled` (default `true`) becomes `EDDI_UPDATE_CHECK_ENABLED`. The check — one anonymous request a day to `api.github.com`, and a notification for the administrators when a newer release exists — is on unless you set it to `false`, which stops it entirely, even the first check after the first start, and locks the switch on the Manager's Updates page. See [Docker → Update check](docker.md#update-check).
+
 ### White-labeling (Helm)
 
 `eddi.branding.*` in `values.yaml` seeds the deployment's brand: product name, tagline, colours, the Powered-by and update-check toggles, `locked` (the values become the whole brand and the Manager's Branding page turns read-only) and `assets.configMap`, an existing ConfigMap of images mounted read-only as `eddi.branding.assets-dir`. Everything is empty by default and an empty value is not rendered. The chart does not mount a login theme into its in-cluster Keycloak; the theme ZIP the Branding page offers has to reach Keycloak the way you manage it. See [White-Labeling → Helm](white-labeling.md#helm).

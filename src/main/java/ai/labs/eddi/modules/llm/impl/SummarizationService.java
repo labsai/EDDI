@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.bootstrap.LlmModule;
 import dev.langchain4j.model.chat.request.ChatRequest;
@@ -73,8 +74,27 @@ public class SummarizationService {
      *            number of input tokens consumed (0 if unavailable)
      * @param outputTokens
      *            number of output tokens generated (0 if unavailable)
+     * @param usage
+     *            the call's metered token-usage map (cache counts, pricing model,
+     *            catalog price) — what {@code TokenPricing} prices; built from the
+     *            two counts when absent
      */
-    public record SummarizationResult(String summary, int inputTokens, int outputTokens) {
+    public record SummarizationResult(String summary, int inputTokens, int outputTokens, Map<String, Object> usage) {
+
+        public SummarizationResult(String summary, int inputTokens, int outputTokens) {
+            this(summary, inputTokens, outputTokens, null);
+        }
+
+        /** The usage map to price; never null. */
+        public Map<String, Object> tokenUsage() {
+            if (usage != null) {
+                return usage;
+            }
+            Map<String, Object> map = new HashMap<>();
+            map.put("inputTokens", inputTokens);
+            map.put("outputTokens", outputTokens);
+            return map;
+        }
 
         /** Total tokens consumed (input + output). */
         public int totalTokens() {
@@ -227,8 +247,8 @@ public class SummarizationService {
                     content.length(), result != null ? result.length() : 0,
                     inputTokens, outputTokens);
 
-            return new SummarizationResult(
-                    result != null ? result : "", inputTokens, outputTokens);
+            return new SummarizationResult(result != null ? result : "", inputTokens, outputTokens,
+                    response.tokenUsage() != null ? ToolContextBudget.tokenUsageMap(response.tokenUsage()) : null);
 
         } catch (RuntimeException e) {
             errorCounter.increment();

@@ -14,7 +14,9 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.compat.CompatibilityRules.Finding;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
+import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.PricingLint;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.utils.RestUtilities;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -151,6 +153,7 @@ public class AgentCompatibilityLint {
             String location = "llm task '" + (task.getId() != null ? task.getId() : "?") + "'";
             findings.addAll(CompatibilityRules.lintLlmTask(location, task, hasApiCalls, hasMcpCalls));
             CompatibilityRules.scanTemplates(location, asTree(task), templatingEngine::validateTemplate, findings);
+            PricingLint.lint(task, ModelPriceCatalogs.current()).forEach(m -> findings.add(new Finding(PricingLint.CODE, location, m)));
         }
     }
 
