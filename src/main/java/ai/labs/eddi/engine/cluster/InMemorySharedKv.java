@@ -24,6 +24,7 @@ import java.util.function.LongSupplier;
  */
 public class InMemorySharedKv implements ISharedKv {
 
+    /** A value, or a delete marker when {@code value} is {@code null}. */
     private record Entry(byte[] value, long revision, long writtenAtMillis) {
     }
 
@@ -48,13 +49,35 @@ public class InMemorySharedKv implements ISharedKv {
         return bucket;
     }
 
-    private Entry live(String key) {
+    /** The key's last record — a value or a delete marker — within the TTL. */
+    private Entry current(String key) {
         Entry e = entries.get(key);
         if (e != null && clock.getAsLong() - e.writtenAtMillis() >= ttlMillis) {
             entries.remove(key, e);
             return null;
         }
         return e;
+    }
+
+    private Entry live(String key) {
+        Entry e = current(key);
+        return e == null || e.value() == null ? null : e;
+    }
+
+    /**
+     * Deletes the key and returns the revision of the delete marker. Like a NATS
+     * bucket, the marker is kept until it ages out — but only in a bucket with a
+     * TTL: without one, a map of every key ever deleted would only grow, so the key
+     * is simply forgotten there.
+     */
+    private long tombstone(String key) {
+        long rev = ++lastRevision;
+        if (ttlMillis == Long.MAX_VALUE) {
+            entries.remove(key);
+        } else {
+            entries.put(key, new Entry(null, rev, clock.getAsLong()));
+        }
+        return rev;
     }
 
     @Override
@@ -74,8 +97,24 @@ public class InMemorySharedKv implements ISharedKv {
     }
 
     @Override
+    public synchronized Latest latest(String key) {
+        Entry e = current(key);
+        if (e == null) {
+            return new Latest(null, 0);
+        }
+        if (e.value() == null) {
+            return new Latest(null, e.revision());
+        }
+        return new Latest(new Versioned(e.value().clone(), e.revision(), e.writtenAtMillis()), e.revision());
+    }
+
+    /**
+     * Compare-and-set on the key's last record, as NATS does it: a delete marker's
+     * revision is a valid expectation too.
+     */
+    @Override
     public synchronized OptionalLong update(String key, byte[] value, long expectedRevision) {
-        Entry e = live(key);
+        Entry e = current(key);
         if (e == null || e.revision() != expectedRevision) {
             return OptionalLong.empty();
         }
@@ -93,19 +132,22 @@ public class InMemorySharedKv implements ISharedKv {
 
     @Override
     public synchronized boolean delete(String key, long expectedRevision) {
+        return deleteReturningRevision(key, expectedRevision).isPresent();
+    }
+
+    @Override
+    public synchronized OptionalLong deleteReturningRevision(String key, long expectedRevision) {
         Entry e = live(key);
         if (e == null || e.revision() != expectedRevision) {
-            return false;
+            return OptionalLong.empty();
         }
-        entries.remove(key);
-        ++lastRevision;
-        return true;
+        return OptionalLong.of(tombstone(key));
     }
 
     @Override
     public synchronized void delete(String key) {
-        if (entries.remove(key) != null) {
-            ++lastRevision;
+        if (live(key) != null) {
+            tombstone(key);
         }
     }
 

@@ -124,17 +124,18 @@ class RestSemanticParserTest {
         void shouldResumeBadRequestOnIllegalArgument() throws Exception {
             doReturn(mock(Future.class)).when(runtime).submitCallable(any(Callable.class), any());
 
-            restSemanticParser.parse("aabbccdd11223344eeff5566", 1, "hello", asyncResponse);
-
-            Callable<Void> callable = captureSubmittedCallable();
-
-            // Make resourceClientLibrary throw to trigger the error path
+            // The parser is resolved on the request thread (so access to what it
+            // references can be checked there), so the failure is staged before parse().
             doThrow(new IllegalArgumentException("bad input"))
                     .when(resourceClientLibrary).getResource(any(), any());
 
             // Stub the parser provider to avoid NPE before the throw
             ILifecycleTask parserTask = mock(ILifecycleTask.class);
             doReturn(parserTask).when(parserProvider).get();
+
+            restSemanticParser.parse("aabbccdd11223344eeff5566", 1, "hello", asyncResponse);
+
+            Callable<Void> callable = captureSubmittedCallable();
 
             callable.call();
 
@@ -148,12 +149,13 @@ class RestSemanticParserTest {
         void shouldResumeInternalServerErrorOnException() throws Exception {
             doReturn(mock(Future.class)).when(runtime).submitCallable(any(Callable.class), any());
 
+            // Make the parser provider throw a generic exception (staged before parse():
+            // the parser is resolved on the request thread)
+            doThrow(new RuntimeException("unexpected error")).when(parserProvider).get();
+
             restSemanticParser.parse("aabbccdd11223344eeff5566", 1, "hello", asyncResponse);
 
             Callable<Void> callable = captureSubmittedCallable();
-
-            // Make the parser provider throw a generic exception
-            doThrow(new RuntimeException("unexpected error")).when(parserProvider).get();
 
             callable.call();
 

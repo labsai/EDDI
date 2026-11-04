@@ -353,6 +353,128 @@ class UserMemoryToolTest {
         assertTrue(result.contains("No memories found"));
     }
 
+    /**
+     * Read visibility is not ownership: deleting another agent's global entry freed
+     * its key for this agent's own value, bypassing the overwrite guard.
+     */
+    @Test
+    void forgetFact_refusesAnotherAgentsGlobalEntry() throws Exception {
+        var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(foreign));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(foreign));
+
+        String result = tool.forgetFact("tz");
+
+        assertTrue(result.contains("owned by another agent"), result);
+        verify(store, never()).deleteEntry(any());
+        verify(store, never()).deleteEntryIfUnchanged(any(), any());
+    }
+
+    /**
+     * A foreign global entry and this agent's own self entry under one key: the
+     * refusal must not hide the entry this agent may forget, whichever of the two
+     * the store's first-match lookup returns.
+     */
+    @Test
+    void forgetFact_deletesItsOwnEntryBesideAForeignGlobalOne_foreignFirst() throws Exception {
+        var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        var own = new UserMemoryEntry("entry-s", "user-1", "tz", "PST", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(foreign));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(foreign, own));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store).deleteEntry("entry-s");
+        verify(store, never()).deleteEntry("entry-g");
+    }
+
+    @Test
+    void forgetFact_deletesItsOwnEntryBesideAForeignGlobalOne_ownFirst() throws Exception {
+        var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        var own = new UserMemoryEntry("entry-s", "user-1", "tz", "PST", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(own));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(foreign, own));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store).deleteEntry("entry-s");
+        verify(store, never()).deleteEntry("entry-g");
+    }
+
+    @Test
+    void forgetFact_deletesItsOwnGlobalEntry() throws Exception {
+        var own = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-1", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(own));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store).deleteEntry("entry-g");
+    }
+
+    @Test
+    void forgetFact_mayDeleteAForeignGlobalEntryWhenOverwriteIsAllowed() throws Exception {
+        config.getGuardrails().setAllowGlobalKeyOverwrite(true);
+        tool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config);
+        var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(foreign));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store).deleteEntry("entry-g");
+    }
+
+    /**
+     * An erasure that deleted the entry between this update's read and its write:
+     * the update-only write matches nothing, the inserting fallback recreates the
+     * row, and the post-write check — the erasure has signalled by then — takes it
+     * back. A plain upsert used to recreate the erased fact for good.
+     */
+    @Test
+    void rememberFact_updateOfAnEntryErasedMeanwhileIsTakenBack() throws Exception {
+        var cancelled = new AtomicBoolean();
+        var racingTool = new UserMemoryTool(store, "user-1", "agent-1", "conv-1", List.of(), config, cancelled::get);
+        var before = new UserMemoryEntry("id-color", "user-1", "color", "teal", "fact", Visibility.self, "agent-1", List.of(), "conv-0", false,
+                0, Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-01-01T00:00:00Z"));
+        var stored = new ArrayList<UserMemoryEntry>(List.of(before));
+        when(store.getAllEntries("user-1")).thenAnswer(inv -> List.copyOf(stored));
+        when(store.replaceIfUnchanged(eq("id-color"), any(), any())).thenAnswer(inv -> {
+            stored.clear(); // the erasure signalled and swept before this write
+            cancelled.set(true);
+            return false;
+        });
+        when(store.upsert(any())).thenAnswer(inv -> {
+            stored.add(new UserMemoryEntry("id-color2", "user-1", "color", "red", "fact", Visibility.self, "agent-1", List.of(), "conv-1",
+                    false, 0, Instant.now(), Instant.now()));
+            return "id-color2";
+        });
+
+        String result = racingTool.rememberFact("color", "red", "fact", "self");
+
+        assertTrue(result.contains("cancelled"), result);
+        verify(store).deleteEntryIfUnchanged(eq("id-color2"), any());
+    }
+
+    /**
+     * An update of an entry that is still there is written in place, never by an
+     * inserting upsert.
+     */
+    @Test
+    void rememberFact_updateIsWrittenInPlace() throws Exception {
+        var before = new UserMemoryEntry("id-color", "user-1", "color", "teal", "fact", Visibility.self, "agent-1", List.of(), "conv-0", false,
+                0, Instant.parse("2026-01-01T00:00:00Z"), Instant.parse("2026-01-01T00:00:00Z"));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(before));
+        when(store.replaceIfUnchanged(eq("id-color"), any(), eq(before.updatedAt()))).thenReturn(true);
+
+        String result = tool.rememberFact("color", "red", "fact", "self");
+
+        assertTrue(result.contains("✅ Remembered"), result);
+        verify(store, never()).upsert(any());
+        verify(store, never()).upsertIfOwnedBy(any(), any());
+    }
+
     @Test
     void forgetFact_shouldDeleteExistingEntry() throws Exception {
         var entry = new UserMemoryEntry("entry-1", "user-1", "name", "Alice", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,

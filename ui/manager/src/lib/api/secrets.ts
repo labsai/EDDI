@@ -481,43 +481,19 @@ export async function getVaultHealth(): Promise<VaultHealth> {
  * Replace a secret's value, keeping who may use it.
  *
  * There is no rotate endpoint: EDDI rotates by storing a new value under the
- * same key (`lastRotatedAt` moves on any PUT to an existing key). The Manager
- * used to POST to a `/rotate` path that has never existed and fall back to a
- * bare PUT on the 404 — and on a backend before the vault-key-safety fix, a PUT
- * without `allowedAgents` stores `["*"]` and a blank description. Every
- * rotation from this screen opened a narrowed secret to every agent.
- *
- * So the grant and description go along explicitly, taken from `current`,
- * which the caller must have read just before (`useRotateSecret` re-reads it).
- * A newer backend keeps both when they are omitted, so sending them changes
- * nothing there; on the older one it is the only thing that preserves them.
- *
- * Known residual race: restating the grant is last-writer-wins. If another
- * admin narrows the grant between the re-read and this PUT, the PUT puts the
- * older, broader list back. The window is one round trip, and no UI-side check
- * closes it — a read after the write cannot tell "restored by us" from "widened
- * by them". It closes when the value PUT stops carrying the grant, which is
- * only safe once every backend this Manager ships with keeps an omitted grant
- * (the vault-key-safety change; `main` still stores `["*"]` for an omitted one).
+ * same key (`lastRotatedAt` moves on any PUT to an existing key). The grant and
+ * the description are deliberately NOT sent: the backend this Manager is bundled
+ * with keeps both when they are omitted (`VaultSecretProvider.store`, both
+ * persistence stores). Restating a grant read earlier is last-writer-wins — if
+ * another admin narrowed it in between, the PUT would put the older, broader
+ * list back and re-open the revoked agent.
  */
 export async function rotateSecret(
   tenantId: string,
   keyName: string,
   newValue: string,
-  current: Pick<SecretMetadata, "allowedAgents" | "description">,
 ): Promise<SecretStoreResponse> {
-  // An empty or missing list means "every agent" to the backend, exactly like
-  // the wildcard — send the wildcard rather than a list it could read either way.
-  const allowedAgents = grantsAllAgents(current.allowedAgents)
-    ? [ALL_AGENTS]
-    : current.allowedAgents;
-  return storeSecret(
-    tenantId,
-    keyName,
-    newValue,
-    current.description ?? undefined,
-    allowedAgents,
-  );
+  return storeSecret(tenantId, keyName, newValue);
 }
 
 /**

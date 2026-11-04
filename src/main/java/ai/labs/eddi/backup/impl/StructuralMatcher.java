@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -30,6 +31,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
+import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.configs.apicalls.rest.RestApiCallsStore;
@@ -109,6 +111,10 @@ public class StructuralMatcher {
 
     @Inject
     RestRagStore ragStore;
+
+    /** Field-injected like the stores above; null in direct test constructions. */
+    @Inject
+    ResourceAccessGuard resourceAccessGuard;
 
     @Inject
     public StructuralMatcher(IRestAgentStore agentStore,
@@ -438,9 +444,13 @@ public class StructuralMatcher {
         // dictionary it names is: it names that dictionary by version, and the sync
         // moves the dictionary to a new one. Saying SKIP here and writing it anyway
         // would make the result disagree with the preview the operator approved.
+        // Indexed once, and only consulted for a SKIP row: a lookup that scanned every
+        // source extension for every row made a workflow of many extensions quadratic.
+        Map<String, ExtensionSourceData> bySourceId = new HashMap<>();
+        sourceExtensions.values().forEach(extension -> bySourceId.putIfAbsent(extension.sourceId(), extension));
         for (ResourceDiff diff : extensionDiffs) {
-            ExtensionSourceData sourceExt = findBySourceId(sourceExtensions, diff.sourceId());
-            if (diff.action() == DiffAction.SKIP && sourceExt != null
+            ExtensionSourceData sourceExt = diff.action() == DiffAction.SKIP ? bySourceId.get(diff.sourceId()) : null;
+            if (sourceExt != null
                     && AbstractBackupService.PARSER_EXT.equals(sourceExt.type())
                     && NestedReferences.namesAny(sourceExt.contentJson(), changing)) {
                 diff = new ResourceDiff(diff.sourceId(), diff.resourceType(), diff.name(), DiffAction.UPDATE,
@@ -451,15 +461,6 @@ public class StructuralMatcher {
         }
 
         return diffs;
-    }
-
-    private static ExtensionSourceData findBySourceId(Map<String, ExtensionSourceData> extensions, String sourceId) {
-        for (ExtensionSourceData extension : extensions.values()) {
-            if (extension.sourceId().equals(sourceId)) {
-                return extension;
-            }
-        }
-        return null;
     }
 
     private List<ResourceDiff> buildUnmatchedWorkflowDiffs(WorkflowSourceData sourceWf) {
@@ -853,9 +854,19 @@ public class StructuralMatcher {
         return nameMap;
     }
 
+    /**
+     * A resource's display name, or null when the caller may not {@code VIEW} it.
+     * The descriptor is read straight from its store, beneath the REST check, and a
+     * REMOVE row names a target workflow the preview never reads — so without this
+     * a caller who can view the target agent learned the name of a workflow they
+     * cannot open.
+     */
     private String readDescriptorName(String resourceId) {
         try {
             DocumentDescriptor desc = documentDescriptorStore.readCurrentDescriptor(resourceId);
+            if (desc != null && resourceAccessGuard != null && !resourceAccessGuard.canAccess(desc, AccessLevel.VIEW)) {
+                return null;
+            }
             return desc != null ? desc.getName() : null;
         } catch (Exception e) {
             return null;

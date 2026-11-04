@@ -58,6 +58,7 @@ class ToolResponseTruncatorTest {
     void truncateIfNeeded_exceedsLimit_truncates() {
         var limits = new ToolResponseLimits();
         limits.setDefaultMaxChars(10);
+        limits.setTruncationStrategy("truncate"); // start only; the default keeps head and tail
         String input = "a".repeat(100);
 
         String result = truncator.truncateIfNeeded("myTool", input, limits, TASK_TYPE, TASK_PARAMS);
@@ -132,7 +133,9 @@ class ToolResponseTruncatorTest {
 
         String result = truncator.truncateIfNeeded("myTool", "a".repeat(100), limits, TASK_TYPE, TASK_PARAMS);
 
-        assertTrue(result.startsWith("a".repeat(10)), result);
+        // Head and tail (the default): 7 from the start and 3 from the end — 10 in all.
+        assertTrue(result.startsWith("a".repeat(7) + "\n"), result);
+        assertTrue(result.endsWith("\n" + "a".repeat(3)), result);
         assertTrue(result.contains("limit is 10"),
                 "the default ceiling must be what applies, not a limit derived from the null entry: " + result);
     }
