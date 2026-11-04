@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { AlertCircle, CheckCircle2, ListOrdered, XCircle, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { EntryBody } from "@/lib/group-entry-body";
 import type { StructuredItem } from "./group-utils";
 import { StructuredTurnCard } from "./structured-turn-card";

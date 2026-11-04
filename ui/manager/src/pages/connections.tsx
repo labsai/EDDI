@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Plug, Plus, Search, ShieldAlert } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";

@@ -11,7 +11,7 @@ import {
   UserRound,
   Languages,
 } from "lucide-react";
-import { useTheme } from "./theme-provider";
+import { useTheme } from "@eddi/ui";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { useLanguageSwitcher } from "@/hooks/use-language-switcher";

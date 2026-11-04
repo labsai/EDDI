@@ -7,7 +7,7 @@ import { useOnboarding } from "@/hooks/use-onboarding";
 import { render } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 
 /** Render sidebar with custom auth context */
 function renderSidebarWithAuth(

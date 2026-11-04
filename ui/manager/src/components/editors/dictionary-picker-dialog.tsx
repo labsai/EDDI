@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/shared/empty-state";

@@ -25,7 +25,7 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 | --- | --- |
 | **Build** | Vite 8 |
 | **UI** | React 19 + TypeScript 5 (strict) |
-| **Styling** | Tailwind CSS v4 + CSS variables (black/gold) |
+| **Styling** | Tailwind CSS v4 + CSS variables (black/gold); the tokens are `@eddi/ui/theme.css` |
 | **State (server)** | TanStack Query v5 |
 | **State (UI)** | Zustand (chat/debug), `useState` / `useCallback` elsewhere |
 | **Routing** | React Router v7 (`react-router-dom` 7.x, a data router — `createBrowserRouter` in `src/app-router.tsx`, rendered by `RouterProvider`) |
@@ -161,9 +161,9 @@ The project has **11 locales**: `en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, 
 src/
 ├── app.tsx                   # Routes (pages load through lazyPage — Key Patterns 5)
 ├── components/
-│   ├── ui/                   # Low-level primitives (button, badge, dialog, …)
+│   ├── ui/                   # Low-level primitives (badge, dialog, …); Button is @eddi/ui's
 │   ├── shared/               # App-level shared components (empty/error state, pickers, …)
-│   ├── layout/               # AppLayout, Sidebar, TopBar, theme provider
+│   ├── layout/               # AppLayout, Sidebar, TopBar, AppToaster (ThemeProvider is @eddi/ui's)
 │   ├── editors/              # Extension editors + shared editor chrome
 │   │   ├── config-editor-layout.tsx   # Tabs (Form|JSON), version picker, save
 │   │   └── editor-registry.tsx        # EDITOR_MAP (single source of truth)
@@ -179,7 +179,7 @@ src/
 │   ├── operator/             # Operator tool allow-list + system prompt
 │   ├── api-client.ts         # Base fetch wrapper with auth header injection
 │   └── query-keys.ts         # Shared TanStack Query keys
-├── i18n/                     # config.ts + locales/ (11 locale JSON files)
+├── i18n/                     # config.ts (setupI18n from @eddi/ui) + locales/ (11 locale JSON files)
 ├── pages/                    # Route pages; pages/workforce/ for the Workforce app
 └── test/
     ├── setup.ts              # Vitest setup (MSW, monaco mock, …)
@@ -189,6 +189,10 @@ src/
 
 Tests sit next to what they test, in `__tests__/` directories throughout `src/`. List
 `src/components/` rather than trusting any enumeration here — it grows with every feature.
+
+### Shared packages: `@eddi/core` and `@eddi/ui`
+
+Two packages under [`ui/packages`](../packages/README.md) are compiled into this app as source. `@eddi/core` is the conversation contract (below, API Communication). `@eddi/ui` holds the design tokens (`index.css` imports `@eddi/ui/theme.css`), `ThemeProvider` / `useTheme`, the i18next setup and per-locale fonts, `Button` and `ThemedToaster` — import them from `@eddi/ui`. A change to a token or to `Button` reaches the Chat UI too once it uses them; it stays a pure move unless the change is meant to be visual. Tailwind scans the package (`@source` in `theme.css`), so its classes are generated. `npm run i18n:check` scans `ui/packages/*/src` with this app's locale files.
 
 ### Key Patterns
 
@@ -409,10 +413,12 @@ Consequences worth knowing:
   mounts, and tests mock it out via `vi.mock("@/lib/monaco-setup")` in
   `src/test/setup.ts`.
 - **Locales are code-split too.** Only `en.json` is bundled (it is `fallbackLng`,
-  so it must resolve synchronously); the other ten load through a tiny i18next
-  backend in `src/i18n/config.ts`. Add a locale by adding it to
-  `SUPPORTED_LANGUAGES` **and** `LOCALE_LOADERS` — the types make a missed entry
-  a compile error. `main.tsx` awaits `i18nReady` before the first render so a
+  so it must resolve synchronously); the other ten load through the lazy backend
+  `setupI18n` installs (`@eddi/ui`, [`ui/packages/ui`](../packages/ui/README.md)),
+  from `LOCALE_LOADERS` in `src/i18n/config.ts`. Add a locale by adding it to
+  `SUPPORTED_LANGUAGES` in `@eddi/ui` **and** to both apps' loader maps (this one and
+  the Chat UI's `src/i18n/index.ts`) — the types make a missed entry a compile error.
+  Script fonts load per locale through `installLocaleFonts` (`@eddi/ui/fonts`). `main.tsx` awaits `i18nReady` before the first render so a
   non-English user never sees a flash of English, and `i18n.changeLanguage()` is
   now genuinely async: await it, and handle rejection (a chunk can 404 across a
   deploy).

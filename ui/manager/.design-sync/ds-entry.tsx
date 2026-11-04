@@ -22,7 +22,7 @@
 export { AccessibleDialog } from "@/components/ui/accessible-dialog";
 export { AlertDialog } from "@/components/ui/alert-dialog";
 export { Badge, badgeVariants } from "@/components/ui/badge";
-export { Button, buttonVariants } from "@/components/ui/button";
+export { Button, buttonVariants } from "@eddi/ui";
 export {
   Card,
   CardHeader,

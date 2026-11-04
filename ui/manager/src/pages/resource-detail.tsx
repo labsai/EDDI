@@ -11,7 +11,7 @@ import {
   Trash2,
   Copy,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { EditableTitle } from "@/components/shared/editable-title";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";

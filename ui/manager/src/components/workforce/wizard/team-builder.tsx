@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentPicker } from "@/components/shared/agent-picker";

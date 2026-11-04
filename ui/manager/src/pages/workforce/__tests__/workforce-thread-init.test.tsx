@@ -4,7 +4,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { createTestQueryClient, userEvent } from "@/test/test-utils";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 
 import * as useGroupsHook from "@/hooks/use-groups";
 import * as useWorkforceThreadsHook from "@/hooks/use-workforce-threads";

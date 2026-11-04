@@ -1,7 +1,7 @@
 import { useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { ImageUp, Loader2, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { BrandAssetSlot } from "@/lib/brand";

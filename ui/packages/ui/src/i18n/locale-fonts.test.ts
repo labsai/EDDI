@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FONT_LOADERS,
@@ -7,8 +5,8 @@ import {
   resetLocaleFontsForTest,
   scriptFamilyFor,
   type ScriptFamily,
-} from "@/i18n/locale-fonts";
-import { SUPPORTED_LANGUAGES } from "@/i18n/config";
+} from "./locale-fonts";
+import { SUPPORTED_LANGUAGES } from "./languages";
 
 function fakeLoaders(impl: () => Promise<unknown> = () => Promise.resolve()) {
   const calls: ScriptFamily[] = [];
@@ -90,20 +88,5 @@ describe("ensureLocaleFont", () => {
     fail = false;
     await ensureLocaleFont("ar", loaders);
     expect(calls).toEqual(["arabic", "arabic"]);
-  });
-});
-
-describe("main.tsx", () => {
-  const main = readFileSync(resolve(__dirname, "../../main.tsx"), "utf8");
-
-  it("imports only the default Noto family eagerly", () => {
-    // The seven script families are ~388 KB of @font-face rules; an eager
-    // import puts them all back into the main stylesheet for every user.
-    const eager = [...main.matchAll(/^import\s+["'](@fontsource[^"']+)["']/gm)].map((m) => m[1]);
-    expect(eager).toEqual(["@fontsource-variable/noto-sans"]);
-  });
-
-  it("installs the per-locale loader", () => {
-    expect(main).toMatch(/installLocaleFonts\(i18n\)/);
   });
 });

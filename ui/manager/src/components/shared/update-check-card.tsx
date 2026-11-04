@@ -17,7 +17,7 @@ import {
   Server,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUpdateCheck } from "@/hooks/use-update-check";
 import {

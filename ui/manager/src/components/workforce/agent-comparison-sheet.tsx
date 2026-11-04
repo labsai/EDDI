@@ -2,7 +2,7 @@ import { useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import type { AgentStat } from "@/hooks/use-workforce-analytics";
 

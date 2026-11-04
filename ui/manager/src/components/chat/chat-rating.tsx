@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Star, ThumbsDown, ThumbsUp, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { cn } from "@/lib/utils";
 import { normalizeScore, type OwnRating, type RatingInput, type RatingProfile } from "@/lib/api/ratings";
 

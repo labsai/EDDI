@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 
 // ─── Types ───────────────────────────────────────────────────────
 

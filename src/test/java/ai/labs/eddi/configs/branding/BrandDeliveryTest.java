@@ -92,12 +92,12 @@ class BrandDeliveryTest {
      */
     @Test
     void brandScaleIsFormulaTextForEveryStep() throws IOException {
-        String theme = Files.readString(Path.of("ui", "manager", "src", "index.css"), StandardCharsets.UTF_8);
+        String theme = Files.readString(Path.of("ui", "packages", "ui", "src", "styles", "theme.css"), StandardCharsets.UTF_8);
         for (int step : new int[]{50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950}) {
             String token = "--color-brand-" + step + ":";
             assertTrue(BrandDelivery.BRAND_SCALE.contains(token), token);
             assertTrue(theme.contains("--color-brand-" + step + ": var(--color-amber-" + step + ");"),
-                    "index.css must declare brand-" + step + " as amber, so an unbranded page is unchanged");
+                    "theme.css (@eddi/ui) must declare brand-" + step + " as amber, so an unbranded page is unchanged");
             assertTrue(theme.contains("--color-warn-" + step + ": var(--color-amber-" + step + ");"), "warn-" + step);
             assertTrue(theme.contains("--color-ochre-" + step + ": var(--color-amber-" + step + ");"), "ochre-" + step);
         }

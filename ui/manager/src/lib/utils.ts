@@ -1,9 +1,6 @@
-import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+// One class-name joiner for the Manager and the primitives it shares with the
+// Chat UI (@eddi/ui).
+export { cn } from "@eddi/ui";
 
 /** Format a timestamp into a human-friendly relative time string */
 export function formatRelativeTime(timestamp: number): string {

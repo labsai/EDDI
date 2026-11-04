@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { isImeComposing } from "@/lib/ime";
 import { Plus, X, type LucideIcon } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { splitChipEntries } from "@/lib/chip-values";

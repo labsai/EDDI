@@ -11,12 +11,11 @@ import {
   BarChart3,
   LayoutDashboard,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button, useTheme } from "@eddi/ui";
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors } from "@/hooks/use-groups";
 import { useStreamingGroupIds } from "@/hooks/use-group-discussion-stream";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { useTheme } from "@/components/layout/theme-provider";
 import { type DiscussionStyle } from "@/lib/api/groups";
 import { styleDisplay } from "@/lib/discussion-styles";
 import { getInitials } from "@/lib/utils";

@@ -308,7 +308,8 @@ grep -o -- '--color-warning[a-z-]*:' .design-sync/.cache/compiled.css | sort -u
   build machine previews would render LTR English inside an RTL document (mirrored padding/
   icons). If that ever matters, force `document.documentElement.dir = "ltr"` in ds-providers.
 - ds-entry / ds-providers import real app code (`@/components/...`, `@/i18n/config`,
-  `@/components/layout/theme-provider`) — if those move, update the imports.
+  and `@eddi/ui` for `Button` and `ThemeProvider`, which moved there in phase 3a) — if those
+  move, update the imports and `componentSrcMap` in config.json.
 
 ## Auth
 DesignSync requires design-system authorization (`/design-login` in an interactive

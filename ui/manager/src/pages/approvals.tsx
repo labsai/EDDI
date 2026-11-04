@@ -21,7 +21,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@/lib/api-client";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
 import {

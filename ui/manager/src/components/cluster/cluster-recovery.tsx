@@ -7,7 +7,7 @@ import { getAuditTrail } from "@/lib/api/audit";
 import type { ActionResult } from "@/lib/api/cluster";
 import { useForwardLocalDeadLetters, useReconcileDeployments, useResyncCaches } from "@/hooks/use-cluster";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { ErrorState } from "@/components/shared/error-state";
 import { actionOutcomeLabel } from "@/lib/cluster-labels";
 

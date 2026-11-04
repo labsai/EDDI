@@ -66,9 +66,11 @@ describe("brand scale", () => {
     for (const [, value] of declarations) expect(value).toContain("var(--color-primary)");
   });
 
-  it("is what index.css's preview panels and BrandDelivery both rely on", () => {
+  it("is what the shared tokens, index.css's preview panels and BrandDelivery all rely on", () => {
+    const tokens = readFileSync(join(__dirname, "../../../../packages/ui/src/styles/theme.css"), "utf8");
     const css = readFileSync(join(__dirname, "../../index.css"), "utf8");
     for (const step of BRAND_SCALE_STEPS) {
+      expect(tokens).toContain(`--color-brand-${step}: var(--color-amber-${step});`);
       expect(css).toContain(`--color-brand-${step}: var(--color-amber-${step});`);
     }
     expect(css).toContain(".brand-preview-light {");
@@ -95,7 +97,7 @@ describe("UNBRANDED_COLORS", () => {
     // The Branding page shows these in an empty field's colour picker; they must
     // be the bundles' real defaults, not a guess.
     const root = join(__dirname, "../../..");
-    const manager = readFileSync(join(root, "src/index.css"), "utf8");
+    const manager = readFileSync(join(root, "../packages/ui/src/styles/theme.css"), "utf8");
     const chat = readFileSync(join(root, "../chat/src/styles/variables.css"), "utf8");
     const declared = (css: string, name: string) =>
       new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`).exec(css)?.[1]?.toLowerCase();

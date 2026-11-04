@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { X, Download, Loader2, Lock } from "lucide-react";
 import { usePreviewExport, useExportSelective } from "@/hooks/use-backup";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { ExportableResource } from "@/lib/api/backup";
 
 interface ExportAgentDialogProps {

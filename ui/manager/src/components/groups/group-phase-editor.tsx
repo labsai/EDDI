@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Save, X, RefreshCw, Info } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useUpdateGroup } from "@/hooks/use-groups";
 import { getErrorMessage } from "@/lib/api-client";
 import type {

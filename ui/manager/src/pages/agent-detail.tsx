@@ -48,7 +48,7 @@ import { useSpaces } from "@/hooks/use-spaces";
 import { toast } from "sonner";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   useAgent,
   useDeploymentStatus,

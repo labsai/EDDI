@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { Send, Loader2, Expand, RotateCw, Paperclip, X } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { cn } from "@/lib/utils";
 import { isImeComposing } from "@/lib/ime";

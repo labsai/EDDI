@@ -6,7 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { server } from "@/test/mocks/server";
 import { createTestQueryClient, renderPage } from "@/test/test-utils";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
 import { CHANGED_RATING_ID, ratingFixtures } from "@/test/mocks/rating-handlers";
 import { FeedbackPage } from "../feedback";

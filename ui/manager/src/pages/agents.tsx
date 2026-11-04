@@ -11,7 +11,7 @@ import { CreateAgentDialog } from "@/components/agents/create-agent-dialog";
 import { ImportAgentDialog } from "@/components/agents/import-agent-dialog";
 import { ExportAgentDialog } from "@/components/agents/export-agent-dialog";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { EmptyState } from "@/components/shared/empty-state";

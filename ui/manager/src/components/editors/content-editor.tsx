@@ -6,7 +6,7 @@ import "@/lib/monaco-setup";
 import Editor, { type OnMount, type BeforeMount } from "@monaco-editor/react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { Maximize2, Minimize2 } from "lucide-react";
-import { useTheme } from "@/components/layout/theme-provider";
+import { useTheme } from "@eddi/ui";
 import { cn } from "@/lib/utils";
 import { cssHexColor } from "@/lib/css-color";
 import type { editor, languages } from "monaco-editor";

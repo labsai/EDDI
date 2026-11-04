@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { useOnboarding } from "@/hooks/use-onboarding";
 import { WelcomeModal } from "@/components/onboarding/welcome-modal";
 import { GuidedTour } from "@/components/onboarding/guided-tour";
