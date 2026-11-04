@@ -600,7 +600,7 @@ class CascadingModelExecutor {
                         convertToObject, FormatRetryRunner.resolveBaseMaxOutputTokens(mergedParams, modelType),
                         stepPrices.inputPer1M(), stepPrices.outputPer1M(),
                         // the step's merged params, so a step-level responseSchema override applies
-                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId());
+                        mergedParams.get("responseSchema"), task.getNonBlankFields(), task.getId(), RescueOptions.of(task));
                 if (retryPolicy != null) {
                     // A re-ask of this step is checked with the earlier steps' cost as well.
                     retryPolicy = retryPolicy.withSpend(spend.plus(totals.runCostUsd()));
@@ -1005,7 +1005,8 @@ class CascadingModelExecutor {
             ticket.release();
         } else {
             var detection = convertToObject
-                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId())
+                    ? formatRetryRunner.classifyJsonReply(response, params.get("responseSchema"), task.getNonBlankFields(), task.getId(),
+                            RescueOptions.of(task))
                     : null;
             if (detection != null) {
                 ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());

@@ -192,6 +192,13 @@ export interface LlmTask {
    */
   nonBlankFields?: string[];
   /**
+   * Renames applied to top-level keys of the parsed `convertToObject` reply:
+   * `{ "htmlResponseStr": "htmlResponseText" }` renames the key when the target
+   * is absent (the target wins when both exist). Independent of
+   * `responseValidation.enabled`.
+   */
+  fieldAliases?: Record<string, string>;
+  /**
    * What the task does when its model phase fails outright. `fallback` serves
    * the configured fallback (see `ResponseValidation.fallbackMessage`) and
    * completes the turn; `error` (the default) fails it.
@@ -334,6 +341,16 @@ export interface ResponseValidation {
    * `ignore`/`warn` keep the parsed object. Default `ignore`.
    */
   onSchemaMismatch?: RetryableResponseValidationAction;
+  /**
+   * With `onInvalidJson: "wrap"` (set it in the JSON view; the policy select does
+   * not offer it yet): the top-level property a plain-text reply is wrapped into.
+   * Required for `wrap`.
+   */
+  wrapField?: string;
+  /** Object merged next to `wrapField` in a wrapped reply, e.g. `{ "quickReplies": [] }`. */
+  wrapDefaults?: Record<string, unknown>;
+  /** Longest reply, in characters, that `wrap` wraps. Default 20000. */
+  wrapMaxChars?: number;
   /**
    * Action when the prompt exceeds the model's context window. `retry` re-sends
    * once with the history window halved. Default `error`.

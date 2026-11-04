@@ -413,5 +413,128 @@ class LlmTaskOutputOutcomeTest {
             assertEquals(Map.of("htmlResponseText", "ok"), templateData.get("taskA"));
             verify(dataFactory).createData(OUTCOME_KEY, "repaired");
         }
+
+        @Test
+        @DisplayName("plain text after a resume is wrapped the same way as on the live path")
+        void plainTextIsWrapped() throws Exception {
+            resumeReplies("Done 🎉");
+
+            llmTask.execute(memory, new LlmConfiguration(List.of(rescueTask(true, "wrap", "ignore", null))));
+
+            assertEquals(Map.of("htmlResponseText", "Done 🎉", "quickReplies", List.of()), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "wrapped");
+        }
+    }
+
+    private static LlmConfiguration.Task rescueTask(boolean tools, String onInvalidJson, String fallbackAction, Map<String, String> aliases) {
+        var t = task(true, tools);
+        var v = new LlmConfiguration.ResponseValidation();
+        v.setEnabled(true);
+        v.setOnInvalidJson(onInvalidJson);
+        v.setFallbackAction(fallbackAction);
+        if ("wrap".equals(onInvalidJson)) {
+            v.setWrapField("htmlResponseText");
+            v.setWrapDefaults(Map.of("quickReplies", List.of()));
+        }
+        t.setResponseValidation(v);
+        t.setFieldAliases(aliases);
+        t.setNonBlankFields(List.of("htmlResponseText"));
+        return t;
+    }
+
+    private double recovered(String action, String outcome) {
+        var counter = meterRegistry.find("eddi.llm.recovery").tag("action", action).tag("outcome", outcome).counter();
+        return counter == null ? 0 : counter.count();
+    }
+
+    @Nested
+    @DisplayName("local rescue of near-miss replies (live path)")
+    class Rescue {
+
+        private void run(LlmConfiguration.Task task) throws Exception {
+            llmTask.execute(memory, new LlmConfiguration(List.of(task)));
+        }
+
+        @Test
+        @DisplayName("onInvalidJson=wrap: a plain-text reply is stored as the wrapped object, outcome wrapped, counted, no extra model call")
+        void plainTextIsWrapped() throws Exception {
+            liveModelReplies(Step.text("您好，已经完成 <strong style=\"color:rgb(230, 0, 0)\">3</strong>"));
+
+            run(rescueTask(false, "wrap", "ignore", null));
+
+            assertEquals(Map.of("htmlResponseText", "您好，已经完成 <strong style=\"color:rgb(230, 0, 0)\">3</strong>", "quickReplies", List.of()),
+                    templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "wrapped");
+            assertEquals(1, counted("wrapped"));
+            assertEquals(1, recovered("wrap", "recovered"));
+            assertEquals(0, recovered("retry", "recovered"), "no second model call was asked for");
+        }
+
+        @Test
+        @DisplayName("wrap leaves a recovery log line")
+        void wrapIsLogged() throws Exception {
+            var lines = new ArrayList<String>();
+            LlmRecoveryLog.observer = lines::add;
+            try {
+                liveModelReplies(Step.text("just text"));
+                run(rescueTask(false, "wrap", "ignore", null));
+            } finally {
+                LlmRecoveryLog.observer = null;
+            }
+
+            assertTrue(lines.stream().anyMatch(l -> l.contains("action=wrap") && l.contains("outcome=recovered") && l.contains("class=invalid_json")),
+                    lines.toString());
+        }
+
+        @Test
+        @DisplayName("a double-escaped reply is repaired, not wrapped")
+        void doubleEscaped() throws Exception {
+            liveModelReplies(Step.text("{\\\"htmlResponseText\\\": \\\"<p>x</p>\\\"}"));
+
+            run(rescueTask(false, "wrap", "ignore", null));
+
+            assertEquals(Map.of("htmlResponseText", "<p>x</p>"), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "repaired");
+        }
+
+        @Test
+        @DisplayName("fieldAliases rename the key before the shape is checked, with no validation block at all")
+        void aliasWithoutResponseValidation() throws Exception {
+            liveModelReplies(Step.text("{\"htmlResponseStr\": \"<p>x</p>\"}"));
+            var t = task(true, false);
+            t.setFieldAliases(Map.of("htmlResponseStr", "htmlResponseText"));
+            t.setNonBlankFields(List.of("htmlResponseText"));
+
+            run(t);
+
+            assertEquals(Map.of("htmlResponseText", "<p>x</p>"), templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "repaired");
+        }
+
+        @Test
+        @DisplayName("broken JSON is not wrapped: it stays invalid and the not-wrappable decision is counted")
+        void brokenJsonIsNotWrapped() throws Exception {
+            String broken = "{\"htmlResponseText\": \"cut o";
+            liveModelReplies(Step.text(broken));
+
+            run(rescueTask(false, "wrap", "warn", null));
+
+            assertEquals(broken, templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "invalid");
+            assertEquals(0, counted("wrapped"));
+            assertEquals(1, recovered("wrap", "not_wrappable"));
+        }
+
+        @Test
+        @DisplayName("a task without the new fields: prose is invalid and stored raw, exactly as before")
+        void unconfiguredIsUnchanged() throws Exception {
+            liveModelReplies(Step.text("just text"));
+
+            run(task(true, false));
+
+            assertEquals("just text", templateData.get("taskA"));
+            verify(dataFactory).createData(OUTCOME_KEY, "invalid");
+            assertEquals(0, counted("wrapped"));
+        }
     }
 }
