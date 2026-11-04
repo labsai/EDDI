@@ -1869,9 +1869,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Map<String, Integer> perToolLimits;
 
         /**
-         * Truncation strategy: "truncate" (default), "paginate", or "summarize".
+         * Truncation strategy: "headTail" (default), "truncate", "paginate", or
+         * "summarize". Matched case-insensitively.
          * <ul>
-         * <li>{@code truncate} — hard cut at limit with note (backward compatible)</li>
+         * <li>{@code headTail} — keep the start and the end, drop the middle; the
+         * default when unset, because errors and exit codes sit at the end</li>
+         * <li>{@code truncate} — hard cut at limit with note, keeping the start only
+         * (the default before 6.7)</li>
          * <li>{@code paginate} — split into pages, return first page + responseId</li>
          * <li>{@code summarize} — route through cheap model, fallback to truncate</li>
          * </ul>
