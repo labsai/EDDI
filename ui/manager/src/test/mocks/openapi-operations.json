@@ -1,6 +1,6 @@
 {
   "//": "Generated. Do not edit by hand — run: node scripts/refresh-openapi-operations.mjs",
-  "eddiVersion": "6.6.0",
+  "eddiVersion": "6.7.0",
   "operations": [
     "DELETE /AgentTriggerStore/agenttriggers/{intent}",
     "DELETE /admin/gdpr/{userId}",
@@ -269,6 +269,7 @@
     "POST /admin/gdpr/{userId}/restrict",
     "POST /administration/agents/setup",
     "POST /administration/agents/setup-api",
+    "POST /administration/agents/{agentId}/setup-api/sync",
     "POST /administration/cluster/caches/resync",
     "POST /administration/cluster/dead-letters/discard",
     "POST /administration/cluster/dead-letters/forward-local",
