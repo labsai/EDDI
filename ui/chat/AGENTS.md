@@ -176,9 +176,16 @@ Production build goes to `dist/` (`chat.html`, `scripts/js/chat-ui.<hash>.js`,
 npm run build    # Outputs to dist/
 ```
 
+Dependencies install at `ui/`, not here: `ui/` is an npm workspaces root and the Chat UI
+shares one `ui/package-lock.json` with the Manager and `ui/packages/*` (`cd ui && npm ci`).
+Change a dependency from `ui/` with `npm install <pkg> -w chat`, keep a version the Manager also
+uses identical in both `package.json` files, and put any `overrides` in
+`ui/package.json`. On Windows, run `npm run lockfile:check` in `ui/` afterwards — the
+`oxide-wasm32-wasi` trap described in `ui/manager/AGENTS.md` now applies to this lock too.
+
 ### Quality gates
 
-CI's `UI Chat` job runs `npm ci`, `npm run typecheck`, `npm run lint` and `npm test` on every
+CI's `UI Chat` job runs `npm ci` (at `ui/`, the npm workspaces root), `npm run typecheck`, `npm run lint` and `npm test` on every
 PR into `main` that touches `ui/` (`ci.yml` runs on no other base branch, so a stacked PR gets
 no CI at all), then builds and runs `npm run budget`. Run them all before pushing.
 

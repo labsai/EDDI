@@ -52,11 +52,26 @@ The Manager, the Chat UI and the backend are one repository, `labsai/EDDI`:
 - **Commit often** with conventional commits scoped to the area: `feat(manager): …`, `fix(manager): …`, or a feature scope such as `fix(operator): …`. Use `(ui)` only for a change that spans both UIs.
 - **Record the change** in a new `docs/changelog.d/YYYY-MM-DD-<slug>.md` fragment at the repository root (root rule 8), in the same commit as the work. Do not add entries to `HANDOFF.md` — every PR editing the same file is the merge conflict the fragments exist to avoid.
 
+### Dependencies: one npm workspace, one lockfile
+
+`ui/` is an **npm workspaces root** (`ui/package.json`): the Manager, the Chat UI and the
+shared packages under `ui/packages/` install from **one `ui/package-lock.json`** into
+`ui/node_modules`. There is no `ui/manager/package-lock.json` any more.
+
+- **Install at `ui/`**: `cd ui && npm ci`. Scripts still run from this directory
+  (`npm run dev`, `test`, `build`, `lint`, ...), and `npx` finds the hoisted binaries.
+- **Change a dependency from `ui/` with `-w manager`**: `npm install <pkg> -w manager`
+  updates `package.json` here and the root lock.
+  A version both apps use should stay the same in both `package.json` files, so it is
+  installed once (`lucide-react`, `react`, the lint and test toolchain).
+- **`overrides` live in `ui/package.json`.** npm ignores them in a workspace's own
+  `package.json`.
+
 ### ⚠️ Dependency changes on Windows break CI's `npm ci`
 
 `@tailwindcss/oxide-wasm32-wasi` is an optional package that Windows skips, so npm
 on Windows never resolves its children and **prunes them from
-`package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
+`ui/package-lock.json`** on any `npm install` / `npm uninstall`. The Linux CI runner
 then fails before it runs anything:
 
 ```
@@ -66,16 +81,19 @@ npm error Missing: @emnapi/core@1.11.3 from lock file
 ```
 
 Neither `npm install --package-lock-only` nor `--os=linux --cpu=x64` re-adds them.
-After changing any dependency on Windows, check the lock still carries all four:
+After changing any dependency on Windows, check the lock at `ui/`:
 
 ```bash
-node -e "const l=require('./package-lock.json');Object.keys(l.packages).filter(k=>k.includes('emnapi')||k.includes('wasm-runtime')).forEach(k=>console.log(k,l.packages[k].version))"
+npm run lockfile:check   # in ui/; CI's UI Manager Checks runs the same script
 ```
 
-Expect `@emnapi/core`, `@emnapi/runtime`, `@emnapi/wasi-threads` and
-`@napi-rs/wasm-runtime` nested under
-`node_modules/@tailwindcss/oxide-wasm32-wasi/node_modules/`. If any are gone,
-restore them from the last lockfile CI accepted rather than regenerating.
+It (`ui/scripts/check-lockfile-platforms.mjs`) expects `@emnapi/core`,
+`@emnapi/runtime`, `@emnapi/wasi-threads` and `@napi-rs/wasm-runtime` resolvable from
+`node_modules/@tailwindcss/oxide-wasm32-wasi`, and every other locked dependency
+resolvable too. If it fails, restore `ui/package-lock.json` from the last version CI
+accepted rather than regenerating, or make the dependency change on Linux (WSL or a
+`node:26` container with `ui/` copied in, then copy the lock back). Dependabot resolves
+on Linux, so its lockfile PRs are not affected.
 
 ### Quality Gates
 

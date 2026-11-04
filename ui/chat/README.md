@@ -64,7 +64,7 @@ See the [EDDI README](https://github.com/labsai/EDDI#-quick-start) for full setu
 
 ```bash
 # Prerequisites: Node.js ≥ 22.12 (what Vitest 5 requires; the build pins 26.13.0), EDDI backend on localhost:7070
-npm install
+(cd .. && npm ci)  # once, at ui/: the npm workspaces root and its one lockfile
 npm run dev        # Vite dev server on http://localhost:5174
 ```
 
