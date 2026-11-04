@@ -859,7 +859,15 @@ public class GroupConversationService implements IGroupConversationService, User
         // SYNTHESIS one, so the discussion concludes with an answer rather than
         // stopping mid-transcript. Deliberately NOT a break: "jump to the first
         // remaining SYNTHESIS phase" is a skip-ahead, not a stop.
-        boolean costCeilingSynthesizeNow = false;
+        //
+        // Carried across a resume (gc.costCeilingSkipAhead): a synthesis that requires
+        // approval pauses the run under the skip-ahead, and the leg its approval starts
+        // must go on skipping the remaining work phases. A fresh leg (a new round)
+        // starts with it off.
+        if (startPhaseIndex == 0) {
+            gc.setCostCeilingSkipAhead(false);
+        }
+        boolean costCeilingSynthesizeNow = gc.isCostCeilingSkipAhead();
 
         try {
             // F1: publish the live instance this leg runs with. Covers both a fresh
@@ -900,6 +908,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 if (costCeilingSynthesizeNow && phase.type() != PhaseType.SYNTHESIS) {
                     continue;
                 }
+                // A SYNTHESIS phase the skip-ahead lets through is executed work, not
+                // abandoned work: its answer is published, so its approval gate holds.
+                // Only the phase that trips the ceiling itself skips its gate below.
+                final boolean ranUnderSkipAhead = costCeilingSynthesizeNow;
 
                 // I11: the one skip condition — a phase marked skipIf=AGREEMENT_REACHED
                 // (the negotiation's arbitration) is only needed when bargaining
@@ -1083,6 +1095,7 @@ public class GroupConversationService implements IGroupConversationService, User
                             return gc;
                         }
                         costCeilingSynthesizeNow = true;
+                        gc.setCostCeilingSkipAhead(true);
                         // Leave the REPEAT loop too, not just future phases: a phase
                         // with repeats > 1 (ROUND_TABLE's "Discussion" is repeats =
                         // rounds - 1 by default) would otherwise re-enter its executor
@@ -1333,7 +1346,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                 // complete, so no boundary gate is owed yet and the
                                 // resumed leg still reaches it at phase end.
                                 boolean boundaryGateWillPause = !facilitatorMidPhaseResume
-                                        && phase.requiresApproval() && !costCeilingSynthesizeNow
+                                        && phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)
                                         && (!(taskLevelHitl && phase.type() == PhaseType.EXECUTE)
                                                 || (gc.getTaskList() != null
                                                         && (gc.getTaskList().hasAwaitingApproval()
@@ -1403,8 +1416,10 @@ public class GroupConversationService implements IGroupConversationService, User
                 // appending a second identical SKIPPED entry and re-incrementing the
                 // hit counter, which is exactly the "one overspend reported as many"
                 // the repeat-loop break exists to prevent. The guard's own comment
-                // states this requirement; it just could not see this phase.
-                if (phase.requiresApproval() && !costCeilingSynthesizeNow) {
+                // states this requirement; it just could not see this phase. A
+                // SYNTHESIS phase that ran under the skip-ahead (ranUnderSkipAhead) is
+                // not that phase — its answer is about to be published, so it pauses.
+                if (phase.requiresApproval() && (!costCeilingSynthesizeNow || ranUnderSkipAhead)) {
                     if (taskLevelHitl && phase.type() == PhaseType.EXECUTE) {
                         // TASK granularity: pause if tasks await approval — or if an
                         // aborted wave (timeout/error) left executable tasks behind.
@@ -1537,6 +1552,7 @@ public class GroupConversationService implements IGroupConversationService, User
             gc.setState(GroupConversationState.COMPLETED);
             gc.setPausedTurnCount(0); // Clear turn budget state on successful completion
             gc.setHitlLastPauseFingerprint(null); // #4: reset no-progress guard
+            gc.setCostCeilingSkipAhead(false);
             // I12: a facilitator's phase-list divergence is one-off for the round —
             // a continuation round starts from the config's phases again, and stale
             // extension counts would misattribute under next round's indices.
@@ -2428,10 +2444,10 @@ public class GroupConversationService implements IGroupConversationService, User
     // requires the method to be declared directly on this class.
 
     private TranscriptEntry tryResolveMemberToolPause(GroupMember member, GroupConversation gc, String convId,
-                                                      String input, int timeoutSeconds, int phaseIdx,
+                                                      int timeoutSeconds, int phaseIdx,
                                                       DiscussionPhase phase, TranscriptEntryType entryType,
                                                       String targetAgentId) {
-        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, input, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
+        return memberTurnExecutor.tryResolveMemberToolPause(member, gc, convId, timeoutSeconds, phaseIdx, phase, entryType, targetAgentId);
     }
 
     private TranscriptEntry handleMemberPause(GroupMember member, GroupConversation gc, String convId,

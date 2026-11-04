@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { screen, within } from "@testing-library/react";
+import { http, HttpResponse } from "msw";
 import { renderWithProviders } from "@/test/test-utils";
+import { server } from "@/test/mocks/server";
 import { UpdatesPage } from "@/pages/updates";
 
 describe("UpdatesPage", () => {
@@ -17,11 +19,17 @@ describe("UpdatesPage", () => {
 
   it("states the check's privacy contract on the page itself", async () => {
     // The page is the whole context an operator has before pressing the button,
-    // so "nothing is sent until you ask" has to be readable here.
+    // so that the check runs by default, and that it can be turned off, has to
+    // be readable here. With the server's switch off, nothing has run yet.
+    server.use(
+      http.get("*/administration/update-check", () =>
+        HttpResponse.json({ enabled: false, lockedByConfig: false, uiEnabled: false }),
+      ),
+    );
     renderWithProviders(<UpdatesPage />);
 
     expect(screen.getByTestId("updates-page-description")).toHaveTextContent(
-      /Nothing is sent until you ask/,
+      /runs by default/,
     );
     expect(await screen.findByTestId("update-check-result")).toHaveTextContent(
       "No check run yet.",

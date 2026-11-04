@@ -221,7 +221,8 @@ marker and the next boundary catches up.
 - `llmProvider`/`llmModel` name the summarizer; without them, overflow falls
   back to the truncation marker (a save-time warning says so).
 - The optional prices attribute the summarizer's own spend to the discussion's
-  cost ledger, where `maxCostPerDiscussion` sees it.
+  cost ledger, where `maxCostPerDiscussion` sees it — and it is charged to the
+  tenant's monthly budget like any other spend ([Model Pricing](model-pricing.md#for-other-features-spend-attribution)).
 - The convergence judge's input is not windowed — it is already bounded to the
   last two rounds.
 
@@ -1208,7 +1209,10 @@ bounds *dollars*, which is what actually differs between a cheap 40-turn round
 table and an expensive 8-turn one with large contexts. Hitting the cost ceiling
 under `SYNTHESIZE_NOW` skips the remaining discussion phases and jumps straight
 to synthesis, so the caller still gets an answer for what was already spent;
-`ABORT` fails the discussion instead. Every LLM call in the discussion is
+`ABORT` fails the discussion instead. The skipped phases' `requiresApproval`
+gates are skipped with them — and so is that of the phase in which the ceiling
+tripped — but a synthesis phase that runs keeps its own: its answer is paused for
+approval as usual. Every LLM call in the discussion is
 attributed, including the facilitator's, the convergence judge's, and the
 summarizer's.
 

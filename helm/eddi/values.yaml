@@ -263,6 +263,13 @@ eddi:
   chat:
     frameAncestors: ""
 
+  # "Is a newer EDDI out?" check (docs/kubernetes.md). On by default: one anonymous
+  # request a day to api.github.com and a notification for the administrators.
+  # false switches it off entirely, even the first check after the first start,
+  # and the Manager can no longer turn it on.
+  updateCheck:
+    enabled: true
+
   # White-labeling (docs/white-labeling.md). Everything here is the SEED: the
   # brand used while no admin has saved one on the Manager's Admin → Branding
   # page. Each value set becomes the matching eddi.branding.* property; an empty
