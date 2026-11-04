@@ -28,6 +28,8 @@ import { OnboardingHero } from "@/components/workforce/onboarding-hero";
 import { usePinnedGroups } from "@/hooks/use-pinned-groups";
 import { TemplatesPanel } from "@/components/workforce/templates-panel";
 import type { DiscussionTemplate } from "@/hooks/use-templates";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { EndUserCatalog, CatalogPreview } from "@/components/workforce/catalog-view";
 
 import { toast } from "sonner";
 
@@ -252,7 +254,17 @@ function WorkforceSection() {
 
 // ─── Dashboard Page ──────────────────────────────────────────────
 
+/**
+ * An author (`eddi-editor` / `eddi-admin`) gets the building dashboard, read
+ * from the group and agent stores; everyone else gets the catalog of what they
+ * may use — those stores would answer them 403.
+ */
 function WorkforceDashboard() {
+  const { canAuthor } = useWorkforceAccess();
+  return canAuthor ? <AuthorDashboard /> : <EndUserCatalog />;
+}
+
+function AuthorDashboard() {
   const { t } = useTranslation();
   const { data: boards, isLoading, isError, refetch } =
     useEnrichedGroupDescriptors();
@@ -392,6 +404,9 @@ function WorkforceDashboard() {
 
       {/* ─── Knowledge Health ────────────────────────────────── */}
       <KnowledgeHealthCard />
+
+      {/* ─── What end users see (the catalog) ────────────────── */}
+      <CatalogPreview />
 
       {/* ─── Templates ────────────────────────────────────────── */}
       <TemplatesPanel

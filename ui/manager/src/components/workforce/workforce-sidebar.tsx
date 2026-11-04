@@ -23,6 +23,8 @@ import { getInitials } from "@/lib/utils";
 import { ModeSwitcher } from "@/components/shared/mode-switcher";
 import { BrandIcon, BrandWordmark } from "@/components/layout/brand-logo";
 import { useBrand } from "@/hooks/use-brand";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
+import { useCatalogAgents, useCatalogGroups } from "@/hooks/use-catalog";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -46,7 +48,20 @@ export function WorkforceSidebar({
   const { productName } = useBrand();
   const { theme, setTheme } = useTheme();
 
-  const { data: boards } = useEnrichedGroupDescriptors(50);
+  const { canAuthor } = useWorkforceAccess();
+  // An author reads the group store (everything they may edit, listed or not);
+  // an end user reads the catalog — `/groupstore` would answer them 403.
+  const { data: storeBoards } = useEnrichedGroupDescriptors(50, 0, "", canAuthor);
+  const { data: catalogGroups } = useCatalogGroups(!canAuthor);
+  const boards = canAuthor
+    ? storeBoards
+    : catalogGroups?.map((g) => ({
+        id: g.groupId,
+        version: g.version,
+        name: g.name ?? "",
+        style: g.style ?? undefined,
+        memberCount: g.members.length,
+      }));
   // Task forces with a discussion running right now — so leaving the board
   // doesn't hide the fact that it is still going.
   const streamingBoardIds = useStreamingGroupIds();
@@ -113,12 +128,16 @@ export function WorkforceSidebar({
         )}
       </div>
 
-      {/* Mode switcher (Manager ↔ Workforce) */}
-      <div className="shrink-0 border-b border-border p-1.5">
-        <ModeSwitcher collapsed={collapsed} />
-      </div>
+      {/* Mode switcher (Manager ↔ Workforce) — authors only: an end user's
+          place is Workforce (decision D6). */}
+      {canAuthor && (
+        <div className="shrink-0 border-b border-border p-1.5">
+          <ModeSwitcher collapsed={collapsed} />
+        </div>
+      )}
 
-      {/* ── New Workforce Button ───────────────────────────────── */}
+      {/* ── New Workforce Button (authors only) ────────────────── */}
+      {canAuthor && (
       <div className="shrink-0 ps-3 pe-3 py-3">
         <Button
           asChild
@@ -136,6 +155,7 @@ export function WorkforceSidebar({
           </Link>
         </Button>
       </div>
+      )}
 
       {/* ── Dashboard Link ────────────────────────────────────── */}
       {/* Without this the only route back to the dashboard was the unlabelled
@@ -160,7 +180,8 @@ export function WorkforceSidebar({
         </Link>
       </div>
 
-      {/* ── Insights Link ─────────────────────────────────────── */}
+      {/* ── Insights Link (authors only — analytics reads the stores) ── */}
+      {canAuthor && (
       <div className="shrink-0 ps-3 pe-3 pb-1">
         <Link
           to="/workforce/analytics"
@@ -180,9 +201,10 @@ export function WorkforceSidebar({
           )}
         </Link>
       </div>
+      )}
 
       {/* ── Workforce ──────────────────────────────────────────── */}
-      <WorkforceSection collapsed={collapsed} boardId={boardId} />
+      <WorkforceSection collapsed={collapsed} boardId={boardId} canAuthor={canAuthor} />
 
       {/* ── Boards List ───────────────────────────────────────── */}
       <nav aria-label={t("Workforce.boardList", "Task Force list")} className="flex-1 overflow-y-auto ps-2 pe-2 pb-2">
@@ -304,12 +326,31 @@ export function WorkforceSidebar({
 
 // ─── Workforce Sub-Component ─────────────────────────────────────
 
-function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?: string }) {
+function WorkforceSection({
+  collapsed,
+  boardId,
+  canAuthor,
+}: {
+  collapsed: boolean;
+  boardId?: string;
+  canAuthor: boolean;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data: rawAgents } = useAgentDescriptors(50);
+  const { data: rawAgents } = useAgentDescriptors(50, 0, "", canAuthor);
+  const { data: catalogAgents } = useCatalogAgents(!canAuthor);
 
-  const agents = rawAgents ? groupAgentsByName(rawAgents).slice(0, 10) : [];
+  const agents: { key: string; agentId: string; name: string }[] = canAuthor
+    ? (rawAgents ? groupAgentsByName(rawAgents).slice(0, 10) : []).map((agent) => ({
+        key: agent.resource,
+        agentId: agent.resource.match(/\/agentstore\/agents\/([^?]+)/)?.[1] ?? agent.id,
+        name: agent.name,
+      }))
+    : (catalogAgents ?? []).slice(0, 10).map((agent) => ({
+        key: agent.agentId,
+        agentId: agent.agentId,
+        name: agent.name ?? "",
+      }));
 
   if (agents.length === 0) return null;
 
@@ -322,12 +363,10 @@ function WorkforceSection({ collapsed, boardId }: { collapsed: boolean; boardId?
       )}
       <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
         {agents.map((agent) => {
-          const agentId = agent.resource.match(
-            /\/agentstore\/agents\/([^?]+)/,
-          )?.[1] ?? agent.id;
+          const agentId = agent.agentId;
 
           return (
-            <li key={agent.resource}>
+            <li key={agent.key}>
               <button
                 type="button"
                 onClick={() =>

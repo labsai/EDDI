@@ -5228,7 +5228,18 @@
       "useStarterPrompt": "시작 프롬프트 삽입",
       "yourAdvisors": "내 자문"
     },
-    "workforce": "워크포스"
+    "workforce": "워크포스",
+    "operatorLink": "플랫폼 운영자",
+    "catalog": {
+      "emptyTitle": "아직 표시할 항목이 없습니다",
+      "emptyAuthorHint": "최종 사용자에게는 등록된 에이전트와 팀만 표시됩니다. Manager에서 에이전트나 그룹을 열고 \"카탈로그에 등록\"을 켜세요. 워크스페이스가 켜져 있다면 공개 또는 내부로 설정해도 됩니다. 사용하려면 여전히 접근 권한이 필요합니다.",
+      "openAgents": "Manager에서 에이전트 열기",
+      "emptyUserHint": "아직 사용할 수 있는 에이전트나 팀이 없습니다. 나중에 다시 확인하세요.",
+      "agents": "에이전트",
+      "teams": "팀",
+      "previewTitle": "최종 사용자에게 보이는 내용",
+      "previewCounts": "등록된 에이전트 {{agents}}개와 팀 {{teams}}개가 사용이 허용된 사람들에게 제공됩니다."
+    }
   },
   "operator": {
     "title": "플랫폼 오퍼레이터",
@@ -7281,5 +7292,12 @@
       "lte": "이하",
       "contains": "포함함"
     }
+  },
+  "catalogListing": {
+    "label": "카탈로그에 등록",
+    "agentDescription": "Workforce에서 최종 사용자에게 이 에이전트를 제공합니다. 사용 권한이 있는 사람에게만, 배포된 후에만 표시됩니다. 워크스페이스가 켜져 있으면 공개 및 내부 에이전트는 어차피 등록됩니다.",
+    "groupDescription": "Workforce에서 최종 사용자에게 이 팀을 제공합니다. 사용 권한이 있는 사람에게만 표시됩니다. 워크스페이스가 켜져 있으면 공개 및 내부 팀은 어차피 등록됩니다.",
+    "listedToast": "카탈로그에 등록했습니다",
+    "unlistedToast": "카탈로그에서 제거했습니다"
   }
 }

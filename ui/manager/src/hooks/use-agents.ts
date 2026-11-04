@@ -31,11 +31,14 @@ const PAGE_SIZE = 50;
 export function useAgentDescriptors(
   limit = 20,
   index = 0,
-  filter = ""
+  filter = "",
+  /** False for a caller the agent store refuses (`eddi-user`). */
+  enabled = true,
 ) {
   return useQuery({
     queryKey: agentKeys.descriptors(limit, index, filter),
     queryFn: () => getAgentDescriptors(limit, index, filter),
+    enabled,
   });
 }
 

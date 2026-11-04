@@ -128,6 +128,8 @@
     "GET /backup/import/sync/agents",
     "GET /capabilities",
     "GET /capabilities/skills",
+    "GET /catalog/agents",
+    "GET /catalog/groups",
     "GET /channelstore/channels/descriptors",
     "GET /channelstore/channels/{id}",
     "GET /channelstore/channels/{id}/currentversion",

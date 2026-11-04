@@ -1,8 +1,8 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ChevronLeft, Menu } from "lucide-react";
+import { ChevronLeft, Menu, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { OperatorDrawer } from "@/components/operator/operator-drawer";
+import { useWorkforceAccess } from "@/hooks/use-workforce-access";
 import { cn } from "@/lib/utils";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -24,6 +24,7 @@ export function WorkforceTopbar({
 }: WorkforceTopbarProps) {
   const navigate = useNavigate();
   const { t } = useTranslation();
+  const { isAdmin } = useWorkforceAccess();
 
   return (
     <header
@@ -67,12 +68,23 @@ export function WorkforceTopbar({
       {/* Spacer when no title */}
       {!title && <div className="flex-1" />}
 
-      {/* Right side: the page's own actions, then the Platform Operator.
-          The operator is last so its panel, which opens flush to the header's
-          end edge, is not offset by whatever the page put beside it. */}
+      {/* Right side: the page's own actions, then — for administrators only —
+          a link to the Platform Operator. Workforce does not mount the
+          operator's drawer: the operator, its allow-list and its approval
+          guards are a Manager feature (decision D5), and an end user has no
+          business with an agent that operates the deployment. */}
       <div className="flex shrink-0 items-center gap-1">
         {rightContent}
-        <OperatorDrawer />
+        {isAdmin && (
+          <Button asChild variant="ghost" size="sm" className="gap-1.5">
+            <Link to="/manage/operator" data-testid="workforce-operator-link">
+              <Sparkles className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                {t("Workforce.operatorLink", "Platform Operator")}
+              </span>
+            </Link>
+          </Button>
+        )}
       </div>
     </header>
   );

@@ -5283,7 +5283,18 @@
       "useStarterPrompt": "Insérer une invite de départ",
       "yourAdvisors": "Vos conseillers"
     },
-    "workforce": "Effectif"
+    "workforce": "Effectif",
+    "operatorLink": "Opérateur de plateforme",
+    "catalog": {
+      "emptyTitle": "Rien à afficher pour l'instant",
+      "emptyAuthorHint": "Les utilisateurs finaux ne voient que les agents et équipes répertoriés. Ouvrez un agent ou un groupe dans le Manager et activez « Répertorié dans le catalogue » — ou, avec les espaces de travail activés, rendez-le publié ou interne. Il faut toujours un accès pour l'utiliser.",
+      "openAgents": "Ouvrir les agents dans le Manager",
+      "emptyUserHint": "Aucun agent ni aucune équipe ne vous a encore été proposé. Revenez plus tard.",
+      "agents": "Agents",
+      "teams": "Équipes",
+      "previewTitle": "Ce que voient les utilisateurs finaux",
+      "previewCounts": "{{agents}} agents répertoriés et {{teams}} équipes répertoriées sont proposés aux personnes autorisées à les utiliser."
+    }
   },
   "operator": {
     "title": "Opérateur de plateforme",
@@ -7352,5 +7363,12 @@
       "lte": "est au plus",
       "contains": "contient"
     }
+  },
+  "catalogListing": {
+    "label": "Répertorié dans le catalogue",
+    "agentDescription": "Propose cet agent aux utilisateurs finaux dans Workforce. Seules les personnes autorisées à l'utiliser le voient, et seulement une fois déployé. Avec les espaces de travail activés, les agents publiés et internes sont répertoriés de toute façon.",
+    "groupDescription": "Propose cette équipe aux utilisateurs finaux dans Workforce. Seules les personnes autorisées à l'utiliser la voient. Avec les espaces de travail activés, les équipes publiées et internes sont répertoriées de toute façon.",
+    "listedToast": "Répertorié dans le catalogue",
+    "unlistedToast": "Retiré du catalogue"
   }
 }

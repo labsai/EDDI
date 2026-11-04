@@ -56,6 +56,12 @@ export interface Agent {
   channels?: ChannelConnector[];
   a2aEnabled?: boolean;
   description?: string;
+  /**
+   * Offered in the end-user catalog (`GET /catalog/agents`, what Workforce
+   * lists for an `eddi-user`). Opt-in, default false; whether someone may
+   * actually use the agent is still decided by its sharing.
+   */
+  listed?: boolean;
   a2aSkills?: string[];
   // Phase 15.4 — Security, Identity, Capabilities, Memory
   identity?: AgentIdentity;
