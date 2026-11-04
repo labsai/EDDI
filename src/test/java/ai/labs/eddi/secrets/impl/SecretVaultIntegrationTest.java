@@ -154,6 +154,19 @@ class SecretVaultIntegrationTest {
             return null;
         }).when(persistence).upsertSecret(any());
 
+        // Update-only, as both real stores implement it: true when the row exists (a
+        // same-value rotation included), false only when it is gone. Left unstubbed, a
+        // mock answers false for every rotation, which store() now reads as a delete.
+        lenient().when(persistence.updateSecretIfPresent(any())).thenAnswer(inv -> {
+            EncryptedSecret secret = inv.getArgument(0);
+            String key = secret.getTenantId() + "/" + secret.getKeyName();
+            if (!secretStore.containsKey(key)) {
+                return false;
+            }
+            secretStore.put(key, copyOf(secret));
+            return true;
+        });
+
         when(persistence.findSecret(anyString(), anyString())).thenAnswer(inv -> {
             String tid = inv.getArgument(0);
             String kn = inv.getArgument(1);
