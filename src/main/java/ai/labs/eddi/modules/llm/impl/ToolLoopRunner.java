@@ -789,9 +789,8 @@ class ToolLoopRunner {
      * <p>
      * Traced as {@code tool_error} with {@code error: "argument_schema"} and
      * counted in {@code eddi.tool.arguments.refused}. A validator that throws
-     * refuses nothing (fail open to the gate, which still applies): the check
-     * exists to spare a human a doomed approval, not to be a second security
-     * boundary.
+     * refuses the call (fail closed): a call that could not be checked is never
+     * shown to the gate as if it had passed.
      */
     static List<ToolExecutionRequest> refuseInvalidArguments(List<ToolExecutionRequest> admitted, Map<String, ToolExecutor> toolExecutors,
                                                              Map<String, String> toolSources, List<ChatMessage> currentMessages,
@@ -808,8 +807,11 @@ class ToolLoopRunner {
                 try {
                     violations = validator.argumentViolations(request);
                 } catch (RuntimeException e) {
-                    LOGGER.warnf("Argument check of tool '%s' failed (%s); the call goes on to the gate unchecked", sanitize(request.name()),
+                    // Fail closed: a call whose arguments could not be checked is not
+                    // shown to the gate unchecked.
+                    LOGGER.warnf("Argument check of tool '%s' failed (%s); the call is refused", sanitize(request.name()),
                             e.getClass().getSimpleName());
+                    violations = List.of("$: the arguments of this call could not be checked; the call was refused");
                 }
             }
             if (violations == null || violations.isEmpty()) {

@@ -74,10 +74,12 @@ public class ApiCall {
     private Map<String, Object> argumentSchema;
     /**
      * What happens to an argument field {@link #argumentSchema} does not declare,
-     * in every object that declares {@code properties} without an explicit
-     * {@code additionalProperties}: {@code "reject"} refuses the call,
-     * {@code "drop"} removes the field before the request is built, {@code "allow"}
-     * passes it through.
+     * in every object that declares {@code properties}: {@code "reject"} refuses
+     * the call, {@code "drop"} removes the field before the request is built,
+     * {@code "allow"} passes it through. An explicit
+     * {@code additionalProperties: true} keeps the field under every mode; an
+     * explicit {@code false} is refused under {@code reject} and {@code allow} and
+     * removed under {@code drop}, which also guarantees it is never sent.
      * <p>
      * <b>A default, not a switch:</b> {@code null} means {@code "reject"} whenever
      * a schema is set (a silently ignored field is the failure the schema exists to

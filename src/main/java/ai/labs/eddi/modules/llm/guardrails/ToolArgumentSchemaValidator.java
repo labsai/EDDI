@@ -17,6 +17,7 @@ import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
 import com.networknt.schema.resource.AllowSchemaLoader;
+import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -92,6 +93,11 @@ public final class ToolArgumentSchemaValidator {
         }
     }
 
+    /** The violation reported when the configured schema itself is unusable. */
+    static final String SCHEMA_NOT_COMPILED = "$: the argument schema of this tool could not be compiled; the call was refused";
+
+    private static final Logger LOGGER = Logger.getLogger(ToolArgumentSchemaValidator.class);
+
     /** Violations quoted back to the model; the rest are counted. */
     static final int MAX_VIOLATIONS = 20;
     private static final int MAX_DEPTH = 32;
@@ -150,7 +156,15 @@ public final class ToolArgumentSchemaValidator {
             return new Result(arguments, List.of());
         }
         UnknownFields mode = UnknownFields.of(unknownFields);
-        Compiled compiled = compile(schema, mode);
+        Compiled compiled;
+        try {
+            compiled = compile(schema, mode);
+        } catch (RuntimeException e) {
+            // Fail closed: a schema that cannot be compiled must not let the call
+            // through unchecked. The type only — the message may quote the schema.
+            LOGGER.warnf("Tool argument schema could not be compiled (%s); the call is refused", e.getClass().getSimpleName());
+            return new Result(arguments, List.of(SCHEMA_NOT_COMPILED));
+        }
         decodeContainerStrings(arguments, compiled.effective());
         if (mode == UnknownFields.DROP) {
             dropUndeclared(arguments, compiled.effective(), 0);

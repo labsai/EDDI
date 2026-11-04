@@ -226,6 +226,48 @@ class ToolLoopRunnerArgumentSchemaTest {
     }
 
     @Test
+    void aMixedBatchRefusesTheBadCallAndGatesTheGoodOne() throws Exception {
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenReturn(calls(MISSPELLED, CORRECTED));
+
+        var pause = assertThrows(ToolApprovalRequiredException.class, () -> runner.executeWithTools(model, null,
+                List.of(UserMessage.from("go")), toolSetup(schemaExecutor()), task, memory(), gateEveryPost(), 0, 0, null));
+
+        verify(gate).classify(argThat((List<ToolExecutionRequest> batch) -> batch.size() == 1 && CORRECTED.equals(batch.getFirst().arguments())),
+                any(), any(), any(), any());
+        assertEquals(1, pause.getBatch().getCalls().size());
+        assertEquals(CORRECTED, pause.getBatch().getCalls().getFirst().getArgumentsRaw());
+        assertTrue(pause.getBatch().getTraceSoFar().stream()
+                .anyMatch(t -> "tool_error".equals(t.get("type")) && "argument_schema".equals(t.get("error"))));
+        assertEquals(0, executed.get());
+    }
+
+    @Test
+    void aValidatorThatThrowsRefusesTheCall() throws Exception {
+        ToolExecutor throwing = new CheckingExecutor() {
+            @Override
+            public List<String> argumentViolations(ToolExecutionRequest request) {
+                throw new IllegalStateException("boom");
+            }
+
+            @Override
+            public String execute(ToolExecutionRequest request, Object memoryId) {
+                executed.incrementAndGet();
+                return "ok";
+            }
+        };
+        ChatModel model = mock(ChatModel.class);
+        when(model.chat(any(ChatRequest.class))).thenReturn(calls(CORRECTED))
+                .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("done")).build());
+
+        runner.executeWithTools(model, null, List.of(UserMessage.from("go")), toolSetup(throwing), task, memory(), gateEveryPost(), 0, 0,
+                null);
+
+        verify(gate, never()).classify(anyList(), any(), any(), any(), any());
+        assertEquals(0, executed.get());
+    }
+
+    @Test
     void anExecutorWithoutAValidatorIsNeverRefused() throws Exception {
         ToolExecutor plain = (request, memoryId) -> {
             executed.incrementAndGet();

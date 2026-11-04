@@ -111,6 +111,32 @@ class ToolArgumentSchemaValidatorTest {
     }
 
     @Test
+    void aSchemaThatCannotBeCompiledRefusesTheCall() {
+        // A value Jackson cannot serialise makes compilation itself fail.
+        Map<String, Object> broken = Map.of("type", "object", "properties", new Object());
+        var result = ToolArgumentSchemaValidator.check(broken, null, "{\"a\":1}");
+        assertEquals(List.of(ToolArgumentSchemaValidator.SCHEMA_NOT_COMPILED), result.violations());
+    }
+
+    @Test
+    void dropRemovesAFieldAnExplicitFalseForbidsAndKeepsOneAnExplicitTrueAdmits() throws Exception {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> closed = MAPPER.readValue("{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},"
+                + "\"additionalProperties\":false}", Map.class);
+        var dropped = ToolArgumentSchemaValidator.check(closed, "drop", "{\"a\":\"x\",\"b\":1}");
+        assertTrue(dropped.valid(), dropped.violations().toString());
+        assertFalse(dropped.arguments().has("b"), "the forbidden field is never sent");
+        assertFalse(ToolArgumentSchemaValidator.check(closed, "reject", "{\"a\":\"x\",\"b\":1}").valid());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> open = MAPPER.readValue("{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}},"
+                + "\"additionalProperties\":true}", Map.class);
+        var kept = ToolArgumentSchemaValidator.check(open, "drop", "{\"a\":\"x\",\"b\":1}");
+        assertTrue(kept.valid());
+        assertTrue(kept.arguments().has("b"));
+    }
+
+    @Test
     void aBodyEncodedAsAJsonStringIsDecodedAndValidated() throws Exception {
         var ok = check(null, "{\"teamId\":7,\"requestBody\":\"{\\\"emails\\\":[\\\"a@x\\\"],\\\"role\\\":\\\"curator\\\"}\"}");
         assertTrue(ok.valid(), ok.violations().toString());
