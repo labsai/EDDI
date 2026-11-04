@@ -36,6 +36,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 @DisplayName("AgentSetupService — setup-api dryRun")
@@ -148,7 +149,9 @@ class AgentSetupApiDryRunTest {
         String shown = mapper.writeValueAsString(result.resources().get("apiCallsConfigurations"));
         assertFalse(shown.contains("sk-live-plaintext-credential"), shown);
         assertTrue(shown.contains(AgentSetupService.DRY_RUN_VAULT_PLACEHOLDER), shown);
-        verifyNoInteractions(f.secrets());
+        // Asked whether the vault is on (as the live path would be), never written to.
+        verify(f.secrets()).isAvailable();
+        verifyNoMoreInteractions(f.secrets());
     }
 
     @Test
@@ -169,5 +172,37 @@ class AgentSetupApiDryRunTest {
         // @Schema does not target record components; javac propagates it to the field.
         Schema schema = CreateApiAgentRequest.class.getDeclaredField("dryRun").getAnnotation(Schema.class);
         assertTrue(schema != null && schema.hidden(), "dryRun must stay @Schema(hidden = true)");
+    }
+
+    private static CreateApiAgentRequest withKey(String apiKey, String vaultKeyName, List<String> allowedHosts) {
+        return new CreateApiAgentRequest("Ops", "You are ops.", SPEC, "openai", "gpt-4o", apiKey, null, null, null, null, null, false, null,
+                null, null, null, null, vaultKeyName, null, null, allowedHosts).asDryRun();
+    }
+
+    @Test
+    @DisplayName("a dry run refuses a vaultKeyName whose syntax a real setup refuses")
+    void namedKeyChecksMatchRealSetup() throws Exception {
+        var f = fixture();
+
+        var syntax = assertThrows(AgentSetupService.AgentSetupException.class, () -> f.service().createApiAgent(withKey(null, "bad name", null)));
+        assertTrue(syntax.getMessage().contains("vaultKeyName must match"), syntax.getMessage());
+        verifyNoInteractions(f.secrets(), f.apiCalls());
+    }
+
+    @Test
+    @DisplayName("a dry run applies the destination rule where a real setup would vault a plaintext key")
+    void plaintextKeyDestinationRuleApplied() throws Exception {
+        var f = fixture();
+        when(f.secrets().isAvailable()).thenReturn(true);
+
+        var refused = assertThrows(AgentSetupService.AgentSetupException.class,
+                () -> f.service().createApiAgent(withKey("sk-plain-0123456789abcdef", null, List.of())));
+        assertTrue(refused.getMessage().contains("allowedHosts must not be empty"), refused.getMessage());
+
+        // With the vault off the live path stores no secret, so no destination is
+        // required.
+        var off = fixture();
+        SetupResult preview = off.service().createApiAgent(withKey("sk-plain-0123456789abcdef", null, List.of()));
+        assertEquals("api_agent_dry_run", preview.action());
     }
 }

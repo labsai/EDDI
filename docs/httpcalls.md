@@ -155,7 +155,7 @@ because the client is cached and a session opened with one user's token would be
 reused by everyone after them. See
 [`mcp-server.md`](mcp-server.md#calling-an-mcp-server-as-the-chatting-user).
 
-## Per-turn credentials from secret context
+### Per-turn credentials from secret context
 
 When EDDI's own OIDC is off, `${caller:token}` has no caller to forward. An
 application that hands EDDI its user's own bearer token with every request — as a
@@ -191,6 +191,8 @@ reference follows the `${caller:token}` rules instead:
   the httpcalls configuration's `targetServerUrl`; an absolute path naming another
   host is refused, and so is a `targetServerUrl` that is itself a template.
   Redirects are not followed for such a request.
+- **Over https.** Plain http is refused unless the host is this machine
+  (localhost, 127.0.0.0/8, ::1, judged as an address, not as text).
 - **Fails closed.** A missing or empty entry — or, on a resumed turn, a value the
   client did not send again — fails the call instead of sending `Bearer `.
 - **Never stored.** The resolved value joins the call's redaction set: it is
@@ -200,7 +202,7 @@ reference follows the `${caller:token}` rules instead:
 `setup-api` accepts the reference as `apiAuth` (`"apiAuth": "Bearer ${context:userToken}"`),
 so an agent generated from an OpenAPI spec can call the API as each user. Outcomes
 are counted as `eddi.httpcalls.context.reference` (tag `outcome`: `resolved`,
-`missing`, `not_secret`, `expired`, `cross_origin`, `mixed`, `not_configured`,
+`missing`, `not_secret`, `expired`, `cross_origin`, `insecure_transport`, `mixed`, `not_configured`,
 `misplaced`).
 
 ### Cookies are not kept between calls

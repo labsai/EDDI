@@ -951,12 +951,35 @@ public class AgentSetupService {
         }
 
         @Override
-        String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts) {
+        String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts)
+                throws AgentSetupException {
+            // The refusals of the live path, minus what needs the vault's contents: a
+            // dry run cannot say whether a named key already exists, or holds the same
+            // value — that is decided when the agent is created.
+            String name = vaultKeyName == null ? null : vaultKeyName.trim();
+            String key = apiKey == null ? null : apiKey.trim();
+            if (name != null && !name.isEmpty()) {
+                SecretReference ref = namedVaultKey(name, key);
+                if (!secretProvider.isAvailable()) {
+                    throw namedKeyWithoutVault(ref);
+                }
+                if (key != null && !key.isEmpty() && !isVaultReference(key)) {
+                    allowedHostsFor(hosts);
+                }
+                return previewApiKey(apiKey, vaultKeyName);
+            }
+            if (key != null && !key.isEmpty() && !isVaultReference(key) && secretProvider.isAvailable()) {
+                // Only where the live path would vault the plaintext.
+                allowedHostsFor(hosts);
+            }
             return previewApiKey(apiKey, vaultKeyName);
         }
 
         @Override
         String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts) throws AgentSetupException {
+            if (apiAuthNeedsVaulting(apiAuth) && secretProvider.isAvailable()) {
+                allowedHostsFor(hosts);
+            }
             return previewApiAuth(apiAuth);
         }
 
@@ -1790,6 +1813,34 @@ public class AgentSetupService {
         // the stored configs show the reference form, so pasting that form into a
         // field labelled "key name" is the obvious mistake to absorb rather than
         // reject.
+        SecretReference ref = namedVaultKey(requestedName, key);
+
+        if (!secretProvider.isAvailable()) {
+            throw namedKeyWithoutVault(ref);
+        }
+
+        SecretMetadata existing;
+        try {
+            existing = secretProvider.getMetadata(ref);
+        } catch (ISecretProvider.SecretNotFoundException e) {
+            existing = null;
+        } catch (ISecretProvider.SecretProviderException e) {
+            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
+        }
+        return useNamedVaultKey(ref, existing, key, agentName, createdResources, hosts);
+    }
+
+    private static AgentSetupException namedKeyWithoutVault(SecretReference ref) {
+        return new AgentSetupException("vaultKeyName '" + ref.keyName() + "' cannot be used: the secrets vault is unavailable or "
+                + "disabled. Set EDDI_VAULT_MASTER_KEY, or omit vaultKeyName to pass the key through as plaintext.");
+    }
+
+    /**
+     * The checks a named vault key passes before the vault is consulted — shared by
+     * a real setup and a dry run: the name's syntax, a second key named through
+     * {@code apiKey}, and the reserved auto-vault shape.
+     */
+    static SecretReference namedVaultKey(String requestedName, String key) throws AgentSetupException {
         SecretReference ref = isVaultReference(requestedName)
                 ? SecretReference.parse(requestedName)
                 : new SecretReference(SecretReference.DEFAULT_TENANT, requestedName);
@@ -1814,21 +1865,12 @@ public class AgentSetupService {
             throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' has the reserved shape of an auto-vaulted conversation "
                     + "secret, which belongs to one user's conversation. Choose another name.");
         }
+        return ref;
+    }
 
-        if (!secretProvider.isAvailable()) {
-            throw new AgentSetupException("vaultKeyName '" + ref.keyName() + "' cannot be used: the secrets vault is unavailable or "
-                    + "disabled. Set EDDI_VAULT_MASTER_KEY, or omit vaultKeyName to pass the key through as plaintext.");
-        }
-
-        SecretMetadata existing;
-        try {
-            existing = secretProvider.getMetadata(ref);
-        } catch (ISecretProvider.SecretNotFoundException e) {
-            existing = null;
-        } catch (ISecretProvider.SecretProviderException e) {
-            throw new AgentSetupException("Could not read vault key '" + ref.keyName() + "': " + e.getMessage(), e);
-        }
-
+    private String useNamedVaultKey(SecretReference ref, SecretMetadata existing, String key, String agentName,
+                                    Map<String, Object> createdResources, HostRule hosts)
+            throws AgentSetupException {
         boolean haveNewPlaintext = key != null && !key.isEmpty() && !isVaultReference(key);
 
         if (existing != null) {

@@ -32,6 +32,8 @@ import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
@@ -296,5 +298,34 @@ class ApiCallExecutorSecretContextReferenceTest {
         executor.execute(headerCall("Accept", "application/json"), memory, new HashMap<>(), TARGET);
 
         assertEquals("application/json", sentHeaders.get("Accept"));
+    }
+
+    @Test
+    @DisplayName("plain http to a non-loopback host is refused: a user's credential travels over https only")
+    void plainHttpToRemoteHostRefused() throws Exception {
+        context("userToken", TOKEN, true);
+
+        var e = refused(headerCall("Authorization", "Bearer ${context:userToken}"), "http://api.example.com");
+
+        assertTrue(messages(e).contains("plain http"), messages(e));
+        verify(request, never()).send();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://localhost:8080", "http://127.0.0.1:7070", "http://127.0.0.2", "http://[::1]:7070"})
+    @DisplayName("plain http to this machine is allowed")
+    void plainHttpToLoopbackAllowed(String target) throws Exception {
+        context("userToken", TOKEN, true);
+
+        executor.execute(headerCall("Authorization", "Bearer ${context:userToken}"), memory, new HashMap<>(), target);
+
+        verify(request).setHttpHeader("Authorization", "Bearer " + TOKEN);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://127.0.0.1.example.com", "http://localhost.example.com", "http://10.0.0.5", "ftp://localhost"})
+    @DisplayName("a host that only looks local, a private address or another scheme is not secure transport")
+    void lookalikesAreNotSecure(String target) {
+        assertFalse(SecretContextReferences.isSecureTransport(URI.create(target)));
     }
 }

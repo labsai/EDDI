@@ -9,9 +9,11 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.security.OriginMatcher;
 import io.micrometer.core.instrument.Metrics;
 
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -46,6 +48,8 @@ import java.util.regex.Pattern;
  * request must have the origin of the httpcalls configuration's
  * {@code targetServerUrl}; an absolute path naming another host is refused, and
  * so is a {@code targetServerUrl} that is itself a template.</li>
+ * <li><b>Over https</b>, or plain http only to this machine ({@code localhost},
+ * {@code 127.0.0.0/8}, {@code ::1}); see {@link #isSecureTransport}.</li>
  * <li><b>Fails closed.</b> A missing entry, an empty value, or the placeholder
  * a resumed turn holds when the client did not re-supply the value throws
  * instead of sending {@code "Bearer "}.</li>
@@ -206,6 +210,44 @@ public final class SecretContextReferences {
             record("cross_origin");
             throw new SecretContextReferenceException(where + " references ${context:…}, which is only sent to the configuration's "
                     + "targetServerUrl (" + allowedOrigin + "), but this call targets " + OriginMatcher.normalize(target) + ".");
+        }
+        if (!isSecureTransport(target)) {
+            record("insecure_transport");
+            throw new SecretContextReferenceException(where + " references ${context:…}, but this call goes over plain http to "
+                    + OriginMatcher.normalize(target) + ". A user's credential is only sent over https, or over http to this machine "
+                    + "(localhost, 127.0.0.0/8, ::1).");
+        }
+    }
+
+    /**
+     * {@code https}, or {@code http} to a loopback host — the rule
+     * {@code ConnectionConfiguration.isSecureCredentialEndpoint} applies to a
+     * connection's credential endpoint, with the loopback range judged as an
+     * address: {@code localhost}, or an IP literal that
+     * {@link InetAddress#isLoopbackAddress()} accepts. A host name other than
+     * {@code localhost} is never resolved here: what it resolves to can change
+     * between this check and the request.
+     */
+    static boolean isSecureTransport(URI target) {
+        if (target == null || target.getScheme() == null || target.getHost() == null) {
+            return false;
+        }
+        String scheme = target.getScheme().toLowerCase(Locale.ROOT);
+        if ("https".equals(scheme)) {
+            return true;
+        }
+        return "http".equals(scheme) && isLoopbackHost(target.getHost());
+    }
+
+    private static boolean isLoopbackHost(String host) {
+        String bare = host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+        if ("localhost".equalsIgnoreCase(bare)) {
+            return true;
+        }
+        try {
+            return InetAddress.ofLiteral(bare).isLoopbackAddress();
+        } catch (IllegalArgumentException notAnAddressLiteral) {
+            return false;
         }
     }
 

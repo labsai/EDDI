@@ -335,4 +335,17 @@ class ApiAgentSyncServiceTest {
         written.getValue().getHttpCalls().forEach(call -> assertEquals(reference, call.getRequest().getHeaders().get("Authorization")));
         verifyNoInteractions(secretProvider);
     }
+
+    @Test
+    @DisplayName("a refused sync never reaches the vault, even with a plaintext apiAuth to vault")
+    void refusedSyncLeavesTheVaultUntouched() {
+        agent.getHitlConfig().getToolApprovals().setExempt(List.of("http:listUsers"));
+        var plaintext = new SyncApiAgentRequest(SPEC_V2, null, null, "Bearer plaintext-credential-0123456789", null, null, null, false, null,
+                null);
+
+        assertThrows(ApiAgentSyncService.DanglingReferencesException.class, () -> service.sync(AGENT_ID, plaintext));
+
+        verifyNoInteractions(secretProvider);
+        verifyNothingWritten();
+    }
 }

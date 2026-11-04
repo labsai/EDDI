@@ -197,6 +197,45 @@ public class ApiAgentSyncService {
         } catch (IllegalArgumentException e) {
             throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
         }
+        Map<String, ApiCall> oldCalls = callsByName(generatedByGroup.values().stream().map(GeneratedStep::config).toList());
+
+        // ── Refusals first: nothing — not even a vault entry — is written for a sync
+        // that is refused. Tool names and endpoints do not depend on apiAuth, so the
+        // parse above (with the value as given) is enough to judge them.
+        Map<String, ApiCall> candidateCalls = callsByName(built.configsByGroup().values());
+        List<String> removedNames = new ArrayList<>();
+        for (String name : oldCalls.keySet()) {
+            if (!candidateCalls.containsKey(name)) {
+                removedNames.add(name);
+            }
+        }
+        IRestLlmStore llmStore = rest(IRestLlmStore.class);
+        Map<String, LlmConfiguration> llmByLocation = new LinkedHashMap<>();
+        for (var step : workflow.getWorkflowSteps()) {
+            String location = stepUri(step, LLM_STEP_TYPE);
+            if (location != null) {
+                LlmConfiguration llm = llmStore.readLlm(idOf(location), versionOf(location));
+                if (llm != null) {
+                    llmByLocation.put(location, llm);
+                }
+            }
+        }
+        List<String> dangling = danglingReferences(removedNames, oldCalls, candidateCalls, agent, llmByLocation);
+        if (!dangling.isEmpty()) {
+            AgentSetupService.recordSetupApi("sync", "dangling_reference");
+            throw new DanglingReferencesException(dangling);
+        }
+
+        // ── The gate: re-applied, never weakened ──────────────────────────────────
+        List<String> warnings = new ArrayList<>();
+        List<String> gateRulesAdded = mergeGate(agent, request.hitlConfig(), warnings);
+        try {
+            HitlConfigValidation.validate(agent.getHitlConfig());
+        } catch (IllegalArgumentException e) {
+            throw new AgentSetupException("The merged hitlConfig is invalid: " + e.getMessage(), e);
+        }
+
+        // ── Vault, then regenerate with the value the calls will carry ────────────
         // Every value — the request's or the one the calls already send — goes through
         // the same vault step: a reference (what setup wrote) comes back unchanged, a
         // plaintext is vaulted (or, in a dry run, shown as a placeholder).
@@ -212,7 +251,6 @@ public class ApiAgentSyncService {
         AgentSetupService.markGenerated(built, effectiveApiAuth, authHeader);
 
         // ── Diff ──────────────────────────────────────────────────────────────────
-        Map<String, ApiCall> oldCalls = callsByName(generatedByGroup.values().stream().map(GeneratedStep::config).toList());
         Map<String, ApiCall> newCalls = callsByName(built.configsByGroup().values());
         List<String> added = new ArrayList<>();
         List<String> changed = new ArrayList<>();
@@ -229,33 +267,6 @@ public class ApiAgentSyncService {
             if (!newCalls.containsKey(name)) {
                 removed.add(name);
             }
-        }
-
-        // ── Read the LLM steps; refuse dangling references before any write ──────
-        IRestLlmStore llmStore = rest(IRestLlmStore.class);
-        Map<String, LlmConfiguration> llmByLocation = new LinkedHashMap<>();
-        for (var step : workflow.getWorkflowSteps()) {
-            String location = stepUri(step, LLM_STEP_TYPE);
-            if (location != null) {
-                LlmConfiguration llm = llmStore.readLlm(idOf(location), versionOf(location));
-                if (llm != null) {
-                    llmByLocation.put(location, llm);
-                }
-            }
-        }
-        List<String> dangling = danglingReferences(removed, oldCalls, newCalls, agent, llmByLocation);
-        if (!dangling.isEmpty()) {
-            AgentSetupService.recordSetupApi("sync", "dangling_reference");
-            throw new DanglingReferencesException(dangling);
-        }
-
-        // ── The gate: re-applied, never weakened ──────────────────────────────────
-        List<String> warnings = new ArrayList<>();
-        List<String> gateRulesAdded = mergeGate(agent, request.hitlConfig(), warnings);
-        try {
-            HitlConfigValidation.validate(agent.getHitlConfig());
-        } catch (IllegalArgumentException e) {
-            throw new AgentSetupException("The merged hitlConfig is invalid: " + e.getMessage(), e);
         }
 
         boolean toolsChanged = !added.isEmpty() || !changed.isEmpty() || !removed.isEmpty() || !sameGroups(generatedByGroup, built)
