@@ -179,19 +179,35 @@ describe("TaskGuardrailsSection", () => {
   });
 
   describe("type-specific forms", () => {
-    it("pii-redaction: all kinds is stored as absent, a subset as a comma list", () => {
+    it("pii-redaction: the standard set is stored as absent, anything else as a comma list", () => {
       const spy = vi.fn();
       show(<Harness initial={{ ...base, inputGuardrails: [{ type: "pii-redaction" }] }} onChangeSpy={spy} />);
       fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
       expect(screen.getByTestId("guardrail-pii-email")).toBeChecked();
+      expect(screen.getByTestId("guardrail-pii-ssn")).toBeChecked();
+      expect(screen.getByTestId("guardrail-pii-ip_address")).not.toBeChecked();
+      expect(screen.getByTestId("guardrail-pii-de_tax_id")).not.toBeChecked();
       fireEvent.click(screen.getByTestId("guardrail-pii-phone"));
       fireEvent.click(screen.getByTestId("guardrail-pii-ssn"));
-      expect(last(spy).inputGuardrails![0]!.parameters).toEqual({
-        patterns: "email,creditcard,iban,de_tax_id,de_social_security,de_id_card,date_of_birth",
-      });
+      expect(last(spy).inputGuardrails![0]!.parameters).toEqual({ patterns: "email,creditcard,iban" });
       fireEvent.click(screen.getByTestId("guardrail-pii-ssn"));
       fireEvent.click(screen.getByTestId("guardrail-pii-phone"));
       expect(last(spy).inputGuardrails).toEqual([{ type: "pii-redaction" }]);
+    });
+
+    it("pii-redaction: a country turns on all of its identifiers through countries", () => {
+      const spy = vi.fn();
+      show(<Harness initial={{ ...base, inputGuardrails: [{ type: "pii-redaction" }] }} onChangeSpy={spy} />);
+      fireEvent.click(screen.getByTestId("guardrail-edit-input-0"));
+      fireEvent.click(screen.getByTestId("guardrail-pii-country-DE"));
+      expect(last(spy).inputGuardrails![0]!.parameters).toEqual({ countries: "DE" });
+      expect(screen.getByTestId("guardrail-pii-de_tax_id")).toBeChecked();
+      expect(screen.getByTestId("guardrail-pii-de_tax_id")).toBeDisabled();
+      fireEvent.click(screen.getByTestId("guardrail-pii-pl_pesel"));
+      expect(last(spy).inputGuardrails![0]!.parameters).toEqual({
+        countries: "DE",
+        patterns: "email,phone,creditcard,iban,ssn,pl_pesel",
+      });
     });
 
     it("pii-redaction: the last kind cannot be switched off", () => {

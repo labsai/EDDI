@@ -34,22 +34,95 @@ export const JUDGE_CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
 /** The judge's `timeoutMs` default (the classifier's is 3000). */
 export const JUDGE_DEFAULT_TIMEOUT_MS = 5000;
 
+/** The `pii-redaction` kinds that belong to no country, in the sheet's order. */
+export const PII_UNIVERSAL_KINDS = ["email", "phone", "creditcard", "iban", "ip_address", "passport_mrz", "date_of_birth"] as const;
+
 /**
- * The built-in `pii-redaction` kinds: the original four, then the ones the shared
- * detector added. The backend applies them in its own fixed order, so the order of
- * a stored `patterns` list does not matter.
+ * What `pii-redaction` finds when `patterns` is absent — mirrors the backend's
+ * `PiiCountries.STANDARD`.
  */
-export const PII_KINDS = [
-  "email",
-  "ssn",
-  "creditcard",
-  "phone",
-  "iban",
-  "de_tax_id",
-  "de_social_security",
-  "de_id_card",
-  "date_of_birth",
-] as const;
+export const PII_STANDARD_KINDS = ["email", "ssn", "creditcard", "phone", "iban"] as const;
+
+export type PiiRegion = "americas" | "europe" | "asiaPacific" | "africa";
+
+export interface PiiCountry {
+  /** ISO 3166 code, as the `countries` parameter takes it. */
+  code: string;
+  region: PiiRegion;
+  /**
+   * The country's identifiers. `name` is the identifier's own official name or
+   * abbreviation (a proper noun, the same in every UI language).
+   */
+  kinds: { kind: string; name: string }[];
+}
+
+/** Mirrors the backend's `PiiCountries`, in the same order. */
+export const PII_COUNTRIES: PiiCountry[] = [
+  { code: "US", region: "americas", kinds: [{ kind: "ssn", name: "SSN" }, { kind: "us_itin", name: "ITIN" }] },
+  { code: "CA", region: "americas", kinds: [{ kind: "ca_sin", name: "SIN" }] },
+  { code: "BR", region: "americas", kinds: [{ kind: "br_cpf", name: "CPF" }] },
+  { code: "MX", region: "americas", kinds: [{ kind: "mx_curp", name: "CURP" }] },
+  {
+    code: "GB",
+    region: "europe",
+    kinds: [
+      { kind: "gb_nino", name: "NINO" },
+      { kind: "gb_nhs", name: "NHS" },
+    ],
+  },
+  { code: "IE", region: "europe", kinds: [{ kind: "ie_pps", name: "PPSN" }] },
+  { code: "FR", region: "europe", kinds: [{ kind: "fr_nir", name: "NIR" }] },
+  { code: "IT", region: "europe", kinds: [{ kind: "it_fiscal_code", name: "Codice fiscale" }] },
+  { code: "ES", region: "europe", kinds: [{ kind: "es_dni", name: "DNI / NIE" }] },
+  { code: "PT", region: "europe", kinds: [{ kind: "pt_nif", name: "NIF" }] },
+  { code: "NL", region: "europe", kinds: [{ kind: "nl_bsn", name: "BSN" }] },
+  { code: "BE", region: "europe", kinds: [{ kind: "be_national_number", name: "NN / RRN" }] },
+  {
+    code: "DE",
+    region: "europe",
+    kinds: [
+      { kind: "de_tax_id", name: "Steuer-ID" },
+      { kind: "de_social_security", name: "Rentenversicherungsnummer" },
+      { kind: "de_id_card", name: "Ausweis / Reisepass" },
+    ],
+  },
+  { code: "AT", region: "europe", kinds: [{ kind: "at_social_security", name: "SVNR" }] },
+  { code: "CH", region: "europe", kinds: [{ kind: "ch_ahv", name: "AHV / AVS" }] },
+  { code: "PL", region: "europe", kinds: [{ kind: "pl_pesel", name: "PESEL" }] },
+  { code: "SE", region: "europe", kinds: [{ kind: "se_personnummer", name: "Personnummer" }] },
+  { code: "DK", region: "europe", kinds: [{ kind: "dk_cpr", name: "CPR" }] },
+  { code: "FI", region: "europe", kinds: [{ kind: "fi_hetu", name: "HETU" }] },
+  {
+    code: "IN",
+    region: "asiaPacific",
+    kinds: [
+      { kind: "in_aadhaar", name: "Aadhaar" },
+      { kind: "in_pan", name: "PAN" },
+    ],
+  },
+  { code: "CN", region: "asiaPacific", kinds: [{ kind: "cn_resident_id", name: "身份证" }] },
+  { code: "JP", region: "asiaPacific", kinds: [{ kind: "jp_my_number", name: "マイナンバー" }] },
+  { code: "KR", region: "asiaPacific", kinds: [{ kind: "kr_rrn", name: "주민등록번호" }] },
+  { code: "SG", region: "asiaPacific", kinds: [{ kind: "sg_nric", name: "NRIC / FIN" }] },
+  {
+    code: "AU",
+    region: "asiaPacific",
+    kinds: [
+      { kind: "au_tfn", name: "TFN" },
+      { kind: "au_medicare", name: "Medicare" },
+    ],
+  },
+  { code: "NZ", region: "asiaPacific", kinds: [{ kind: "nz_ird", name: "IRD" }] },
+  { code: "ZA", region: "africa", kinds: [{ kind: "za_id", name: "RSA ID" }] },
+];
+
+export const PII_REGIONS: PiiRegion[] = ["europe", "americas", "asiaPacific", "africa"];
+
+/**
+ * Every `pii-redaction` kind. The backend applies them in its own fixed order, so
+ * the order of a stored `patterns` list does not matter.
+ */
+export const PII_KINDS: string[] = [...PII_UNIVERSAL_KINDS, ...PII_COUNTRIES.flatMap((c) => c.kinds.map((k) => k.kind))];
 
 const PHASES_BY_TYPE: Record<GuardrailTypeName, GuardrailPhaseName[]> = {
   "prompt-injection": ["input"],
@@ -225,7 +298,6 @@ export function withType(g: GuardrailConfig, type: string): GuardrailConfig {
   return next;
 }
 
-/** `pii-redaction.patterns` as the set of enabled kinds; absent means every kind. */
 /**
  * Entity names the backend accepts in `patterns` as aliases of a kind
  * (`PiiRedactionGuardrail.entityOf`) whose lower-case form is not the kind itself.
@@ -235,10 +307,11 @@ const PII_ENTITY_ALIASES: Record<string, string> = {
   us_ssn: "ssn",
 };
 
+/** `pii-redaction.patterns` as the set of selected kinds; absent means the standard set. */
 export function enabledPiiKinds(g: GuardrailConfig): string[] {
   const raw = g.parameters?.patterns;
-  // The backend reads a blank value, whitespace included, as "all kinds".
-  if (!raw?.trim()) return [...PII_KINDS];
+  // The backend reads a blank value, whitespace included, as the standard set.
+  if (!raw?.trim()) return PII_KINDS.filter((k) => (PII_STANDARD_KINDS as readonly string[]).includes(k));
   const wanted = raw.split(",").map((s) => {
     const name = s.trim().toLowerCase();
     return PII_ENTITY_ALIASES[name] ?? name;
@@ -246,10 +319,31 @@ export function enabledPiiKinds(g: GuardrailConfig): string[] {
   return PII_KINDS.filter((k) => wanted.includes(k));
 }
 
-/** Writes the kinds back; all of them is the default, so it is stored as absent. */
+/** Writes the kinds back; exactly the standard set is the default, so it is stored as absent. */
 export function withPiiKinds(g: GuardrailConfig, kinds: string[]): GuardrailConfig {
   const ordered = PII_KINDS.filter((k) => kinds.includes(k));
-  return withParameter(g, "patterns", ordered.length === PII_KINDS.length ? "" : ordered.join(","));
+  const isStandard =
+    ordered.length === PII_STANDARD_KINDS.length && PII_STANDARD_KINDS.every((k) => ordered.includes(k));
+  return withParameter(g, "patterns", isStandard ? "" : ordered.join(","));
+}
+
+/** `pii-redaction.countries` as the known country codes it names, upper-case. */
+export function enabledPiiCountries(g: GuardrailConfig): string[] {
+  const wanted = (g.parameters?.countries ?? "").split(",").map((s) => s.trim().toUpperCase());
+  return PII_COUNTRIES.map((c) => c.code).filter((code) => wanted.includes(code));
+}
+
+export function withPiiCountries(g: GuardrailConfig, codes: string[]): GuardrailConfig {
+  const ordered = PII_COUNTRIES.map((c) => c.code).filter((code) => codes.includes(code));
+  return withParameter(g, "countries", ordered.join(","));
+}
+
+/** Every kind the guardrail will look for: the selected kinds plus those of the selected countries. */
+export function effectivePiiKinds(g: GuardrailConfig): string[] {
+  const countries = enabledPiiCountries(g);
+  const fromCountries = PII_COUNTRIES.filter((c) => countries.includes(c.code)).flatMap((c) => c.kinds.map((k) => k.kind));
+  const all = new Set([...enabledPiiKinds(g), ...fromCountries]);
+  return PII_KINDS.filter((k) => all.has(k));
 }
 
 /**
@@ -305,7 +399,7 @@ export function summarizeGuardrail(g: GuardrailConfig): string {
     case "judge":
       return [p.provider, p.modelName ?? p.model ?? p.modelId ?? p.deploymentName].filter(Boolean).join(" · ");
     case "pii-redaction":
-      return enabledPiiKinds(g).join(", ");
+      return effectivePiiKinds(g).join(", ");
     case "max-length":
       return p.maxChars ? `${p.maxChars}` : "";
     case "expression":

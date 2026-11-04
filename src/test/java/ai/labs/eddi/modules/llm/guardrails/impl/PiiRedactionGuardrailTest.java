@@ -110,14 +110,14 @@ class PiiRedactionGuardrailTest {
 
         @Test
         void taxIdAndSocialSecurity() {
-            assertEquals("Steuer-ID [REDACTED:de_tax_id].", rewrite("Steuer-ID 86095742719.", Map.of()));
-            assertEquals("RVNR [REDACTED:de_social_security]", rewrite("RVNR 15 070649 C 103", Map.of()));
+            assertEquals("Steuer-ID [REDACTED:de_tax_id].", rewrite("Steuer-ID 86095742719.", Map.of("countries", "DE")));
+            assertEquals("RVNR [REDACTED:de_social_security]", rewrite("RVNR 15 070649 C 103", Map.of("countries", "de")));
         }
 
         @Test
         void idCardAndBirthDate() {
-            assertEquals("Ausweisnummer [REDACTED:de_id_card]", rewrite("Ausweisnummer L01X00T471", Map.of()));
-            assertEquals("geb. [REDACTED:date_of_birth] in Wien", rewrite("geb. 12.03.1980 in Wien", Map.of()));
+            assertEquals("Ausweisnummer [REDACTED:de_id_card]", rewrite("Ausweisnummer L01X00T471", Map.of("countries", "DE")));
+            assertEquals("geb. [REDACTED:date_of_birth] in Wien", rewrite("geb. 12.03.1980 in Wien", Map.of("patterns", "date_of_birth")));
         }
 
         @Test
@@ -125,6 +125,17 @@ class PiiRedactionGuardrailTest {
         void entityAlias() {
             assertEquals("[REDACTED:iban] a@b.io", rewrite("GB82 WEST 1234 5698 7654 32 a@b.io", Map.of("patterns", "IBAN")));
             assertEquals("[REDACTED:creditcard]", rewrite("4111 1111 1111 1111", Map.of("patterns", "CREDIT_CARD")));
+        }
+
+        @Test
+        @DisplayName("national identifiers are opt-in: by country, by kind, or both")
+        void countries() {
+            String text = "Steuer-ID 86095742719, CF RSSMRA85T10A562S, a@b.io";
+            assertEquals("Steuer-ID 86095742719, CF RSSMRA85T10A562S, [REDACTED:email]", rewrite(text, Map.of()));
+            assertEquals("Steuer-ID [REDACTED:de_tax_id], CF RSSMRA85T10A562S, [REDACTED:email]", rewrite(text, Map.of("countries", "DE")));
+            assertEquals("Steuer-ID 86095742719, CF [REDACTED:it_fiscal_code], a@b.io", rewrite(text, Map.of("patterns", "it_fiscal_code")));
+            assertEquals("Steuer-ID [REDACTED:de_tax_id], CF [REDACTED:it_fiscal_code], a@b.io",
+                    rewrite(text, Map.of("patterns", "IT_FISCAL_CODE", "countries", "DE")));
         }
 
         @ParameterizedTest
@@ -151,9 +162,26 @@ class PiiRedactionGuardrailTest {
         }
 
         @Test
+        void unknownCountry_isAWarning() {
+            List<String> warnings = guardrail.warnings(Map.of("countries", "DE, XX"));
+            assertEquals(1, warnings.size());
+            assertTrue(warnings.getFirst().contains("XX"), warnings.getFirst());
+            assertTrue(guardrail.warnings(Map.of("countries", "de,FR,gb")).isEmpty());
+        }
+
+        @Test
+        void defaultIsTheStandardSet() {
+            assertEquals(List.of("email", "iban", "ssn", "creditcard", "phone"),
+                    PiiRedactionGuardrail.enabledEntities(null, null).stream().map(PiiRedactionGuardrail::kindOf).toList());
+        }
+
+        @Test
         void kindsListsEveryKind() {
-            assertEquals(List.of("email", "iban", "de_tax_id", "de_id_card", "de_social_security", "date_of_birth", "ssn", "creditcard", "phone"),
-                    PiiRedactionGuardrail.kinds());
+            List<String> kinds = PiiRedactionGuardrail.kinds();
+            assertEquals(40, kinds.size());
+            assertEquals(List.of("email", "iban"), kinds.subList(0, 2));
+            assertEquals(List.of("creditcard", "phone"), kinds.subList(kinds.size() - 2, kinds.size()));
+            assertTrue(kinds.containsAll(List.of("ssn", "de_tax_id", "fr_nir", "in_aadhaar", "ip_address", "passport_mrz")), kinds.toString());
         }
 
         @Test

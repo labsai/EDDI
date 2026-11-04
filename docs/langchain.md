@@ -1097,7 +1097,7 @@ A `block` is a returned value, never an exception, so a block message can never 
 | Type | Phases | Finds | Parameters |
 |---|---|---|---|
 | `prompt-injection` | input | Instruction-override phrasings: "ignore all previous instructions", "reveal your system prompt", "you are now in developer mode", chat-template tags. A heuristic — it catches the common verbatim attacks, not paraphrased or encoded ones. | `patterns` — extra regular expressions, one per line; `mode` — `append` (default) or `replace` the built-in list |
-| `pii-redaction` | input, output | E-mail addresses, US social security numbers, payment card numbers (Luhn-checked; a card followed by its CVV or expiry, `4111 1111 1111 1111 123`, is found by checking the digit groups of the run, never by splitting an unseparated number), phone numbers (grouped, or unspaced with a leading `+`, e.g. `+15551234567`; an unspaced number without `+` is not treated as a phone number), IBANs (ISO 13616: country length and mod-97, written compact or in groups of four), German tax IDs (Steuer-ID check digit and digit-repetition rule), German pension insurance numbers (check digit), German ID card and passport serials (only next to a keyword such as `Ausweis` or `Reisepass`, and checked when the ICAO check digit is included) and dates of birth (only next to a keyword such as `geb.`, `geboren`, `born` or `DOB`); rewrites each to `[REDACTED:<kind>]`. The kinds run one after another: e-mail first, so an address is redacted whole even when its local part is an IBAN, then the structured identifiers, so the phone pattern cannot take an IBAN's digit groups; on a text with none of the newer kinds the result is exactly what the first four kinds always produced. Its patterns are fixed and bounded, so a scan is linear in the text and it needs no time budget. Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated subset of `email,ssn,creditcard,phone,iban,de_tax_id,de_social_security,de_id_card,date_of_birth` (default: all; entity names such as `CREDIT_CARD` are accepted too, and an unknown name is a deploy warning); `replacement` — e.g. `***` (`{kind}` is replaced by the kind) |
+| `pii-redaction` | input, output | Personal identifiers, each checked by its format and check digit (or a keyword) and rewritten to `[REDACTED:<kind>]`. By default the standard set: e-mail addresses, US social security numbers, payment card numbers (Luhn-checked), phone numbers and IBANs. Also available: IP addresses, passport machine-readable zones, dates of birth, and national identifiers of 27 countries — see [PII kinds and countries](#pii-kinds-and-countries). Pattern-based — not names, addresses or free-form identifiers. | `patterns` — comma-separated kinds (default: the standard set; entity names such as `CREDIT_CARD` are accepted too); `countries` — comma-separated ISO codes whose identifiers are all added; `replacement` — e.g. `***` (`{kind}` is replaced by the kind). An unknown kind or country is a deploy warning |
 | `regex-filter` | input, output | Your own patterns; each match is rewritten to `replacement`. | `patterns` — regular expressions, one per line, case-insensitive (required); `replacement` (default `[REDACTED]`) |
 | `max-length` | input, output | Text longer than `maxChars`; `redact` truncates. `reprompt` asks for a shorter answer on the output side only; on the input side it behaves as `block`. | `maxChars` (default `8000`) |
 | `judge` | output | What *your* criteria call wrong — a model grades the answer and names the issue codes you declared, each with your fix text for the reprompt. See [The `judge` type](#the-judge-type-grading-the-answer-with-issue-codes). | `provider`, `promptTemplate`, `issues` (required), … |
@@ -1105,6 +1105,64 @@ A `block` is a returned value, never an exception, so a block message can never 
 | `expression` | output | A JSON answer for which your boolean expression is false — arithmetic and cross-field rules such as `sum(lines[*].amount) == total`. See [below](#the-expression-type-a-deterministic-check-over-a-json-answer). | `expr`, `issue`, `fix` (all required) |
 
 For a type that *finds* rather than rewrites (`pii-redaction`, `regex-filter`, `max-length`), any finding counts: with `block` the text is refused, with `redact` the rewrite is applied.
+
+#### PII kinds and countries
+
+`pii-redaction` looks for the kinds in `patterns` (absent: `email`, `ssn`, `creditcard`, `phone`, `iban`) plus every identifier of the countries in `countries`. National identifiers are **opt-in**: each matches only its own country's format, so turning all of them on would only add false positives in texts that never mention those countries. Mix freely — a whole country, single identifiers, or both:
+
+```json
+{ "type": "pii-redaction", "action": "redact", "parameters": { "countries": "DE,AT,CH" } }
+```
+
+keeps the standard set and adds the German, Austrian and Swiss identifiers;
+
+```json
+{ "type": "pii-redaction", "action": "redact", "parameters": { "patterns": "email,iban,fr_nir,gb_nhs" } }
+```
+
+replaces the standard set with exactly those four kinds; and
+
+```json
+{ "type": "pii-redaction", "action": "redact", "parameters": { "patterns": "email,phone", "countries": "IN" } }
+```
+
+finds e-mail addresses and phone numbers plus the Indian Aadhaar and PAN.
+
+| Kind | What | Check |
+| --- | --- | --- |
+| `email`, `phone`, `creditcard`, `iban` | Any country. Cards and IBANs (ISO 13616, per-country length) carry check digits; a phone number is grouped, or unspaced with a leading `+` | Luhn, mod-97 |
+| `ip_address` | IPv4 and IPv6 addresses | octet ranges, IPv6 group rules |
+| `passport_mrz` | The second line of a passport's machine-readable zone (ICAO 9303 TD3), any issuing country | four ICAO check digits |
+| `date_of_birth` | A date next to a birth keyword (`geb.`, `born`, `DOB`, `né le`, `fecha de nacimiento`, `生年月日`, …) | plausible date, keyword |
+| `ssn`, `us_itin` (US) | Social Security Number, Individual Taxpayer ID | number ranges |
+| `ca_sin` (CA) | Social Insurance Number | Luhn, keyword |
+| `br_cpf` (BR) | CPF | two mod-11 digits |
+| `mx_curp` (MX) | CURP | date, state code, check digit |
+| `gb_nino`, `gb_nhs` (GB) | National Insurance number; NHS number | prefix rules; mod-11 and keyword `NHS` |
+| `ie_pps` (IE) | Personal Public Service number | mod-23 letter |
+| `fr_nir` (FR) | Social security number (NIR), Corsica included | mod-97 key |
+| `it_fiscal_code` (IT) | Codice fiscale, omocodia included | check letter |
+| `es_dni` (ES) | DNI and NIE | mod-23 letter |
+| `pt_nif` (PT) | NIF | mod-11, keyword |
+| `nl_bsn` (NL) | BSN | eleven test, keyword |
+| `be_national_number` (BE) | National register number | mod-97, both centuries |
+| `de_tax_id`, `de_social_security`, `de_id_card` (DE) | Steuer-ID; Rentenversicherungsnummer; ID card or passport serial | MOD 11,10 and repetition rule; check digit; ICAO digit and keyword |
+| `at_social_security` (AT) | Sozialversicherungsnummer | mod-11, birth date, keyword |
+| `ch_ahv` (CH) | AHV/AVS number (756…) | EAN-13 |
+| `pl_pesel` (PL) | PESEL | check digit, birth date, keyword |
+| `se_personnummer` (SE) | Personnummer, coordination numbers included | Luhn, date |
+| `dk_cpr` (DK) | CPR number | date, keyword (no check digit since 2007) |
+| `fi_hetu` (FI) | Henkilötunnus | mod-31 character |
+| `in_aadhaar`, `in_pan` (IN) | Aadhaar; Permanent Account Number | Verhoeff and keyword; format |
+| `cn_resident_id` (CN) | Resident identity card number | birth date, mod-11 |
+| `jp_my_number` (JP) | My Number | check digit, keyword |
+| `kr_rrn` (KR) | Resident registration number | date and sex digit (no check digit since 2020) |
+| `sg_nric` (SG) | NRIC and FIN (S, T, F, G series) | check letter |
+| `au_tfn`, `au_medicare` (AU) | Tax file number; Medicare card number | mod-11 and keyword; check digit and keyword |
+| `nz_ird` (NZ) | IRD number | mod-11, keyword |
+| `za_id` (ZA) | Identity number | Luhn, birth date |
+
+"Keyword" means a word such as `PESEL`, `NHS`, `BSN`, `Aadhaar` or `マイナンバー` must stand at most 40 characters before the value. It is required where the check digit alone lets about one in ten random numbers of that length through. The kinds run one after another in a fixed order: e-mail first, so an address is redacted whole even when its local part is an identifier, then the longer and checked formats, and the loose card and phone patterns last, so they cannot take an identifier's digit groups. On a text with none of the newer kinds the result is exactly what the first four kinds always produced. Every pattern is fixed and bounded, so a scan is linear in the text and needs no time budget.
 
 Patterns in `parameters` are author configuration evaluated against untrusted text. Keep them free of nested quantifiers (`(a+)+`). The `regex-filter` and `prompt-injection` patterns of one guardrail get **250 ms together per text**: a pattern that backtracks past that has not checked the text, which counts as *could not decide* (reason `pattern_timeout`) — its `failMode` applies. Failing closed (the default for `block`) the text is refused. Failing open (the default for `redact`) what the finished patterns found is still used: a `redact` keeps the rewrites they made (recorded as a `redact` with reason `pattern_timeout`), a `block` whose earlier pattern matched still blocks, and only when nothing matched is it a warning with the text passing. A pattern that is not a valid regular expression **fails the deploy** (the message names its line), rather than being dropped — which would leave a block-only filter that never fires.
 

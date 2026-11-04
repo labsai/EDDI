@@ -74,7 +74,7 @@ class BuiltinPiiDetectorTest {
     }
 
     @Test
-    @DisplayName("an empty entity set asks for every type")
+    @DisplayName("an empty entity set asks for the standard set")
     void allEntities() throws DetectorUnavailableException {
         List<PiiSpan> spans = detector.detect("a@b.io DE89370400440532013000", DetectorContext.of(Set.of(), 1_000));
         assertEquals(Set.of(PiiEntities.EMAIL, PiiEntities.IBAN), Set.copyOf(spans.stream().map(PiiSpan::entityType).toList()));
@@ -101,8 +101,19 @@ class BuiltinPiiDetectorTest {
     @Test
     @DisplayName("long digit and letter runs are scanned in linear time")
     void linearScan() {
-        String text = "1".repeat(100_000) + " " + "A1".repeat(50_000) + " geb. " + "1.".repeat(50_000);
-        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> detector.detect(text, DetectorContext.of(Set.of(), 20_000)));
+        String text = "1".repeat(100_000) + " " + "A1".repeat(50_000) + " geb. " + "1.".repeat(50_000) + " pesel " + "a:".repeat(50_000)
+                + " " + "A<".repeat(50_000) + " " + "1-".repeat(50_000) + " " + "S1".repeat(50_000);
+        var every = new DetectorContext(Set.of(), Map.of("entities", String.join(",", BuiltinRecognizers.entities())),
+                System.nanoTime() + 20_000_000_000L);
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> detector.detect(text, every));
+    }
+
+    @Test
+    @DisplayName("the countries parameter adds that country's identifiers to the standard set")
+    void countriesParameter() throws DetectorUnavailableException {
+        var context = new DetectorContext(Set.of(), Map.of("countries", "it"), System.nanoTime() + 1_000_000_000L);
+        List<PiiSpan> spans = detector.detect("a@b.io CF RSSMRA85T10A562S Steuer-ID 86095742719", context);
+        assertEquals(List.of(PiiEntities.EMAIL, PiiEntities.IT_FISCAL_CODE), spans.stream().map(PiiSpan::entityType).toList());
     }
 
     @Test
@@ -112,5 +123,8 @@ class BuiltinPiiDetectorTest {
         String problem = detector.validate(Map.of("entities", "email,PERSON"));
         assertNotNull(problem);
         assertTrue(problem.contains("PERSON"), problem);
+        String country = detector.validate(Map.of("countries", "DE,XX"));
+        assertNotNull(country);
+        assertTrue(country.contains("XX"), country);
     }
 }

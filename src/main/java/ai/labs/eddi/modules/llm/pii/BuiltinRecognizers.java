@@ -7,10 +7,12 @@ package ai.labs.eddi.modules.llm.pii;
 import ai.labs.eddi.utils.RegexDeadline;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -101,15 +103,94 @@ public final class BuiltinRecognizers {
             + "|(\\d{1,2})\\.? ?(jan(?:uar|uary)?|feb(?:ruar|ruary)?|m(?:ä|ae)rz|mar(?:ch)?|apr(?:il)?|mai|may|jun[ei]?|jul[iy]?"
             + "|aug(?:ust)?|sep(?:t(?:ember)?)?|okt(?:ober)?|oct(?:ober)?|nov(?:ember)?|de[zc](?:ember)?)\\.? (\\d{4}))(?![\\d])",
             Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
-    private static final Pattern BIRTH_TRIGGER = Pattern.compile(
-            "\\b(?:geb\\.|geboren|geburtsdatum|geburtstag|born\\b|date of birth|birth ?date|birthday|dob\\b|d\\.o\\.b\\.)",
-            Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    // Birth keywords in the languages of the supported countries. Scripts Java's
+    // ASCII \b cannot see (CJK) are listed apart from the word-boundary group.
+    private static final Pattern BIRTH_TRIGGER = trigger(
+            "geb\\.|geboren|geburtsdatum|geburtstag|born\\b|date of birth|birth ?date|birthday|dob\\b|d\\.o\\.b\\."
+                    + "|née? le|date de naissance|fecha de nacimiento|nacid[oa]|data di nascita|nat[oa] il|geboortedatum"
+                    + "|data de nascimento|nascid[oa]|data urodzenia|urodzon[ya]|födelsedatum|född|fødselsdato|født"
+                    + "|syntymäaika|syntynyt",
+            "生年月日|出生日期|생년월일");
+
+    // ---- universal ----
+
+    private static final Pattern IPV4 = Pattern
+            .compile("(?<![\\d.])(?:(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?!\\d|\\.\\d)");
+    private static final Pattern IPV6 = Pattern.compile("(?<![0-9A-Za-z:])[0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7}(?![0-9A-Za-z:])");
+    private static final Pattern PASSPORT_MRZ = Pattern
+            .compile("(?<![A-Z0-9<])[A-Z0-9<]{9}\\d[A-Z<]{3}\\d{6}\\d[MFX<]\\d{6}\\d[A-Z0-9<]{14}[0-9<]\\d(?![A-Z0-9<])");
+
+    // ---- national ----
+
+    private static final Pattern US_ITIN = bounded("9\\d{2}-(?:5\\d|6[0-5]|7\\d|8[0-8]|9[0-24-9])-\\d{4}");
+    private static final Pattern CA_SIN = bounded("\\d{3}[ -]?\\d{3}[ -]?\\d{3}");
+    private static final Pattern CA_SIN_TRIGGER = trigger("sin\\b|social insurance|nas\\b|assurance sociale", null);
+    private static final Pattern BR_CPF = bounded("\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}");
+    private static final Pattern MX_CURP = boundedCi("[A-Z][AEIOUX][A-Z]{2}\\d{6}[HMX](?:AS|BC|BS|CC|CL|CM|CS|CH|DF|CX|DG|GT|GR|HG|JC|MC|MN|MS|NT|NL"
+            + "|OC|PL|QT|QR|SP|SL|SR|TC|TS|TL|VZ|YN|ZS|NE)[B-DF-HJ-NP-TV-Z]{3}[A-Z\\d]\\d");
+    private static final Pattern GB_NINO = bounded("[A-CEGHJ-PR-TW-Z][A-CEGHJ-NPR-TW-Z] ?\\d{2} ?\\d{2} ?\\d{2} ?[A-D]");
+    private static final Pattern GB_NHS = bounded("\\d{3}[ -]?\\d{3}[ -]?\\d{4}");
+    private static final Pattern GB_NHS_TRIGGER = trigger("nhs", null);
+    private static final Pattern IE_PPS = boundedCi("\\d{7}[A-W][A-W]?");
+    private static final Pattern FR_NIR = boundedCi("[1-478] ?\\d{2} ?\\d{2} ?(?:\\d{2}|2[AB]) ?\\d{3} ?\\d{3} ?\\d{2}");
+    private static final Pattern IT_FISCAL_CODE = boundedCi("[A-Z]{6}[0-9LMNP-V]{2}[ABCDEHLMPRST][0-9LMNP-V]{2}[A-Z][0-9LMNP-V]{3}[A-Z]");
+    private static final Pattern ES_DNI = boundedCi("(?:\\d{8}|[XYZ][- ]?\\d{7})[- ]?[A-Z]");
+    private static final Pattern PT_NIF = bounded("[1-35-9]\\d{2} ?\\d{3} ?\\d{3}");
+    private static final Pattern PT_NIF_TRIGGER = trigger("nif\\b|contribuinte|número fiscal|numero fiscal|tax number", null);
+    private static final Pattern NL_BSN = bounded("\\d{4}\\.\\d{2}\\.\\d{3}|\\d{3} \\d{3} \\d{3}|\\d{9}");
+    private static final Pattern NL_BSN_TRIGGER = trigger("bsn|burgerservicenummer|sofi-?nummer|citizen service number", null);
+    private static final Pattern BE_NATIONAL_NUMBER = bounded("\\d{2}\\.?\\d{2}\\.?\\d{2}[-. ]?\\d{3}\\.?\\d{2}");
+    private static final Pattern AT_SOCIAL_SECURITY = bounded("\\d{4} ?\\d{6}");
+    private static final Pattern AT_SOCIAL_SECURITY_TRIGGER = trigger(
+            "svnr|sv-nr|sv-nummer|sozialversicherungsnummer|versicherungsnummer|social security", null);
+    private static final Pattern CH_AHV = bounded("756\\.?\\d{4}\\.?\\d{4}\\.?\\d{2}");
+    private static final Pattern PL_PESEL = bounded("\\d{11}");
+    private static final Pattern PL_PESEL_TRIGGER = trigger("pesel", null);
+    private static final Pattern SE_PERSONNUMMER = bounded("(?:19|20)?\\d{6}[-+]\\d{4}|(?:19|20)\\d{10}");
+    private static final Pattern DK_CPR = bounded("\\d{6}-?\\d{4}");
+    private static final Pattern DK_CPR_TRIGGER = trigger("cpr|personnummer", null);
+    private static final Pattern FI_HETU = boundedCi("\\d{6}[-+A-FU-Y]\\d{3}[0-9A-Y]");
+    private static final Pattern IN_AADHAAR = bounded("[2-9]\\d{3} ?\\d{4} ?\\d{4}");
+    private static final Pattern IN_AADHAAR_TRIGGER = trigger("aadhaa?r|uidai|uid\\b", "आधार");
+    private static final Pattern IN_PAN = bounded("[A-Z]{3}[ABCFGHJLPT][A-Z]\\d{4}[A-Z]");
+    private static final Pattern CN_RESIDENT_ID = boundedCi("[1-9]\\d{5}(?:19|20)\\d{2}(?:0[1-9]|1[0-2])\\d{2}\\d{3}[\\dX]");
+    private static final Pattern JP_MY_NUMBER = bounded("\\d{4} ?\\d{4} ?\\d{4}");
+    private static final Pattern JP_MY_NUMBER_TRIGGER = trigger("my ?number|individual number", "マイナンバー|個人番号");
+    private static final Pattern KR_RRN = bounded("\\d{6}-[1-8]\\d{6}");
+    private static final Pattern SG_NRIC = boundedCi("[STFG]\\d{7}[A-Z]");
+    private static final Pattern AU_TFN = bounded("\\d{3} ?\\d{3} ?\\d{3}");
+    private static final Pattern AU_TFN_TRIGGER = trigger("tfn|tax file", null);
+    private static final Pattern AU_MEDICARE = bounded("[2-6]\\d{3} ?\\d{5} ?\\d{1,2}");
+    private static final Pattern AU_MEDICARE_TRIGGER = trigger("medicare", null);
+    private static final Pattern NZ_IRD = bounded("\\d{2,3}-?\\d{3}-?\\d{3}");
+    private static final Pattern NZ_IRD_TRIGGER = trigger("ird|inland revenue", null);
+    private static final Pattern ZA_ID = bounded("\\d{13}");
 
     private static final Map<String, Recognizer> RECOGNIZERS = new LinkedHashMap<>();
 
     static {
+        // The pii-redaction guardrail applies these one after another in this order:
+        // e-mail first, then the long and checked formats, then the shorter and
+        // keyword-bound ones, and the loose card and phone patterns last.
         RECOGNIZERS.put(PiiEntities.EMAIL, scanner(PiiEntities.EMAIL, EMAIL, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.IBAN, scanner(PiiEntities.IBAN, IBAN, CHECKED, BuiltinRecognizers::acceptIban, (t, s, e) -> s + 1));
+        RECOGNIZERS.put(PiiEntities.PASSPORT_MRZ, scanner(PiiEntities.PASSPORT_MRZ, PASSPORT_MRZ, CHECKED,
+                (t, s, e, d) -> NationalChecksums.passportMrz(t.substring(s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
+        checked(PiiEntities.IT_FISCAL_CODE, IT_FISCAL_CODE, NationalChecksums::itFiscalCode);
+        checked(PiiEntities.MX_CURP, MX_CURP, NationalChecksums::mxCurp);
+        checked(PiiEntities.CN_RESIDENT_ID, CN_RESIDENT_ID, NationalChecksums::cnResidentId);
+        checked(PiiEntities.FR_NIR, FR_NIR, NationalChecksums::frNir);
+        checked(PiiEntities.CH_AHV, CH_AHV, NationalChecksums::chAhv);
+        checked(PiiEntities.ZA_ID, ZA_ID, NationalChecksums::zaId);
+        checked(PiiEntities.KR_RRN, KR_RRN, NationalChecksums::krRrn);
+        checked(PiiEntities.BR_CPF, BR_CPF, NationalChecksums::brCpf);
+        checked(PiiEntities.BE_NATIONAL_NUMBER, BE_NATIONAL_NUMBER, NationalChecksums::beNationalNumber);
+        checked(PiiEntities.SE_PERSONNUMMER, SE_PERSONNUMMER, v -> NationalChecksums.sePersonnummer(v.length() == 12 ? v.substring(2) : v));
+        // The century sign (-, +, A …) is part of the value, so it is not normalized
+        // away.
+        RECOGNIZERS.put(PiiEntities.FI_HETU, scanner(PiiEntities.FI_HETU, FI_HETU, CHECKED,
+                (t, s, e, d) -> NationalChecksums.fiHetu(t.substring(s, e).toUpperCase(Locale.ROOT)) ? new int[]{s, e} : null, AFTER_MATCH));
+        keyed(PiiEntities.PL_PESEL, PL_PESEL, PL_PESEL_TRIGGER, NationalChecksums::plPesel);
         RECOGNIZERS.put(PiiEntities.DE_TAX_ID,
                 scanner(PiiEntities.DE_TAX_ID, DE_TAX_ID, CHECKED, (t, s, e, d) -> PiiChecksums.deTaxId(compact(t, s, e)) ? new int[]{s, e} : null,
                         AFTER_MATCH));
@@ -117,12 +198,88 @@ public final class BuiltinRecognizers {
                 scanner(PiiEntities.DE_ID_CARD, DE_ID_CARD, CONTEXTUAL, BuiltinRecognizers::acceptIdCard, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.DE_SOCIAL_SECURITY, scanner(PiiEntities.DE_SOCIAL_SECURITY, DE_SOCIAL_SECURITY, CHECKED,
                 (t, s, e, d) -> PiiChecksums.deSocialSecurity(compact(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
+        keyed(PiiEntities.DK_CPR, DK_CPR, DK_CPR_TRIGGER, NationalChecksums::dkCpr);
+        keyed(PiiEntities.AT_SOCIAL_SECURITY, AT_SOCIAL_SECURITY, AT_SOCIAL_SECURITY_TRIGGER, NationalChecksums::atSocialSecurity);
+        checked(PiiEntities.GB_NINO, GB_NINO, NationalChecksums::gbNino);
+        keyed(PiiEntities.GB_NHS, GB_NHS, GB_NHS_TRIGGER, NationalChecksums::gbNhs);
+        checked(PiiEntities.IE_PPS, IE_PPS, NationalChecksums::iePps);
+        checked(PiiEntities.ES_DNI, ES_DNI, NationalChecksums::esDni);
+        keyed(PiiEntities.PT_NIF, PT_NIF, PT_NIF_TRIGGER, NationalChecksums::ptNif);
+        keyed(PiiEntities.NL_BSN, NL_BSN, NL_BSN_TRIGGER, NationalChecksums::nlBsn);
+        keyed(PiiEntities.IN_AADHAAR, IN_AADHAAR, IN_AADHAAR_TRIGGER, NationalChecksums::inAadhaar);
+        checked(PiiEntities.IN_PAN, IN_PAN, v -> true);
+        keyed(PiiEntities.JP_MY_NUMBER, JP_MY_NUMBER, JP_MY_NUMBER_TRIGGER, NationalChecksums::jpMyNumber);
+        checked(PiiEntities.SG_NRIC, SG_NRIC, NationalChecksums::sgNric);
+        keyed(PiiEntities.AU_MEDICARE, AU_MEDICARE, AU_MEDICARE_TRIGGER, NationalChecksums::auMedicare);
+        keyed(PiiEntities.AU_TFN, AU_TFN, AU_TFN_TRIGGER, NationalChecksums::auTfn);
+        keyed(PiiEntities.NZ_IRD, NZ_IRD, NZ_IRD_TRIGGER, NationalChecksums::nzIrd);
+        keyed(PiiEntities.CA_SIN, CA_SIN, CA_SIN_TRIGGER, NationalChecksums::caSin);
+        checked(PiiEntities.US_ITIN, US_ITIN, v -> true);
         RECOGNIZERS.put(PiiEntities.DATE_OF_BIRTH,
                 scanner(PiiEntities.DATE_OF_BIRTH, DATE, CONTEXTUAL, BuiltinRecognizers::acceptBirthDate, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.US_SSN, scanner(PiiEntities.US_SSN, US_SSN, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
+        RECOGNIZERS.put(PiiEntities.IP_ADDRESS, ipAddress());
         RECOGNIZERS.put(PiiEntities.CREDIT_CARD,
                 scanner(PiiEntities.CREDIT_CARD, CREDIT_CARD, CHECKED, (t, s, e, d) -> cardWithin(t, s, e), BuiltinRecognizers::afterFirstSeparator));
         RECOGNIZERS.put(PiiEntities.PHONE, scanner(PiiEntities.PHONE, PHONE, CONTEXTUAL, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
+    }
+
+    /**
+     * {@code body} as a whole token: no letter or digit directly before or after
+     * it. Upper-case letters only, as these identifiers are printed.
+     */
+    private static Pattern bounded(String body) {
+        return Pattern.compile("(?<![A-Za-z0-9])(?:" + body + ")(?![A-Za-z0-9])");
+    }
+
+    /** {@link #bounded} for identifiers also written in lower case. */
+    private static Pattern boundedCi(String body) {
+        return Pattern.compile("(?<![A-Za-z0-9])(?:" + body + ")(?![A-Za-z0-9])", Pattern.CASE_INSENSITIVE);
+    }
+
+    /**
+     * A keyword pattern: the {@code latin} alternatives start at a word boundary,
+     * the {@code other} ones (scripts Java's ASCII word boundary cannot see) do
+     * not.
+     */
+    private static Pattern trigger(String latin, String other) {
+        String regex = "\\b(?:" + latin + ")" + (other != null ? "|" + other : "");
+        return Pattern.compile(regex, Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+    }
+
+    /**
+     * Accepts a match when {@code valid} holds for its {@link #normalized} value.
+     */
+    private static void checked(String entity, Pattern pattern, Predicate<String> valid) {
+        RECOGNIZERS.put(entity,
+                scanner(entity, pattern, CHECKED, (t, s, e, d) -> valid.test(normalized(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
+    }
+
+    /**
+     * {@link #checked}, and a keyword at most {@link #TRIGGER_WINDOW} characters
+     * before the value — for identifiers whose check digit lets about one in ten
+     * random numbers of the right length through.
+     */
+    private static void keyed(String entity, Pattern pattern, Pattern trigger, Predicate<String> valid) {
+        RECOGNIZERS.put(entity, scanner(entity, pattern, CHECKED,
+                (t, s, e, d) -> valid.test(normalized(t, s, e)) && hasTriggerBefore(trigger, t, s, d) ? new int[]{s, e} : null, AFTER_MATCH));
+    }
+
+    /** IPv4 and IPv6 addresses, left to right. */
+    private static Recognizer ipAddress() {
+        Recognizer v4 = scanner(PiiEntities.IP_ADDRESS, IPV4, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH);
+        Recognizer v6 = scanner(PiiEntities.IP_ADDRESS, IPV6, CHECKED,
+                (t, s, e, d) -> NationalChecksums.ipv6(t.substring(s, e)) ? new int[]{s, e} : null, AFTER_MATCH);
+        return (text, deadline) -> {
+            List<PiiSpan> spans = new ArrayList<>(v4.find(text, deadline));
+            for (PiiSpan span : v6.find(text, deadline)) {
+                if (spans.stream().noneMatch(other -> other.overlaps(span.start(), span.end()))) {
+                    spans.add(span);
+                }
+            }
+            spans.sort(Comparator.comparingInt(PiiSpan::start));
+            return spans;
+        };
     }
 
     private BuiltinRecognizers() {
@@ -320,6 +477,18 @@ public final class BuiltinRecognizers {
             }
         }
         return digits;
+    }
+
+    /** The letters and digits of {@code text[start, end)}, upper-case. */
+    private static String normalized(String text, int start, int end) {
+        StringBuilder out = new StringBuilder(end - start);
+        for (int i = start; i < end; i++) {
+            char c = text.charAt(i);
+            if (Character.isLetterOrDigit(c)) {
+                out.append(Character.toUpperCase(c));
+            }
+        }
+        return out.toString();
     }
 
     /** {@code text[start, end)} without spaces. */
