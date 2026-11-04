@@ -166,7 +166,7 @@ public class ToolCacheService {
      * and never executed, so the second order was never placed and the model was
      * told it had been.
      */
-    public static final Set<String> SIDE_EFFECTING_SOURCES = Set.of("http", "mcp", "a2a");
+    public static final Set<String> SIDE_EFFECTING_SOURCES = Set.of("http", "mcp", "a2a", "team");
 
     /**
      * Whether a call from this source may use the cache at all. Built-in tools may

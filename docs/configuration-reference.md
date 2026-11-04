@@ -659,6 +659,8 @@ below. See [Enabling connections](connections.md#enabling-connections).
 |---|---|---|
 | `eddi.groups.max-depth` | `3` | Nesting limit for groups-of-groups |
 | `eddi.groups.cadence.claim-ttl` | `PT24H` | How long a standing-team cadence claim is held |
+| `eddi.groups.handoff.max-hops` | `3` | How many team boundaries one piece of work may cross by [cross-team handoff](team-handoff.md) before further handoffs are refused as a loop |
+| `eddi.groups.handoff.decline-memory` | `P30D` | How long a declined handoff blocks the same handoff being filed again. An upper limit, not a guarantee: only the 200 most recent decline tombstones are kept per workspace, so older declines can be forgotten sooner |
 | `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
