@@ -36,6 +36,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
 
 /**
  * Checks, at deployment time, that every vault reference an agent's
@@ -102,8 +103,16 @@ public class VaultGrantChecker {
      */
     private static final ReferenceScanner VARS_REFERENCES = ReferenceScanner.of("vars");
 
-    /** A vault or variable reference that names its tenant explicitly. */
-    private static final ReferenceScanner TENANT_REFERENCES = ReferenceScanner.withTenant("vault", "eddivault", "vars");
+    /**
+     * A vault reference that names its tenant explicitly. Vault only, and variables
+     * are found with their own grammar
+     * ({@link GlobalVariableResolver#VARS_PATTERN}): one scanner for both let a
+     * malformed <code>${vars:a</code> opener swallow the
+     * <code>${vault:t.other…/key}</code> after it into one bogus tenant, while the
+     * runtime, which resolves each namespace with its own rules, still resolved the
+     * inner reference — and the space-membership check never saw its tenant.
+     */
+    private static final ReferenceScanner VAULT_TENANT_REFERENCES = ReferenceScanner.withTenant("vault", "eddivault");
 
     private final ISecretProvider secretProvider;
     private final IAgentStore agentStore;
@@ -352,6 +361,22 @@ public class VaultGrantChecker {
     }
 
     /**
+     * {@link #referencedTenants(String, Integer)} for one configuration document on
+     * its own — a knowledge base run through its standalone endpoints, outside any
+     * agent: the same scan, variables expanded twice over and connections followed.
+     *
+     * @throws UnverifiableReferencesException
+     *             when a variable or connection it names cannot be read
+     */
+    public Set<String> referencedTenantsOf(Object configuration) {
+        Set<String> tenants = new LinkedHashSet<>();
+        if (configuration != null) {
+            collectTenants(configuration, tenants, ConnectionReference.DEFAULT_TENANT, new LinkedHashSet<>());
+        }
+        return tenants;
+    }
+
+    /**
      * Adds every tenant {@code config} names, following {@code ${connection:…}}
      * into the connection document — the same hop the grant check makes. A
      * connection that holds {@code ${vault:t.finance…/key}} is otherwise a way to
@@ -378,8 +403,16 @@ public class VaultGrantChecker {
         }
         List<ReferenceScanner.Match> connectionMatches = new ArrayList<>();
         for (String text : scanned) {
-            for (ReferenceScanner.Match match : TENANT_REFERENCES.findAll(text)) {
+            for (ReferenceScanner.Match match : VAULT_TENANT_REFERENCES.findAll(text)) {
                 sink.add(match.tenant());
+            }
+            // The resolver's own pattern: its classes exclude '$', '{' and '}', so an
+            // opener inside a malformed one is still found, as the runtime finds it.
+            Matcher variables = GlobalVariableResolver.VARS_PATTERN.matcher(text);
+            while (variables.find()) {
+                if (variables.group(1) != null) {
+                    sink.add(variables.group(1));
+                }
             }
             connectionMatches.addAll(ConnectionReference.findAll(text));
         }

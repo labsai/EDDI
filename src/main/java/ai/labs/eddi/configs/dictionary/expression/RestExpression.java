@@ -52,6 +52,12 @@ public class RestExpression implements IRestExpression {
             WorkflowConfiguration workflowConfig = workflowStore.read(workflowId, workflowVersion);
             List<IResourceStore.IResourceId> resourceIds = readDictionaryResourceIds(workflowConfig);
             for (IResourceStore.IResourceId resourceId : resourceIds) {
+                // VIEW on the workflow does not extend to the dictionaries it names: they
+                // are read by whatever id config.uri spells, relative or not, so each is
+                // checked on its own. One the caller may not read contributes nothing.
+                if (!accessGuard.hasAccess(resourceId.getId(), AccessLevel.VIEW)) {
+                    continue;
+                }
                 List<String> expressions = regularDictionaryStore.readExpressions(resourceId.getId(), resourceId.getVersion(), filter, "asc", 0,
                         limit);
                 CollectionUtilities.addAllWithoutDuplicates(retExpressions, expressions);

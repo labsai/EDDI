@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
+import ai.labs.eddi.datastore.HistorizedResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -41,10 +42,19 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
 
     private final IDocumentDescriptorStore descriptorStore;
 
+    /**
+     * The same collections read from the primary. The client default is
+     * {@code nearest()}, which can serve a lagging secondary; the connection lookup
+     * decides where a credential may be sent, so it must see the latest save.
+     * {@code null} only for a store built without storage (a test seam).
+     */
+    private final HistorizedResourceStore<ConnectionConfiguration> primaryResourceStore;
+
     @Inject
     public ConnectionStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, IDocumentDescriptorStore descriptorStore) {
         super(storageFactory, "connections", documentBuilder, ConnectionConfiguration.class);
         this.descriptorStore = descriptorStore;
+        this.primaryResourceStore = resourceStorage == null ? null : new HistorizedResourceStore<>(resourceStorage.primaryReads());
     }
 
     /**
@@ -133,14 +143,33 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
      * one transient read error fails every turn that uses a live connection for a
      * minute after the database recovered. That one propagates, and the registry
      * deliberately does not cache what it never got an answer for.
+     * <p>
+     * The live version, not the one the descriptor names: the descriptor is
+     * advanced by a response filter after the update has returned, and the update
+     * invalidates the registry before that. A lookup in between read the previous
+     * version through the stale descriptor and cached it, so a host just removed
+     * from {@code allowedHosts} kept receiving the credential for the cache's TTL.
      */
     private ConnectionConfiguration readIfPresent(String id, URI resourceUri) throws ResourceStoreException {
         try {
-            return read(id, versionOf(resourceUri));
+            return freshRead(id, freshCurrentResourceId(id).getVersion());
         } catch (ResourceNotFoundException e) {
             LOGGER.debugv("Connection descriptor references a missing resource: {0}", resourceUri);
             return null;
         }
+    }
+
+    /**
+     * Current version of {@code id}, resolved on the primary. A seam, so the lookup
+     * can be told apart from the nearest-read {@link #getCurrentResourceId}.
+     */
+    protected IResourceId freshCurrentResourceId(String id) throws ResourceNotFoundException {
+        return primaryResourceStore.getCurrentResourceId(id);
+    }
+
+    /** One version of {@code id}, read on the primary. */
+    protected ConnectionConfiguration freshRead(String id, Integer version) throws ResourceNotFoundException, ResourceStoreException {
+        return primaryResourceStore.read(id, version);
     }
 
     private static String idOf(URI resourceUri) {
@@ -152,20 +181,4 @@ public class ConnectionStore extends AbstractResourceStore<ConnectionConfigurati
         return lastSlash >= 0 ? path.substring(lastSlash + 1) : path;
     }
 
-    private static Integer versionOf(URI resourceUri) {
-        String query = resourceUri.getQuery();
-        if (query == null) {
-            return 1;
-        }
-        for (String pair : query.split("&")) {
-            if (pair.startsWith("version=")) {
-                try {
-                    return Integer.valueOf(pair.substring("version=".length()));
-                } catch (NumberFormatException e) {
-                    return 1;
-                }
-            }
-        }
-        return 1;
-    }
 }

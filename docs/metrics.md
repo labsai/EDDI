@@ -536,7 +536,14 @@ agent, produced no LLM latency, token or error signal at all.
 
 ```text
 eddi_llm_request_duration_seconds           # Provider call latency (timer); tags: provider, model, outcome (success|error)
-eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output)
+eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output|cache_read|cache_write|reasoning) — cache_* are subsets of input, reasoning of output
+eddi_llm_cost_usd_total                     # Priced LLM spend in USD per model phase; tags: provider, model, source (task|catalog|mixed|unpriced)
+eddi_llm_calls_unpriced_total               # Model calls with no price ($0); tags: provider, model, site (llm_task|group_system|…)
+eddi_llm_pricing_refused_total              # Calls refused by the strict unpriced policy; tags: site, reason (the policy)
+eddi_llm_price_catalog_entries              # Entries in the deployment price catalog (gauge)
+eddi_llm_price_catalog_oldest_asof_days     # Age of the oldest asOf in the catalog (gauge)
+eddi_llm_price_catalog_load_failures_total  # Failed catalog reads; the last good catalog is kept
+
 eddi_llm_request_errors_total               # Failed calls; tags: provider, model, error (exception simple name)
 ```
 
@@ -1080,9 +1087,14 @@ eddi_cluster_node_duplicate                 # 1 while another live JVM uses this
 eddi_cluster_versions                       # Distinct EDDI version/payload-protocol pairs among the live members; >1 during a rolling upgrade (gauge)
 eddi_cluster_lease_acquire_seconds          # Lease acquisition {outcome=acquired|timeout|degraded|degraded_reject, contended} (timer)
 eddi_cluster_lease_held                     # Leases this node holds (gauge)
-eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released}
+eddi_cluster_lease_lost_total               # Leases lost while a turn ran {reason=taken_over|force_released|unconfirmed|gone}; unconfirmed = no renewal acknowledged for ttl - 2 x heartbeat
 eddi_cluster_lease_takeover_total           # Leases taken over from a dead or restarted holder
 eddi_cluster_lease_release_conflicts_total  # Releases that found the lease already taken over
+eddi_cluster_lease_adopted_total            # Writes of this node applied by NATS although the reply was lost, recognised and kept {op=create|renew}
+eddi_cluster_lease_orphans_deleted_total    # Leases this node wrote but never took (the reply was lost), deleted
+eddi_cluster_lease_handoffs_total           # Leases handed to the next turn queued on the same node, without a release
+eddi_cluster_lease_renew_failures_total     # Lease renewals that could not reach NATS (the lease stays valid until ttl - 2 x heartbeat)
+eddi_cluster_kv_reopens_total               # KV bucket handles (re)opened {bucket}; a steady rise means calls keep failing on stale handles
 eddi_cluster_fence_rejected_total           # Turn writes refused by the database fence (a zombie write stopped)
 eddi_cluster_kv_seconds                     # KV calls {bucket, op, outcome} (timer)
 eddi_cluster_kv_cas_conflicts_total         # Lost compare-and-sets {bucket}
