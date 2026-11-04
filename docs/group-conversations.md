@@ -612,8 +612,9 @@ generated id and are still found by their `groupId`.
 
 Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
-a soft (versioned) delete keeps it, because the group can come back. Not in
-v1: cross-team handoff, Manager UI, reputation weighting.
+a soft (versioned) delete keeps it, because the group can come back. Another
+team or a standalone agent can file tasks into a workspace: see
+[Cross-Team Handoff](team-handoff.md). Not in v1: reputation weighting.
 
 ## Shared artifacts (blackboard-lite)
 
@@ -1276,6 +1277,7 @@ speaker and phase pairs.
 | `task_plan_created` / `task_verified` | TASK_FORCE planned its backlog / verified a task |
 | `retro_recorded` | A RETRO phase finished, with the number of lessons stored (I8) |
 | `artifact_updated` | A shared artifact was created or revised (I17) |
+| `team_handoff` | A handoff attempt to another team, from a member's `handoff_to_team` call or an `onDecision` rule: `{handoffId, targetAlias, targetGroupId, outcome, mode, trigger, subject}`. Refusals that reach the filing service are announced too (`outcome` is e.g. `NOT_ACCEPTED`); a call rejected earlier by the tool itself (unknown alias, per-turn limit exceeded) emits no event. Never carries the description. See [Cross-Team Handoff](team-handoff.md) |
 | `member_tool_call` | A member's tool loop is about to run a tool: `{agentId, displayName, tool}`. Name only, never arguments (the same rule as the 1:1 `tool_call`). A best-effort liveness signal while the member's non-streamed turn is running; the engine skips it for a speaker the orchestrator has cancelled, but cancellation or a timeout can race with the notification, so it may trail `speaker_complete` of a turn already closed |
 | `cost_updated` | A cost attribution landed in the discussion ledger: `{attributionKey, displayName, attributedCost, totalCost}`. `attributedCost` is that key's cumulative cost, so a consumer overwrites per key rather than adding. Also fires for system spend (`system:...` keys that name no member) |
 | `stance_updated` | A member's one-line stance was recomputed at a phase boundary: `{agentId, displayName, stance, llmGenerated, coveredContributions}`. Fires only when the text changed |

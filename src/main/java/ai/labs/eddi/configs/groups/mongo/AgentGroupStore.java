@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.groups.ArtifactValidators;
+import ai.labs.eddi.configs.groups.HandoffConfigValidator;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
@@ -68,6 +69,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
+        HandoffConfigValidator.validate(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         repairNegotiationArbitration(groupConfiguration);
@@ -92,6 +94,7 @@ public class AgentGroupStore extends AbstractResourceStore<AgentGroupConfigurati
         validateVotePhases(groupConfiguration);
         validateHumanMembers(groupConfiguration);
         validateFacilitator(groupConfiguration);
+        HandoffConfigValidator.validate(groupConfiguration);
         ArtifactValidators.requireValidSpecs(groupConfiguration.getArtifactConfig());
         normalizeNonPositiveCostCeiling(groupConfiguration);
         repairNegotiationArbitration(groupConfiguration);

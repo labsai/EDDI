@@ -123,6 +123,21 @@ public class AgentGroupConfiguration {
     }
 
     /**
+     * Cross-team handoff, both halves: the teams this group may file tasks into
+     * (tools and decision rules) and the sources it accepts from. {@code null}
+     * means the group neither sends nor receives — see {@link HandoffPolicies}.
+     */
+    private HandoffPolicies.GroupHandoffConfig handoffConfig;
+
+    public HandoffPolicies.GroupHandoffConfig getHandoffConfig() {
+        return handoffConfig;
+    }
+
+    public void setHandoffConfig(HandoffPolicies.GroupHandoffConfig handoffConfig) {
+        this.handoffConfig = handoffConfig;
+    }
+
+    /**
      * How HUMAN members' turns are timed out (I6). {@code null} means wait
      * indefinitely — the same thing a default-constructed {@link HumanMemberConfig}
      * means.
