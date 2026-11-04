@@ -45,6 +45,7 @@
 - [Conversations](conversations.md)
 - [REST API Reference — Conversations & Streaming](rest-api-reference.md)
 - [Group Conversations](group-conversations.md)
+  - [Group Convergence Judge: SERVICE](group-service-judge.md)
   - [Cross-Team Handoff](team-handoff.md)
 - [Human-in-the-Loop (HITL)](hitl.md)
   - [HITL Review & Audit](hitl-review-and-audit.md)
