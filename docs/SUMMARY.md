@@ -72,6 +72,7 @@
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
+- [End-User Catalog](catalog.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
 - [Audit Ledger](audit-ledger.md)

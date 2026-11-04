@@ -90,6 +90,15 @@ id from the user, the Manager, or an earlier run in `list_agent_test_runs`.
 Run the suite before every promotion when the agent has one. `read_docs("agent-testing")`
 has the suite format.
 
+## Offering agents to end users
+
+End users (`eddi-user`) pick agents and teams from the catalog, which Workforce shows them. An agent
+appears there only when it is deployed, the person may use it, and it is **listed**: the agent
+document carries `"listed": true` (a group: the group document), default false. With workspaces
+enforced, `published` and `internal` visibility list it as well. Set the flag with
+`update_resource` on the agent (then redeploy) or `update_group` on the group. Listing never grants
+access. `read_docs("catalog")` has the details.
+
 ## Feedback from users
 
 If the agent's `ratingConfig` is on, the people chatting rate conversations and replies.
