@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { waitForApp } from "./e2e-helpers";
-import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "@/test/mocks/handlers";
+import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "@/test/mocks/catalog-fixtures";
 
 /**
  * Workforce as a plain `eddi-user` (frontend-unification plan, phase 2).
