@@ -883,6 +883,16 @@ public class AgentSetupService {
         abstract void rollback(Map<String, Object> createdResources, String agentName, Exception cause);
     }
 
+    /** {@code createdResources} key of what a dry run could not decide. */
+    static final String DRY_RUN_WARNINGS = "warnings";
+
+    @SuppressWarnings("unchecked")
+    private static void previewWarning(Map<String, Object> createdResources, String warning) {
+        if (createdResources != null) {
+            ((List<String>) createdResources.computeIfAbsent(DRY_RUN_WARNINGS, k -> new ArrayList<String>())).add(warning);
+        }
+    }
+
     /** The writer for a real setup, or for a dry run. */
     ResourceWriter writerFor(boolean dryRun) {
         return dryRun ? new PreviewWriter() : new LiveWriter();
@@ -964,7 +974,17 @@ public class AgentSetupService {
                     throw namedKeyWithoutVault(ref);
                 }
                 if (key != null && !key.isEmpty() && !isVaultReference(key)) {
-                    allowedHostsFor(hosts);
+                    // The live path applies the destination rule only when it CREATES
+                    // the named key; an existing key holding the same value is reused
+                    // as stored. Which of the two happens needs the vault's metadata, so
+                    // a refusal here is reported, not enforced.
+                    try {
+                        allowedHostsFor(hosts);
+                    } catch (AgentSetupException hostRule) {
+                        previewWarning(createdResources, "host rule not checked: vault key '" + ref.keyName() + "' may already exist and "
+                                + "would then be reused as stored; if it does not exist, creating the agent fails with: "
+                                + hostRule.getMessage());
+                    }
                 }
                 return previewApiKey(apiKey, vaultKeyName);
             }

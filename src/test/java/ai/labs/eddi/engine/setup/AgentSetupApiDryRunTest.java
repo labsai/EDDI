@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -204,5 +205,21 @@ class AgentSetupApiDryRunTest {
         var off = fixture();
         SetupResult preview = off.service().createApiAgent(withKey("sk-plain-0123456789abcdef", null, List.of()));
         assertEquals("api_agent_dry_run", preview.action());
+    }
+
+    @Test
+    @DisplayName("a named key with a plaintext apiKey: the destination rule is reported, not enforced, since the key may already exist")
+    @SuppressWarnings("unchecked")
+    void namedKeyHostRuleIsAWarning() throws Exception {
+        var f = fixture();
+        when(f.secrets().isAvailable()).thenReturn(true);
+
+        SetupResult preview = f.service().createApiAgent(withKey("sk-plain-0123456789abcdef", "openai-prod", List.of()));
+
+        assertEquals("api_agent_dry_run", preview.action());
+        var warnings = (List<String>) preview.resources().get(AgentSetupService.DRY_RUN_WARNINGS);
+        assertTrue(warnings != null && warnings.stream().anyMatch(w -> w.startsWith("host rule not checked") && w.contains("openai-prod")),
+                String.valueOf(warnings));
+        verify(f.secrets(), never()).getMetadata(any());
     }
 }
