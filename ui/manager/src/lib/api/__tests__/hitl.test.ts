@@ -268,6 +268,7 @@ describe("HITL API", () => {
         "dynamic",
         "memory",
         "recall",
+        "team",
       ]);
     });
   });

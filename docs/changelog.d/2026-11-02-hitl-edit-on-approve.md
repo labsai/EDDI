@@ -62,6 +62,20 @@ shape that analytics can rely on.
   example), linked from `hitl.md`, `group-conversations.md`, `mcp-server.md` and `SUMMARY.md`. The operator and MCP
   follow-up is in [`planning/operator-followups/hitl-edit-on-approve.md`](../../planning/operator-followups/hitl-edit-on-approve.md).
 
+### Review follow-ups (2026-11-04)
+
+- **Slack**: a tool-call card offers Edit only when the shown arguments are a JSON object (or blank) — malformed model
+  arguments opened a modal every submission of which the server-side merge refused (`SlackHitlEditModal.forCard`).
+- **Manager**: an amendment identical to the shown arguments is no amendment, so a selected reason code is not sent
+  with what the server treats as a plain approval (it answered that with a `400`) (`approval-banner.tsx`).
+- **Group cancel audit**: a cancel that lands while a running leg commits its pause is audited by that leg on its own
+  thread; the token now records the caller that signalled it (`DiscussionControlToken.getSignalledBy`), so the entry
+  names the canceller instead of the owner or `system:unattributed`.
+- **Docs and dashboard**: [`hitl-review-and-audit.md`](../hitl-review-and-audit.md) separates request validation
+  (`400`, still paused) from screening (a refused edit re-pauses), says the resume reply needs a reply flag and
+  owner-or-admin access, and what an edit reaches for an `addToOutput: false` task; "Size of approver edits" says
+  "no samples yet" when empty.
+
 ### Contract for the features built on this branch
 
 - **Approval analytics** reads `hitl.approval` entries only through `HitlApprovalAudit.parse(AuditEntry)` →

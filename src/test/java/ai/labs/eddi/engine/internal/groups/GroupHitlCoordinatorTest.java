@@ -330,6 +330,37 @@ class GroupHitlCoordinatorTest {
         verify(ledger).submit(entry.capture());
         assertEquals(pausedAt.toString(), entry.getValue().output().get("pausedAt"));
         assertNotNull(entry.getValue().output().get("latencyMs"));
+        assertEquals("system:unattributed", entry.getValue().output().get("decidedBy"),
+                "no canceller recorded on the token and no identity on this thread");
+    }
+
+    /**
+     * A cancel signalled by one caller and audited later on the running leg's
+     * thread names that caller, not whoever the leg's thread runs as.
+     */
+    @Test
+    void convertPauseToCancelIfSignalled_auditNamesTheCallerThatSignalled() throws Exception {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        conversationStore = mock(IGroupConversationStore.class);
+        groupStore = mock(IAgentGroupStore.class);
+        scheduleStore = mock(IScheduleStore.class);
+        var coordinator = new GroupHitlCoordinator(groupStore, conversationStore, scheduleStore, ledger,
+                new GroupSigningGuard(null, null, null, "default"), new ConcurrentHashMap<>(), Mockito.mock(ExecutorService.class),
+                new CallerIdentityContext(null, null), Mockito.mock(GroupConversationService.class),
+                new SimpleMeterRegistry().counter("test.hitl.pause"), new SimpleMeterRegistry().counter("test.hitl.resume"),
+                new SimpleMeterRegistry().counter("test.group.failure"));
+        var gc = gc(GroupConversationState.AWAITING_APPROVAL);
+        gc.setPausedAt(Instant.parse("2026-11-01T10:00:00Z"));
+        var token = new DiscussionControlToken();
+        token.setSignal(ControlSignal.CANCEL_GRACEFUL, "admin-1");
+
+        coordinator.convertPauseToCancelIfSignalled(gc, mock(GroupDiscussionEventListener.class), token);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals("admin-1", entry.getValue().output().get("decidedBy"));
+        assertEquals("admin-1", token.getSignalledBy());
     }
 
     @Test

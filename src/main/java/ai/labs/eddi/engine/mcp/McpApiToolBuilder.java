@@ -573,6 +573,9 @@ public final class McpApiToolBuilder {
         // Parameters (path + query)
         var paramDescriptions = new LinkedHashMap<String, String>();
         var queryParams = new LinkedHashMap<String, String>();
+        // The JSON Schema of the same parameters, for ApiCall.argumentSchema: typed
+        // tool parameters, and a check of every call before the approval gate.
+        var argumentProperties = new LinkedHashMap<String, Object>();
 
         for (Parameter param : parameters) {
             if (param == null || param.getName() == null) {
@@ -596,8 +599,10 @@ public final class McpApiToolBuilder {
                 // the tool parameter the model fills) uses the safe variable name.
                 queryParams.put(paramName, "{" + variableName + "}");
                 paramDescriptions.put(variableName, paramDesc);
+                argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
             } else if ("path".equals(param.getIn())) {
                 paramDescriptions.put(variableName, paramDesc);
+                argumentProperties.put(variableName, OpenApiArgumentSchemas.parameterSchema(param.getSchema(), openAPI));
             }
             // header/cookie params are skipped for now
         }
@@ -630,8 +635,10 @@ public final class McpApiToolBuilder {
                     }
                     bodyTemplate = bodyTemplate.replace("{" + variableName + "}", "{" + renamed + "}");
                     paramDescriptions.put(renamed, variable.getValue());
+                    argumentProperties.put(renamed, bodyMapping.argumentSchema(openAPI));
                 } else {
                     paramDescriptions.put(variableName, variable.getValue());
+                    argumentProperties.put(variableName, bodyMapping.argumentSchema(openAPI));
                 }
             }
             request.setBody(bodyTemplate);
@@ -642,6 +649,15 @@ public final class McpApiToolBuilder {
         // Set parameter descriptions for LLM tool use
         if (!paramDescriptions.isEmpty()) {
             httpCall.setParameters(paramDescriptions);
+            // Every parameter stays required, as the untyped tools always made them: an
+            // omitted query value would render as an empty "?name=". Requiredness INSIDE
+            // the body is the spec's own.
+            var argumentSchema = new LinkedHashMap<String, Object>();
+            argumentSchema.put("type", "object");
+            argumentSchema.put("properties", argumentProperties);
+            argumentSchema.put("required", new ArrayList<>(paramDescriptions.keySet()));
+            httpCall.setArgumentSchema(argumentSchema);
+            httpCall.setUnknownFields(ApiCall.UNKNOWN_FIELDS_REJECT);
         }
 
         return httpCall;
@@ -657,7 +673,20 @@ public final class McpApiToolBuilder {
      * A request body ready to be written into a call: the content type to send, and
      * the template plus the tool parameters that fill it.
      */
-    private record BodyMapping(String contentType, BodyTemplate body) {
+    private record BodyMapping(String contentType, BodyTemplate body, Schema<?> schema) {
+
+        /**
+         * The argument schema of the body variable: a string for a text body, the
+         * resolved schema for a JSON one (untyped when the spec declares none).
+         */
+        Map<String, Object> argumentSchema(OpenAPI openAPI) {
+            if (TEXT_MEDIA_TYPE.equals(contentType)) {
+                Map<String, Object> string = new LinkedHashMap<>();
+                string.put("type", "string");
+                return string;
+            }
+            return OpenApiArgumentSchemas.bodySchema(schema, openAPI);
+        }
     }
 
     /**
@@ -711,14 +740,15 @@ public final class McpApiToolBuilder {
         MediaType media = selected.getValue();
         String selectedType = baseMediaType(selected.getKey());
         if (TEXT_MEDIA_TYPE.equals(selectedType)) {
-            return new BodyMapping(TEXT_MEDIA_TYPE, buildTextBodyTemplate(requestBody.getDescription(), media));
+            return new BodyMapping(TEXT_MEDIA_TYPE, buildTextBodyTemplate(requestBody.getDescription(), media), null);
         }
         // An RFC 6902 patch is declared as application/json-patch+json ONLY, and is
         // chosen only when plain JSON is not declared (selectSupportedBody prefers
         // it). It is the same single-variable JSON body, with a description that
         // says what the array IS and sent under its own content type.
         if (JSON_PATCH_MEDIA_TYPE.equals(selectedType)) {
-            return new BodyMapping(JSON_PATCH_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI), true));
+            return new BodyMapping(JSON_PATCH_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI), true),
+                    media.getSchema());
         }
         // One level of $ref resolution, HERE and deliberately not resolveFully():
         // the parser leaves component references unresolved, so a body
@@ -731,7 +761,7 @@ public final class McpApiToolBuilder {
         // Nested property refs stay unresolved: the top-level field
         // names and requiredness are what the model needs to write a
         // correct body.
-        return new BodyMapping(JSON_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI)));
+        return new BodyMapping(JSON_MEDIA_TYPE, buildBodyTemplate(resolveComponentRef(media.getSchema(), openAPI)), media.getSchema());
     }
 
     /**

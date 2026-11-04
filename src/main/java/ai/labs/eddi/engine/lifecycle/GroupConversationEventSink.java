@@ -86,6 +86,12 @@ public final class GroupConversationEventSink {
      */
     public static final String EVENT_ARTIFACT_UPDATED = "artifact_updated";
     /**
+     * A handoff attempt to another team (see {@code docs/team-handoff.md}), from a
+     * member's {@code handoff_to_team} tool call or an {@code onDecision} rule.
+     * Carries the outcome, so a refusal is visible too.
+     */
+    public static final String EVENT_TEAM_HANDOFF = "team_handoff";
+    /**
      * A member turn's dollar cost landed in the discussion's ledger. Fires after
      * every turn that produced a cost attribution, so an observer can watch spend
      * accrue instead of only learning the total once the document is persisted.
@@ -290,6 +296,23 @@ public final class GroupConversationEventSink {
      */
     public record ArtifactUpdatedEvent(String artifactId, String name, String type, long version, String editorAgentId,
             String status, boolean created) {
+    }
+
+    /**
+     * A handoff attempt. Carries the subject (author-visible, bounded to 200
+     * characters) but never the description.
+     *
+     * @param outcome
+     *            the {@code HandoffResult.Outcome} name, e.g.
+     *            {@code QUEUED_FOR_REVIEW}
+     * @param mode
+     *            {@code AUTO}/{@code REVIEW}, or {@code null} when the attempt
+     *            ended before the target's rule was known
+     * @param trigger
+     *            {@code TOOL} or {@code DECISION}
+     */
+    public record TeamHandoffEvent(String handoffId, String targetAlias, String targetGroupId, String outcome, String mode, String trigger,
+            String subject) {
     }
 
     /**

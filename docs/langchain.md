@@ -930,6 +930,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
+| `teamHandoff`              | object   | Cross-team handoff: the teams this agent may file tasks into with the `handoff_to_team` tool: `{"targets": [{"alias": "account-desk", "groupId": "…", "description": "…"}], "maxPerTurn": 2, "maxPerConversation": 5}`. A target only receives if its own `handoffConfig.accept` lists this agent. See [Cross-Team Handoff](team-handoff.md) | (none) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment. Unset prices, and cache and long-context prices (`pricing`), come from the [price catalog](model-pricing.md) | (catalog, else unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
@@ -1517,7 +1518,7 @@ The same applies to MCP calls via `enableMcpCallTools` (also default `true`), wh
 ### How it Works
 
 1.  **Configuration**: You add httpcall steps to the agent's workflow, as you would for `ApiCallsTask`.
-2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
+2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map — or, when the call declares an [`argumentSchema`](httpcalls.md#argument-schema-for-llm-tools), with parameters typed from it (integer, boolean, array, object), and every call checked against it before the approval gate: a call that violates it gets a `NOT_EXECUTED` result listing each violation and is never paused or executed. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
 3.  **Execution**: When the agent decides to use a tool, it calls that tool by name (e.g. `get_stock_price`) with the arguments the schema declares.
 4.  **Security**: The agent can **only** execute the HTTP calls present in its workflow. It cannot make arbitrary HTTP requests to the internet. To narrow the agent's reach, narrow the httpcalls configuration in its workflow — or set `enableHttpCallTools: false`.
 
@@ -2172,6 +2173,22 @@ the [GDPR erasure cascade](gdpr-compliance.md) (deleted by subject), are part of
 expire on their own an hour after their window ends. If your `subject` template derives an identifier
 that differs from the conversation's user id, erasure deletes the counters whose subject equals the
 **erased user id**; erase by the derived identifier too, or let them expire.
+
+#### Argument schema refusals
+
+A call to a tool whose configuration declares an argument schema (an httpcall with
+[`argumentSchema`](httpcalls.md#argument-schema-for-llm-tools), generated for every OpenAPI tool) is
+checked **before the approval gate** classifies the batch. A call that violates it is answered
+
+```json
+{"status":"NOT_EXECUTED","reason":"The arguments do not match this tool's schema, so the call was not run and no approval was requested. Fix every listed violation and call the tool again.","violations":["$.requestBody.emails: required","$.requestBody.role: must be one of manager, curator"]}
+```
+
+and is neither executed nor shown to a human; the rest of the batch goes on to the gate as usual. The
+trace records `tool_error` with `error: "argument_schema"`, and `eddi.tool.arguments.refused`
+(tag `source`) counts it. Tools without a schema are never refused here. The check is a pure function
+of the tool's schema and the arguments, kept separate so it can later become a configurable
+tool-call guardrail.
 
 #### Repeated failing tool calls
 

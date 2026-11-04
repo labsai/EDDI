@@ -134,6 +134,23 @@ public final class ResponseSchemaConverter {
     }
 
     /**
+     * One schema node (not necessarily an object root) as a langchain4j element,
+     * under the same all-or-nothing rules as {@link #convert}. Used for typed tool
+     * parameters ({@code ApiCall.argumentSchema}), where each parameter is
+     * converted on its own and one that cannot be falls back to a plain string
+     * parameter.
+     *
+     * @return the element, or empty when the node is not convertible
+     */
+    public static Optional<JsonSchemaElement> toElement(JsonNode node) {
+        try {
+            return Optional.ofNullable(element(node, 0));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Whether any object in the schema says {@code additionalProperties: false}.
      */
     public static boolean hasClosedObject(String responseSchemaJson) {

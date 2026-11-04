@@ -28,6 +28,8 @@ import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
+import ai.labs.eddi.modules.llm.guardrails.ToolArgumentSchemaValidator;
+import ai.labs.eddi.modules.llm.tools.spi.ToolArgumentValidator;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
@@ -531,8 +533,14 @@ class ToolLoopRunner {
                     // results in the order the model listed the calls (the refused ones are
                     // always the tail).
                     CallAdmission admission = admitWithinCallCaps(aiMessage, perResponseCap, perTurnCap, toolCallsThisTurn);
-                    List<ToolExecutionRequest> admitted = admission.admitted();
-                    toolCallsThisTurn += admitted.size();
+                    toolCallsThisTurn += admission.admitted().size();
+                    // === Argument schema (before the gate) ===
+                    // A call whose arguments break its tool's declared schema is answered
+                    // NOT_EXECUTED here and never reaches the gate: no human is asked to
+                    // approve a request that cannot be right. Only executors that declare
+                    // a schema check anything (ToolArgumentValidator).
+                    List<ToolExecutionRequest> admitted = refuseInvalidArguments(admission.admitted(), toolExecutors, toolSources,
+                            currentMessages, aiMessage, trace, exchangeRecorder);
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
@@ -543,8 +551,10 @@ class ToolLoopRunner {
                     // null/empty — byte-identical to the pre-HITL path.
                     var screened = refuseDoomedGatedCalls(
                             refuseExhaustedGatedCalls(
-                                    toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                            effectiveToolApprovals, clearedCalls),
+                                    admitted.isEmpty()
+                                            ? new ToolApprovalGate.GateResult(List.of(), List.of(), Map.of())
+                                            : toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
+                                                    effectiveToolApprovals, clearedCalls),
                                     task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
                     var gateResult = screened.gateResult();
@@ -768,6 +778,64 @@ class ToolLoopRunner {
         addResult(currentMessages, call, request, SELF_CONVERSATION_REFUSAL, exchangeRecorder);
         trace.add(Map.of("type", "hitl_self_conversation", "tool", request.name(), "detail", selfTargeted));
         return true;
+    }
+
+    /**
+     * Answers, with a {@code NOT_EXECUTED} result listing each violation, every
+     * call whose executor is a {@link ToolArgumentValidator} and finds its
+     * arguments invalid, and returns the rest in order. Runs before the approval
+     * gate, so a refused call is never paused for a human and never executed; the
+     * model reads the violations and corrects the call on its next iteration.
+     * <p>
+     * Traced as {@code tool_error} with {@code error: "argument_schema"} and
+     * counted in {@code eddi.tool.arguments.refused}. A validator that throws
+     * refuses the call (fail closed): a call that could not be checked is never
+     * shown to the gate as if it had passed.
+     */
+    static List<ToolExecutionRequest> refuseInvalidArguments(List<ToolExecutionRequest> admitted, Map<String, ToolExecutor> toolExecutors,
+                                                             Map<String, String> toolSources, List<ChatMessage> currentMessages,
+                                                             AiMessage aiMessage, List<Map<String, Object>> trace,
+                                                             ToolExchangeRecorder exchangeRecorder) {
+        if (admitted.isEmpty() || toolExecutors == null) {
+            return admitted;
+        }
+        List<ToolExecutionRequest> valid = null;
+        for (int index = 0; index < admitted.size(); index++) {
+            ToolExecutionRequest request = admitted.get(index);
+            List<String> violations = List.of();
+            if (toolExecutors.get(request.name()) instanceof ToolArgumentValidator validator) {
+                try {
+                    violations = validator.argumentViolations(request);
+                } catch (RuntimeException e) {
+                    // Fail closed: a call whose arguments could not be checked is not
+                    // shown to the gate unchecked.
+                    LOGGER.warnf("Argument check of tool '%s' failed (%s); the call is refused", sanitize(request.name()),
+                            e.getClass().getSimpleName());
+                    violations = List.of("$: the arguments of this call could not be checked; the call was refused");
+                }
+            }
+            if (violations == null || violations.isEmpty()) {
+                if (valid != null) {
+                    valid.add(request);
+                }
+                continue;
+            }
+            if (valid == null) {
+                valid = new ArrayList<>(admitted.subList(0, index));
+            }
+            LOGGER.infof("Refusing tool '%s' before the approval gate: %d argument schema violation(s)", sanitize(request.name()),
+                    violations.size());
+            addResult(currentMessages, aiMessage, request, ToolArgumentSchemaValidator.refusal(violations), exchangeRecorder);
+            Map<String, Object> step = new HashMap<>();
+            step.put("type", "tool_error");
+            step.put("tool", request.name());
+            step.put("error", "argument_schema");
+            step.put("violations", List.copyOf(violations));
+            trace.add(step);
+            String source = toolSources != null ? toolSources.get(request.name()) : null;
+            Metrics.globalRegistry.counter("eddi.tool.arguments.refused", "source", source != null ? source : "unknown").increment();
+        }
+        return valid == null ? admitted : valid;
     }
 
     /** Tool result for a call refused by {@link #refusedAsSelfTargeted}. */
@@ -1330,6 +1398,11 @@ class ToolLoopRunner {
         // tracking itself is unaffected by the flag.
         AgentOrchestrator.warnAboutUnenforcedBudgets(task);
         boolean enforceBudget = AgentOrchestrator.isBudgetEnforced(task);
+        // An enforced ceiling is checked against the tracker, so every charge it
+        // counts — the call's and a summarize truncation's — is recorded whatever
+        // enableCostTracking says; otherwise turning the reporting off would leave
+        // the ceiling counting nothing.
+        boolean chargeTracker = enableCostTracking || (enforceBudget && maxBudget != null);
         if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
             String budgetError = "Budget exceeded for conversation " + conversationId;
@@ -1469,7 +1542,7 @@ class ToolLoopRunner {
                 Supplier<String> execution = mock != null
                         ? () -> mockingExecutor.executeMocked(toolRequest, mock)
                         : () -> executor.execute(toolRequest, null);
-                boolean trackCost = enableCostTracking && mock == null;
+                boolean trackCost = chargeTracker && mock == null;
                 // Without a quota gate the call takes exactly the path it always took.
                 toolResult = quotaGate == null
                         ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
@@ -1510,7 +1583,7 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, enableCostTracking, runSpend));
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");

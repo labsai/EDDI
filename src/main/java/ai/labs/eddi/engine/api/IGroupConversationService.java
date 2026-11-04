@@ -294,6 +294,8 @@ public interface IGroupConversationService {
         }
         default void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
         }
+        default void onTeamHandoff(GroupConversationEventSink.TeamHandoffEvent event) {
+        }
         default void onCostUpdated(GroupConversationEventSink.CostUpdatedEvent event) {
         }
         default void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {

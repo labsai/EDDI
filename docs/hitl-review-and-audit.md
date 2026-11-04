@@ -74,7 +74,9 @@ A call governed by the rule is recorded under its `approvalCategory`; any other 
 
 ## Deciding with an edit
 
-All checks run **before** the pause is consumed: a malformed edit is a `400` and the conversation stays paused.
+Request validation runs **before** the pause is consumed: a malformed edit is a `400` and the conversation stays
+paused. Screening and the redacted-content check run **after** it, while the turn resumes: an edit refused there is
+not a `400` but a new pause (see "A refused edit" below), so read `approval-status` after the resume.
 
 ### Rule pause edits
 
@@ -94,7 +96,9 @@ All checks run **before** the pause is consumed: a malformed edit is a `400` and
 **What the engine does.** The LLM task that gave the draft replaces it **in place**: its own output item and data
 keys (`langchain:<type>:<taskId>`, `output:text:langchain:<type>`). Nothing after it is cut back and nothing runs
 again — not `postResponse`, not later tasks, not the rule that paused (it would pause again). The pipeline then
-resumes after the pause as for any approval. The step records `hitl:edit:applied` (digests and sizes, never the
+resumes after the pause as for any approval. A task with `addToOutput: false` has no output item to replace: the
+edit reaches only what reads its data key after the pause (an output template, a later rule), not properties its
+`postResponse` already set from the draft. The step records `hitl:edit:applied` (digests and sizes, never the
 original text — the original stays in the paused turn's LLM audit entry), `hitl:edit:outcome`, and the conversation
 output `hitlAnswerEdited = "true"` (`{memory.current.hitlAnswerEdited}` in templates).
 
@@ -113,7 +117,9 @@ ledger records a `hitl.edit.refused` entry.
 system role; later model calls see it as the assistant's earlier turn. Every later gated tool call still pauses.
 
 **Streaming clients** may already have shown the draft token by token during the paused turn. The resume reply and
-the `HitlResumeCompletedEvent` snapshot carry the final text — render from them. Tasks between the answer and the
+the `HitlResumeCompletedEvent` snapshot carry the final text — render from them. The reply carries it only when
+asked for: pass `returnCurrentStepOnly`, `returnDetailed` or `returningFields` on the resume (a reply needs
+owner-or-admin access, as `say` does); without any of them the resume answers an empty `200`. Tasks between the answer and the
 pause saw the draft and are not re-run: put the pause rule directly after the LLM task.
 
 ### Tool-call pause — amendments and reasons
