@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package ai.labs.eddi.engine.mcp;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -200,7 +201,14 @@ public class McpHitlTools {
                 // only the fingerprint, so argumentsRaw, the frozen LLM transcript
                 // and the running trace (all carrying raw tool arguments) reached
                 // every MCP caller the gate above admits.
-                return jsonSerialization.serialize(ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot));
+                var sanitized = ConversationMemoryUtilities.sanitizePendingToolCallsForApprover(snapshot);
+                // As REST: the compiled system prompt is the agent's configuration, so a
+                // caller without VIEW on the agent gets the snapshot without it.
+                if (resourceAccessGuard != null
+                        && (snapshot.getAgentId() == null || !resourceAccessGuard.hasAccess(snapshot.getAgentId(), AccessLevel.VIEW))) {
+                    ConversationMemoryUtilities.stripAuditData(sanitized);
+                }
+                return jsonSerialization.serialize(sanitized);
             }
             Map<String, String> summary = new LinkedHashMap<>();
             summary.put("conversationId", conversationId);
@@ -290,7 +298,8 @@ public class McpHitlTools {
                     "BAD_REQUEST", null);
         }
         try {
-            hitlAccessGuard.requireConversationHitlAccess(conversationId);
+            // As REST: an owner must still be allowed to USE the agent to resume.
+            hitlAccessGuard.requireConversationResumeAccess(conversationId);
             HitlDecision decision = new HitlDecision();
             decision.setVerdict(parsed);
             decision.setNote(note);

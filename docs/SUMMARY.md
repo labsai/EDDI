@@ -31,6 +31,7 @@
   - [LLM Parameters Reference](llm-parameters.md)
 - [RAG (Retrieval-Augmented Generation)](rag.md)
 - [Model Cascade](model-cascade.md)
+  - [Model Pricing and Cost Accounting](model-pricing.md)
 - [LLM Turn Resilience](llm-resilience.md)
 - [Prompt Snippets](prompt-snippets-guide.md)
 - [Output Configuration](output-configuration.md)

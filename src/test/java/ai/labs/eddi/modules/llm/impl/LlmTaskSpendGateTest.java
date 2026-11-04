@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
+import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
+import ai.labs.eddi.engine.pricing.model.UnpricedPolicy;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -237,6 +240,40 @@ class LlmTaskSpendGateTest {
         assertEquals(1, model.calls);
         assertEquals("hi", templateData.get("taskA"));
         verify(dataFactory, never()).createData(eq(LLM_SPEND_REFUSED_PREFIX + "taskA"), any());
+    }
+
+    @Test
+    @DisplayName("strict pricing (REFUSE): an unpriced model is not called and the fallback says unpriced_model")
+    void strictPricingRefusesAnUnpricedModel() throws Exception {
+        var model = new CountingModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        ModelPriceCatalogs.publish(PriceCatalogSnapshot.EMPTY.withFloor(UnpricedPolicy.REFUSE));
+        try {
+            run(task());
+        } finally {
+            ModelPriceCatalogs.publish(null);
+        }
+
+        assertEquals(0, model.calls);
+        verify(dataFactory).createData(eq(LLM_SPEND_REFUSED_PREFIX + "taskA"),
+                argThat(r -> r instanceof Map<?, ?> m && UnpricedCallPolicy.REASON.equals(m.get("reason"))));
+    }
+
+    @Test
+    @DisplayName("strict pricing (REFUSE): an explicitly priced task still calls its model")
+    void strictPricingLetsAPricedModelThrough() throws Exception {
+        var model = new CountingModel();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+        var task = task();
+        task.setInputPricePer1M(0.0);
+        ModelPriceCatalogs.publish(PriceCatalogSnapshot.EMPTY.withFloor(UnpricedPolicy.REFUSE));
+        try {
+            run(task);
+        } finally {
+            ModelPriceCatalogs.publish(null);
+        }
+
+        assertEquals(1, model.calls);
     }
 
     @Test

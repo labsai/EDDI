@@ -59,6 +59,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_GUARDRAIL_PREFIX;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_COST;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_NAME;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_MODEL_RESPONSE;
+import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_PRICING;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOKEN_USAGE;
 import static ai.labs.eddi.engine.memory.MemoryKeys.AUDIT_TOOL_CALLS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.LANGCHAIN_TRACE_PREFIX;
@@ -854,6 +855,9 @@ public class LifecycleManager implements ILifecycleManager {
             IData<Map<String, Object>> tokenData = currentStep.getLatestData(AUDIT_TOKEN_USAGE);
             if (tokenData != null && tokenData.getResult() != null)
                 llmDetail.put("tokenUsage", tokenData.getResult());
+            IData<Map<String, Object>> pricingData = currentStep.getLatestData(AUDIT_PRICING);
+            if (pricingData != null && pricingData.getResult() != null)
+                llmDetail.put("pricing", pricingData.getResult());
             IData<String> cascadeModelData = currentStep.getLatestData(AUDIT_CASCADE_MODEL);
             if (cascadeModelData != null && cascadeModelData.getResult() != null)
                 llmDetail.put("cascadeModel", cascadeModelData.getResult());

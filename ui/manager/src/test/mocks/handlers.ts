@@ -4,6 +4,7 @@ import { ratingHandlers } from "./rating-handlers";
 import { oversightHandlers } from "./oversight-handlers";
 import { alertHandlers } from "./alert-handlers";
 import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
+import { modelPriceHandlers } from "./model-prices-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
@@ -744,6 +745,9 @@ const WORKSPACES_DISABLED = {
 /** Where an E2E spec plants the workspace context it wants. */
 export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 
+/** Where an E2E spec plants the update-check switch it wants (default: on). */
+export const UPDATE_CHECK_SEED_KEY = "eddi-e2e-update-check";
+
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
@@ -896,12 +900,29 @@ function nextWeekday9amUtc(from: number = Date.now()): number {
 }
 
 export const handlers = [
+  // The server-side update-check switch: on by default, like the real backend.
+  http.get("*/administration/update-check", () =>
+    HttpResponse.json(
+      readSeed<{ enabled: boolean; lockedByConfig: boolean; uiEnabled: boolean }>(UPDATE_CHECK_SEED_KEY) ?? {
+        enabled: true,
+        lockedByConfig: false,
+        uiEnabled: true,
+      },
+    ),
+  ),
+  http.put("*/administration/update-check", async ({ request }) => {
+    const { enabled } = (await request.json()) as { enabled: boolean };
+    return HttpResponse.json({ enabled, lockedByConfig: false, uiEnabled: enabled });
+  }),
+
   // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
   ...ratingHandlers,
   // HITL oversight: /hitl/analytics, /hitl/samples, /hitl/autonomy.
   ...oversightHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).
   ...alertHandlers,
+  // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
+  ...modelPriceHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI
