@@ -11,7 +11,7 @@ import {
   extractOutputTexts,
   isTurnPaused,
   parseToolCallName,
-} from "./sse-events";
+} from "./stream-events";
 
 describe("parseErrorMessage", () => {
   it("extracts the message from the backend's JSON error payload", () => {

@@ -15,7 +15,7 @@ import {
   parseConfigFromQuery,
 } from "./ChatWidget";
 import { ChatProvider } from "@/store/chat-store";
-import { setAuthToken } from "@/api/http";
+import { setAuthToken } from "@eddi/core";
 import { MSG_READY, MSG_TOKEN, MSG_TOKEN_REQUEST } from "@/api/embed-auth";
 
 const originalFetch = globalThis.fetch;

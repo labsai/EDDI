@@ -64,7 +64,7 @@ export default defineConfig({
         target: "http://localhost:7070",
         changeOrigin: true,
       },
-      // Attachment upload and delete (attachments-api.ts).
+      // Attachment upload and delete (attachments.ts in @eddi/core).
       "/conversations": {
         target: "http://localhost:7070",
         changeOrigin: true,

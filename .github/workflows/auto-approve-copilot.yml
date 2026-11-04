@@ -161,6 +161,9 @@ jobs:
               // narrowed Playwright project turns a red UI job green.
               'ui/*/vite.config.*', 'ui/*/vitest.config.*', 'ui/*/playwright.config.*',
               'ui/*/eslint.config.*', 'ui/*/tsconfig*.json', 'ui/*/stryker.config.*',
+              // The same for a shared package, one level deeper: its lint config is
+              // also where the package boundaries (no app, no React import) live.
+              'ui/packages/*/vitest.config.*', 'ui/packages/*/eslint.config.*', 'ui/packages/*/tsconfig*.json',
               // What goes into the image the Dockerfile builds.
               '**/.dockerignore', '**/*.dockerignore',
               // The security-critical code itself. A change here (the auth and SSRF

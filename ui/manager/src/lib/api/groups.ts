@@ -1,6 +1,6 @@
 import { api } from "../api-client";
 import { deleteAgent, type AgentDescriptor } from "./agents";
-import { parseSseFrame } from "./sse-utils";
+import { readSseStream } from "@eddi/core";
 import { repairNegotiationArbitration } from "../hitl-config";
 import { seg } from "./path-segment";
 
@@ -1711,34 +1711,19 @@ export interface ArtifactUpdatedPayload {
 }
 
 /**
- * Sentinel for "this frame carried no `event:` line".
- *
- * `parseSseFrame` always returns a type, falling back to the default it is
- * given. Group events are dispatched by name, so a frame without an explicit
- * type has nothing to dispatch on and is skipped — passing a sentinel is how we
- * tell the two cases apart without re-parsing.
- */
-const NO_EVENT_TYPE = "\u0000no-event-type";
-
-/**
  * Read a Server-Sent Events response body as a stream of parsed group events.
  * Shared by the initial-discussion and approve/resume streaming endpoints.
  *
- * Framing is delegated to {@link parseSseFrame}, the one spec-correct parser in
- * this repo. This function used to hand-roll it and got three things wrong that
- * `sse-utils.ts` had already documented:
+ * Framing is `@eddi/core`'s `readSseStream`, the one reader for agent and group
+ * streams. This function used to hand-roll it and got three things wrong, each
+ * now pinned in the package's tests: it `.trim()`ed every `data:` line; it
+ * normalised CRLF per decoded chunk, so a `\r\n` straddling two reads was
+ * missed; and it never flushed the buffer on stream end, so a server that
+ * closed without a trailing blank line lost its final event — typically
+ * `group_complete`, the one the UI waits for.
  *
- *  - it `.trim()`ed every `data:` line, so a payload's leading and trailing
- *    whitespace was destroyed — meaningful in a token stream where a lone " " is
- *    a chunk;
- *  - it normalised CRLF per decoded chunk, so a `\r\n` straddling two
- *    `reader.read()` calls was missed and the frame silently failed to split;
- *  - it never flushed the buffer on stream end, so a server that closed without
- *    a trailing blank line lost its final event — typically `group_complete`,
- *    the one the UI waits for.
- *
- * The one deliberate divergence from the generic parser is kept: a frame with no
- * explicit `event:` line is skipped rather than dispatched as "message".
+ * Group events are dispatched by name, so a frame with no `event:` line is
+ * skipped (`defaultEventType: null`) rather than dispatched as "message".
  */
 async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> {
   if (!response.ok) {
@@ -1749,57 +1734,8 @@ async function* readGroupSSE(response: Response): AsyncGenerator<GroupSSEEvent> 
     throw new Error(await streamRefusalMessage(response));
   }
 
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("No readable stream");
-
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  /** Split off every COMPLETE frame in the buffer, leaving the partial tail. */
-  function takeFrames(): string[] {
-    // Normalise on the accumulated buffer, not per chunk, and hold back a
-    // trailing lone \r: it may be the first half of a \r\n that lands next read.
-    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r(?!$)/g, "\n");
-    const parts = buffer.split("\n\n");
-    buffer = parts.pop() ?? "";
-    return parts;
-  }
-
-  function toEvent(frame: string): GroupSSEEvent | null {
-    const parsed = parseSseFrame(frame, NO_EVENT_TYPE);
-    if (!parsed || parsed.type === NO_EVENT_TYPE) return null;
-    return { type: parsed.type as GroupSSEEventType, data: parsed.data };
-  }
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      for (const frame of takeFrames()) {
-        const event = toEvent(frame);
-        if (event) yield event;
-      }
-    }
-
-    // Flush the DECODER first. Every read above passes `{ stream: true }`, which
-    // deliberately holds back a trailing incomplete UTF-8 sequence in case the
-    // rest arrives next chunk. At EOF there is no next chunk, so a final
-    // `decode()` with no argument is what emits those held-back bytes — without
-    // it, a frame ending mid-character (any non-ASCII agent output split across
-    // the last chunk boundary) loses its last character.
-    buffer += decoder.decode();
-
-    // Then flush the BUFFER. A server that closes without a final blank line
-    // still meant to send that frame.
-    buffer = buffer.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    for (const frame of buffer.split("\n\n")) {
-      const event = toEvent(frame);
-      if (event) yield event;
-    }
-  } finally {
-    reader.releaseLock();
+  for await (const frame of readSseStream(response.body, { defaultEventType: null })) {
+    yield { type: frame.type as GroupSSEEventType, data: frame.data };
   }
 }
 

@@ -15,8 +15,8 @@ import {
   uploadAttachment,
   deleteAttachment,
   MAX_ATTACHMENTS_PER_TURN,
-} from "@/api/attachments-api";
-import { ApiError } from "@/api/http";
+} from "@eddi/core";
+import { ApiError } from "@eddi/core";
 
 /**
  * ChatInput reports upload problems by posting into the transcript, which the
@@ -94,9 +94,9 @@ describe("ChatInput", () => {
 
 /* ─── Attachments ───────────────────────────── */
 
-vi.mock("@/api/attachments-api", async () => {
-  const actual = await vi.importActual<typeof import("@/api/attachments-api")>(
-    "@/api/attachments-api",
+vi.mock("@eddi/core", async () => {
+  const actual = await vi.importActual<typeof import("@eddi/core")>(
+    "@eddi/core",
   );
   return {
     ...actual,

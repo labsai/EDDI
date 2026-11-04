@@ -13,10 +13,10 @@ import {
   type ReactNode,
 } from "react";
 import type { ChatMessage, QuickReply, ConversationState, ChatConfig, InputField } from "@/types";
-import type { AttachmentResult } from "@/api/attachments-api";
-import type { ApprovalStatus } from "@/api/hitl-api";
+import type { AttachmentResult } from "@eddi/core";
+import type { ApprovalStatus } from "@eddi/core";
 import { agentAppearanceLayer, brandConfigLayer } from "@/api/brand";
-import type { RatingProfile } from "@/api/rating-api";
+import type { RatingProfile } from "@eddi/core";
 
 /* ─── State ───────────────────────────────────── */
 

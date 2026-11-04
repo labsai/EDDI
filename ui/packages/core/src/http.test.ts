@@ -11,7 +11,7 @@ import {
   errorPayload,
   setUnauthorizedHandler,
 } from "./http";
-import { captureFetch, mockFetchResponse } from "@/test-utils/sse";
+import { captureFetch, mockFetchResponse } from "./test-utils/sse";
 
 const originalFetch = globalThis.fetch;
 
@@ -31,7 +31,7 @@ describe("auth token", () => {
 
     await request("/agents/x", undefined, "ctx");
 
-    const headers = new Headers(calls[0].init?.headers);
+    const headers = new Headers(calls[0]!.init?.headers);
     expect(headers.has("Authorization")).toBe(false);
   });
 
@@ -43,7 +43,7 @@ describe("auth token", () => {
 
     await request("/agents/x", undefined, "ctx");
 
-    const headers = new Headers(calls[0].init?.headers);
+    const headers = new Headers(calls[0]!.init?.headers);
     expect(headers.get("Authorization")).toBe("Bearer abc123");
   });
 
@@ -57,7 +57,7 @@ describe("auth token", () => {
       "ctx",
     );
 
-    const headers = new Headers(calls[0].init?.headers);
+    const headers = new Headers(calls[0]!.init?.headers);
     expect(headers.get("Content-Type")).toBe("text/plain");
     expect(headers.get("Authorization")).toBe("Bearer abc123");
   });
@@ -69,7 +69,7 @@ describe("auth token", () => {
 
     await request("/agents/x", undefined, "ctx");
 
-    expect(new Headers(calls[0].init?.headers).has("Authorization")).toBe(false);
+    expect(new Headers(calls[0]!.init?.headers).has("Authorization")).toBe(false);
   });
 });
 

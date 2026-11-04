@@ -1,13 +1,15 @@
 /* ──────────────────────────────────────────────
-   EDDI Chat — Attachments
+   @eddi/core — attachments
    Upload, then reference the returned storageRef through an `attachment_N`
    context key. The context key is the ONLY ingestion path the backend reads
    (AttachmentContextExtractor) — a reference embedded in the message text is
    silently ignored.
+
+   Derived from the Chat UI's `api/attachments-api.ts`.
    ────────────────────────────────────────────── */
 
-import { encodeSegment, request, requestJson } from "./http";
-import type { ContextMap } from "@/types";
+import { defaultHttp, encodeSegment, type HttpClient } from "./http";
+import type { ContextMap } from "./types";
 
 export interface AttachmentResult {
   storageRef: string;
@@ -37,9 +39,6 @@ export interface AttachmentResult {
    * Not a complete signal: there is also an aggregate cap
    * (`max-forward-aggregate-bytes`, 20 MiB default) that this flag cannot see,
    * so several individually-forwardable files can still push the last one out.
-   * The per-turn skip record lands in `attachments:errors`, which the widget
-   * does not read — it asks for `returnDetailed=false`, and the projection's
-   * key-prefix allowlist only admits that key when detailed is requested.
    */
   forwardableInline?: boolean;
 }
@@ -47,16 +46,15 @@ export interface AttachmentResult {
 /**
  * Backend cap per turn — AttachmentContextExtractor's
  * DEFAULT_MAX_ATTACHMENTS_PER_TURN. Extra attachments are dropped server-side,
- * so the UI must not pretend they were sent.
+ * so a UI must not pretend they were sent.
  *
- * Caveat, stated plainly because this repo rejected a client-side upload-size
- * pre-check on the same grounds: `eddi.attachments.max-per-turn` is a
- * @ConfigProperty, so this is a default rather than a contract. It is kept
- * client-side anyway because the failure mode differs — a deployment that
- * RAISES the cap merely leaves slots unused here, whereas a stale size limit
- * would refuse uploads the server would have accepted. A deployment that LOWERS
- * it still gets a correct outcome, just reported by the server rather than
- * pre-empted. There is no endpoint exposing the effective value.
+ * `eddi.attachments.max-per-turn` is a @ConfigProperty, so this is a default
+ * rather than a contract. It is kept client-side anyway because the failure
+ * mode differs — a deployment that RAISES the cap merely leaves slots unused,
+ * whereas a stale size limit would refuse uploads the server would have
+ * accepted. A deployment that LOWERS it still gets a correct outcome, just
+ * reported by the server rather than pre-empted. There is no endpoint
+ * exposing the effective value.
  */
 export const MAX_ATTACHMENTS_PER_TURN = 5;
 
@@ -76,51 +74,53 @@ const ATTACHMENT_PREFIX = "attachment_";
  * no name at all.
  */
 export function buildAttachmentContext(
-  attachments: readonly AttachmentResult[],
+  attachments: readonly Pick<AttachmentResult, "storageRef" | "fileName">[],
 ): ContextMap {
   const context: ContextMap = {};
   attachments.slice(0, MAX_ATTACHMENTS_PER_TURN).forEach((a, index) => {
     context[`${ATTACHMENT_PREFIX}${index}`] = {
       type: "object",
-      value: a.fileName
-        ? { storageRef: a.storageRef, fileName: a.fileName }
-        : { storageRef: a.storageRef },
+      value: a.fileName ? { storageRef: a.storageRef, fileName: a.fileName } : { storageRef: a.storageRef },
     };
   });
   return context;
 }
 
-/**
- * Upload a file to a conversation.
- * POST /conversations/{conversationId}/attachments (multipart/form-data)
- *
- * Throws ApiError on rejection so the caller can surface the server's reason
- * (ATTACHMENT_TOO_LARGE, ATTACHMENT_REJECTED, or a bare 400).
- */
-export async function uploadAttachment(
-  conversationId: string,
-  file: File,
-): Promise<AttachmentResult> {
-  const formData = new FormData();
-  formData.append("file", file);
+/** The attachment endpoints over one {@link HttpClient}. */
+export function createAttachmentApi(http: HttpClient) {
+  /**
+   * Upload a file to a conversation.
+   * POST /conversations/{conversationId}/attachments (multipart/form-data)
+   *
+   * Throws on rejection so the caller can surface the server's reason
+   * (ATTACHMENT_TOO_LARGE, ATTACHMENT_REJECTED, or a bare 400).
+   */
+  async function uploadAttachment(conversationId: string, file: Blob): Promise<AttachmentResult> {
+    const formData = new FormData();
+    formData.append("file", file);
 
-  const result = await requestJson<AttachmentResult>(
-    `/conversations/${encodeSegment(conversationId)}/attachments`,
-    { method: "POST", body: formData },
-    "Attachment upload failed",
-  );
-  if (!result) throw new Error("uploadAttachment: empty response body");
-  return result;
+    const result = await http.requestJson<AttachmentResult>(
+      `/conversations/${encodeSegment(conversationId)}/attachments`,
+      { method: "POST", body: formData },
+      "Attachment upload failed",
+    );
+    if (!result) throw new Error("uploadAttachment: empty response body");
+    return result;
+  }
+
+  /** Remove a previously uploaded attachment. */
+  async function deleteAttachment(conversationId: string, storageRef: string): Promise<void> {
+    await http.request(
+      `/conversations/${encodeSegment(conversationId)}/attachments/${encodeSegment(storageRef)}`,
+      { method: "DELETE" },
+      "Failed to remove attachment",
+    );
+  }
+
+  return { uploadAttachment, deleteAttachment };
 }
 
-/** Remove a previously uploaded attachment. */
-export async function deleteAttachment(
-  conversationId: string,
-  storageRef: string,
-): Promise<void> {
-  await request(
-    `/conversations/${encodeSegment(conversationId)}/attachments/${encodeSegment(storageRef)}`,
-    { method: "DELETE" },
-    "Failed to remove attachment",
-  );
-}
+export type AttachmentApi = ReturnType<typeof createAttachmentApi>;
+
+/** The attachment API over {@link defaultHttp}. */
+export const { uploadAttachment, deleteAttachment } = createAttachmentApi(defaultHttp);

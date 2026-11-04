@@ -49,6 +49,7 @@ import {
   type AgentDescriptor,
   parseResourceUri,
 } from "@/lib/api/agents";
+import { UNCONSUMED_STREAM_ERROR_CODES, parseErrorEvent } from "@eddi/core";
 import { useDebugStore } from "@/hooks/use-debug-events";
 import { getErrorMessage, isApiError } from "@/lib/api-client";
 import { toast } from "sonner";
@@ -558,26 +559,13 @@ class SendBlockedError extends Error {
 
 /**
  * Stream error codes that mean the input was refused BEFORE the turn started,
- * so it was never consumed. They are the codes
- * `RestAgentEngineStreaming.buildKnownConditionOrOpaqueErrorEvent` emits for the
- * conditions the non-streaming twin answers with a status (409, 410, 404, 413,
- * 429, 403, 503). A failure DURING a turn arrives as an opaque error without a
- * code and keeps the error bubble, because that turn did run.
+ * so it was never consumed — `@eddi/core`'s list, shared with the Chat UI. A
+ * failure DURING a turn arrives as an opaque error without a code and keeps the
+ * error bubble, because that turn did run.
  *
- * Exported for tests, which pin the list against the backend's.
+ * Re-exported for tests, which pin the list against the backend's.
  */
-export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
-  "awaiting_approval",
-  "conversation_not_found",
-  "input_too_large",
-  "conversation_ended",
-  "agent_not_ready",
-  "agent_mismatch",
-  "quota_accounting_unavailable",
-  "quota_exceeded",
-  "processing_restricted",
-  "restriction_status_unavailable",
-]);
+export { UNCONSUMED_STREAM_ERROR_CODES };
 
 /**
  * How long a stream detached from the transcript on screen is left to finish
@@ -587,19 +575,6 @@ export const UNCONSUMED_STREAM_ERROR_CODES: ReadonlySet<string> = new Set([
  * open for good, one more per switch.
  */
 export const DETACHED_STREAM_GRACE_MS = 120_000;
-
-/** The `{message, code}` an SSE `error` frame carries; raw text when it is not JSON. */
-function parseStreamError(data: string): { message: string; code?: string } {
-  try {
-    const parsed = JSON.parse(data);
-    return {
-      message: parsed && typeof parsed.message === "string" ? parsed.message : data,
-      code: parsed && typeof parsed.code === "string" ? parsed.code : undefined,
-    };
-  } catch {
-    return { message: data };
-  }
-}
 
 /**
  * Turn a 409 on a send into a {@link RejectedSendError}, reading the
@@ -787,7 +762,7 @@ export function useSendMessage() {
                 continue;
               }
               if (event.type === "error") {
-                const { message: reason, code } = parseStreamError(event.data);
+                const { message: reason, code } = parseErrorEvent(event.data);
                 // The streaming twins of the non-streaming refusals: the input
                 // was NOT consumed, so it is rolled back like a refused status
                 // instead of staying in the transcript above an error bubble.

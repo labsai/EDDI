@@ -6,7 +6,7 @@ import { server } from "@/test/mocks/server";
 import { renderWithProviders } from "@/test/test-utils";
 import type { ChatMessage } from "@/lib/api/chat";
 import type { RatingProfile } from "@/lib/api/ratings";
-import { agentReplyCount, lastStepIndex, ratableSteps, stepIndexes } from "@/lib/chat-rating-steps";
+import { agentReplyCount, lastStepIndex, ratableSteps, stepIndexes } from "@eddi/core";
 import { useChatRatings } from "@/hooks/use-chat-ratings";
 import { ChatRatingCard, ChatStepRating } from "../chat-rating";
 

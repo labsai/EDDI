@@ -31,8 +31,29 @@ import {
   rerunLastStep,
   endManagedConversation,
   setBaseUrl,
-} from "@/api/chat-api";
-import { setAuthToken } from "@/api/http";
+  setAuthToken,
+  ApiError,
+  parseRatingProfile,
+  lastStepIndex,
+  ratableSteps,
+  buildAttachmentContext,
+  outputsCarryStepIndexes,
+  stepsToMessages,
+  cancelConversation,
+  parseDoneSnapshot,
+  parseErrorEvent,
+  isSkippedTurn,
+  isPausedState,
+  extractOutputTexts,
+  extractOutputImages,
+  findInputField,
+  isTurnPaused,
+  parseToolCallName,
+  UNCONSUMED_STREAM_ERROR_CODES,
+  type ApprovalStatus,
+  type DoneSnapshot,
+  type OutputImage,
+} from "@eddi/core";
 import { parseAllowedTokenOrigins, startEmbedAuth } from "@/api/embed-auth";
 import { readUrlToken } from "@/api/chat-config";
 import {
@@ -43,31 +64,12 @@ import {
   demoRatingClient,
   DEMO_RATING_PROFILE,
 } from "@/api/demo-api";
-import { httpRatingClient, parseRatingProfile } from "@/api/rating-api";
+import { httpRatingClient } from "@/api/rating-api";
 import { useRatings } from "@/hooks/useRatings";
-import { lastStepIndex, ratableSteps } from "@/rating-steps";
 import { RatingCard } from "./RatingCard";
-import { buildAttachmentContext } from "@/api/attachments-api";
-import { outputsCarryStepIndexes, stepsToMessages } from "@/api/snapshot";
-import { cancelConversation, type ApprovalStatus } from "@/api/hitl-api";
 import { useHitlPolling } from "@/hooks/useHitlPolling";
 import { PausedCard } from "./PausedCard";
-import { ApiError } from "@/api/http";
-import {
-  parseDoneSnapshot,
-  parseErrorEvent,
-  isSkippedTurn,
-  skippedTurnMessage,
-  isPausedState,
-  extractOutputTexts,
-  extractOutputImages,
-  findInputField,
-  isTurnPaused,
-  parseToolCallName,
-  UNCONSUMED_STREAM_ERROR_CODES,
-  type DoneSnapshot,
-  type OutputImage,
-} from "@/api/sse-events";
+import { skippedTurnMessage } from "@/turn-notices";
 import type {
   ChatMessage,
   SSEEvent,
@@ -966,7 +968,7 @@ export function ChatWidget() {
           dispatch({ type: "SET_CONVERSATION_ID", id: convId });
 
           // GET to pick up welcome message
-          const snapshot = await readConversation(environment, agentId, convId);
+          const snapshot = await readConversation(convId);
           if (gen !== generationRef.current) return;
           processSnapshot(snapshot, { fullHistory: true });
           loadAgentName(snapshot, gen);
@@ -1248,14 +1250,7 @@ export function ChatWidget() {
           const gen = generationRef.current;
           let streamDone = false;
 
-          const events = sendMessageStreaming(
-            environment,
-            agentId,
-            state.conversationId,
-            text,
-            context,
-            abort.signal,
-          );
+          const events = sendMessageStreaming(state.conversationId, text, { context, signal: abort.signal });
 
           try {
             for await (const event of events) {
@@ -1292,12 +1287,7 @@ export function ChatWidget() {
           // redoAvailable are absent, so without this re-read the undo/redo
           // buttons stay permanently greyed out on the streaming path.
           try {
-            const after = await readConversation(
-              "",
-              "",
-              state.conversationId,
-              true,
-            );
+            const after = await readConversation(state.conversationId, true);
             if (gen !== generationRef.current) return;
             // The `done` payload could not be read, so nothing of the turn's
             // outcome has been applied yet. This read of the current step
@@ -1355,15 +1345,7 @@ export function ChatWidget() {
           }
         } else if (environment && agentId && state.conversationId) {
           // Non-streaming path — pass context for secret input
-          const snapshot = await sendMessage(
-            environment,
-            agentId,
-            state.conversationId,
-            text,
-            userId,
-            context,
-            abort.signal,
-          );
+          const snapshot = await sendMessage(state.conversationId, text, { userId, context, signal: abort.signal });
           if (sendGen !== generationRef.current || stopped()) return;
           dispatch({ type: "SET_THINKING", value: false });
           processSnapshot(snapshot);
@@ -1403,12 +1385,7 @@ export function ChatWidget() {
           // refused, leaving the composer live against a paused conversation.
           if (state.conversationId) {
             try {
-              const snap = await readConversation(
-                environment ?? "",
-                agentId ?? "",
-                state.conversationId,
-                true,
-              );
+              const snap = await readConversation(state.conversationId, true);
               if (sendGen !== generationRef.current) return;
               if (snap.conversationState) {
                 dispatch({
@@ -1430,12 +1407,7 @@ export function ChatWidget() {
           // the conversation's version gets its own footer.
           let endReason: string | null = null;
           try {
-            const snap = await readConversation(
-              environment ?? "",
-              agentId ?? "",
-              state.conversationId,
-              true,
-            );
+            const snap = await readConversation(state.conversationId, true);
             endReason = snap.endReason ?? null;
           } catch {
             // best effort — the generic ended footer still applies
@@ -1501,12 +1473,7 @@ export function ChatWidget() {
         });
         if (state.conversationId) {
           try {
-            const after = await readConversation(
-              "",
-              "",
-              state.conversationId,
-              true,
-            );
+            const after = await readConversation(state.conversationId, true);
             if (sendGen !== generationRef.current || stopped()) return;
             dispatch({
               type: "SET_UNDO_REDO",
@@ -1609,8 +1576,8 @@ export function ChatWidget() {
       dispatch({ type: "SET_PROCESSING", value: true });
       setHistoryBusy(true);
       // undo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await undoConversation("", "", state.conversationId);
-      const snapshot = await readConversation("", "", state.conversationId);
+      await undoConversation(state.conversationId);
+      const snapshot = await readConversation(state.conversationId);
 
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
@@ -1650,8 +1617,8 @@ export function ChatWidget() {
       dispatch({ type: "SET_PROCESSING", value: true });
       setHistoryBusy(true);
       // redo returns 200 with an EMPTY body; re-read the snapshot to rebuild.
-      await redoConversation("", "", state.conversationId);
-      const snapshot = await readConversation("", "", state.conversationId);
+      await redoConversation(state.conversationId);
+      const snapshot = await readConversation(state.conversationId);
 
       // Rebuild from the shape the endpoint really returns. An empty result
       // means "could not rebuild", NOT "the conversation is empty" — replacing
@@ -1755,12 +1722,7 @@ export function ChatWidget() {
     // the widget in a paused state it can never leave.
     if (!state.conversationId) return false;
     try {
-      const snapshot = await readConversation(
-        environment ?? "",
-        agentId ?? "",
-        state.conversationId,
-        true,
-      );
+      const snapshot = await readConversation(state.conversationId, true);
       // The watch may have been torn down while this read was in flight (a
       // restart, an unmount). Applying the snapshot then would graft the old
       // conversation's transcript onto the new one.
@@ -1772,7 +1734,7 @@ export function ChatWidget() {
       console.error("Failed to refresh after approval:", err);
       return false;
     }
-  }, [environment, agentId, state.conversationId, processSnapshot]);
+  }, [state.conversationId, processSnapshot]);
 
   useHitlPolling({
     conversationId: state.conversationId,
@@ -1829,7 +1791,7 @@ export function ChatWidget() {
     try {
       await rerunLastStep(state.conversationId);
       if (gen === generationRef.current && rerunStep !== null) clearRatedStep(rerunStep);
-      const snapshot = await readConversation("", "", state.conversationId, true);
+      const snapshot = await readConversation(state.conversationId, true);
       if (gen !== generationRef.current) return;
       if (snapshot.conversationState) {
         dispatch({

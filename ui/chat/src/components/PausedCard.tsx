@@ -8,12 +8,8 @@
 
 import { useEffect, useState } from "react";
 import { Hand } from "lucide-react";
-import {
-  approvalDeadline,
-  gatedToolNames,
-  pauseHeadline,
-  type ApprovalStatus,
-} from "@/api/hitl-api";
+import { approvalDeadline, gatedToolNames, type ApprovalStatus } from "@eddi/core";
+import { pauseHeadline } from "@/api/hitl-api";
 import { t, getLocale } from "@/i18n";
 
 interface PausedCardProps {

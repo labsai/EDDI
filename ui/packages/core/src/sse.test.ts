@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSseFrame } from "../sse-utils";
+import { parseSseFrame } from "./sse";
 
 /**
  * Regression tests for the three framing rules the chat stream previously got

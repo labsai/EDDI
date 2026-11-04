@@ -9,10 +9,10 @@ import {
   rerunLastStep,
   loadManagedConversation,
   sendManagedAgentMessage,
-  setBaseUrl,
-} from "./chat-api";
-import { mockFetchSSE, mockFetchResponse, captureFetch } from "@/test-utils/sse";
-import type { SSEEvent } from "@/types";
+} from "./conversation";
+import { setBaseUrl } from "./http";
+import { mockFetchSSE, mockFetchResponse, captureFetch } from "./test-utils/sse";
+import type { SSEEvent } from "./types";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {
@@ -22,7 +22,7 @@ afterEach(() => {
 async function collect(chunks: string[]): Promise<SSEEvent[]> {
   mockFetchSSE(chunks);
   const events: SSEEvent[] = [];
-  for await (const event of sendMessageStreaming("", "", "conv-1", "hi")) {
+  for await (const event of sendMessageStreaming("conv-1", "hi")) {
     events.push(event);
   }
   return events;
@@ -162,14 +162,14 @@ describe("undoConversation — empty response bodies", () => {
     setBaseUrl("");
     mockFetchResponse(200, "");
 
-    await expect(undoConversation("", "", "conv-1")).resolves.toBeDefined();
+    await expect(undoConversation("conv-1")).resolves.toBeDefined();
   });
 
   it("throws an ApiError carrying status 409 when undo is refused", async () => {
     setBaseUrl("");
     mockFetchResponse(409, "");
 
-    await expect(undoConversation("", "", "conv-1")).rejects.toMatchObject({
+    await expect(undoConversation("conv-1")).rejects.toMatchObject({
       status: 409,
     });
   });
@@ -182,21 +182,21 @@ describe("rerunLastStep", () => {
 
     await rerunLastStep("conv-1");
 
-    expect(calls[0].url).toContain("/agents/conv-1/rerun");
-    expect(calls[0].init?.method).toBe("POST");
+    expect(calls[0]!.url).toContain("/agents/conv-1/rerun");
+    expect(calls[0]!.init?.method).toBe("POST");
     // No language unless one is asked for. A hard-coded "en" became the
     // conversation's `lang` property, filtering language-specific outputs
     // for that user and re-running managed conversations on every load.
-    expect(calls[0].url).not.toContain("language");
+    expect(calls[0]!.url).not.toContain("language");
   });
 
   it("forwards a language only when one is given", async () => {
     setBaseUrl("");
     const { calls } = captureFetch(200, "{}");
 
-    await rerunLastStep("conv-1", "de");
+    await rerunLastStep("conv-1", { language: "de" });
 
-    expect(calls[0].url).toContain("/agents/conv-1/rerun?language=de");
+    expect(calls[0]!.url).toContain("/agents/conv-1/rerun?language=de");
   });
 
   it("tolerates an empty 200 body", async () => {
@@ -221,7 +221,7 @@ describe("managed-agent conversation", () => {
 
     await loadManagedConversation("support", "user-7");
 
-    expect(calls[0].init?.method).toBe("GET");
+    expect(calls[0]!.init?.method).toBe("GET");
   });
 
   it("POSTs an attachment-only turn instead of falling back to GET", async () => {
@@ -235,7 +235,7 @@ describe("managed-agent conversation", () => {
       attachment_0: { type: "object", value: { storageRef: "r1", fileName: "a.pdf" } },
     });
 
-    expect(calls[0].init?.method).toBe("POST");
+    expect(calls[0]!.init?.method).toBe("POST");
   });
 
   it("carries the attachment context on the wire", async () => {
@@ -246,7 +246,7 @@ describe("managed-agent conversation", () => {
       attachment_0: { type: "object", value: { storageRef: "r1", fileName: "a.pdf" } },
     });
 
-    const body = JSON.parse(String(calls[0].init?.body));
+    const body = JSON.parse(String(calls[0]!.init?.body));
     expect(body.context.attachment_0.value.storageRef).toBe("r1");
   });
 });

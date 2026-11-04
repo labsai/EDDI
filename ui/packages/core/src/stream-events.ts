@@ -1,11 +1,10 @@
 /* ──────────────────────────────────────────────
-   EDDI Chat — SSE payload interpretation
+   @eddi/core — agent stream payloads and turn outcomes
    Pure functions over the wire format, so the stream semantics are testable
-   without mounting the widget.
+   without mounting a UI. Derived from the Chat UI's `api/sse-events.ts`.
    ────────────────────────────────────────────── */
 
-import type { ConversationState, ConversationOutput, InputField } from "@/types";
-import { t } from "@/i18n";
+import type { ConversationState, ConversationOutput, InputField } from "./types";
 
 /** The trimmed snapshot the `done` event carries — NOT the full snapshot. */
 export interface DoneSnapshot {
@@ -166,14 +165,16 @@ export interface OutputImage {
  * A slash-prefixed value is resolved the way the browser will resolve it, not
  * judged by its first characters: `//host` and `/\host` (a backslash counts as a
  * slash in an http(s) URL) both name another host, so they are paths only when
- * that host is this page's.
+ * that host is this page's. `pageUrl` defaults to the current page; without
+ * one (outside a browser) no slash-prefixed value is same-origin.
  */
-export function isSafeUri(uri: string): boolean {
+export function isSafeUri(uri: string, pageUrl: string | undefined = globalThis.location?.href): boolean {
   const trimmed = uri.trim();
   if (!trimmed) return false;
   if (trimmed.startsWith("/")) {
+    if (!pageUrl) return false;
     try {
-      const page = new URL(window.location.href);
+      const page = new URL(pageUrl);
       const resolved = new URL(trimmed, page);
       return resolved.protocol === page.protocol && resolved.host === page.host;
     } catch {
@@ -339,18 +340,4 @@ export function extractOutputTexts(output: unknown): string[] {
     }
   }
   return texts;
-}
-
-/** User-facing copy explaining why a turn was dropped. */
-export function skippedTurnMessage(state: ConversationState | undefined): string {
-  switch (state) {
-    case "AWAITING_HUMAN":
-      return t("skipped.awaiting");
-    case "IN_PROGRESS":
-      return t("skipped.busy");
-    case "ENDED":
-      return t("skipped.ended");
-    default:
-      return t("skipped.default");
-  }
 }
