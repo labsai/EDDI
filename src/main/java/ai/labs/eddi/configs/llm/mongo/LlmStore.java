@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaConfigValidator;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -66,6 +67,9 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 SecretScopeValidation.validate(task.getPostResponse(), "langchain.task[" + i + "].postResponse");
                 ToolRateLimiter.validateLimits(task.getDefaultRateLimit(), task.getToolRateLimits(), "langchain.task[" + i + "]");
                 warnStrictModeImplications(task.getToolApprovals(), fieldPath);
+                // answerMode: the terminal reply tool (convertToObject + object-root
+                // responseSchema, no name collision).
+                AnswerToolConfigValidator.validate(task, "langchain.task[" + i + "]");
             }
         }
     }

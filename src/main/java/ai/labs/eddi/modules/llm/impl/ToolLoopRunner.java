@@ -46,6 +46,7 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.ToolChoice;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -397,6 +398,18 @@ class ToolLoopRunner {
             int perTurnCap = effectiveCallCap(task.getMaxToolCallsPerTurn(), DEFAULT_MAX_TOOL_CALLS_PER_TURN);
             int toolCallsThisTurn = countToolCalls(trace);
 
+            // answerMode "tool": the reply tool is always on the surface — a LAZY
+            // start and a HITL resume restore their own surfaces, and neither may lose
+            // it — and the request forces a tool call where the provider can.
+            String answerToolName = setup.answerToolName();
+            ToolChoice answerToolChoice = null;
+            if (answerToolName != null) {
+                if (activeSpecs.stream().noneMatch(spec -> answerToolName.equals(spec.name()))) {
+                    activeSpecs.add(setup.answerTool());
+                }
+                answerToolChoice = AnswerTool.toolChoice(task, jsonPolicy != null ? jsonPolicy.provider() : null);
+            }
+
             // Repeat guard: stack-local on purpose (the runner is a shared singleton),
             // so a HITL resume, which is a new run of this method, starts a fresh one.
             // Null when the task switched it off.
@@ -481,7 +494,13 @@ class ToolLoopRunner {
                 // API-level JSON, decided against THIS request's tool surface. Baking it
                 // into the model instead would put it on every request the cached model
                 // ever serves — the Gemini 400 documented in docs/changelog.md.
-                if (jsonPolicy != null) {
+                // Not with the reply tool: the answer arrives as its arguments, which the
+                // provider's function calling already holds to the schema.
+                if (answerToolName != null) {
+                    if (answerToolChoice != null) {
+                        requestBuilder.toolChoice(answerToolChoice);
+                    }
+                } else if (jsonPolicy != null) {
                     var responseFormat = jsonPolicy.resolve(toolsInRequest);
                     if (responseFormat != null) {
                         requestBuilder.responseFormat(responseFormat);
@@ -511,8 +530,22 @@ class ToolLoopRunner {
                     throw requestFailure;
                 }
                 modelAnswered = true;
-                AiMessage aiMessage = ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals);
-                currentMessages.add(aiMessage);
+                // The reply tool's calls are taken out of the response BEFORE anything
+                // else sees it: the call caps, the approval gate, quotas, rate limits,
+                // the cache and cost tracking only ever see the other calls, and the
+                // transcript (a pause freezes it, a cascade hands it on) never holds a
+                // call without a result.
+                AnswerTool.Extraction answerCall = AnswerTool.extract(
+                        ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals), answerToolName);
+                AiMessage aiMessage = answerCall.remaining();
+                if (answerCall.replyCalls() > 1) {
+                    AnswerTool.duplicate(conversationId, answerCall.replyCalls());
+                }
+                // A response that is only the reply call adds nothing to the transcript
+                // here; answerWith appends the answer as the final assistant message.
+                if (!answerCall.answered() || answerCall.hasOtherCalls()) {
+                    currentMessages.add(aiMessage);
+                }
 
                 // Accumulate token usage for cost/observability reporting.
                 if (chatResponse.metadata() != null && chatResponse.metadata().tokenUsage() != null) {
@@ -655,6 +688,12 @@ class ToolLoopRunner {
                             // resume's spend checks count it.
                             Map<String, Object> usageSoFar = tokenHolder[0] != null ? ToolContextBudget.tokenUsageMap(tokenHolder[0]) : null;
                             pause.addSpend(usageSoFar, runSpend.getAsDouble());
+                            if (answerCall.answered()) {
+                                // The turn did not end: the reply sat next to a call that now
+                                // waits for a human. It is dropped (it is not in the frozen
+                                // transcript); the resumed loop offers the reply tool again.
+                                AnswerTool.count(AnswerTool.OUTCOME_DISCARDED);
+                            }
                             throw pause;
                         }
                     }
@@ -689,6 +728,13 @@ class ToolLoopRunner {
                     }
                     admission.answerRefused(aiMessage, currentMessages, trace, exchangeRecorder);
 
+                    // The other calls of a response that also called the reply tool have
+                    // run (none paused — a pause throws above and drops the reply): the
+                    // reply is the turn's answer.
+                    if (answerCall.answered()) {
+                        return answerWith(answerCall, answerToolName, currentMessages, trace, transcriptOut);
+                    }
+
                     // The model keeps re-sending calls the guard has to refuse: stop
                     // asking it. Every call of this round has its result, so the
                     // transcript is well-formed; completed calls are kept as they are.
@@ -698,7 +744,14 @@ class ToolLoopRunner {
                         trace.add(Map.of("type", "tool_repeat_stopped", "refusals", repeatGuard.refusals()));
                         return finish(currentMessages, transcriptOut, ToolRepeatGuard.stoppedMessage(repeatGuard.refusals()));
                     }
+                } else if (answerCall.answered()) {
+                    return answerWith(answerCall, answerToolName, currentMessages, trace, transcriptOut);
                 } else {
+                    if (answerToolName != null) {
+                        // answerMode "tool", answered in plain text: the text goes on to the
+                        // convertToObject parse and its invalid-JSON handling, as in "text" mode.
+                        AnswerTool.count(AnswerTool.OUTCOME_TEXT);
+                    }
                     return finish(currentMessages, transcriptOut, aiMessage.text());
                 }
             }
@@ -715,6 +768,11 @@ class ToolLoopRunner {
             // asking to continue. Observed live: the Platform Operator building an
             // agent died at the cap after 22 calls, with real resources created and a
             // four-word answer.
+            if (answerToolName != null) {
+                // answerMode "tool" without a reply: whatever text comes back below goes
+                // through the invalid-JSON handling — never silently lost.
+                AnswerTool.count(AnswerTool.OUTCOME_NO_REPLY);
+            }
             ChatMessage last = currentMessages.get(currentMessages.size() - 1);
             if (last instanceof AiMessage aiLast && aiLast.text() != null) {
                 return finish(currentMessages, transcriptOut, aiLast.text());
@@ -1045,6 +1103,21 @@ class ToolLoopRunner {
         if (exchangeRecorder != null) {
             exchangeRecorder.record(call, request, message);
         }
+    }
+
+    /**
+     * Ends the loop with the reply tool's arguments as the answer. The answer is
+     * appended as the final assistant message — the shape a text answer has — so
+     * the tool exchange handed on (a cascade, a format re-ask) holds no call
+     * without a result, and a re-ask transcript ends where the answer begins.
+     */
+    private static String answerWith(AnswerTool.Extraction answerCall, String answerToolName, List<ChatMessage> currentMessages,
+                                     List<Map<String, Object>> trace, List<ChatMessage> transcriptOut) {
+        String answer = answerCall.answerText();
+        trace.add(AnswerTool.traceStep(answerToolName));
+        AnswerTool.count(AnswerTool.OUTCOME_REPLY);
+        currentMessages.add(AiMessage.from(answer));
+        return finish(currentMessages, transcriptOut, answer);
     }
 
     private static String finish(List<ChatMessage> currentMessages, List<ChatMessage> transcriptOut, String response) {

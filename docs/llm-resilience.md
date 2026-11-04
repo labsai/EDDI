@@ -100,6 +100,7 @@ Two rules hold at every step:
 | `nonBlankFields` | Fields of the parsed reply that must hold a non-blank string (`"htmlResponseText"`, `"answer.text"`) | none |
 | `parameters.responseSchema` | A JSON Schema the reply must match; also sent natively to providers that support it | none |
 | `jsonResponseFormat` | `auto`, `on` or `off`: whether the request carries the provider's JSON mode | `auto` |
+| `answerMode` / `answerToolChoice` | `tool` makes the model answer through a terminal `reply` tool whose arguments are the `responseSchema` — provider-enforced also with tools on Gemini, Anthropic and Bedrock. A plain-text answer still goes through `onInvalidJson`; no extra model call compared to `text` ([details](langchain.md#answering-through-a-reply-tool-answermode-tool)) | `text` / `required` |
 | `modelCascade.steps[i].maxFormatRetries` | Per-step override of `maxRetries` | task value |
 | `modelCascade.steps[i].timeoutMs` | Per-step timeout; also caps the step model's request `timeout` | `30000` |
 
@@ -289,6 +290,7 @@ All counters are Micrometer meters on `/q/metrics` (names below as Prometheus re
 | `eddi_llm_recovery_total` | `action`, `outcome`, `trigger` | One count per recovery action. `action` is `repair`, `retry`, `escalate`, `circuit_skip` or `fallback` |
 | `eddi_llm_output_total` | `outcome` | `convertToObject` replies by parse outcome (`valid`, `repaired`, `invalid`, `empty`, `schema_mismatch`) |
 | `eddi_llm_turn_deadline_exceeded_total` | `stage` | A layer stopped because the turn deadline left no room (`attempt`, `sleep`, `attempt_timeout`, `cascade`, `tool`, `httpcall`, `httpcall_retry`) |
+| `eddi_llm_answer_tool_total` | `outcome` | `answerMode: "tool"` decisions: `reply`, `text` (answered in text, handed to `onInvalidJson`), `duplicate`, `discarded_by_pause`, `no_reply` (iteration budget spent), `collision_dropped` |
 | `eddi_llm_cancelled_total` | `scope` | An attempt or cascade step abandoned on timeout |
 | `eddi_llm_circuit_total`, `eddi_llm_circuit_skipped_total`, `eddi_llm_circuit_open` | | Circuit breaker transitions, skipped turns and the gauge of open circuits |
 

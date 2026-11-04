@@ -192,6 +192,19 @@ export interface LlmTask {
    */
   nonBlankFields?: string[];
   /**
+   * How a `convertToObject` answer arrives. `text` (default) — the model writes
+   * the JSON as its reply; `tool` — it calls a terminal reply tool whose
+   * parameters are the `responseSchema` (needs an object-root JSON Schema).
+   */
+  answerMode?: 'text' | 'tool';
+  /** Name of the reply tool in `answerMode: "tool"` (default `reply`). */
+  answerToolName?: string;
+  /**
+   * `required` (default) forces a tool call where the provider supports it;
+   * `auto` lets the model choose.
+   */
+  answerToolChoice?: 'required' | 'auto';
+  /**
    * What the task does when its model phase fails outright. `fallback` serves
    * the configured fallback (see `ResponseValidation.fallbackMessage`) and
    * completes the turn; `error` (the default) fails it.
