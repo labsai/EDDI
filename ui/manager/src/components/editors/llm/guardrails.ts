@@ -34,8 +34,22 @@ export const JUDGE_CODE = /^[A-Z][A-Z0-9_]{0,39}$/;
 /** The judge's `timeoutMs` default (the classifier's is 3000). */
 export const JUDGE_DEFAULT_TIMEOUT_MS = 5000;
 
-/** The built-in `pii-redaction` kinds, in the order the backend lists them. */
-export const PII_KINDS = ["email", "ssn", "creditcard", "phone"] as const;
+/**
+ * The built-in `pii-redaction` kinds: the original four, then the ones the shared
+ * detector added. The backend applies them in its own fixed order, so the order of
+ * a stored `patterns` list does not matter.
+ */
+export const PII_KINDS = [
+  "email",
+  "ssn",
+  "creditcard",
+  "phone",
+  "iban",
+  "de_tax_id",
+  "de_social_security",
+  "de_id_card",
+  "date_of_birth",
+] as const;
 
 const PHASES_BY_TYPE: Record<GuardrailTypeName, GuardrailPhaseName[]> = {
   "prompt-injection": ["input"],

@@ -1170,8 +1170,12 @@ your tool schemas do not cover it, not as a routine first step:
   logs a warning for deliver-best on a classifier (a safety check should not
   deliver what it flagged). block/redact/reprompt on the output side make the task buffer
   its answer instead of streaming it; warn keeps streaming. Parameters are plain
-  strings, never templates: pii-redaction takes patterns
-  ("email,ssn,creditcard,phone"), regex-filter and prompt-injection take
+  strings, never templates: pii-redaction takes patterns, a comma list of
+  email, ssn, creditcard, phone, iban, de_tax_id, de_social_security,
+  de_id_card, date_of_birth (absent = all nine; an unknown name only logs a
+  deploy warning and selects nothing; de_id_card and date_of_birth need a
+  keyword such as "Ausweis" or "geb." just before the value; no names or
+  addresses), regex-filter and prompt-injection take
   patterns one regular expression per line, max-length takes maxChars. A
   guardrail that errors fails closed for block/reprompt (the turn is blocked,
   reason guardrail_error) and open for redact/warn; parameter failMode

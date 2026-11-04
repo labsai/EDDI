@@ -8,31 +8,47 @@ import ai.labs.eddi.modules.llm.guardrails.ContentGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailPhase;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailVerdict;
+import ai.labs.eddi.modules.llm.pii.BuiltinRecognizers;
+import ai.labs.eddi.modules.llm.pii.PiiEntities;
+import ai.labs.eddi.modules.llm.pii.PiiSpan;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * {@code pii-redaction} — input and output. Finds e-mail addresses, US social
- * security numbers, payment card numbers (Luhn-checked) and phone numbers and
- * reports a rewrite with each one replaced by {@code [REDACTED:<kind>]}.
+ * {@code pii-redaction} — input and output. Finds personal identifiers with the
+ * built-in detector ({@link BuiltinRecognizers}) and reports a rewrite with
+ * each one replaced by {@code [REDACTED:<kind>]}.
+ * <p>
+ * Kinds: {@code email}, {@code ssn} (US), {@code creditcard} (Luhn-checked),
+ * {@code phone}, {@code iban} (ISO 13616 mod-97), {@code de_tax_id} (Steuer-ID
+ * check digit), {@code de_social_security} (Rentenversicherungsnummer check
+ * digit), {@code de_id_card} (ID card or passport serial next to a keyword such
+ * as "Ausweis") and {@code date_of_birth} (a date next to a keyword such as
+ * "geb." or "born"). The entity names ({@code CREDIT_CARD}, {@code US_SSN}, …)
+ * are accepted as aliases.
+ * <p>
+ * Kinds are applied one after another on the text the previous one left — the
+ * structured identifiers first, so the looser phone pattern cannot take the
+ * digit groups of an IBAN — and for a text with none of the newer kinds the
+ * result is exactly what the four original kinds produced.
  * <p>
  * With action {@code redact} the rewrite is applied; with {@code block},
  * {@code reprompt} or {@code warn} any finding counts as a violation of that
  * kind. Pattern-based: it finds well-formed identifiers, not names or
- * addresses, and is no substitute for a data-loss-prevention service.
- * Parameters:
+ * addresses, and is no substitute for a data-loss-prevention service. It runs
+ * without a time budget, unlike {@code regex-filter}: its patterns are EDDI's,
+ * fixed and bounded, so a scan is linear in the text and a budget would only
+ * make long texts undecided. Parameters:
  * <ul>
- * <li>{@code patterns} — comma-separated subset of {@code email}, {@code ssn},
- * {@code creditcard}, {@code phone} (default: all four);</li>
+ * <li>{@code patterns} — comma-separated subset of the kinds (default:
+ * all);</li>
  * <li>{@code replacement} — the replacement text; {@code {kind}} is replaced by
  * the kind (default {@code [REDACTED:{kind}]}).</li>
  * </ul>
@@ -43,32 +59,12 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
     public static final String TYPE = "pii-redaction";
     static final String DEFAULT_REPLACEMENT = "[REDACTED:{kind}]";
 
-    /** Fewest and most digits a payment card number has. */
-    private static final int CARD_MIN_DIGITS = 13;
-    private static final int CARD_MAX_DIGITS = 19;
-
     /**
-     * Applied in this order: card before phone, so a card number is not half-eaten
-     * as a phone number.
-     * <p>
-     * Every repetition in these patterns is bounded, so a scan stays linear in the
-     * text: an unbounded local part ({@code [..]+@}) made a long run of local-part
-     * characters without an {@code @} cost quadratic time, on input as long as the
-     * conversation input limit allows. The bounds are the RFC 5321 ones (64 for the
-     * local part, 63 per domain label).
+     * The kind names the guardrail used before it had a shared detector; they stay
+     * its names for those entities, in {@code {kind}} and in the reason.
      */
-    private static final Map<String, Pattern> KINDS = new LinkedHashMap<>();
-
-    static {
-        KINDS.put("email", Pattern.compile("[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]{1,63}(?:\\.[A-Za-z0-9-]{1,63}){0,8}\\.[A-Za-z]{2,63}"));
-        KINDS.put("ssn", Pattern.compile("\\b(?!000|666|9\\d\\d)\\d{3}-(?!00)\\d{2}-(?!0000)\\d{4}\\b"));
-        KINDS.put("creditcard", Pattern.compile("\\b\\d(?:[ -]?\\d){12,18}\\b"));
-        // Grouped national and international forms, plus the unspaced international
-        // (E.164) form "+15551234567". An unspaced number without "+" is left alone:
-        // it cannot be told apart from an order or account number.
-        KINDS.put("phone", Pattern.compile("(?<![\\w+(])(?:\\+\\d{1,3}[ -]?)?(?:\\(\\d{2,4}\\)[ -]?|\\d{2,4}[ -])\\d{3,4}[ -]?\\d{3,4}\\b"
-                + "|(?<![\\w+])\\+\\d{8,15}\\b"));
-    }
+    private static final Map<String, String> LEGACY_KINDS = Map.of(PiiEntities.EMAIL, "email", PiiEntities.US_SSN, "ssn",
+            PiiEntities.CREDIT_CARD, "creditcard", PiiEntities.PHONE, "phone");
 
     @Override
     public String type() {
@@ -80,172 +76,96 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
         return Set.of(GuardrailPhase.INPUT, GuardrailPhase.OUTPUT);
     }
 
+    /** The guardrail's name for {@code entity}: {@code email}, {@code iban}, … */
+    public static String kindOf(String entity) {
+        return LEGACY_KINDS.getOrDefault(entity, entity.toLowerCase(Locale.ROOT));
+    }
+
+    /** Every kind, in the order they are applied. */
+    public static List<String> kinds() {
+        return BuiltinRecognizers.entities().stream().map(PiiRedactionGuardrail::kindOf).toList();
+    }
+
+    /**
+     * Names in {@code patterns} that are no kind: they select nothing, so a typo
+     * silently narrows the guardrail.
+     */
+    @Override
+    public List<String> warnings(Map<String, String> parameters) {
+        String raw = parameters != null ? parameters.get("patterns") : null;
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        List<String> unknown = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String name = part.trim();
+            if (!name.isEmpty() && entityOf(name) == null) {
+                unknown.add(name);
+            }
+        }
+        return unknown.isEmpty()
+                ? List.of()
+                : List.of("pii-redaction guardrail: unknown kind(s) " + unknown + " in patterns — known: " + String.join(", ", kinds()));
+    }
+
     @Override
     public GuardrailVerdict evaluate(String text, GuardrailContext context) {
         String replacement = context.parameter("replacement", DEFAULT_REPLACEMENT);
         String result = text;
         Set<String> found = new TreeSet<>();
-        for (String kind : enabledKinds(context.parameter("patterns", null))) {
-            String redacted = redact(result, kind, replacement);
-            if (!redacted.equals(result)) {
+        for (String entity : enabledEntities(context.parameter("patterns", null))) {
+            List<PiiSpan> spans = BuiltinRecognizers.find(entity, result, BuiltinRecognizers.NO_DEADLINE);
+            if (!spans.isEmpty()) {
+                String kind = kindOf(entity);
+                result = replace(result, spans, replacement.replace("{kind}", kind));
                 found.add(kind);
-                result = redacted;
             }
         }
         if (found.isEmpty()) {
             return GuardrailVerdict.allow();
         }
-        return GuardrailVerdict.rewrite(result, "pii:" + String.join(",", found));
+        return GuardrailVerdict.rewrite(result, reason(found));
     }
 
-    private static List<String> enabledKinds(String parameter) {
+    private static String reason(Set<String> kinds) {
+        return "pii:" + String.join(",", kinds);
+    }
+
+    /** The entity a {@code patterns} entry names (kind or entity name), or null. */
+    private static String entityOf(String name) {
+        String lower = name.toLowerCase(Locale.ROOT);
+        for (Map.Entry<String, String> legacy : LEGACY_KINDS.entrySet()) {
+            if (legacy.getValue().equals(lower)) {
+                return legacy.getKey();
+            }
+        }
+        String upper = name.toUpperCase(Locale.ROOT);
+        return BuiltinRecognizers.supports(upper) ? upper : null;
+    }
+
+    private static List<String> enabledEntities(String parameter) {
         if (parameter == null || parameter.isBlank()) {
-            return List.copyOf(KINDS.keySet());
+            return BuiltinRecognizers.entities();
         }
-        Set<String> wanted = new TreeSet<>();
+        Set<String> wanted = new LinkedHashSet<>();
         for (String part : parameter.split(",")) {
-            wanted.add(part.trim().toLowerCase(Locale.ROOT));
-        }
-        List<String> kinds = new ArrayList<>();
-        for (String kind : KINDS.keySet()) {
-            if (wanted.contains(kind)) {
-                kinds.add(kind);
+            String entity = entityOf(part.trim());
+            if (entity != null) {
+                wanted.add(entity);
             }
         }
-        return kinds;
+        return BuiltinRecognizers.entities().stream().filter(wanted::contains).toList();
     }
 
-    private static String redact(String text, String kind, String replacementTemplate) {
-        String replacement = replacementTemplate.replace("{kind}", kind);
-        Matcher matcher = KINDS.get(kind).matcher(text);
-        StringBuilder out = new StringBuilder();
+    /** {@code text} with each span (sorted, disjoint) replaced. */
+    private static String replace(String text, List<PiiSpan> spans, String replacement) {
+        StringBuilder out = new StringBuilder(text.length());
         int copied = 0;
-        int from = 0;
-        boolean any = false;
-        while (from <= text.length() && matcher.find(from)) {
-            int start = matcher.start();
-            int end = matcher.end();
-            from = end;
-            if ("creditcard".equals(kind)) {
-                int[] card = cardWithin(text, start, end);
-                if (card == null) {
-                    // The greedy run may have started on digit groups in front of the
-                    // card ("ref 1234 4111 1111 1111 1111" is 20 digits, so the run
-                    // stops short of the card's last group). Look again from the next
-                    // group; each retry starts further right, so the scan stays linear.
-                    int separator = firstSeparator(text, start, end);
-                    if (separator >= 0) {
-                        from = separator + 1;
-                    }
-                    continue;
-                }
-                start = card[0];
-                end = card[1];
-            }
-            out.append(text, copied, start).append(replacement);
-            copied = end;
-            any = true;
-        }
-        if (!any) {
-            return text;
+        for (PiiSpan span : spans) {
+            out.append(text, copied, span.start()).append(replacement);
+            copied = span.end();
         }
         out.append(text, copied, text.length());
         return out.toString();
-    }
-
-    /**
-     * The card number inside a digit run the card pattern matched, as
-     * {@code [start, end)} in {@code text}, or {@code null} if there is none.
-     * <p>
-     * The pattern is greedy, so a card followed by its CVV or expiry ("4111 1111
-     * 1111 1111 123") matches as one run, which fails the Luhn check as a whole.
-     * The card is then looked for among the shorter windows of the run that start
-     * at its beginning or just after a separator and end at its end or just before
-     * one; the longest Luhn-valid window of 13 to 19 digits wins, the earliest
-     * among equals. Windows never split a digit group, so an unseparated long
-     * number (an order or account number) is still only ever checked as a whole and
-     * cannot become a card by chance.
-     */
-    static int[] cardWithin(String text, int runStart, int runEnd) {
-        if (luhn(text.substring(runStart, runEnd))) {
-            return new int[]{runStart, runEnd};
-        }
-        List<Integer> starts = new ArrayList<>();
-        List<Integer> ends = new ArrayList<>();
-        starts.add(runStart);
-        for (int i = runStart; i < runEnd; i++) {
-            char c = text.charAt(i);
-            if (c == ' ' || c == '-') {
-                ends.add(i);
-                starts.add(i + 1);
-            }
-        }
-        ends.add(runEnd);
-        int[] best = null;
-        int bestDigits = 0;
-        for (int s : starts) {
-            for (int e : ends) {
-                if (e <= s) {
-                    continue;
-                }
-                int digits = countDigits(text, s, e);
-                if (digits < CARD_MIN_DIGITS || digits > CARD_MAX_DIGITS || digits <= bestDigits) {
-                    continue;
-                }
-                if (luhn(text.substring(s, e))) {
-                    best = new int[]{s, e};
-                    bestDigits = digits;
-                }
-            }
-        }
-        return best;
-    }
-
-    private static int firstSeparator(String text, int start, int end) {
-        for (int i = start; i < end; i++) {
-            char c = text.charAt(i);
-            if (c == ' ' || c == '-') {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int countDigits(String text, int start, int end) {
-        int digits = 0;
-        for (int i = start; i < end; i++) {
-            char c = text.charAt(i);
-            if (c >= '0' && c <= '9') {
-                digits++;
-            }
-        }
-        return digits;
-    }
-
-    /**
-     * The Luhn checksum — keeps order numbers and other long digit runs from
-     * matching as cards.
-     */
-    static boolean luhn(String candidate) {
-        int sum = 0;
-        boolean doubleIt = false;
-        int digits = 0;
-        for (int i = candidate.length() - 1; i >= 0; i--) {
-            char c = candidate.charAt(i);
-            if (c < '0' || c > '9') {
-                continue;
-            }
-            int d = c - '0';
-            if (doubleIt) {
-                d *= 2;
-                if (d > 9) {
-                    d -= 9;
-                }
-            }
-            sum += d;
-            doubleIt = !doubleIt;
-            digits++;
-        }
-        return digits >= CARD_MIN_DIGITS && sum % 10 == 0;
     }
 }

@@ -440,6 +440,14 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly }: Gu
                         {kind === "ssn" && t("llmEditor.grPiiSsn", "US social security numbers")}
                         {kind === "creditcard" && t("llmEditor.grPiiCard", "Payment card numbers (Luhn-checked)")}
                         {kind === "phone" && t("llmEditor.grPiiPhone", "Phone numbers")}
+                        {kind === "iban" && t("llmEditor.grPiiIban", "IBANs (checksum-validated)")}
+                        {kind === "de_tax_id" && t("llmEditor.grPiiDeTaxId", "German tax IDs (Steuer-ID)")}
+                        {kind === "de_social_security" &&
+                          t("llmEditor.grPiiDeSocialSecurity", "German pension insurance numbers")}
+                        {kind === "de_id_card" &&
+                          t("llmEditor.grPiiDeIdCard", "German ID card and passport numbers (next to a keyword)")}
+                        {kind === "date_of_birth" &&
+                          t("llmEditor.grPiiDateOfBirth", "Dates of birth (next to a keyword such as “born”)")}
                       </label>
                     );
                   })}

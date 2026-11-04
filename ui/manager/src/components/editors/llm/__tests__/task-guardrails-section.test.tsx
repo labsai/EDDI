@@ -186,7 +186,9 @@ describe("TaskGuardrailsSection", () => {
       expect(screen.getByTestId("guardrail-pii-email")).toBeChecked();
       fireEvent.click(screen.getByTestId("guardrail-pii-phone"));
       fireEvent.click(screen.getByTestId("guardrail-pii-ssn"));
-      expect(last(spy).inputGuardrails![0]!.parameters).toEqual({ patterns: "email,creditcard" });
+      expect(last(spy).inputGuardrails![0]!.parameters).toEqual({
+        patterns: "email,creditcard,iban,de_tax_id,de_social_security,de_id_card,date_of_birth",
+      });
       fireEvent.click(screen.getByTestId("guardrail-pii-ssn"));
       fireEvent.click(screen.getByTestId("guardrail-pii-phone"));
       expect(last(spy).inputGuardrails).toEqual([{ type: "pii-redaction" }]);
