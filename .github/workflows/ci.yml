@@ -1691,6 +1691,21 @@ jobs:
         working-directory: ui
         run: npm ci
 
+      # @eddi/core (ui/packages/core) is compiled into both apps as source; its
+      # own type check, lint (package boundaries) and tests run here, before the
+      # app's, so a contract break is reported against the package.
+      - name: "@eddi/core: type check"
+        working-directory: ui/packages/core
+        run: npm run typecheck
+
+      - name: "@eddi/core: lint"
+        working-directory: ui/packages/core
+        run: npm run lint
+
+      - name: "@eddi/core: unit tests"
+        working-directory: ui/packages/core
+        run: npm test
+
       - name: Type check
         run: npm run typecheck
 
