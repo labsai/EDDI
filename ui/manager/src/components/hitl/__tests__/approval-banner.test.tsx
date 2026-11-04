@@ -257,6 +257,31 @@ describe("ApprovalBanner", () => {
       });
     });
 
+    it("keeps an explicit rejection of a call whose provider-chosen id is __proto__", () => {
+      // Assigned onto a plain {} that key re-prototypes the object instead of
+      // becoming an entry, so the rejection was missing from the JSON sent and
+      // the backend read the absent call as approved.
+      const onDecide = vi.fn();
+      renderWithProviders(
+        <ApprovalBanner
+          surface="regular"
+          pauseDetails={toolPause({
+            calls: [
+              { callId: "__proto__", toolName: "transfer_funds", source: "builtin", arguments: "{}", argsTruncated: false, gateReason: "transfer_*", requestPinned: false },
+              { callId: "c2", toolName: "sendEmail", source: "mcp", arguments: "{}", argsTruncated: false, gateReason: "mcp:*", requestPinned: false },
+            ],
+          })}
+          onDecide={onDecide}
+        />,
+      );
+      fireEvent.click(screen.getByTestId("tool-reject-__proto__"));
+      fireEvent.click(screen.getByTestId("approve-button"));
+      confirmInDialog("Approve");
+      const decisions = onDecide.mock.calls[0]![3] as Record<string, unknown>;
+      expect(Object.keys(decisions)).toEqual(["__proto__"]);
+      expect(JSON.stringify(decisions)).toBe('{"__proto__":{"verdict":"REJECTED"}}');
+    });
+
     it("rejecting the batch is all-or-nothing (no contradictory per-call approvals sent)", () => {
       const onDecide = vi.fn();
       renderWithProviders(

@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
@@ -50,6 +51,7 @@ class RestRagIngestionInspectionTest {
     private IRestRagStore restRagStore;
     private KnowledgeBaseInspector inspector;
     private ResourceAccessGuard accessGuard;
+    private SpaceReferenceGuard spaceReferenceGuard;
     private RestRagIngestion rest;
 
     @BeforeEach
@@ -57,8 +59,9 @@ class RestRagIngestionInspectionTest {
         restRagStore = mock(IRestRagStore.class);
         inspector = mock(KnowledgeBaseInspector.class);
         accessGuard = mock(ResourceAccessGuard.class);
+        spaceReferenceGuard = mock(SpaceReferenceGuard.class);
         rest = new RestRagIngestion(restRagStore, mock(RagIngestionService.class),
-                mock(RagSourceIngestionService.class), mock(IngestedFileService.class), inspector, accessGuard);
+                mock(RagSourceIngestionService.class), mock(IngestedFileService.class), inspector, accessGuard, spaceReferenceGuard);
         when(restRagStore.readRag(eq(KB_ID), anyInt())).thenReturn(knowledgeBase());
     }
 
@@ -140,6 +143,16 @@ class RestRagIngestionInspectionTest {
         assertEquals(502, response.getStatus());
         assertEquals("The embedding model or vector store failed: 401 invalid api key",
                 ((Map<?, ?>) response.getEntity()).get("error"));
+    }
+
+    @Test
+    @DisplayName("a knowledge base naming another space's variables or secrets is not run for a non-member: no deployment checked it")
+    void foreignSpaceReferencesAreRefusedBeforeTheStoreIsBuilt() {
+        doThrow(new ForbiddenException("not a member")).when(spaceReferenceGuard).requireMayUse(any(), anyString());
+
+        assertThrows(ForbiddenException.class, () -> rest.searchKnowledgeBase(KB_ID, 1, new KnowledgeBaseSearch("hello", null, null, null)));
+        verify(spaceReferenceGuard).requireMayUse(any(RagConfiguration.class), eq("knowledge base"));
+        verifyNoInteractions(inspector);
     }
 
     @Test

@@ -718,6 +718,9 @@ class StreamingLegacyChatExecutorRetryTest {
             retry.setBackoffDelayMs(30_000L);
             retry.setBackoffMultiplier(1.0);
             retry.setMaxBackoffDelayMs(30_000L);
+            // Two full 30 s backoffs must exactly spend the 60 s budget; jitter would
+            // shorten them and leave room for a third.
+            retry.setJitterRatio(0.0);
             task.setRetry(retry);
             return task;
         }

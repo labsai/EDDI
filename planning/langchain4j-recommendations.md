@@ -516,6 +516,7 @@ Observable events, not a calendar date.
 3. **We add query expansion** → `ReRankingContentAggregator.DEFAULT_QUERY_SELECTOR`'s throw goes from latent to hard failure. **We add agent-mode streaming** → reopens the executor and observability questions together.
 4. **`EmbeddingInputType` provider coverage crosses ~6/8** → straight bugfix for the live Gemini defect (I5).
 5. **lc4j ships fallback / circuit breaking (#874)** → our cascading either upstreams or diverges permanently. Decide deliberately.
+   *Partly fired in 1.23.0 (2026-11-03):* `ConfidenceCascadePlanner` (#6765) is a cheapest-first cascade graded by a `DecisionModel`, but it lives in `langchain4j-agentic-patterns` behind `AgenticScope`/typed agents, so it cannot replace `CascadingModelExecutor`. Decision: **diverge, and borrow its grading rules** — the judge now grades against the request and takes an `acceptanceCriterion` (`docs/changelog.d/2026-11-03-langchain4j-1-23-adaptations.md`). Still open: never grading a guaranteed-accept step (it changes `audit:confidence` and `returnBestAcrossSteps`), and a `decision_model` strategy once `DecisionModel` is no longer `@Experimental`.
 6. **Any release moving `langchain4j-agentic-patterns` or the agentic scope store toward a public, `AiServices`-free API** — that is the surface we are re-deriving natively each release.
 
 ---

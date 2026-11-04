@@ -393,12 +393,18 @@ public class VaultSecretProvider implements ISecretProvider {
             // A rotation is an update and never an insert. As an upsert, a row deleted
             // between the read above and this write was re-created with the insert
             // defaults, the wildcard grant included, from a call that supplied no grant
-            // at all. Now the vanished row makes this a create, with a create's check.
-            boolean updated = existingOpt.isPresent() && persistence.updateSecretIfPresent(secret);
-            if (!updated) {
-                if (existingOpt.isPresent()) {
-                    requireExplicitGrant(reference, allowedAgents);
+            // at all. Turning it into a create instead was not enough either: the
+            // caller decided "this is a rotation" before the delete, so the create
+            // checks its endpoint runs (an explicit host list, the agents already
+            // deployed against the key) never ran, and a rotation sending only the
+            // stored agent grant re-created the key sendable to any host. The delete
+            // wins; storing the key again is a create, made as one.
+            if (existingOpt.isPresent()) {
+                if (!persistence.updateSecretIfPresent(secret)) {
+                    throw new SecretProviderException(describe(reference) + " was deleted while it was being rotated; nothing was written. "
+                            + "Store it again to create it anew.");
                 }
+            } else {
                 persistence.upsertSecret(secret);
             }
             LOGGER.infof("Secret stored: %s (description: %s)", describe(reference), description != null ? sanitize(description) : "none");

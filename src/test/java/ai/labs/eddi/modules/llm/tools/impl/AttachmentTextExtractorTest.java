@@ -307,6 +307,49 @@ class AttachmentTextExtractorTest {
         }
 
         @Test
+        void repeatedUnfilteredContentReferencesSpendTheDecodeBudget() throws Exception {
+            // One unfiltered 200 KB stream referenced 16 times from /Contents: nothing is
+            // decoded through a counted filter, yet PDFBox parses all 3.2 MB of it.
+            var bounded = new AttachmentTextExtractor(10_000, 500, 1024L * 1024);
+            byte[] pdf = pdfWithRepeatedUnfilteredContent(200 * 1024, 16);
+
+            var e = assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfText(pdf));
+            assertTrue(e.getMessage().contains("expands to more than 2 MB"), e.getMessage());
+        }
+
+        @Test
+        void aPageOutsideTheRequestedRangeIsNotCharged() throws Exception {
+            // Page 1 would spend the whole document budget; only page 2 is asked for.
+            var bounded = new AttachmentTextExtractor(10_000, 500, 1024L * 1024);
+            byte[] pdf = pdfWithHeavyPageThenText(200 * 1024, 16, "Bravo page");
+
+            assertTrue(bounded.extractPdfText(pdf, 2, 2, 10_000).contains("Bravo page"));
+            assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfText(pdf, 1, 2, 10_000),
+                    "the heavy page is still charged when it is requested");
+        }
+
+        @Test
+        void glyphAllowanceStopsLayoutAndKeepsWhatWasLaidOut() throws Exception {
+            try (PDDocument document = Loader.loadPDF(createMultiPagePdf("Alpha page", "Bravo page"))) {
+                var stripper = new AttachmentTextExtractor.BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1), 3);
+
+                String text = stripper.getText(document);
+
+                assertTrue(text.contains("Alp"), text);
+                assertFalse(text.contains("Alpha"), text);
+                assertFalse(text.contains("Bravo"), "no page is read past the allowance: " + text);
+            }
+        }
+
+        @Test
+        void textLongerThanTheCapIsStillCappedNotRefused() throws Exception {
+            String result = new AttachmentTextExtractor(10_000).extractPdfText(createMultiPagePdf("Alpha page", "Bravo page"), 5);
+
+            assertTrue(result.startsWith("Alpha"), result);
+            assertTrue(result.contains("Content truncated"), result);
+        }
+
+        @Test
         void ordinaryDocumentsStillExtract() throws Exception {
             assertTrue(new AttachmentTextExtractor(10_000).extractPdfText(createPdf("hello budget"), 10_000).contains("hello budget"));
         }
@@ -334,6 +377,63 @@ class AttachmentTextExtractorTest {
                 contents.add(stream);
             }
             page.setContents(contents);
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * One page whose /Contents references the same unfiltered stream
+     * {@code references} times.
+     */
+    private static byte[] pdfWithRepeatedUnfilteredContent(int size, int references) throws Exception {
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var page = new PDPage();
+            doc.addPage(page);
+            var stream = new PDStream(doc);
+            try (OutputStream os = stream.createOutputStream()) {
+                byte[] spaces = new byte[size];
+                Arrays.fill(spaces, (byte) ' ');
+                os.write(spaces);
+            }
+            List<PDStream> contents = new ArrayList<>();
+            for (int i = 0; i < references; i++) {
+                contents.add(stream);
+            }
+            page.setContents(contents);
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * Page 1 references one unfiltered stream {@code references} times; page 2
+     * carries {@code text}.
+     */
+    private static byte[] pdfWithHeavyPageThenText(int size, int references, String text) throws Exception {
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var heavy = new PDPage();
+            doc.addPage(heavy);
+            var stream = new PDStream(doc);
+            try (OutputStream os = stream.createOutputStream()) {
+                byte[] spaces = new byte[size];
+                Arrays.fill(spaces, (byte) ' ');
+                os.write(spaces);
+            }
+            List<PDStream> contents = new ArrayList<>();
+            for (int i = 0; i < references; i++) {
+                contents.add(stream);
+            }
+            heavy.setContents(contents);
+            var page = new PDPage();
+            doc.addPage(page);
+            try (var cs = new PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                cs.newLineAtOffset(50, 700);
+                cs.showText(text);
+                cs.endText();
+            }
             doc.save(out);
             return out.toByteArray();
         }

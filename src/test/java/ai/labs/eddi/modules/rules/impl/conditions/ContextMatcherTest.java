@@ -164,14 +164,7 @@ public class ContextMatcherTest {
         setupValuesWithObject(true);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"John\",\"lastName\":\"Silver\"}}}";
         final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", "someObjectValue");
-        when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
-        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
-        when(currentStep.getAllData(eq("context"))).then(invocation -> {
-            LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
-            return ret;
-        });
+        setupIConversationMemoryIConversationStepGetAllDataAnd2MoreStubs(contextJson, objectValue);
 
         // test
         IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
@@ -189,14 +182,7 @@ public class ContextMatcherTest {
         setupValuesWithObject(true);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"Albert\",\"lastName\":\"Silver\"}}}";
         final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", "someObjectValue");
-        when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
-        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
-        when(currentStep.getAllData(eq("context"))).then(invocation -> {
-            LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
-            return ret;
-        });
+        setupIConversationMemoryIConversationStepGetAllDataAnd2MoreStubs(contextJson, objectValue);
 
         // test
         IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
@@ -214,14 +200,7 @@ public class ContextMatcherTest {
         setupValuesWithObject(false);
         final String contextJson = "{\"userInfo\":{\"name\":{\"firstName\":\"John\",\"lastName\":\"Silver\"}}}";
         final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", null);
-        when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
-        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
-        when(currentStep.getAllData(eq("context"))).then(invocation -> {
-            LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
-            return ret;
-        });
+        setupIConversationMemoryIConversationStepGetAllDataAnd2MoreStubs(contextJson, objectValue);
 
         // test
         IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
@@ -239,14 +218,7 @@ public class ContextMatcherTest {
         setupValuesWithObject(false);
         final String contextJson = "{\"userInfo\":\"somethingElse\"}";
         final ContextMatcher.ObjectValue objectValue = new ContextMatcher.ObjectValue("someKeyPath", null);
-        when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
-        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
-        when(currentStep.getAllData(eq("context"))).then(invocation -> {
-            LinkedList<IData<Context>> ret = new LinkedList<>();
-            ret.add(new MockData<>("context:someContextKey",
-                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
-            return ret;
-        });
+        setupIConversationMemoryIConversationStepGetAllDataAnd2MoreStubs(contextJson, objectValue);
 
         // test
         IRuleCondition.ExecutionState actualExecutionState = contextMatcher.execute(conversationMemory, new LinkedList<>());
@@ -520,5 +492,18 @@ public class ContextMatcherTest {
         public int hashCode() {
             return Objects.hash(key, result);
         }
+    }
+
+    private void setupIConversationMemoryIConversationStepGetAllDataAnd2MoreStubs(final String contextJson,
+                                                                                  final ContextMatcher.ObjectValue objectValue)
+            throws Exception {
+        when(jsonSerialization.deserialize(eq(contextJson), eq(Object.class))).thenAnswer(invocation -> objectValue);
+        when(jsonSerialization.serialize(eq(objectValue))).thenAnswer(invocation -> contextJson);
+        when(currentStep.getAllData(eq("context"))).then(invocation -> {
+            LinkedList<IData<Context>> ret = new LinkedList<>();
+            ret.add(new MockData<>("context:someContextKey",
+                    new Context(Context.ContextType.object, jsonSerialization.deserialize(contextJson, Object.class))));
+            return ret;
+        });
     }
 }

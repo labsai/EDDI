@@ -19,6 +19,7 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
@@ -69,6 +70,9 @@ class GridFsAttachmentStoreTest {
         Field bucketField = GridFsAttachmentStore.class.getDeclaredField("gridFSBucket");
         bucketField.setAccessible(true);
         bucketField.set(store, bucket);
+        Field primaryField = GridFsAttachmentStore.class.getDeclaredField("primaryReadBucket");
+        primaryField.setAccessible(true);
+        primaryField.set(store, bucket);
         Field filesField = GridFsAttachmentStore.class.getDeclaredField("filesCollection");
         filesField.setAccessible(true);
         filesField.set(store, files);
@@ -429,6 +433,23 @@ class GridFsAttachmentStoreTest {
         assertEquals(2, count);
         verify(gridFSBucket).delete(id1);
         verify(gridFSBucket).delete(id2);
+    }
+
+    @Test
+    @DisplayName("the erasure sweep lists the blobs on the primary: a lagging secondary left committed ones behind")
+    void deleteByConversation_enumeratesFromThePrimary() throws Exception {
+        ObjectId id = new ObjectId();
+        GridFSFile file = mock(GridFSFile.class);
+        when(file.getObjectId()).thenReturn(id);
+        whenFindIterate(file); // on the primary-read bucket
+        GridFSBucket nearest = mock(GridFSBucket.class);
+        Field bucketField = GridFsAttachmentStore.class.getDeclaredField("gridFSBucket");
+        bucketField.setAccessible(true);
+        bucketField.set(sut, nearest);
+
+        assertEquals(1, sut.deleteByConversation("conv-1"));
+        verify(nearest, never()).find(any(Bson.class));
+        verify(nearest).delete(id);
     }
 
     @Test

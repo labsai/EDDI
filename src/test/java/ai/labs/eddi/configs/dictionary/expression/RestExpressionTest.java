@@ -32,13 +32,29 @@ class RestExpressionTest {
 
     private IWorkflowStore workflowStore;
     private IDictionaryStore dictionaryStore;
+    private ResourceAccessGuard accessGuard;
     private RestExpression restExpression;
 
     @BeforeEach
     void setUp() {
         workflowStore = mock(IWorkflowStore.class);
         dictionaryStore = mock(IDictionaryStore.class);
-        restExpression = new RestExpression(workflowStore, dictionaryStore, mock(ResourceAccessGuard.class));
+        accessGuard = mock(ResourceAccessGuard.class);
+        when(accessGuard.hasAccess(any(), any())).thenReturn(true);
+        restExpression = new RestExpression(workflowStore, dictionaryStore, accessGuard);
+    }
+
+    @Test
+    @DisplayName("a referenced dictionary the caller may not VIEW contributes no expressions")
+    void skipsDictionaryTheCallerCannotView() throws Exception {
+        var wfConfig = createWorkflowWithParserStep(VALID_ID, 1);
+        when(workflowStore.read("wf-1", 1)).thenReturn(wfConfig);
+        when(accessGuard.hasAccess(eq(VALID_ID), any())).thenReturn(false);
+
+        List<String> result = restExpression.readExpressions("wf-1", 1, "", 20);
+
+        assertTrue(result.isEmpty());
+        verifyNoInteractions(dictionaryStore);
     }
 
     @Test
