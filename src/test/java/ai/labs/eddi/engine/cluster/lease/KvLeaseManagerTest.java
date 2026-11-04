@@ -98,6 +98,7 @@ class KvLeaseManagerTest {
         volatile boolean connected = true;
         volatile boolean degraded;
         volatile boolean presenceDown;
+        volatile boolean duplicate;
         final Map<String, String> live = new ConcurrentHashMap<>();
 
         @Override
@@ -116,6 +117,11 @@ class KvLeaseManagerTest {
                 throw new ClusterUnavailableException("presence bucket unreachable");
             }
             return Optional.ofNullable(live.get(nodeId));
+        }
+
+        @Override
+        public boolean isDuplicateNode() {
+            return duplicate;
         }
     }
 
@@ -334,6 +340,19 @@ class KvLeaseManagerTest {
         assertTrue(kv.get("c.mine-old").isEmpty());
         assertTrue(kv.get("c.other").isPresent());
         assertTrue(kv.get("c.mine-current").isPresent());
+    }
+
+    @Test
+    @DisplayName("a node flagged as a duplicate id does not sweep its twin's leases, and sweeps once it no longer is")
+    void duplicateNodeSkipsBootSweep() {
+        kv.create("c.twin", "{\"node\":\"a\",\"boot\":\"twin\",\"since\":1}".getBytes(StandardCharsets.UTF_8));
+        KvLeaseManager a = manager("a", "new");
+        view.duplicate = true;
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isPresent(), "a live twin's lease is not an earlier boot's");
+        view.duplicate = false;
+        a.sweepOwnStaleLeases();
+        assertTrue(kv.get("c.twin").isEmpty(), "the skipped sweep runs on a later connect");
     }
 
     @Test

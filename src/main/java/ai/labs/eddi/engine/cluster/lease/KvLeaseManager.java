@@ -218,6 +218,15 @@ public class KvLeaseManager implements IConversationLeaseManager {
          * "unknown", never "not present".
          */
         Optional<String> liveBoot(String nodeId);
+
+        /**
+         * True while another live JVM uses this node's id. Its leases then carry this
+         * node id under a boot that is not ours but is not stale either, so neither the
+         * boot sweep nor a takeover may treat them as an earlier incarnation.
+         */
+        default boolean isDuplicateNode() {
+            return false;
+        }
     }
 
     private final ISharedKv kv;
@@ -668,7 +677,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
         if (node.nodeId().equals(info.node())) {
             // Our own earlier incarnation (same node id, different boot). A lease of this
             // boot is never stale: the caller recognises its own writes by the lease id.
-            return !node.bootId().equals(info.boot());
+            // While a live twin shares our id, the other boot may be that twin.
+            return !view.isDuplicateNode() && !node.bootId().equals(info.boot());
         }
         Optional<String> liveBoot;
         try {
@@ -1360,6 +1370,12 @@ public class KvLeaseManager implements IConversationLeaseManager {
      */
     public void sweepOwnStaleLeases() {
         if (swept.get()) {
+            return;
+        }
+        if (view.isDuplicateNode()) {
+            // An earlier boot's leases cannot be told from a live twin's; retried on
+            // the next connect.
+            LOGGER.warn("Stale-lease sweep skipped: another live JVM uses this node id");
             return;
         }
         try {

@@ -60,6 +60,11 @@ public class NatsLeaseManager extends KvLeaseManager {
                     public Optional<String> liveBoot(String nodeId) {
                         return presence.memberStrict(nodeId).map(m -> String.valueOf(m.get("boot")));
                     }
+
+                    @Override
+                    public boolean isDuplicateNode() {
+                        return presence.isDuplicate();
+                    }
                 }, meterRegistry);
         connections.onConnected(this::sweepOwnStaleLeases);
         connections.onShutdown(this::releaseAll);
