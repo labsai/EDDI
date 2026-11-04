@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -143,8 +144,24 @@ public class ConfigJsonPatcher {
      *             relocated, or the patched document is not a valid {@code type}
      */
     public <T> T apply(T current, String patchBody, Class<T> type, boolean protectCredentials) {
+        return apply(current, patchBody, type, protectCredentials, Set.of());
+    }
+
+    /**
+     * {@link #apply(Object, String, Class, boolean)} for a store whose read
+     * redaction skips some paths ({@code RestLlmStore.NOT_CONFIGURATION}, say).
+     *
+     * @param readSkippedPaths
+     *            the paths the store's redacted read leaves as they are. Masking
+     *            and the relocation check must use the read's own rules: judged by
+     *            the generic ones, a credential moved under a skipped path counted
+     *            as still hidden, and the store's read then returned it in plain
+     *            text
+     */
+    public <T> T apply(T current, String patchBody, Class<T> type, boolean protectCredentials, Set<String> readSkippedPaths) {
+        Set<String> skipped = readSkippedPaths == null ? Set.of() : readSkippedPaths;
         JsonArray operations = parseOperations(patchBody);
-        CredentialMask mask = protectCredentials ? CredentialMask.of(mapper, current, type) : null;
+        CredentialMask mask = protectCredentials ? CredentialMask.of(mapper, current, type, skipped) : null;
         JsonStructure document = mask != null ? toJson(mask.masked()) : toJson(current);
 
         long budget = MAX_GROWTH_FACTOR * weight(document, Long.MAX_VALUE) + MAX_GROWTH_BYTES;
@@ -181,7 +198,7 @@ public class ConfigJsonPatcher {
             throw badRequest("The patched document is not a valid " + type.getSimpleName() + ": " + e.getMessage());
         }
         if (!shifted.isEmpty()) {
-            requireStillRedacted(result, type, shifted);
+            requireStillRedacted(result, type, shifted, skipped);
         }
         return result;
     }
@@ -193,9 +210,9 @@ public class ConfigJsonPatcher {
      * would be readable by the very caller it was hidden from, so the patch is
      * refused. Fails closed when the path no longer resolves after parsing.
      */
-    private <T> void requireStillRedacted(T result, Class<T> type, List<String> pointers) {
+    private <T> void requireStillRedacted(T result, Class<T> type, List<String> pointers, Set<String> readSkippedPaths) {
         JsonNode plain = mapper.valueToTree(result);
-        JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(result, type));
+        JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(result, type, readSkippedPaths));
         List<String> exposed = new ArrayList<>();
         for (String pointer : pointers) {
             JsonNode value = plain.at(pointer);
@@ -310,9 +327,9 @@ public class ConfigJsonPatcher {
         private record Hidden(String pointer, JsonNode value) {
         }
 
-        static <T> CredentialMask of(ObjectMapper mapper, T current, Class<T> type) {
+        static <T> CredentialMask of(ObjectMapper mapper, T current, Class<T> type, Set<String> readSkippedPaths) {
             JsonNode original = mapper.valueToTree(current);
-            JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(current, type));
+            JsonNode redacted = mapper.valueToTree(ConfigSecretRedactor.redact(current, type, readSkippedPaths));
             JsonNode working = original.deepCopy();
             Map<String, Hidden> hidden = new HashMap<>();
             String nonce = UUID.randomUUID().toString();

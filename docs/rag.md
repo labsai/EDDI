@@ -313,7 +313,10 @@ left in place — drop the table or collection by hand once nothing uses it. Ren
 base does the same migration automatically: in 6.5.0 a rename already moved it to a new, empty store —
 the one named after its new name, which could be another knowledge base's. Removing the explicit
 `table`/`collectionName`/`indexName` of a 6.5.0 knowledge base migrates it the same way, since its default
-location would otherwise be whatever its (possibly changed) name maps to. A knowledge base with an
+location would otherwise be whatever its (possibly changed) name maps to — and so does changing its
+`storeType`, or the server it connects to (`host`, `port`, `database`, `databaseName`, `connectionString`,
+`serverUrl`, `baseUrl` or `tenantName`): there its name maps to that server's default store, which can be
+another 6.5.0 knowledge base's of the same name. A knowledge base with an
 explicit `table`/`collectionName`/`indexName` stays in the same table when it is switched: its old
 chunks are no longer tagged with the id retrieval filters on, so they stop being returned (and stay
 in the table); sources re-ingest and re-tag everything, `/ingest` documents have to be ingested again.

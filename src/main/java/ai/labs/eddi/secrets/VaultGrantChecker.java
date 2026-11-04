@@ -361,6 +361,22 @@ public class VaultGrantChecker {
     }
 
     /**
+     * {@link #referencedTenants(String, Integer)} for one configuration document on
+     * its own — a knowledge base run through its standalone endpoints, outside any
+     * agent: the same scan, variables expanded twice over and connections followed.
+     *
+     * @throws UnverifiableReferencesException
+     *             when a variable or connection it names cannot be read
+     */
+    public Set<String> referencedTenantsOf(Object configuration) {
+        Set<String> tenants = new LinkedHashSet<>();
+        if (configuration != null) {
+            collectTenants(configuration, tenants, ConnectionReference.DEFAULT_TENANT, new LinkedHashSet<>());
+        }
+        return tenants;
+    }
+
+    /**
      * Adds every tenant {@code config} names, following {@code ${connection:…}}
      * into the connection document — the same hop the grant check makes. A
      * connection that holds {@code ${vault:t.finance…/key}} is otherwise a way to
