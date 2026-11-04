@@ -21,6 +21,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,49 +31,66 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
-import java.util.HashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Leases on a shared KV bucket ({@code <prefix>_LEASES} in NATS mode).
  * <p>
- * <b>Acquire</b> is a KV {@code create}: it succeeds only while the key is
- * absent, and the revision it returns is the fencing token — KV revisions are
- * the bucket stream's sequence numbers and only ever grow. A failed create
- * parks a waiter, which wakes on
+ * <b>Acquire</b> writes the key only while it holds no live value: a
+ * compare-and-set at the revision of the delete marker the last release left
+ * (or a KV {@code create} when there is none). The revision it returns is the
+ * fencing token — KV revisions are the bucket stream's sequence numbers and
+ * only ever grow. Each lease value carries a lease id ({@code lid}) unique to
+ * this process, so a write whose reply was lost can be recognised as this
+ * node's own. A failed acquire parks a waiter, which wakes on
  * <ul>
- * <li>the holder's release notification (core NATS, sub-millisecond),</li>
- * <li>a jittered poll every {@code ttl/4}, which is what notices that a crashed
- * holder's lease expired on the server (server-side TTL, so no clock skew
- * between nodes is involved), and</li>
+ * <li>a release notification addressed to this node by the holder, which this
+ * node told that it is waiting (core NATS, sub-millisecond; it carries the
+ * delete marker's revision, so the wake-up acquires in one round trip),</li>
+ * <li>a jittered poll every {@code ttl/4}, at most {@value #MAX_POLL_MILLIS}
+ * ms, which also notices that a crashed holder's lease expired on the server
+ * (server-side TTL, so no clock skew between nodes is involved), and</li>
  * <li>fast takeover: a lease whose holder's presence record is gone (or carries
  * a different boot id, i.e. it restarted) is deleted by compare-and-set and
  * re-acquired at once.</li>
  * </ul>
- * <b>Heartbeat</b>: one node-wide task refreshes every held lease each
- * {@code heartbeat-interval} with a compare-and-set on the last revision, the
- * renewals side by side. In NATS mode it runs on a scheduler thread of its own,
- * which nothing else uses: work that shares a thread with it (reconnect hooks,
- * sweeps) could otherwise delay it past the TTL and lose every lease of a live
- * node at once. A revision mismatch means the lease was taken over: the handle
- * fires {@link LeaseHandle#onLost}, which cancels the running turn. An I/O
- * failure is ignored — the database fence decides whether the turn's write
- * lands.
+ * <b>Validity</b>: a lease is trusted for {@code ttl − 2×heartbeat} after the
+ * last write of it this node saw acknowledged (measured from when that write
+ * was <i>sent</i>, so the server's TTL — counted from when it stored the write
+ * — always ends later). Past that {@link LeaseHandle#isLost()} is true and the
+ * lost callbacks fire, whether or not NATS could be reached: a holder cut off
+ * from NATS stops itself before any other node can take the conversation over.
  * <p>
- * <b>Fairness</b>: a waiter leaves a {@code w.<key>} marker. A holder that sees
- * another node's marker when it releases holds back its own next acquire of
- * that key for {@code handoff-grace}, so a busy node cannot starve the others.
+ * <b>Heartbeat</b>: a node-wide tick every {@code heartbeat/4} renews the
+ * leases due (last renewal at least {@code 3/4} of a heartbeat ago) with a
+ * compare-and-set on the last revision, at most
+ * {@value #MAX_CONCURRENT_RENEWALS} at a time, oldest confirmation first. In
+ * NATS mode it runs on a scheduler thread of its own. A revision mismatch is
+ * re-read from the stream leader: if the key still holds this lease (a renewal
+ * the server applied although its reply was lost), the lease is kept at the
+ * revision found; otherwise it was taken over, and the handle fires
+ * {@link LeaseHandle#onLost}, which cancels the running turn.
+ * <p>
+ * <b>Fairness</b>: a waiter tells the holder's node that it is waiting, and
+ * leaves a {@code w.<key>} marker (read by the admin console and by nodes of
+ * earlier versions). A holder that knows of another node's waiter when it
+ * releases holds back its own next acquire of that key for
+ * {@code handoff-grace}, and does not hand the lease to its own next queued
+ * turn, so a busy node cannot starve the others.
  * <p>
  * <b>No I/O on the caller's thread for acquire</b>: attempts run on the I/O
  * executor and complete the returned stage; the coordinator never blocks a pool
@@ -85,12 +104,60 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private static final long NOT_CONNECTED_RETRY_MILLIS = 250;
     /** How many leases of an admin listing are re-read from the stream leader. */
     static final int CONSISTENT_READS = 500;
+    /** Upper bound of the waiter poll. */
+    static final long MAX_POLL_MILLIS = 500;
+    /**
+     * Renewals in flight at once. A pass over thousands of leases sent all at once
+     * filled the client's outgoing queue, and every renewal after it failed.
+     */
+    static final int MAX_CONCURRENT_RENEWALS = 64;
+    /** Consecutive turns one lease may be handed to without a release. */
+    static final int MAX_HANDOFFS = 16;
+    /**
+     * How long another node's "I am waiting" counts. Waiters repeat it with every
+     * poll, so a waiter that gave up stops counting soon after.
+     */
+    static final long WAITING_FRESH_NANOS = TimeUnit.SECONDS.toNanos(3);
 
-    /** Core NATS release notifications. */
+    static final List<String> ACQUIRE_OUTCOMES = List.of("acquired", "timeout", "degraded", "degraded_reject");
+    static final List<String> LOST_REASONS = List.of("taken_over", "force_released", "unconfirmed", "gone");
+
+    /** Core NATS notifications between lease managers. */
     public interface LeaseNotifier {
+        /**
+         * Broadcast to every node: the release notification of earlier versions, still
+         * sent by them and by an administrative force-release.
+         */
         void publishReleased(String key);
 
         void onReleased(Consumer<String> listener);
+
+        /**
+         * Tells {@code toNode}, which waits for {@code key}, that it was released;
+         * {@code deleteRevision} is the delete marker's revision ({@code 0} when
+         * unknown). Defaults to the broadcast.
+         */
+        default void publishReleasedTo(String toNode, String key, long deleteRevision) {
+            publishReleased(key);
+        }
+
+        /**
+         * Tells the holder's node {@code toNode} that {@code fromNode} waits for
+         * {@code key}.
+         */
+        default void publishWaiting(String toNode, String key, String fromNode) {
+        }
+
+        /** Delivers the notifications addressed to {@code nodeId}. */
+        default void onAddressed(String nodeId, AddressedListener listener) {
+        }
+    }
+
+    /** Notifications addressed to one node. */
+    public interface AddressedListener {
+        void released(String key, long deleteRevision);
+
+        void waiting(String key, String fromNode);
     }
 
     /** A lease taken over from a holder that had died or restarted. */
@@ -162,17 +229,34 @@ public class KvLeaseManager implements IConversationLeaseManager {
     private final ClusterView view;
     private final MeterRegistry meterRegistry;
 
+    /** How long a lease is trusted after its last acknowledged write was sent. */
+    private final long validityNanos;
+    /** How old a renewal must be before the tick renews the lease again. */
+    private final long renewDueNanos;
+    private final long tickMillis;
+
     private final Map<String, Held> held = new ConcurrentHashMap<>();
     private final Map<String, Set<Waiter>> waiters = new ConcurrentHashMap<>();
+    /** Lease ids a {@link #tryAcquireKey} of this process is writing, per key. */
+    private final Map<String, Set<String>> tryAcquiring = new ConcurrentHashMap<>();
     private final Map<String, Long> yieldUntil = new ConcurrentHashMap<>();
+    /**
+     * Other nodes waiting for a lease this node holds, with when each last said so.
+     */
+    private final Map<String, Map<String, Long>> waitingNodes = new ConcurrentHashMap<>();
     /**
      * What this node last saw in a contended lease whose holder has no presence
      * record: the revision and when (monotonic clock) it was first seen.
      */
     private final Map<String, Observation> observed = new ConcurrentHashMap<>();
+    private final AtomicLong leaseIds = new AtomicLong();
+    private final Semaphore renewSlots = new Semaphore(MAX_CONCURRENT_RENEWALS);
+    /** The sweep for this node's earlier boots has run (once per process). */
+    private final AtomicBoolean swept = new AtomicBoolean();
 
     private record Observation(long revision, long sinceNanos) {
     }
+
     private volatile boolean shuttingDown;
     /**
      * Set by an administrator: no new leases until undrained. Unlike
@@ -183,6 +267,9 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     private final Counter takeovers;
     private final Counter releaseConflicts;
+    private final Counter handoffs;
+    private final Counter renewFailures;
+    private final Counter orphansDeleted;
     private ScheduledFuture<?> heartbeat;
     /** A heartbeat pass is running on the I/O executor. */
     private final AtomicBoolean heartbeatRunning = new AtomicBoolean();
@@ -197,18 +284,76 @@ public class KvLeaseManager implements IConversationLeaseManager {
         this.notifier = notifier;
         this.view = view;
         this.meterRegistry = meterRegistry;
+        this.validityNanos = validityNanos(config.leaseTtl(), config.leaseHeartbeatInterval());
+        long heartbeatNanos = config.leaseHeartbeatInterval().toNanos();
+        this.renewDueNanos = heartbeatNanos - heartbeatNanos / 4;
+        this.tickMillis = Math.max(10, config.leaseHeartbeatInterval().toMillis() / 4);
         this.takeovers = Counter.builder("eddi.cluster.lease.takeover")
                 .description("Leases taken over from a holder that had died or restarted").register(meterRegistry);
         this.releaseConflicts = Counter.builder("eddi.cluster.lease.release.conflicts")
                 .description("Releases that found the lease already taken over").register(meterRegistry);
+        this.handoffs = Counter.builder("eddi.cluster.lease.handoffs")
+                .description("Leases handed straight to the next turn queued on this node, without a release").register(meterRegistry);
+        this.renewFailures = Counter.builder("eddi.cluster.lease.renew.failures")
+                .description("Lease renewals that could not reach NATS").register(meterRegistry);
+        this.orphansDeleted = Counter.builder("eddi.cluster.lease.orphans.deleted")
+                .description("Leases this process wrote but never took (the reply was lost), deleted").register(meterRegistry);
         Gauge.builder("eddi.cluster.lease.held", held, Map::size).description("Leases this node holds").register(meterRegistry);
-        notifier.onReleased(this::wakeWaiters);
+        registerMeters();
+        notifier.onReleased(key -> wakeWaiters(key, 0));
+        notifier.onAddressed(node.nodeId(), new AddressedListener() {
+            @Override
+            public void released(String key, long deleteRevision) {
+                wakeWaiters(key, deleteRevision);
+            }
+
+            @Override
+            public void waiting(String key, String fromNode) {
+                noteWaiting(key, fromNode);
+            }
+        });
+    }
+
+    /**
+     * Registers every lease meter with all its tag values at once, so an alert on
+     * {@code increase()} sees the first occurrence on each pod: a meter that only
+     * appears with its first increment has no earlier sample to increase from.
+     */
+    private void registerMeters() {
+        for (String outcome : ACQUIRE_OUTCOMES) {
+            for (String contended : List.of("true", "false")) {
+                Timer.builder("eddi.cluster.lease.acquire").tag("outcome", outcome).tag("contended", contended).register(meterRegistry);
+            }
+        }
+        for (String reason : LOST_REASONS) {
+            meterRegistry.counter("eddi.cluster.lease.lost", "reason", reason);
+        }
+        for (String op : List.of("create", "renew")) {
+            meterRegistry.counter("eddi.cluster.lease.adopted", "op", op);
+        }
+        for (String action : List.of(ClusterConfig.REJECT, "local")) {
+            meterRegistry.counter("eddi.cluster.degraded.decisions", "area", "turns", "action", action);
+        }
+    }
+
+    /**
+     * How long a lease is trusted after its last acknowledged write was sent:
+     * {@code ttl − 2×heartbeat}, which leaves two missed renewals of margin before
+     * the server could expire it. Where that leaves less than one and a half
+     * heartbeats (a heartbeat close to half the TTL, which the configuration
+     * allows), the midpoint between one heartbeat and the TTL instead: still a
+     * quarter of the TTL or more short of it, and at least one renewal can land.
+     */
+    static long validityNanos(Duration ttl, Duration heartbeat) {
+        long t = ttl.toNanos();
+        long h = heartbeat.toNanos();
+        long v = t - 2 * h;
+        return v >= h + h / 2 ? v : (t + h) / 2;
     }
 
     /** Starts the node-wide heartbeat. */
     public void start() {
-        long period = config.leaseHeartbeatInterval().toMillis();
-        heartbeat = scheduler.scheduleAtFixedRate(this::dispatchHeartbeat, period, period, TimeUnit.MILLISECONDS);
+        heartbeat = scheduler.scheduleAtFixedRate(this::tick, tickMillis, tickMillis, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -220,7 +365,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     @Override
     public CompletionStage<LeaseHandle> acquireKey(String key, Duration maxWait) {
-        Waiter waiter = new Waiter(key, System.nanoTime() + maxWait.toNanos());
+        Waiter waiter = new Waiter(key, System.nanoTime() + maxWait.toNanos(), newLeaseId());
         if (shuttingDown) {
             waiter.future.completeExceptionally(
                     new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null, "node is shutting down"));
@@ -244,6 +389,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
         return waiter.future;
     }
 
+    private String newLeaseId() {
+        return Long.toString(leaseIds.incrementAndGet(), 36);
+    }
+
     private void removeWaiter(Waiter waiter) {
         Set<Waiter> set = waiters.get(waiter.key);
         if (set != null) {
@@ -256,6 +405,31 @@ public class KvLeaseManager implements IConversationLeaseManager {
         ScheduledFuture<?> next = waiter.next;
         if (next != null) {
             next.cancel(false);
+        }
+        clearMarker(waiter);
+    }
+
+    /**
+     * Deletes this waiter's {@code w.<key>} marker — by compare-and-set at the
+     * revision it wrote, so a marker another node has written since stays. A waiter
+     * that gave up (timeout, drain, shutdown) removes its own as well.
+     */
+    private void clearMarker(Waiter w) {
+        long revision = w.markerRevision;
+        if (revision <= 0) {
+            return;
+        }
+        w.markerRevision = -1;
+        try {
+            io.execute(() -> {
+                try {
+                    kv.delete(WAITER_PREFIX + w.key, revision);
+                } catch (ClusterUnavailableException ignored) {
+                    // expires with the bucket TTL
+                }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // shutting down; expires with the bucket TTL
         }
     }
 
@@ -298,39 +472,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
                 }
                 return;
             }
-            OptionalLong revision = kv.create(w.key, encode(System.currentTimeMillis()));
-            if (revision.isPresent()) {
-                grant(w, revision.getAsLong());
-                return;
-            }
-            w.contended = true;
-            Optional<ISharedKv.Versioned> current = kv.get(w.key);
-            if (current.isEmpty()) {
-                // Released between our create and our read — try again at once.
-                observed.remove(w.key);
-                reschedule(w, 1);
-                return;
-            }
-            LeaseInfo info = decode(current.get());
-            w.lastHolder = info.node();
-            if (isStale(w.key, info) && kv.delete(w.key, info.revision())) {
-                observed.remove(w.key);
-                takeovers.increment();
-                notifyTakeover(w.key, info);
-                w.takenOver = true;
-                LOGGER.infof("Took over lease %s from %s/%s (holder gone)", sanitize(w.key), info.node(), info.boot());
-                reschedule(w, 0);
-                return;
-            }
-            if (!w.markerWritten) {
-                w.markerWritten = true;
-                try {
-                    kv.put(WAITER_PREFIX + w.key, node.nodeId().getBytes(StandardCharsets.UTF_8));
-                } catch (ClusterUnavailableException ignored) {
-                    // fairness only
-                }
-            }
-            reschedule(w, pollDelayMillis());
+            tryOnce(w);
         } catch (ClusterUnavailableException e) {
             LOGGER.debugf("Lease attempt for %s could not reach NATS: %s", sanitize(w.key), e.getMessage());
             if (view.isDegraded()) {
@@ -353,8 +495,155 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
+    /**
+     * One acquisition attempt. Uncontended it costs two round trips — read the
+     * key's last record, write at its revision — or one, when a release
+     * notification named the delete marker's revision.
+     */
+    private void tryOnce(Waiter w) {
+        long sent = System.nanoTime();
+        byte[] value = encode(System.currentTimeMillis(), w.lid);
+        long hint = w.hint;
+        w.hint = 0;
+        if (hint > 0) {
+            OptionalLong revision = kv.update(w.key, value, hint);
+            if (revision.isPresent()) {
+                grant(w, revision.getAsLong(), sent);
+                return;
+            }
+        }
+        ISharedKv.Latest latest = kv.latest(w.key);
+        if (!latest.isLive()) {
+            OptionalLong revision = kv.createAt(w.key, value, latest);
+            if (revision.isPresent()) {
+                grant(w, revision.getAsLong(), sent);
+                return;
+            }
+            // Somebody wrote the key in between — look again at once.
+            w.contended = true;
+            observed.remove(w.key);
+            reschedule(w, 1);
+            return;
+        }
+        w.contended = true;
+        ISharedKv.Versioned current = latest.live();
+        LeaseInfo info = decode(current);
+        w.lastHolder = info.node();
+        if (isThisBoot(info)) {
+            String lid = leaseId(current);
+            if (w.lid.equals(lid)) {
+                // An earlier attempt of this very waiter wrote the lease, but its reply was
+                // lost (a timeout, a NATS leader change): it is ours.
+                adopt(w, info);
+                return;
+            }
+            if (!heldHere(w.key, lid)) {
+                deleteOrphan(w.key, info);
+                reschedule(w, 0);
+                return;
+            }
+        } else if (isStale(w.key, info) && kv.delete(w.key, info.revision())) {
+            observed.remove(w.key);
+            takeovers.increment();
+            notifyTakeover(w.key, info);
+            w.takenOver = true;
+            LOGGER.infof("Took over lease %s from %s/%s (holder gone)", sanitize(w.key), info.node(), info.boot());
+            reschedule(w, 0);
+            return;
+        }
+        announceWaiting(w, info);
+        reschedule(w, pollDelayMillis());
+    }
+
+    /**
+     * Takes a lease this waiter had written although the write's reply never came,
+     * renewing it at once: when that write reached the server is unknown, so its
+     * validity cannot be counted from it.
+     */
+    private void adopt(Waiter w, LeaseInfo info) {
+        long sent = System.nanoTime();
+        OptionalLong revision = kv.update(w.key, encode(System.currentTimeMillis(), w.lid), info.revision());
+        if (revision.isEmpty()) {
+            reschedule(w, 1);
+            return;
+        }
+        meterRegistry.counter("eddi.cluster.lease.adopted", "op", "create").increment();
+        LOGGER.infof("Lease %s was written by this node although the reply was lost — taken", sanitize(w.key));
+        grant(w, revision.getAsLong(), sent);
+    }
+
+    /**
+     * A lease this process wrote but nobody here holds: the write of an acquire
+     * that gave up after its reply was lost. Left alone it would block the
+     * conversation for the TTL — on every node, this one included.
+     */
+    private void deleteOrphan(String key, LeaseInfo info) {
+        if (kv.delete(key, info.revision())) {
+            orphansDeleted.increment();
+            LOGGER.infof("Deleted lease %s, written by this node but never taken (its reply was lost)", sanitize(key));
+        }
+    }
+
+    private boolean isThisBoot(LeaseInfo info) {
+        return node.nodeId().equals(info.node()) && node.bootId().equals(info.boot());
+    }
+
+    /**
+     * Whether this process holds the lease with id {@code lid} under {@code key},
+     * or is still taking it: a waiter's or a {@link #tryAcquireKey}'s write is
+     * visible in the bucket before it is recorded in {@code held}, and another
+     * acquire of this process reading it in that window must not delete it as an
+     * orphan. A waiter stays registered until after {@code grant} recorded its
+     * lease (the future completes after {@code held.put}), and a tryAcquireKey id
+     * until the call returns.
+     */
+    private boolean heldHere(String key, String lid) {
+        if (lid == null) {
+            return false;
+        }
+        Held h = held.get(key);
+        if (h != null && lid.equals(h.lid)) {
+            return true;
+        }
+        Set<Waiter> pending = waiters.get(key);
+        if (pending != null) {
+            for (Waiter w : pending) {
+                if (lid.equals(w.lid)) {
+                    return true;
+                }
+            }
+        }
+        Set<String> trying = tryAcquiring.get(key);
+        return trying != null && trying.contains(lid);
+    }
+
+    /**
+     * Tells the holder's node that this node waits (repeated with every poll; core
+     * NATS, no round trip), and leaves the {@code w.<key>} marker once.
+     */
+    private void announceWaiting(Waiter w, LeaseInfo info) {
+        if (!info.node().isEmpty() && !node.nodeId().equals(info.node())) {
+            try {
+                notifier.publishWaiting(info.node(), w.key, node.nodeId());
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Waiting notice for %s not sent: %s", sanitize(w.key), e.getMessage());
+            }
+        }
+        if (w.markerRevision == 0) {
+            w.markerRevision = -1;
+            try {
+                w.markerRevision = kv.put(WAITER_PREFIX + w.key, node.nodeId().getBytes(StandardCharsets.UTF_8));
+            } catch (ClusterUnavailableException ignored) {
+                // fairness and the admin listing only
+            }
+            if (w.future.isDone()) {
+                clearMarker(w); // completed while the marker was being written
+            }
+        }
+    }
+
     private long pollDelayMillis() {
-        long base = Math.max(50, config.leaseTtl().toMillis() / 4);
+        long base = Math.min(MAX_POLL_MILLIS, Math.max(50, config.leaseTtl().toMillis() / 4));
         return base / 2 + ThreadLocalRandom.current().nextLong(base);
     }
 
@@ -377,9 +666,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     private boolean isStale(String key, LeaseInfo info) {
         if (node.nodeId().equals(info.node())) {
-            // Our own earlier incarnation (same node id, different boot) — or, if the
-            // boot matches, a lease this process holds under the same key, which the
-            // local FIFO makes impossible for conversations; never take that over.
+            // Our own earlier incarnation (same node id, different boot). A lease of this
+            // boot is never stale: the caller recognises its own writes by the lease id.
             return !node.bootId().equals(info.boot());
         }
         Optional<String> liveBoot;
@@ -408,8 +696,8 @@ public class KvLeaseManager implements IConversationLeaseManager {
         return now - seen.sinceNanos() >= config.leaseHeartbeatInterval().multipliedBy(3).toNanos();
     }
 
-    private void grant(Waiter w, long revision) {
-        Held h = new Held(w.key, revision, w.takenOver);
+    private void grant(Waiter w, long revision, long sentNanos) {
+        Held h = newHeld(w.key, revision, w.takenOver, w.lid, sentNanos);
         observed.remove(w.key);
         held.put(w.key, h);
         if (!w.future.complete(h)) {
@@ -418,13 +706,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
             return;
         }
         record(w, "acquired");
-        if (w.markerWritten) {
-            try {
-                kv.delete(WAITER_PREFIX + w.key);
-            } catch (ClusterUnavailableException ignored) {
-                // expires with the bucket TTL
-            }
-        }
+    }
+
+    private Held newHeld(String key, long revision, boolean takenOver, String lid, long sentNanos) {
+        return new Held(key, revision, takenOver, lid, sentNanos, validityNanos, this::expired);
     }
 
     private void timeout(Waiter w) {
@@ -462,27 +747,40 @@ public class KvLeaseManager implements IConversationLeaseManager {
             return Optional.empty();
         }
         Held existing = held.get(key);
-        if (existing != null && !existing.lost) {
+        if (existing != null && !existing.isLost()) {
             return Optional.of(existing);
         }
+        String lid = newLeaseId();
+        tryAcquiring.computeIfAbsent(key, k -> ConcurrentHashMap.newKeySet()).add(lid);
         try {
-            OptionalLong revision = kv.create(key, encode(System.currentTimeMillis()));
-            if (revision.isEmpty()) {
-                Optional<ISharedKv.Versioned> current = kv.get(key);
-                if (current.isPresent()) {
-                    LeaseInfo info = decode(current.get());
-                    if (isStale(key, info) && kv.delete(key, info.revision())) {
-                        observed.remove(key);
-                        takeovers.increment();
-                        notifyTakeover(key, info);
-                        revision = kv.create(key, encode(System.currentTimeMillis()));
-                    }
+            long sent = System.nanoTime();
+            ISharedKv.Latest latest = kv.latest(key);
+            if (latest.isLive()) {
+                ISharedKv.Versioned current = latest.live();
+                LeaseInfo info = decode(current);
+                boolean orphan = isThisBoot(info) && !heldHere(key, leaseId(current));
+                boolean stale = !orphan && isStale(key, info);
+                if (!orphan && !stale) {
+                    return Optional.empty();
                 }
+                OptionalLong deleted = kv.deleteReturningRevision(key, info.revision());
+                if (deleted.isEmpty()) {
+                    return Optional.empty();
+                }
+                if (orphan) {
+                    orphansDeleted.increment();
+                } else {
+                    observed.remove(key);
+                    takeovers.increment();
+                    notifyTakeover(key, info);
+                }
+                latest = new ISharedKv.Latest(null, deleted.getAsLong());
             }
+            OptionalLong revision = kv.createAt(key, encode(System.currentTimeMillis(), lid), latest);
             if (revision.isEmpty()) {
                 return Optional.empty();
             }
-            Held h = new Held(key, revision.getAsLong(), false);
+            Held h = newHeld(key, revision.getAsLong(), false, lid, sent);
             observed.remove(key);
             held.put(key, h);
             if (draining || shuttingDown) {
@@ -495,31 +793,87 @@ public class KvLeaseManager implements IConversationLeaseManager {
             return Optional.of(h);
         } catch (ClusterUnavailableException e) {
             return Optional.empty();
+        } finally {
+            tryAcquiring.computeIfPresent(key, (k, ids) -> {
+                ids.remove(lid);
+                return ids.isEmpty() ? null : ids;
+            });
         }
+    }
+
+    // ---------------------------------------------------------------- handoff
+
+    /**
+     * Keeps a lease for the next turn queued on this node: no release, no
+     * re-acquire, no round trip. Refused when the lease is lost or about to be
+     * (less than one heartbeat of validity left), when another node is known to be
+     * waiting for it, after {@value #MAX_HANDOFFS} handoffs in a row, and while the
+     * node drains or shuts down.
+     */
+    @Override
+    public boolean handOver(LeaseHandle handle) {
+        if (!(handle instanceof Held h) || held.get(h.key) != h || h.released.get() || h.isLost() || draining || shuttingDown) {
+            return false;
+        }
+        if (System.nanoTime() - h.confirmedNanos > validityNanos - config.leaseHeartbeatInterval().toNanos()) {
+            return false;
+        }
+        if (!freshWaitingNodes(h.key).isEmpty() || h.handoffs >= MAX_HANDOFFS) {
+            return false;
+        }
+        h.prepareForNextTurn();
+        handoffs.increment();
+        return true;
+    }
+
+    private void noteWaiting(String key, String fromNode) {
+        if (fromNode == null || node.nodeId().equals(fromNode) || !held.containsKey(key)) {
+            return;
+        }
+        waitingNodes.computeIfAbsent(key, k -> new ConcurrentHashMap<>()).put(fromNode, System.nanoTime());
+        if (!held.containsKey(key)) {
+            waitingNodes.remove(key); // released in between: no entry may outlive the lease
+        }
+    }
+
+    private List<String> freshWaitingNodes(String key) {
+        Map<String, Long> nodes = waitingNodes.get(key);
+        return nodes == null ? List.of() : fresh(nodes);
+    }
+
+    private static List<String> fresh(Map<String, Long> nodes) {
+        long now = System.nanoTime();
+        List<String> fresh = new ArrayList<>(nodes.size());
+        nodes.forEach((n, at) -> {
+            if (now - at <= WAITING_FRESH_NANOS) {
+                fresh.add(n);
+            }
+        });
+        return fresh;
     }
 
     // ---------------------------------------------------------------- release
 
     @Override
     public void release(LeaseHandle handle) {
-        if (!(handle instanceof Held h) || !held.remove(h.key, h)) {
+        if (!(handle instanceof Held h) || !h.released.compareAndSet(false, true)) {
             return; // unfenced, foreign or already released
         }
-        h.released = true;
-        if (h.lost) {
-            return;
-        }
+        held.remove(h.key, h);
+        Map<String, Long> waiting = held.containsKey(h.key) ? null : waitingNodes.remove(h.key);
         try {
-            if (!kv.delete(h.key, h.revision)) {
-                deleteIfStillOurs(h);
+            long deleteRevision;
+            if (h.isLost()) {
+                // Lost here does not mean gone there: a lease lost because no renewal was
+                // acknowledged may still be ours on the server, and would block the
+                // conversation for the rest of its TTL — this node included.
+                deleteRevision = deleteIfStillOurs(h);
+            } else {
+                OptionalLong deleted = kv.deleteReturningRevision(h.key, h.revision);
+                deleteRevision = deleted.isPresent() ? deleted.getAsLong() : deleteIfStillOurs(h);
             }
-            notifier.publishReleased(h.key);
-            Optional<ISharedKv.Versioned> marker = kv.get(WAITER_PREFIX + h.key);
-            if (marker.isPresent()) {
-                String waiterNode = new String(marker.get().value(), StandardCharsets.UTF_8);
-                if (!node.nodeId().equals(waiterNode)) {
-                    yieldUntil.put(h.key, System.currentTimeMillis() + config.leaseHandoffGrace().toMillis());
-                }
+            if (deleteRevision >= 0) {
+                announceReleased(h.key, deleteRevision, waiting == null ? List.of() : fresh(waiting));
             }
         } catch (ClusterUnavailableException e) {
             // The lease expires on the server within the TTL; waiters poll for that.
@@ -528,22 +882,50 @@ public class KvLeaseManager implements IConversationLeaseManager {
     }
 
     /**
-     * The delete at the last revision we knew missed. Either the lease was taken
-     * over (a real conflict), or our own heartbeat renewed it between that revision
-     * being read and this release — then the key is still ours at a newer revision,
-     * and leaving it would hold the conversation for the whole TTL after the turn
-     * had finished.
+     * Wakes this node's waiters, and tells every other node known to wait that the
+     * lease is free — addressed to each, not broadcast to the cluster. Having
+     * released to another node's waiter, this node holds back its own next acquire
+     * of the key for the handoff grace.
      */
-    private void deleteIfStillOurs(Held h) {
-        Optional<ISharedKv.Versioned> current = kv.get(h.key);
-        if (current.isEmpty()) {
-            return; // already gone
-        }
-        LeaseInfo info = decode(current.get());
-        if (node.nodeId().equals(info.node()) && node.bootId().equals(info.boot()) && kv.delete(h.key, info.revision())) {
+    private void announceReleased(String key, long deleteRevision, List<String> otherNodes) {
+        wakeWaiters(key, deleteRevision);
+        if (otherNodes.isEmpty()) {
             return;
         }
+        yieldUntil.put(key, System.currentTimeMillis() + config.leaseHandoffGrace().toMillis());
+        for (String other : otherNodes) {
+            try {
+                notifier.publishReleasedTo(other, key, deleteRevision);
+            } catch (RuntimeException e) {
+                LOGGER.debugf("Release notice for %s to %s not sent: %s", sanitize(key), other, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * The delete at the last revision we knew missed, or the lease is lost. Either
+     * it was taken over (a real conflict), or a write of ours landed that we have
+     * not recorded — a renewal racing this release, or one whose reply was lost —
+     * then the key still holds this lease at a newer revision, and leaving it would
+     * hold the conversation for the whole TTL after the turn had finished.
+     *
+     * @return the delete marker's revision ({@code 0} when the key was already
+     *         gone), or {@code -1} when another lease holds the key now
+     */
+    private long deleteIfStillOurs(Held h) {
+        Optional<ISharedKv.Versioned> current = kv.getConsistent(h.key);
+        if (current.isEmpty()) {
+            return 0; // already gone
+        }
+        LeaseInfo info = decode(current.get());
+        if (isThisBoot(info) && h.lid.equals(leaseId(current.get()))) {
+            OptionalLong deleted = kv.deleteReturningRevision(h.key, info.revision());
+            if (deleted.isPresent()) {
+                return deleted.getAsLong();
+            }
+        }
         releaseConflicts.increment();
+        return -1;
     }
 
     @Override
@@ -646,6 +1028,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
             lose(local, "force_released");
         }
         try {
+            // Broadcast: the waiters may be on any node, of any version.
             notifier.publishReleased(key);
         } catch (RuntimeException e) {
             LOGGER.debugf("Release notification for %s not sent: %s", sanitize(key), e.getMessage());
@@ -673,10 +1056,10 @@ public class KvLeaseManager implements IConversationLeaseManager {
      */
     public List<LeaseSnapshot> snapshot(String prefix, int max) {
         List<ISharedKv.Entry> all = kv.entries("", Math.max(max, 1) * 2 + 16);
-        Map<String, String> waitingNodes = new HashMap<>();
+        Map<String, String> waitingByKey = new HashMap<>();
         for (ISharedKv.Entry e : all) {
             if (e.key().startsWith(WAITER_PREFIX)) {
-                waitingNodes.put(e.key().substring(WAITER_PREFIX.length()), new String(e.value().value(), StandardCharsets.UTF_8));
+                waitingByKey.put(e.key().substring(WAITER_PREFIX.length()), new String(e.value().value(), StandardCharsets.UTF_8));
             }
         }
         List<LeaseSnapshot> leases = new ArrayList<>();
@@ -693,17 +1076,16 @@ public class KvLeaseManager implements IConversationLeaseManager {
             if (value.isEmpty()) {
                 continue; // released since the watch saw it
             }
-            leases.add(new LeaseSnapshot(e.key(), decode(value.get()), value.get().writtenAt(), waitingNodes.get(e.key())));
+            leases.add(new LeaseSnapshot(e.key(), decode(value.get()), value.get().writtenAt(), waitingByKey.get(e.key())));
         }
         return leases;
     }
 
     /**
      * Releases every held lease at shutdown, side by side and within a bounded
-     * time. A release costs up to three NATS calls; one after another, a few dozen
-     * leases against a NATS that answers slowly would outlast the pod's termination
-     * grace. A lease this misses expires on the server within the TTL — safe, only
-     * slower for the next turn.
+     * time. One after another, a few dozen leases against a NATS that answers
+     * slowly would outlast the pod's termination grace. A lease this misses expires
+     * on the server within the TTL — safe, only slower for the next turn.
      */
     @Override
     public void releaseAll() {
@@ -722,12 +1104,15 @@ public class KvLeaseManager implements IConversationLeaseManager {
         awaitAll(releases, config.natsRequestTimeout().multipliedBy(4));
     }
 
-    private void wakeWaiters(String key) {
+    private void wakeWaiters(String key, long deleteRevision) {
         Set<Waiter> set = waiters.get(key);
         if (set == null) {
             return;
         }
         for (Waiter w : set) {
+            if (deleteRevision > 0) {
+                w.hint = deleteRevision;
+            }
             ScheduledFuture<?> next = w.next;
             if (next != null) {
                 next.cancel(false);
@@ -739,11 +1124,45 @@ public class KvLeaseManager implements IConversationLeaseManager {
     // ---------------------------------------------------------------- heartbeat
 
     /**
-     * The scheduler's tick: starts a heartbeat pass on the I/O executor and returns
-     * at once. The lease scheduler also runs every lease waiter's retry and
-     * deadline timer, so a pass that waits for a stalled renewal must not run on
-     * it. A tick that finds the previous pass still running skips; the renewals of
-     * that pass carry on, and the next tick picks the lease up again.
+     * The scheduler's tick, every quarter heartbeat: marks the leases whose
+     * validity ran out as lost — no I/O, so it runs whatever NATS does — and starts
+     * a renewal pass on the I/O executor. The lease scheduler also runs every lease
+     * waiter's retry and deadline timer, so a pass that waits for a stalled renewal
+     * must not run on it.
+     */
+    void tick() {
+        expireUnconfirmed();
+        dispatchHeartbeat();
+    }
+
+    /** Loses every held lease whose validity ran out. */
+    void expireUnconfirmed() {
+        long now = System.nanoTime();
+        for (Held h : new ArrayList<>(held.values())) {
+            if (!h.lost && h.isExpired(now) && h.expiring.compareAndSet(false, true)) {
+                expired(h);
+            }
+        }
+        long nowMillis = System.currentTimeMillis();
+        yieldUntil.values().removeIf(until -> until < nowMillis);
+    }
+
+    /**
+     * A lease whose validity ran out: loses it on the I/O executor, so the lost
+     * callbacks never run on the lease scheduler or on the thread that asked
+     * {@link LeaseHandle#isLost()}.
+     */
+    private void expired(Held h) {
+        try {
+            io.execute(() -> lose(h, "unconfirmed"));
+        } catch (RejectedExecutionException e) {
+            lose(h, "unconfirmed");
+        }
+    }
+
+    /**
+     * Starts a pass renewing the leases due, unless one is still running; the
+     * renewals of that pass carry on, and the next tick picks the rest up.
      */
     void dispatchHeartbeat() {
         if (!heartbeatRunning.compareAndSet(false, true)) {
@@ -752,7 +1171,7 @@ public class KvLeaseManager implements IConversationLeaseManager {
         try {
             io.execute(() -> {
                 try {
-                    heartbeatAll();
+                    renewDue();
                 } finally {
                     heartbeatRunning.set(false);
                 }
@@ -762,61 +1181,130 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
+    /** Renews the leases whose last renewal is at least 3/4 heartbeat old. */
+    void renewDue() {
+        long now = System.nanoTime();
+        List<Held> due = new ArrayList<>();
+        for (Held h : held.values()) {
+            if (now - h.lastRenewalNanos >= renewDueNanos) {
+                due.add(h);
+            }
+        }
+        renew(due, Duration.ofMillis(tickMillis));
+    }
+
     /**
-     * Renews every held lease. The renewals run side by side on the I/O executor
-     * and this method waits for them: done one after another, a NATS that answers
-     * slowly (each call may take up to the request timeout) would stretch one pass
-     * over hundreds of leases past the lease TTL, and the node would lose all of
-     * them at once although it is alive. The wait is bounded by one heartbeat
-     * interval, so a stalled call never delays the next tick; a lease whose
-     * previous renewal is still in flight is skipped, never renewed twice
-     * concurrently.
+     * Renews every held lease, whether due or not, and waits for the renewals — at
+     * most one heartbeat interval.
      */
     void heartbeatAll() {
+        renew(new ArrayList<>(held.values()), config.leaseHeartbeatInterval());
+    }
+
+    /**
+     * Renews {@code leases}, the least recently confirmed first, at most
+     * {@value #MAX_CONCURRENT_RENEWALS} in flight. Waits at most {@code budget} for
+     * a free slot and for the renewals; what does not start within it is left to
+     * the next pass, and a renewal still running then finishes on the I/O executor
+     * — its lease is skipped through {@code renewing}, never renewed twice
+     * concurrently.
+     */
+    private void renew(List<Held> leases, Duration budget) {
+        long deadline = System.nanoTime() + budget.toNanos();
+        leases.sort(Comparator.comparingLong(h -> h.confirmedNanos));
         List<CompletableFuture<Void>> renewals = new ArrayList<>();
-        for (Held h : new ArrayList<>(held.values())) {
-            if (h.lost || h.released || !h.renewing.compareAndSet(false, true)) {
+        for (Held h : leases) {
+            if (h.lost || h.released.get() || !h.renewing.compareAndSet(false, true)) {
                 continue;
+            }
+            boolean slot;
+            try {
+                slot = renewSlots.tryAcquire(Math.max(0, deadline - System.nanoTime()), TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                h.renewing.set(false);
+                break;
+            }
+            if (!slot) {
+                h.renewing.set(false);
+                break;
             }
             CompletableFuture<Void> renewal = new CompletableFuture<>();
             renewals.add(renewal);
             try {
                 io.execute(() -> {
                     try {
-                        renew(h);
+                        renewOne(h);
                     } finally {
                         h.renewing.set(false);
+                        renewSlots.release();
                         renewal.complete(null);
                     }
                 });
             } catch (RuntimeException e) {
                 // The executor refused (shutting down): nothing to renew any more.
                 h.renewing.set(false);
+                renewSlots.release();
                 renewal.complete(null);
             }
         }
-        // At most one heartbeat interval: the scheduler does not overlap runs, so a
-        // longer wait would delay the next tick, and with it every other lease. A
-        // renewal still running then finishes on the I/O executor, and the next tick
-        // skips its lease through `renewing`.
-        awaitAll(renewals, config.leaseHeartbeatInterval());
+        awaitAll(renewals, Duration.ofNanos(Math.max(1, deadline - System.nanoTime())));
     }
 
-    private void renew(Held h) {
-        if (h.lost || h.released) {
+    private void renewOne(Held h) {
+        if (h.lost || h.released.get()) {
             return;
         }
+        long sent = System.nanoTime();
+        if (h.isExpired(sent)) {
+            lose(h, "unconfirmed");
+            return;
+        }
+        h.lastRenewalNanos = sent;
         try {
-            OptionalLong next = kv.update(h.key, encode(h.since), h.revision);
+            OptionalLong next = kv.update(h.key, encode(h.since, h.lid), h.revision);
             if (next.isPresent()) {
-                h.revision = next.getAsLong();
-            } else if (!h.released) {
-                lose(h, "taken_over");
+                h.confirm(next.getAsLong(), sent);
+            } else if (!h.released.get()) {
+                reconcile(h);
             }
         } catch (ClusterUnavailableException e) {
-            // Keep running: the DB fence decides whether the turn's write lands.
+            // Not lost yet: the lease stays valid until its validity, counted from the
+            // last acknowledged renewal, runs out — then the tick loses it.
+            renewFailures.increment();
+            LOGGER.debugf("Heartbeat of %s could not reach NATS: %s", sanitize(h.key), e.getMessage());
         } catch (RuntimeException e) {
+            renewFailures.increment();
             LOGGER.debugf("Heartbeat of %s failed: %s", sanitize(h.key), e.getMessage());
+        }
+    }
+
+    /**
+     * A renewal conflicted. Read the key from the stream leader: if it still holds
+     * this lease, an earlier renewal was applied although its reply was lost (a
+     * timeout, a NATS leader change) — keep the lease, renewing it at the revision
+     * found. Anything else is a takeover.
+     */
+    private void reconcile(Held h) {
+        Optional<ISharedKv.Versioned> current = kv.getConsistent(h.key);
+        if (current.isEmpty()) {
+            lose(h, "gone");
+            return;
+        }
+        LeaseInfo info = decode(current.get());
+        if (!isThisBoot(info) || !h.lid.equals(leaseId(current.get()))) {
+            lose(h, "taken_over");
+            return;
+        }
+        long sent = System.nanoTime();
+        OptionalLong next = kv.update(h.key, encode(h.since, h.lid), info.revision());
+        if (next.isPresent()) {
+            h.confirm(next.getAsLong(), sent);
+            meterRegistry.counter("eddi.cluster.lease.adopted", "op", "renew").increment();
+            LOGGER.infof("Lease %s: a renewal had been applied although its reply was lost — kept at revision %d", sanitize(h.key),
+                    next.getAsLong());
+        } else if (!h.released.get()) {
+            lose(h, "taken_over");
         }
     }
 
@@ -840,35 +1328,55 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     private void lose(Held h, String reason) {
         held.remove(h.key, h);
+        if (!held.containsKey(h.key)) {
+            waitingNodes.remove(h.key);
+        }
+        if (h.released.get()) {
+            return; // the turn already finished with it
+        }
+        List<Runnable> callbacks = h.claimLost();
+        if (callbacks == null) {
+            return; // already lost
+        }
         meterRegistry.counter("eddi.cluster.lease.lost", "reason", reason).increment();
         LOGGER.warnf("Lost lease %s (%s) — the running turn is cancelled at its next task boundary and its write is fenced",
                 sanitize(h.key), reason);
-        h.fireLost();
+        for (Runnable r : callbacks) {
+            try {
+                r.run();
+            } catch (RuntimeException e) {
+                LOGGER.warnf(e, "Lease-lost callback failed for %s", sanitize(h.key));
+            }
+        }
     }
 
     /**
      * Deletes leases this node id still holds under an earlier boot id, so a
-     * restarted pod does not wait out its own leases. Runs on every (re)connect.
+     * restarted pod does not wait out its own leases. Runs once per process, on the
+     * first connect that lets it finish: leases of an earlier boot can only exist
+     * from before this process started, so a reconnect has nothing to add — and
+     * every node scanning the whole bucket on every reconnect, all at once, was the
+     * cost of an outage. One watch lists the bucket instead of a read per key.
      */
     public void sweepOwnStaleLeases() {
+        if (swept.get()) {
+            return;
+        }
         try {
-            for (String key : kv.keys()) {
-                if (key.startsWith(WAITER_PREFIX)) {
+            for (ISharedKv.Entry e : kv.entries("", Integer.MAX_VALUE)) {
+                if (e.key().startsWith(WAITER_PREFIX)) {
                     continue;
                 }
-                Optional<ISharedKv.Versioned> v = kv.get(key);
-                if (v.isEmpty()) {
-                    continue;
-                }
-                LeaseInfo info = decode(v.get());
-                if (node.nodeId().equals(info.node()) && !node.bootId().equals(info.boot()) && kv.delete(key, info.revision())) {
+                LeaseInfo info = decode(e.value());
+                if (node.nodeId().equals(info.node()) && !node.bootId().equals(info.boot()) && kv.delete(e.key(), info.revision())) {
                     takeovers.increment();
-                    notifyTakeover(key, info);
-                    LOGGER.infof("Released lease %s left by this node's previous boot %s", sanitize(key), info.boot());
+                    notifyTakeover(e.key(), info);
+                    LOGGER.infof("Released lease %s left by this node's previous boot %s", sanitize(e.key()), info.boot());
                 }
             }
+            swept.set(true);
         } catch (ClusterUnavailableException e) {
-            LOGGER.debugf("Stale-lease sweep skipped: %s", e.getMessage());
+            LOGGER.debugf("Stale-lease sweep skipped (retried on the next connect): %s", e.getMessage());
         }
     }
 
@@ -877,10 +1385,15 @@ public class KvLeaseManager implements IConversationLeaseManager {
     @Override
     public Optional<LeaseInfo> peekKey(String key) {
         try {
-            return kv.get(key).map(this::decode);
+            return peekKeyStrict(key);
         } catch (ClusterUnavailableException e) {
             return Optional.empty();
         }
+    }
+
+    @Override
+    public Optional<LeaseInfo> peekKeyStrict(String key) {
+        return kv.get(key).map(this::decode);
     }
 
     @Override
@@ -890,11 +1403,17 @@ public class KvLeaseManager implements IConversationLeaseManager {
 
     // ---------------------------------------------------------------- encoding
 
-    private byte[] encode(long since) {
+    /**
+     * The lease value. {@code node}, {@code boot} and {@code since} are what every
+     * version reads; {@code lid} — the id of this lease within this process — is
+     * new, and earlier versions ignore it.
+     */
+    private byte[] encode(long since, String lid) {
         ObjectNode value = JSON.createObjectNode();
         value.put("node", node.nodeId());
         value.put("boot", node.bootId());
         value.put("since", since);
+        value.put("lid", lid);
         try {
             return JSON.writeValueAsBytes(value);
         } catch (IOException e) {
@@ -911,45 +1430,76 @@ public class KvLeaseManager implements IConversationLeaseManager {
         }
     }
 
+    /** The lease id in a value, or {@code null} (written by an earlier version). */
+    static String leaseId(ISharedKv.Versioned v) {
+        try {
+            JsonNode lid = JSON.readTree(v.value()).get("lid");
+            return lid == null || lid.isNull() ? null : lid.asText();
+        } catch (IOException | RuntimeException e) {
+            return null;
+        }
+    }
+
     // ---------------------------------------------------------------- types
 
     private static final class Waiter {
         final String key;
         final long deadlineNanos;
+        final String lid;
         final long startNanos = System.nanoTime();
         final CompletableFuture<LeaseHandle> future = new CompletableFuture<>();
         final AtomicBoolean attempting = new AtomicBoolean();
         volatile ScheduledFuture<?> next;
         volatile boolean contended;
-        volatile boolean markerWritten;
+        /** Revision of this waiter's {@code w.<key>} marker; 0 not written, -1 none. */
+        volatile long markerRevision;
         volatile boolean takenOver;
         volatile boolean rerun;
         volatile long notBeforeNanos;
         volatile String lastHolder;
+        /** The delete marker's revision from a release notification, or 0. */
+        volatile long hint;
 
-        Waiter(String key, long deadlineNanos) {
+        Waiter(String key, long deadlineNanos, String lid) {
             this.key = key;
             this.deadlineNanos = deadlineNanos;
+            this.lid = lid;
         }
     }
 
     static final class Held implements LeaseHandle {
         final String key;
         final long fence;
+        final String lid;
         final long since = System.currentTimeMillis();
-        final boolean takenOver;
+        private final long validityNanos;
+        private final Consumer<Held> onExpired;
+        volatile boolean takenOver;
         volatile long revision;
+        /** When the last write of this lease that was acknowledged had been sent. */
+        volatile long confirmedNanos;
+        /** When the last renewal was started. */
+        volatile long lastRenewalNanos;
         volatile boolean lost;
-        volatile boolean released;
+        final AtomicBoolean released = new AtomicBoolean();
+        /** Turns this lease was handed to without a release. */
+        volatile int handoffs;
         /** A heartbeat renewal of this lease is in flight. */
         final AtomicBoolean renewing = new AtomicBoolean();
+        /** Its expiry has been handed to {@code onExpired} (once). */
+        final AtomicBoolean expiring = new AtomicBoolean();
         private final List<Runnable> lostCallbacks = new ArrayList<>();
 
-        Held(String key, long fence, boolean takenOver) {
+        Held(String key, long fence, boolean takenOver, String lid, long sentNanos, long validityNanos, Consumer<Held> onExpired) {
             this.key = key;
             this.fence = fence;
             this.revision = fence;
             this.takenOver = takenOver;
+            this.lid = lid;
+            this.confirmedNanos = sentNanos;
+            this.lastRenewalNanos = sentNanos;
+            this.validityNanos = validityNanos;
+            this.onExpired = onExpired;
         }
 
         @Override
@@ -968,9 +1518,34 @@ public class KvLeaseManager implements IConversationLeaseManager {
             return fence;
         }
 
+        /**
+         * True once the lease was taken over or force-released, and as soon as its
+         * validity ran out without an acknowledged renewal — whether or not the tick
+         * has noticed yet (then the lost callbacks are started from here).
+         */
         @Override
         public boolean isLost() {
-            return lost;
+            if (lost) {
+                return true;
+            }
+            if (isExpired(System.nanoTime())) {
+                if (!released.get() && expiring.compareAndSet(false, true)) {
+                    onExpired.accept(this);
+                }
+                return true;
+            }
+            return false;
+        }
+
+        boolean isExpired(long nowNanos) {
+            return nowNanos - confirmedNanos >= validityNanos;
+        }
+
+        synchronized void confirm(long newRevision, long sentNanos) {
+            revision = newRevision;
+            if (sentNanos - confirmedNanos > 0) {
+                confirmedNanos = sentNanos;
+            }
         }
 
         @Override
@@ -992,23 +1567,29 @@ public class KvLeaseManager implements IConversationLeaseManager {
             }
         }
 
-        void fireLost() {
-            List<Runnable> callbacks;
+        /**
+         * Marks the lease lost; the callbacks to run, or {@code null} if it already
+         * was.
+         */
+        List<Runnable> claimLost() {
             synchronized (lostCallbacks) {
                 if (lost) {
-                    return;
+                    return null;
                 }
                 lost = true;
-                callbacks = new ArrayList<>(lostCallbacks);
+                List<Runnable> callbacks = new ArrayList<>(lostCallbacks);
+                lostCallbacks.clear();
+                return callbacks;
+            }
+        }
+
+        /** Resets the handle for the next turn it is handed to. */
+        void prepareForNextTurn() {
+            synchronized (lostCallbacks) {
                 lostCallbacks.clear();
             }
-            for (Runnable r : callbacks) {
-                try {
-                    r.run();
-                } catch (RuntimeException e) {
-                    LOGGER.warnf(e, "Lease-lost callback failed for %s", sanitize(key));
-                }
-            }
+            takenOver = false;
+            handoffs++;
         }
     }
 }

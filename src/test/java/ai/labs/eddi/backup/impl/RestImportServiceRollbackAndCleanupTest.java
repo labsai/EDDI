@@ -412,10 +412,53 @@ class RestImportServiceRollbackAndCleanupTest {
                 verify(restWorkflowStore).updateWorkflow(eq(LOCAL_WORKFLOW_ID), eq(3), any());
                 // ... and the compensation: the pre-import content written over v4
                 verify(restWorkflowStore).updateWorkflow(LOCAL_WORKFLOW_ID, 4, previous);
-                verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3), argThat((DocumentDescriptor d) -> d == previousDescriptor
-                        && d.getResource().toString().endsWith(LOCAL_WORKFLOW_ID + "?version=5")));
+                // The current descriptor, with the snapshot's metadata put back on it.
+                verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3),
+                        argThat((DocumentDescriptor d) -> d != previousDescriptor && "Before".equals(d.getName())
+                                && d.getResource().toString().endsWith(LOCAL_WORKFLOW_ID + "?version=5")));
                 verify(workflowStore, never()).deleteAllPermanently(LOCAL_WORKFLOW_ID);
             }
+        }
+
+        @Test
+        @DisplayName("the rollback puts back the metadata the merge rewrote, never the sharing the snapshot had")
+        void rollbackKeepsTheCurrentSharing() throws Exception {
+            var workflowStore = mock(IWorkflowStore.class);
+            var agentStore = mock(IAgentStore.class);
+            var restWorkflowStore = mock(IRestWorkflowStore.class);
+            stubAgentWithOneWorkflowZip();
+            stubExistingLocalWorkflow(workflowStore);
+            when(documentDescriptorStore.getCurrentResourceId(LOCAL_WORKFLOW_ID)).thenReturn(resourceId(LOCAL_WORKFLOW_ID, 3));
+            var snapshot = new DocumentDescriptor();
+            snapshot.setName("Before");
+            snapshot.setOwnerId("owner-1");
+            snapshot.setVisibility("shared");
+            // While the import ran, the owner made the workflow private again.
+            when(documentDescriptorStore.readDescriptor(LOCAL_WORKFLOW_ID, 3)).thenReturn(snapshot, privateDescriptor(), privateDescriptor(),
+                    privateDescriptor(), privateDescriptor(), privateDescriptor());
+            when(restWorkflowStore.updateWorkflow(eq(LOCAL_WORKFLOW_ID), anyInt(), any())).thenReturn(Response.ok().build());
+            when(agentStore.create(any())).thenThrow(new IResourceStore.ResourceStoreException("agent store unavailable"));
+
+            try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+                stubBean(stubCdi(cdiMock, workflowStore, agentStore, mock(CapabilityRegistryService.class)),
+                        IRestWorkflowStore.class, restWorkflowStore);
+
+                assertThrows(InternalServerErrorException.class, () -> importService.importAgent(
+                        new ByteArrayInputStream(new byte[0]), "merge", null, null, null));
+            }
+
+            verify(documentDescriptorStore).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3),
+                    argThat((DocumentDescriptor d) -> "Before".equals(d.getName()) && "private".equals(d.getVisibility())
+                            && "owner-1".equals(d.getOwnerId())));
+            verify(documentDescriptorStore, never()).setDescriptor(eq(LOCAL_WORKFLOW_ID), eq(3),
+                    argThat((DocumentDescriptor d) -> "shared".equals(d.getVisibility())));
+        }
+
+        private static DocumentDescriptor privateDescriptor() {
+            var descriptor = new DocumentDescriptor();
+            descriptor.setOwnerId("owner-1");
+            descriptor.setVisibility("private");
+            return descriptor;
         }
 
         @Test

@@ -7,9 +7,12 @@ package ai.labs.eddi.engine.memory;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.ObjectReader;
 import org.jboss.logging.Logger;
 
+import java.math.BigDecimal;
 import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -62,6 +65,15 @@ public final class SecretValueScrubber {
      * the JSON form it would be stored and returned in.
      */
     private static final ObjectMapper TREE_MAPPER = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+
+    /**
+     * Reads serialized JSON found inside a string. Decimals stay {@link BigDecimal}
+     * so they keep their text when the JSON is written back (1.00 stays 1.00, not
+     * 1.0, and 17+ significant digits survive), and so a secret number written with
+     * a decimal point can still be matched by value.
+     */
+    private static final ObjectReader EMBEDDED_JSON_READER = TREE_MAPPER.readerFor(Object.class)
+            .with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
 
     private SecretValueScrubber() {
     }
@@ -243,7 +255,7 @@ public final class SecretValueScrubber {
             return cleaned.equals(text) ? null : cleaned;
         }
         if (value instanceof Number number) {
-            return plaintexts.contains(String.valueOf(number)) ? placeholder : null;
+            return plaintexts.contains(String.valueOf(number)) || equalsDecimal(number, plaintexts) ? placeholder : null;
         }
         if (value instanceof Context context) {
             Object cleaned = scrubSorted(context.getValue(), plaintexts, placeholder, deep, match);
@@ -300,6 +312,31 @@ public final class SecretValueScrubber {
     }
 
     /**
+     * Whether a decimal read from embedded JSON equals one of the plaintexts by
+     * value, so {@code 12345678.00} is found whether the JSON wrote it as
+     * {@code 12345678.0} or {@code 1.2345678E7}. Only decimals: an integer keeps
+     * the exact text comparison.
+     */
+    private static boolean equalsDecimal(Number number, List<String> plaintexts) {
+        if (!(number instanceof BigDecimal decimal)) {
+            return false;
+        }
+        for (String plaintext : plaintexts) {
+            if (plaintext.isEmpty() || !(Character.isDigit(plaintext.charAt(0)) || plaintext.charAt(0) == '-' || plaintext.charAt(0) == '.')) {
+                continue;
+            }
+            try {
+                if (decimal.compareTo(new BigDecimal(plaintext.strip())) == 0) {
+                    return true;
+                }
+            } catch (NumberFormatException e) {
+                // not a number: only the exact-text comparison applies
+            }
+        }
+        return false;
+    }
+
+    /**
      * A string that holds serialized JSON, rewritten with its decoded values (and,
      * in substring mode, keys) scrubbed in the given {@code match} mode, or
      * {@code null} when it is not JSON or carries none of the plaintexts — see
@@ -312,7 +349,7 @@ public final class SecretValueScrubber {
         }
         Object tree;
         try {
-            tree = TREE_MAPPER.readValue(trimmed, Object.class);
+            tree = EMBEDDED_JSON_READER.readValue(trimmed);
         } catch (JsonProcessingException e) {
             return null;
         }

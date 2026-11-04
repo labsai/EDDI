@@ -10,10 +10,18 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
+import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
+import ai.labs.eddi.engine.pricing.model.ModelPriceCatalog;
+import ai.labs.eddi.engine.pricing.model.ModelPriceEntry;
+import ai.labs.eddi.engine.pricing.model.UnpricedPolicy;
 import ai.labs.eddi.engine.tenancy.ITenantQuotaStore;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
+import ai.labs.eddi.modules.llm.pricing.UsageNormalizer;
+import dev.langchain4j.model.output.TokenUsage;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -1891,6 +1899,27 @@ class DreamServiceTest {
         assertEquals(3.0, DreamService.pricedCost(usage, 0, 3.0, null), 1e-12);
         assertEquals(5.0, DreamService.pricedCost(usage, 0, null, 5.0), 1e-12);
         assertEquals(0.0, DreamService.pricedCost(usage, 0, -1.0, -1.0));
+    }
+
+    @Test
+    void pricedCost_aHalfPricedDreamIsCompletedFromTheCatalog() {
+        var catalog = PriceCatalogSnapshot.of(
+                new ModelPriceCatalog(1, UnpricedPolicy.ALLOW, null, null, List.of(ModelPriceEntry.of("openai", "gpt-4o-mini", 3.0, 15.0))),
+                UnpricedPolicy.ALLOW);
+        ModelPriceCatalogs.publish(catalog);
+        try {
+            var raw = new TokenUsage(1_000_000, 1_000_000);
+            var usage = ToolContextBudget.tokenUsageMap(UsageNormalizer.normalize(raw, "openai", null, "gpt-4o-mini", catalog, true));
+            var result = new SummarizationService.SummarizationResult("x", 1_000_000, 1_000_000, usage);
+            // only the input price is configured: the output side comes from the catalog,
+            // not $0
+            assertEquals(1.0 + 15.0, DreamService.pricedCost(result, 0, 1.0, null), 1e-9);
+            assertEquals(3.0 + 5.0, DreamService.pricedCost(result, 0, null, 5.0), 1e-9);
+            // fully configured stays on the configured prices
+            assertEquals(1.0 + 5.0, DreamService.pricedCost(result, 0, 1.0, 5.0), 1e-9);
+        } finally {
+            ModelPriceCatalogs.publish(null);
+        }
     }
 
     @Test
