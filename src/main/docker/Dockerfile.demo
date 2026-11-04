@@ -52,8 +52,8 @@ COPY docs/ docs/
 RUN rm -f docs/changelog.md docs/code-review-standards.md docs/incident-response.md docs/SUMMARY.md
 
 # The Manager and the Chat UI. `package` builds both (frontend-maven-plugin in
-# prepare-package: it downloads Node into ui/node, then `npm ci` and
-# `npm run build` in each), and the demo's own story runs through the Manager —
+# prepare-package: it downloads Node into ui/node, runs `npm ci` once at the
+# ui/ workspaces root, then `npm run build` in each app), and the demo's own story runs through the Manager —
 # the Platform Operator, the wizard, HITL approvals. Without this COPY the ui/
 # directory did not exist in the build context, `npm ci` failed on a missing
 # package.json, and the documented `docker compose -f docker-compose.openwebui.yml
