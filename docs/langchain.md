@@ -1516,7 +1516,7 @@ The same applies to MCP calls via `enableMcpCallTools` (also default `true`), wh
 ### How it Works
 
 1.  **Configuration**: You add httpcall steps to the agent's workflow, as you would for `ApiCallsTask`.
-2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
+2.  **Discovery**: Each `ApiCall` in those configurations becomes its own tool, named after the ApiCall's `name`, described by its `description`, and with one string parameter per entry in its `parameters` map — or, when the call declares an [`argumentSchema`](httpcalls.md#argument-schema-for-llm-tools), with parameters typed from it (integer, boolean, array, object), and every call checked against it before the approval gate: a call that violates it gets a `NOT_EXECUTED` result listing each violation and is never paused or executed. That name is also the key used by `toolPricing`, `toolRateLimits` and `toolCacheScopes`, and the name `toolApprovals` patterns match on (alongside the `http.method:path` form).
 3.  **Execution**: When the agent decides to use a tool, it calls that tool by name (e.g. `get_stock_price`) with the arguments the schema declares.
 4.  **Security**: The agent can **only** execute the HTTP calls present in its workflow. It cannot make arbitrary HTTP requests to the internet. To narrow the agent's reach, narrow the httpcalls configuration in its workflow — or set `enableHttpCallTools: false`.
 
@@ -2137,6 +2137,22 @@ the [GDPR erasure cascade](gdpr-compliance.md) (deleted by subject), are part of
 expire on their own an hour after their window ends. If your `subject` template derives an identifier
 that differs from the conversation's user id, erasure deletes the counters whose subject equals the
 **erased user id**; erase by the derived identifier too, or let them expire.
+
+#### Argument schema refusals
+
+A call to a tool whose configuration declares an argument schema (an httpcall with
+[`argumentSchema`](httpcalls.md#argument-schema-for-llm-tools), generated for every OpenAPI tool) is
+checked **before the approval gate** classifies the batch. A call that violates it is answered
+
+```json
+{"status":"NOT_EXECUTED","reason":"The arguments do not match this tool's schema, so the call was not run and no approval was requested. Fix every listed violation and call the tool again.","violations":["$.requestBody.emails: required","$.requestBody.role: must be one of manager, curator"]}
+```
+
+and is neither executed nor shown to a human; the rest of the batch goes on to the gate as usual. The
+trace records `tool_error` with `error: "argument_schema"`, and `eddi.tool.arguments.refused`
+(tag `source`) counts it. Tools without a schema are never refused here. The check is a pure function
+of the tool's schema and the arguments, kept separate so it can later become a configurable
+tool-call guardrail.
 
 #### Repeated failing tool calls
 
