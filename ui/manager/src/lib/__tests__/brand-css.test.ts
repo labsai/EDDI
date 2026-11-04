@@ -103,6 +103,9 @@ describe("UNBRANDED_COLORS", () => {
       new RegExp(`${name}:\\s*(#[0-9a-fA-F]{6})`).exec(css)?.[1]?.toLowerCase();
     expect(declared(manager, "--color-primary")).toBe(UNBRANDED_COLORS.primary);
     expect(declared(manager, "--color-primary-foreground")).toBe(UNBRANDED_COLORS.primaryForeground);
-    expect(declared(chat, "--chat-accent")).toBe(UNBRANDED_COLORS.chatAccent);
+    // The widget's --chat-accent is an alias of its own --color-primary
+    // (CHAT_TOKEN_ALIASES in @eddi/ui), so the default sits on the token.
+    expect(chat).toMatch(/--chat-accent:\s*var\(--color-primary\)/);
+    expect(declared(chat, "--color-primary")).toBe(UNBRANDED_COLORS.chatAccent);
   });
 });

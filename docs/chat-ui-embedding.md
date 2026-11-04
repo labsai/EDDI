@@ -27,6 +27,10 @@ The display parameters (`theme`, `title`, `hideUndo`, the colour parameters) are
 
 These parameters beat the deployment's [brand](white-labeling.md#the-chat-ui): with a brand set, the widget's default title, logo and accent come from it, and a `title` or `accentColor` parameter still overrides them.
 
+Each colour parameter sets one or more `--chat-*` CSS variables (`bgColor` → `--chat-bg`, `accentColor` → `--chat-accent`, the user bubble and the focus ring, …). Those names are stable: since the shared design tokens arrived, the ones with a shared meaning are declared as aliases of them (`--chat-bg` is `var(--color-background)`), and setting the `--chat-*` name still wins, so an existing link renders as it did. The table is `CHAT_TOKEN_ALIASES` in [`ui/packages/ui/src/chat-aliases.ts`](../ui/packages/ui/src/chat-aliases.ts).
+
+`lang` picks the widget's language — any of the eleven the Manager ships (`en`, `de`, `fr`, `es`, `ar`, `zh`, `th`, `ja`, `ko`, `pt`, `hi`); without it the browser's languages decide, falling back to English. `lang=ar` lays the widget out right to left. Only the widget's own text is translated, never the agent's.
+
 ## 2. Hand the widget a token (authentication on)
 
 With OIDC enabled, every API call the widget makes needs a bearer token. The widget has no login flow of its own; the host page, which has already signed the user in, passes it an access token by `postMessage`.

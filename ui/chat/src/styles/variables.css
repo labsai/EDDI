@@ -1,83 +1,92 @@
 /* ──────────────────────────────────────────────
    EDDI Chat — CSS Custom Properties Design System
+
+   Two layers since phase 3a of the frontend unification plan:
+
+   1. The widget's values for the SHARED design tokens (@eddi/ui:
+      --color-background, --color-primary, --radius, --font-sans …), per theme.
+      The names are the Manager's; the values are the widget's own palette, so
+      nothing looks different.
+   2. The --chat-* names every stylesheet rule, URL colour parameter
+      (`?bgColor=` …), operator setting and /branding/brand.css uses. Those that
+      have a shared meaning are DOCUMENTED ALIASES of a token
+      (CHAT_TOKEN_ALIASES in ui/packages/ui/src/chat-aliases.ts — the table, and
+      docs/chat-ui-embedding.md); the rest are widget-specific and keep a value.
+
+   An override of a --chat-* name still wins: the URL parameters set it inline
+   on <html>, and brand.css comes later in the cascade. chat-aliases.test.ts
+   pins this file to the table and every name to the colour it resolved to
+   before the aliases existed.
    ────────────────────────────────────────────── */
 
 :root,
 [data-theme="dark"] {
-  /* Surface */
-  --chat-bg: #0a0a0a;
-  --chat-surface: #141414;
-  --chat-surface-raised: #1e1e1e;
+  /* Shared tokens — the widget's dark values */
+  --color-background: #0a0a0a;
+  --color-card: #141414;
+  --color-popover: #1e1e1e;
+  --color-foreground: #f1f1f1;
+  --color-card-foreground: #f1f1f1;
+  --color-muted-foreground: #999;
+  --color-primary: #113b92;
+  --color-input: #333;
+  --color-ring: #113b92;
+  --color-border: #222;
+  /* Recoverable-problem accent (recovery banner). */
+  --color-warning: #d9822b;
+  --radius: 8px;
+  --font-sans: "Noto Sans", system-ui, -apple-system, sans-serif;
 
-  /* Text */
-  --chat-text: #f1f1f1;
-  --chat-text-muted: #999;
+  /* Widget-specific */
   --chat-text-accent: #cba135;
-
-  /* Accent / brand */
-  --chat-accent: #113b92;
   --chat-accent-hover: #1a50b5;
   --chat-accent-soft: rgba(17, 59, 146, 0.15);
 
-  /* Agent bubbles */
   --chat-agent-bg: #1e1e1e;
   --chat-agent-border: #2a2a2a;
-  --chat-agent-text: #f1f1f1;
 
-  /* User bubbles */
-  --chat-user-bg: #113b92;
   --chat-user-text: #ffffff;
 
-  /* Input */
   --chat-input-bg: #1a1a1a;
-  --chat-input-border: #333;
-  --chat-input-focus: #113b92;
-  --chat-input-text: #f1f1f1;
   --chat-input-placeholder: #666;
 
-  /* Quick replies */
   --chat-qr-bg: rgba(17, 59, 146, 0.18);
   --chat-qr-border: rgba(17, 59, 146, 0.4);
   --chat-qr-text: #7eaaff;
   --chat-qr-hover: rgba(17, 59, 146, 0.35);
 
-  /* Misc */
-  --chat-border: #222;
   --chat-radius: 16px;
-  --chat-radius-sm: 8px;
-  --chat-font: "Noto Sans", system-ui, -apple-system, sans-serif;
   --chat-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   --chat-scrollbar-thumb: #444;
   --chat-scrollbar-track: transparent;
-
-  /* Recoverable-problem accent (recovery banner). */
-  --chat-warning: #d9822b;
 }
 
 [data-theme="light"] {
-  --chat-bg: #f5f5f5;
-  --chat-surface: #ffffff;
-  --chat-surface-raised: #fafafa;
+  /* Shared tokens — the widget's light values */
+  --color-background: #f5f5f5;
+  --color-card: #ffffff;
+  --color-popover: #fafafa;
+  --color-foreground: #1a1a1a;
+  --color-card-foreground: #1a1a1a;
+  --color-muted-foreground: #666;
+  --color-primary: #113b92;
+  --color-input: #d0d0d0;
+  --color-ring: #113b92;
+  --color-border: #e0e0e0;
+  /* Darkened for the light surface — #d9822b on white is only 2.7:1. */
+  --color-warning: #a85a12;
 
-  --chat-text: #1a1a1a;
-  --chat-text-muted: #666;
+  /* Widget-specific */
   --chat-text-accent: #8b6914;
-
-  --chat-accent: #113b92;
   --chat-accent-hover: #0d2d6b;
   --chat-accent-soft: rgba(17, 59, 146, 0.08);
 
   --chat-agent-bg: #ffffff;
   --chat-agent-border: #e0e0e0;
-  --chat-agent-text: #1a1a1a;
 
-  --chat-user-bg: #113b92;
   --chat-user-text: #ffffff;
 
   --chat-input-bg: #ffffff;
-  --chat-input-border: #d0d0d0;
-  --chat-input-focus: #113b92;
-  --chat-input-text: #1a1a1a;
   --chat-input-placeholder: #999;
 
   --chat-qr-bg: rgba(17, 59, 146, 0.06);
@@ -85,11 +94,27 @@
   --chat-qr-text: #113b92;
   --chat-qr-hover: rgba(17, 59, 146, 0.14);
 
-  --chat-border: #e0e0e0;
   --chat-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
   --chat-scrollbar-thumb: #ccc;
   --chat-scrollbar-track: transparent;
+}
 
-  /* Darkened for the light surface — #d9822b on white is only 2.7:1. */
-  --chat-warning: #a85a12;
+/* The documented aliases (CHAT_TOKEN_ALIASES). Declared once: each var()
+   resolves against whichever theme block's token values apply to <html>. */
+:root {
+  --chat-bg: var(--color-background);
+  --chat-surface: var(--color-card);
+  --chat-surface-raised: var(--color-popover);
+  --chat-text: var(--color-foreground);
+  --chat-text-muted: var(--color-muted-foreground);
+  --chat-accent: var(--color-primary);
+  --chat-agent-text: var(--color-card-foreground);
+  --chat-user-bg: var(--chat-accent);
+  --chat-input-border: var(--color-input);
+  --chat-input-focus: var(--color-ring);
+  --chat-input-text: var(--color-foreground);
+  --chat-border: var(--color-border);
+  --chat-warning: var(--color-warning);
+  --chat-radius-sm: var(--radius);
+  --chat-font: var(--font-sans);
 }

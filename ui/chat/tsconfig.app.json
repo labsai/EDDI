@@ -14,5 +14,5 @@
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsBuildInfo",
     "outDir": "./dist"
   },
-  "include": ["src", "vite-env.d.ts"]
+  "include": ["src", "src/**/*.json", "vite-env.d.ts"]
 }
