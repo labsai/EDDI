@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -749,7 +750,7 @@ class ToolLoopResumer {
             ResolvedRequest current = resolution.resolve(rawArguments);
             if (current != null) {
                 return uriTargetsConversation(current.uri(), conversationId)
-                        || (envelope && uriTargetsConversation(rawArguments, conversationId))
+                        || (envelope && argumentsTargetConversation(rawArguments, conversationId))
                                 ? "the request targets the conversation the agent is running in"
                                 : null;
             }
@@ -760,9 +761,55 @@ class ToolLoopResumer {
                     + "falling back to its arguments for the self-conversation check.",
                     sanitize(toolName), e.getClass().getSimpleName());
         }
-        return uriTargetsConversation(rawArguments, conversationId)
+        return argumentsTargetConversation(rawArguments, conversationId)
                 ? "the request targets the conversation the agent is running in"
                 : null;
+    }
+
+    /**
+     * {@link #uriTargetsConversation} on raw tool arguments, and again on their
+     * JSON-decoded strings. The executor decodes the arguments before it uses them,
+     * so an id with a character written as a JSON escape (a backslash-u sequence)
+     * names the conversation the containment test on the raw text does not see.
+     * Arguments that do not parse are judged on the raw text alone, as before.
+     */
+    static boolean argumentsTargetConversation(String rawArguments, String conversationId) {
+        if (uriTargetsConversation(rawArguments, conversationId)) {
+            return true;
+        }
+        // Without a backslash there is no JSON escape, so decoding changes nothing.
+        if (rawArguments == null || rawArguments.indexOf(BACKSLASH) < 0) {
+            return false;
+        }
+        try {
+            StringBuilder decoded = new StringBuilder(rawArguments.length());
+            appendStrings(ENVELOPE_MAPPER.readTree(rawArguments), decoded);
+            return uriTargetsConversation(decoded.toString(), conversationId);
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+    }
+
+    private static final char BACKSLASH = '\\';
+    private static final char LINE_BREAK = '\n';
+
+    /** Every field name and string value under {@code node}, one per line. */
+    private static void appendStrings(JsonNode node, StringBuilder out) {
+        if (node == null) {
+            return;
+        }
+        if (node.isTextual()) {
+            out.append(node.textValue()).append(LINE_BREAK);
+            return;
+        }
+        if (node.isObject()) {
+            node.properties().forEach(field -> {
+                out.append(field.getKey()).append(LINE_BREAK);
+                appendStrings(field.getValue(), out);
+            });
+        } else if (node.isArray()) {
+            node.forEach(element -> appendStrings(element, out));
+        }
     }
 
     /**

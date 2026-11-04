@@ -589,6 +589,12 @@ export interface AgentGroupConfiguration {
    * checkpoint ever runs and the discussion costs nothing extra.
    */
   facilitator?: FacilitatorConfig | null;
+  /**
+   * Cross-team handoff, both halves (see `team-handoffs.ts`): the teams this
+   * group may file tasks into, and the sources it accepts from. `null` = the
+   * group neither sends nor receives.
+   */
+  handoffConfig?: import("./team-handoffs").GroupHandoffConfig | null;
 }
 
 /**

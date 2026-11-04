@@ -1330,6 +1330,11 @@ class ToolLoopRunner {
         // tracking itself is unaffected by the flag.
         AgentOrchestrator.warnAboutUnenforcedBudgets(task);
         boolean enforceBudget = AgentOrchestrator.isBudgetEnforced(task);
+        // An enforced ceiling is checked against the tracker, so every charge it
+        // counts — the call's and a summarize truncation's — is recorded whatever
+        // enableCostTracking says; otherwise turning the reporting off would leave
+        // the ceiling counting nothing.
+        boolean chargeTracker = enableCostTracking || (enforceBudget && maxBudget != null);
         if (enforceBudget && maxBudget != null && conversationId != null
                 && !toolExecutionService.getCostTracker().isWithinBudget(conversationId, maxBudget)) {
             String budgetError = "Budget exceeded for conversation " + conversationId;
@@ -1469,7 +1474,7 @@ class ToolLoopRunner {
                 Supplier<String> execution = mock != null
                         ? () -> mockingExecutor.executeMocked(toolRequest, mock)
                         : () -> executor.execute(toolRequest, null);
-                boolean trackCost = enableCostTracking && mock == null;
+                boolean trackCost = chargeTracker && mock == null;
                 // Without a quota gate the call takes exactly the path it always took.
                 toolResult = quotaGate == null
                         ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
@@ -1510,7 +1515,7 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), toolResult, reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, enableCostTracking, runSpend));
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
 
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");

@@ -162,6 +162,7 @@ public class MemberTurnExecutor {
             // a timeout or cancellation after the write must not swallow the event.
             // Drained even with a null listener so the queue never grows unbounded.
             announceArtifactChanges(gc, listener);
+            HandoffAnnouncer.announce(gc, listener);
         }
     }
 
