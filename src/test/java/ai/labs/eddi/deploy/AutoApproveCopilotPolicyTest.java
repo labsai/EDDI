@@ -160,6 +160,9 @@ class AutoApproveCopilotPolicyTest {
                 "install.sh", "install.ps1", "mise.toml", "ui/manager/mise.toml", ".gitleaksignore", ".trivyignore",
                 "ui/manager/package.json", "ui/manager/package-lock.json", "ui/chat/package.json",
                 "ui/chat/package-lock.json", "ui/manager/scripts/check-i18n.mjs",
+                "ui/package.json", "ui/package-lock.json", "ui/scripts/check-lockfile-platforms.mjs",
+                "ui/packages/core/package.json", "ui/tsconfig.base.json", "ui/eslint.config.base.js",
+                "ui/bundle-budget.json",
                 "ui/manager/vitest.config.ts", "ui/chat/vite.config.ts", "ui/manager/playwright.config.ts",
                 "ui/chat/eslint.config.js", "ui/manager/tsconfig.app.json", "ui/manager/stryker.config.json",
                 ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore",
@@ -180,7 +183,8 @@ class AutoApproveCopilotPolicyTest {
                 "docs/changelog.d/2026-10-02-x.md", "docs/docker-compose-guide.md", "README.md",
                 "ui/manager/src/App.tsx", "ui/manager/src/lib/package.json", "ui/chat/src/main.tsx",
                 "scriptsx/run.sh", "src/test/java/ai/labs/eddi/FooTest.java",
-                "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts");
+                "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts",
+                "ui/packages/README.md", "ui/packages/core/src/http.ts");
 
         List<String> inputs = new ArrayList<>(protectedPaths);
         inputs.addAll(ordinaryPaths);
