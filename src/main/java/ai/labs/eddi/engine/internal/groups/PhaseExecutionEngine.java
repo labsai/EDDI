@@ -32,6 +32,7 @@ import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.concurrent.CompletableFuture;
@@ -65,6 +66,7 @@ public class PhaseExecutionEngine {
     private final GroupContextBuilder contextBuilder;
     private final ExecutorService executorService;
     private final CallerIdentityContext callerIdentityContext;
+    private ServiceConvergenceJudge serviceJudge;
 
     /**
      * The {@code memberConversationIds} key the convergence judge's own private
@@ -88,6 +90,15 @@ public class PhaseExecutionEngine {
         this.contextBuilder = contextBuilder;
         this.executorService = executorService;
         this.callerIdentityContext = callerIdentityContext;
+    }
+
+    /**
+     * Wires the {@code judge: "SERVICE"} convergence judge. A setter, not a
+     * constructor argument, so the engine's many construction sites stay as they
+     * are; without it every judge runs on the moderator agent, as before.
+     */
+    public void setServiceJudge(ServiceConvergenceJudge serviceJudge) {
+        this.serviceJudge = serviceJudge;
     }
 
     /**
@@ -236,9 +247,9 @@ public class PhaseExecutionEngine {
         }
 
         var verdict = verdictMode
-                ? runJudge(gc, config, phase, protocol, phaseIdx, convergence,
+                ? runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
                         ConvergenceDetector.buildVerdictInput(currentQuestion(gc), repeatEntries), ConvergenceDetector::parseVerdict, listener)
-                : runJudge(gc, config, phase, protocol, phaseIdx, convergence,
+                : runJudge(gc, config, phase, protocol, phaseIdx, repeat, convergence,
                         ConvergenceDetector.buildJudgeInput(previousRepeatEntries, repeatEntries),
                         output -> ConvergenceDetector.parseJudgeVerdict(output, convergence.threshold()), listener);
         recordConvergence(gc, phase, phaseIdx, repeat, verdict.agreementScore(), verdict.converged(), verdict.summary(), listener);
@@ -660,9 +671,17 @@ public class PhaseExecutionEngine {
     }
 
     private ConvergenceDetector.ConvergenceVerdict runJudge(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase,
-                                                            ProtocolConfig protocol, int phaseIdx, ConvergenceConfig convergence, String input,
-                                                            Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
+                                                            ProtocolConfig protocol, int phaseIdx, int repeat, ConvergenceConfig convergence,
+                                                            String input, Function<String, ConvergenceDetector.ConvergenceVerdict> parser,
                                                             GroupDiscussionEventListener listener) {
+        // SERVICE judge first: it needs no moderator, so it must run before the
+        // no-moderator early return. Empty = run the moderator judge below.
+        Optional<ConvergenceDetector.ConvergenceVerdict> serviceVerdict = serviceJudge != null
+                ? serviceJudge.judge(gc, phase, phaseIdx, repeat, convergence, input, parser, listener)
+                : Optional.empty();
+        if (serviceVerdict.isPresent()) {
+            return serviceVerdict.get();
+        }
         String moderatorAgentId = config.getModeratorAgentId();
         if (moderatorAgentId == null || moderatorAgentId.isBlank()) {
             // Nothing to run the judge on. Not an error: a phase can enable
@@ -670,11 +689,6 @@ public class PhaseExecutionEngine {
             // is to keep going rather than to guess.
             return ConvergenceDetector.ConvergenceVerdict.notConverged("Convergence judge skipped — no moderator agent configured");
         }
-        if (ConvergenceConfig.JUDGE_SERVICE.equals(convergence.judge())) {
-            LOGGER.warnf("Phase '%s' requests judge=SERVICE, which is not wired yet — falling back to the moderator agent. "
-                    + "See ConvergenceConfig's Javadoc.", phase.name());
-        }
-
         var judge = new GroupMember(moderatorAgentId, "Convergence Judge", 0, "MODERATOR");
         try {
             // JUDGE_CONVERSATION_KEY, not the moderator's agent id: the judge runs the
