@@ -605,7 +605,7 @@ class CascadingModelExecutor {
                     // A re-ask of this step is checked with the earlier steps' cost as well.
                     retryPolicy = retryPolicy.withSpend(spend.plus(totals.runCostUsd()));
                 }
-                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null
+                boolean streamLiveCandidate = allowLiveStreaming && !useAgentMode && retryPolicy == null && !RescueOptions.of(task).wraps()
                         && EvaluationStrategy.fromConfig(effectiveStrategy) != EvaluationStrategy.STRUCTURED_OUTPUT
                         && guaranteedAccept && isLastStep;
                 StreamingChatModel streamingModel = streamLiveCandidate ? registry.getOrCreateStreaming(modelType, mergedParams) : null;

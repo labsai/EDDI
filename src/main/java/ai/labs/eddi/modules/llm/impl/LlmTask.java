@@ -715,7 +715,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // already streamed cannot be taken back. A warn-only guardrail streams.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
         boolean guardrailBuffering = outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || guardrailBuffering;
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps() || guardrailBuffering;
         // How an output guardrail's reprompt asks the model again — set by the branch
         // that produced the answer, so the reprompt runs on the same model and never
         // re-runs a tool. Null leaves a reprompt nothing to do but block.
@@ -2115,7 +2115,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         long started = System.nanoTime();
         ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId, rescue);
         String label = outcome.label();
-        if (outcome.wrapped()) {
+        // a wrapped reply that then breaks the shape was not recovered
+        if (outcome.wrapped() && outcome.kind() == ModelOutputParser.Kind.VALID) {
             recordRecovery(memory, LlmRecoveryLog.WRAP, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
         }
         switch (outcome.kind()) {
@@ -2266,7 +2267,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // tokens of an attempt that is then retried cannot be taken back.
         // WS4: an output guardrail that can change the answer buffers it the same way.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps()
+                || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
         var resumeBridge = bufferOutput
                 ? null
                 : createToolLoopStreamingBridge(memory.getEventSink(),

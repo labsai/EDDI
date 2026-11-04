@@ -471,6 +471,20 @@ class LlmTaskOutputOutcomeTest {
         }
 
         @Test
+        @DisplayName("a wrapped reply that then breaks the shape is schema_mismatch and is not counted as a recovery")
+        void wrappedThenMismatchIsNotRecovered() throws Exception {
+            liveModelReplies(Step.text("just text"));
+            var t = rescueTask(false, "wrap", "ignore", null);
+            t.getResponseValidation().setWrapDefaults(null);
+            t.getParameters().put("responseSchema", "{\"type\":\"object\",\"required\":[\"htmlResponseText\",\"other\"]}");
+
+            run(t);
+
+            verify(dataFactory).createData(OUTCOME_KEY, "schema_mismatch");
+            assertEquals(0, recovered("wrap", "recovered"));
+        }
+
+        @Test
         @DisplayName("wrap leaves a recovery log line")
         void wrapIsLogged() throws Exception {
             var lines = new ArrayList<String>();
