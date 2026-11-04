@@ -45,6 +45,56 @@ export function reactApp({ ecmaVersion }) {
 }
 
 /**
+ * The base for a shared package under ui/packages/: the same recommended rules
+ * without React, plus the boundaries the frontend unification plan (§3.1) sets.
+ * Apps may import packages; a package never imports an app, and a package that
+ * declares itself framework-free (`frameworkFree: true`, as `@eddi/core` does)
+ * imports neither React nor `@eddi/ui` and touches no DOM global beyond fetch.
+ * `src/__tests__/boundaries.test.ts` in `@eddi/core` checks the same rules and
+ * the absence of import cycles across every package.
+ *
+ * @param {{ frameworkFree: boolean }} options
+ */
+export function sharedPackage({ frameworkFree }) {
+  const appImports = [
+    {
+      group: ["@/*", "**/manager/**", "**/chat/**", "**/workforce/**"],
+      message: "A shared package never imports an app. Move the code into the package, or pass it in from the app.",
+    },
+  ];
+  const frameworkImports = frameworkFree
+    ? [
+        {
+          group: ["react", "react/*", "react-dom", "react-dom/*", "@eddi/ui", "@eddi/ui/*", "@eddi/conversation", "@eddi/conversation/*"],
+          message: "@eddi/core is framework-free: no React and no UI package. Put React code in @eddi/conversation or the app.",
+        },
+      ]
+    : [];
+  const domGlobals = frameworkFree
+    ? ["window", "document", "localStorage", "sessionStorage", "navigator", "history"].map((name) => ({
+        name,
+        message: `@eddi/core uses no DOM beyond fetch. Take what you need from '${name}' as a parameter from the app.`,
+      }))
+    : [];
+  return [
+    { ignores: ["dist"] },
+    {
+      extends: [js.configs.recommended, ...tseslint.configs.recommended],
+      files: ["**/*.ts"],
+      languageOptions: {
+        ecmaVersion: 2022,
+        globals: globals.browser,
+      },
+      rules: {
+        "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+        "no-restricted-imports": ["error", { patterns: [...appImports, ...frameworkImports] }],
+        "no-restricted-globals": ["error", ...domGlobals],
+      },
+    },
+  ];
+}
+
+/**
  * `expect(xs.length).toBeGreaterThanOrEqual(0)` asserts nothing: it holds for
  * every array. It reads like a check, which is worse than no check at all. For
  * "indexOf found it", use `toContain`; for "this loaded something", assert what
