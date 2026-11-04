@@ -203,6 +203,67 @@ class GroupConversationServiceCostCeilingTest {
     }
 
     @Test
+    @DisplayName("SYNTHESIZE_NOW: the tripping phase skips its approval, but a synthesis that runs still pauses for it")
+    void synthesizeNow_synthesisThatRuns_keepsItsApprovalGate() throws Exception {
+        // The first turn (Opinion) spends $2; the ceiling trips at Critique's first
+        // turn, so Critique is the abandoned phase whose own approval is skipped.
+        var phases = List.of(
+                phase("Opinion", PhaseType.OPINION),
+                new DiscussionPhase("Critique", PhaseType.CRITIQUE, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true),
+                new DiscussionPhase("Summary", PhaseType.SYNTHESIS, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true));
+        var config = buildConfig(phases, protocol(0.5, CostPolicy.SYNTHESIZE_NOW));
+        doReturn(mockResourceId()).when(groupStore).getCurrentResourceId(GROUP_ID);
+        doReturn(config).when(groupStore).read(GROUP_ID, 1);
+        doReturn("gc-synth-gate").when(conversationStore).create(any());
+        stubAgentSayCosting(2.0);
+
+        GroupConversation gc = service.discuss(GROUP_ID, "Q?", USER_ID, 0);
+
+        var phasesRun = gc.getTranscript().stream()
+                .filter(e -> e.type() != TranscriptEntryType.SKIPPED)
+                .map(e -> e.phaseName()).distinct().toList();
+        assertTrue(phasesRun.contains("Summary"), "the abandoned Critique phase must not pause — the run skips ahead to synthesis");
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(),
+                "the synthesis ran and its answer would be published, so its requiresApproval gate must still pause");
+        assertEquals(2, gc.getCurrentPhaseIndex(), "the pause belongs to the synthesis phase");
+    }
+
+    @Test
+    @DisplayName("SYNTHESIZE_NOW survives the synthesis approval: the resumed leg still skips the remaining work phases")
+    void synthesizeNow_skipAheadSurvivesTheSynthesisApproval() throws Exception {
+        // Opinion's turn and Summary's turn exhaust maxTurns=2; the ceiling trips at
+        // Critique. Review, after Summary, requires approval too: once Summary is
+        // approved, the resumed leg must abandon it under the skip-ahead, not pause a
+        // second time for a phase the run already gave up.
+        var phases = List.of(
+                phase("Opinion", PhaseType.OPINION),
+                phase("Critique", PhaseType.CRITIQUE),
+                new DiscussionPhase("Summary", PhaseType.SYNTHESIS, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true),
+                new DiscussionPhase("Review", PhaseType.REVISION, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true));
+        var config = buildConfig(phases,
+                new ProtocolConfig(60, MemberFailurePolicy.SKIP, 2, MemberUnavailablePolicy.SKIP, 2, 0.5, CostPolicy.SYNTHESIZE_NOW));
+        doReturn(mockResourceId()).when(groupStore).getCurrentResourceId(GROUP_ID);
+        doReturn(config).when(groupStore).read(GROUP_ID, 1);
+        doReturn("gc-synth-resume").when(conversationStore).create(any());
+        stubAgentSayCosting(2.0);
+
+        GroupConversation gc = service.discuss(GROUP_ID, "Q?", USER_ID, 0);
+        assertEquals(GroupConversationState.AWAITING_APPROVAL, gc.getState(), "the synthesis pauses for its approval");
+        assertEquals(2, gc.getCurrentPhaseIndex());
+        assertTrue(gc.isCostCeilingSkipAhead(), "the skip-ahead is recorded with the pause");
+
+        // The approval's resume: the leg starts at the phase after Summary.
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        GroupConversation resumed = service.executeDiscussion(gc, config, phases, "Q?", null, 3);
+
+        assertNotEquals(GroupConversationState.AWAITING_APPROVAL, resumed.getState(),
+                "Review was abandoned by the skip-ahead; it must not ask for another decision");
+        assertFalse(resumed.getTranscript().stream().anyMatch(e -> "Review".equals(e.phaseName())),
+                "nothing of Review runs or is recorded");
+        assertFalse(resumed.isCostCeilingSkipAhead(), "a completed run clears the skip-ahead");
+    }
+
+    @Test
     @DisplayName("ABORT: the discussion fails immediately, remaining phases including synthesis never run")
     void abort_failsDiscussionImmediately() throws Exception {
         var phases = List.of(

@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rag.rest;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.configs.rag.IRestRagIngestion;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
@@ -48,13 +49,15 @@ public class RestRagIngestion implements IRestRagIngestion {
     private final KnowledgeBaseInspector inspector;
 
     private final ResourceAccessGuard resourceAccessGuard;
+    private final SpaceReferenceGuard spaceReferenceGuard;
 
     @Inject
     public RestRagIngestion(IRestRagStore restRagStore, RagIngestionService ragIngestionService,
             RagSourceIngestionService sourceIngestionService, IngestedFileService ingestedFileService,
-            KnowledgeBaseInspector inspector, ResourceAccessGuard resourceAccessGuard) {
+            KnowledgeBaseInspector inspector, ResourceAccessGuard resourceAccessGuard, SpaceReferenceGuard spaceReferenceGuard) {
         this.inspector = inspector;
         this.resourceAccessGuard = resourceAccessGuard;
+        this.spaceReferenceGuard = spaceReferenceGuard;
         this.restRagStore = restRagStore;
         this.ragIngestionService = ragIngestionService;
         this.sourceIngestionService = sourceIngestionService;
@@ -75,6 +78,17 @@ public class RestRagIngestion implements IRestRagIngestion {
         return restRagStore instanceof RestRagStore store
                 ? store.readUnredacted(ragConfigId, version)
                 : restRagStore.readRag(ragConfigId, version);
+    }
+
+    /**
+     * The deployment rule for a knowledge base run here, outside any agent: the
+     * model and store are built from {@code config} on the spot, resolving every
+     * {@code ${vars:<tenant>/…}} and {@code ${vault:<tenant>/…}} it names with the
+     * server's authority, and no deployment ever checked those. The caller must
+     * belong to each space tenant named (see {@link SpaceReferenceGuard}).
+     */
+    private void requireMayUseReferences(RagConfiguration config) {
+        spaceReferenceGuard.requireMayUse(config, "knowledge base");
     }
 
     /**
@@ -129,6 +143,8 @@ public class RestRagIngestion implements IRestRagIngestion {
         // names this knowledge base (its id, or the name it defaulted to), so
         // existing clients keep working, and refused otherwise rather than ignored:
         // a client that meant another knowledge base must not be told 202.
+        requireMayUseReferences(ragConfig);
+
         if (kbId != null && !kbId.isBlank() && !kbId.equals(ragConfigId) && !kbId.equals(ragConfig.getName())) {
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity(Map.of("error", "kbId names a different knowledge base. Documents are always ingested into the "
@@ -651,6 +667,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             return new ResolvedSource(null, null, Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "RAG configuration not found: " + ragConfigId + " v" + version)).build());
         }
+        requireMayUseReferences(ragConfig);
         return new ResolvedSource(ragConfig, null, null);
     }
 

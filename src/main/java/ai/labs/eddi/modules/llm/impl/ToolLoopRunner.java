@@ -1225,7 +1225,7 @@ class ToolLoopRunner {
                         || toolExecutionService.getCostTracker() == null) {
                     return;
                 }
-                double price = ModelPrices.ofTask(task).cost(tokenUsage);
+                double price = ModelPrices.forToolSummarizer(task).cost(tokenUsage);
                 toolExecutionService.getCostTracker()
                         .trackToolCall(new ToolInvocation(SUMMARIZER_DISPATCH_NAME, SUMMARIZER_DISPATCH_NAME, price), conversationId);
             }

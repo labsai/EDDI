@@ -147,12 +147,45 @@ describe("NotificationBell", () => {
     expect(screen.queryByTestId("notification-count")).not.toBeInTheDocument();
   });
 
-  it("does not render while workspaces are off", async () => {
+  it("shows the update notice even while workspaces are off, and links to the Updates page", async () => {
+    // The update check is on by default (the default handler), so the bell must
+    // not depend on workspaces to carry its notice.
+    vi.spyOn(workspacesApi, "getWorkspaceInfo").mockResolvedValue(info({ enabled: false }));
+    server.use(
+      http.get("*/workspaces/notifications/count", () => HttpResponse.json({ unread: 1 })),
+      http.get("*/workspaces/notifications", () =>
+        HttpResponse.json([
+          notification({
+            id: "u1",
+            type: "UPDATE_AVAILABLE",
+            resourceId: "9.9.9",
+            resourceUri: "https://github.com/labsai/EDDI/releases/tag/9.9.9",
+            resourceName: "9.9.9",
+            actor: "system",
+            actorLabel: "EDDI",
+          }),
+        ]),
+      ),
+    );
+    renderWithProviders(<NotificationBell />);
+
+    expect(await screen.findByTestId("notification-count")).toHaveTextContent("1");
+    await userEvent.click(screen.getByTestId("notification-bell"));
+
+    expect(await screen.findByTestId("notification-u1")).toHaveTextContent("9.9.9 is available");
+    expect(screen.getByTestId("notification-update-u1")).toHaveAttribute("href", "/manage/updates");
+  });
+
+  it("does not render while workspaces are off and the update check is off too", async () => {
+    server.use(
+      http.get("*/administration/update-check", () =>
+        HttpResponse.json({ enabled: false, lockedByConfig: true, uiEnabled: true }),
+      ),
+    );
     const spy = vi.spyOn(workspacesApi, "getWorkspaceInfo").mockResolvedValue(info({ enabled: false }));
     renderWithProviders(<NotificationBell />);
 
     await waitFor(() => expect(spy).toHaveBeenCalled());
-    // Let the query settle before asserting absence.
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(screen.queryByTestId("notification-bell")).not.toBeInTheDocument();
   });

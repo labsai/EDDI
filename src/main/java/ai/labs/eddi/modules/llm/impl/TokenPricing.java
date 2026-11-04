@@ -4,22 +4,24 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
+import ai.labs.eddi.modules.llm.pricing.PricedSpend;
+
 import java.util.Map;
 
 /**
- * The single home of the configured-price token-cost arithmetic. Both dollar
- * signals that price LLM token spend — cascade steps
- * ({@code CascadingModelExecutor.computeCost}) and plain task-level pricing
- * ({@code LlmTask.accumulateAuditEvidence}) — delegate here, so the formula
- * cannot drift between the two paths.
+ * The configured-price token-cost entry point for callers that hold a pair of
+ * prices rather than a task: guardrails, the cascade's confidence judge, group
+ * and stance summaries, Dream, format re-asks. A thin wrapper over
+ * {@link ModelPriceResolver}, the one price resolution every model call goes
+ * through.
  * <p>
- * There is deliberately no built-in provider price table: prices are an
- * agent-designer concern and belong in configuration, where they can track
- * provider changes without a code release.
- * <p>
- * Public because the group transcript summarizer (I9,
- * {@code GroupContextBuilder}) prices its own summarization calls with the same
- * formula.
+ * This class used to say there was deliberately no built-in provider price
+ * table. That stance is reversed (docs/model-pricing.md): the deployment price
+ * catalog completes whatever a configuration leaves unpriced. It still ships no
+ * <em>active</em> prices — an empty catalog prices exactly as before, and an
+ * admin adopts the bundled reference prices explicitly.
  */
 public final class TokenPricing {
 
@@ -27,31 +29,21 @@ public final class TokenPricing {
     }
 
     /**
-     * Dollar cost of one call from its reported token usage and configured
-     * per-1M-token prices. A null price means "unpriced" and contributes 0; with
-     * both prices null (or no usage reported) the call is free.
+     * Dollar cost of one call (or a sum of calls) from its reported token usage and
+     * configured per-1M-token prices. A null price is completed from the catalog
+     * entry the usage's model matches; with no price anywhere the call is unpriced
+     * and contributes 0.
      *
      * @param tokenUsage
-     *            the {@code tokenUsage} metadata map carrying
-     *            {@code inputTokens}/{@code outputTokens} as numbers
+     *            the {@code tokenUsage} metadata map ({@code inputTokens},
+     *            {@code outputTokens}, and the metered keys when present)
      */
     public static double cost(Double inputPricePer1M, Double outputPricePer1M, Map<?, ?> tokenUsage) {
-        if (tokenUsage == null || (inputPricePer1M == null && outputPricePer1M == null)) {
-            return 0.0;
-        }
-        long inputTokens = asLong(tokenUsage.get("inputTokens"));
-        long outputTokens = asLong(tokenUsage.get("outputTokens"));
-        double cost = 0.0;
-        if (inputPricePer1M != null) {
-            cost += inputTokens / 1_000_000.0 * inputPricePer1M;
-        }
-        if (outputPricePer1M != null) {
-            cost += outputTokens / 1_000_000.0 * outputPricePer1M;
-        }
-        return cost;
+        return price(inputPricePer1M, outputPricePer1M, tokenUsage).usd();
     }
 
-    private static long asLong(Object value) {
-        return value instanceof Number n ? n.longValue() : 0L;
+    /** As {@link #cost}, with the unpriced count and the price source. */
+    public static PricedSpend price(Double inputPricePer1M, Double outputPricePer1M, Map<?, ?> tokenUsage) {
+        return ModelPriceResolver.price(PriceOverride.of(inputPricePer1M, outputPricePer1M), tokenUsage);
     }
 }
