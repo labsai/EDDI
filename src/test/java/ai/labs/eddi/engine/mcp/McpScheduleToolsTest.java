@@ -121,6 +121,29 @@ class McpScheduleToolsTest {
     }
 
     @Test
+    void createSchedule_heartbeatBelowTheMinimumInterval_refusedBeforeAnythingIsStored() throws Exception {
+        String result = tools.createSchedule("agent-1", "HEARTBEAT", null, 5L, null, "Too fast", "UTC", null, null, null);
+
+        assertTrue(result.contains("below the minimum allowed"), result);
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void createSchedule_cronBelowTheMinimumInterval_refusedBeforeAnythingIsStored() throws Exception {
+        when(scheduleStore.createSchedule(any())).thenReturn("c-1");
+        // every minute is exactly the default floor (60s): allowed
+        assertTrue(tools.createSchedule("agent-1", "CRON", "* * * * *", null, "Hello", "Every minute", "UTC", "new", null, null)
+                .contains("schedule_created"));
+        verify(scheduleStore, times(1)).createSchedule(any());
+
+        tools.minScheduleIntervalSeconds = 120;
+        String refused = tools.createSchedule("agent-1", "CRON", "* * * * *", null, "Hello", "Every minute", "UTC", "new", null, null);
+
+        assertTrue(refused.contains("below the minimum allowed (120s)"), refused);
+        verify(scheduleStore, times(1)).createSchedule(any());
+    }
+
+    @Test
     void createSchedule_missingAgentId_error() {
         String result = tools.createSchedule(null, "CRON", "0 9 * * *", null, "Hello", "Test", "UTC", "new", null, null);
 
