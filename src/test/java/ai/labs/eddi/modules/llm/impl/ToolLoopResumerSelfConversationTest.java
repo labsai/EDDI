@@ -219,4 +219,37 @@ class ToolLoopResumerSelfConversationTest {
                 .arguments("{\"conversationId\":\"" + OTHER_CONVERSATION_ID + "\"}").build();
         assertNull(ToolLoopResumer.targetsOwnConversationLive(other, mcp, CONVERSATION_ID));
     }
+
+    /**
+     * The id with its second character ('8', 0x38) written as a JSON unicode
+     * escape, so the raw text holds no copy of the id. Built from parts so neither
+     * javac nor the formatter decodes it.
+     */
+    private static String jsonEscapedOwnId() {
+        return CONVERSATION_ID.charAt(0) + "\\" + "u0038" + CONVERSATION_ID.substring(2);
+    }
+
+    @Test
+    @DisplayName("an id written with JSON escapes is still the agent's own conversation — the executor decodes it")
+    void jsonEscapedIdIsRefused() {
+        String args = "{\"conversationId\":\"" + jsonEscapedOwnId() + "\",\"message\":\"hi\"}";
+        assertFalse(args.contains(CONVERSATION_ID), "the raw arguments must not already name the id");
+        var builtin = ToolExecutionRequest.builder().id("c1").name("converse_with_agent").arguments(args).build();
+
+        assertNotNull(ToolLoopResumer.targetsOwnConversationLive(builtin, Map.of(), CONVERSATION_ID), "live path, no resolver");
+        assertNotNull(resumer.targetsOwnConversation(call(args), null, Map.of(), CONVERSATION_ID), "resume path, no resolver");
+    }
+
+    @Test
+    @DisplayName("an MCP envelope's JSON-escaped target id is refused too, while another conversation's passes")
+    void jsonEscapedIdInEnvelopeIsRefused() {
+        var mcp = Map.of("talk_to_agent", RemoteToolRequestResolvers.forMcp("https://eddi.example/mcp", "talk_to_agent", false));
+        var own = ToolExecutionRequest.builder().id("c1").name("talk_to_agent")
+                .arguments("{\"conversationId\":\"" + jsonEscapedOwnId() + "\"}").build();
+        var other = ToolExecutionRequest.builder().id("c2").name("talk_to_agent")
+                .arguments("{\"conversationId\":\"\\" + "u0061" + OTHER_CONVERSATION_ID.substring(1) + "\"}").build();
+
+        assertNotNull(ToolLoopResumer.targetsOwnConversationLive(own, mcp, CONVERSATION_ID));
+        assertNull(ToolLoopResumer.targetsOwnConversationLive(other, mcp, CONVERSATION_ID));
+    }
 }
