@@ -786,9 +786,16 @@ OVERRIDE_EOF
     printf 'header = "Authorization: Bearer %s"\n' "\${KC_TOKEN}" | curl --noproxy 127.0.0.1 -K - "\$@"
   }
   for attempt in \$(seq 1 18); do
-    # The password goes only to a port Docker reports as a running keycloak container's.
-    KC_OWNED=\$(docker ps -q --filter "label=com.docker.compose.service=keycloak" \\
-      --filter "publish=\${KC_PORT}" --filter "status=running" 2>/dev/null) || KC_OWNED=""
+    # The password goes only to a port Docker reports as a running keycloak container's,
+    # and only this project's: the id comes from the same compose arguments that
+    # started the stack, so another project's keycloak on the port does not qualify.
+    # shellcheck disable=SC2086
+    KC_CID=\$(docker compose --env-file "\${EDDI_DIR}/.env" \${COMPOSE_ARGS[*]} ps -q keycloak 2>/dev/null | head -n1) || KC_CID=""
+    KC_OWNED=""
+    if [[ "\${KC_CID}" =~ ^[0-9a-f]+\$ ]]; then
+      KC_OWNED=\$(docker ps -q --filter "id=\${KC_CID}" --filter "label=com.docker.compose.service=keycloak" \\
+        --filter "publish=\${KC_PORT}" --filter "status=running" 2>/dev/null) || KC_OWNED=""
+    fi
     if [[ -n "\${KC_OWNED}" ]]; then
       KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl --noproxy 127.0.0.1 -sf -X POST \\
         "\${KC_BASE}/realms/master/protocol/openid-connect/token" \\

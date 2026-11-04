@@ -49,6 +49,14 @@ pass (#1185); the rest are fixed here or recorded as accepted risk or open decis
   and decodes incrementally, so a CRLF or a multi-byte character split by the 64 KiB reads no longer
   delays or merges events.
 
+- **PR #1239 third review:** `sse_events` resumes its `"\n\n"` search one character before each
+  new piece instead of rescanning an incomplete frame from its start, and fails the turn as a
+  protocol error once a frame passes 1 MiB (`MAX_SSE_FRAME`, the reader's existing line limit);
+  `report --out` / `cluster-report --out` naming a special file such as `/dev/stdout` is written
+  in place rather than replaced; the GCP script takes the Keycloak container id from
+  `docker compose ps -q keycloak` with the stack's own compose arguments, so a keycloak of
+  another Compose project on the same port is never sent the admin password.
+
 ### Verdicts (35 findings)
 
 FIXED 13, ALREADY_FIXED 14, ACCEPTED_RISK 4, NEEDS_DECISION 4 (the Copilot auto-approve

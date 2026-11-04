@@ -31,6 +31,9 @@ import time
 import urllib.parse
 
 TIMEOUT_S = 180
+# Longest SSE frame held while its blank line has not arrived: the 1 MiB the connection's reader
+# already allows a header line (open_connection's limit). Longer, and the turn fails as a protocol error.
+MAX_SSE_FRAME = 1 << 20
 
 
 def percentiles(values):
@@ -142,13 +145,17 @@ async def sse_events(resp):
         held_cr = text.endswith("\r")
         if held_cr:
             text = text[:-1]
+        # The held tail contains no complete "\n\n" (the last scan found none), so the scan resumes
+        # one character before the new text: a delimiter split across two pieces is still found,
+        # and an incomplete frame is not rescanned from its start for every 64 KiB piece.
+        scan = max(0, len(buf) - 1)
         buf += text.replace("\r\n", "\n")
         # An advancing offset, with the unconsumed tail cut once per chunk: splitting the buffer
         # per frame copies the whole remainder each time, which a chunk packed with empty frames
         # turns into quadratic work on the loop every virtual user shares.
         pos = 0
         while True:
-            end = buf.find("\n\n", pos)
+            end = buf.find("\n\n", max(pos, scan))
             if end < 0:
                 break
             raw, pos = buf[pos:end], end + 2
@@ -165,6 +172,9 @@ async def sse_events(resp):
             if data or name != "message":
                 yield t, name, "\n".join(data)
         buf = buf[pos:]
+        if len(buf) > MAX_SSE_FRAME:
+            # vu_loop counts a ValueError as a "protocol" error, like any other malformed stream.
+            raise ValueError(f"SSE frame longer than {MAX_SSE_FRAME} characters")
 
 
 class Stats:

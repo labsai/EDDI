@@ -181,11 +181,24 @@ def ensure_results():
         os.chmod(RESULTS, 0o777)  # nosec B103 - scratch output directory shared with a container user
 
 
-def write_text_atomic(path, text):
+def write_text_atomic(path, text, explicit=False):
     """Writes `text` to `path` through a fresh, exclusively created temp file in the same directory,
     renamed over the target. results/ is world-writable (ensure_results), so a plain write-mode open would
     follow a symlink another local user planted at a predictable result name and truncate whatever
-    it points to; os.replace swaps the directory entry itself and never follows it."""
+    it points to; os.replace swaps the directory entry itself and never follows it.
+
+    `explicit` marks a path the user named with --out. If that names something other than a regular
+    file or a directory (`--out /dev/stdout`, a pipe), it is written in place: replacing it would swap
+    the device entry out instead of writing to it. Default result paths never take this branch."""
+    if explicit:
+        try:
+            st = os.stat(path)
+        except FileNotFoundError:
+            st = None
+        if st is not None and not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode):
+            with open(path, "w", encoding="utf-8", newline="\n") as dest:
+                dest.write(text)
+            return
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), prefix=".out-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
@@ -1152,7 +1165,7 @@ def cmd_report(args):
                  f"Raw results: `scripts/loadtest/results/{args.label}-*.json` (not committed). "
                  + f"Report: `{command_line()}`.", ""]
     out = args.out or os.path.join(RESULTS, f"{args.label}-report.md")
-    write_text_atomic(out, "\n".join(L))
+    write_text_atomic(out, "\n".join(L), explicit=bool(args.out))
     print(f"wrote {out}")
 
 
@@ -1557,7 +1570,7 @@ def cluster_report(results, args):
                          f"{peak(p, 'eddi_processing_conversation_count')} | {peak(p, 'eddi_cluster_lease_held')} | {c:.0f} |")
         lines.append("")
     lines += ["Raw numbers: the `.json` files next to this report (not committed).", ""]
-    write_text_atomic(path, "\n".join(lines))
+    write_text_atomic(path, "\n".join(lines), explicit=bool(getattr(args, "out", None)))
     print(f"wrote {path}", flush=True)
     return path
 

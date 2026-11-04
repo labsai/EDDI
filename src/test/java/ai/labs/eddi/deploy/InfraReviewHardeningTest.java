@@ -250,13 +250,37 @@ class InfraReviewHardeningTest {
     @DisplayName("the load-test writers replace result files instead of following a symlink in the shared results directory")
     void loadtestResultWritesDoNotFollowSymlinks() throws IOException {
         String lt = read("scripts/loadtest/loadtest.py");
-        assertTrue(lt.contains("def write_text_atomic(path, text):") && lt.contains("tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path))"));
+        assertTrue(lt.contains("def write_text_atomic(path, text, explicit=False):")
+                && lt.contains("tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path))"));
         assertTrue(lt.contains("os.replace(tmp, path)"));
         assertFalse(lt.contains("RESULTS, f\"{result['name']}.json\"), \"w\""), "write_result opens the predictable path itself");
         assertFalse(lt.contains("f\"{name}.json\"), \"w\""), "the cluster runner opens the predictable path itself");
         assertFalse(lt.contains("open(out, \"w\""), "the report opens the predictable path itself");
-        assertFalse(lt.contains("open(path, \"w\""), "the matrix reports open the predictable path themselves");
         assertFalse(lt.contains("\"gate-summary.md\"), \"w\""));
+        // The one direct write: a special file (--out /dev/stdout) the user named
+        // explicitly, inside write_text_atomic and only behind the explicit flag.
+        int direct = lt.indexOf("open(path, \"w\"");
+        int gate = lt.indexOf("    if explicit:\n");
+        assertTrue(direct > gate && gate > lt.indexOf("def write_text_atomic(") && lt.indexOf("open(path, \"w\"", direct + 1) < 0,
+                "only write_text_atomic's explicit special-file branch may open the target itself");
+        assertTrue(lt.contains("not stat.S_ISREG(st.st_mode) and not stat.S_ISDIR(st.st_mode)"));
+        assertTrue(lt.contains("write_text_atomic(os.path.join(RESULTS, f\"{result['name']}.json\"), json.dumps(result, indent=2))"),
+                "default result paths never pass explicit");
+    }
+
+    @Test
+    @DisplayName("PR #1239 review: SSE scan resumes across pieces with a frame cap, and the GCP Keycloak check is scoped to this compose project")
+    void sseScanAndKeycloakProjectScope() throws IOException {
+        String py = read("scripts/loadtest/drivers/stream_driver.py");
+        assertTrue(py.contains("scan = max(0, len(buf) - 1)") && py.contains("end = buf.find(\"\\n\\n\", max(pos, scan))"),
+                "an incomplete frame must not be rescanned from its start for every piece");
+        assertTrue(py.contains("MAX_SSE_FRAME = 1 << 20") && py.contains("if len(buf) > MAX_SSE_FRAME:"));
+
+        String vm = read("gcp/provision-vm.sh");
+        int loop = vm.indexOf("for attempt in \\$(seq 1 18); do");
+        int cid = vm.indexOf("KC_CID=\\$(docker compose --env-file \"\\${EDDI_DIR}/.env\" \\${COMPOSE_ARGS[*]} ps -q keycloak", loop);
+        int owned = vm.indexOf("KC_OWNED=\\$(docker ps -q --filter \"id=\\${KC_CID}\"", loop);
+        assertTrue(loop > 0 && cid > loop && owned > cid, "the container id must come from this project's compose arguments");
     }
 
     @Test
@@ -265,7 +289,7 @@ class InfraReviewHardeningTest {
         String py = read("scripts/loadtest/drivers/stream_driver.py");
         assertFalse(py.contains("out += c"), "bytes += copies the whole body per chunk");
         assertFalse(py.contains("buf.split(\"\\n\\n\", 1)"), "split copies the whole remainder per frame");
-        assertTrue(py.contains("end = buf.find(\"\\n\\n\", pos)") && py.contains("buf = buf[pos:]"));
+        assertTrue(py.contains("end = buf.find(\"\\n\\n\", max(pos, scan))") && py.contains("buf = buf[pos:]"));
         assertTrue(py.contains("async def text(self, limit=65536):"));
         // Pieces are cut at 64 KiB wherever that falls: a CRLF or a multi-byte
         // character can be split.
