@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.hitl;
 
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.NatsConnectionManager;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -48,7 +49,7 @@ class ClusterHitlRecoveryTest {
     @DisplayName("A11: while NATS cannot be read, a conversation is never taken for one nobody holds")
     void notEligibleWhileNatsIsUnreachable() {
         when(connection.isConnected()).thenReturn(false);
-        when(leases.peek(ID)).thenReturn(Optional.empty()); // what peek answers when it cannot read
+        when(leases.peekStrict(ID)).thenReturn(Optional.empty()); // what peek answers when it cannot read
 
         assertFalse(recovery.eligible(ID));
         assertFalse(recovery.eligible(ID), "not on a later sweep either");
@@ -59,7 +60,17 @@ class ClusterHitlRecoveryTest {
     @DisplayName("A11: a connection lost during the read makes the answer untrustworthy")
     void notEligibleWhenTheConnectionDropsDuringThePeek() {
         when(connection.isConnected()).thenReturn(true, false);
-        when(leases.peek(ID)).thenReturn(Optional.empty());
+        when(leases.peekStrict(ID)).thenReturn(Optional.empty());
+
+        assertFalse(recovery.eligible(ID));
+        verify(store, never()).getRevision(ID);
+    }
+
+    @Test
+    @DisplayName("A11: a lease read that fails on a connection still marked connected is not \"no lease\"")
+    void notEligibleWhenTheLeaseCannotBeRead() {
+        when(connection.isConnected()).thenReturn(true);
+        when(leases.peekStrict(ID)).thenThrow(new ClusterUnavailableException("request timed out"));
 
         assertFalse(recovery.eligible(ID));
         verify(store, never()).getRevision(ID);

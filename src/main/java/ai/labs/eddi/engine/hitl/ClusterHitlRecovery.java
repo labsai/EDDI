@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl;
 
 import ai.labs.eddi.engine.cluster.ClusterConfig;
 import ai.labs.eddi.engine.cluster.ClusterStartable;
+import ai.labs.eddi.engine.cluster.ClusterUnavailableException;
 import ai.labs.eddi.engine.cluster.NatsConnectionManager;
 import ai.labs.eddi.engine.cluster.lease.IConversationLeaseManager;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -101,16 +102,17 @@ public class ClusterHitlRecovery implements ClusterStartable {
         // "nobody runs it, recover now". Not eligible while this node is cut off from
         // NATS, before and after the read (a read that failed because the connection
         // dropped meanwhile); the next sweep asks again.
-        // TODO(cluster): use IConversationLeaseManager.peekStrict
-        // (fix/cluster-lease-validity),
-        // which throws on an unreadable lease, so a request that timed out on a
-        // connection
-        // still marked connected is not taken for "no lease" either.
+        // peekStrict throws on an unreadable lease, so a request that timed out on a
+        // connection still marked connected is not taken for "no lease" either.
         if (!natsConnected()) {
             return false;
         }
-        if (leases.peek(conversationId).isPresent()) {
-            sightings.remove(conversationId);
+        try {
+            if (leases.peekStrict(conversationId).isPresent()) {
+                sightings.remove(conversationId);
+                return false;
+            }
+        } catch (ClusterUnavailableException e) {
             return false;
         }
         if (!natsConnected()) {
