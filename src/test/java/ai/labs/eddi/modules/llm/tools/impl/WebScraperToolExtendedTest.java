@@ -416,6 +416,21 @@ class WebScraperToolExtendedTest {
         }
 
         @Test
+        @DisplayName("positional text inside a literal argument or attribute value does not make a selector positional")
+        void positionalTextInALiteralIsNotPositional() throws Exception {
+            mockResponse(200, "<html><body>" + "<i>x</i>".repeat(10_000) + "<span>see :eq(1)</span></body></html>");
+
+            String result = textOf(() -> webScraperTool.extractWithSelector("https://example.com", "span:contains(:eq(1))"));
+
+            assertTrue(result.contains("see :eq(1)"), result);
+            assertFalse(WebScraperTool.usesPositionalPseudo("a[title=':nth-child(2)']"));
+            assertFalse(WebScraperTool.usesPositionalPseudo("p:containsOwn(:first-of-type)"));
+            assertTrue(WebScraperTool.usesPositionalPseudo("li:nth-child(2n+1)"));
+            assertTrue(WebScraperTool.usesPositionalPseudo("div:has(p:eq(1))"));
+            assertTrue(WebScraperTool.usesPositionalPseudo("p:contains(x:eq(1)"), "an unterminated argument fails closed");
+        }
+
+        @Test
         @DisplayName("positional pseudos still run on an ordinary table")
         void positionalPseudoRunsOnANormalPage() throws Exception {
             StringBuilder html = new StringBuilder("<html><body><table>");

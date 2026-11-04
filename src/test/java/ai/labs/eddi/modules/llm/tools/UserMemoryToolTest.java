@@ -362,12 +362,46 @@ class UserMemoryToolTest {
         var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
                 Instant.now(), Instant.now());
         when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(foreign));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(foreign));
 
         String result = tool.forgetFact("tz");
 
         assertTrue(result.contains("owned by another agent"), result);
         verify(store, never()).deleteEntry(any());
         verify(store, never()).deleteEntryIfUnchanged(any(), any());
+    }
+
+    /**
+     * A foreign global entry and this agent's own self entry under one key: the
+     * refusal must not hide the entry this agent may forget, whichever of the two
+     * the store's first-match lookup returns.
+     */
+    @Test
+    void forgetFact_deletesItsOwnEntryBesideAForeignGlobalOne_foreignFirst() throws Exception {
+        var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        var own = new UserMemoryEntry("entry-s", "user-1", "tz", "PST", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(foreign));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(foreign, own));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store).deleteEntry("entry-s");
+        verify(store, never()).deleteEntry("entry-g");
+    }
+
+    @Test
+    void forgetFact_deletesItsOwnEntryBesideAForeignGlobalOne_ownFirst() throws Exception {
+        var foreign = new UserMemoryEntry("entry-g", "user-1", "tz", "CET", "fact", Visibility.global, "agent-2", List.of(), "conv-0", false, 0,
+                Instant.now(), Instant.now());
+        var own = new UserMemoryEntry("entry-s", "user-1", "tz", "PST", "fact", Visibility.self, "agent-1", List.of(), "conv-1", false, 0,
+                Instant.now(), Instant.now());
+        when(store.getByKey("user-1", "tz")).thenReturn(Optional.of(own));
+        when(store.getAllEntries("user-1")).thenReturn(List.of(foreign, own));
+
+        assertTrue(tool.forgetFact("tz").contains("✅ Forgotten"));
+        verify(store).deleteEntry("entry-s");
+        verify(store, never()).deleteEntry("entry-g");
     }
 
     @Test

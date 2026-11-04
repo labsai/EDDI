@@ -423,7 +423,11 @@ public class AttachmentTextExtractor {
          */
         @Override
         public void processPage(PDPage page) throws IOException {
-            if (glyphsLeft < 0) {
+            // PDFBox calls this for every page with contents and applies the start/end
+            // range inside super.processPage; a page outside the requested range is
+            // never parsed, so it must not be charged either (no bookmarks are set, so
+            // the range is the whole check).
+            if (glyphsLeft < 0 || getCurrentPageNo() < getStartPage() || getCurrentPageNo() > getEndPage()) {
                 return;
             }
             PdfTextExtractor.chargePageContents(page);

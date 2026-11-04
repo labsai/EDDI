@@ -318,6 +318,17 @@ class AttachmentTextExtractorTest {
         }
 
         @Test
+        void aPageOutsideTheRequestedRangeIsNotCharged() throws Exception {
+            // Page 1 would spend the whole document budget; only page 2 is asked for.
+            var bounded = new AttachmentTextExtractor(10_000, 500, 1024L * 1024);
+            byte[] pdf = pdfWithHeavyPageThenText(200 * 1024, 16, "Bravo page");
+
+            assertTrue(bounded.extractPdfText(pdf, 2, 2, 10_000).contains("Bravo page"));
+            assertThrows(AttachmentExtractionException.class, () -> bounded.extractPdfText(pdf, 1, 2, 10_000),
+                    "the heavy page is still charged when it is requested");
+        }
+
+        @Test
         void glyphAllowanceStopsLayoutAndKeepsWhatWasLaidOut() throws Exception {
             try (PDDocument document = Loader.loadPDF(createMultiPagePdf("Alpha page", "Bravo page"))) {
                 var stripper = new AttachmentTextExtractor.BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1), 3);
@@ -390,6 +401,39 @@ class AttachmentTextExtractorTest {
                 contents.add(stream);
             }
             page.setContents(contents);
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * Page 1 references one unfiltered stream {@code references} times; page 2
+     * carries {@code text}.
+     */
+    private static byte[] pdfWithHeavyPageThenText(int size, int references, String text) throws Exception {
+        try (PDDocument doc = new PDDocument(); ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            var heavy = new PDPage();
+            doc.addPage(heavy);
+            var stream = new PDStream(doc);
+            try (OutputStream os = stream.createOutputStream()) {
+                byte[] spaces = new byte[size];
+                Arrays.fill(spaces, (byte) ' ');
+                os.write(spaces);
+            }
+            List<PDStream> contents = new ArrayList<>();
+            for (int i = 0; i < references; i++) {
+                contents.add(stream);
+            }
+            heavy.setContents(contents);
+            var page = new PDPage();
+            doc.addPage(page);
+            try (var cs = new PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12);
+                cs.newLineAtOffset(50, 700);
+                cs.showText(text);
+                cs.endText();
+            }
             doc.save(out);
             return out.toByteArray();
         }

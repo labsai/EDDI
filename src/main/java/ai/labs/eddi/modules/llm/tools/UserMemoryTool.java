@@ -330,28 +330,27 @@ public class UserMemoryTool {
 
         try {
             // getByKey is scoped by userId ONLY and returns the FIRST match, which may
-            // belong to a different agent. Only delete what this agent may see; if the
-            // first match is not ours, look for this agent's own entry with that key
-            // instead of deleting someone else's memory.
-            UserMemoryEntry target = store.getByKey(userId, key).filter(this::isVisibleToThisAgent).orElse(null);
+            // belong to a different agent. Only delete what this agent may see and may
+            // delete; if the first match is not that, look for this agent's own entry
+            // with that key instead of deleting someone else's memory.
+            UserMemoryEntry target = store.getByKey(userId, key).filter(this::isVisibleToThisAgent).filter(this::mayDelete).orElse(null);
+            boolean foreignGlobalOnly = false;
             if (target == null) {
                 // Every entry of the user, not filterEntries: that is a capped substring
                 // search (IUserMemoryStore.MAX_FILTER_RESULTS, newest first), so for a
                 // key whose terms many entries share, this agent's own older entry fell
                 // outside the page and forgetting it answered "not found".
-                target = store.getAllEntries(userId).stream().filter(entry -> key.equals(entry.key()))
-                        .filter(this::isVisibleToThisAgent).findFirst().orElse(null);
+                List<UserMemoryEntry> visible = store.getAllEntries(userId).stream().filter(entry -> key.equals(entry.key()))
+                        .filter(this::isVisibleToThisAgent).toList();
+                target = visible.stream().filter(this::mayDelete).findFirst().orElse(null);
+                foreignGlobalOnly = target == null && !visible.isEmpty();
+            }
+            if (foreignGlobalOnly) {
+                return ("⚠️ The global memory with key '%s' is owned by another agent (or its owner is unknown) and cannot be "
+                        + "deleted by this agent.").formatted(key);
             }
             if (target == null) {
                 return "No memory with key '%s' found.".formatted(key);
-            }
-            // Seeing a global memory is not owning it. Deleting another agent's global
-            // entry and then writing the freed key would replace its value — exactly what
-            // the overwrite guard in rememberFact refuses — so the same rule applies here.
-            if (target.visibility() == Visibility.global && !guardrails.isAllowGlobalKeyOverwrite()
-                    && (agentId == null || agentId.isBlank() || !agentId.equals(target.sourceAgentId()))) {
-                return ("⚠️ The global memory with key '%s' is owned by another agent (or its owner is unknown) and cannot be "
-                        + "deleted by this agent.").formatted(key);
             }
             if (turnDiscarded.getAsBoolean()) {
                 return TURN_DISCARDED_REFUSAL;
@@ -366,6 +365,17 @@ public class UserMemoryTool {
             LOGGER.errorf("[MEMORY] Failed to forget fact: %s", e.getMessage());
             return "❌ Failed to forget memory: " + e.getMessage();
         }
+    }
+
+    /**
+     * Whether {@code forgetFact} may delete this visible entry. Seeing a global
+     * memory is not owning it: deleting another agent's global entry and then
+     * writing the freed key would replace its value — exactly what the overwrite
+     * guard in rememberFact refuses — so the same rule applies to deletion.
+     */
+    private boolean mayDelete(UserMemoryEntry entry) {
+        return entry.visibility() != Visibility.global || guardrails.isAllowGlobalKeyOverwrite()
+                || (agentId != null && !agentId.isBlank() && agentId.equals(entry.sourceAgentId()));
     }
 
     /**

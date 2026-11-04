@@ -237,9 +237,10 @@ public class ExpressionGuardrail implements ContentGuardrail {
 
     /**
      * Whether an exact reading and a {@code double} reading of an answer are the
-     * same JSON value: same structure and keys, integers equal exactly, decimals
-     * equal as the {@code double} the downstream reading holds — which must be
-     * finite.
+     * same JSON value: same structure and keys, integers equal exactly, and each
+     * decimal exactly the value of the {@code double} the downstream reading holds
+     * — which must be finite. A decimal that underflows or loses digits on the way
+     * to a double is not the value the task uses, so the answer is ambiguous.
      */
     static boolean sameJson(Object exact, Object downstream) {
         if (exact instanceof Map<?, ?> a && downstream instanceof Map<?, ?> b) {
@@ -269,7 +270,10 @@ public class ExpressionGuardrail implements ContentGuardrail {
         }
         if (exact instanceof BigDecimal a && (downstream instanceof Double || downstream instanceof Float)) {
             double d = ((Number) downstream).doubleValue();
-            return Double.isFinite(d) && a.doubleValue() == d;
+            // Against the double's own decimal value, not a.doubleValue(): 1e-400 and 0.0
+            // are the same double, but the guardrail would judge a positive number the
+            // task then reads as zero.
+            return Double.isFinite(d) && a.compareTo(BigDecimal.valueOf(d)) == 0;
         }
         if (exact instanceof Number || downstream instanceof Number) {
             return false;

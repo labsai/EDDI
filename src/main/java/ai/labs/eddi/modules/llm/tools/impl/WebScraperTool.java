@@ -292,7 +292,7 @@ public class WebScraperTool {
             LOGGER.debugf("Extracting elements matching '%s' from %s", sanitize(cssSelector), sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            boolean positional = POSITIONAL_PSEUDO.matcher(cssSelector).find();
+            boolean positional = usesPositionalPseudo(cssSelector);
             Elements elements = parseBounded(() -> {
                 Document doc = Jsoup.parse(page.html());
                 return positional && siblingScanWork(doc) > MAX_POSITIONAL_SCAN_WORK ? null : doc.select(cssSelector);
@@ -502,6 +502,41 @@ public class WebScraperTool {
             }
         }
         return false;
+    }
+
+    /**
+     * Whether {@code selector} uses one of the {@link #POSITIONAL_PSEUDO}s as
+     * selector syntax. The same text inside a quoted string, an attribute selector
+     * or a text pseudo's argument ({@code span:contains(:eq(1))}) is a literal
+     * jsoup never evaluates, so those spans are skipped — the spans
+     * {@link #hasSiblingCombinator} skips. An unterminated span fails closed (as if
+     * positional). Package-private for tests.
+     */
+    static boolean usesPositionalPseudo(String selector) {
+        StringBuilder syntax = new StringBuilder(selector.length());
+        int i = 0;
+        int n = selector.length();
+        while (i < n) {
+            char c = selector.charAt(i);
+            int next;
+            if (c == '"' || c == '\'') {
+                next = skipQuoted(selector, i);
+            } else if (c == '[') {
+                next = skipBalanced(selector, i, '[', ']');
+            } else if (c == '(' && isLiteralArgumentPseudo(selector, i)) {
+                next = skipBalanced(selector, i, '(', ')');
+            } else {
+                syntax.append(c);
+                i++;
+                continue;
+            }
+            if (next < 0) {
+                return true;
+            }
+            syntax.append(' ');
+            i = next;
+        }
+        return POSITIONAL_PSEUDO.matcher(syntax).find();
     }
 
     /**
