@@ -688,7 +688,7 @@ Every editor can read the LLM configuration that holds the reference, so a key s
 | --- | --- |
 | a base URL (`baseUrl` on `/setup`, `llmBaseUrl` on `/setup-api`) | that URL's host, with its port when the URL spells one |
 | no base URL, a provider with a known endpoint | the provider's host: `api.openai.com`, `api.anthropic.com`, `generativelanguage.googleapis.com`, `api.mistral.ai`, `router.huggingface.co`, `huggingface.co` (jlama's model-download token), or the default and regional hosts of a named OpenAI-compatible provider |
-| `apiAuth` on `/setup-api` | the host of each generated httpcall's `targetServerUrl` (from `apiBaseUrl` or the spec's `servers`) |
+| `apiAuth` on `/setup-api` | the host of each generated httpcall's `targetServerUrl` (from `apiBaseUrl` or the spec's `servers`). A reference alone, optionally after a scheme — `${vault:…}`, `${connection:…}`, `${vars:…}`, `${caller:…}` or `${context:…}` (the user's own token, sent per turn as secret context; see [httpcalls](httpcalls.md#per-turn-credentials-from-secret-context)) — is written as given and nothing is vaulted |
 | `"allowedHosts": ["api.example.com", "proxy.example:8443"]` | exactly that list, for every secret the request vaults — validated as on the secrets API |
 | `"allowedHosts": ["*"]` | no list: the secret may go anywhere |
 
