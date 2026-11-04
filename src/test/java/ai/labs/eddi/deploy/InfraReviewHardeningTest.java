@@ -267,6 +267,10 @@ class InfraReviewHardeningTest {
         assertFalse(py.contains("buf.split(\"\\n\\n\", 1)"), "split copies the whole remainder per frame");
         assertTrue(py.contains("end = buf.find(\"\\n\\n\", pos)") && py.contains("buf = buf[pos:]"));
         assertTrue(py.contains("async def text(self, limit=65536):"));
+        // Pieces are cut at 64 KiB wherever that falls: a CRLF or a multi-byte
+        // character can be split.
+        assertTrue(py.contains("codecs.getincrementaldecoder(\"utf-8\")(\"replace\")") && py.contains("held_cr = text.endswith(\"\\r\")"));
+        assertFalse(py.contains("chunk.decode(\"utf-8\", \"replace\")"), "per-piece decoding corrupts a split character");
     }
 
     @Test

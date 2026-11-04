@@ -45,6 +45,10 @@ pass (#1185); the rest are fixed here or recorded as accepted risk or open decis
   running Keycloak container owns the port on every attempt instead of once; `install.ps1`
   removes only one matching outer quote pair when reading `.env`.
 
+- **Stream driver, SSE across piece boundaries:** `sse_events` holds a trailing `` until the next piece
+  and decodes incrementally, so a CRLF or a multi-byte character split by the 64 KiB reads no longer
+  delays or merges events.
+
 ### Verdicts (35 findings)
 
 FIXED 13, ALREADY_FIXED 14, ACCEPTED_RISK 4, NEEDS_DECISION 4 (the Copilot auto-approve

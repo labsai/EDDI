@@ -22,6 +22,7 @@ the GIL has not scheduled yet.
 """
 import argparse
 import asyncio
+import codecs
 import json
 import os
 import re
@@ -130,9 +131,18 @@ async def request(base, method, path, body=None, headers=None):
 async def sse_events(resp):
     """(arrival time, event name, data) per SSE event, timestamped when its last byte was read."""
     buf = ""
+    # chunks() hands over body pieces of at most 64 KiB, cut wherever the size falls. A CRLF
+    # (or a multi-byte character) can be split across two of them, so a trailing "\r" is held
+    # back until the next piece shows whether a "\n" follows, and the decoder is incremental.
+    decoder = codecs.getincrementaldecoder("utf-8")("replace")
+    held_cr = False
     async for chunk in resp.chunks():
         t = time.perf_counter()
-        buf += chunk.decode("utf-8", "replace").replace("\r\n", "\n")
+        text = ("\r" if held_cr else "") + decoder.decode(chunk)
+        held_cr = text.endswith("\r")
+        if held_cr:
+            text = text[:-1]
+        buf += text.replace("\r\n", "\n")
         # An advancing offset, with the unconsumed tail cut once per chunk: splitting the buffer
         # per frame copies the whole remainder each time, which a chunk packed with empty frames
         # turns into quadratic work on the loop every virtual user shares.
