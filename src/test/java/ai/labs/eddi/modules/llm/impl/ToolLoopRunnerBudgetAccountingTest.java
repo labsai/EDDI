@@ -38,6 +38,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -58,6 +59,7 @@ class ToolLoopRunnerBudgetAccountingTest {
     private ToolResponseTruncator truncator;
     private LlmConfiguration.Task task;
     private AgentOrchestrator.ToolSetup setup;
+    private ToolCostTracker tracker;
 
     @BeforeEach
     void setUp() {
@@ -66,7 +68,7 @@ class ToolLoopRunnerBudgetAccountingTest {
                 .when(toolExecutionService.executeToolWrapped(any(ToolInvocation.class), anyString(), nullable(String.class),
                         nullable(String.class), any(), anyBoolean(), anyBoolean(), anyBoolean(), anyInt(), anyInt()))
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
-        ToolCostTracker tracker = mock(ToolCostTracker.class);
+        tracker = mock(ToolCostTracker.class);
         lenient().when(tracker.isWithinBudget(anyString(), anyDouble())).thenReturn(true);
         lenient().when(toolExecutionService.getCostTracker()).thenReturn(tracker);
         truncator = mock(ToolResponseTruncator.class);
@@ -138,5 +140,19 @@ class ToolLoopRunnerBudgetAccountingTest {
         task.setEnforceBudget(false);
 
         assertEquals(false, trackCostPassed());
+    }
+
+    @Test
+    @DisplayName("a summarize truncation's model call is charged to an enforced ceiling too")
+    void enforcedCeilingChargesTheSummarizer() throws Exception {
+        task.setMaxBudgetPerConversation(1.0);
+        task.setEnforceBudget(true);
+        trackCostPassed();
+
+        var spend = ArgumentCaptor.forClass(ToolResponseTruncator.SummarizerSpend.class);
+        verify(truncator).truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), spend.capture());
+        spend.getValue().charge(Map.of("inputTokens", 10, "outputTokens", 5));
+
+        verify(tracker).trackToolCall(any(ToolInvocation.class), eq(CONVERSATION_ID));
     }
 }

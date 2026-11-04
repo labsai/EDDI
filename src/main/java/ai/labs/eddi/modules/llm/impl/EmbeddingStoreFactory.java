@@ -46,6 +46,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HexFormat;
@@ -930,7 +931,16 @@ public class EmbeddingStoreFactory {
             return List.of();
         }
         try {
-            return List.copyOf(new ConnectionString(connectionString).getHosts());
+            ConnectionString parsed = new ConnectionString(connectionString);
+            List<String> hosts = new ArrayList<>(parsed.getHosts());
+            // The driver dials a proxyHost and hands it proxyUsername/proxyPassword, so
+            // it is a destination of the secrets in the string like any seed.
+            String proxyHost = parsed.getProxyHost();
+            if (proxyHost != null && !proxyHost.isBlank()) {
+                Integer proxyPort = parsed.getProxyPort();
+                hosts.add(proxyPort != null ? proxyHost + ":" + proxyPort : proxyHost);
+            }
+            return List.copyOf(hosts);
         } catch (RuntimeException e) {
             return List.of("");
         }
