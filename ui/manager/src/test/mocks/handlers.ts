@@ -2,6 +2,7 @@ import { http, HttpResponse } from "msw";
 import { clusterHandlers } from "./cluster-handlers";
 import { ratingHandlers } from "./rating-handlers";
 import { alertHandlers } from "./alert-handlers";
+import { modelPriceHandlers } from "./model-prices-handlers";
 import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
 
 // Stateful, in its own module; re-exported so the OpenAPI contract test, which
@@ -898,6 +899,8 @@ export const handlers = [
   ...ratingHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).
   ...alertHandlers,
+  // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
+  ...modelPriceHandlers,
 
   // Workspace context. Disabled by default, matching the backend's own default
   // and today's behaviour — no existing test should suddenly grow a sharing UI

@@ -221,7 +221,8 @@ marker and the next boundary catches up.
 - `llmProvider`/`llmModel` name the summarizer; without them, overflow falls
   back to the truncation marker (a save-time warning says so).
 - The optional prices attribute the summarizer's own spend to the discussion's
-  cost ledger, where `maxCostPerDiscussion` sees it.
+  cost ledger, where `maxCostPerDiscussion` sees it — and it is charged to the
+  tenant's monthly budget like any other spend ([Model Pricing](model-pricing.md#for-other-features-spend-attribution)).
 - The convergence judge's input is not windowed — it is already bounded to the
   last two rounds.
 

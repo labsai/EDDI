@@ -25,6 +25,7 @@ import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.CascadingStrategy;
 import ai.labs.eddi.modules.llm.model.EvaluationStrategy;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.UsageMaps;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.HeuristicConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.JudgeModelConfig;
@@ -577,6 +578,8 @@ class CascadingModelExecutor {
             var stepExchange = new ToolExchangeRecorder(stepPrices);
 
             try {
+                // strict mode: a refused unpriced step fails like any other and escalates
+                UnpricedCallPolicy.require(stepPrices.override(), modelType, modelName, memory, cascade.getMaxCostPerRun() != null, "cascade_step");
                 // Live-stream a step only when it is GUARANTEED to be accepted regardless of
                 // the confidence value — otherwise tokens could be sent for a step that then
                 // escalates. That is: the last step (always accepted), a null-threshold step
@@ -1734,11 +1737,7 @@ class CascadingModelExecutor {
         if (stepTokenUsage == null || stepTokenUsage.isEmpty()) {
             return;
         }
-        for (String field : AgentOrchestrator.TOKEN_USAGE_FIELDS) {
-            if (stepTokenUsage.containsKey(field) || runTokenUsage.containsKey(field)) {
-                runTokenUsage.put(field, asLong(runTokenUsage.get(field)) + asLong(stepTokenUsage.get(field)));
-            }
-        }
+        UsageMaps.merge(runTokenUsage, stepTokenUsage, AgentOrchestrator.TOKEN_USAGE_FIELDS);
     }
 
     /**

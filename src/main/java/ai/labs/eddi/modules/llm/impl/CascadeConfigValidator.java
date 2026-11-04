@@ -60,6 +60,7 @@ final class CascadeConfigValidator {
         // negative value, cascade or not.
         requireNonNegativeTaskPrice(taskId, "inputPricePer1M", task.getInputPricePer1M());
         requireNonNegativeTaskPrice(taskId, "outputPricePer1M", task.getOutputPricePer1M());
+        ModelPricingValidator.validate(taskId, task);
 
         // Warnings only, never blocking: timeouts that contradict each other and a
         // JSON agent with no fallback path (TurnResilienceWarnings).
