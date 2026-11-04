@@ -671,6 +671,44 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("embeddings discarded for lost ownership still count against the segment budget")
+        void discardedEmbeddingsAreCharged() {
+            var armed = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<IngestionRun> activeRun(String sourceId) {
+                    if (armed[0]) {
+                        armed[0] = false;
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.activeRun(sourceId);
+                }
+            };
+            // The store fails once, right after the first (paid) embedding call.
+            doAnswer(invocation -> {
+                armed[0] = true;
+                List<TextSegment> segments = invocation.getArgument(0);
+                return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f, 0.2f})).toList());
+            }).when(embeddingModel).embedAll(any());
+            IngestionSource capped = leafSource();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setMaxSegmentsPerRun(1);
+            settings.setCostPerThousandSegments(1000.0);
+            capped.setSettings(settings);
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", "<html><head><title>T</title></head><body><main><p>Seed.</p><a href=\"" + SITE
+                            + "/a\">a</a></main></body></html>")
+                    .page(SITE + "/a", pageWith("Second page."));
+            var pipeline = new IngestionPipeline(new WebCrawler(site), new HtmlToMarkdownConverter(), flaky, fileStore,
+                    extractors(), modelFactory, storeFactory, new SimpleMeterRegistry());
+
+            IngestionReport report = pipeline.run(KB_RESOURCE_ID, knowledgeBase(), capped, Mode.INGEST);
+
+            verify(embeddingModel, times(1)).embedAll(any());
+            assertEquals(1.0, report.costUsd(), 0.0001, "the discarded call was paid for");
+        }
+
+        @Test
         @DisplayName("a reserved run is not claimed twice, and the reservation is the one that runs")
         void reservationIsClaimedOnce() {
             // Two requests arriving together both used to be told "started": the claim

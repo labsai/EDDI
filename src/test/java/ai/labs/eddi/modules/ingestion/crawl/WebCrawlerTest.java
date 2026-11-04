@@ -423,12 +423,15 @@ class WebCrawlerTest {
             }
             FakeSite site = new FakeSite().page(base, html.append("</body></html>").toString());
 
-            new WebCrawler(site).crawl(
+            CrawlSummary summary = new WebCrawler(site).crawl(
                     request(base, Scope.defaults(),
                             new Limits(links * 2, links * 3, 0, 0, Duration.ofMinutes(1), Duration.ofSeconds(5))),
                     new RecordingSink());
 
-            long admitted = site.requestedUrls().size() - 1L;
+            // Only the generated links: the seed, robots.txt and sitemap requests are not.
+            long admitted = site.requestedUrls().stream().filter(url -> url.startsWith(base + "l")).count();
+            assertFalse(summary.coveredWholeSource(),
+                    "links were dropped, so the queue emptying is not coverage of the source");
             assertTrue(admitted > 0 && admitted < links,
                     "the frontier admitted " + admitted + " of " + links + " links, 2 x 7,000 characters each");
         }

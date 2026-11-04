@@ -489,6 +489,20 @@ class DocumentExtractorsTest {
         }
 
         @Test
+        @DisplayName("the word 'stream' inside a dictionary string does not hide the object's real stream")
+        void streamWordInsideDictionaryDoesNotSuppressTheRealStream() {
+            byte[] bomb = zlib(content(4 * 1024 * 1024));
+            var out = new ByteArrayOutputStream();
+            out.writeBytes(("%PDF-1.4\n1 0 obj\n<< /Title (stream) /Length " + bomb.length
+                    + " /Filter /FlateDecode >>\nstream\n").getBytes(StandardCharsets.US_ASCII));
+            out.writeBytes(bomb);
+            out.writeBytes("\nendstream\nendobj\n".getBytes(StandardCharsets.US_ASCII));
+
+            assertThrows(UnreadableDocumentException.class,
+                    () -> PdfStreamBudget.requireWithin(out.toByteArray(), 1024 * 1024, Instant.now().plusSeconds(30)));
+        }
+
+        @Test
         @DisplayName("a predictor asking for enormous rows is refused before PDFBox allocates them")
         void hugePredictorRowsAreRefused() throws IOException {
             // PDFBox allocates two row buffers from /Columns x /Colors x /BitsPerComponent

@@ -114,8 +114,14 @@ public final class PdfStreamBudget {
                 // its size.
                 continue;
             }
-            lastDictionaryObj = lastObj;
-            List<String> filters = filtersOf(dictionaryBefore(pdf, lastObj, keyword));
+            String dictionary = dictionaryBefore(pdf, lastObj, keyword);
+            // Only a complete dictionary settles the object. A "stream" inside one of its
+            // strings sees the text up to there, which ends mid-dictionary: it must not
+            // stand in for the real keyword that follows, whose /Filter is still unread.
+            if (dictionary != null && dictionary.stripTrailing().endsWith(">>")) {
+                lastDictionaryObj = lastObj;
+            }
+            List<String> filters = filtersOf(dictionary);
             if (filters == null) {
                 continue;
             }

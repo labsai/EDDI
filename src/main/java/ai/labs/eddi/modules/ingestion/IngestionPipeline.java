@@ -1002,6 +1002,12 @@ public class IngestionPipeline {
          */
         private int inconclusive;
         private int segments;
+        /**
+         * Segments the provider embedded and the run then refused to publish because it
+         * no longer owned its source. Not stored, but paid for: they count against the
+         * run's segment budget and cost.
+         */
+        private int discardedSegments;
         private int tombstoned;
         private boolean replaceUnsupported;
         private boolean tombstoningSkipped;
@@ -1153,7 +1159,7 @@ public class IngestionPipeline {
 
         private double currentCost() {
             Double rate = source.settings().getCostPerThousandSegments();
-            return rate != null && rate > 0 ? (segments / 1000.0) * rate : 0.0;
+            return rate != null && rate > 0 ? ((segments + discardedSegments) / 1000.0) * rate : 0.0;
         }
 
         @Override
@@ -1336,7 +1342,7 @@ public class IngestionPipeline {
 
             List<TextSegment> textSegments = split(documentId, url, title, markdown);
             int budget = source.settings().maxSegmentsPerRunOrDefault();
-            if (textSegments.size() > budget - segments) {
+            if (textSegments.size() > budget - segments - discardedSegments) {
                 // Checked before the provider is paid, not after: the budget is
                 // documented as a hard ceiling, and a check after embedding let the
                 // document that crossed it through whole.
@@ -1346,6 +1352,7 @@ public class IngestionPipeline {
 
             int stored = embed(documentId, textSegments);
             if (stored < 0) {
+                discardedSegments += textSegments.size();
                 return;
             }
             segments += stored;
@@ -1357,7 +1364,7 @@ public class IngestionPipeline {
             // provider timeout marks a page done forever.
             stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId);
 
-            if (segments >= source.settings().maxSegmentsPerRunOrDefault()) {
+            if (segments + discardedSegments >= source.settings().maxSegmentsPerRunOrDefault()) {
                 budgetExhausted = true;
                 LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d)",
                         LogSanitizer.sanitize(source.getName()), segments);
