@@ -232,7 +232,7 @@ class GroupConversationServiceHitlCoverage2Test {
 
     private Method toolPauseMethod() throws NoSuchMethodException {
         return method("tryResolveMemberToolPause", GroupMember.class, GroupConversation.class,
-                String.class, String.class, int.class, int.class, DiscussionPhase.class,
+                String.class, int.class, int.class, DiscussionPhase.class,
                 TranscriptEntryType.class, String.class);
     }
 
@@ -241,9 +241,9 @@ class GroupConversationServiceHitlCoverage2Test {
     void toolPauseResumeStartThrows() throws Exception {
         var gc = pausedPhaseGc("gc-tool-start-throw");
         doThrow(new RuntimeException("resume start failed"))
-                .when(conversationService).resumeConversation(anyString(), any(), any());
+                .when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
-        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp1", "input",
+        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp1",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
 
         assertNull(result, "A resume start failure must fall back (return null)");
@@ -257,9 +257,9 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onSkipped(snapshot(ConversationState.READY, "ignored"));
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
-        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp2", "input",
+        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp2",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
 
         assertNull(result, "onSkipped resolves the future to null → fall back");
@@ -273,9 +273,9 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(snapshot(ConversationState.AWAITING_HUMAN, "still paused"));
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
-        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp3", "input",
+        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp3",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
 
         assertNull(result, "A re-paused snapshot must fall back (return null)");
@@ -289,9 +289,9 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(snapshot(ConversationState.READY, "Tool-less answer"));
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
-        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp4", "input",
+        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp4",
                 5, 3, phase(PhaseType.CRITIQUE), TranscriptEntryType.CRITIQUE, "peer-1");
 
         assertNotNull(result, "Graceful success returns a real contribution");
@@ -314,9 +314,9 @@ class GroupConversationServiceHitlCoverage2Test {
             IConversationService.ConversationResponseHandler h = inv.getArgument(2);
             h.onComplete(errSnap);
             return null;
-        }).when(conversationService).resumeConversation(anyString(), any(), any());
+        }).when(conversationService).resumeConversation(anyString(), any(), any(), any(), any(), any());
 
-        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp5", "input",
+        Object result = invoke(toolPauseMethod(), member(), gc, "conv-tp5",
                 5, 0, phase(PhaseType.OPINION), TranscriptEntryType.OPINION, null);
 
         assertNotNull(result);
