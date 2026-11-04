@@ -50,6 +50,24 @@ class SecretScrubberCredentialQueryNameTest {
     }
 
     @Test
+    @DisplayName("a percent-encoded credential parameter name is judged decoded, on both export branches")
+    void encodedNames() throws Exception {
+        // %6Bey is key to the server that decodes the query; the additional
+        // query-name rule (key, signature, accessKey, ...) used to compare the encoded
+        // spelling only. (%73ig was already caught: sig is a header word too.)
+        String path = scrubbedField("""
+                {"request":{"path":"/container/blob?sv=2022-11-02&%6Bey=fixturefixturefixture"}}""", "/request/path");
+        String url = scrubbedField("""
+                {"targetServerUrl":"https://maps.example.com/api?%6Bey=plainkey1&zoom=3"}""", "/targetServerUrl");
+
+        // A zero-entropy value, so only the name rule can redact it.
+        assertFalse(path.contains("fixturefixturefixture"), path);
+        assertTrue(path.contains("%6Bey=" + SecretScrubber.REDACTED), path);
+        assertFalse(url.contains("plainkey1"), url);
+        assertTrue(url.contains("%6Bey=") && url.contains("zoom=3"), url);
+    }
+
+    @Test
     @DisplayName("a pointer under a credential name stays legible")
     void pointerKept() throws Exception {
         String path = scrubbedField("""

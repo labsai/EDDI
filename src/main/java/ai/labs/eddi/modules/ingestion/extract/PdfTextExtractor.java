@@ -178,8 +178,9 @@ public class PdfTextExtractor implements DocumentTextExtractor {
      * unfiltered stream referenced thousands of times from a {@code /Contents}
      * array — each reference parsed in full, its operands retained until an
      * operator arrives — cost nothing; each reference is now charged its length.
+     * Public for the attachment extractor, which reads PDFs under the same budget.
      */
-    static void chargePageContents(PDPage page) throws IOException {
+    public static void chargePageContents(PDPage page) throws IOException {
         COSBase contents = page.getCOSObject().getDictionaryObject(COSName.CONTENTS);
         if (contents instanceof COSStream stream) {
             if (COSName.FLATE_DECODE.equals(stream.getFilters())) {

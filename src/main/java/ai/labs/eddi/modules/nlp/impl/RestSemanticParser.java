@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.nlp.impl;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.parser.IRestParserStore;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
+import ai.labs.eddi.configs.workflows.rest.RestWorkflowStore;
 import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.bootstrap.LifecycleExtensions;
 import ai.labs.eddi.engine.runtime.IRuntime;
@@ -33,6 +34,7 @@ import jakarta.ws.rs.container.AsyncResponse;
 import java.net.URI;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -75,12 +77,12 @@ public class RestSemanticParser implements IRestSemanticParser {
 
     /**
      * Bounded, thread-safe parser cache. This bean is an {@code @ApplicationScoped}
-     * singleton and parsers are created on runtime pool threads, so the cache is
-     * mutated concurrently. Caffeine applies the loader at most once per key, which
-     * guarantees that concurrent requests for the same, not-yet-cached parser
-     * configuration create exactly one parser instance.
+     * singleton and parsers are created on whichever request thread asks first, so
+     * the cache is mutated concurrently. Caffeine applies the loader at most once
+     * per key, which guarantees that concurrent requests for the same,
+     * not-yet-cached parser configuration create exactly one parser instance.
      */
-    private final Cache<URI, IInputParser> parserCache;
+    private final Cache<URI, CachedParser> parserCache;
 
     private final Logger log = Logger.getLogger(RestSemanticParser.class);
 
@@ -127,10 +129,32 @@ public class RestSemanticParser implements IRestSemanticParser {
         // (ForbiddenException) propagates synchronously and maps to 403.
         resourceAccessGuard.requireAccess(configId, AccessLevel.VIEW, "parser configuration");
 
+        // The cached parser is shared between callers, and it was built from a parser
+        // document that may itself name another parser (config.uri) - possibly one
+        // saved before RestParserStore began checking that on save. Resolve it here,
+        // on the request thread, and require VIEW on every parser it was built from
+        // for THIS caller, every time, hit or miss. A build failure is carried into
+        // the submitted task so it maps to the same responses as before.
+        URI resourceUri = URI.create(IRestParserStore.resourceURI + configId + IRestParserStore.versionQueryParam + version);
+        CachedParser resolved = null;
+        Exception resolveFailure = null;
+        try {
+            resolved = getParser(resourceUri);
+        } catch (Exception e) {
+            resolveFailure = e;
+        }
+        if (resolved != null) {
+            requireAccessToReferencedParsers(resolved);
+        }
+        final CachedParser cachedParser = resolved;
+        final Exception failure = resolveFailure;
+
         runtime.submitCallable((Callable<Void>) () -> {
             try {
-                URI resourceUri = URI.create(IRestParserStore.resourceURI + configId + IRestParserStore.versionQueryParam + version);
-                IInputParser inputParser = getParser(resourceUri);
+                if (failure != null) {
+                    throw failure;
+                }
+                IInputParser inputParser = cachedParser.parser();
                 List<RawSolution> rawSolutions = inputParser.parse(sentence);
                 List<Solution> solutionExpressions = extractExpressions(rawSolutions, true, true);
                 asyncResponse.resume(solutionExpressions.stream().map(solution -> new ResponseSolution(solution.getExpressions())).toList());
@@ -145,7 +169,7 @@ public class RestSemanticParser implements IRestSemanticParser {
         }, null);
     }
 
-    private IInputParser getParser(URI resourceUri) throws Exception {
+    private CachedParser getParser(URI resourceUri) throws Exception {
         try {
             return parserCache.get(resourceUri, this::createParser);
         } catch (ParserCreationException e) {
@@ -160,19 +184,48 @@ public class RestSemanticParser implements IRestSemanticParser {
      * Cache loader. Runs at most once per key, even when several pool threads
      * request the same parser configuration simultaneously.
      */
-    private IInputParser createParser(URI resourceUri) {
+    private CachedParser createParser(URI resourceUri) {
         try {
             ILifecycleTask parserTask = parserProvider.get();
             var parserConfiguration = fetchParserConfiguration(resourceUri);
             var config = parserConfiguration.getConfig();
             var extensions = parserConfiguration.getExtensions();
-            return (IInputParser) parserTask.configure(config != null ? config : new HashMap<>(),
+            IInputParser built = (IInputParser) parserTask.configure(config != null ? config : new HashMap<>(),
                     extensions != null ? extensions : new HashMap<>());
+            // InputParserTask.configure followed config.uri to load another parser's
+            // dictionaries; remember what it followed so each request can be checked.
+            Map<String, URI> references = new LinkedHashMap<>();
+            RestWorkflowStore.addConfigReference(config, references);
+            return new CachedParser(built, List.copyOf(references.values()));
         } catch (RuntimeException e) {
             throw e;
         } catch (Exception e) {
             throw new ParserCreationException(e);
         }
+    }
+
+    /**
+     * Same rule {@code RestParserStore} applies when a parser is saved: VIEW on the
+     * parser a document's {@code config.uri} names, unless the caller sees
+     * everything. Runs on the request thread (the guard reads the request-scoped
+     * identity), once per request, against the targets recorded when the cache
+     * entry was built - the documents are not re-read.
+     */
+    private void requireAccessToReferencedParsers(CachedParser cached) {
+        if (cached.referencedParsers().isEmpty() || resourceAccessGuard.seesEverything()) {
+            return;
+        }
+        for (URI uri : cached.referencedParsers()) {
+            String label = "parser referenced by this parser configuration (" + uri.getHost() + ")";
+            resourceAccessGuard.requireAccess(RestUtilities.extractResourceId(uri).getId(), AccessLevel.VIEW, label);
+        }
+    }
+
+    /**
+     * A built parser and the parser documents ({@code config.uri}) it was built
+     * from.
+     */
+    private record CachedParser(IInputParser parser, List<URI> referencedParsers) {
     }
 
     /**
