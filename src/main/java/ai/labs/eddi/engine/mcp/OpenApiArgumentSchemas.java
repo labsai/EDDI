@@ -61,6 +61,17 @@ final class OpenApiArgumentSchemas {
         return convert(schema, openAPI, new HashSet<>(), 0);
     }
 
+    /**
+     * One OpenAPI schema as a subset JSON Schema map. A component {@code $ref} is
+     * followed; a reference already being resolved on this path (recursion), an
+     * unknown or non-component reference, {@code anyOf}/{@code oneOf} and a schema
+     * without a type all yield an untyped node (an empty map, plus the description)
+     * that accepts any value. Depth is capped at {@link #MAX_DEPTH}.
+     *
+     * @param resolving
+     *            component names being resolved on the current path, for cycle
+     *            detection
+     */
     static Map<String, Object> convert(Schema<?> schema, OpenAPI openAPI, Set<String> resolving, int depth) {
         Map<String, Object> out = new LinkedHashMap<>();
         if (schema == null || depth > MAX_DEPTH) {
@@ -133,6 +144,12 @@ final class OpenApiArgumentSchemas {
         return out;
     }
 
+    /**
+     * Adds an object's {@code properties} (each converted, {@code readOnly} ones
+     * left out), its {@code required} names that are still declared, and a boolean
+     * {@code additionalProperties}: a schema-valued one becomes {@code true} (any
+     * key; the value schema is not carried).
+     */
     private static void putObjectShape(Map<String, Object> out, Schema<?> schema, OpenAPI openAPI, Set<String> resolving, int depth) {
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
@@ -237,12 +254,18 @@ final class OpenApiArgumentSchemas {
         return null;
     }
 
+    /** Copies a non-blank description, trimmed. */
     private static void putDescription(Map<String, Object> out, Schema<?> schema) {
         if (schema.getDescription() != null && !schema.getDescription().isBlank()) {
             out.put("description", schema.getDescription().trim());
         }
     }
 
+    /**
+     * Adds a numeric bound under {@code keyword}, or under {@code exclusiveKeyword}
+     * when the OpenAPI 3.0 {@code exclusive*} flag is set. Nothing when there is no
+     * bound.
+     */
     private static void putBound(Map<String, Object> out, String keyword, BigDecimal value, Boolean exclusive, String exclusiveKeyword) {
         if (value == null) {
             return;
@@ -250,6 +273,7 @@ final class OpenApiArgumentSchemas {
         out.put(Boolean.TRUE.equals(exclusive) ? exclusiveKeyword : keyword, plain(value));
     }
 
+    /** Adds an integer keyword when the spec declares it. */
     private static void putInt(Map<String, Object> out, String keyword, Integer value) {
         if (value != null) {
             out.put(keyword, value);
@@ -274,6 +298,7 @@ final class OpenApiArgumentSchemas {
         return String.valueOf(value);
     }
 
+    /** Whether the list is non-null and has an element. */
     private static boolean notEmpty(List<?> list) {
         return list != null && !list.isEmpty();
     }

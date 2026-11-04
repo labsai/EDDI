@@ -400,6 +400,11 @@ class HttpCallToolsProvider implements ToolSourceProvider {
     private interface HttpCallToolExecutor extends MockAwareToolExecutor, ToolArgumentValidator {
     }
 
+    /**
+     * Whether the call declares a non-empty {@code argumentSchema}. Every typed
+     * behaviour (typed parameters, the pre-gate check, JSON rendering) hangs on
+     * this; without it the call behaves exactly as before.
+     */
     static boolean hasArgumentSchema(ApiCall apiCall) {
         return apiCall.getArgumentSchema() != null && !apiCall.getArgumentSchema().isEmpty();
     }

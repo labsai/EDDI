@@ -88,6 +88,7 @@ public final class ToolArgumentSchemaValidator {
             violations = violations == null ? List.of() : List.copyOf(violations);
         }
 
+        /** Whether the call may proceed: no violations. */
         public boolean valid() {
             return violations.isEmpty();
         }
@@ -202,6 +203,12 @@ public final class ToolArgumentSchemaValidator {
         return result.toString();
     }
 
+    /**
+     * The effective schema for {@code mode} and its compiled validator, cached by
+     * schema text and mode (the cache is cleared when full). Throws on a schema
+     * that cannot be serialised or compiled; {@link #check} turns that into a
+     * refusal (fail closed).
+     */
     private static Compiled compile(Map<String, Object> schema, UnknownFields mode) {
         JsonNode declared = MAPPER.valueToTree(schema);
         String key = mode + "\u0000" + declared;
@@ -332,6 +339,10 @@ public final class ToolArgumentSchemaValidator {
         });
     }
 
+    /**
+     * Whether the schema's {@code type} (a name or a list of names) includes
+     * {@code wanted}.
+     */
     private static boolean typeAllows(JsonNode schema, String wanted) {
         JsonNode type = schema.get("type");
         if (type == null) {
@@ -399,6 +410,11 @@ public final class ToolArgumentSchemaValidator {
         };
     }
 
+    /**
+     * The path of a property below {@code path}: dotted for a plain identifier,
+     * bracketed and quoted otherwise. {@code path} itself when there is no property
+     * name.
+     */
     private static String child(String path, String property) {
         if (property == null) {
             return path;
@@ -407,6 +423,7 @@ public final class ToolArgumentSchemaValidator {
         return plain ? path + "." + property : path + "['" + property + "']";
     }
 
+    /** The enum values, comma-separated; strings unquoted, other values as JSON. */
     private static String joinValues(JsonNode values) {
         if (values == null || !values.isArray()) {
             return String.valueOf(values);
@@ -416,6 +433,10 @@ public final class ToolArgumentSchemaValidator {
         return String.join(", ", parts);
     }
 
+    /**
+     * The expected type(s) as words, e.g. {@code an integer} or
+     * {@code a string or null}.
+     */
     private static String joinTypes(JsonNode type) {
         if (type == null) {
             return "of another type";
@@ -428,6 +449,7 @@ public final class ToolArgumentSchemaValidator {
         return article(String.join(" or ", parts));
     }
 
+    /** The type name with its indefinite article ({@code null} stays bare). */
     private static String article(String type) {
         return switch (type) {
             case "object", "array", "integer" -> "an " + type;

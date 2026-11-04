@@ -194,18 +194,22 @@ public class ApiCall {
         this.forEach = forEach;
     }
 
+    /** @see #argumentSchema */
     public Map<String, Object> getArgumentSchema() {
         return argumentSchema;
     }
 
+    /** @see #argumentSchema */
     public void setArgumentSchema(Map<String, Object> argumentSchema) {
         this.argumentSchema = argumentSchema;
     }
 
+    /** @see #unknownFields */
     public String getUnknownFields() {
         return unknownFields;
     }
 
+    /** @see #unknownFields */
     public void setUnknownFields(String unknownFields) {
         this.unknownFields = unknownFields;
     }
