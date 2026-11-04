@@ -427,7 +427,7 @@ Full guide: [hitl.md](hitl.md).
 | Property | Default | Description |
 |---|---|---|
 | `eddi.tools.budget.enforce-by-default` | `true` | Whether a per-conversation tool cost ceiling (`maxBudgetPerConversation`) refuses calls when the task does not set `enforceBudget` itself. `false` makes such ceilings advisory (tracked, never refused) and names each one in a WARN. See [langchain.md](langchain.md#budgets) |
-| `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call |
+| `eddi.tools.ratelimit.global.enabled` | `false` | Deployment-wide tool rate limit, on top of per-tool limits. Both must admit a call; a task with `enableRateLimiting: false` skips only its own limit, never this one |
 | `eddi.tools.ratelimit.global.limit` | `1000` | Calls per minute when the above is on |
 | `eddi.tools.web-scraper.max-response-bytes` | `5242880` (5 MB) | Cap on the response body the web-scraper tool reads from an LLM-chosen URL, bounded as it streams |
 | `eddi.tools.web-scraper.parse-threads` | `2` | Platform threads that may parse pages / evaluate CSS selectors at the same time; a call that finds all busy is refused at once. Bounds the CPU a runaway selector can hold — see [Web Scraper Tool](langchain.md#web-scraper-tool) |

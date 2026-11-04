@@ -2000,7 +2000,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Quota (toolQuot
 
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
-| **Rate Limiting** | Token-bucket per tool, configurable limits (calls per minute; `0` blocks the tool, a negative limit is refused at save time — switch limiting off with `enableRateLimiting: false`) | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Rate Limiting** | Token-bucket per tool, configurable limits (calls per minute; `0` blocks the tool, a negative limit is refused at save time — switch limiting off with `enableRateLimiting: false`, which leaves the operator's deployment-wide `eddi.tools.ratelimit.global.*` limit in force) | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
 | **Per-subject quotas** | Caps per user (or other subject) per time window, across conversations and nodes; counts real executions only; fails closed | `toolQuotas` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
