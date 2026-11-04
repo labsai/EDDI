@@ -197,17 +197,14 @@ public class ApiAgentSyncService {
         } catch (IllegalArgumentException e) {
             throw new AgentSetupException("OpenAPI parsing failed: " + e.getMessage(), e);
         }
+        // Every value — the request's or the one the calls already send — goes through
+        // the same vault step: a reference (what setup wrote) comes back unchanged, a
+        // plaintext is vaulted (or, in a dry run, shown as a placeholder).
         Map<String, Object> vaulted = new LinkedHashMap<>();
-        String effectiveApiAuth;
-        if (request.apiAuth() == null) {
-            effectiveApiAuth = apiAuth;
-        } else if (dryRun) {
-            effectiveApiAuth = AgentSetupService.previewApiAuth(apiAuth);
-        } else {
-            var targets = built.configsByGroup().values().stream().map(ApiCallsConfiguration::getTargetServerUrl).toList();
-            effectiveApiAuth = setupService.vaultApiAuth(apiAuth, "agent-" + agentId, vaulted, new AgentSetupService.HostRule(
-                    AgentSetupService.apiAuthRequestedHosts(request.allowedHosts()), SetupSecretHosts.forUrls(targets), "apiAuth"));
-        }
+        var targets = built.configsByGroup().values().stream().map(ApiCallsConfiguration::getTargetServerUrl).toList();
+        String effectiveApiAuth = setupService.writerFor(dryRun).vaultApiAuth(apiAuth, "agent-" + agentId, vaulted,
+                new AgentSetupService.HostRule(AgentSetupService.apiAuthRequestedHosts(request.allowedHosts()), SetupSecretHosts.forUrls(targets),
+                        "apiAuth"));
         if (!Objects.equals(effectiveApiAuth, apiAuth)) {
             built = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), effectiveApiAuth, authHeader,
                     setupService.specFetcher());

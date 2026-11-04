@@ -646,9 +646,9 @@ public class AgentSetupService {
         }
 
         // Generate-only: the configurations below are built exactly as for a real
-        // setup; only the writes are skipped (see ResourceWriter).
-        boolean dryRun = Boolean.TRUE.equals(request.dryRun());
-        var writer = new ResourceWriter(dryRun);
+        // setup; every write goes through the writer, which a dry run replaces with
+        // one that writes nothing (see ResourceWriter).
+        ResourceWriter writer = writerFor(Boolean.TRUE.equals(request.dryRun()));
 
         // --- Step 0b: Resolve the API key against the vault ---
         // Outside the try, so an unusable vaultKeyName fails while rollback still has
@@ -657,10 +657,8 @@ public class AgentSetupService {
         String llmEndpoint = "ollama".equals(params.providerType) && isNullOrBlank(request.llmBaseUrl())
                 ? ollamaDefaultBaseUrl
                 : request.llmBaseUrl();
-        String effectiveApiKey = dryRun
-                ? previewApiKey(request.apiKey(), request.vaultKeyName())
-                : vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources,
-                        new HostRule(request.allowedHosts(), SetupSecretHosts.forLlm(params.providerType, llmEndpoint), "apiKey"));
+        String effectiveApiKey = writer.vaultApiKey(request.apiKey(), request.agentName(), request.vaultKeyName(), createdResources,
+                new HostRule(request.allowedHosts(), SetupSecretHosts.forLlm(params.providerType, llmEndpoint), "apiKey"));
 
         try {
 
@@ -672,10 +670,8 @@ public class AgentSetupService {
             // plaintext.
             // Its destination is the API the generated httpcalls call, not the LLM.
             var apiTargets = buildResult.configsByGroup().values().stream().map(ApiCallsConfiguration::getTargetServerUrl).toList();
-            String effectiveApiAuth = dryRun
-                    ? previewApiAuth(request.apiAuth())
-                    : vaultApiAuth(request.apiAuth(), request.agentName(), createdResources,
-                            new HostRule(apiAuthRequestedHosts(request.allowedHosts()), SetupSecretHosts.forUrls(apiTargets), "apiAuth"));
+            String effectiveApiAuth = writer.vaultApiAuth(request.apiAuth(), request.agentName(), createdResources,
+                    new HostRule(apiAuthRequestedHosts(request.allowedHosts()), SetupSecretHosts.forUrls(apiTargets), "apiAuth"));
             if (!Objects.equals(effectiveApiAuth, request.apiAuth())) {
                 buildResult = McpApiToolBuilder.parseAndBuild(request.openApiSpec(), request.endpoints(), request.apiBaseUrl(), effectiveApiAuth,
                         request.apiAuthHeader(), specFetcher());
@@ -688,9 +684,7 @@ public class AgentSetupService {
             // Registered before the loop, so a later createApiCalls failure still leaves
             // the earlier locations visible to rollback.
             createdResources.put("httpCallsGroups", groupNames);
-            if (!dryRun) {
-                createdResources.put("httpCallsLocations", httpCallsLocations);
-            }
+            writer.record(createdResources, "httpCallsLocations", httpCallsLocations);
             for (var entry : buildResult.configsByGroup().entrySet()) {
                 String groupName = entry.getKey();
                 var config = entry.getValue();
@@ -747,9 +741,7 @@ public class AgentSetupService {
 
             // --- Step 5b: Create MCP Calls Configurations (if MCP URLs provided) ---
             var mcpConfigs = new ArrayList<McpCallsConfiguration>();
-            List<String> mcpCallsLocations = dryRun
-                    ? previewMcpCallsResources(request.mcpServerUrls(), writer, mcpConfigs)
-                    : createMcpCallsResources(request.mcpServerUrls(), request.agentName(), createdResources);
+            List<String> mcpCallsLocations = writer.mcpCalls(request.mcpServerUrls(), request.agentName(), createdResources, mcpConfigs);
 
             // --- Step 6: Create Workflow (with httpcalls in pipeline) ---
             var workflowConfig = createWorkflowConfig(parserLocation, behaviorLocation, httpCallsLocations, mcpCallsLocations, langchainLocation,
@@ -767,11 +759,13 @@ public class AgentSetupService {
             // ship an agent that can be returned to an ungated state.
             agentConfig.setHitlConfig(request.hitlConfig());
 
-            if (dryRun) {
+            // Captured for the two final steps below.
+            final McpApiToolBuilder.ApiBuildResult generated = buildResult;
+            return writer.finish(() -> {
                 recordDryRun("api_agent");
                 var preview = new LinkedHashMap<String, Object>(createdResources);
-                preview.put("apiCallsConfigurations", buildResult.configsByGroup());
-                preview.put("toolNames", toolNamesOf(buildResult.configsByGroup().values()));
+                preview.put("apiCallsConfigurations", generated.configsByGroup());
+                preview.put("toolNames", toolNamesOf(generated.configsByGroup().values()));
                 preview.put("llmConfiguration", llmConfig);
                 if (!mcpConfigs.isEmpty()) {
                     preview.put("mcpCallsConfigurations", mcpConfigs);
@@ -779,28 +773,28 @@ public class AgentSetupService {
                 preview.put("workflowConfiguration", workflowConfig);
                 preview.put("agentConfiguration", agentConfig);
                 return SetupResult.builder().action("api_agent_dry_run").agentName(request.agentName()).provider(params.providerType)
-                        .model(params.modelId).endpointCount(buildResult.endpointCount()).groups(groupNames).deployed(false)
+                        .model(params.modelId).endpointCount(generated.endpointCount()).groups(groupNames).deployed(false)
                         .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey)).resources(preview).build();
-            }
+            }, () -> {
+                Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
+                String agentLocation = agentResponse.getHeaderString("Location");
+                String agentId = extractIdFromLocation(agentLocation);
+                int agentVersion = extractVersionFromLocation(agentLocation);
+                createdResources.put("agentLocation", agentLocation);
+                patchDescriptor(agentId, agentVersion, request.agentName());
 
-            Response agentResponse = getRestStore(IRestAgentStore.class).createAgent(agentConfig);
-            String agentLocation = agentResponse.getHeaderString("Location");
-            String agentId = extractIdFromLocation(agentLocation);
-            int agentVersion = extractVersionFromLocation(agentLocation);
-            createdResources.put("agentLocation", agentLocation);
-            patchDescriptor(agentId, agentVersion, request.agentName());
+                // --- Step 8: Deploy ---
+                var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
+                        .agentName(request.agentName()).provider(params.providerType).model(params.modelId)
+                        .endpointCount(generated.endpointCount()).groups(groupNames)
+                        // See setupAgent: hands the caller the reference to reuse next time.
+                        .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey));
 
-            // --- Step 8: Deploy ---
-            var resultBuilder = SetupResult.builder().action("api_agent_created").agentId(agentId != null ? agentId : "unknown")
-                    .agentName(request.agentName()).provider(params.providerType).model(params.modelId).endpointCount(buildResult.endpointCount())
-                    .groups(groupNames)
-                    // See setupAgent: hands the caller the reference to reuse next time.
-                    .apiKeyVaultReference(vaultReferenceOrNull(effectiveApiKey));
+                grantAndDeploy(resultBuilder, createdResources, params, agentId, agentVersion, request.grantReferencedSecrets());
 
-            grantAndDeploy(resultBuilder, createdResources, params, agentId, agentVersion, request.grantReferencedSecrets());
-
-            resultBuilder.resources(createdResources);
-            return resultBuilder.build();
+                resultBuilder.resources(createdResources);
+                return resultBuilder.build();
+            });
 
         } catch (AgentSetupException e) {
             // Rethrown unwrapped, so the caller sees the real reason rather than it
@@ -809,14 +803,10 @@ public class AgentSetupService {
             // store (an unparseable spec, a rejected maxToolIterations) orphaned
             // everything created up to that point, and once key resolution moved
             // ahead of the try that included the vaulted secret.
-            if (!dryRun) {
-                rollbackCreatedResources(createdResources, request.agentName(), e);
-            }
+            writer.rollback(createdResources, request.agentName(), e);
             throw e;
         } catch (Exception e) {
-            if (!dryRun) {
-                rollbackCreatedResources(createdResources, request.agentName(), e);
-            }
+            writer.rollback(createdResources, request.agentName(), e);
             throw new AgentSetupException("Failed to create API agent: " + e.getMessage(), e);
         }
     }
@@ -850,36 +840,140 @@ public class AgentSetupService {
     }
 
     /**
-     * The one place {@code createApiAgent} creates a document, so a dry run runs
-     * every line of a real setup and skips exactly the writes: in a dry run a
-     * create returns a placeholder location of the right store, a descriptor patch
-     * does nothing, and no location is recorded for rollback.
+     * A write of the final setup step, which may throw like the steps before it.
      */
-    final class ResourceWriter {
-        private final boolean dryRun;
-        private int previewIds;
+    @FunctionalInterface
+    interface SetupStep<T> {
+        T run() throws AgentSetupException;
+    }
 
-        ResourceWriter(boolean dryRun) {
-            this.dryRun = dryRun;
-        }
+    /**
+     * Every write {@code createApiAgent} and the re-sync make — documents, vault
+     * entries, descriptors, rollback — goes through one of these, so a dry run runs
+     * every line of a real setup and skips exactly the writes.
+     * <p>
+     * Two implementations, chosen once by {@link #writerFor}: the live one writes,
+     * the preview one returns what would have been written (a placeholder location
+     * of the right store; the reference a vaulting would produce, or a placeholder
+     * for a plaintext). No write is guarded by a flag at its call site.
+     */
+    abstract class ResourceWriter {
+        abstract String create(String storePrefix, Supplier<Response> creator);
 
+        abstract void describe(String location, String name);
+
+        abstract void record(Map<String, Object> createdResources, String key, Object location);
+
+        abstract String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts)
+                throws AgentSetupException;
+
+        abstract String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts)
+                throws AgentSetupException;
+
+        abstract List<String> mcpCalls(String mcpServerUrls, String agentName, Map<String, Object> createdResources,
+                                       List<McpCallsConfiguration> previewed)
+                throws Exception;
+
+        /**
+         * The live writer runs {@code live}; the preview writer returns
+         * {@code preview}.
+         */
+        abstract <T> T finish(SetupStep<T> preview, SetupStep<T> live) throws AgentSetupException;
+
+        abstract void rollback(Map<String, Object> createdResources, String agentName, Exception cause);
+    }
+
+    /** The writer for a real setup, or for a dry run. */
+    ResourceWriter writerFor(boolean dryRun) {
+        return dryRun ? new PreviewWriter() : new LiveWriter();
+    }
+
+    private final class LiveWriter extends ResourceWriter {
+        @Override
         String create(String storePrefix, Supplier<Response> creator) {
-            if (dryRun) {
-                return storePrefix + DRY_RUN_ID_PREFIX + (++previewIds) + "?version=1";
-            }
             return creator.get().getHeaderString("Location");
         }
 
+        @Override
         void describe(String location, String name) {
-            if (!dryRun) {
-                patchDescriptor(extractIdFromLocation(location), extractVersionFromLocation(location), name);
-            }
+            patchDescriptor(extractIdFromLocation(location), extractVersionFromLocation(location), name);
         }
 
-        void record(Map<String, Object> createdResources, String key, String location) {
-            if (!dryRun) {
-                createdResources.put(key, location);
-            }
+        @Override
+        void record(Map<String, Object> createdResources, String key, Object location) {
+            createdResources.put(key, location);
+        }
+
+        @Override
+        String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts)
+                throws AgentSetupException {
+            return AgentSetupService.this.vaultApiKey(apiKey, agentName, vaultKeyName, createdResources, hosts);
+        }
+
+        @Override
+        String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts) throws AgentSetupException {
+            return AgentSetupService.this.vaultApiAuth(apiAuth, agentName, createdResources, hosts);
+        }
+
+        @Override
+        List<String> mcpCalls(String mcpServerUrls, String agentName, Map<String, Object> createdResources, List<McpCallsConfiguration> previewed)
+                throws Exception {
+            return createMcpCallsResources(mcpServerUrls, agentName, createdResources);
+        }
+
+        @Override
+        <T> T finish(SetupStep<T> preview, SetupStep<T> live) throws AgentSetupException {
+            return live.run();
+        }
+
+        @Override
+        void rollback(Map<String, Object> createdResources, String agentName, Exception cause) {
+            rollbackCreatedResources(createdResources, agentName, cause);
+        }
+    }
+
+    private final class PreviewWriter extends ResourceWriter {
+        private int previewIds;
+
+        @Override
+        String create(String storePrefix, Supplier<Response> creator) {
+            return storePrefix + DRY_RUN_ID_PREFIX + (++previewIds) + "?version=1";
+        }
+
+        @Override
+        void describe(String location, String name) {
+            // nothing is written in a dry run
+        }
+
+        @Override
+        void record(Map<String, Object> createdResources, String key, Object location) {
+            // nothing was created, so there is nothing to roll back
+        }
+
+        @Override
+        String vaultApiKey(String apiKey, String agentName, String vaultKeyName, Map<String, Object> createdResources, HostRule hosts) {
+            return previewApiKey(apiKey, vaultKeyName);
+        }
+
+        @Override
+        String vaultApiAuth(String apiAuth, String agentName, Map<String, Object> createdResources, HostRule hosts) throws AgentSetupException {
+            return previewApiAuth(apiAuth);
+        }
+
+        @Override
+        List<String> mcpCalls(String mcpServerUrls, String agentName, Map<String, Object> createdResources,
+                              List<McpCallsConfiguration> previewed) {
+            return previewMcpCallsResources(mcpServerUrls, this, previewed);
+        }
+
+        @Override
+        <T> T finish(SetupStep<T> preview, SetupStep<T> live) throws AgentSetupException {
+            return preview.run();
+        }
+
+        @Override
+        void rollback(Map<String, Object> createdResources, String agentName, Exception cause) {
+            // nothing to undo
         }
     }
 

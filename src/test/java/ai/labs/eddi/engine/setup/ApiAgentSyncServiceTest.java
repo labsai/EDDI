@@ -23,6 +23,8 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
@@ -43,6 +45,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @DisplayName("ApiAgentSyncService — re-sync of a setup-api agent")
@@ -98,6 +101,7 @@ class ApiAgentSyncServiceTest {
     private AgentConfiguration agent;
     private LlmConfiguration llm;
     private ApiAgentSyncService service;
+    private ISecretProvider secretProvider;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -110,7 +114,8 @@ class ApiAgentSyncServiceTest {
         when(factory.get(IRestWorkflowStore.class)).thenReturn(workflowStore);
         when(factory.get(IRestApiCallsStore.class)).thenReturn(apiCallsStore);
         when(factory.get(IRestLlmStore.class)).thenReturn(llmStore);
-        var setup = new AgentSetupService(factory, mock(IRestAgentAdministration.class), mock(ISecretProvider.class), "http://localhost:11434");
+        secretProvider = mock(ISecretProvider.class);
+        var setup = new AgentSetupService(factory, mock(IRestAgentAdministration.class), secretProvider, "http://localhost:11434");
         service = new ApiAgentSyncService(factory, setup);
 
         // The state a setup-api call with SPEC_V1 leaves behind.
@@ -312,5 +317,22 @@ class ApiAgentSyncServiceTest {
     void unknownAgent() {
         when(agentStore.getCurrentVersion("nope")).thenReturn(null);
         assertThrows(ApiAgentSyncService.AgentSyncNotFoundException.class, () -> service.sync("nope", request(SPEC_V2, null, null)));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"${eddivault:crm-token}", "Bearer ${vault:crm-token}", "${connection:crm}"})
+    @DisplayName("a recorded reference goes through the vault step unchanged and never touches the vault")
+    void recordedReferencePassesThroughUnchanged(String reference) throws Exception {
+        var v1 = McpApiToolBuilder.parseAndBuild(SPEC_V1, null, null, reference, null);
+        AgentSetupService.markGenerated(v1, reference, null);
+        when(apiCallsStore.readApiCalls(ITEMS_ID, 1)).thenReturn(copy(v1.configsByGroup().get("Items")));
+        when(apiCallsStore.readApiCalls(USERS_ID, 1)).thenReturn(copy(v1.configsByGroup().get("Users")));
+
+        service.sync(AGENT_ID, request(SPEC_V2, null, null));
+
+        ArgumentCaptor<ApiCallsConfiguration> written = ArgumentCaptor.forClass(ApiCallsConfiguration.class);
+        verify(apiCallsStore).updateApiCalls(eq(ITEMS_ID), eq(1), written.capture());
+        written.getValue().getHttpCalls().forEach(call -> assertEquals(reference, call.getRequest().getHeaders().get("Authorization")));
+        verifyNoInteractions(secretProvider);
     }
 }
