@@ -1253,7 +1253,11 @@ public class IngestionPipeline {
                 return;
             }
             var known = stateStore.lookup(sourceKey, file.fileId());
-            if (known.isEmpty() || known.get().tombstoned() || !stillOwnsRun(true)) {
+            if (known.isEmpty() || known.get().tombstoned()) {
+                return;
+            }
+            if (!stillOwnsRun(true)) {
+                ownershipUnverified(file.fileId(), true);
                 return;
             }
             try {
@@ -1336,7 +1340,9 @@ public class IngestionPipeline {
             }
             if (!stillOwnsRun(true)) {
                 // Nothing written for a source that is no longer this run's: the
-                // chunks would belong to nobody.
+                // chunks would belong to nobody. Nothing was embedded either, so
+                // nothing is charged to the segment budget.
+                ownershipUnverified(documentId, existing.isPresent());
                 return;
             }
 
@@ -1353,6 +1359,7 @@ public class IngestionPipeline {
             int stored = embed(documentId, textSegments);
             if (stored < 0) {
                 discardedSegments += textSegments.size();
+                ownershipUnverified(documentId, existing.isPresent());
                 return;
             }
             segments += stored;
@@ -1368,6 +1375,31 @@ public class IngestionPipeline {
                 budgetExhausted = true;
                 LOGGER.warnf("Ingestion of source '%s' stopped at its segment budget (%d)",
                         LogSanitizer.sanitize(source.getName()), segments);
+            }
+        }
+
+        /**
+         * A document left alone because the run could not confirm it still owns its
+         * source.
+         *
+         * <p>
+         * The run learned nothing about the document, so it must not count as missing:
+         * left unmarked, the reconciliation at the end of the run bumps its miss
+         * counter, and a store that stays unwell for {@code tombstoneAfterMissedRuns}
+         * runs deletes pages that are still there. It is marked the way an unreachable
+         * page is, and counted as inconclusive, which also keeps the orphan sweep from
+         * running on an incomplete picture.
+         */
+        private void ownershipUnverified(String documentId, boolean known) {
+            inconclusive++;
+            if (known && mode == Mode.INGEST) {
+                try {
+                    stateStore.recordUnreachable(sourceKey, documentId, runId);
+                } catch (RuntimeException e) {
+                    // The same store that could not answer may not take this either; the
+                    // run is inconclusive regardless, which keeps the sweep away.
+                    LOGGER.debugf(e, "Could not mark document %s unreachable", LogSanitizer.sanitize(documentId));
+                }
             }
         }
 

@@ -670,6 +670,67 @@ class IngestionPipelineTest {
                     "a run that cannot confirm it still owns its source must not publish vectors");
         }
 
+        private static String seedPage(String text) {
+            return "<html><head><title>Docs</title></head><body><main><p>" + text + "</p><a href=\"" + SITE
+                    + "/keep\">k</a></main></body></html>";
+        }
+
+        @Test
+        @DisplayName("a document skipped because ownership could not be verified is not counted as missing")
+        void unverifiableOwnershipDoesNotTombstone() {
+            var armOnLookup = new boolean[1];
+            var armed = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized Optional<DocumentState> lookup(String sourceId, String documentId) {
+                    if (armOnLookup[0] && documentId.equals(SITE)) {
+                        armOnLookup[0] = false;
+                        armed[0] = true;
+                    }
+                    return super.lookup(sourceId, documentId);
+                }
+
+                @Override
+                public synchronized Optional<IngestionRun> activeRun(String sourceId) {
+                    if (armed[0]) {
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    return super.activeRun(sourceId);
+                }
+
+                @Override
+                public synchronized List<DocumentState> bumpAndFindMissing(String sourceId, String runId,
+                                                                           int threshold) {
+                    // The store has recovered by the time the run reconciles.
+                    armed[0] = false;
+                    return super.bumpAndFindMissing(sourceId, runId, threshold);
+                }
+            };
+            IngestionSource strict = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTombstoneAfterMissedRuns(1);
+            strict.setSettings(settings);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, strict);
+
+            new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", seedPage("First version."))
+                    .page(SITE + "/keep", pageWith("Still here."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+            assertFalse(flaky.lookup(sourceKey, SITE).orElseThrow().tombstoned());
+
+            // The page changed, and the store cannot confirm ownership when it is time to
+            // write.
+            armOnLookup[0] = true;
+            IngestionReport report = new IngestionPipeline(
+                    new WebCrawler(new FakeSite().page(SITE + "/", seedPage("Second version."))
+                            .page(SITE + "/keep", pageWith("Still here."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+
+            assertEquals(0, report.documentsTombstoned(), "the run learned nothing about the page, so it is not gone");
+            assertFalse(flaky.lookup(sourceKey, SITE).orElseThrow().tombstoned());
+        }
+
         @Test
         @DisplayName("embeddings discarded for lost ownership still count against the segment budget")
         void discardedEmbeddingsAreCharged() {
