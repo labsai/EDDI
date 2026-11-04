@@ -26,9 +26,11 @@ import java.util.regex.Pattern;
  * the text as undecided, never as clean.
  * <p>
  * {@link #entities()} lists the types in the order the {@code pii-redaction}
- * guardrail applies them: the structured identifiers first, so the looser
- * {@code PHONE} pattern cannot eat the digit groups of an IBAN or a tax ID
- * before those are recognised; card before phone for the same reason.
+ * guardrail applies them: {@code EMAIL} first, so an address is redacted whole
+ * even when its local part is an IBAN or a tax ID; then the structured
+ * identifiers, so the looser {@code PHONE} pattern cannot eat the digit groups
+ * of an IBAN or a tax ID before those are recognised; card before phone for the
+ * same reason.
  */
 public final class BuiltinRecognizers {
 
@@ -106,6 +108,7 @@ public final class BuiltinRecognizers {
     private static final Map<String, Recognizer> RECOGNIZERS = new LinkedHashMap<>();
 
     static {
+        RECOGNIZERS.put(PiiEntities.EMAIL, scanner(PiiEntities.EMAIL, EMAIL, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.IBAN, scanner(PiiEntities.IBAN, IBAN, CHECKED, BuiltinRecognizers::acceptIban, (t, s, e) -> s + 1));
         RECOGNIZERS.put(PiiEntities.DE_TAX_ID,
                 scanner(PiiEntities.DE_TAX_ID, DE_TAX_ID, CHECKED, (t, s, e, d) -> PiiChecksums.deTaxId(compact(t, s, e)) ? new int[]{s, e} : null,
@@ -116,7 +119,6 @@ public final class BuiltinRecognizers {
                 (t, s, e, d) -> PiiChecksums.deSocialSecurity(compact(t, s, e)) ? new int[]{s, e} : null, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.DATE_OF_BIRTH,
                 scanner(PiiEntities.DATE_OF_BIRTH, DATE, CONTEXTUAL, BuiltinRecognizers::acceptBirthDate, AFTER_MATCH));
-        RECOGNIZERS.put(PiiEntities.EMAIL, scanner(PiiEntities.EMAIL, EMAIL, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.US_SSN, scanner(PiiEntities.US_SSN, US_SSN, CHECKED, (t, s, e, d) -> new int[]{s, e}, AFTER_MATCH));
         RECOGNIZERS.put(PiiEntities.CREDIT_CARD,
                 scanner(PiiEntities.CREDIT_CARD, CREDIT_CARD, CHECKED, (t, s, e, d) -> cardWithin(t, s, e), BuiltinRecognizers::afterFirstSeparator));

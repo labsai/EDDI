@@ -102,6 +102,13 @@ class PiiRedactionGuardrailTest {
         }
 
         @Test
+        @DisplayName("an address whose local part is an IBAN or a tax ID is redacted whole, as an e-mail")
+        void emailBeforeStructuredIdentifiers() {
+            assertEquals("to [REDACTED:email].", rewrite("to DE89370400440532013000@example.com.", Map.of()));
+            assertEquals("to [REDACTED:email].", rewrite("to 86095742719@example.com.", Map.of("patterns", "iban,de_tax_id,email")));
+        }
+
+        @Test
         void taxIdAndSocialSecurity() {
             assertEquals("Steuer-ID [REDACTED:de_tax_id].", rewrite("Steuer-ID 86095742719.", Map.of()));
             assertEquals("RVNR [REDACTED:de_social_security]", rewrite("RVNR 15 070649 C 103", Map.of()));
@@ -145,7 +152,7 @@ class PiiRedactionGuardrailTest {
 
         @Test
         void kindsListsEveryKind() {
-            assertEquals(List.of("iban", "de_tax_id", "de_id_card", "de_social_security", "date_of_birth", "email", "ssn", "creditcard", "phone"),
+            assertEquals(List.of("email", "iban", "de_tax_id", "de_id_card", "de_social_security", "date_of_birth", "ssn", "creditcard", "phone"),
                     PiiRedactionGuardrail.kinds());
         }
 

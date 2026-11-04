@@ -237,7 +237,8 @@ const PII_ENTITY_ALIASES: Record<string, string> = {
 
 export function enabledPiiKinds(g: GuardrailConfig): string[] {
   const raw = g.parameters?.patterns;
-  if (!raw) return [...PII_KINDS];
+  // The backend reads a blank value, whitespace included, as "all kinds".
+  if (!raw?.trim()) return [...PII_KINDS];
   const wanted = raw.split(",").map((s) => {
     const name = s.trim().toLowerCase();
     return PII_ENTITY_ALIASES[name] ?? name;

@@ -8,6 +8,7 @@ const pii = (patterns?: string): GuardrailConfig =>
 describe("pii-redaction kinds", () => {
   it("treats absent patterns as every kind", () => {
     expect(enabledPiiKinds(pii())).toEqual([...PII_KINDS]);
+    expect(enabledPiiKinds(pii("   "))).toEqual([...PII_KINDS]);
   });
 
   it("reads kind names case-insensitively, in the backend's order", () => {

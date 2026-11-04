@@ -34,10 +34,11 @@ import java.util.TreeSet;
  * "geb." or "born"). The entity names ({@code CREDIT_CARD}, {@code US_SSN}, …)
  * are accepted as aliases.
  * <p>
- * Kinds are applied one after another on the text the previous one left — the
- * structured identifiers first, so the looser phone pattern cannot take the
- * digit groups of an IBAN — and for a text with none of the newer kinds the
- * result is exactly what the four original kinds produced.
+ * Kinds are applied one after another on the text the previous one left —
+ * e-mail first, so an address is redacted whole even when its local part is an
+ * IBAN; then the structured identifiers, so the looser phone pattern cannot
+ * take the digit groups of an IBAN — and for a text with none of the newer
+ * kinds the result is exactly what the four original kinds produced.
  * <p>
  * With action {@code redact} the rewrite is applied; with {@code block},
  * {@code reprompt} or {@code warn} any finding counts as a violation of that
