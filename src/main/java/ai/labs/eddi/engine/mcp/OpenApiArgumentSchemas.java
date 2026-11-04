@@ -136,12 +136,10 @@ final class OpenApiArgumentSchemas {
     private static void putObjectShape(Map<String, Object> out, Schema<?> schema, OpenAPI openAPI, Set<String> resolving, int depth) {
         @SuppressWarnings("rawtypes")
         Map<String, Schema> properties = schema.getProperties();
-        Set<String> readOnly = new HashSet<>();
         if (properties != null && !properties.isEmpty()) {
             Map<String, Object> converted = new LinkedHashMap<>();
             for (var entry : properties.entrySet()) {
                 if (entry.getValue() != null && Boolean.TRUE.equals(entry.getValue().getReadOnly())) {
-                    readOnly.add(entry.getKey());
                     continue;
                 }
                 converted.put(entry.getKey(), convert(entry.getValue(), openAPI, resolving, depth + 1));

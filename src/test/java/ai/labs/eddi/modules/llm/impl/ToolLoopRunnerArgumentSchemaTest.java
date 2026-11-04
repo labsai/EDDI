@@ -147,7 +147,7 @@ class ToolLoopRunnerArgumentSchemaTest {
         };
     }
 
-    private AgentOrchestrator.ToolSetup setup(ToolExecutor executor) {
+    private AgentOrchestrator.ToolSetup toolSetup(ToolExecutor executor) {
         var spec = ToolSpecification.builder().name(TOOL).description("invite").build();
         return new AgentOrchestrator.ToolSetup(List.of(spec), new HashMap<>(Map.of(TOOL, executor)), new HashMap<>(Map.of(TOOL, "http")),
                 List.of(spec), new HashMap<>(), new HashMap<>(Map.of(TOOL, "post:/teams/invites")), new HashMap<>());
@@ -187,7 +187,7 @@ class ToolLoopRunnerArgumentSchemaTest {
         });
 
         var pause = assertThrows(ToolApprovalRequiredException.class, () -> runner.executeWithTools(model, null,
-                List.of(UserMessage.from("invite a@x as manager")), setup(schemaExecutor()), task, memory(), gateEveryPost(), 0, 0, null));
+                List.of(UserMessage.from("invite a@x as manager")), toolSetup(schemaExecutor()), task, memory(), gateEveryPost(), 0, 0, null));
 
         // the refusal the model read on its second iteration
         ToolExecutionResultMessage refusal = seen.get(1).stream().filter(ToolExecutionResultMessage.class::isInstance)
@@ -216,7 +216,7 @@ class ToolLoopRunnerArgumentSchemaTest {
         when(model.chat(any(ChatRequest.class))).thenReturn(calls(MISSPELLED, "{\"requestBody\":{\"emails\":[],\"role\":\"boss\"}}"))
                 .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("I could not send the invite.")).build());
 
-        var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup(schemaExecutor()), task, memory(),
+        var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), toolSetup(schemaExecutor()), task, memory(),
                 gateEveryPost(), 0, 0, null);
 
         assertEquals("I could not send the invite.", result.response());
@@ -235,7 +235,7 @@ class ToolLoopRunnerArgumentSchemaTest {
         when(model.chat(any(ChatRequest.class))).thenReturn(calls(MISSPELLED))
                 .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("done")).build());
 
-        var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup(plain), task, memory(), null, 0, 0, null);
+        var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), toolSetup(plain), task, memory(), null, 0, 0, null);
 
         assertEquals("done", result.response());
         assertEquals(1, executed.get());
