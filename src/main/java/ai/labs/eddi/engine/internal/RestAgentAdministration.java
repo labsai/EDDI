@@ -48,6 +48,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import java.util.concurrent.atomic.AtomicReference;
@@ -233,6 +234,38 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
     }
 
     /**
+     * A legacy Slack connector on the agent ({@code channels[].config.groupId})
+     * becomes a standing route into that group once the agent is deployed:
+     * {@code ChannelTargetRouter} serves it to anyone who can message the channel.
+     * The channel API refuses a group target its author may not USE; this applies
+     * the same rule to the legacy form, against the person deploying. Fail-closed:
+     * a configuration that cannot be read here cannot be checked, so the deploy is
+     * refused (503) rather than let through unchecked - unlike
+     * {@link #requireAgentExists}, which only guards against a false 404.
+     */
+    @SuppressWarnings("removal")
+    private void requireUseOnLegacyChannelGroups(String agentId, Integer version) {
+        AgentConfiguration config;
+        try {
+            config = agentStore.read(agentId, version);
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
+            log.warnf("Could not read Agent %s v%s to check its legacy channel groups - deployment refused: %s", sanitize(agentId), version,
+                    e.getMessage());
+            throw new ServiceUnavailableException("The agent's configuration could not be read to check its channel groups. Try again.");
+        }
+        if (config == null || config.getChannels() == null) {
+            return;
+        }
+        for (AgentConfiguration.ChannelConnector connector : config.getChannels()) {
+            String groupId = connector == null || connector.getConfig() == null ? null : connector.getConfig().get("groupId");
+            if (groupId != null && !groupId.isBlank()) {
+                // As stored: it is the id the router routes to.
+                resourceAccessGuard.requireUseAccess(groupId, "group");
+            }
+        }
+    }
+
+    /**
      * Rejects a deploy of an agent that does not exist, with the 404 the endpoint
      * has always advertised.
      * <p>
@@ -250,34 +283,6 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
      * @throws IResourceStore.ResourceNotFoundException
      *             mapped to 404 by {@code ResourceNotFoundExceptionMapper}
      */
-    /**
-     * A legacy Slack connector on the agent ({@code channels[].config.groupId})
-     * becomes a standing route into that group once the agent is deployed:
-     * {@code ChannelTargetRouter} serves it to anyone who can message the channel.
-     * The channel API refuses a group target its author may not USE; this applies
-     * the same rule to the legacy form, against the person deploying. A store
-     * outage is left to the deploy itself, as in {@link #requireAgentExists}.
-     */
-    @SuppressWarnings("removal")
-    private void requireUseOnLegacyChannelGroups(String agentId, Integer version) {
-        AgentConfiguration config;
-        try {
-            config = agentStore.read(agentId, version);
-        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException | IllegalArgumentException e) {
-            return;
-        }
-        if (config == null || config.getChannels() == null) {
-            return;
-        }
-        for (AgentConfiguration.ChannelConnector connector : config.getChannels()) {
-            String groupId = connector == null || connector.getConfig() == null ? null : connector.getConfig().get("groupId");
-            if (groupId != null && !groupId.isBlank()) {
-                // As stored: it is the id the router routes to.
-                resourceAccessGuard.requireUseAccess(groupId, "group");
-            }
-        }
-    }
-
     private void requireAgentExists(String agentId, Integer version) {
         try {
             agentStore.read(agentId, version);

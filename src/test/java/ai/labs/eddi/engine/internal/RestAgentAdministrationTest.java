@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.InternalServerErrorException;
+import jakarta.ws.rs.ServiceUnavailableException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.mockito.ArgumentCaptor;
@@ -193,18 +194,16 @@ class RestAgentAdministrationTest {
         }
 
         @Test
-        @DisplayName("a store outage does not masquerade as a missing agent")
-        void storeOutageStillDeploys() throws Exception {
+        @DisplayName("a store outage does not masquerade as a missing agent, and is not deployed unchecked: 503, not 404")
+        void storeOutageIsRetryableNotMissing() throws Exception {
             when(agentStore.read("agent-1", 1))
                     .thenThrow(new IResourceStore.ResourceStoreException("mongo down"));
-            when(agentFactory.getAgent(any(), anyString(), anyInt())).thenReturn(null);
-            when(runtime.submitCallable(any(Callable.class), any()))
-                    .thenReturn(CompletableFuture.completedFuture(null));
 
-            Response response = restAgentAdmin.deployAgent(
-                    Deployment.Environment.test, "agent-1", 1, true, false);
-
-            assertEquals(202, response.getStatus());
+            // The legacy channel-group check cannot read the configuration, so it fails
+            // closed - as a retryable 503, never as the 404 of a missing agent.
+            assertThrows(ServiceUnavailableException.class, () -> restAgentAdmin.deployAgent(
+                    Deployment.Environment.test, "agent-1", 1, true, false));
+            verify(runtime, never()).submitCallable(any(Callable.class), any());
         }
     }
 
