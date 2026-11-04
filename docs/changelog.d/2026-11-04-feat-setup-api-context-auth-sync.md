@@ -14,6 +14,8 @@ An integrator could not build a per-user-token operator agent with EDDI's own Op
 
 - The existing `Bearer {context.userToken}` Qute form does **not** leak into persisted memory: an `Authorization` header is name-redacted in the request record, and the turn-end scrub (`Conversation.scrubSecretContextValues`) removes the value (8+ characters) from every step datum, property, pending tool-call batch and audit entry. It is weaker in-turn: it renders anywhere (path, query, body), towards any host, follows redirects, sends `Bearer ` when missing, and an API error body echoing the token reaches the model's tool result only pattern-redacted. Unchanged; the reference is documented as the recommended form.
 
+- Review follow-up: a dry run that names an existing vault key (`vaultKeyName`) together with a plaintext `apiKey` can't tell reuse from creation without vault metadata, so it reports the destination-host rule a new key would fail in `resources.warnings` instead of refusing the request; the live setup checks hosts only when it creates the key.
+
 ### Not done
 
 - `toolDisplay` reference checks: the field is not on `main` yet (`feat/resume-stream-tool-events`); sync preserves it (the LLM task is copied whole) but cannot check it for dangling references.
