@@ -40,6 +40,11 @@ pass (#1185); the rest are fixed here or recorded as accepted risk or open decis
   keeps an existing file's mode or the umask default; the NetworkPolicy and metrics-path
   notes are corrected.
 
+- **PR #1239 outside-diff review:** the Grafana health probe and the GCP script's Keycloak
+  grant and admin calls also pass `--noproxy 127.0.0.1`; the GCP script re-checks that a
+  running Keycloak container owns the port on every attempt instead of once; `install.ps1`
+  removes only one matching outer quote pair when reading `.env`.
+
 ### Verdicts (35 findings)
 
 FIXED 13, ALREADY_FIXED 14, ACCEPTED_RISK 4, NEEDS_DECISION 4 (the Copilot auto-approve

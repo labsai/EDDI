@@ -642,7 +642,13 @@ function Get-EnvFileValue([string]$Key) {
     if (-not (Test-Path $envFile)) { return "" }
     $line = Get-Content $envFile | Where-Object { $_ -match "^$([regex]::Escape($Key))=(.*)$" } | Select-Object -First 1
     if (-not $line) { return "" }
-    return ($line -replace "^$([regex]::Escape($Key))=", "").Trim().Trim('"', "'")
+    $value = ($line -replace "^$([regex]::Escape($Key))=", "").Trim()
+    # Only one matching outer quote pair is the .env delimiter; Trim('"', "'") would also eat
+    # quote characters that belong to the value.
+    if ($value.Length -ge 2 -and ($value[0] -eq '"' -or $value[0] -eq "'") -and $value[$value.Length - 1] -eq $value[0]) {
+        $value = $value.Substring(1, $value.Length - 2)
+    }
+    return $value
 }
 
 # Resolves the overlay credentials BEFORE .env is written. Keeping a stored value

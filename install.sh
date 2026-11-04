@@ -2382,7 +2382,7 @@ confirm_grafana_login() {
     warn "No running grafana container found - not sending Grafana credentials to ${g_base}."
     return 0
   fi
-  until curl -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
+  until curl --noproxy 127.0.0.1 -sf -o /dev/null "${g_base}/api/health" 2>/dev/null; do
     if (( waited >= 60 )); then
       warn "Grafana did not answer on ${g_base} within 60s, so the installer could not confirm that it accepts GRAFANA_ADMIN_PASSWORD in ${EDDI_DIR}/.env."
       return 0

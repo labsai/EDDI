@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -175,8 +176,8 @@ class InfraReviewHardeningTest {
         assertTrue(vm.indexOf("  EDDI_DIR=\"/root/.eddi\"\n", dir + 1) < 0, "assigned once");
 
         String sh = read("install.sh");
-        assertTrue(sh.split("curl --noproxy 127.0.0.1 ", -1).length - 1 == 5,
-                "password grant, kc_authed_curl, Grafana status and both Grafana PUTs must bypass a configured proxy");
+        assertTrue(sh.split("curl --noproxy 127.0.0.1 ", -1).length - 1 == 6,
+                "password grant, kc_authed_curl, Grafana health + status and both Grafana PUTs must bypass a configured proxy");
 
         assertTrue(read("install.ps1").contains("$MongoAppSecret = $env:MONGO_APP_PASSWORD"),
                 "an exported value is what Compose uses, so it is what must be written to .env");
@@ -194,6 +195,35 @@ class InfraReviewHardeningTest {
     }
 
     @Test
+    @DisplayName("PR #1239 outside-diff review: Grafana health and GCP Keycloak calls bypass proxies, ownership is rechecked per attempt, ps1 keeps inner quotes")
+    void outsideDiffReviewFollowUps() throws IOException {
+        String sh = read("install.sh");
+        assertTrue(sh.contains("until curl --noproxy 127.0.0.1 -sf -o /dev/null \"${g_base}/api/health\""));
+
+        String vm = read("gcp/provision-vm.sh");
+        assertTrue(vm.contains("| curl --noproxy 127.0.0.1 -K - "), "kc_curl");
+        assertTrue(vm.contains("| curl --noproxy 127.0.0.1 -sf -X POST"), "the password grant");
+        int loop = vm.indexOf("for attempt in \\$(seq 1 18); do");
+        int owned = vm.indexOf("KC_OWNED=\\$(docker ps", loop);
+        int grant = vm.indexOf("curl --noproxy 127.0.0.1 -sf -X POST", loop);
+        assertTrue(loop > 0 && owned > loop && grant > owned, "the ownership check must run inside the retry loop, before the grant");
+        assertTrue(vm.indexOf("KC_OWNED=\\$(docker ps") == owned, "no single early ownership check outside the loop");
+
+        // The startup script is an UNQUOTED heredoc: an unescaped backtick (even in a
+        // comment) runs as
+        // command substitution when the provisioner generates it.
+        int start = vm.indexOf("cat <<STARTUP_SCRIPT");
+        String heredoc = vm.substring(start, vm.indexOf("\nSTARTUP_SCRIPT", start));
+        assertFalse(Pattern.compile("(?<!\\\\)`").matcher(heredoc).find(), "unescaped backtick in the startup-script heredoc");
+
+        assertTrue(read("src/main/resources/application.properties").contains("only the metrics permission keeps the role restriction"));
+
+        String ps1 = read("install.ps1");
+        assertFalse(ps1.contains(".Trim().Trim('\"', \"'\")"), "Trim() with a quote set eats quotes that belong to the value");
+        assertTrue(ps1.contains("$value[$value.Length - 1] -eq $value[0]"), "only a matching outer pair is removed");
+    }
+
+    @Test
     @DisplayName("provision-vm.sh sends Keycloak admin credentials only to the port Docker reports, and the token not in argv")
     void provisionVmKeycloakCallsAreScoped() throws IOException {
         String sh = read("gcp/provision-vm.sh");
@@ -204,7 +234,7 @@ class InfraReviewHardeningTest {
         assertTrue(sh.contains("--filter \"label=com.docker.compose.service=keycloak\""));
         assertTrue(sh.contains("--filter \"publish=\\${KC_PORT}\""));
         assertFalse(sh.contains("-H \"Authorization: Bearer"), "-H puts the token in argv");
-        assertTrue(sh.contains("curl -K - "));
+        assertTrue(sh.contains("curl --noproxy 127.0.0.1 -K - "));
     }
 
     @Test

@@ -777,28 +777,29 @@ OVERRIDE_EOF
   # occupied 8180 and records the choice in .env). The admin password and token go
   # only to a port Docker reports as a running keycloak container's, so a process
   # that grabbed 8180 first is not handed them.
-  KC_OWNED=\$(docker ps -q --filter "label=com.docker.compose.service=keycloak" \\
-    --filter "publish=\${KC_PORT}" --filter "status=running" 2>/dev/null) || KC_OWNED=""
+  # Checked on every attempt below: right after compose up the container may not be
+  # running yet, and a single early check would skip the update for good.
   # The bearer token travels in a curl config on stdin, not a -H argument: argv is
   # readable by every local user through the process table.
   kc_curl() {
     [[ "\${KC_TOKEN}" =~ ^[A-Za-z0-9._~+/=-]+\$ ]] || return 1
-    printf 'header = "Authorization: Bearer %s"\n' "\${KC_TOKEN}" | curl -K - "\$@"
+    printf 'header = "Authorization: Bearer %s"\n' "\${KC_TOKEN}" | curl --noproxy 127.0.0.1 -K - "\$@"
   }
-  if [[ -z "\${KC_OWNED}" ]]; then
-    echo "WARNING: no running Keycloak container publishes port \${KC_PORT}; not sending admin credentials."
-  else
   for attempt in \$(seq 1 18); do
-    KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl -sf -X POST \\
-      "\${KC_BASE}/realms/master/protocol/openid-connect/token" \\
-      --data-urlencode "client_id=admin-cli" --data-urlencode "grant_type=password" \\
-      --data-urlencode "username=\${KC_ADMIN_USER:-admin}" --data-urlencode "password@-" \\
-      2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
+    # The password goes only to a port Docker reports as a running keycloak container's.
+    KC_OWNED=\$(docker ps -q --filter "label=com.docker.compose.service=keycloak" \\
+      --filter "publish=\${KC_PORT}" --filter "status=running" 2>/dev/null) || KC_OWNED=""
+    if [[ -n "\${KC_OWNED}" ]]; then
+      KC_TOKEN=\$(printf '%s' "\${KC_ADMIN_PW}" | curl --noproxy 127.0.0.1 -sf -X POST \\
+        "\${KC_BASE}/realms/master/protocol/openid-connect/token" \\
+        --data-urlencode "client_id=admin-cli" --data-urlencode "grant_type=password" \\
+        --data-urlencode "username=\${KC_ADMIN_USER:-admin}" --data-urlencode "password@-" \\
+        2>/dev/null | jq -r '.access_token // empty' 2>/dev/null) || KC_TOKEN=""
+    fi
     [[ -n "\${KC_TOKEN:-}" ]] && break
     echo "  Waiting for Keycloak admin API... (\${attempt}/18)"
     sleep 10
   done
-  fi
 
   if [[ -n "\${KC_TOKEN:-}" ]]; then
     KC_CLIENT_UUID=\$(kc_curl -sf \\
