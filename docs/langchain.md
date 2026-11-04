@@ -924,6 +924,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
 | `toolRepeatGuard` | object | Refuses a tool call that already failed identically with nothing succeeding since, instead of re-running it. **On by default**; `{"enabled": false}` turns it off. See [Repeated failing tool calls](#repeated-failing-tool-calls) | enabled |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
+| `toolResponseLimits`       | object   | Character limit on each single tool result, and what to do with a result over it. See [Tool Response Limits](#tool-response-limits) | (none) |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
@@ -1708,7 +1709,8 @@ failure is attempted up to 3 times before the cascade (if any) escalates. To tur
     "backoffMultiplier": 2.0,
     "maxBackoffDelayMs": 10000,
     "honorRetryAfter": true,
-    "maxRetryAfterMs": 10000
+    "maxRetryAfterMs": 10000,
+    "jitterRatio": 0.2
   }
 }
 ```
@@ -1721,6 +1723,7 @@ failure is attempted up to 3 times before the cascade (if any) escalates. To tur
 | `maxBackoffDelayMs`  | long    | Ceiling on any single delay                                                                  | 10000   |
 | `honorRetryAfter`    | boolean | Sleep the delay the provider asked for (when the error carries one) instead of the backoff   | true    |
 | `maxRetryAfterMs`    | long    | Longest provider-requested wait accepted; a longer request stops retrying **without sleeping** | 10000   |
+| `jitterRatio`        | double  | Shortens each backoff by a random share of up to this fraction, so conversations that failed together do not all retry at the same moment. Only ever shortens, so the ceilings below still hold; a provider-requested wait is never shortened. `0` turns it off; clamped to `[0, 1]` | 0.2     |
 
 The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
 30 seconds for one backoff (and for `maxRetryAfterMs`), and at most 60 seconds of backoff in total
@@ -1881,6 +1884,7 @@ back into the full text through the `conversationRecall` built-in tool.
 | `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
 | `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
+| `summarizationPrompt`          | string  | Replaces the built-in summarizer instructions entirely. The built-in prompt asks for goals, decisions and their reasons, corrections and commitments, and tells the model to copy every opaque identifier (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names) exactly as written. A custom prompt gets none of that, so restate the identifier rule if your agent deals in order numbers, ticket ids or links | (built-in) |
 | `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
 
 Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
@@ -1945,6 +1949,37 @@ set `toolResponseLimits`, or raise `maxToolContextTokens`.
   "maxToolContextTokens": 60000
 }
 ```
+
+### Tool Response Limits
+
+`toolResponseLimits` caps each **single** tool result before it reaches the model. It has no
+default: without it a result is passed through at full length.
+
+```json
+{
+  "toolResponseLimits": {
+    "defaultMaxChars": 20000,
+    "perToolLimits": { "webscraper": 8000 },
+    "truncationStrategy": "headTail"
+  }
+}
+```
+
+| Parameter            | Type   | Description                                                                 | Default    |
+| -------------------- | ------ | --------------------------------------------------------------------------- | ---------- |
+| `defaultMaxChars`    | int    | Character limit per tool result. `0` or less disables the limit             | 50000      |
+| `perToolLimits`      | object | Tool name → character limit, overriding `defaultMaxChars` for that tool     | (none)     |
+| `truncationStrategy` | string | What happens to a result over the limit, see below. Case-insensitive        | `headTail` |
+| `summarizerModel`    | string | Model for the `summarize` strategy, on the task's own provider               | (none)     |
+
+| Strategy   | Result over the limit                                                                                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `headTail` | The first 70% and the last 30% of the limit are kept, with a `[TRUNCATED: …]` note in place of the middle. The end of a result is where exit codes, error messages and totals usually are |
+| `truncate` | Only the start is kept, followed by the note. The default before 6.7; set it explicitly to keep that behaviour                                                              |
+| `paginate` | The first page is returned with a `responseId` the model pages through with `fetch_page`. Falls back to `truncate` outside a conversation or above 500,000 characters        |
+| `summarize`| A summary from `summarizerModel`, charged to the conversation. Falls back to `truncate` when no model is set, the call fails, or the summary does not fit                   |
+
+An unknown strategy name is treated as `truncate`.
 
 ---
 
