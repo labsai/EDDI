@@ -34,6 +34,7 @@ import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.validation.ServiceJudgeVaultGrants;
 import ai.labs.eddi.configs.groups.model.GroupConversation.DecisionType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
@@ -62,6 +63,7 @@ import ai.labs.eddi.engine.internal.groups.NegotiationEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseExecutionEngine;
 import ai.labs.eddi.engine.internal.groups.PhaseOutcome;
 import ai.labs.eddi.engine.internal.groups.RunningDiscussionWrites;
+import ai.labs.eddi.engine.internal.groups.ServiceConvergenceJudge;
 import ai.labs.eddi.engine.internal.groups.TaskForceEngine;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.model.Context;
@@ -267,6 +269,13 @@ public class GroupConversationService implements IGroupConversationService, User
     SummarizationService summarizationService;
 
     /**
+     * The vault-grant rule the SERVICE judge re-checks before resolving its
+     * parameters.
+     */
+    @Inject
+    ServiceJudgeVaultGrants serviceJudgeVaultGrants;
+
+    /**
      * Files {@code handoffConfig.onDecision} rules once a discussion completes.
      * Null in tests that build the service by hand: no rules fire.
      */
@@ -354,6 +363,8 @@ public class GroupConversationService implements IGroupConversationService, User
         this.memberTurnExecutor = new MemberTurnExecutor(conversationService, agentFactory, signingGuard, contextBuilder, this,
                 counterGroupMemberPauseSkipped, DEFAULT_AGENT_TIMEOUT_SECONDS, DEFAULT_MAX_RETRIES);
         this.phaseExecutionEngine = new PhaseExecutionEngine(memberTurnExecutor, contextBuilder, executorService, callerIdentityContext);
+        this.phaseExecutionEngine
+                .setServiceJudge(new ServiceConvergenceJudge(() -> summarizationService, meterRegistry, () -> serviceJudgeVaultGrants));
         // I12: the deployment store is field-injected (RECRUIT's deployed-and-ready
         // check), so the engine takes a supplier that reads it lazily.
         this.facilitatorEngine = new FacilitatorEngine(memberTurnExecutor, () -> deploymentStore, auditLedgerService, meterRegistry,

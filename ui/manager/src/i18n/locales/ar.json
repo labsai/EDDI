@@ -3525,7 +3525,6 @@
     "convergenceJudge": "الحَكَم",
     "judgeModerator": "المنسّق",
     "judgeService": "خدمة",
-    "judgeServiceNote": "مقبول لكنه غير موصول بعد — يعود المحرك إلى المنسّق ويسجّل تحذيرًا.",
     "convergenceMode": "التوقف عندما",
     "convergenceModeSimilarity": "يتفق الأعضاء",
     "convergenceModeVerdict": "تجتاز مراجعة المشرف",
@@ -4324,6 +4323,16 @@
     "presetsLink": "قوالب المجموعات",
     "agentNotDeployed": "تم إنشاء الوكيل ولكن لم يتم نشره",
     "deployingAgents": "جارٍ نشر الوكلاء..."
+  },
+  "groupServiceJudge": {
+    "provider": "المزوّد",
+    "model": "النموذج",
+    "apiKey": "مرجع مفتاح API",
+    "timeoutMs": "المهلة (مللي ثانية)",
+    "inputPrice": "الإدخال $ / مليون رمز",
+    "outputPrice": "الإخراج $ / مليون رمز",
+    "noteConfigured": "استدعاء مباشر واحد للنموذج في كل فحص، دون الحاجة إلى مشرف. تُحتسب تكلفته ضمن النقاش. الرد الفاشل أو غير المقروء لا ينهي المرحلة أبدًا.",
+    "noteFallback": "حدّد مزوّدًا ونموذجًا، وإلا فسيحكم الوكيل المشرف."
   },
   "groupTemplates": {
     "advisoryBoard": "مجلس استشاري",
