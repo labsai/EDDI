@@ -68,6 +68,12 @@ misbehaving source cannot decide how much heap one sync takes; the sync then fai
 has its own fixed 256 MiB cap, and is then unpacked under the
 [archive limits](import-export-an-agent.md#archive-limits).
 
+**So is the number of requests.** A sync fetches each document once — a workflow the
+source agent names several times is read and parsed once, and a document that failed is
+not asked for again — and stops after `eddi.backup.sync.max-requests` requests (default
+`10000`) with `502`, so a source naming thousands of distinct documents cannot keep a
+request worker fetching them one by one.
+
 ## Workflow
 
 ### 1. List Remote Agents

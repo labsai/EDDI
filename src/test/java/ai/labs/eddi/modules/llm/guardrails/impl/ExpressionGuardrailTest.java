@@ -164,6 +164,26 @@ class ExpressionGuardrailTest {
         }
 
         @Test
+        @DisplayName("an earlier object only exact number parsing refuses is not skipped for a later one")
+        void exactOnlyNumberCandidateIsNotSkipped() {
+            // BigDecimal cannot hold 1e2147483648, so both exact readings skipped the
+            // first object and agreed on the second; the task's double reading takes
+            // the first (as Infinity).
+            assertEquals(ExpressionGuardrail.REASON_UNPARSEABLE,
+                    undecided("total == 1", "{\"total\":1e2147483648} {\"total\":1}"));
+        }
+
+        @Test
+        @DisplayName("a decimal the downstream double cannot hold is not judged as exact")
+        void decimalThatChangesAsADoubleIsUndecided() {
+            // 1e-400 underflows to 0.0: the exact reading passes "x > 0", the task reads 0.
+            assertEquals(ExpressionGuardrail.REASON_UNPARSEABLE, undecided("x > 0", "{\"x\": 1e-400}"));
+            // 0.30000000000000001 is 0.3 as a double: "x > 0.3" passes exactly, fails
+            // downstream.
+            assertEquals(ExpressionGuardrail.REASON_UNPARSEABLE, undecided("x > 0.3", "{\"x\": 0.30000000000000001}"));
+        }
+
+        @Test
         @DisplayName("an answer over the size cap is not parsed")
         void tooLarge() {
             String big = "{\"total\": 1, \"pad\": \"" + "x".repeat(ExpressionGuardrail.MAX_ANSWER_CHARS) + "\"}";

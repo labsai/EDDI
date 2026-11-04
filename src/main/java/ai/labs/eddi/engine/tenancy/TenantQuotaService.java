@@ -378,6 +378,20 @@ public class TenantQuotaService {
     }
 
     /**
+     * Whether {@code tenantId} has a monthly dollar budget in force — what the
+     * strict unpriced-call policy ({@code REFUSE_WHEN_BUDGETED}) asks. A store that
+     * cannot answer counts as budgeted: the stricter reading.
+     */
+    public boolean hasCostBudget(String tenantId) {
+        try {
+            TenantQuota quota = quotaFor(tenantId);
+            return quota != null && quota.enabled() && quota.maxMonthlyCostUsd() >= 0;
+        } catch (QuotaAccountingUnavailableException e) {
+            return true;
+        }
+    }
+
+    /**
      * {@link #checkCostBudget(String)} with spend the caller has made but the
      * monthly counter has not seen yet. The counter is charged when a turn settles
      * ({@code TurnCostMeter}), so a paid call later in the same turn — a re-ask, a

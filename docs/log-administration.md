@@ -77,7 +77,7 @@ Returns historical logs from the database. These survive restarts and work acros
 | `userId` | string | — | Filter by user ID |
 | `instanceId` | string | — | Filter by EDDI instance ID (useful in multi-instance deployments) |
 | `skip` | integer | `0` | Number of entries to skip (pagination) |
-| `limit` | integer | `100` | Maximum entries to return |
+| `limit` | integer | `100` | Maximum entries to return; `0` or a negative value is treated as `100` |
 
 **Example:**
 

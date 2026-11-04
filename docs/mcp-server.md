@@ -100,7 +100,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 
 | Tool                    | Description                                                                                                                                                                                         |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Heartbeats default to persistent conversations |
+| `create_schedule`       | Create a new scheduled agent trigger (cron job or heartbeat). For CRON: provide `cron`. For HEARTBEAT: provide `heartbeatIntervalSeconds`. Intervals below `eddi.schedule.min-interval-seconds` (default 60) are refused, as over REST. Heartbeats default to persistent conversations |
 | `list_schedules`        | List all scheduled agent triggers with name, type, cron/interval, status, next fire time, and fire count. Optionally filter by agentId                                                              |
 | `read_schedule`         | Read a schedule's full configuration including recent fire history (last 10 executions)                                                                                                             |
 | `delete_schedule`       | Delete a scheduled agent trigger                                                                                                                                                                    |
