@@ -57,9 +57,10 @@ import java.util.function.Consumer;
  * they are used, so a destination validated once at build time would otherwise
  * be re-resolved by the JDK client on every new connection, unchecked: a
  * hostname whose DNS answer changed after the build reached a private address
- * (DNS rebinding). The per-request check is the same one the MCP transport
- * applies; the residual gap between that lookup and the JDK's own is the
- * cache-expiry window documented in {@code docs/security.md}.
+ * (DNS rebinding). The MCP transport is built on this client too, with its own
+ * URL check as the guard ({@link #builder(Consumer)}); the residual gap between
+ * that lookup and the JDK's own is the cache-expiry window documented in
+ * {@code docs/security.md}.
  */
 public final class BoundedJdkHttpClient {
 
@@ -85,6 +86,16 @@ public final class BoundedJdkHttpClient {
     public static JdkHttpClientBuilder builder(OutboundTargetPolicy targetPolicy) {
         OutboundTargetPolicy policy = OutboundTargetPolicy.orPermissive(targetPolicy);
         return builder(maxResponseBytes(), uri -> policy.validateUrl(uri.toString()));
+    }
+
+    /**
+     * {@link #builder()} that runs {@code requestGuard} on every request's URL
+     * immediately before it is sent; a guard that throws stops the request unsent.
+     * For callers whose target check is not an {@link OutboundTargetPolicy} — the
+     * MCP transport keeps its own.
+     */
+    public static JdkHttpClientBuilder builder(Consumer<URI> requestGuard) {
+        return builder(maxResponseBytes(), requestGuard);
     }
 
     static JdkHttpClientBuilder builder(long maxResponseBytes) {
@@ -147,7 +158,7 @@ public final class BoundedJdkHttpClient {
                 if (subscription != null) {
                     subscription.cancel();
                 }
-                delegate.onError(new IOException("The LLM provider's response is larger than " + maxBytes + " bytes ("
+                delegate.onError(new IOException("The response is larger than " + maxBytes + " bytes ("
                         + MAX_RESPONSE_BYTES_PROPERTY + ")"));
                 return;
             }

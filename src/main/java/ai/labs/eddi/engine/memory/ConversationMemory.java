@@ -216,6 +216,11 @@ public class ConversationMemory implements IConversationMemory {
         IData<Object> pending = from != null ? from.getData(MemoryKeys.AUDIT_PENDING_COST) : null;
         if (pending != null && pending.getResult() instanceof Number owed) {
             currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_COST, owed.doubleValue()));
+            // the attribution travels with the dollars, a zero marker included
+            IData<Object> attribution = from.getData(MemoryKeys.AUDIT_PENDING_SPEND);
+            if (attribution != null && attribution.getResult() != null) {
+                currentStep.storeData(new Data<>(MemoryKeys.AUDIT_PENDING_SPEND, attribution.getResult()));
+            }
         }
     }
 

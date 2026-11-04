@@ -153,7 +153,7 @@ class RestImportServiceMergeSharedExtensionTest {
         assertEquals(4, current.get(), "the rollback must land on top of the latest imported version");
         assertEquals(3, written.size());
         assertSame(original, written.get(2), "restored to the content from before the import, not the intermediate");
-        verify(documentDescriptorStore).setDescriptor(eq(LOCAL_DICT_ID), eq(1), argThat((DocumentDescriptor d) -> d == originalDescriptor
+        verify(documentDescriptorStore).setDescriptor(eq(LOCAL_DICT_ID), eq(1), argThat((DocumentDescriptor d) -> d != originalDescriptor
                 && "Original name".equals(d.getName())
                 && d.getResource().toString().endsWith(LOCAL_DICT_ID + "?version=4")));
     }

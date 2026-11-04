@@ -129,4 +129,31 @@ class ScrubbedSecretsDestinationTest {
                 || merged.contains("\"headers\":{\"Authorization\":\"Bearer t7\"},\"name\":\"call7\""), "each call keeps its own token");
         assertFalse(merged.contains(ScrubbedSecrets.PLACEHOLDER), "every call has a counterpart");
     }
+
+    @Test
+    @DisplayName("a source that drops the target's endpoint goes to the provider default, and keeps the placeholder")
+    void removedEndpoint() throws Exception {
+        String target = """
+                {"tasks":[{"id":"support","parameters":{"baseUrl":"https://gateway.internal.example.com","apiKey":"live-gateway-key"}}]}""";
+        String source = """
+                {"tasks":[{"id":"support","parameters":{"apiKey":"${vault:REDACTED}"}}]}""";
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertFalse(merged.contains("live-gateway-key"), merged);
+        assertTrue(merged.contains(ScrubbedSecrets.PLACEHOLDER), merged);
+    }
+
+    @Test
+    @DisplayName("a destination that is not a string is compared too, not skipped")
+    void nonStringHost() throws Exception {
+        String target = """
+                {"store":{"host":"qdrant.internal.example.com","apiKey":"live-qdrant-key"}}""";
+        String source = """
+                {"store":{"host":167772161,"apiKey":"${vault:REDACTED}"}}""";
+
+        String merged = ScrubbedSecrets.restore(source, target, jsonSerialization);
+
+        assertFalse(merged.contains("live-qdrant-key"), merged);
+    }
 }
