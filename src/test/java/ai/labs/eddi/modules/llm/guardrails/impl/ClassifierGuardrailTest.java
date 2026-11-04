@@ -5,6 +5,11 @@
 package ai.labs.eddi.modules.llm.guardrails.impl;
 
 import ai.labs.eddi.configs.shared.TurnDeadline;
+import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
+import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
+import ai.labs.eddi.engine.pricing.model.ModelPriceCatalog;
+import ai.labs.eddi.engine.pricing.model.ModelPriceEntry;
+import ai.labs.eddi.engine.pricing.model.UnpricedPolicy;
 import ai.labs.eddi.modules.llm.guardrails.ContentGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailAction;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailContext;
@@ -682,6 +687,25 @@ class ClassifierGuardrailTest {
         @DisplayName("an unpriced classifier expects nothing")
         void unpricedExpectsNothing() {
             assertEquals(0.0, GuardrailModelClient.expectedCost(List.of(UserMessage.from("hello")), input(params())));
+        }
+
+        @Test
+        @DisplayName("a guardrail with no own price expects the catalog's input price, so the reservation matches what is later charged")
+        void catalogPriceReservesToo() {
+            ModelPriceCatalogs.publish(PriceCatalogSnapshot.of(
+                    new ModelPriceCatalog(1, UnpricedPolicy.ALLOW, null, null, List.of(ModelPriceEntry.of("openai", "gpt-4o-mini", 2.0, 8.0))),
+                    UnpricedPolicy.ALLOW));
+            try {
+                var messages = List.<ChatMessage>of(UserMessage.from("x".repeat(400)));
+                // 400 characters ~ 100 tokens at $2 per 1M
+                assertEquals(100 * 2.0 / 1_000_000, GuardrailModelClient.expectedCost(messages, input(params()), "openai", "gpt-4o-mini"), 1e-12);
+                assertEquals(0.0, GuardrailModelClient.expectedCost(messages, input(params()), "openai", "unknown-model"));
+                // an own price still wins
+                assertEquals(100 * 5.0 / 1_000_000,
+                        GuardrailModelClient.expectedCost(messages, input(params("inputPricePer1M", "5")), "openai", "gpt-4o-mini"), 1e-12);
+            } finally {
+                ModelPriceCatalogs.publish(null);
+            }
         }
     }
 }

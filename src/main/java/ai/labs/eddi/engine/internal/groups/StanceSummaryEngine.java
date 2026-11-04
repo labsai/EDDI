@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.internal.groups;
 
+import ai.labs.eddi.engine.pricing.SystemSpendMeter;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.StanceSummaryConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
@@ -11,7 +14,6 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.MemberStance;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
-import ai.labs.eddi.modules.llm.impl.TokenPricing;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
@@ -232,6 +234,10 @@ public final class StanceSummaryEngine {
         if (content.isBlank()) {
             return null;
         }
+        if (!SystemSpendMeter.admit() || UnpricedCallPolicy.check(PriceOverride.of(config.inputPricePer1M(), config.outputPricePer1M()),
+                config.llmProvider(), config.llmModel(), null, false, "group_stance") != null) {
+            return new StanceResult(agentId, extract(entries, coverage, maxChars), 0.0, false);
+        }
         try {
             var result = summarizationService.summarizeWithUsage(content, STANCE_INSTRUCTIONS,
                     config.llmProvider(), config.llmModel());
@@ -241,9 +247,9 @@ public final class StanceSummaryEngine {
                         LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(agentId));
                 return new StanceResult(agentId, extract(entries, coverage, maxChars), 0.0, false);
             }
-            double cost = TokenPricing.cost(config.inputPricePer1M(), config.outputPricePer1M(),
-                    Map.of("inputTokens", result.inputTokens(), "outputTokens", result.outputTokens()));
-            GroupCostLedger.recordSystemCost(gc, "system:stance:" + agentId + ":" + coverage, cost);
+            String costKey = "system:stance:" + agentId + ":" + coverage;
+            double cost = SystemSpendMeter.charge(gc, costKey, PriceOverride.of(config.inputPricePer1M(), config.outputPricePer1M()),
+                    result.tokenUsage(), costKey);
             return new StanceResult(agentId, new MemberStance(text, coverage, true, Instant.now()), cost, false);
         } catch (Exception e) {
             LOGGER.warnf("Group %s: stance summarization failed for member %s (%s) — extracting instead",

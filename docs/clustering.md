@@ -46,7 +46,7 @@ one node. NATS adds:
 
 | Concern | Mechanism |
 |---|---|
-| Turns of one conversation never overlap anywhere | A conversation **lease** in the `<prefix>_LEASES` KV bucket (create = acquire, heartbeat every `lease.heartbeat-interval`, server-side TTL `lease.ttl`). Turns on one node stay FIFO. |
+| Turns of one conversation never overlap anywhere | A conversation **lease** in the `<prefix>_LEASES` KV bucket (a write that succeeds only while the key holds no lease = acquire, heartbeat every `lease.heartbeat-interval`, server-side TTL `lease.ttl`). Turns on one node stay FIFO; the next turn queued on the same node takes the lease over directly, without a release and a new acquire, unless another node is waiting for it. |
 | A node that lost its lease cannot overwrite newer turns | The lease revision is a **fencing token**; both conversation stores refuse a write older than the `_fence` the document carries. The refused turn is dead-lettered with its input (`reason: fenced`, both tokens). |
 | A turn that lost its lease does not vanish | Losing the lease cancels the turn at its next task boundary — and inside an LLM task's tool loop before its next model call or tool call, so a long agent loop does not keep spending and calling tools for a conversation another node now runs (the one call already in flight finishes). It stores nothing, stamps no state, and is dead-lettered with its input (`reason: lease-lost`, its fencing token, `failedOn` the node). If its reply has not gone out yet, its caller is told it was not processed: 409 with `Retry-After` over REST, an error event on a stream. |
 | A crashed node does not block a conversation | Its lease expires (≤ `lease.ttl`), or is taken over at once when the node's presence record is gone or shows a new boot. |
@@ -58,7 +58,8 @@ one node. NATS adds:
 | Dead letters are shared | The `EDDI_DEAD_LETTERS` stream: every node lists, discards and replays the same entries. It is capped by age (`dead-letter.max-age`) and size (`dead-letter.max-bytes`, 1 GiB); when full it refuses new entries, which stay in the node-local ring and are forwarded once there is room. A locally kept entry is never forwarded for a conversation that a GDPR erasure marked (`ERASED` bucket) or that no longer exists; if the marker cannot be read (NATS dropped again) the entry stays on the node and is retried. |
 | A retried request is still one turn | An `Idempotency-Key` duplicate that reaches another node while the first request runs queues for the lease and, holding it, finds the key already recorded by the turn that just committed: it is answered 409 + `Retry-After` instead of running again, and its retry gets the stored answer. |
 | HITL crash recovery does not hit live turns | No recovery at boot; a leader-elected sweep recovers only conversations without a lease that stayed unchanged for `hitl-recovery.min-age`. A drained node hands its leader lease over at once. |
-| A busy node does not lose its leases | Lease heartbeats run on a scheduler thread of their own, and renew all held leases side by side: reconnect work (outbox flush, bucket provisioning, stale-lease sweep runs on separate threads) or a NATS that answers slowly can no longer push a renewal past `lease.ttl`. |
+| A busy node keeps its leases while NATS answers | Lease heartbeats run on a scheduler thread of their own and renew the leases due side by side, at most 64 at a time, the least recently confirmed first; reconnect work runs on separate threads. A renewal the server applied but whose reply was lost (a timeout, a NATS leader change) is recognised by the lease id in the value and kept, not reported as a takeover. What no heartbeat can do is keep a lease whose renewals are not acknowledged: see the next row. |
+| A holder cut off from NATS stops itself | A lease is trusted for `lease.ttl − 2 × lease.heartbeat-interval` (10 s by default) after the last renewal NATS acknowledged, counted from when that renewal was sent. Past that it counts as lost on its node — whether NATS is unreachable, slow, or answering — and the running turn is cancelled at its next task boundary, before any other node can take the conversation over at `lease.ttl`. |
 
 ## Ordering contract
 
@@ -115,10 +116,13 @@ that set `degraded.turns=reject`. Security state always fails closed.
 
 ## Sizing
 
-- **NATS**: three nodes, `eddi.nats.replicas=3`, file storage. Each turn costs
-  about four small KV operations (create, delete, release notification,
-  waiter marker on contention) plus one heartbeat per 5 s for long turns; an
-  audit entry costs one compare-and-set. A NATS node with 1 vCPU and 1 GiB is
+- **NATS**: three nodes, `eddi.nats.replicas=3`, file storage. The lease of an
+  uncontended turn costs three round trips to the `LEASES` stream leader (read
+  the key, write at the revision of the last release's delete marker, delete),
+  none for a turn queued behind another on the same node, plus one renewal
+  every 3.75–5 s for long turns. A contended turn adds one read per poll (every
+  250–750 ms) and a waiter marker; a waiter woken by the holder's release
+  acquires with one write. Each audit entry adds a read and a compare-and-set. A NATS node with 1 vCPU and 1 GiB is
   ample for thousands of turns per second.
 - **EDDI**: unchanged per-node sizing; add replicas for throughput. The
   database is the shared bottleneck.

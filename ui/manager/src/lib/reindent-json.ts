@@ -1,3 +1,6 @@
+/** Deepest indentation printed; see reindentJsonText. */
+const MAX_INDENT_DEPTH = 64;
+
 /**
  * Re-indent JSON-shaped text without requiring it to be valid JSON.
  *
@@ -16,21 +19,31 @@
  * parse would be.
  */
 export function reindentJsonText(text: string, indent = "  "): string {
-  let out = "";
+  // Pieces, joined once at the end: the trailing-comma case below takes the last
+  // newline back, and cutting it out of one growing string copied all of it.
+  const out: string[] = [];
+  // Whether the last piece is a newline plus indentation.
+  let endsWithNewline = false;
   let depth = 0;
   // Whitespace between two values (`true false`, `"a" "b"`) is not layout, it
   // is the only thing keeping them apart — dropping it would print one token
   // that is in neither document. Such a run collapses to a single space.
   let skippedWhitespace = false;
   let afterValue = false;
-  const newline = () => "\n" + indent.repeat(depth);
+  // Indentation stops growing at this depth. Unbounded, a run of N openers prints
+  // N lines of up to N levels each — quadratic memory for a few hundred KB of
+  // `[[[[…`. Depth is still tracked exactly; only the printed indent is capped.
+  const newline = () => "\n" + indent.repeat(Math.min(depth, MAX_INDENT_DEPTH));
   const value = (token: string) => {
-    out += (skippedWhitespace && afterValue ? " " : "") + token;
+    out.push((skippedWhitespace && afterValue ? " " : "") + token);
+    endsWithNewline = false;
     skippedWhitespace = false;
     afterValue = true;
   };
-  const punctuation = (printed: string) => {
-    out += printed;
+  const punctuation = (printed: string, thenNewline = false) => {
+    out.push(printed);
+    if (thenNewline) out.push(newline());
+    endsWithNewline = thenNewline;
     skippedWhitespace = false;
     afterValue = false;
   };
@@ -65,7 +78,7 @@ export function reindentJsonText(text: string, indent = "  "): string {
         continue;
       }
       depth++;
-      punctuation(c + newline());
+      punctuation(c, true);
     } else if (c === "}" || c === "]") {
       // Clamped, not just clamped when printed: a stray closer must not leave a
       // debt that the next opener silently pays off, printing whatever follows
@@ -73,13 +86,13 @@ export function reindentJsonText(text: string, indent = "  "): string {
       depth = Math.max(0, depth - 1);
       // A trailing comma (`{"a":1,}`) has already opened an empty indented
       // line; the closer takes that line instead of leaving it blank.
-      out = out.replace(/\n[^\S\n]*$/, "");
-      punctuation((out === "" ? "" : newline()) + c);
+      if (endsWithNewline) out.pop();
+      punctuation((out.length === 0 ? "" : newline()) + c);
       // A closed container is a finished value: text after it (`{…} true`)
       // must stay apart from it, not run into the bracket.
       afterValue = true;
     } else if (c === ",") {
-      punctuation("," + newline());
+      punctuation(",", true);
     } else if (c === ":") {
       punctuation(": ");
     } else {
@@ -87,7 +100,7 @@ export function reindentJsonText(text: string, indent = "  "): string {
     }
     i++;
   }
-  return out;
+  return out.join("");
 }
 
 /**
