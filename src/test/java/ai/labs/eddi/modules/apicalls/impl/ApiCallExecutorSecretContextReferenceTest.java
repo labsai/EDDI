@@ -59,7 +59,10 @@ import static org.mockito.Mockito.when;
  */
 class ApiCallExecutorSecretContextReferenceTest {
 
-    private static final String TOKEN = "user-token-0123456789abcdef";
+    /**
+     * Opaque: neither its value nor the header it goes in looks like a credential.
+     */
+    private static final String TOKEN = "opaque0123456789value";
     private static final String TARGET = "https://api.example.com";
 
     private IHttpClient httpClient;
@@ -182,9 +185,9 @@ class ApiCallExecutorSecretContextReferenceTest {
     void scrubbedFromStoredRequest() throws Exception {
         context("userToken", TOKEN, true);
 
-        executor.execute(headerCall("X-User-Token", "${context:userToken}"), memory, new HashMap<>(), TARGET);
+        executor.execute(headerCall("X-Acme-Id", "${context:userToken}"), memory, new HashMap<>(), TARGET);
 
-        verify(request).setHttpHeader("X-User-Token", TOKEN);
+        verify(request).setHttpHeader("X-Acme-Id", TOKEN);
         ArgumentCaptor<Object> recorded = ArgumentCaptor.forClass(Object.class);
         verify(dataFactory).createData(eq("httpCalls:itemsRequest"), recorded.capture());
         String stored = String.valueOf(recorded.getValue());
@@ -197,7 +200,7 @@ class ApiCallExecutorSecretContextReferenceTest {
     void scrubbedFromPreview() throws Exception {
         context("userToken", TOKEN, true);
 
-        var preview = executor.resolve(headerCall("X-User-Token", "${context:userToken}"), memory, new HashMap<>(), TARGET);
+        var preview = executor.resolve(headerCall("X-Acme-Id", "${context:userToken}"), memory, new HashMap<>(), TARGET);
 
         assertFalse(preview.toString().contains(TOKEN), preview.toString());
     }
