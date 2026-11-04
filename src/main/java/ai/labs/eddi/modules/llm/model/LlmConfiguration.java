@@ -14,6 +14,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.ArrayList;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -545,6 +546,20 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * @since 6.6.0
          */
         private List<String> nonBlankFields;
+
+        /**
+         * Renames applied to the top-level keys of a parsed {@code convertToObject}
+         * reply before the shape is validated: <code>{"htmlResponseStr":
+         * "htmlResponseText"}</code> renames {@code htmlResponseStr} to
+         * {@code htmlResponseText} when the target key is absent (when both exist the
+         * target wins and nothing is renamed). Explicit and designer-controlled; there
+         * is no fuzzy matching. Null or empty (default) renames nothing; it is
+         * independent of {@code responseValidation.enabled}. Names must be plain
+         * top-level property names (checked at save time).
+         *
+         * @since 6.7.0
+         */
+        private Map<String, String> fieldAliases;
 
         // === Multi-Model Cascade ===
 
@@ -1124,6 +1139,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
             this.nonBlankFields = nonBlankFields != null ? new ArrayList<>(nonBlankFields) : null;
         }
 
+        public Map<String, String> getFieldAliases() {
+            return fieldAliases;
+        }
+
+        public void setFieldAliases(Map<String, String> fieldAliases) {
+            this.fieldAliases = fieldAliases != null ? new LinkedHashMap<>(fieldAliases) : null;
+        }
+
         public ModelCascadeConfig getModelCascade() {
             return modelCascade;
         }
@@ -1392,10 +1415,47 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         /**
          * Action when a {@code convertToObject} reply is not valid JSON even after the
          * local repair ({@code ModelOutputParser}: fence stripping, extraction).
-         * {@code "retry"} re-asks the same model with a corrective message. Default:
-         * "ignore" — the raw reply is stored as a string, as before.
+         * {@code "retry"} re-asks the same model with a corrective message.
+         * {@code "wrap"} (needs {@link #wrapField}) wraps a plain-text reply into an
+         * object instead, with no second model call; a reply that cannot be wrapped
+         * (broken JSON, over {@link #wrapMaxChars}) gets {@link #fallbackAction}.
+         * Default: "ignore" — the raw reply is stored as a string, as before.
          */
         private String onInvalidJson = "ignore";
+
+        /** Default of {@link #wrapMaxChars}. */
+        public static final int DEFAULT_WRAP_MAX_CHARS = 20_000;
+
+        /**
+         * Used with {@code onInvalidJson: "wrap"} (required then): the top-level
+         * property a non-JSON reply is wrapped into, for example
+         * {@code htmlResponseText}, giving <code>{ "htmlResponseText": "&lt;the
+         * text&gt;" }</code>. The wrapped object is validated like any parsed reply (so
+         * {@code nonBlankFields} still applies) and recorded as outcome
+         * {@code wrapped}. Text that starts with <code>{</code> or <code>[</code> is
+         * broken JSON, not prose, and is never wrapped ({@link #fallbackAction}
+         * applies). Null (default) = no wrapping, today's behaviour.
+         *
+         * @since 6.7.0
+         */
+        private String wrapField;
+
+        /**
+         * Optional object merged into a wrapped reply for the other fields, for example
+         * <code>{"quickReplies": []}</code>, so the client still gets a valid shape.
+         * Never overrides {@link #wrapField}. Null (default) merges nothing.
+         *
+         * @since 6.7.0
+         */
+        private Map<String, Object> wrapDefaults;
+
+        /**
+         * Longest reply, in characters, that {@code onInvalidJson: "wrap"} wraps; a
+         * longer one counts as not wrappable. Default 20000.
+         *
+         * @since 6.7.0
+         */
+        private int wrapMaxChars = DEFAULT_WRAP_MAX_CHARS;
 
         /**
          * Action when a reply parses as JSON but breaks the response shape
@@ -1469,6 +1529,30 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setOnInvalidJson(String onInvalidJson) {
             this.onInvalidJson = onInvalidJson;
+        }
+
+        public String getWrapField() {
+            return wrapField;
+        }
+
+        public void setWrapField(String wrapField) {
+            this.wrapField = wrapField;
+        }
+
+        public Map<String, Object> getWrapDefaults() {
+            return wrapDefaults;
+        }
+
+        public void setWrapDefaults(Map<String, Object> wrapDefaults) {
+            this.wrapDefaults = wrapDefaults != null ? new LinkedHashMap<>(wrapDefaults) : null;
+        }
+
+        public int getWrapMaxChars() {
+            return wrapMaxChars;
+        }
+
+        public void setWrapMaxChars(int wrapMaxChars) {
+            this.wrapMaxChars = wrapMaxChars;
         }
 
         public String getOnSchemaMismatch() {
@@ -1869,9 +1953,13 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Map<String, Integer> perToolLimits;
 
         /**
-         * Truncation strategy: "truncate" (default), "paginate", or "summarize".
+         * Truncation strategy: "headTail" (default), "truncate", "paginate", or
+         * "summarize". Matched case-insensitively.
          * <ul>
-         * <li>{@code truncate} — hard cut at limit with note (backward compatible)</li>
+         * <li>{@code headTail} — keep the start and the end, drop the middle; the
+         * default when unset, because errors and exit codes sit at the end</li>
+         * <li>{@code truncate} — hard cut at limit with note, keeping the start only
+         * (the default before 6.7)</li>
          * <li>{@code paginate} — split into pages, return first page + responseId</li>
          * <li>{@code summarize} — route through cheap model, fallback to truncate</li>
          * </ul>
@@ -2176,6 +2264,16 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private JudgeModelConfig judgeModel;
 
         /**
+         * Optional sentence telling the judge model what an acceptable answer must do,
+         * e.g. "The answer gives concrete steps and does not tell the user to contact
+         * support". Added to the judge's instructions; the judge then rates the
+         * probability that the answer addresses the user's request <em>and</em> meets
+         * it. Only the judge reads it, so it has no effect on the {@code heuristic},
+         * {@code structured_output} or {@code none} strategies. Null = no criterion.
+         */
+        private String acceptanceCriterion;
+
+        /**
          * Optional overrides for the {@code heuristic} evaluation strategy. When null,
          * the built-in English defaults are used. Enables per-deployment localization
          * of hedging/refusal phrases and thresholds.
@@ -2270,6 +2368,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setJudgeModel(JudgeModelConfig judgeModel) {
             this.judgeModel = judgeModel;
+        }
+
+        public String getAcceptanceCriterion() {
+            return acceptanceCriterion;
+        }
+
+        public void setAcceptanceCriterion(String acceptanceCriterion) {
+            this.acceptanceCriterion = acceptanceCriterion;
         }
 
         public HeuristicConfig getHeuristic() {

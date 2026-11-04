@@ -1495,6 +1495,8 @@
     "evalStructured": "Structured Output (JSON)",
     "evalHeuristic": "Heuristic (hedging detection)",
     "evalJudge": "Judge Model (secondary LLM)",
+    "cascadeAcceptanceCriterion": "Acceptance criterion (optional)",
+    "cascadeAcceptanceCriterionHint": "One sentence the judge checks besides the user's request, e.g. \"Gives concrete steps\"",
     "evalNone": "None (always accept)",
     "cascadeInAgent": "Also use cascade in Agent Mode (with tools)",
     "cascadeSteps": "Cascade Steps (cheap → expensive)",
@@ -5697,16 +5699,16 @@
   },
   "updates": {
     "title": "{{productName}} Updates",
-    "description": "Check whether a newer {{productName}} release is available. Nothing is sent until you ask.",
+    "description": "Check whether a newer {{productName}} release is available. The check runs by default; you can turn it off below.",
     "installed": "Installed",
     "githubRelease": "GitHub release",
     "dockerImage": "Docker image",
     "unknownVersion": "Unknown",
     "checkNow": "Check now",
     "checking": "Checking…",
-    "autoCheck": "Check automatically on every page load",
-    "autoCheckHint": "Runs one check per browser reload and shows a banner when a newer release exists.",
-    "privacyNote": "Checks contact api.github.com directly from your browser — no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
+    "autoCheck": "Check for updates automatically",
+    "autoCheckHint": "{{productName}} checks for a new release once a day and notifies the administrators; this page also checks on each load and shows a banner. Turn it off to stop all of it.",
+    "privacyNote": "Checks contact api.github.com — from this server once a day and from your browser on each page load — and no other host. Your browser attaches this site's address (the request origin); no other deployment data is sent.",
     "neverChecked": "No check run yet.",
     "upToDate": "You are running the latest release ({{version}}).",
     "updateAvailable": "{{productName}} {{version}} is available",
@@ -5726,7 +5728,9 @@
     "howToUpdate": "How to update",
     "howToUpdateCli": "With the eddi CLI (created by the installer):",
     "howToUpdateManual": "Without the CLI, from your install directory (~/.eddi by default):",
-    "howToUpdateNote": "Adjust the -f flags to match your setup — add -f docker-compose.auth.yml if you run Keycloak."
+    "howToUpdateNote": "Adjust the -f flags to match your setup — add -f docker-compose.auth.yml if you run Keycloak.",
+    "autoCheckLocked": "Switched off by this deployment's configuration (EDDI_UPDATE_CHECK_ENABLED=false). Remove that setting and restart to allow it.",
+    "autoCheckAdminOnly": "Only an administrator can change this."
   },
   "analyticsPage": {
     "acrossGroups": "across {{count}} task forces",
@@ -5838,7 +5842,10 @@
   "workforce": {
     "addAgent": "Deploy Agent",
     "count": "{{count}} experts",
+    "loadIncomplete": "Some experts could not be loaded.",
     "ready": "Ready",
+    "showAll": "Show all {{total}}",
+    "showLess": "Show fewer",
     "title": "Your Digital Workforce",
     "unnamed": "Unnamed Agent"
   },

@@ -271,6 +271,10 @@ public class GroupContextBuilder {
             }
         }
 
+        // Everything quoted from another participant is cleaned and bounded in one
+        // place, for every phase type and for custom inputTemplates alike.
+        PeerContentGuard.apply(data);
+
         String rendered;
         try {
             rendered = templatingEngine.processTemplate(template, data, ITemplatingEngine.TemplateMode.TEXT);
@@ -534,6 +538,7 @@ public class GroupContextBuilder {
     static final String WINDOW_SUMMARY_INSTRUCTIONS = """
             Summarize the group discussion entries below for a participant who must continue the discussion.
             Preserve: each speaker's position and key arguments, decisions reached, open disagreements, and task outcomes.
+            Copy every opaque identifier exactly as written (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names).
             [format: bullet points] [limit: 500 tokens]""";
 
     /**

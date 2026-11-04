@@ -498,16 +498,13 @@ public final class SecretRedactionFilter {
      * <p>
      * Cost is gated to nearly nothing on the logging path: a message with no
      * apostrophe cannot have an apostrophe value, and one that does not begin like
-     * a JSON document needs no parse. Anything longer than
-     * {@link #MAXIMUM_CARRIER_CHECK_LENGTH} is assumed to BE a carrier, which is
-     * the safe default — bounding never tears a document, it only leaves an
+     * a JSON document needs no parse. Anything that would need one and is longer
+     * than {@link #MAXIMUM_CARRIER_CHECK_LENGTH} is assumed to BE a carrier, which
+     * is the safe default — bounding never tears a document, it only leaves an
      * embedded double quote in a Python-style secret.
      */
     private static boolean apostropheValuesMayContainDoubleQuotes(String message) {
         if (message.indexOf('\'') < 0) {
-            return false;
-        }
-        if (message.length() > MAXIMUM_CARRIER_CHECK_LENGTH) {
             return false;
         }
         String trimmed = message.stripLeading();
@@ -516,7 +513,13 @@ public final class SecretRedactionFilter {
         }
         char first = trimmed.charAt(0);
         if (first != '{' && first != '[' && first != '"') {
+            // Known not to be a JSON document without parsing anything, so the size
+            // bound below does not apply: assuming a carrier here let an embedded
+            // double quote end a long Python-style password early and publish the rest.
             return true;
+        }
+        if (message.length() > MAXIMUM_CARRIER_CHECK_LENGTH) {
+            return false;
         }
         return !isJsonDocument(message);
     }

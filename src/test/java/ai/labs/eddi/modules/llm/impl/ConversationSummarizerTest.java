@@ -234,6 +234,24 @@ class ConversationSummarizerTest {
         verify(summarizationService).summarizeWithUsage(anyString(), contains("ALREADY stored"), anyString(), anyString(), any());
     }
 
+    /**
+     * Order numbers, ticket ids and links are what a user comes back for, and a
+     * summarizer left to itself paraphrases them ("the order from earlier").
+     */
+    @Test
+    void updateIfNeeded_defaultPrompt_asksForIdentifiersVerbatim() {
+        var memory = createMockMemory(7);
+        var config = createConfig(5);
+
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(new SummarizationService.SummarizationResult("Summary", 0, 0));
+
+        summarizer.updateIfNeeded(memory, config, null);
+
+        verify(summarizationService).summarizeWithUsage(anyString(), contains("Every opaque identifier exactly as written"), anyString(), anyString(),
+                any());
+    }
+
     @Test
     void readSummary_noProperty_returnsNull() {
         var memory = createMockMemory(1);
