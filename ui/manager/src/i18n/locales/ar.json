@@ -6047,7 +6047,10 @@
   "workforce": {
     "addAgent": "نشر وكيل",
     "count": "{{count}} خبيراً",
+    "loadIncomplete": "تعذّر تحميل بعض الخبراء.",
     "ready": "جاهز",
+    "showAll": "عرض الكل ({{total}})",
+    "showLess": "عرض أقل",
     "title": "فريق عملك الرقمي",
     "unnamed": "وكيل بدون اسم"
   },

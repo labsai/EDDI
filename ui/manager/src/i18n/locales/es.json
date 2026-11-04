@@ -5867,7 +5867,10 @@
   "workforce": {
     "addAgent": "Desplegar agente",
     "count": "{{count}} expertos",
+    "loadIncomplete": "No se pudieron cargar algunos expertos.",
     "ready": "Listo",
+    "showAll": "Mostrar todos ({{total}})",
+    "showLess": "Mostrar menos",
     "title": "Tu plantilla digital",
     "unnamed": "Agente sin nombre"
   },

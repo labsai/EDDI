@@ -5807,7 +5807,10 @@
   "workforce": {
     "addAgent": "Deploy Agent",
     "count": "{{count}} experts",
+    "loadIncomplete": "Some experts could not be loaded.",
     "ready": "Ready",
+    "showAll": "Show all {{total}}",
+    "showLess": "Show fewer",
     "title": "Your Digital Workforce",
     "unnamed": "Unnamed Agent"
   },
