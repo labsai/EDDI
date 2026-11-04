@@ -5726,16 +5726,16 @@
   },
   "updates": {
     "title": "Mises à jour {{productName}}",
-    "description": "Vérifiez si une version plus récente d'{{productName}} est disponible. Rien n'est envoyé tant que vous ne le demandez pas.",
+    "description": "Vérifie si une version plus récente de {{productName}} est disponible. La vérification est active par défaut ; vous pouvez la désactiver ci-dessous.",
     "installed": "Installée",
     "githubRelease": "Version GitHub",
     "dockerImage": "Image Docker",
     "unknownVersion": "Inconnue",
     "checkNow": "Vérifier maintenant",
     "checking": "Vérification…",
-    "autoCheck": "Vérifier automatiquement à chaque chargement de page",
-    "autoCheckHint": "Effectue une vérification par rechargement du navigateur et affiche une bannière si une version plus récente existe.",
-    "privacyNote": "La vérification contacte uniquement api.github.com depuis votre navigateur. Le navigateur joint l'adresse de ce site (l'origine de la requête) ; aucune autre donnée de votre déploiement n'est transmise.",
+    "autoCheck": "Rechercher les mises à jour automatiquement",
+    "autoCheckHint": "{{productName}} recherche une nouvelle version une fois par jour et en informe les administrateurs ; cette page vérifie aussi à chaque chargement et affiche une bannière. Désactivez l'option pour tout arrêter.",
+    "privacyNote": "Les vérifications contactent api.github.com — depuis ce serveur une fois par jour et depuis votre navigateur à chaque chargement de page — et aucun autre hôte. Votre navigateur joint l'adresse de ce site (l'origine de la requête) ; aucune autre donnée de déploiement n'est envoyée.",
     "neverChecked": "Aucune vérification effectuée.",
     "upToDate": "Vous utilisez la dernière version ({{version}}).",
     "updateAvailable": "{{productName}} {{version}} est disponible",
@@ -5755,7 +5755,9 @@
     "howToUpdate": "Comment mettre à jour",
     "howToUpdateCli": "Avec la CLI eddi (créée par l'installateur) :",
     "howToUpdateManual": "Sans la CLI, depuis votre répertoire d'installation (~/.eddi par défaut) :",
-    "howToUpdateNote": "Adaptez les options -f à votre configuration — ajoutez -f docker-compose.auth.yml si vous utilisez Keycloak."
+    "howToUpdateNote": "Adaptez les options -f à votre configuration — ajoutez -f docker-compose.auth.yml si vous utilisez Keycloak.",
+    "autoCheckLocked": "Désactivé par la configuration de ce déploiement (EDDI_UPDATE_CHECK_ENABLED=false). Supprimez ce paramètre et redémarrez pour l'autoriser.",
+    "autoCheckAdminOnly": "Seul un administrateur peut modifier ce réglage."
   },
   "analyticsPage": {
     "acrossGroups": "sur {{count}} task forces",

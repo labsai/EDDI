@@ -743,6 +743,9 @@ const WORKSPACES_DISABLED = {
 /** Where an E2E spec plants the workspace context it wants. */
 export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
 
+/** Where an E2E spec plants the update-check switch it wants (default: on). */
+export const UPDATE_CHECK_SEED_KEY = "eddi-e2e-update-check";
+
 /** Where an E2E spec plants the sharing state of one resource, keyed by id. */
 export const SHARE_SEED_KEY = "eddi-e2e-shares";
 
@@ -895,6 +898,21 @@ function nextWeekday9amUtc(from: number = Date.now()): number {
 }
 
 export const handlers = [
+  // The server-side update-check switch: on by default, like the real backend.
+  http.get("*/administration/update-check", () =>
+    HttpResponse.json(
+      readSeed<{ enabled: boolean; lockedByConfig: boolean; uiEnabled: boolean }>(UPDATE_CHECK_SEED_KEY) ?? {
+        enabled: true,
+        lockedByConfig: false,
+        uiEnabled: true,
+      },
+    ),
+  ),
+  http.put("*/administration/update-check", async ({ request }) => {
+    const { enabled } = (await request.json()) as { enabled: boolean };
+    return HttpResponse.json({ enabled, lockedByConfig: false, uiEnabled: enabled });
+  }),
+
   // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
   ...ratingHandlers,
   // Alerts: /alerts/rules and /alerts/events (the inbox).

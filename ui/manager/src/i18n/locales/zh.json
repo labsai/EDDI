@@ -5666,16 +5666,16 @@
   },
   "updates": {
     "title": "{{productName}} 更新",
-    "description": "检查是否有更新的 {{productName}} 版本。在你发起检查之前不会发送任何请求。",
+    "description": "检查是否有更新的 {{productName}} 版本。检查默认开启，您可以在下方关闭。",
     "installed": "已安装",
     "githubRelease": "GitHub 发布",
     "dockerImage": "Docker 镜像",
     "unknownVersion": "未知",
     "checkNow": "立即检查",
     "checking": "检查中…",
-    "autoCheck": "每次加载页面时自动检查",
-    "autoCheckHint": "每次浏览器重新加载执行一次检查，发现更新版本时显示提示条。",
-    "privacyNote": "检查仅会从你的浏览器直接访问 api.github.com，不会访问其他主机。浏览器会附带本站点的地址（请求来源 Origin），不会发送其他任何部署数据。",
+    "autoCheck": "自动检查更新",
+    "autoCheckHint": "{{productName}} 每天检查一次新版本并通知管理员；此页面也会在每次加载时检查并显示横幅。关闭即可全部停止。",
+    "privacyNote": "检查只会连接 api.github.com（由此服务器每天一次，由您的浏览器在每次加载页面时），不会连接其他主机。浏览器会附带此站点的地址（请求来源），不会发送其他部署数据。",
     "neverChecked": "尚未执行检查。",
     "upToDate": "你正在运行最新版本（{{version}}）。",
     "updateAvailable": "{{productName}} {{version}} 已发布",
@@ -5695,7 +5695,9 @@
     "howToUpdate": "如何更新",
     "howToUpdateCli": "使用 eddi 命令行工具（由安装程序创建）：",
     "howToUpdateManual": "若没有该命令行工具，请在安装目录（默认 ~/.eddi）中执行：",
-    "howToUpdateNote": "根据你的部署调整 -f 参数——如果使用 Keycloak，请添加 -f docker-compose.auth.yml。"
+    "howToUpdateNote": "根据你的部署调整 -f 参数——如果使用 Keycloak，请添加 -f docker-compose.auth.yml。",
+    "autoCheckLocked": "已被此部署的配置关闭（EDDI_UPDATE_CHECK_ENABLED=false）。删除该设置并重启后才能启用。",
+    "autoCheckAdminOnly": "只有管理员可以更改此设置。"
   },
   "analyticsPage": {
     "acrossGroups": "跨 {{count}} 个任务组",
