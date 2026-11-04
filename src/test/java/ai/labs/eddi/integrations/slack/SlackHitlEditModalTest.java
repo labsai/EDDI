@@ -119,6 +119,16 @@ class SlackHitlEditModalTest {
         }
 
         @Test
+        void argumentsThatAreNotAJsonObjectAreNot() {
+            var malformed = toolSnapshot(call("c1", "{\"body\":", "{\"body\":"));
+            var edits = SlackHitlEditModal.forCard("TOOL_CALL", malformed.getHitlPendingToolCalls(), malformed, Map.of());
+            assertFalse(edits.edit(), "the merge would refuse every submission");
+            assertTrue(edits.rejectWithReason());
+            var array = toolSnapshot(call("c1", "[1,2]", "[1,2]"));
+            assertFalse(SlackHitlEditModal.forCard("TOOL_CALL", array.getHitlPendingToolCalls(), array, Map.of()).edit());
+        }
+
+        @Test
         void ruleDraftNeedsTheOptInAndEditsAllowed() {
             var snapshot = ruleSnapshot("The release is Friday.", true);
             var withoutOptIn = SlackHitlEditModal.forCard("RULE", null, snapshot, Map.of());

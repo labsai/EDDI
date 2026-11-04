@@ -292,7 +292,12 @@ export function ApprovalBanner({
     const toolDecisions = Object.create(null) as Record<string, ToolCallDecision>;
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
-      const amend = s?.amend?.trim();
+      // An amendment identical to the arguments shown is no amendment: the server
+      // compares it with the stored arguments and would answer a reason code on
+      // that "plain approval" with a 400. Arguments redacted for display differ from
+      // the stored ones, so equality cannot be shown there and a copy goes out as typed.
+      const typed = s?.amend?.trim();
+      const amend = typed && typed !== call.arguments ? typed : undefined;
       // A call nobody touched inherits the top-level APPROVED — except the lone
       // call under explicit review, which is always sent as its own decision.
       if (!singleCall && (!s || (!s.verdict && !amend))) continue;

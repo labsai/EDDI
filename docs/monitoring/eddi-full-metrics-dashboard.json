@@ -7263,6 +7263,7 @@
           "fieldConfig": {
             "defaults": {
               "unit": "short",
+              "noValue": "no samples yet",
               "color": {
                 "mode": "palette-classic"
               },
