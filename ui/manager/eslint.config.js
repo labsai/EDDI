@@ -1,31 +1,17 @@
-import js from "@eslint/js";
-import globals from "globals";
-import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
+import { NO_ALWAYS_TRUE_LENGTH, reactApp } from "../eslint.config.base.js";
 
 export default tseslint.config(
-  { ignores: ["dist"] },
+  // ESLint + typescript-eslint recommended and the two hook rules, shared with
+  // ui/chat (ui/eslint.config.base.js).
+  ...reactApp({ ecmaVersion: 2020 }),
   {
-    extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
-    languageOptions: {
-      ecmaVersion: 2020,
-      globals: globals.browser,
-    },
     plugins: {
-      "react-hooks": reactHooks,
       "react-refresh": reactRefresh,
     },
     rules: {
-      // The two classic hook rules, pinned by name. eslint-plugin-react-hooks 7
-      // folded the React Compiler rules (set-state-in-effect, refs, purity,
-      // immutability, static-components, preserve-manual-memoization) into its
-      // `recommended` preset; spreading that preset here would switch on 119
-      // findings across the app in a dependency upgrade. Adopting them is a
-      // change of its own, rule by rule.
-      "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "warn",
       "react-refresh/only-export-components": [
         "warn",
         {
@@ -55,18 +41,8 @@ export default tseslint.config(
   // matches `**/*.spec.ts` AND `e2e/**`, and the later block silently won.
   ...(() => {
     const NO_TAUTOLOGY = [
-      {
-        // `expect(xs.length).toBeGreaterThanOrEqual(0)` asserts nothing: it
-        // holds for every array. It reads like a check, which is worse than no
-        // check at all. For "indexOf found it", use `toContain`; for "this
-        // loaded something", assert what it loaded. A geometry coordinate that
-        // could legitimately be negative is the one real exception — disable
-        // the rule on that line and say why.
-        selector:
-          "CallExpression[callee.property.name='toBeGreaterThanOrEqual'][arguments.0.type='Literal'][arguments.0.value=0]",
-        message:
-          "toBeGreaterThanOrEqual(0) is always true for a length or count. Assert the value you actually expect — toContain() for a found substring, or the specific content for a loaded list. If the receiver can genuinely be negative (a coordinate), disable this line with a reason.",
-      },
+      // toBeGreaterThanOrEqual(0), shared with ui/chat (ui/eslint.config.base.js).
+      NO_ALWAYS_TRUE_LENGTH,
       {
         // Same shape, one operator over.
         selector:

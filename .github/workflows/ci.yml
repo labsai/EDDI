@@ -1564,11 +1564,21 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
+      # ui/ is an npm workspaces root with one lockfile for both apps (and the
+      # shared packages under ui/packages/), so the install runs there.
       - name: Install
+        working-directory: ui
         run: npm ci
+
+      # npm on Windows prunes the children of the optional
+      # @tailwindcss/oxide-wasm32-wasi package from the lock, and `npm ci` above
+      # would already have failed on that — this names the cause and also checks
+      # every other locked edge (ui/scripts/check-lockfile-platforms.mjs).
+      - name: Lockfile carries every platform's packages
+        working-directory: ui
+        run: npm run lockfile:check
 
       - name: Audit production dependencies
         run: npm run audit:prod
@@ -1628,10 +1638,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
@@ -1675,10 +1685,10 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/chat/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Install
+        working-directory: ui
         run: npm ci
 
       - name: Type check
@@ -1886,15 +1896,21 @@ jobs:
         # needs no `npm ci` and cannot execute install scripts. --omit dev matches what
         # Vite actually bundles into dist/; ui/manager/.ds-sync is design-sync tooling
         # that never reaches the image, so it is deliberately not inventoried here.
+        #
+        # ui/ is an npm workspaces root with the one lockfile, so each document is read
+        # from ui/package.json and narrowed to one app with --workspace: the Manager's
+        # BOM lists no Chat UI dependency and vice versa. The document's root component
+        # is therefore the workspace root (eddi-ui), with the app as its component.
         run: |
           set -euo pipefail
           for ui in manager chat; do
             npx --yes @cyclonedx/cyclonedx-npm@6.0.1 \
               --package-lock-only \
               --omit dev \
+              --workspace "$ui" \
               --output-format JSON \
               --output-file "target/bom-ui-$ui.json" \
-              "ui/$ui/package.json"
+              ui/package.json
           done
 
       - name: Upload SBOM
@@ -2058,17 +2074,15 @@ jobs:
             echo "- \`${DOCKER_IMAGE}:latest\`" >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      # frontend-maven-plugin vendors its own Node, but its `npm ci` reads and writes
-      # the same ~/.npm cache this restores; without it every run downloaded both
-      # dependency trees cold.
+      # frontend-maven-plugin vendors its own Node, but its `npm ci` (one, at the ui/
+      # workspaces root) reads and writes the same ~/.npm cache this restores;
+      # without it every run downloaded the dependency tree cold.
       - name: Set up Node ${{ env.NODE_VERSION }} (npm cache for the UI build)
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            ui/manager/package-lock.json
-            ui/chat/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       # frontend-maven-plugin 1.15.1 downloads Node from nodejs.org and verifies
       # nothing — no checksum, no signature — and it reuses any archive it finds
@@ -2107,8 +2121,8 @@ jobs:
           echo "Node ${NODE_VERSION} archive verified at ${ARCHIVE}"
 
       - name: Build application
-        # No -DskipUi: this is the build that ships, so it runs npm ci + npm run build
-        # for both UIs (frontend-maven-plugin vendors Node into ui/node) and copies
+        # No -DskipUi: this is the build that ships, so it runs npm ci at ui/ and
+        # npm run build for both UIs (frontend-maven-plugin vendors Node into ui/node) and copies
         # their dist/ into the jar. `clean` matters: copy-resources never prunes, so
         # an incremental build would package hashed assets from older builds.
         #
@@ -2369,10 +2383,11 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
+      # One install for both apps at the npm workspaces root (ui/package.json).
       - name: Install dependencies
-        working-directory: ui/manager
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on
@@ -2491,7 +2506,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ui/manager/package-lock.json
+          cache-dependency-path: ui/package-lock.json
 
       - name: Generate the test realm
         # From helm/eddi/files/eddi-realm.json — the realm EDDI ships — plus a
@@ -2519,8 +2534,9 @@ jobs:
           docker compose -f "$COMPOSE" logs
           exit 1
 
+      # One install for both apps at the npm workspaces root (ui/package.json).
       - name: Install dependencies
-        working-directory: ui/manager
+        working-directory: ui
         run: npm ci
 
       # The browser download can stall on a runner (2026-09-30: over 1.5 hours on

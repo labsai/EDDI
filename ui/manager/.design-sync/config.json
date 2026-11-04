@@ -8,7 +8,7 @@
   "buildCmd": "node .design-sync/build-css.mjs",
   "cssEntry": ".design-sync/.cache/compiled.css",
   "extraFonts": [
-    "node_modules/@fontsource-variable/noto-sans/index.css"
+    "../node_modules/@fontsource-variable/noto-sans/index.css"
   ],
   "readmeHeader": ".design-sync/conventions.md",
   "provider": {

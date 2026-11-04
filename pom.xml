@@ -1092,14 +1092,17 @@
                         <phase>prepare-package</phase>
                     </execution>
                     <execution>
-                        <id>manager-install</id>
+                        <!-- One install for both UIs: ui/ is an npm workspaces root with a
+                             single package-lock.json (ui/package.json), and the per-app
+                             builds below resolve their dependencies from ui/node_modules. -->
+                        <id>ui-install</id>
                         <goals>
                             <goal>npm</goal>
                         </goals>
                         <phase>prepare-package</phase>
                         <configuration>
                             <arguments>ci</arguments>
-                            <workingDirectory>${project.basedir}/ui/manager</workingDirectory>
+                            <workingDirectory>${project.basedir}/ui</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>
@@ -1115,17 +1118,6 @@
                                 <!-- keeps the sidebar version in lockstep with this pom -->
                                 <EDDI_VERSION>${project.version}</EDDI_VERSION>
                             </environmentVariables>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>chat-install</id>
-                        <goals>
-                            <goal>npm</goal>
-                        </goals>
-                        <phase>prepare-package</phase>
-                        <configuration>
-                            <arguments>ci</arguments>
-                            <workingDirectory>${project.basedir}/ui/chat</workingDirectory>
                         </configuration>
                     </execution>
                     <execution>

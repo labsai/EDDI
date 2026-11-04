@@ -560,7 +560,7 @@ EDDI provides built-in infrastructure for regulatory compliance:
 | **Maven**      | 3.9+    | Bundled via `mvnw` / `mvnw.cmd` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker (`docker run -d -p 27017:27017 mongo:7`) |
 | **Docker**     | Latest  | For integration tests and container builds                        |
-| **Node.js**    | —       | Not required: Maven downloads Node 26 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat` |
+| **Node.js**    | —       | Not required: Maven downloads Node 26 into `ui/node/` to build the Manager and Chat UIs. Install it only to run `npm run dev` in `ui/manager` or `ui/chat`, after `npm ci` in `ui/` (one lockfile for both) |
 | **mise**       | Optional | [`mise.toml`](mise.toml) pins the exact JDK, Maven and Node versions and offers the common commands as tasks (`mise run dev`, `mise run test`) |
 
 > **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
@@ -581,7 +581,7 @@ Dev mode starts the application with **live reload** — code changes are picked
 
 Then open [http://localhost:7070](http://localhost:7070). The Quarkus Dev UI is available at [http://localhost:7070/q/dev](http://localhost:7070/q/dev).
 
-> **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
+> **💡 The Manager and Chat UI build with Maven, at packaging time.** Their sources live in `ui/manager` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, about two minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` only after a `package`. For frontend work run `npm ci` once in `ui/` (an npm workspace: one lockfile for both UIs), then `npm run dev` in `ui/manager` (port 3000, proxying to the backend on 7070). Upgrading an older checkout? Run `./mvnw clean` once.
 
 Dev mode also enables:
 

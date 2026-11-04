@@ -152,6 +152,10 @@ jobs:
               'helm/**', 'k8s/**', 'gcp/**', 'keycloak/**', '**/docker-compose*.yml',
               'install.sh', 'install.ps1', '**/mise.toml', '.gitleaksignore', '.trivyignore',
               'ui/*/package*.json', 'ui/*/.npmrc', 'ui/*/scripts/**',
+              // The npm workspaces root: the one lockfile both apps install from, its
+              // overrides, the shared configs the apps extend, and the CI scripts there.
+              'ui/package*.json', 'ui/.npmrc', 'ui/scripts/**', 'ui/packages/*/package*.json',
+              'ui/tsconfig*.json', 'ui/eslint.config.*', 'ui/bundle-budget.json',
               // What the UI checks run, and what they check against: an excluded test
               // in vitest.config, a disabled lint rule, a loosened tsconfig or a
               // narrowed Playwright project turns a red UI job green.

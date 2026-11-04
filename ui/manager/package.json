@@ -90,32 +90,21 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "^5.0.5",
-    "eslint": "^10.13.0",
+    "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
     "jsdom": "~30.1.2",
     "msw": "^2.15.0",
     "tailwindcss": "^4.0.0",
-    "typescript": "~5.9.0",
-    "typescript-eslint": "^8.71.2",
-    "vite": "^8.3.4",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vite": "^8.3.5",
     "vitest": "^5.0.5"
   },
   "msw": {
     "workerDirectory": [
       "public"
     ]
-  },
-  "overrides": {
-    "monaco-editor": {
-      "dompurify": "$dompurify"
-    },
-    "typed-rest-client": {
-      "qs": "^6.16.0"
-    },
-    "@tailwindcss/typography": {
-      "postcss-selector-parser": "^7.1.6"
-    }
   }
 }
