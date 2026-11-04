@@ -15,6 +15,7 @@ import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
+import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
@@ -1249,38 +1250,40 @@ public class McpToolProviderManager {
         // the configured URL above is validated; a 3xx from it would carry every
         // POST (the handshake, tools/list, each tool call with its Authorization
         // header) to a Location nobody checked, an internal host included
-        // (security review 2026-10-15, finding M2). langchain4j-mcp 1.22 happens to
-        // default to Redirect.NEVER, but earlier releases built the client with
-        // Redirect.NORMAL and the builder flag exists precisely so a caller can
-        // decide; McpTransportRedirectTest holds this line to its word against an
-        // embedded redirecting server. The A2A client makes the same choice.
-        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout).followRedirects(false);
-
-        // The headers supplier is the transport's one per-request hook: langchain4j
-        // calls it while building every HTTP request it sends — the handshake, each
-        // tools/list and tool call, the optional GET stream — before anything is
-        // written. The URL is validated there again, because this transport is cached
-        // and resolves the host itself on every new connection: a name that passed
-        // the check above can rebind to a private address later (DNS
-        // rebinding). A refusal throws out of the request, unsent.
-        String serverUrl = config.getUrl();
+        // (security review 2026-10-15, finding M2). Since langchain4j 1.23 the HTTP
+        // backend below decides, and a JDK client never follows a redirect unless told
+        // to; the flag stays pinned so a later default cannot flip it (the transport
+        // rejects only followRedirects(true) next to a supplied backend), and
+        // McpTransportRedirectTest holds this line to its word against an embedded
+        // redirecting server. The A2A client makes the same choice.
+        //
+        // The backend is EDDI's BoundedJdkHttpClient (langchain4j 1.23 made the
+        // transport's HTTP client pluggable), which gives MCP two things the built-in
+        // client lacked:
+        // - the response cap of the LLM provider clients (eddi.llm.max-response-bytes):
+        // a server could otherwise answer a tools/list or a tool call without bound
+        // into the heap;
+        // - the URL check before EVERY request the cached client sends — handshake,
+        // tools/list, each tool call — because this transport is cached and the JDK
+        // resolves the host again on every new connection: a name that passed the
+        // check above can rebind to a private address later (DNS rebinding). A
+        // refusal throws out of the request, unsent.
+        // streamingBackpressure(true) keeps what the transport's own JDK backend sets.
+        var transportBuilder = StreamableHttpMcpTransport.builder().url(config.getUrl()).timeout(timeout).followRedirects(false)
+                .httpClientBuilder(BoundedJdkHttpClient.builder(uri -> validateServerUrl(uri.toString())).streamingBackpressure(true));
         if (!isNullOrEmpty(apiKey)) {
             final String configuredKey = apiKey;
             // Per request, not per client. The Map overload would freeze this value
             // into the cached client, which is why a ${caller:...} reference has to be
             // resolved here: the client is shared across conversations, the caller is
             // not. Applies to every POST the transport makes.
-            transportBuilder.customHeaders(callContext -> {
-                validateServerUrl(serverUrl);
-                return withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext), callContext);
-            });
+            transportBuilder.customHeaders(
+                    callContext -> withTraceHeaders(authorizationHeader(configuredKey, config, callerBound, connectionBound, callContext),
+                            callContext));
         } else {
             // No credential configured: the server decides whether it needs one.
             // The trace context still goes out, mirrored from params._meta.
-            transportBuilder.customHeaders(callContext -> {
-                validateServerUrl(serverUrl);
-                return withTraceHeaders(Map.of(), callContext);
-            });
+            transportBuilder.customHeaders(callContext -> withTraceHeaders(Map.of(), callContext));
         }
 
         return transportBuilder.build();

@@ -115,8 +115,21 @@ class ClusterConversationCoordinatorTest {
             releasedAll = true;
         }
 
+        volatile boolean handOverAllowed;
+        final AtomicInteger acquired = new AtomicInteger();
+        final List<LeaseHandle> handedOver = new CopyOnWriteArrayList<>();
+
+        @Override
+        public boolean handOver(LeaseHandle handle) {
+            if (handOverAllowed) {
+                handedOver.add(handle);
+            }
+            return handOverAllowed;
+        }
+
         @Override
         public CompletionStage<LeaseHandle> acquireKey(String key, Duration maxWait) {
+            acquired.incrementAndGet();
             CompletableFuture<LeaseHandle> f = new CompletableFuture<>();
             if (stopped) {
                 f.completeExceptionally(new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null, "stopping"));
@@ -371,6 +384,63 @@ class ClusterConversationCoordinatorTest {
         assertEquals(20, coordinator.getTotalProcessed());
         assertEquals(0, runtime.plainCallbacks.get(),
                 "every turn, including those scheduled from a completion callback, must be submitted as a turn (virtual thread)");
+    }
+
+    @Test
+    @DisplayName("D2: a lease the manager lets go is handed to the next queued turn instead of being released and re-acquired")
+    void leaseIsHandedToTheNextQueuedTurn() throws Exception {
+        leases.handOverAllowed = true;
+        CountDownLatch gate = new CountDownLatch(1);
+        Turn first = new Turn("first", log) {
+            @Override
+            public Void call() {
+                try {
+                    gate.await(5, TimeUnit.SECONDS); // the others queue up behind it
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return super.call();
+            }
+        };
+        coordinator.submitInOrder("conv1", first);
+        List<Turn> rest = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            Turn t = new Turn("t" + i, log);
+            rest.add(t);
+            coordinator.submitInOrder("conv1", t);
+        }
+        gate.countDown();
+        await(first);
+        for (Turn t : rest) {
+            await(t);
+        }
+        awaitIdle();
+        assertEquals(List.of("first", "t0", "t1", "t2", "t3", "t4"), log);
+        assertEquals(1, leases.acquired.get(), "one acquire for the whole queue");
+        for (Turn t : rest) {
+            assertSame(first.lease.get(), t.lease.get(), "each queued turn ran under the handed-over lease");
+        }
+        long deadline = System.currentTimeMillis() + 2000;
+        while (leases.released.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(5);
+        }
+        assertEquals(List.of(first.lease.get()), leases.released, "released once, after the last queued turn");
+    }
+
+    @Test
+    @DisplayName("D2: a handed-over lease that no queued turn takes is released at once")
+    void unclaimedHandoffIsReleased() throws Exception {
+        leases.handOverAllowed = true;
+        Turn only = new Turn("only", log);
+        coordinator.submitInOrder("conv1", only);
+        await(only);
+        awaitIdle();
+        long deadline = System.currentTimeMillis() + 2000;
+        while (leases.released.isEmpty() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(5);
+        }
+        assertEquals(1, leases.released.size());
+        assertEquals(1, leases.handedOver.size());
     }
 
     @Test

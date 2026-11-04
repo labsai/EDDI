@@ -823,7 +823,9 @@ public class RestAgentEngine implements IRestAgentEngine {
                     .entity("Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters")
                     .build();
         }
-        validateConversationOwnership(conversationId, true);
+        // Owner, admin or approver; an owner must also still be allowed to USE the
+        // agent, as for say — the resume runs the rest of the turn.
+        hitlAccessGuard.requireConversationResumeAccess(conversationId);
         if (handler != null) {
             // A reply is a read of the conversation, and resume admits approver-only
             // callers: the approver role decides a pause, it does not license reading

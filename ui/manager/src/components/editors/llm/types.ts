@@ -66,6 +66,8 @@ export interface ModelCascadeConfig {
   steps?: CascadeStep[];
   /** Judge model config — used when evaluationStrategy is "judge_model". */
   judgeModel?: CascadeJudgeModel;
+  /** One sentence the judge checks besides the request; only the judge reads it. */
+  acceptanceCriterion?: string;
   /** Overrides for the "heuristic" evaluation strategy. */
   heuristic?: CascadeHeuristic;
   /** Wall-clock ceiling across the whole cascade (ms). Must be > 0 when set. */
@@ -89,6 +91,22 @@ export interface LlmPostResponse {
   propertyInstructions?: PropertyInstruction[];
   outputBuildInstructions?: OutputBuildingInstruction[];
   qrBuildInstructions?: QuickRepliesBuildingInstruction[];
+}
+
+/**
+ * Cache and long-context prices for a task's model (docs/model-pricing.md).
+ * Absent fields come from the deployment price catalog; a blank cache price is
+ * charged at the input price. The long-context threshold comes from the catalog.
+ */
+export interface TaskModelPricing {
+  cacheReadPricePer1M?: number | null;
+  cacheWritePricePer1M?: number | null;
+  longContext?: {
+    inputPricePer1M?: number | null;
+    outputPricePer1M?: number | null;
+    cacheReadPricePer1M?: number | null;
+    cacheWritePricePer1M?: number | null;
+  } | null;
 }
 
 export interface LlmTask {
@@ -134,6 +152,7 @@ export interface LlmTask {
     maxBackoffDelayMs?: number;
     honorRetryAfter?: boolean;
     maxRetryAfterMs?: number;
+    jitterRatio?: number;
   };
   maxBudgetPerConversation?: number;
   enableCostTracking?: boolean;
@@ -192,6 +211,13 @@ export interface LlmTask {
    */
   nonBlankFields?: string[];
   /**
+   * Renames applied to top-level keys of the parsed `convertToObject` reply:
+   * `{ "htmlResponseStr": "htmlResponseText" }` renames the key when the target
+   * is absent (the target wins when both exist). Independent of
+   * `responseValidation.enabled`.
+   */
+  fieldAliases?: Record<string, string>;
+  /**
    * What the task does when its model phase fails outright. `fallback` serves
    * the configured fallback (see `ResponseValidation.fallbackMessage`) and
    * completes the turn; `error` (the default) fails it.
@@ -226,6 +252,8 @@ export interface LlmTask {
    */
   inputPricePer1M?: number | null;
   outputPricePer1M?: number | null;
+  /** Cache and long-context prices; see {@link TaskModelPricing}. */
+  pricing?: TaskModelPricing | null;
 
   /**
    * Guardrails that screen the user's message before the model is called
@@ -334,6 +362,16 @@ export interface ResponseValidation {
    * `ignore`/`warn` keep the parsed object. Default `ignore`.
    */
   onSchemaMismatch?: RetryableResponseValidationAction;
+  /**
+   * With `onInvalidJson: "wrap"` (set it in the JSON view; the policy select does
+   * not offer it yet): the top-level property a plain-text reply is wrapped into.
+   * Required for `wrap`.
+   */
+  wrapField?: string;
+  /** Object merged next to `wrapField` in a wrapped reply, e.g. `{ "quickReplies": [] }`. */
+  wrapDefaults?: Record<string, unknown>;
+  /** Longest reply, in characters, that `wrap` wraps. Default 20000. */
+  wrapMaxChars?: number;
   /**
    * Action when the prompt exceeds the model's context window. `retry` re-sends
    * once with the history window halved. Default `error`.

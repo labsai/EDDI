@@ -99,7 +99,8 @@ class ReservedPrincipalsTest {
             Map.entry("loop:", "inbound mail refusal reason"),
             Map.entry("unauthenticated:", "inbound mail refusal reason"),
             Map.entry("failed:", "inbound mail refusal reason"),
-            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"));
+            Map.entry("recovered:", "inbound ledger note of the stranded-turn sweep"),
+            Map.entry("p:", "in-memory route step into a named property (ArtifactSchemaComplexity's recursion check)"));
 
     @Test
     @DisplayName("every principal-shaped prefix in src/main is either reserved or known not to be a principal")

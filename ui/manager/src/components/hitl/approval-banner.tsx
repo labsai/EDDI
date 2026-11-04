@@ -292,7 +292,10 @@ export function ApprovalBanner({
       else onDecide("REJECTED", finalNote, undefined, undefined);
       return;
     }
-    const toolDecisions: Record<string, ToolCallDecision> = {};
+    // No prototype: a provider-chosen call id of "__proto__" would otherwise re-prototype this object
+    // instead of becoming a key, the reviewer's explicit decision on it would vanish from the JSON sent,
+    // and the backend would read the missing entry as an approval.
+    const toolDecisions = Object.create(null) as Record<string, ToolCallDecision>;
     for (const call of toolPause.calls) {
       const s = callStates[call.callId];
       const amend = s?.amend?.trim();

@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 import jakarta.ws.rs.core.Response;
 import java.net.URI;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Function;
 
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -267,6 +268,16 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
      */
     public Response patch(String id, Integer version, String patchBody, Class<T> type, ConfigJsonPatcher patcher,
                           Function<T, Response> validator) {
+        return patch(id, version, patchBody, type, patcher, Set.of(), validator);
+    }
+
+    /**
+     * {@link #patch(String, Integer, String, Class, ConfigJsonPatcher, Function)}
+     * for a store whose redacted read skips {@code readSkippedPaths} — the patch
+     * must judge credential relocation by the same rules that read applies.
+     */
+    public Response patch(String id, Integer version, String patchBody, Class<T> type, ConfigJsonPatcher patcher,
+                          Set<String> readSkippedPaths, Function<T, Response> validator) {
         requireEditAccess(id);
         version = validateParameters(id, version);
         // Before the patch is applied rather than only when the store write fails:
@@ -284,7 +295,7 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
         // Read unredacted so an unchanged credential survives the write, but applied so
         // a caller whose reads are redacted cannot copy or move a credential into a
         // field they can read back - see ConfigJsonPatcher.apply.
-        T patched = patcher.apply(current, patchBody, type, !accessGuard.isAdmin());
+        T patched = patcher.apply(current, patchBody, type, !accessGuard.isAdmin(), readSkippedPaths);
         Response refusal = validator != null ? validator.apply(patched) : null;
         if (refusal != null) {
             return refusal;

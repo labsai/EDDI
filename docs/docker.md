@@ -175,6 +175,16 @@ docker run --name eddi \
 
 Set configuration through environment variables like these rather than by overriding `JAVA_OPTS_APPEND`: the image sets `JAVA_OPTS_APPEND` itself, and a runtime value replaces it instead of adding to it.
 
+### Update check
+
+EDDI looks for a newer release once a day and puts a notification in the administrators' inbox (the bell in the Manager's top bar) when there is one. It is **on by default**: one anonymous request a day to `api.github.com/repos/labsai/EDDI/releases/latest`, the first a minute after boot, carrying nothing about your deployment.
+
+| Variable                    | Default | Description |
+| --------------------------- | ------- | ----------- |
+| `EDDI_UPDATE_CHECK_ENABLED` | `true`  | `false` switches the check off entirely — the first check after the first start included, because it is read before the database is touched. It wins over the Manager's switch, which then shows as locked. Compose passes it through from `.env`; the Helm chart sets it from `eddi.updateCheck.enabled` |
+
+Administrators can also turn it off on the Manager's **Updates** page; that is stored in the database, so it survives restarts and applies to every node. A white-labelled deployment that has not set `eddi.branding.show-update-check` neither checks nor notifies. `eddi.update-check.interval` (default `24h`) changes the cadence.
+
 ### AI Tools
 
 ```bash

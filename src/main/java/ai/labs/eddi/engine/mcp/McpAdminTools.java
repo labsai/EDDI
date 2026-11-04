@@ -108,6 +108,14 @@ public class McpAdminTools {
     private final SecurityIdentity identity;
     private final boolean authEnabled;
 
+    /**
+     * The scheduler's floor, the one {@code RestScheduleStore} enforces on REST
+     * creation: a recurring schedule firing more often than this is a loop of agent
+     * turns the deployment did not budget for.
+     */
+    @ConfigProperty(name = "eddi.schedule.min-interval-seconds", defaultValue = "60")
+    long minScheduleIntervalSeconds = 60;
+
     @Inject
     public McpAdminTools(IRestInterfaceFactory restInterfaceFactory, IRestAgentAdministration agentAdmin, IJsonSerialization jsonSerialization,
             StrictConfigurationParser configParser, IScheduleStore scheduleStore, ScheduleFireExecutor scheduleFireExecutor,
@@ -1046,9 +1054,19 @@ public class McpAdminTools {
                 if (message == null || message.isBlank())
                     return errorJson("message is required for CRON triggers");
                 CronParser.validate(cron);
+                long cronInterval = CronParser.computeMinIntervalSeconds(cron,
+                        ZoneId.of(timeZone != null && !timeZone.isBlank() ? timeZone : "UTC"));
+                if (cronInterval < minScheduleIntervalSeconds) {
+                    return errorJson("Cron interval (" + cronInterval + "s) is below the minimum allowed (" + minScheduleIntervalSeconds
+                            + "s); use a less frequent schedule, or have an operator lower eddi.schedule.min-interval-seconds");
+                }
             } else {
                 if (heartbeatIntervalSeconds == null || heartbeatIntervalSeconds <= 0) {
                     return errorJson("heartbeatIntervalSeconds is required and must be > 0 for HEARTBEAT triggers");
+                }
+                if (heartbeatIntervalSeconds < minScheduleIntervalSeconds) {
+                    return errorJson("Heartbeat interval (" + heartbeatIntervalSeconds + "s) is below the minimum allowed ("
+                            + minScheduleIntervalSeconds + "s); use a longer interval, or have an operator lower eddi.schedule.min-interval-seconds");
                 }
             }
 

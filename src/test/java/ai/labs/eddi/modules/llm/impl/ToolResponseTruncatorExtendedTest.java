@@ -55,7 +55,7 @@ class ToolResponseTruncatorExtendedTest {
     }
 
     @Nested
-    @DisplayName("Truncate Strategy (default)")
+    @DisplayName("Truncate Strategy")
     class TruncateStrategyTests {
 
         @Test
@@ -73,6 +73,7 @@ class ToolResponseTruncatorExtendedTest {
         void testExceedsLimit() {
             var limits = new ToolResponseLimits();
             limits.setDefaultMaxChars(10);
+            limits.setTruncationStrategy("truncate");
 
             String result = truncator.truncateIfNeeded("testTool", "A".repeat(100), limits, TASK_TYPE, TASK_PARAMS);
             assertTrue(result.startsWith("AAAAAAAAAA"));
@@ -99,6 +100,7 @@ class ToolResponseTruncatorExtendedTest {
             var limits = new ToolResponseLimits();
             limits.setDefaultMaxChars(1000);
             limits.setPerToolLimits(Map.of("specialTool", 5));
+            limits.setTruncationStrategy("truncate");
 
             String result = truncator.truncateIfNeeded("specialTool", "A".repeat(20), limits, TASK_TYPE, TASK_PARAMS);
             assertTrue(result.startsWith("AAAAA"));
@@ -113,6 +115,81 @@ class ToolResponseTruncatorExtendedTest {
 
             String result = truncator.truncateIfNeeded("testTool", "A".repeat(100), limits, TASK_TYPE, TASK_PARAMS);
             assertEquals("A".repeat(100), result);
+        }
+    }
+
+    @Nested
+    @DisplayName("Head-and-tail Strategy (default)")
+    class HeadTailStrategyTests {
+
+        private static final String HEAD = "H".repeat(100);
+        private static final String MIDDLE = "M".repeat(800);
+        private static final String TAIL = "T".repeat(100);
+
+        @Test
+        @DisplayName("an unset strategy keeps the start and the end, not just the start")
+        void defaultKeepsHeadAndTail() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(100);
+
+            String result = truncator.truncateIfNeeded("testTool", HEAD + MIDDLE + TAIL + "exit code 2", limits, TASK_TYPE, TASK_PARAMS);
+
+            assertTrue(result.startsWith("H".repeat(70)), "70% of the limit comes from the start");
+            assertTrue(result.endsWith("T".repeat(19) + "exit code 2"), "30% from the end, where the exit code is: " + result);
+            assertTrue(result.contains("[TRUNCATED: Response was 1011 characters, limit is 100."));
+            assertTrue(result.contains("The middle 911 characters were omitted; the first 70 and the last 30 are shown."), result);
+            assertFalse(result.contains("MMM"), "the middle is gone");
+        }
+
+        @Test
+        @DisplayName("the kept content is exactly the limit")
+        void keptContentIsTheLimit() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(37);
+            limits.setTruncationStrategy("headTail");
+
+            String result = truncator.truncateIfNeeded("testTool", "x".repeat(500), limits, TASK_TYPE, TASK_PARAMS);
+
+            assertEquals(37, result.chars().filter(c -> c == 'x').count());
+        }
+
+        @Test
+        @DisplayName("strategy names are case-insensitive")
+        void caseInsensitive() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(100);
+            limits.setTruncationStrategy("HEADTAIL");
+
+            String result = truncator.truncateIfNeeded("testTool", HEAD + MIDDLE + TAIL, limits, TASK_TYPE, TASK_PARAMS);
+            assertTrue(result.endsWith("T".repeat(30)));
+        }
+
+        @Test
+        @DisplayName("neither cut splits a surrogate pair")
+        void cutsKeepSurrogatePairsWhole() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(10);
+
+            // head ends at index 7, tail starts at length - 3: put a pair across each
+            String text = "aaaaaa😀" + "m".repeat(50) + "😀bb";
+            String result = truncator.truncateIfNeeded("testTool", text, limits, TASK_TYPE, TASK_PARAMS);
+
+            int marker = result.indexOf("\n\n[TRUNCATED");
+            assertFalse(Character.isHighSurrogate(result.charAt(marker - 1)), "no lone high surrogate before the note");
+            int tail = result.indexOf("]\n\n") + 3;
+            assertFalse(Character.isLowSurrogate(result.charAt(tail)), "no lone low surrogate after the note");
+        }
+
+        @Test
+        @DisplayName("explicit truncate still keeps the start only")
+        void explicitTruncateKeepsHeadOnly() {
+            var limits = new ToolResponseLimits();
+            limits.setDefaultMaxChars(100);
+            limits.setTruncationStrategy("truncate");
+
+            String result = truncator.truncateIfNeeded("testTool", HEAD + MIDDLE + TAIL, limits, TASK_TYPE, TASK_PARAMS);
+            assertTrue(result.startsWith(HEAD));
+            assertFalse(result.contains("TTT"), "the end is dropped under truncate");
         }
     }
 

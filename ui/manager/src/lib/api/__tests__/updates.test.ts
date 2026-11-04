@@ -29,7 +29,7 @@ describe("updates i18n", () => {
   it("defines every updates.* key the components reference", () => {
     const KEYS_USED = [
       "title", "description", "installed", "githubRelease", "dockerImage",
-      "unknownVersion", "checkNow", "checking", "autoCheck", "autoCheckHint",
+      "unknownVersion", "checkNow", "checking", "autoCheck", "autoCheckHint", "autoCheckLocked", "autoCheckAdminOnly",
       "privacyNote", "neverChecked", "upToDate", "updateAvailable",
       "updateAvailableDetail", "ahead", "unknownInstalled",
       "errorRateLimited", "errorBlockedByCsp", "errorUnreachable", "errorFailed",
