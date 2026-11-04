@@ -22,6 +22,12 @@ template giving instructions. The text could also be any size.
   now put that text between ` ``` ` fences, including `targetResponse` and `originalResponse`, and
   open with `QUOTED_CONTENT_NOTICE`, which tells the member that fenced text is quoted material to
   weigh and not instructions to follow.
+- The participant names spliced into the instructions themselves (`targetName` in "You are reviewing
+  {targetName}'s…", the speaker's own `displayName`) get the same one-line treatment, and the list
+  budget counts every rendered string of an entry (names and phase name too), not only its content.
+- The Manager's verbatim copy of the arbitration prompt (`NEGOTIATION_ARBITRATION_TEMPLATE` in
+  [`hitl-config.ts`](../../ui/manager/src/lib/hitl-config.ts)) follows the new preset; a Vitest
+  compares the two.
 - The user's own `question` is not treated as peer text.
 - **Not covered yet:** the task-force templates (`TEMPLATE_EXECUTE`, `TEMPLATE_VERIFY`), which
   `TaskForceEngine` renders from its own data. They quote task results the same unfenced way.
@@ -73,8 +79,11 @@ the same provider outage retried in lockstep and arrived in one burst again.
 New `PeerContentGuardTest`, including a real Qute render in which a peer's attempt to close the
 fence stays inside it, and a check that every peer-quoting preset carries the notice. Also new
 head-and-tail cases in `ToolResponseTruncatorExtendedTest`, jitter cases in
-`RetryConfigurationTest`, and an identifier-rule case in `ConversationSummarizerTest`. Three
-existing retry tests that assert exact sleep values now set `jitterRatio` to `0`.
+`RetryConfigurationTest`, and an identifier-rule case in `ConversationSummarizerTest`. Existing
+retry tests that assert exact sleep values or exact budget arithmetic
+(`RetryConfigurationTest`, `RetryConfigurationDeadlineTest`, `StreamingLegacyChatExecutorRetryTest`,
+`ToolExchangeIdsAndProvenanceTest`) now set `jitterRatio` to `0`: jitter only shortens a sleep, so
+with it on, one more retry fits inside the same budget.
 
 ```decision-log
 | 2026-11-04 | Retry jitter only shortens the backoff (`[base × (1 − r), base]`), never lengthens it | Adding ±20% jitter as OpenClaw does | Symmetric jitter, which could push a sleep past `maxBackoffDelayMs`, the total backoff budget or the turn deadline |

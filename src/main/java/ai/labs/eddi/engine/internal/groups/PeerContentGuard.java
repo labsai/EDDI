@@ -49,6 +49,7 @@ final class PeerContentGuard {
     static final int MAX_SPEAKER_CHARS = 120;
 
     static final String FENCE = "```";
+    /** {@link #FENCE} with a zero-width space (U+200B) after its first backtick. */
     static final String BROKEN_FENCE = "`​``";
 
     private static final String ENTRY_CUT_NOTE = "\n[... %d more characters not shown]";
@@ -60,18 +61,32 @@ final class PeerContentGuard {
     /** Template-data map keys naming who wrote an entry. */
     private static final List<String> SPEAKER_KEYS = List.of("speaker", "reviewer");
 
+    /**
+     * Top-level template-data keys holding a participant's name. Both are spliced
+     * into the instructions themselves ("You are reviewing {targetName}'s…", "As
+     * {displayName}, …"), and either can be a dynamic agent's or a human member's
+     * chosen name.
+     */
+    private static final List<String> NAME_KEYS = List.of("targetName", "displayName");
+
     private PeerContentGuard() {
     }
 
     /**
      * Cleans every quoted value in {@code data} in place: the single responses
-     * ({@code targetResponse}, {@code originalResponse}) and every list of entries,
+     * ({@code targetResponse}, {@code originalResponse}), the participant names
+     * ({@code targetName}, {@code displayName}) and every list of entries,
      * recognised as a list of maps carrying a {@code content} key.
      */
     static void apply(Map<String, Object> data) {
         for (String key : SINGLE_VALUE_KEYS) {
             if (data.get(key) instanceof String value) {
                 data.put(key, content(value));
+            }
+        }
+        for (String key : NAME_KEYS) {
+            if (data.get(key) instanceof String value) {
+                data.put(key, speaker(value));
             }
         }
         for (Map.Entry<String, Object> e : data.entrySet()) {
@@ -149,7 +164,7 @@ final class PeerContentGuard {
         int total = 0;
         int firstKept = cleaned.size();
         while (firstKept > 0) {
-            int length = contentLength(cleaned.get(firstKept - 1));
+            int length = renderedLength(cleaned.get(firstKept - 1));
             if (firstKept < cleaned.size() && total + length > MAX_DIGEST_CHARS) {
                 break;
             }
@@ -179,7 +194,18 @@ final class PeerContentGuard {
         return result;
     }
 
-    private static int contentLength(Map<String, Object> entry) {
-        return entry.get("content") instanceof String text ? text.length() : 0;
+    /**
+     * Every string an entry renders (content, speaker, phase name), so a run of
+     * short entries under long names cannot outgrow the budget. Separator text
+     * belongs to the template and is not counted.
+     */
+    private static int renderedLength(Map<String, Object> entry) {
+        int length = 0;
+        for (Object value : entry.values()) {
+            if (value instanceof String text) {
+                length += text.length();
+            }
+        }
+        return length;
     }
 }

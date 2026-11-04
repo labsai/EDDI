@@ -127,6 +127,7 @@ class ToolExchangeIdsAndProvenanceTest {
         var retry = new RetryConfiguration();
         retry.setMaxAttempts(2);
         retry.setBackoffDelayMs(5L);
+        retry.setJitterRatio(0.0); // the shared budget is asserted to the millisecond
         AtomicInteger attempts = new AtomicInteger();
         long[] spent = {0L};
 
