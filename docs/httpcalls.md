@@ -246,6 +246,7 @@ We will emphasize the `httpCall` model and go through an example step by step, y
 ```javascript
 {
   "targetServerUrl": "string",
+  "description": "string",
   "httpCalls": [
     {
       "name": "string",
@@ -353,6 +354,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | Element                                                                     | Description                                                                                                                                                                                                                      |
 | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | targetServerUrl                                                             | (`String`) `root/context` path of the `httpCall` (e.g `http://example.com/api)`                                                                                                                                                  |
+| description                                                                 | (`String`, optional) one-line summary of this group of calls. Shown by `discover_tools` when an LLM task loads its http tools lazily (`lazySources: ["http"]`, see [Lazy tool loading](langchain.md#lazy-tool-loading)); the OpenAPI generator fills it from the tag|
 | httpCall.saveResponse                                                       | (`Boolean`) whether to save the `JSON` response into `{memory.current.httpCalls}`. `true` requires a `responseObjectName`; saving a config that sets one without the other is refused with `400`, because the executor would have nothing to store the body under                                      |
 | httpCall.fireAndForget                                                      | (`Boolean`) whether to execute the request without waiting for a response to be returned, (useful for `POST`)                                                                                                                    |
 | httpCall.responseObjectName                                                 | (`String`) name of the `JSON` object so it can be accessed from other `httpCalls` or `outputsets`.                                                                                                                               |

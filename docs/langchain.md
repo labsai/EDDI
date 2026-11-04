@@ -936,7 +936,9 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enableRateLimiting`       | boolean  | Limit tool/LLM usage rate                        | true                   |
 | `defaultToolTimeoutMs`     | int      | Wall-clock ceiling in milliseconds on a single tool execution. On expiry the call is abandoned and the model gets an error result; the turn continues. `-1` or `0` disables the bound — see [Execution timeouts](#execution-timeouts) | 120000 |
 | `toolTimeoutsMs`           | map      | Per-tool execution timeouts in milliseconds, keyed on the built-in slug (`{"websearch": 15000}`) or on a single dispatch name, which takes precedence. `-1` exempts one tool without unbounding the task | (all `defaultToolTimeoutMs`) |
-| `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` sends only a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window | `EAGER` |
+| `toolLoadingStrategy`      | string   | `EAGER` sends every tool spec on every request. `LAZY` hides the sources named in `lazySources` behind a `discover_tools` meta-tool, and injects the tools the model asks for from the next iteration on. Use `LAZY` when a large tool set is crowding the context window — see [Lazy tool loading](#lazy-tool-loading) | `EAGER` |
+| `lazySources`              | list     | Which sources `LAZY` hides: any of `builtin`, `http`, `mcp`, `a2a`. Unlisted sources are sent in full. Ignored under `EAGER` | `["builtin"]` |
+| `lazyRetention`            | string   | How long a tool `discover_tools` loaded stays in the request: `turn` (the rest of the turn, across cascade steps and approval pauses) or `conversation` (also later turns, at most `maxToolsInContext` of them) | `turn` |
 | `maxToolsInContext`        | int      | Maximum tool specifications returned per discovery call under `LAZY`. Ignored under `EAGER` | 20 |
 | `retry`                    | object   | Retry policy for LLM calls — see [Retry configuration](#retry-configuration) | (none) |
 | `responseValidation`       | object   | Validates the model's response and applies a remediation action. Policies: `onEmpty`, `onTruncation`, `onContentFilter`, `onInvalidJson`, `onSchemaMismatch`, `onContextTooLong`, `onRefusal`, `onStreamingTimeout`. The `fallback` action serves a configurable message — see [Fallback answers and `onError`](#fallback-answers-and-onerror); the `retry` action re-asks the model — see [Recovery policies](#recovery-policies-retry-where-it-helps) | (none) |
@@ -1460,6 +1462,28 @@ eddi.tools.weather.openweathermap.api-key=YOUR_OWM_API_KEY
 **Docker Environment Variables:**
 
 - `EDDI_TOOLS_WEATHER_OPENWEATHERMAP_API_KEY=...`
+
+### Lazy tool loading
+
+An agent whose tools are an API of 60 or more operations sends every tool description on every model call under `EAGER` — often more text than the rest of the prompt, and enough to degrade a small model's tool choice. `toolLoadingStrategy: "LAZY"` sends a `discover_tools` meta-tool instead, and only the tools the model asks for after that:
+
+```json
+{
+  "toolLoadingStrategy": "LAZY",
+  "lazySources": ["http"],
+  "lazyRetention": "turn",
+  "maxToolsInContext": 20
+}
+```
+
+- **`lazySources`** picks what is hidden. The default, `["builtin"]`, hides the built-in tools only (the behaviour before the field existed). `http`, `mcp` and `a2a` hide those sources; a source not listed is sent in full, as under `EAGER`.
+- **Groups.** With an external source listed, `discover_tools` takes a `group` or `keywords` (or both), and its description lists the groups with a one-line summary each, so the model knows what exists without seeing every tool. An http group is one apicalls configuration (its resource id; the summary is the configuration's [`description`](httpcalls.md#description-of-the-model), which the OpenAPI generator fills from the tag); an MCP group is one server (its `name`, else its host); built-in and A2A tools are grouped as `builtin` and `a2a`. A group may also be named by a word of its summary.
+- **`maxToolsInContext`** caps what one discovery call loads; the result tells the model to narrow with keywords to reach the rest.
+- **Safety is unchanged.** A loaded tool runs through exactly the same approval gate, quotas, rate limits, result guardrails, caching, cost tracking and trace as an eager one. A call to a lazily-hidden tool the model has *not* loaded is refused with a `NOT_EXECUTED` result telling it to call `discover_tools` first — it is never executed and never shown to an approver (trace entry `tool_not_activated`, metric `eddi.llm.lazy_tools.refused`).
+- **Approval pauses.** A paused batch's approved calls run on resume by name, whether or not the resumed turn has discovered them again: every tool's executor is registered regardless of what is loaded.
+- **`lazyRetention`** — `turn` keeps loaded tools until the turn ends (also across cascade steps and pauses); `conversation` carries them into later turns, at most `maxToolsInContext`. The names are kept on the conversation step, not in the task.
+
+Measured on a synthetic 66-tool HTTP agent (six groups of eleven, OpenAPI-generated shape): the tool part of the first request drops from ~9,400 tokens (40,600 characters, 66 specs) to ~260 tokens (`discover_tools` alone), and to ~1,830 after one group of eleven is loaded (GPT-4o tokenizer). The cost is one extra model call (the discovery) per turn that needs a tool.
 
 ### Example: Selective Tool Enablement
 

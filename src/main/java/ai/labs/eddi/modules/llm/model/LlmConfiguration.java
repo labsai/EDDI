@@ -179,6 +179,35 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private int maxToolsInContext = 20;
 
         /**
+         * Which tool sources {@link ToolLoadingStrategy#LAZY} hides behind
+         * {@code discover_tools}: any of {@code builtin}, {@code http}, {@code mcp},
+         * {@code a2a}. A source not listed is sent in full on every request, as with
+         * {@code EAGER}. Ignored unless the strategy is {@code LAZY}.
+         * <p>
+         * <b>A default, not a switch:</b> {@code null} or empty means
+         * {@code ["builtin"]}, which is exactly the LAZY behaviour from before this
+         * field existed — so a stored config is unchanged. Unknown entries are ignored
+         * with a WARN.
+         *
+         * @since 6.7.0
+         */
+        private List<String> lazySources;
+
+        /**
+         * How long a tool that {@code discover_tools} activated stays in the request
+         * under {@link ToolLoadingStrategy#LAZY}: {@code turn} (until the turn ends,
+         * across cascade steps and approval pauses) or {@code conversation} (carried
+         * into later turns of the same conversation, at most {@link #maxToolsInContext}
+         * of them). The activated names are kept in conversation memory, never in the
+         * task.
+         * <p>
+         * <b>A default, not a switch:</b> {@code null} means {@code turn}.
+         *
+         * @since 6.7.0
+         */
+        private String lazyRetention;
+
+        /**
          * Maximum conversation turns to include in context. -1 = unlimited, 0 = none,
          * default = 10
          */
@@ -561,7 +590,7 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
          * directive-shaped content. Null means the defaults — provenance marking on,
          * directives redacted — which is what an existing config gets.
          *
-         * @since 6.3.0
+         * @since 6.7.0
          */
         private ToolResultGuardrailConfig toolResultGuardrails;
 
@@ -844,6 +873,22 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setMaxToolsInContext(int maxToolsInContext) {
             this.maxToolsInContext = maxToolsInContext;
+        }
+
+        public List<String> getLazySources() {
+            return lazySources;
+        }
+
+        public void setLazySources(List<String> lazySources) {
+            this.lazySources = lazySources;
+        }
+
+        public String getLazyRetention() {
+            return lazyRetention;
+        }
+
+        public void setLazyRetention(String lazyRetention) {
+            this.lazyRetention = lazyRetention;
         }
 
         public Integer getConversationHistoryLimit() {
