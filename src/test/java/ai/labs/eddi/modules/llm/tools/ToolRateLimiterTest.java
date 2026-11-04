@@ -248,6 +248,19 @@ class ToolRateLimiterTest {
             assertTrue(rateLimiter.tryAcquire("conv-2", "searchWeb", 2));
             assertFalse(rateLimiter.tryAcquire("conv-2", "searchWeb", 2));
         }
+
+        @Test
+        @DisplayName("the global-only check shares the deployment bucket and never refuses while it is off")
+        void globalOnlyCheck() {
+            assertFalse(rateLimiter.refusedByGlobalLimit("searchWeb"), "off: never refused");
+
+            rateLimiter.globalLimitEnabled = true;
+            rateLimiter.globalLimit = 2;
+            assertTrue(rateLimiter.tryAcquire("conv-1", "searchWeb", 10));
+            assertFalse(rateLimiter.refusedByGlobalLimit("searchWeb"));
+            assertTrue(rateLimiter.refusedByGlobalLimit("searchWeb"), "the same bucket a task with limiting on spends");
+            assertFalse(rateLimiter.tryAcquire("conv-2", "searchWeb", 10));
+        }
     }
 
     /**

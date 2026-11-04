@@ -167,4 +167,39 @@ class ChatModelRegistryAllowedHostsTest {
                 () -> regional.getOrCreate("regional", Map.of("apiKey", "${vault:k}", "region", "eu")));
         verify(secretResolver, never()).resolveSecrets(any());
     }
+
+    @Test
+    @DisplayName("an endpoint key the builder does not read does not stand in for the default it does use")
+    void unusedEndpointKeyDoesNotSkipTheDefault() throws Exception {
+        Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+        builders.put("regional", () -> new ILanguageModelBuilder() {
+            @Override
+            public ChatModel build(Map<String, String> parameters) {
+                return new ChatModel() {
+                    @Override
+                    public ChatResponse doChat(ChatRequest chatRequest) {
+                        return ChatResponse.builder().aiMessage(AiMessage.from("ok")).build();
+                    }
+                };
+            }
+
+            @Override
+            public String defaultEndpoint(Map<String, String> parameters) {
+                // Like an OpenAI-compatible preset: reads baseUrl only, ignores "endpoint".
+                return parameters.containsKey("baseUrl") ? null : "https://" + parameters.getOrDefault("region", "us") + ".vendor.example/v1";
+            }
+        });
+        SecretResolver secretResolver = mock(SecretResolver.class);
+        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
+        when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+        var regional = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, allowlist);
+        doThrow(new VaultHostAllowlist.HostNotAllowedException("not on allowedHosts")).when(allowlist).requireAllowed(anyMap(),
+                eq("https://eu.vendor.example/v1"), anyString());
+
+        assertThrows(VaultHostAllowlist.HostNotAllowedException.class, () -> regional.getOrCreate("regional",
+                Map.of("apiKey", "${vault:k}", "endpoint", "https://us.vendor.example/v1", "region", "eu")));
+        verify(allowlist).requireAllowed(anyMap(), eq("https://us.vendor.example/v1"), anyString());
+        verify(secretResolver, never()).resolveSecrets(any());
+    }
 }

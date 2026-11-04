@@ -475,6 +475,13 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             if (refusal != null) {
                 return refusal;
             }
+        } else if (version < 1) {
+            // Versions start at 1. The loop below decrements an int, so at
+            // Integer.MIN_VALUE `current--` wrapped to MAX_VALUE and the single-version
+            // call never ended.
+            return Response.status(Response.Status.BAD_REQUEST)
+                    .entity(String.format("Version %d does not exist; agent versions start at 1", version))
+                    .type(MediaType.TEXT_PLAIN).build();
         }
         final int highestUndeployed = version;
         final int lowestUndeployed = thisAndAllPrevious ? 1 : version;

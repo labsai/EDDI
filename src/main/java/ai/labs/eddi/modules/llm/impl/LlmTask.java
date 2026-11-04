@@ -412,6 +412,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * ({@link #recordFailedPhaseSpend}).
      */
     private void recordSpend(IWritableConversationStep currentStep, Map<?, ?> tokenUsage, double costUsd) {
+        recordSpend(currentStep, tokenUsage, costUsd, null);
+    }
+
+    /**
+     * As above, with the phase's prices when known — so {@code audit:pricing} can
+     * tell unpriced from free.
+     */
+    private void recordSpend(IWritableConversationStep currentStep, Map<?, ?> tokenUsage, double costUsd, ModelPrices prices) {
         if (currentStep == null) {
             return;
         }
@@ -419,6 +427,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             accumulateTokenUsage(currentStep, tokenUsage);
         }
         accumulateCost(currentStep, costUsd);
+        PricingAudit.record(currentStep, tokenUsage, costUsd, prices);
     }
 
     /**
@@ -702,7 +711,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null,
                 Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT)),
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()), reaskSpend);
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId(), RescueOptions.of(task)), reaskSpend);
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
                     if (memory.getEventSink() != null) {
@@ -715,7 +724,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // already streamed cannot be taken back. A warn-only guardrail streams.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
         boolean guardrailBuffering = outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || guardrailBuffering;
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps() || guardrailBuffering;
         // How an output guardrail's reprompt asks the model again — set by the branch
         // that produced the answer, so the reprompt runs on the same model and never
         // re-runs a tool. Null leaves a reprompt nothing to do but block.
@@ -788,6 +797,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // that call reached.
         if (spendRefusal == null && screenInput && spendGate != null) {
             spendRefusal = spendGate.check(memory);
+        }
+        if (spendRefusal == null && !cascadeActive) {
+            spendRefusal = UnpricedCallPolicy.check(ModelPrices.ofTask(task).override(), resolvedType,
+                    resolveModelNameOf(processedParams, resolvedType), memory, false, "llm_task");
         }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
@@ -980,8 +993,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                     toolTrace = outcome.trace();
                     responseMetadata = outcome.responseMetadata();
                     usedToolMode = true;
-                } else if (eventSink != null) {
-                    // Legacy mode with streaming — try to get a streaming model
+                } else if (eventSink != null && !addToOutputExplicitlyFalse) {
+                    // Legacy mode with streaming — try to get a streaming model.
+                    // Not with addToOutput=false: the postResponse decides what the
+                    // caller sees, and a streamed token of the raw answer cannot be
+                    // taken back — that task takes the plain path below.
                     // R5: a task that may re-ask its model is buffered, never streamed — the
                     // tokens of an attempt that is then retried cannot be taken back. The same
                     // holds for an output guardrail that can change the answer (WS4).
@@ -997,7 +1013,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                                 currentStep, circuitGate, memory.getTurnDeadline());
                         responseContent = chatResult.response();
                         responseMetadata = chatResult.responseMetadata();
-                        if (!addToOutputExplicitlyFalse && !bufferOutput) {
+                        if (!bufferOutput) {
                             eventSink.onToken(responseContent);
                         }
                     }
@@ -1138,7 +1154,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             templateDataObjects.put(responseObjectName, fallbackServed.object());
         } else if (Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT))) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
-                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory, RescueOptions.of(task)));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -1263,7 +1279,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
                         resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
                         historicInputScreen(memory, task), summaryAdmission(memory));
-                recordSpend(currentStep, summaryUsage, ModelPrices.ofTask(task).cost(summaryUsage));
+                ModelPrices summaryPrices = ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
+                        effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel());
+                recordSpend(currentStep, summaryUsage, summaryPrices.cost(summaryUsage), summaryPrices);
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
                         sanitize(memory.getConversationId()));
@@ -1351,7 +1369,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         }
         var detection = convertObject
                 ? formatRetryRunner.classifyJsonReply(responseContent, processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(),
-                        task.getId())
+                        task.getId(), RescueOptions.of(task))
                 : null;
         if (detection != null) {
             ticket.failure(LlmCircuitBreakers.Failure.INVALID_OUTPUT, detection.trigger().label() + ": " + detection.reason());
@@ -1656,7 +1674,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         if (responseMetadata == null) {
             return;
         }
-        recordSpend(currentStep, responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null, pricedCost(responseMetadata, task));
+        recordSpend(currentStep, responseMetadata.get("tokenUsage") instanceof Map<?, ?> tu ? tu : null, pricedCost(responseMetadata, task),
+                responseMetadata.containsKey("cascadeCostUsd") ? null : ModelPrices.ofTask(task));
     }
 
     /**
@@ -1903,7 +1922,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             }
             responseContent = step.content();
         } else if (convertObject && responseContent != null && !responseContent.isBlank()) {
-            var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId());
+            var parsed = modelOutputParser.parse(responseContent, true, processedParamsSchema, task.getNonBlankFields(), task.getId(),
+                    RescueOptions.of(task));
             if (parsed.kind() == ModelOutputParser.Kind.SCHEMA_MISMATCH) {
                 var step = applyValidationAction(validation.getOnSchemaMismatch(), "schema_mismatch",
                         "LLM response does not match the response shape (" + parsed.reason() + ")", responseContent, task, currentStep,
@@ -1999,6 +2019,31 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                 LOGGER.errorf("[ResponseValidation] %s — throwing error (task=%s): %s", validationType, task.getId(), message);
                 throw new LifecycleException("Response validation failed [" + validationType + "]: " + message);
 
+            case "wrap" :
+                // Only onInvalidJson can say "wrap", and the parser already wrapped every
+                // reply it could. A reply that reaches this point is broken JSON (it starts
+                // with { or [), is over wrapMaxChars, or a policy other than onInvalidJson
+                // was set to "wrap" by mistake: nothing is left to rescue it with, so the
+                // exhausted-recovery action applies, exactly as after spent retries.
+                if (!"invalid_json".equals(validationType)) {
+                    LOGGER.warnf("[ResponseValidation] 'wrap' is only available for onInvalidJson, not %s (task=%s), treating as 'warn'",
+                            validationType, task.getId());
+                    currentStep.storeData(dataFactory.createData("llm:validation:" + validationType + ":" + task.getId(), message));
+                    break;
+                }
+                String unwrappable = task.getResponseValidation() != null ? task.getResponseValidation().getFallbackAction() : null;
+                if (unwrappable == null || "retry".equalsIgnoreCase(unwrappable) || "wrap".equalsIgnoreCase(unwrappable)) {
+                    unwrappable = "fallback";
+                }
+                LOGGER.warnf("[ResponseValidation] %s — the reply cannot be wrapped, applying fallbackAction '%s' (task=%s)", validationType,
+                        unwrappable, task.getId());
+                if (meterRegistry != null) {
+                    meterRegistry.counter("eddi.llm.recovery", "action", LlmRecoveryLog.WRAP, "outcome", "not_wrappable", "trigger", validationType)
+                            .increment();
+                }
+                return applyValidationAction(unwrappable, validationType, message, responseContent, task, currentStep, templateDataObjects, memory,
+                        convertObject);
+
             case "retry" :
                 // The re-asks happened (or were skipped) before validation ran; a reply
                 // still failing here is out of recoveries. Only the policies that are
@@ -2072,9 +2117,27 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      */
     Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
                                    List<String> nonBlankFields, IConversationMemory memory) {
+        return convertResponseToObject(responseContent, taskId, currentStep, responseSchema, nonBlankFields, memory, RescueOptions.NONE);
+    }
+
+    /**
+     * As above with the task's local rescue options ({@link RescueOptions#of}): the
+     * double-escape repair, {@code fieldAliases} and the plain-text {@code wrap}. A
+     * wrapped reply is outcome {@code wrapped}, counted in
+     * {@code eddi.llm.output{outcome=wrapped}} and
+     * {@code eddi.llm.recovery{action=wrap}}, and leaves the one recovery log line.
+     * This is the single place a non-JSON reply is turned into the stored object,
+     * so every caller that routes a reply through here gets the rescue.
+     */
+    Object convertResponseToObject(String responseContent, String taskId, IWritableConversationStep currentStep, String responseSchema,
+                                   List<String> nonBlankFields, IConversationMemory memory, RescueOptions rescue) {
         long started = System.nanoTime();
-        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId);
+        ModelOutputParser.JsonOutcome outcome = modelOutputParser.parse(responseContent, true, responseSchema, nonBlankFields, taskId, rescue);
         String label = outcome.label();
+        // a wrapped reply that then breaks the shape was not recovered
+        if (outcome.wrapped() && outcome.kind() == ModelOutputParser.Kind.VALID) {
+            recordRecovery(memory, LlmRecoveryLog.WRAP, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
+        }
         switch (outcome.kind()) {
             case SCHEMA_MISMATCH -> LOGGER.warnf("convertToObject=true but the response of task '%s' does not match the expected shape (%s)",
                     taskId, outcome.reason());
@@ -2082,7 +2145,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
                     outcome.reason());
             case EMPTY -> LOGGER.warnf("convertToObject=true but the response of task '%s' is empty, storing as string", taskId);
             default -> {
-                if (outcome.repaired()) {
+                if (outcome.repaired() && !outcome.wrapped()) {
                     recordRecovery(memory, LlmRecoveryLog.REPAIR, "recovered", "invalid_json", (System.nanoTime() - started) / 1_000_000L);
                 }
             }
@@ -2195,7 +2258,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         boolean convertObject = Boolean.parseBoolean(processedParams.get(KEY_CONVERT_TO_OBJECT));
         FormatRetryRunner.Policy retryPolicy = withSpend(FormatRetryRunner.Policy.from(task.getResponseValidation(), null, convertObject,
                 FormatRetryRunner.resolveBaseMaxOutputTokens(processedParams, resolvedType), task.getInputPricePer1M(), task.getOutputPricePer1M(),
-                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId()),
+                processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), task.getId(), RescueOptions.of(task)),
                 FormatRetryRunner.ReaskSpend.of(spendGate, memory));
         FormatRetryRunner.ReaskListener retryListener = LlmRecoveryLog.reaskListener(memory.getConversationId(), memory.getAgentId(),
                 (trigger, attempt) -> {
@@ -2223,7 +2286,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         // tokens of an attempt that is then retried cannot be taken back.
         // WS4: an output guardrail that can change the answer buffers it the same way.
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
-        boolean bufferOutput = retryPolicy != null || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
+        boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps()
+                || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
         var resumeBridge = bufferOutput
                 ? null
                 : createToolLoopStreamingBridge(memory.getEventSink(),
@@ -2365,7 +2429,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
             templateDataObjects.put(responseObjectName, fallbackServed.object());
         } else if (convertObject) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(responseContent, task.getId(), currentStep,
-                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+                    processedParams.get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory, RescueOptions.of(task)));
         } else {
             templateDataObjects.put(responseObjectName, responseContent);
         }
@@ -2728,7 +2792,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
         currentStep.storeData(dataFactory.createData(KEY_LANGCHAIN + ":" + task.getType() + ":" + task.getId(), content));
         if (revision.convertObject()) {
             templateDataObjects.put(responseObjectName, convertResponseToObject(content, task.getId(), currentStep,
-                    revision.processedParams().get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory));
+                    revision.processedParams().get(KEY_RESPONSE_SCHEMA), task.getNonBlankFields(), memory, RescueOptions.of(task)));
         } else {
             templateDataObjects.put(responseObjectName, content);
         }
@@ -2805,6 +2869,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
     public static final Pattern CONFIG_REF_MENTION = Pattern.compile("\\{(?:vault|eddivault|vars|connection|caller):[^}]*\\}");
 
     /**
+     * The namespaces of {@link #CONFIG_REF_MENTION}, each with its colon, for the
+     * forward scan in {@link #escapeConfigReferenceMentions}. Kept in the pattern's
+     * order; {@code LlmTaskVaultMentionTest} derives the namespaces from the
+     * pattern and fails if one is not escaped.
+     */
+    private static final List<String> CONFIG_REF_OPENERS = List.of("vault:", "eddivault:", "vars:", "connection:", "caller:");
+
+    /**
      * Substrings that make a value WORTH running {@link #CONFIG_REF_MENTION}
      * against — the cheap pre-check, so the common no-reference value never pays
      * for a regex.
@@ -2856,12 +2928,58 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask {
      * Known limit: a mention already inside a {@code {|raw|}} section would be
      * double-wrapped and render its markers. Prompts do not write Qute raw
      * sections; accepting that beats parsing Qute here.
+     * <p>
+     * A forward scan, not {@code CONFIG_REF_MENTION.replaceAll}: the regex retried
+     * {@code [^}]*} to the end of the value from every opener that has no closing
+     * brace, so an editor-written prompt full of unclosed {@code {vault:} openers
+     * cost quadratic CPU on every turn, before any template limit applies. Here an
+     * opener without a later {@code }} ends the scan — no later opener can close
+     * either. Same matches as the pattern, and a mention is copied literally (the
+     * regex replacement also read {@code $} and {@code \} inside one as group
+     * references).
      */
     static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
-        return CONFIG_REF_MENTION.matcher(value).replaceAll(match -> "{|" + match.group() + "|}");
+        StringBuilder escaped = null;
+        int copied = 0;
+        int from = 0;
+        while (true) {
+            int open = value.indexOf('{', from);
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = openerEnd(value, open + 1);
+            if (bodyStart < 0) {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', bodyStart);
+            if (close < 0) {
+                break;
+            }
+            if (escaped == null) {
+                escaped = new StringBuilder(value.length() + 16);
+            }
+            escaped.append(value, copied, open).append("{|").append(value, open, close + 1).append("|}");
+            copied = close + 1;
+            from = close + 1;
+        }
+        return escaped == null ? value : escaped.append(value, copied, value.length()).toString();
+    }
+
+    /**
+     * Where a mention's body starts when a namespace opener begins at
+     * {@code start}, else -1.
+     */
+    private static int openerEnd(String value, int start) {
+        for (String opener : CONFIG_REF_OPENERS) {
+            if (value.startsWith(opener, start)) {
+                return start + opener.length();
+            }
+        }
+        return -1;
     }
 
     /**
