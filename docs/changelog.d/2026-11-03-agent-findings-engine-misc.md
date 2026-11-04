@@ -17,3 +17,10 @@
 **Open decisions** (not implemented; they change a contract or need a redesign): a cap on active alert rules per agent and a per-event delivery budget; routing OpenAPI external `$ref` fetches through the guarded fetcher (or refusing external refs); a durable deletion barrier between conversation purge and in-flight dependent writes.
 
 Verdicts for the 40 findings: 4 FIXED, 28 ALREADY_FIXED (two of them on the sibling `fix/agent-findings-engine-internal` branch), 1 FALSE_POSITIVE, 3 ACCEPTED_RISK, 4 NEEDS_DECISION.
+
+**Review follow-up (PR #1257)**
+
+- `CronParser.computeMinIntervalSeconds` skips calendar dates a zone does not contain (Pacific/Apia lost 2011-12-30), which used to yield a gap of 0 and reject a valid daily schedule on REST, MCP and RAG ingestion alike.
+- Embedded JSON in scrubbed strings is read with decimals as `BigDecimal`: unrelated decimals keep their text (`1.00` stays `1.00`) and a secret number is matched by value.
+- A downloaded OpenAPI spec is checked on its decoded tree only (prose and YAML comments that mention `$ref: file:` no longer refuse it) and a `file:`/`jar:`/`classpath:` schema `$id` is refused, since relative refs resolve against it.
+- The MCP schedule-floor error tells operators to lower, not raise, `eddi.schedule.min-interval-seconds`.

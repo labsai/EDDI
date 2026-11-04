@@ -1058,7 +1058,7 @@ public class McpAdminTools {
                         ZoneId.of(timeZone != null && !timeZone.isBlank() ? timeZone : "UTC"));
                 if (cronInterval < minScheduleIntervalSeconds) {
                     return errorJson("Cron interval (" + cronInterval + "s) is below the minimum allowed (" + minScheduleIntervalSeconds
-                            + "s); use a less frequent schedule or raise eddi.schedule.min-interval-seconds");
+                            + "s); use a less frequent schedule, or have an operator lower eddi.schedule.min-interval-seconds");
                 }
             } else {
                 if (heartbeatIntervalSeconds == null || heartbeatIntervalSeconds <= 0) {
@@ -1066,7 +1066,7 @@ public class McpAdminTools {
                 }
                 if (heartbeatIntervalSeconds < minScheduleIntervalSeconds) {
                     return errorJson("Heartbeat interval (" + heartbeatIntervalSeconds + "s) is below the minimum allowed ("
-                            + minScheduleIntervalSeconds + "s); use a longer interval or raise eddi.schedule.min-interval-seconds");
+                            + minScheduleIntervalSeconds + "s); use a longer interval, or have an operator lower eddi.schedule.min-interval-seconds");
                 }
             }
 

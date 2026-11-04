@@ -91,7 +91,13 @@ class AuditLedgerErasedUserTest {
             replied.set(true);
         });
         stop.start();
-        stop.join(300);
+        // No timing: the stop thread is either blocked on the flush (the fix) or has
+        // already finished (the regression), and state polling tells the two apart.
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (stop.getState() != Thread.State.BLOCKED && stop.getState() != Thread.State.TERMINATED && System.nanoTime() < deadline) {
+            Thread.onSpinWait();
+        }
+        assertEquals(Thread.State.BLOCKED, stop.getState(), "the stop thread must be waiting for the batch being written");
         assertFalse(replied.get(), "the reply went out while the batch was still being written");
 
         release.countDown();

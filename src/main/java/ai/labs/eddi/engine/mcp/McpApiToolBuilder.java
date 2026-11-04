@@ -404,9 +404,14 @@ public final class McpApiToolBuilder {
         if (specContent == null) {
             return;
         }
-        Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
-        while (matcher.find()) {
-            checkRef(matcher.group(1), downloaded);
+        if (!downloaded) {
+            // The cheap first gate for an editor's own document. Not for a downloaded
+            // one: a description or YAML comment that merely mentions "$ref: file:..."
+            // would refuse a valid spec, and the decoded tree below is the authority.
+            Matcher matcher = REF_VALUE_PATTERN.matcher(specContent);
+            while (matcher.find()) {
+                checkRef(matcher.group(1), false);
+            }
         }
 
         JsonNode root = deserializeLikeParser(specContent);
@@ -420,6 +425,12 @@ public final class McpApiToolBuilder {
                 JsonNode ref = node.get("$ref");
                 if (ref != null && ref.isValueNode()) {
                     checkRef(ref.asText(), downloaded);
+                }
+                // An OpenAPI 3.1 schema $id is the base its relative refs resolve against:
+                // under "file:///etc/" a bare "secret.yaml" is a local file.
+                JsonNode id = downloaded ? node.get("$id") : null;
+                if (id != null && id.isTextual()) {
+                    checkSchemaId(id.asText());
                 }
             }
             if (node.isContainerNode()) {
@@ -446,6 +457,22 @@ public final class McpApiToolBuilder {
     }
 
     private static final Pattern EXPLICIT_SCHEME = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]*:");
+
+    /**
+     * Refuses a schema {@code $id} that would turn relative references into local
+     * reads: {@code file:}, {@code jar:}, {@code classpath:}, a drive or UNC path.
+     * Other schemes ({@code urn:}, http) cannot be read from the filesystem.
+     */
+    private static void checkSchemaId(String rawId) {
+        String id = rawId.trim();
+        String lower = id.toLowerCase(Locale.ROOT);
+        boolean local = lower.startsWith("file:") || lower.startsWith("jar:") || lower.startsWith("classpath:") || id.startsWith("\\\\")
+                || (id.length() > 1 && Character.isLetter(id.charAt(0)) && id.charAt(1) == ':' && !lower.startsWith("urn:"));
+        if (local) {
+            throw new IllegalArgumentException("Downloaded OpenAPI spec declares a schema $id '" + id
+                    + "' that resolves its relative $refs against the local filesystem; refused.");
+        }
+    }
 
     private static void checkRef(String rawRef, boolean downloaded) {
         String ref = rawRef.trim();

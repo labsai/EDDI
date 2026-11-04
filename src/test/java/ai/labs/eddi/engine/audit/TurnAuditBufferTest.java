@@ -252,6 +252,20 @@ class TurnAuditBufferTest {
         assertEquals("order 14711", redacted.output().get("note"));
     }
 
+    @Test
+    @DisplayName("a secret number inside a JSON string is redacted by value, and unrelated decimals keep their text")
+    void embeddedJsonDecimalsStayExact() {
+        String json = "{\"a\":\"12345678.00\",\"b\":12345678.00,\"c\":1.00,\"e\":12345678.0,\"d\":0.1234567890123456789}";
+        var entry = new AuditEntry("e1", "conv1", "agent1", 1, "user1", null, 1, "task", "type", 0, 1L, Map.of("userInput", "hi"),
+                Map.of("o", "x"), Map.of("raw", json), null, List.of(), 0.0, Instant.now(), null, null);
+
+        String redacted = String.valueOf(TurnAuditBuffer.redactValues(entry, List.of("12345678.00"), "<p>").llmDetail().get("raw"));
+
+        assertTrue(redacted.contains("\"a\":\"<p>\",\"b\":\"<p>\""), redacted);
+        assertTrue(redacted.contains("\"c\":1.00,\"e\":\"<p>\""), redacted);
+        assertTrue(redacted.contains("0.1234567890123456789"), redacted);
+    }
+
     /** A payload object that is not a map, list or string — an output item. */
     public record OutputItem(String text) {
     }

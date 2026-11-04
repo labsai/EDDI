@@ -107,6 +107,32 @@ class McpApiToolBuilderExternalRefTest {
     }
 
     @Test
+    @DisplayName("a downloaded spec that only MENTIONS a file: ref in prose or a comment is not refused")
+    void downloadedSpecProseIsNotARef() {
+        String yaml = """
+                openapi: 3.0.0
+                # use $ref: file:///tmp/x for local testing
+                info: {title: 'Use $ref: file:///tmp/schema.yaml for local testing', version: '1'}
+                paths: {}
+                """;
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(yaml, true));
+        // an inline document keeps the stricter raw-text gate
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(yaml, false));
+    }
+
+    @Test
+    @DisplayName("a downloaded 3.1 schema whose $id is a file: base cannot turn relative refs into local reads")
+    void downloadedSchemaIdFileBaseRefused() {
+        String spec = """
+                {"openapi":"3.1.0","info":{"title":"T","version":"1"},"paths":{},
+                 "components":{"schemas":{"S":{"$id":"file:///etc/","$ref":"secret.yaml"}}}}
+                """;
+        assertThrows(IllegalArgumentException.class, () -> McpApiToolBuilder.rejectUnsafeRefs(spec, true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(spec.replace("file:///etc/", "https://example.com/s/"), true));
+        assertDoesNotThrow(() -> McpApiToolBuilder.rejectUnsafeRefs(spec.replace("file:///etc/", "urn:example:s"), true));
+    }
+
+    @Test
     @DisplayName("a spec the scan cannot read is refused, not waved through")
     void unreadableSpecFailsClosed() {
         IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
