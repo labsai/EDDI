@@ -24,8 +24,10 @@ import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -552,6 +554,61 @@ class LlmTaskBranchTest {
 
             // Sync fallback path now respects addToOutputExplicitlyFalse
             verify(eventSink, never()).onToken(anyString());
+        }
+
+        @Test
+        @DisplayName("a provider that can stream is not streamed when addToOutput=false — no raw token reaches the caller")
+        void streamingCapableProviderIsNotStreamed() throws Exception {
+            Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
+            var streamingBuilds = new int[1];
+            builders.put("openai", () -> new ILanguageModelBuilder() {
+                @Override
+                public ChatModel build(Map<String, String> parameters) {
+                    return new ChatModel() {
+                        @Override
+                        public ChatResponse doChat(ChatRequest chatRequest) {
+                            return ChatResponse.builder().aiMessage(aiMessage(LLM_RESPONSE)).build();
+                        }
+                    };
+                }
+
+                @Override
+                public StreamingChatModel buildStreaming(Map<String, String> parameters) {
+                    streamingBuilds[0]++;
+                    return new StreamingChatModel() {
+                        @Override
+                        public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                            handler.onPartialResponse("private-intermediate");
+                            handler.onCompleteResponse(ChatResponse.builder().aiMessage(aiMessage("private-intermediate")).build());
+                        }
+                    };
+                }
+            });
+            var secretResolver = mock(SecretResolver.class);
+            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+            var registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
+            var counterweightService = new CounterweightService(mockSnippetService, new SimpleMeterRegistry());
+            counterweightService.initMetrics();
+            var identityMaskingService = new IdentityMaskingService(new SimpleMeterRegistry());
+            identityMaskingService.initMetrics();
+            var task2 = new LlmTask(resourceClientLibrary, dataFactory, memoryItemConverter,
+                    templatingEngine, jsonSerialization, prePostUtils, registry,
+                    mock(IApiCallExecutor.class), mock(IAgentStore.class), mock(IWorkflowStore.class),
+                    mock(RagContextProvider.class), new TokenCounterFactory(), mock(ConversationSummarizer.class),
+                    mockSnippetService, globalVariableResolver, counterweightService,
+                    identityMaskingService, mock(AgentOrchestrator.class), new ConversationHistoryBuilder(),
+                    new SimpleMeterRegistry(), new CallerIdentityContext(null, null));
+
+            var memory = setupMemory(List.of("action1"));
+            when(memoryItemConverter.convert(memory)).thenReturn(new HashMap<>());
+            when(templatingEngine.processTemplate(anyString(), anyMap())).thenAnswer(i -> i.getArgument(0));
+            var eventSink = mock(ConversationEventSink.class);
+            when(memory.getEventSink()).thenReturn(eventSink);
+
+            task2.execute(memory, new LlmConfiguration(List.of(createTask(Map.of("apiKey", "key", "addToOutput", "false")))));
+
+            verify(eventSink, never()).onToken(anyString());
+            assertEquals(0, streamingBuilds[0], "the streaming model is not even built for a suppressed task");
         }
     }
 
