@@ -34,6 +34,7 @@ Typically, Behavior Rules decide **when** to make an API call by triggering an a
 - **Batch requests**: Make multiple API calls by iterating over an array (requires `"fireAndForget": true`)
 - **Fire and forget**: Optional asynchronous calls that don't wait for a response
 - **Caller identity**: Call an API *as the signed-in user* with `${caller:token}` — see [Calling as the signed-in user](#calling-as-the-signed-in-user)
+- **Per-turn credentials**: Send the token a client supplied as secret context with `${context:<key>}` — see [Per-turn credentials from secret context](#per-turn-credentials-from-secret-context)
 
 ## Calling as the signed-in user
 
@@ -153,6 +154,56 @@ Only the tool call carries the caller — the handshake and `tools/list` do not,
 because the client is cached and a session opened with one user's token would be
 reused by everyone after them. See
 [`mcp-server.md`](mcp-server.md#calling-an-mcp-server-as-the-chatting-user).
+
+### Per-turn credentials from secret context
+
+When EDDI's own OIDC is off, `${caller:token}` has no caller to forward. An
+application that hands EDDI its user's own bearer token with every request — as a
+context entry marked secret, re-supplied on a HITL resume — references it with
+`${context:<key>}`:
+
+```json
+"headers": {
+  "Authorization": "Bearer ${context:userToken}"
+}
+```
+
+The client sends the value with each say (and resume) request:
+
+```json
+"context": { "userToken": { "type": "string", "value": "eyJ…", "secret": true } }
+```
+
+This is the **recommended form**. `Bearer {context.userToken}` (a plain Qute
+template) works too, but it is only templating: it renders into any part of the
+request, towards any host, and renders `Bearer ` when the value is missing. The
+reference follows the `${caller:token}` rules instead:
+
+- **Secret entries only.** An entry without `"secret": true` is refused: only
+  secret entries are scrubbed from the stored conversation when the turn ends.
+- **Headers only.** A reference in the path, a query parameter or the body is
+  refused, never resolved.
+- **Written in the header itself**, as a lone reference optionally after a scheme
+  (`Bearer ${context:userToken}`). A value mixing it with other text is refused,
+  and so is a reference that user input, an API response or a `${vars:…}` value
+  rendered into the header.
+- **Only to the configuration's own host.** The request must go to the origin of
+  the httpcalls configuration's `targetServerUrl`; an absolute path naming another
+  host is refused, and so is a `targetServerUrl` that is itself a template.
+  Redirects are not followed for such a request.
+- **Over https.** Plain http is refused unless the host is this machine
+  (localhost, 127.0.0.0/8, ::1, judged as an address, not as text).
+- **Fails closed.** A missing or empty entry — or, on a resumed turn, a value the
+  client did not send again — fails the call instead of sending `Bearer `.
+- **Never stored.** The resolved value joins the call's redaction set: it is
+  removed by value from the request record in conversation memory, the approval
+  preview, error bodies and log lines, whatever the header is called.
+
+`setup-api` accepts the reference as `apiAuth` (`"apiAuth": "Bearer ${context:userToken}"`),
+so an agent generated from an OpenAPI spec can call the API as each user. Outcomes
+are counted as `eddi.httpcalls.context.reference` (tag `outcome`: `resolved`,
+`missing`, `not_secret`, `expired`, `cross_origin`, `insecure_transport`, `mixed`, `not_configured`,
+`misplaced`).
 
 ### Cookies are not kept between calls
 
