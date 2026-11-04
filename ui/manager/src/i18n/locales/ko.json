@@ -1443,6 +1443,8 @@
     "evalStructured": "구조화된 출력 (JSON)",
     "evalHeuristic": "휴리스틱 (망설임 감지)",
     "evalJudge": "심판 모델 (보조 LLM)",
+    "cascadeAcceptanceCriterion": "수락 기준(선택)",
+    "cascadeAcceptanceCriterionHint": "평가 모델이 요청과 함께 확인하는 한 문장. 예: \"구체적인 단계를 제시한다\"",
     "evalNone": "없음 (항상 수락)",
     "cascadeInAgent": "에이전트 모드(도구 사용)에서도 캐스케이드 적용",
     "cascadeSteps": "Cascade Steps",

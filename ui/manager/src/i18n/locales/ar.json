@@ -1507,6 +1507,8 @@
     "evalStructured": "مخرجات منظمة (JSON)",
     "evalHeuristic": "استدلالي (كشف التردد)",
     "evalJudge": "نموذج حكم (LLM ثانوي)",
+    "cascadeAcceptanceCriterion": "معيار القبول (اختياري)",
+    "cascadeAcceptanceCriterionHint": "جملة واحدة يتحقق منها نموذج التقييم إلى جانب الطلب، مثل «يقدّم خطوات محددة»",
     "evalNone": "بدون (قبول دائم)",
     "cascadeInAgent": "استخدام التسلسل أيضاً في وضع الوكيل (مع الأدوات)",
     "cascadeSteps": "Cascade Steps",

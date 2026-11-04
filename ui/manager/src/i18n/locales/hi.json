@@ -1443,6 +1443,8 @@
     "evalStructured": "संरचित आउटपुट (JSON)",
     "evalHeuristic": "अनुमानी (अनिश्चितता पहचान)",
     "evalJudge": "न्यायाधीश मॉडल (सहायक LLM)",
+    "cascadeAcceptanceCriterion": "स्वीकृति मानदंड (वैकल्पिक)",
+    "cascadeAcceptanceCriterionHint": "एक वाक्य जिसे मूल्यांकन मॉडल अनुरोध के साथ जाँचता है, जैसे \"ठोस चरण बताता है\"",
     "evalNone": "कोई नहीं (हमेशा स्वीकार)",
     "cascadeInAgent": "एजेंट मोड (उपकरण सहित) में भी कैस्केड उपयोग करें",
     "cascadeSteps": "Cascade Steps",
