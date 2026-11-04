@@ -105,8 +105,11 @@ const MATRIX: Record<CapabilityId, Record<SurfaceId, Cell>> = {
       status: "yes",
       check: async (page) => {
         await startSupportChat(page);
-        // The mock welcome offers four quick replies.
-        await expect(page.getByTestId("quick-reply-btn").first()).toBeVisible();
+        // Picking the agent can resume its last conversation, and a resumed
+        // conversation does not restore the quick replies of its last output.
+        // Start a fresh one: the mock welcome offers four quick replies.
+        await page.getByTestId("new-conversation").click();
+        await expect(page.getByTestId("quick-reply-btn")).toHaveCount(4, { timeout: 15_000 });
       },
     },
     operator: { status: "no", reason: "the operator chat renders no quick replies" },
