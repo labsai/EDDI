@@ -210,8 +210,55 @@ public final class CompatibilityRules {
      * reference forms are resolved for credentials and are not templates.
      */
     static boolean containsTemplate(String value) {
-        String withoutReferences = LlmTask.CONFIG_REF_MENTION.matcher(value).replaceAll("");
+        String withoutReferences = withoutConfigReferences(value);
         return QUTE_MARKER.matcher(withoutReferences).find() || withoutReferences.contains("[[${") || withoutReferences.contains("[(${");
+    }
+
+    /**
+     * The namespaces of {@link LlmTask#CONFIG_REF_MENTION}, each with its colon.
+     */
+    private static final List<String> CONFIG_REF_OPENERS = List.of("vault:", "eddivault:", "vars:", "connection:", "caller:");
+
+    /**
+     * {@code value} without its configuration-reference mentions: the same matches
+     * as {@code LlmTask.CONFIG_REF_MENTION.replaceAll("")}, by a forward scan. The
+     * regex retried {@code [^}]*} to the end of the value from every opener without
+     * a closing brace, which is quadratic on a value of unclosed {@code {vault:}
+     * openers; here an opener without a later closing brace ends the scan, as no
+     * later opener can close either.
+     */
+    static String withoutConfigReferences(String value) {
+        StringBuilder kept = null;
+        int copied = 0;
+        int from = 0;
+        while (true) {
+            int open = value.indexOf('{', from);
+            if (open < 0) {
+                break;
+            }
+            int bodyStart = -1;
+            for (String opener : CONFIG_REF_OPENERS) {
+                if (value.startsWith(opener, open + 1)) {
+                    bodyStart = open + 1 + opener.length();
+                    break;
+                }
+            }
+            if (bodyStart < 0) {
+                from = open + 1;
+                continue;
+            }
+            int close = value.indexOf('}', bodyStart);
+            if (close < 0) {
+                break;
+            }
+            if (kept == null) {
+                kept = new StringBuilder(value.length());
+            }
+            kept.append(value, copied, open);
+            copied = close + 1;
+            from = close + 1;
+        }
+        return kept == null ? value : kept.append(value, copied, value.length()).toString();
     }
 
     private static String taskParameter(LlmConfiguration.Task task, String key) {

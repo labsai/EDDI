@@ -186,7 +186,7 @@ Returns: matching entries formatted as bullet list
 
 ### `forgetFact`
 
-Delete a specific memory by key.
+Delete a specific memory by key. Only a memory this agent can see is deleted, and a `global` memory only when this agent owns it — unless `allowGlobalKeyOverwrite` is on, the same rule `rememberFact` applies, since deleting another agent's global key and writing it again would replace its value.
 
 ```
 Parameters:

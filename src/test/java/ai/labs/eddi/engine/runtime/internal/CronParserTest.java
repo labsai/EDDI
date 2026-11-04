@@ -161,6 +161,16 @@ class CronParserTest {
         assertEquals(60, interval);
     }
 
+    /**
+     * Pacific/Apia skipped 2011-12-30 entirely; that date must not yield a 0 gap.
+     */
+    @Test
+    void computeMinIntervalSeconds_zoneThatSkippedACalendarDate() {
+        ZoneId apia = ZoneId.of("Pacific/Apia");
+        assertTrue(CronParser.computeMinIntervalSeconds("0 9 * * *", apia) >= 82_800, "daily, give or take a DST hour");
+        assertTrue(CronParser.computeMinIntervalSeconds("0 9,10 * * *", apia) >= 3_600);
+    }
+
     @Test
     void computeMinIntervalSeconds_every15min() {
         long interval = CronParser.computeMinIntervalSeconds("*/15 * * * *", UTC);
