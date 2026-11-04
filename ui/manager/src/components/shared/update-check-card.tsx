@@ -20,6 +20,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useUpdateCheck } from "@/hooks/use-update-check";
+import { useHasRole } from "@/hooks/use-auth";
 import {
   EDDI_DOCKER_TAGS_URL,
   EDDI_RELEASES_URL,
@@ -63,18 +64,21 @@ const MANUAL_UPDATE_COMMANDS = [
 ].join("\n");
 
 /**
- * Opt-in "is there a newer EDDI?" panel.
+ * "Is there a newer EDDI?" panel.
  *
  * The body of the Updates page (`/manage/updates`), which owns the heading —
  * this renders only the controls and results, so it does not repeat the title.
- * Nothing here talks to the network until the operator presses the button or
- * ticks the checkbox.
+ * The check is on by default; the checkbox is the server's switch (administrators
+ * only), and `EDDI_UPDATE_CHECK_ENABLED=false` locks it off. With the switch off,
+ * nothing here talks to the network until someone presses the button.
  */
 export function UpdateCheckCard() {
   const { t, i18n } = useTranslation();
   const {
     autoCheck,
+    autoCheckLocked,
     setAutoCheck,
+    autoCheckSaving,
     knownInstalledVersion: knownInstalled,
     installedVersionLoading,
     latest,
@@ -87,6 +91,7 @@ export function UpdateCheckCard() {
   } = useUpdateCheck();
 
   const updateAvailable = status === "update-available";
+  const isAdmin = useHasRole("eddi-admin");
 
   // `dateStyle: "medium"` over the bare numeric default: this app ships both
   // month-first and day-first locales, and "3/4/2026" is a different day in
@@ -233,19 +238,33 @@ export function UpdateCheckCard() {
               type="checkbox"
               checked={autoCheck}
               onChange={(e) => setAutoCheck(e.target.checked)}
+              disabled={autoCheckLocked || autoCheckSaving || !isAdmin}
               className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary"
               data-testid="update-auto-check"
             />
             <span>
               <span className="font-medium">
-                {t("updates.autoCheck", "Check automatically on every page load")}
+                {t("updates.autoCheck", "Check for updates automatically")}
               </span>
               <span className="block text-xs text-muted-foreground">
                 {t(
                   "updates.autoCheckHint",
-                  "Runs one check per browser reload and shows a banner when a newer release exists.",
+                  "{{productName}} checks for a new release once a day and notifies the administrators, and this page checks on each load and shows a banner. Turn it off to stop all of it.",
                 )}
               </span>
+              {autoCheckLocked && (
+                <span className="block text-xs text-muted-foreground" data-testid="update-auto-check-locked">
+                  {t(
+                    "updates.autoCheckLocked",
+                    "Switched off by this deployment's configuration (EDDI_UPDATE_CHECK_ENABLED=false). Remove that setting and restart to allow it.",
+                  )}
+                </span>
+              )}
+              {!autoCheckLocked && !isAdmin && (
+                <span className="block text-xs text-muted-foreground">
+                  {t("updates.autoCheckAdminOnly", "Only an administrator can change this.")}
+                </span>
+              )}
             </span>
           </label>
 

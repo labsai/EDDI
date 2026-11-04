@@ -1580,7 +1580,21 @@ public class AuditLedgerService implements UserErasureParticipant {
     @Override
     public int stopInFlightWorkByHash(String userIdHash) {
         markUserErasedHash(userIdHash);
+        // A batch drained before the mark above went up is already past the
+        // pseudonymisation check and may still be committing; the erasing node sweeps
+        // the stored rows as soon as every node replied, so replying before that batch
+        // is in the store would let it land raw after the sweep.
+        awaitInFlightFlush();
         return 0;
+    }
+
+    /**
+     * Returns once a flush that is running has finished. {@link #flush} is
+     * synchronized, and every flush that starts after the user was marked
+     * pseudonymises their entries itself.
+     */
+    synchronized void awaitInFlightFlush() {
+        // intentionally empty: acquiring the monitor is the wait
     }
 
     /** An erasure started on another node; see {@link #markUserErased}. */

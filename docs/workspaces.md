@@ -343,7 +343,9 @@ Three properties are worth knowing:
   its streaming twin, a rerun, MCP `talk_to_agent` and `chat_with_agent` on an
   existing conversation. Revoking a share or making an agent private stops the
   owner's *next message*, not only their next conversation. (Up to 6.5 only the
-  start was checked.)
+  start was checked.) A HITL resume runs the rest of a turn, so an owner who
+  decides their own pause (REST `resume`, MCP `resume_conversation`) passes the
+  same check; admins and `eddi-approver`s decide by their role.
 - **Schedules and group membership** are checked when they are *authored*:
   creating or re-pointing one at an agent requires `USE` on that agent — for a
   group, on every member, the moderator and the facilitator, and again when a

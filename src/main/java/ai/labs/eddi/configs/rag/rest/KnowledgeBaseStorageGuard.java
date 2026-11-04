@@ -115,13 +115,17 @@ public class KnowledgeBaseStorageGuard {
         // its name maps. That location changes - unchecked - when it is renamed, and
         // also when an explicit location is dropped: renaming while keeping the
         // explicit location and then removing it reached the default store of a
-        // different name. Either way it moves to a store of its own, keyed by its id.
+        // different name. So does a change of backend or of the server it connects
+        // to: the same name maps to that backend's or server's default store, which
+        // can be another 6.5.0 knowledge base of the same name there. Any of these
+        // moves it to a store of its own, keyed by its id.
         boolean losesExplicitLocation = previous != null && KnowledgeBaseStorage.explicitPhysicalName(previous) != null;
         if (previous != null && !KnowledgeBaseStorage.usesIdNamespace(updated)
-                && (!Objects.equals(previous.getName(), updated.getName()) || losesExplicitLocation)
+                && (!Objects.equals(previous.getName(), updated.getName()) || losesExplicitLocation
+                        || KnowledgeBaseStorage.movesServer(previous, updated))
                 && KnowledgeBaseStorage.explicitPhysicalName(updated) == null) {
-            LOGGER.warnf("Knowledge base %s (was '%s', now '%s') changed its name or dropped its explicit location while still in "
-                    + "the 6.5.0 name layout. It now uses "
+            LOGGER.warnf("Knowledge base %s (was '%s', now '%s') changed its name, backend or server, or dropped its explicit location,"
+                    + " while still in the 6.5.0 name layout. It now uses "
                     + "storeNamespace '%s': a store of its own, keyed by its id, rather than the one named after '%s'.",
                     LogSanitizer.sanitize(id), LogSanitizer.sanitize(previous.getName()), LogSanitizer.sanitize(updated.getName()),
                     KnowledgeBaseStorage.NAMESPACE_ID, LogSanitizer.sanitize(updated.getName()));

@@ -567,6 +567,13 @@ A **snippet or connection file** that is not valid JSON is *not* fatal: like any
 connection the importer cannot use, it is skipped with a warning in the log, and the rest of the
 archive is imported.
 
+**One document is one resource.** An archive file is named by resource id, so every reference
+to that id — the same workflow named twice in the agent, two spellings of one URI, or several
+versions of one extension — reads the same file, and the import (and a preview or sync) parses
+and writes it once; every reference then names the one resource written for it. A workflow
+directory holding **more than one** workflow document is a bad archive (`400`): only one of them
+could ever be the workflow the agent names.
+
 ## Live Sync (Without ZIP)
 
 If both EDDI instances are reachable over HTTP, you can skip the ZIP step entirely and sync directly between instances. See the **[Agent Sync Guide](agent-sync-guide.md)** for the full workflow.
