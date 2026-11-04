@@ -226,14 +226,26 @@ export function withType(g: GuardrailConfig, type: string): GuardrailConfig {
 }
 
 /** `pii-redaction.patterns` as the set of enabled kinds; absent means every kind. */
+/**
+ * Entity names the backend accepts in `patterns` as aliases of a kind
+ * (`PiiRedactionGuardrail.entityOf`) whose lower-case form is not the kind itself.
+ */
+const PII_ENTITY_ALIASES: Record<string, string> = {
+  credit_card: "creditcard",
+  us_ssn: "ssn",
+};
+
 export function enabledPiiKinds(g: GuardrailConfig): string[] {
   const raw = g.parameters?.patterns;
   if (!raw) return [...PII_KINDS];
-  const wanted = raw.split(",").map((s) => s.trim().toLowerCase());
+  const wanted = raw.split(",").map((s) => {
+    const name = s.trim().toLowerCase();
+    return PII_ENTITY_ALIASES[name] ?? name;
+  });
   return PII_KINDS.filter((k) => wanted.includes(k));
 }
 
-/** Writes the kinds back; all four is the default, so it is stored as absent. */
+/** Writes the kinds back; all of them is the default, so it is stored as absent. */
 export function withPiiKinds(g: GuardrailConfig, kinds: string[]): GuardrailConfig {
   const ordered = PII_KINDS.filter((k) => kinds.includes(k));
   return withParameter(g, "patterns", ordered.length === PII_KINDS.length ? "" : ordered.join(","));

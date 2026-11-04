@@ -15,7 +15,7 @@ The first piece of the reversible pseudonymization work: a detector layer that t
   - The kinds run one after another, structured identifiers first, so the phone pattern no longer takes an IBAN's digit groups (before, `DE89 3704 0044 0532…` came out as a partial `[REDACTED:phone]`).
   - The four original kinds keep their names, their `{kind}` value and their reason, and their output is byte-identical. `PiiRedactionGuardrailTest` checks this against `LegacyPiiRedaction`, a frozen copy of the old rewrite, over a fixed corpus and 3,000 random fragment combinations.
   - An unknown kind in `patterns` is now a deploy warning (it used to select nothing, silently).
-- **Manager:** the PII kind checkboxes list all nine kinds, with labels in all 11 locales.
+- **Manager:** the PII kind checkboxes list all nine kinds, with labels in all 11 locales. A stored `patterns` that uses the entity-name aliases `CREDIT_CARD` or `US_SSN` ticks the right boxes.
 - **Operator:** the system prompt lists the new kinds; the operator revision is bumped.
 - **Docs:** [`langchain.md`](../langchain.md) (the `pii-redaction` row) and [`security.md`](../security.md).
 
