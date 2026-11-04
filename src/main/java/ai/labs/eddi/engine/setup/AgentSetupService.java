@@ -857,7 +857,7 @@ public class AgentSetupService {
      * of the right store; the reference a vaulting would produce, or a placeholder
      * for a plaintext). No write is guarded by a flag at its call site.
      */
-    abstract class ResourceWriter {
+    abstract static class ResourceWriter {
         abstract String create(String storePrefix, Supplier<Response> creator);
 
         abstract void describe(String location, String name);
