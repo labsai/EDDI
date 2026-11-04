@@ -88,16 +88,19 @@ public record RescueOptions(String wrapField, Map<String, Object> wrapDefaults, 
 
     /** As {@link #of(Task)} from the pieces. */
     public static RescueOptions of(ResponseValidation validation, Map<String, String> fieldAliases) {
-        boolean active = validation != null && validation.isEnabled();
-        String onInvalid = active ? validation.getOnInvalidJson() : null;
-        boolean wrap = WRAP.equalsIgnoreCase(onInvalid) && validation.getWrapField() != null && !validation.getWrapField().isBlank();
-        boolean doubleEscape = wrap || "retry".equalsIgnoreCase(onInvalid);
         Map<String, String> aliases = fieldAliases == null ? Map.of() : Map.copyOf(fieldAliases);
-        if (!wrap && !doubleEscape && aliases.isEmpty()) {
+        if (validation == null || !validation.isEnabled()) {
+            return aliases.isEmpty() ? NONE : new RescueOptions(null, null, DEFAULT_WRAP_MAX_CHARS, false, aliases);
+        }
+        String onInvalid = validation.getOnInvalidJson();
+        String wrapField = validation.getWrapField();
+        boolean wrap = WRAP.equalsIgnoreCase(onInvalid) && wrapField != null && !wrapField.isBlank();
+        boolean doubleEscape = wrap || "retry".equalsIgnoreCase(onInvalid);
+        if (!doubleEscape && aliases.isEmpty()) {
             return NONE;
         }
-        return new RescueOptions(wrap ? validation.getWrapField() : null, wrap ? validation.getWrapDefaults() : null,
-                active ? validation.getWrapMaxChars() : DEFAULT_WRAP_MAX_CHARS, doubleEscape, aliases);
+        return new RescueOptions(wrap ? wrapField : null, wrap ? validation.getWrapDefaults() : null, validation.getWrapMaxChars(), doubleEscape,
+                aliases);
     }
 
     /**
