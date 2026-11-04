@@ -17,6 +17,7 @@
 | Vite           | 8       | Build tool + dev server        |
 | Vitest         | 5.x     | Unit testing (jsdom)           |
 | react-markdown | 10.x    | Markdown rendering in messages |
+| i18next        | 26      | Widget text in 11 locales, set up by `@eddi/ui` |
 
 ### Ecosystem
 
@@ -53,23 +54,45 @@ src/
 │   ├── Indicators.tsx      # Typing (dots), Thinking (brain), Escalating (cascade), Using {tool}
 │   └── ScrollToBottom.tsx  # Floating scroll button
 ├── hooks/
-│   ├── useTheme.ts         # Dark/light/system theme with localStorage
+│   ├── useTheme.ts         # Dark/light/system theme; storage and data-theme marking from @eddi/ui
 │   ├── useHitlPolling.ts   # Polls approval-status while a turn is paused
 │   └── useRatings.ts       # Restore, optimistic rate/withdraw, when the rating card offers itself
 ├── store/
 │   └── chat-store.tsx  # Context + useReducer state management
 ├── styles/
-│   ├── variables.css   # CSS custom properties (dark/light tokens)
+│   ├── variables.css   # The shared tokens' widget values, and the --chat-* aliases of them
 │   └── chat.css        # All component styles (BEM naming)
 ├── test-utils/
 │   └── sse.ts          # SSE stream + status-aware fetch harnesses
-├── i18n.ts             # String tables (en/de/fr/es), t(), initLocale() — ALL widget-owned text goes through t()
+├── i18n/
+│   ├── index.ts        # t(), initLocale() on i18next via @eddi/ui — ALL widget-owned text goes through t()
+│   └── locales/        # en.json (bundled) + 10 lazily loaded locales, the Manager's eleven
 ├── ime.ts              # isImeComposing(): Enter that confirms an IME candidate is not "send"
 ├── location.ts         # The three URL shapes (parseChatPath), useChatRoute() — there is no router
 ├── turn-notices.ts     # skippedTurnMessage() — the widget's words for a dropped turn
 ├── main.tsx            # Entry point
 └── types.ts            # Shared TypeScript types
 ```
+
+### What comes from `@eddi/ui`
+
+[`ui/packages/ui`](../packages/ui/README.md) holds the foundations both apps share: the
+design-token names, the theme helpers, and the i18next setup. The widget uses three of them:
+
+- **i18n.** `src/i18n` sets up an i18next instance through `setupI18n`: English bundled, the
+  other ten locales one chunk each, only the active one loaded, `dir`/`lang` on `<html>` from
+  the RESOLVED language, `{{productName}}` from the brand. There is no react-i18next — the
+  locale is chosen once before the first render (`main.tsx` awaits `initLocale`), and `t()`
+  works outside React. Strings use i18next's `{{name}}` placeholders and flat keys
+  (`keySeparator: false`).
+- **Theme.** `useTheme` uses the package's storage, resolution and `data-theme` helpers.
+- **Tokens.** `variables.css` gives the shared tokens the widget's own values and declares the
+  `--chat-*` names as documented aliases of them (`CHAT_TOKEN_ALIASES`). The names and the
+  URL colour parameters are a public contract; `src/styles/chat-aliases.test.ts` pins both.
+
+Per-locale script fonts (`@eddi/ui/fonts`) are the Manager's: the widget keeps the Noto Sans
+faces `chat.html` declares and does not import that entry, which would add the font chunks
+to `dist/`.
 
 ### Where the API and SSE code lives: `@eddi/core`
 
@@ -93,10 +116,10 @@ through `t()`) stays here.
 
 ## 3. Key Conventions
 
-1. **CSS** — BEM naming: `.chat-header__logo`, `.message--user`, `.quick-replies__btn`. No Tailwind.
+1. **CSS** — BEM naming: `.chat-header__logo`, `.message--user`, `.quick-replies__btn`. No Tailwind yet: the plan (D3) moves the widget onto Tailwind with the shared components (phase 3b). Colours come from the `--chat-*` variables, which alias the shared tokens — add a colour as a token value plus an alias where it has a shared meaning, and never give an aliased name a literal in a theme block (the alias would lose).
 2. **State** — `ChatProvider` → `useChatState()` / `useChatDispatch()`. No prop drilling.
 3. **API** — `@eddi/core` (see above). SSE streaming uses its `AsyncGenerator` (`sendMessageStreaming`). Tests that need the network replace `globalThis.fetch` (`src/test-utils/sse.ts`); a test that mocks an API function mocks `@eddi/core` with `importActual` and overrides only that function (see `ChatInput.test.tsx`).
-4. **Testing** — Wrap components in `<ChatProvider>`, and anything that reads the route in `<ChatLocationProvider initialPath="/chat/production/agent-1?…">` (the in-memory location that replaced `MemoryRouter`). Mock `window.matchMedia` in `test-setup.ts`.
+4. **Testing** — A test that switches language awaits it (`await setLocale("de")`, and `await setLocale("en")` in `afterEach`): a locale other than English is a chunk. Wrap components in `<ChatProvider>`, and anything that reads the route in `<ChatLocationProvider initialPath="/chat/production/agent-1?…">` (the in-memory location that replaced `MemoryRouter`). Mock `window.matchMedia` in `test-setup.ts`.
 4a. **No router** — react-router was 92 KB of first load for three path shapes. `src/location.ts` parses `/chat/managed/:intent/:userId`, `/chat/:environment/:agentId/:userId` and `/chat/:environment/:agentId` with react-router's matching rules (case-insensitive literals, `managed` beats `:environment`, trailing slashes ignored, params decoded); `location.test.tsx` pins them — these URLs are a public contract for embedders. Do not add a router back for a fourth shape; extend `parseChatPath`.
 4b. **Keep heavy renderers lazy** — KaTeX, highlight.js and the raw-HTML parser (`rehype-raw` → parse5) load only when a message needs them (`markdown-plugins.ts`); `npm run budget` fails CI when the first load grows past `ui/bundle-budget.json`. Raw HTML is still rendered (sanitised) for every agent until the per-agent `rawHtml` setting exists (frontend unification plan, D9).
 5. **Demo mode** — `/chat/demo/showcase` uses `demo-api.ts`. Check with `isDemoMode()`.
@@ -140,5 +163,7 @@ no CI at all), then builds and runs `npm run budget`. Run them all before pushin
 ### DO NOT
 
 - Add external state libraries (zustand, redux) — use Context + useReducer
-- Add CSS frameworks — use CSS custom properties
+- Add CSS frameworks in this phase — use the CSS custom properties (Tailwind arrives with the shared components, plan D3)
+- Add a string to only some locales — `en.json` and all ten others change together
+- Import `@eddi/ui/fonts` — it adds every script font chunk to the widget's `dist/`
 - Duplicate logic from `demo-api.ts` into components

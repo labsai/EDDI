@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { SecurityIdentitySection } from "@/components/editors/agent-config-sections";
 import type { Agent } from "@/lib/api/agents";
 import { server } from "@/test/mocks/server";

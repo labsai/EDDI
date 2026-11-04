@@ -1,7 +1,7 @@
 import { render, type RenderOptions } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import type { ReactElement } from "react";
 import { GrantRequiredDialogHost } from "@/components/secrets/grant-required-dialog";
 

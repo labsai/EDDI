@@ -5,7 +5,7 @@ import {
   SquareKanban, ClipboardList, Plus, Trash2, RefreshCw, Users, DollarSign, CheckCircle2, Clock,
 } from "lucide-react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/shared/error-state";
 import { BackLink } from "@/components/shared/back-link";

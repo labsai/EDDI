@@ -10,7 +10,7 @@ import {
   Sparkles,
   CheckCircle2,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { ResourceTypeBadge } from "@/components/shared/resource-type-badge";
 import { ActionBadge } from "@/components/shared/action-badge";

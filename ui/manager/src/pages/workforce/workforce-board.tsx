@@ -32,7 +32,7 @@ import { DecisionRecordCard } from "@/components/groups/decision-record-card";
 import { hasDisplayableDecision } from "@/lib/group-config";
 import { HumanTurnBanner } from "@/components/groups/human-turn-banner";
 import { TaskBoard, PersistedTaskBoard } from "@/components/groups/task-board";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";

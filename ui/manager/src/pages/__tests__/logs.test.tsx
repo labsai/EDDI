@@ -6,7 +6,7 @@ import { MemoryRouter, useLocation, useNavigate, type NavigateFunction } from "r
 function LocationProbe() {
   return <span data-testid="loc">{useLocation().search}</span>;
 }
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { LogsPage } from "@/pages/logs";
 import { useLogStream } from "@/hooks/use-logs";
 import userEvent from "@testing-library/user-event";

@@ -166,6 +166,8 @@ class AutoApproveCopilotPolicyTest {
                 "ui/manager/vitest.config.ts", "ui/chat/vite.config.ts", "ui/manager/playwright.config.ts",
                 "ui/chat/eslint.config.js", "ui/manager/tsconfig.app.json", "ui/manager/stryker.config.json",
                 "ui/packages/core/vitest.config.ts", "ui/packages/core/eslint.config.js", "ui/packages/core/tsconfig.json",
+                "ui/packages/ui/package.json", "ui/packages/ui/vitest.config.ts", "ui/packages/ui/eslint.config.js",
+                "ui/packages/ui/tsconfig.json",
                 ".dockerignore", "src/main/docker/Dockerfile.demo.dockerignore",
                 // The security-critical code: the guards, the vault, the outbound HTTP
                 // client, stored connections and the shipped defaults.
@@ -185,7 +187,8 @@ class AutoApproveCopilotPolicyTest {
                 "ui/manager/src/App.tsx", "ui/manager/src/lib/package.json", "ui/chat/src/main.tsx",
                 "scriptsx/run.sh", "src/test/java/ai/labs/eddi/FooTest.java",
                 "ui/manager/src/vite-env.d.ts", "ui/manager/src/lib/vitest.config.ts",
-                "ui/packages/README.md", "ui/packages/core/src/http.ts");
+                "ui/packages/README.md", "ui/packages/core/src/http.ts", "ui/packages/ui/src/index.ts",
+                "ui/packages/ui/src/styles/theme.css");
 
         List<String> inputs = new ArrayList<>(protectedPaths);
         inputs.addAll(ordinaryPaths);

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@eddi/core": "*",
+    "@eddi/ui": "*",
     "katex": "^0.19.1",
     "lucide-react": "^1.59.0",
     "react": "^19.3.1",

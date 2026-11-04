@@ -36,7 +36,7 @@ import { DiscussionActions } from "@/components/groups/discussion-actions";
 import { GroupConfigPanel } from "@/components/groups/group-config-panel";
 import { hasDisplayableDecision } from "@/lib/group-config";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";

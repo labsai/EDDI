@@ -8,7 +8,7 @@ import { cn, hashColor, formatRelativeTime } from "@/lib/utils";
 import { useGroupConversation } from "@/hooks/use-groups";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isAgentFailurePlaceholder, parseTranscriptContent, truncateContent } from "@/components/groups/group-utils";
 import { downloadFile, generateMarkdown } from "@/lib/group-transcript-export";

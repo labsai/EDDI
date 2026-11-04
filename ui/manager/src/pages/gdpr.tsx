@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   ShieldUser,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import {
   useDeleteUserData,

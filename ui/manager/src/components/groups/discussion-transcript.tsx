@@ -19,7 +19,7 @@ import type { HitlVerdict } from "@/lib/api/hitl";
 import type { GroupStreamState } from "@/hooks/use-group-discussion-stream";
 import { cn, formatUsd } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { styleInfo as localizedStyleInfo } from "@/lib/discussion-styles";
 import { STYLE_THEME } from "./discussion-style-theme";

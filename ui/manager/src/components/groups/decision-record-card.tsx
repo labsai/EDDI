@@ -6,7 +6,7 @@ import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, Gavel, MessageSquareWarning, Scale } from "lucide-react";
 import { cn, hashColor, getInitials } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { DecisionRecord, DecisionType } from "@/lib/api/groups";
 import { describeDecision } from "@/lib/group-decision";
 import { formatMarkdownText } from "./group-utils";

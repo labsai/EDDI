@@ -3,7 +3,7 @@
  *
  * ## Why
  *
- * `main.tsx` used to import all eight Noto families. The font FILES were
+ * The Manager's `main.tsx` used to import all eight Noto families. The font FILES were
  * already lazy (each `@font-face` carries a `unicode-range`, so the browser only
  * fetches a file when a glyph in its range is drawn), but the DECLARATIONS were
  * not: 476 `@font-face` rules, about 388 KB of the 606 KB main stylesheet, went
@@ -17,7 +17,7 @@
  * ## Text in another script
  *
  * A Latin UI can still show Japanese, Arabic or Thai: an agent reply, a user's
- * name, a conversation title. `--font-sans` in `index.css` still names every
+ * name, a conversation title. `--font-sans` in `styles/theme.css` still names every
  * Noto family, so where a family's CSS has not been loaded the browser falls
  * through to `system-ui` / `sans-serif`, which on every desktop and mobile OS
  * has a font for these scripts. It renders correctly, in the system's face
@@ -32,7 +32,7 @@ export type ScriptFamily = "arabic" | "thai" | "devanagari" | "jp" | "kr" | "sc"
 
 /**
  * One loader per family. An explicit map rather than a template-literal import,
- * for the same reason as `LOCALE_LOADERS` in `config.ts`: the chunk set is
+ * for the same reason as the locale loader map (`setup.ts`): the chunk set is
  * exactly what is named here.
  */
 export const FONT_LOADERS: Record<ScriptFamily, () => Promise<unknown>> = {
@@ -51,7 +51,7 @@ export const FONT_LOADERS: Record<ScriptFamily, () => Promise<unknown>> = {
  * Takes a BCP 47 tag rather than a bare language because Chinese depends on the
  * rest of it: Taiwan, Hong Kong and Macau, and an explicit `Hant` script, use
  * Traditional characters; everything else (`zh`, `zh-CN`, `zh-SG`, `zh-Hans`)
- * uses Simplified. The Manager ships one `zh` locale, but the detected tag —
+ * uses Simplified. The apps ship one `zh` locale, but the detected tag —
  * which `i18n.language` keeps — still says which glyphs the reader expects.
  */
 export function scriptFamilyFor(tag: string | undefined | null): ScriptFamily | null {
@@ -105,14 +105,21 @@ export function ensureLocaleFont(
 
 /**
  * Load the current language's family now and on every language change.
- * Returns the first load, which `main.tsx` awaits next to `i18nReady` so a
- * Japanese user's first paint is already in Noto Sans JP.
+ * Returns the first load, which the Manager's `main.tsx` awaits next to
+ * `i18nReady` so a Japanese user's first paint is already in Noto Sans JP.
+ *
+ * Opt-in, and separate from `setupI18n`: the families are an app's choice (the
+ * Manager loads them; the Chat UI keeps the fonts its page declares), and an app
+ * that never calls this never bundles a font chunk.
  */
-export function installLocaleFonts(i18n: I18n): Promise<void> {
+export function installLocaleFonts(
+  i18n: I18n,
+  loaders: Record<ScriptFamily, () => Promise<unknown>> = FONT_LOADERS,
+): Promise<void> {
   i18n.on("languageChanged", (lng: string) => {
-    void ensureLocaleFont(lng);
+    void ensureLocaleFont(lng, loaders);
   });
-  return ensureLocaleFont(i18n.language);
+  return ensureLocaleFont(i18n.language, loaders);
 }
 
 /** Test hook: forget what has been requested. */

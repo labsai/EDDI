@@ -60,7 +60,7 @@ import { PauseNotice } from "@/components/hitl/pause-notice";
 import { AgentDetailsPanel } from "@/components/workforce/agent-details-panel";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 

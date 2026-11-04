@@ -41,7 +41,7 @@ EDDI Chat UI is a standalone, themeable React chat widget that connects to any E
 - 🔧 **Fully Configurable** — Every feature togglable via URL query parameters or typed `ChatConfig`
 - 📱 **Responsive** — Mobile-first design with adaptive breakpoints
 - 🎭 **Demo Mode** — Full showcase without a running backend (`/chat/demo/showcase`)
-- 🌍 **Translated** — English, German, French and Spanish widget text, chosen by `?lang=` or the browser language (see [Language](#language))
+- 🌍 **Translated** — the widget's text in the Manager's eleven languages (English, German, French, Spanish, Arabic right to left, Chinese, Thai, Japanese, Korean, Portuguese, Hindi), chosen by `?lang=` or the browser language (see [Language](#language))
 - 📋 **Copy** — a copy button on every agent message and code block
 - 🏷️ **Agent Name Display** — Auto-fetches and shows the agent's display name from the backend
 
@@ -157,7 +157,9 @@ With authentication on, the host page hands the widget its user's access token b
 
 ### Language
 
-The widget's own text (buttons, notices, hints, screen-reader labels) is available in English, German, French and Spanish. `?lang=de` picks one; without it the browser's language list is used, falling back to English. `<html lang>` follows. What an agent says is never translated. To add a language, add a table to `src/i18n.ts`: any key you leave out shows in English.
+The widget's own text (buttons, notices, hints, screen-reader labels) is available in the eleven languages the Manager ships: English, German, French, Spanish, Arabic, Chinese, Thai, Japanese, Korean, Portuguese and Hindi. `?lang=de` picks one; without it the browser's language list is used, falling back to English. `<html lang>` and `dir` follow (`?lang=ar` lays the widget out right to left). What an agent says is never translated.
+
+The strings are i18next bundles in `src/i18n/locales/`, set up through `@eddi/ui` ([`ui/packages/ui`](../packages/ui/README.md)). English is bundled; every other language is its own small chunk, and only the one in use is loaded. A new string goes into `en.json` and all ten other files in the same change — `src/i18n/i18n.test.ts` fails on a missing key, a changed placeholder or a key the code uses that English lacks.
 
 Combine query parameters to create a minimal, focused chat experience:
 
@@ -186,6 +188,8 @@ All styles use **vanilla CSS** with **BEM naming** and **CSS custom properties**
 ```
 
 Dark/light themes are controlled by `[data-theme]` attribute — no runtime style injection.
+
+The colour variables come in two layers (`src/styles/variables.css`). The widget gives the shared design tokens of [`@eddi/ui`](../packages/ui/README.md) (`--color-background`, `--color-primary`, `--radius`, `--font-sans`, …) its own values per theme, and the `--chat-*` names the stylesheet, the colour parameters and `/branding/brand.css` use are **documented aliases** of those tokens where they share a meaning — `--chat-bg` is `var(--color-background)`, `--chat-accent` is `var(--color-primary)`, and so on (`CHAT_TOKEN_ALIASES` in `ui/packages/ui/src/chat-aliases.ts` is the table). Setting a `--chat-*` name still overrides it, which is what `?bgColor=` and the other colour parameters do. `src/styles/chat-aliases.test.ts` pins the file to the table and every name to the colour it had before the aliases.
 
 ### State Management
 

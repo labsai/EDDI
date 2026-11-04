@@ -7,7 +7,7 @@ import {
   Lock,
   X,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import type { GroupConversationAction, GroupMember } from "@/lib/api/groups";
 

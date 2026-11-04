@@ -4,7 +4,7 @@ import { GroupSaveProblems } from "@/components/groups/group-save-problems";
 import type { GroupSaveProblem } from "@/lib/group-config";
 import { Check, Clock, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
 import { type DiscussionStyle } from "@/lib/api/groups";

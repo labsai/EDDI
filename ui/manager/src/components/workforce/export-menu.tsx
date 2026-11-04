@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Download, FileText, Braces, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import {
   DropdownMenu,
   DropdownMenuContent,

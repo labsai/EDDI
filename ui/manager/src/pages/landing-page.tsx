@@ -7,7 +7,7 @@ import {
   Briefcase,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/components/layout/theme-provider";
+import { useTheme } from "@eddi/ui";
 import { BrandIcon } from "@/components/layout/brand-logo";
 
 // ─── Constants ───────────────────────────────────────────────────

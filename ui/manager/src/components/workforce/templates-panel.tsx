@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { useTemplates, type DiscussionTemplate } from "@/hooks/use-templates";
 import { styleLabel } from "@/lib/discussion-styles";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 
 interface TemplatesPanelProps {

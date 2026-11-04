@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { AlertTriangle, Bot, Globe, Info, Loader2, Server, X } from "lucide-react";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { AgentPicker } from "@/components/shared/agent-picker";

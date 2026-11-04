@@ -16,7 +16,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useEnrichedGroupDescriptors, useDeleteGroup } from "@/hooks/use-groups";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertDialog } from "@/components/ui/alert-dialog";
 import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";

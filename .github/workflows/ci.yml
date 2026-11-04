@@ -1706,6 +1706,21 @@ jobs:
         working-directory: ui/packages/core
         run: npm test
 
+      # @eddi/ui (ui/packages/ui): tokens, theme, i18n setup and primitives, also
+      # compiled into both apps as source. Its lint holds the boundaries that keep
+      # it free of API calls and app imports.
+      - name: "@eddi/ui: type check"
+        working-directory: ui/packages/ui
+        run: npm run typecheck
+
+      - name: "@eddi/ui: lint"
+        working-directory: ui/packages/ui
+        run: npm run lint
+
+      - name: "@eddi/ui: unit tests"
+        working-directory: ui/packages/ui
+        run: npm test
+
       - name: Type check
         run: npm run typecheck
 

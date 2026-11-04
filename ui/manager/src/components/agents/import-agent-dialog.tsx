@@ -11,7 +11,7 @@ import {
   usePreviewSync,
 } from "@/hooks/use-backup";
 import type { ImportPreview, DocumentDescriptor, SyncExecution } from "@/lib/api/backup";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useAllAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import { SyncConfigPanel } from "@/components/agents/sync-config-panel";
 import { parseResourceUri } from "@/lib/api/backup";

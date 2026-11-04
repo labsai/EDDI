@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { ChevronDown, ChevronRight, FlaskConical, Loader2, Play } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useResourceDescriptors } from "@/hooks/use-resources";
 import { useAgentTestRuns, useStartAgentTestRun } from "@/hooks/use-agent-tests";
 import { parseResourceUri } from "@/lib/api/resources";

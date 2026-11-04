@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { StepDots } from "@/components/shared/step-dots";
 import { ConnectionCredentialFields } from "@/components/connections/connection-credential-fields";

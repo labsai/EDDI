@@ -4,7 +4,7 @@ import { useQueries, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Copy, KeyRound, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { AccessibleDialog } from "@/components/ui/accessible-dialog";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useHasRole } from "@/hooks/use-auth";
 import { useAgentDescriptors, groupAgentsByName } from "@/hooks/use-agents";
 import {

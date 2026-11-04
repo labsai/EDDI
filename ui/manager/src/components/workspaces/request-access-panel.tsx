@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { KeyRound, MessageSquare, Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Input } from "@/components/ui/input";
 import { getErrorMessage } from "@/lib/api-client";
 import { getAgentProfile } from "@/lib/api/agents";

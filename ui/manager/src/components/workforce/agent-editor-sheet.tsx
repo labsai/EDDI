@@ -11,7 +11,7 @@ import type { Agent, Capability, AgentDescriptor } from "@/lib/api/agents";
 import { parseResourceUri } from "@/lib/api/agents";
 import { useAgentPrompt, useUpdateAgentPrompt } from "@/hooks/use-agent-prompt";
 import { AdvisorAvatar } from "@/components/workforce/advisor-avatar";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";

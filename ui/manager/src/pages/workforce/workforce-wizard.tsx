@@ -6,7 +6,7 @@ import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getErrorMessage } from "@/lib/api-client";
 import { groupSaveProblems } from "@/lib/group-config";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { useSetupAgent } from "@/hooks/use-agent-setup";
 import { useDeployWithGrants } from "@/hooks/use-deploy-with-grants";
 import { resolveSetupVersion } from "@/lib/api/agent-setup";
