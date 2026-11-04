@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "budget": "node ../scripts/check-bundle-budget.mjs chat",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
