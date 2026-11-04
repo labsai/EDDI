@@ -706,6 +706,22 @@ class VaultGrantCheckerTest {
         }
 
         @Test
+        @DisplayName("a malformed opener of one namespace cannot swallow a reference of the other")
+        void malformedOpenerHidesNothing() throws Exception {
+            // One scanner for ${vault: and ${vars: read each of these as ONE reference
+            // with a bogus tenant ("a${vault:t.finance…"), while the runtime — vault and
+            // variables each resolved by their own rules — resolved the inner one.
+            agentWhoseCallCarries("${vars:a${vault:t.finance.9e8d7c6b/key}&y=${vault:b${vars:u.dave.1f2e3d4c/model}"
+                    + "&z=${vars:c${vars:u.erin.5a6b7c8d/region}");
+
+            Set<String> tenants = checker.referencedTenants(AGENT_ID, 1);
+
+            assertTrue(tenants.contains("t.finance.9e8d7c6b"), "the vault reference inside a malformed ${vars: opener: " + tenants);
+            assertTrue(tenants.contains("u.dave.1f2e3d4c"), "the variable inside a malformed ${vault: opener: " + tenants);
+            assertTrue(tenants.contains("u.erin.5a6b7c8d"), "the variable inside a malformed ${vars: opener: " + tenants);
+        }
+
+        @Test
         @DisplayName("sees a secret hidden behind a variable, as the runtime does")
         void seesThroughVariables() throws Exception {
             agentWhoseCallCarries("${vars:u.carol.0a0b0c0d/token}");

@@ -924,12 +924,13 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `maxToolCallsPerTurn`      | int      | Most tool calls executed across the whole turn (all iterations, including those a HITL resume continues). Refused the same way. `-1`/`0` disables | 100 |
 | `toolRepeatGuard` | object | Refuses a tool call that already failed identically with nothing succeeding since, instead of re-running it. **On by default**; `{"enabled": false}` turns it off. See [Repeated failing tool calls](#repeated-failing-tool-calls) | enabled |
 | `maxToolContextTokens`     | int      | Aggregate token ceiling on the **in-turn** tool-call context (tool requests + tool results across all loop iterations). The oldest complete tool exchange is evicted when exceeded. `-1`/`0` disables. See [In-Turn Tool Context Budget](#in-turn-tool-context-budget). | 60000 |
+| `toolResponseLimits`       | object   | Character limit on each single tool result, and what to do with a result over it. See [Tool Response Limits](#tool-response-limits) | (none) |
 | **Cost & Performance**     |          |                                                  |                        |
 | `maxBudgetPerConversation` | number   | Ceiling on accumulated **tool** cost per conversation, in USD. Enforced unless `enforceBudget` opts out | (unlimited) |
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
-| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment | (unpriced — $0) |
+| `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment. Unset prices, and cache and long-context prices (`pricing`), come from the [price catalog](model-pricing.md) | (catalog, else unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
 | `toolCacheScopes`          | map      | Per-tool cache partition: `user`/`conversation`/`global`. Naming an HTTP, MCP or A2A tool here is also what opts it into caching | (all `user`)   |
 | `defaultToolCacheScope`    | string   | Cache partition for tools without an override    | `user`                 |
@@ -1141,7 +1142,7 @@ The classifier is called the way an LLM task calls its model: `provider` is an E
 | `timeoutMs` | How long the call may take; the provider client is built with the same timeout. The turn's [deadline](#turn-deadline) wins when it is closer, and a turn already out of time does not call the classifier at all. Capped at 60000. | `3000` |
 | `failMode` | `closed` or `open` — what *could not decide* does; see below. | `closed` for `block`/`reprompt` |
 | `includeRetrievedContext` | Output phase: make this turn's retrieved RAG context (vector store and `httpCallRag`) available to the template as `{context}`, for a groundedness check. Without a `promptTemplate` it has no effect. | `false` |
-| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the classifier reports. | unpriced (free) |
+| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the classifier reports; unset, the [price catalog](model-pricing.md) applies. | catalog, else unpriced (free) |
 
 **Template data, never template source.** `promptTemplate` is your configuration. The text being screened reaches it only as data — `{input}` (the user's message; in the output phase, the user message the model answered), `{output}` (the answer, output phase), `{context}` and `{risk}` — so a user who types `{risk}` or `{#for …}` sends exactly those characters to the classifier; they are never evaluated.
 
@@ -1243,7 +1244,7 @@ The judge is called exactly like a [`classifier`](#the-classifier-type-a-safety-
 | `timeoutMs` | How long the call may take; the provider client is built with the same timeout. Capped at 60000; the turn's [deadline](#turn-deadline) wins when it is closer. | `5000` |
 | `failMode` | `closed` or `open` — what *could not decide* does. | `closed` for `block`/`reprompt` |
 | `jsonResponseFormat` | `on`, `off` or `auto`: whether the request asks the provider for JSON. `auto` follows the same provider matrix as a task's [`jsonResponseFormat`](#structured-output-json-mode); `on` forces it for a provider or gateway the matrix does not know. | `auto` |
-| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the judge reports. A judge without prices is logged at deploy time: its calls would be invisible to cost ceilings. | unpriced (free) |
+| `inputPricePer1M`, `outputPricePer1M` | Dollar price per million tokens, applied to the token usage the judge reports; unset, the [price catalog](model-pricing.md) applies. A judge without prices is logged at deploy time: its calls would be invisible to cost ceilings. | catalog, else unpriced (free) |
 
 **The answer format is EDDI's, not yours.** After your rendered template EDDI appends a fixed instruction that lists the declared codes (with their fix texts, so the judge knows what each one means) and asks for exactly `{"issues": ["CODE", ...]}` — an empty list when nothing applies. The request asks for JSON where the provider takes it per request, with the codes as an `enum` where the provider enforces a schema (`openai`, `azure-openai`, `mistral`, `gemini`); nothing is baked into the cached model. The reply is read tolerantly — a Markdown code fence or prose around the object is fine, and a code is matched case-insensitively.
 
@@ -1708,7 +1709,8 @@ failure is attempted up to 3 times before the cascade (if any) escalates. To tur
     "backoffMultiplier": 2.0,
     "maxBackoffDelayMs": 10000,
     "honorRetryAfter": true,
-    "maxRetryAfterMs": 10000
+    "maxRetryAfterMs": 10000,
+    "jitterRatio": 0.2
   }
 }
 ```
@@ -1721,6 +1723,7 @@ failure is attempted up to 3 times before the cascade (if any) escalates. To tur
 | `maxBackoffDelayMs`  | long    | Ceiling on any single delay                                                                  | 10000   |
 | `honorRetryAfter`    | boolean | Sleep the delay the provider asked for (when the error carries one) instead of the backoff   | true    |
 | `maxRetryAfterMs`    | long    | Longest provider-requested wait accepted; a longer request stops retrying **without sleeping** | 10000   |
+| `jitterRatio`        | double  | Shortens each backoff by a random share of up to this fraction, so conversations that failed together do not all retry at the same moment. Only ever shortens, so the ceilings below still hold; a provider-requested wait is never shortened. `0` turns it off; clamped to `[0, 1]` | 0.2     |
 
 The engine clamps these so a config cannot pin a pipeline thread: at most 10 attempts, at most
 30 seconds for one backoff (and for `maxRetryAfterMs`), and at most 60 seconds of backoff in total
@@ -1881,6 +1884,7 @@ back into the full text through the `conversationRecall` built-in tool.
 | `recentWindowSteps`            | int     | Conversation steps kept verbatim alongside the summary. Everything older is covered by it        | 5       |
 | `maxRecallTurns`               | int     | Maximum verbatim turns returned per `conversationRecall` invocation                              | 20      |
 | `maxTurnsPerUpdate`            | int     | Most turns folded into the summary by one update. A backlog (summary enabled late, or a summarizer outage) is caught up over several turns instead of one request that outgrows the summarizer's context | 20      |
+| `summarizationPrompt`          | string  | Replaces the built-in summarizer instructions entirely. The built-in prompt asks for goals, decisions and their reasons, corrections and commitments, and tells the model to copy every opaque identifier (IDs, UUIDs, hashes, URLs, hostnames, IPs, ports, file names) exactly as written. A custom prompt gets none of that, so restate the identifier rule if your agent deals in order numbers, ticket ids or links | (built-in) |
 | `maxCharsPerUpdate`            | int     | Character ceiling on everything sent in one update — the previous summary, its headings and the new turns. The summary's share is reserved first; the batch of new turns is shortened turn by turn to fit the rest, and a single larger turn is cut. The summary is never cut: if it leaves the new turns less than a quarter of the budget, the update is skipped with a WARN (turns past the summary keep reaching the model verbatim) until you raise this. Lowering `maxSummaryTokens` does not help that conversation — the stored summary is not rewritten while updates are skipped — it only keeps later summaries small | 60000   |
 
 Turns are numbered by conversation step, in the summary and in `conversationRecall` alike: turn 0 is
@@ -1946,6 +1950,37 @@ set `toolResponseLimits`, or raise `maxToolContextTokens`.
 }
 ```
 
+### Tool Response Limits
+
+`toolResponseLimits` caps each **single** tool result before it reaches the model. It has no
+default: without it a result is passed through at full length.
+
+```json
+{
+  "toolResponseLimits": {
+    "defaultMaxChars": 20000,
+    "perToolLimits": { "webscraper": 8000 },
+    "truncationStrategy": "headTail"
+  }
+}
+```
+
+| Parameter            | Type   | Description                                                                 | Default    |
+| -------------------- | ------ | --------------------------------------------------------------------------- | ---------- |
+| `defaultMaxChars`    | int    | Character limit per tool result. `0` or less disables the limit             | 50000      |
+| `perToolLimits`      | object | Tool name → character limit, overriding `defaultMaxChars` for that tool     | (none)     |
+| `truncationStrategy` | string | What happens to a result over the limit, see below. Case-insensitive        | `headTail` |
+| `summarizerModel`    | string | Model for the `summarize` strategy, on the task's own provider               | (none)     |
+
+| Strategy   | Result over the limit                                                                                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `headTail` | The first 70% and the last 30% of the limit are kept, with a `[TRUNCATED: …]` note in place of the middle. The end of a result is where exit codes, error messages and totals usually are |
+| `truncate` | Only the start is kept, followed by the note. The default before 6.7; set it explicitly to keep that behaviour                                                              |
+| `paginate` | The first page is returned with a `responseId` the model pages through with `fetch_page`. Falls back to `truncate` outside a conversation or above 500,000 characters        |
+| `summarize`| A summary from `summarizerModel`, charged to the conversation. Falls back to `truncate` when no model is set, the call fails, or the summary does not fit                   |
+
+An unknown strategy name is treated as `truncate`.
+
 ---
 
 ## API Endpoints
@@ -2000,7 +2035,7 @@ Tool Call ──▶ Rate Limiter ──▶ Cache Check ──▶ Quota (toolQuot
 
 | Feature           | Description                                                            | Config Key                                                 |
 | ----------------- | ---------------------------------------------------------------------- | ---------------------------------------------------------- |
-| **Rate Limiting** | Token-bucket per tool, configurable limits (calls per minute; `0` blocks the tool, a negative limit is refused at save time — switch limiting off with `enableRateLimiting: false`) | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
+| **Rate Limiting** | Token-bucket per tool, configurable limits (calls per minute; `0` blocks the tool, a negative limit is refused at save time — switch limiting off with `enableRateLimiting: false`, which leaves the operator's deployment-wide `eddi.tools.ratelimit.global.*` limit in force) | `enableRateLimiting`, `defaultRateLimit`, `toolRateLimits` |
 | **Per-subject quotas** | Caps per user (or other subject) per time window, across conversations and nodes; counts real executions only; fails closed | `toolQuotas` |
 | **Smart Caching** | Deduplicates identical tool calls, partitioned per identity, source and agent. HTTP/MCP/A2A tools only on opt-in | `enableToolCaching`, `toolCacheScopes`, `defaultToolCacheScope` |
 | **Cost Tracking** | Per-conversation tool-cost accounting, with an enforced-by-default ceiling and automatic stale-data eviction | `enableCostTracking`, `toolPricing`, `maxBudgetPerConversation`, `enforceBudget` |
@@ -2780,7 +2815,8 @@ Every `convertToObject` reply gets an outcome, recorded on the step under `llm:o
 | Outcome | Meaning |
 | --- | --- |
 | `valid` | Parsed as received (after trimming) |
-| `repaired` | Parsed only after fence stripping or extraction |
+| `repaired` | Parsed only after fence stripping, extraction, the double-escape repair or a `fieldAliases` rename |
+| `wrapped` | Not JSON, wrapped into `{ "<wrapField>": "<the text>" }` by `onInvalidJson: "wrap"` ([Rescue near-miss replies](#rescue-near-miss-replies-without-a-second-model-call)) |
 | `invalid` | Not parseable; the raw string is stored |
 | `empty` | Null or blank reply; the raw value is stored |
 | `schema_mismatch` | Parsed, but violates `responseSchema` / `nonBlankFields`; the **parsed** object is stored and the reason is under `llm:output:reason:<taskId>` |
@@ -2820,6 +2856,38 @@ Two things can leave a turn without a model answer: a `responseValidation` polic
 
 **Resume after a human-in-the-loop approval.** The resumed model phase runs under the same `onError` guard: a failure of the final answer serves the fallback instead of failing the turn (the approved tool calls already ran exactly once, so only the answer is replaced). A pause, a cancel and a refused approval still propagate. See [LLM Turn Resilience](llm-resilience.md#after-a-human-approval-resume) for what does and does not apply on resume.
 
+### Rescue near-miss replies without a second model call
+
+A tool-using agent on Gemini, Anthropic or Bedrock gets no native JSON mode (the provider rejects it together with tools), so a model that answers in prose, double-escapes its JSON, misspells a field or sends `{}` costs the user an answer the model had in fact written. Four opt-in, purely local repairs (no model call) cover those shapes. All are absent by default; a config without them behaves exactly as before.
+
+```json
+{
+  "convertToObject": "true",
+  "nonBlankFields": ["htmlResponseText"],
+  "fieldAliases": { "htmlResponseStr": "htmlResponseText" },
+  "responseValidation": {
+    "enabled": true,
+    "onInvalidJson": "wrap",
+    "wrapField": "htmlResponseText",
+    "wrapDefaults": { "quickReplies": [] },
+    "onSchemaMismatch": "retry"
+  }
+}
+```
+
+| Failure shape | Rescue |
+| --- | --- |
+| Plain HTML or text, no JSON (Chinese and other non-Latin replies, long creative replies) | `responseValidation.onInvalidJson: "wrap"` with the required `wrapField`: the trimmed text becomes `{ "<wrapField>": "<text>" }`, plus the optional `wrapDefaults` object (for example `{"quickReplies": []}`, so the client still gets a valid shape; it never overrides `wrapField`). Outcome `wrapped`. Not wrapped: text that starts with `{` or `[` (that is broken JSON, not prose) and text longer than `wrapMaxChars` (default `20000`); both stay `invalid` and `fallbackAction` applies |
+| Double-escaped JSON: `{\"htmlResponseText\": \"…` or `{"htmlResponseText": \"…` | Unescaped one level (`\"` to `"`, `\\` to `\`) and parsed again; accepted **only** if the result is a JSON object, and **never** tried on a reply that already parsed (a legitimately escaped quote inside a value is not touched). On whenever `onInvalidJson` is `wrap` or `retry`; otherwise off. Outcome `repaired` |
+| Valid JSON, wrong field name (`htmlResponseStr`) | Task field `fieldAliases` (`{"alias": "target"}`): after parsing, a top-level key in the map is renamed **when the target key is absent**; when both exist the target wins and nothing is renamed. Explicit, no fuzzy matching, independent of `responseValidation.enabled`. Outcome `repaired` |
+| Valid but empty `{}` | Not rescued locally on purpose (there is no text to keep): the recommended combination is `nonBlankFields` plus `onSchemaMismatch: "retry"`, as in the example above |
+
+`wrapField`, an alias name and every `wrapDefaults` key are **plain top-level names**; `wrap` without a `wrapField` is rejected with a 400 when the configuration is saved. A wrapped reply is checked like any parsed reply, so `nonBlankFields` and `responseSchema` still apply to it (give `wrapDefaults` every other required field). Wrapping is counted in `eddi.llm.output{outcome=wrapped}` and `eddi.llm.recovery{action=wrap, outcome=recovered, trigger=invalid_json}` and leaves one `LLM recovery … action=wrap` log line. An un-wrappable reply under `wrap` is counted as `eddi.llm.recovery{action=wrap, outcome=not_wrappable}`. `wrap` and `retry` are alternatives for `onInvalidJson` (a policy is one action); to re-ask the reply that wrap cannot rescue, use `retry` and let the double-escape repair and `fieldAliases` do the local work.
+
+The same code serves the live turn, a resume after a human approval, the format-retry runner's decision to re-ask, the circuit breaker's view of the reply and every cascade step, so a reply one of them accepts is accepted by all.
+
+**Order of recovery.** Fence strip → `\'` repair → double-escape repair → parse → extract an object out of surrounding prose → `fieldAliases` → shape validation (`responseSchema`, `nonBlankFields`) → `wrap` (only for a reply that is still not JSON) → `onInvalidJson` / `onSchemaMismatch` policy (`retry`, cascade escalation, `fallbackAction`).
+
 ### Recovery policies: retry where it helps
 
 A reply the task cannot use is usually fixed by asking again, and the model that slipped is the cheapest one to ask. `responseValidation` therefore has a `retry` action. The order of recovery is always: **the model answers, the parser repairs what it can locally (fence stripping, extracting the object from surrounding prose — free), the same model is asked again with a corrective message (up to `maxRetries`), then a cascade escalates to the next model (which gets its own repair and re-asks, see [Model Cascade](model-cascade.md#format-recovery-and-escalation)), and after the last model `fallbackAction` applies.** Without a cascade it is the same without the escalation step.
@@ -2844,7 +2912,7 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 | Field | Meaning | Default |
 | --- | --- | --- |
 | `onEmpty`, `onTruncation`, `onContentFilter` | now also accept `retry` | `warn` |
-| `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
+| `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `wrap` (with `wrapField`) wraps a plain-text reply into an object with no model call, see [Rescue near-miss replies](#rescue-near-miss-replies-without-a-second-model-call); `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
 | `onSchemaMismatch` | A reply that parses but breaks the response shape (`responseSchema` or `nonBlankFields`, see above). `retry` re-asks like `onInvalidJson`, with the violation (for example `nonBlank: $.answer` or `schema: $.answer required`) as the corrective message's `{reason}`; `ignore` and `warn` keep the parsed object; `fallback` and `error` act as usual | `ignore` |
 | `onContextTooLong` | The provider refused the prompt as too long. `retry` re-sends **once** with the history window halved (half the `maxContextTokens`, or half the `conversationHistoryLimit`; when that is unlimited, half of the conversation). The anchored first steps (`anchorFirstSteps`) are kept. Any other value lets the failure propagate as before | `error` |
 | `maxRetries` | Same-model re-asks **per model** (per cascade step), shared by every `retry` policy. Clamped to `0..3`. `0` sends no re-ask (a cascade still escalates on invalid output). A cascade step overrides it with `steps[i].maxFormatRetries`, e.g. `0` for an expensive last-resort model | `1` |
