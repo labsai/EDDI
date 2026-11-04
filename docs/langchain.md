@@ -2799,7 +2799,8 @@ Every `convertToObject` reply gets an outcome, recorded on the step under `llm:o
 | Outcome | Meaning |
 | --- | --- |
 | `valid` | Parsed as received (after trimming) |
-| `repaired` | Parsed only after fence stripping or extraction |
+| `repaired` | Parsed only after fence stripping, extraction, the double-escape repair or a `fieldAliases` rename |
+| `wrapped` | Not JSON, wrapped into `{ "<wrapField>": "<the text>" }` by `onInvalidJson: "wrap"` ([Rescue near-miss replies](#rescue-near-miss-replies-without-a-second-model-call)) |
 | `invalid` | Not parseable; the raw string is stored |
 | `empty` | Null or blank reply; the raw value is stored |
 | `schema_mismatch` | Parsed, but violates `responseSchema` / `nonBlankFields`; the **parsed** object is stored and the reason is under `llm:output:reason:<taskId>` |
@@ -2839,6 +2840,38 @@ Two things can leave a turn without a model answer: a `responseValidation` polic
 
 **Resume after a human-in-the-loop approval.** The resumed model phase runs under the same `onError` guard: a failure of the final answer serves the fallback instead of failing the turn (the approved tool calls already ran exactly once, so only the answer is replaced). A pause, a cancel and a refused approval still propagate. See [LLM Turn Resilience](llm-resilience.md#after-a-human-approval-resume) for what does and does not apply on resume.
 
+### Rescue near-miss replies without a second model call
+
+A tool-using agent on Gemini, Anthropic or Bedrock gets no native JSON mode (the provider rejects it together with tools), so a model that answers in prose, double-escapes its JSON, misspells a field or sends `{}` costs the user an answer the model had in fact written. Four opt-in, purely local repairs (no model call) cover those shapes. All are absent by default; a config without them behaves exactly as before.
+
+```json
+{
+  "convertToObject": "true",
+  "nonBlankFields": ["htmlResponseText"],
+  "fieldAliases": { "htmlResponseStr": "htmlResponseText" },
+  "responseValidation": {
+    "enabled": true,
+    "onInvalidJson": "wrap",
+    "wrapField": "htmlResponseText",
+    "wrapDefaults": { "quickReplies": [] },
+    "onSchemaMismatch": "retry"
+  }
+}
+```
+
+| Failure shape | Rescue |
+| --- | --- |
+| Plain HTML or text, no JSON (Chinese and other non-Latin replies, long creative replies) | `responseValidation.onInvalidJson: "wrap"` with the required `wrapField`: the trimmed text becomes `{ "<wrapField>": "<text>" }`, plus the optional `wrapDefaults` object (for example `{"quickReplies": []}`, so the client still gets a valid shape; it never overrides `wrapField`). Outcome `wrapped`. Not wrapped: text that starts with `{` or `[` (that is broken JSON, not prose) and text longer than `wrapMaxChars` (default `20000`); both stay `invalid` and `fallbackAction` applies |
+| Double-escaped JSON: `{\"htmlResponseText\": \"…` or `{"htmlResponseText": \"…` | Unescaped one level (`\"` to `"`, `\\` to `\`) and parsed again; accepted **only** if the result is a JSON object, and **never** tried on a reply that already parsed (a legitimately escaped quote inside a value is not touched). On whenever `onInvalidJson` is `wrap` or `retry`; otherwise off. Outcome `repaired` |
+| Valid JSON, wrong field name (`htmlResponseStr`) | Task field `fieldAliases` (`{"alias": "target"}`): after parsing, a top-level key in the map is renamed **when the target key is absent**; when both exist the target wins and nothing is renamed. Explicit, no fuzzy matching, independent of `responseValidation.enabled`. Outcome `repaired` |
+| Valid but empty `{}` | Not rescued locally on purpose (there is no text to keep): the recommended combination is `nonBlankFields` plus `onSchemaMismatch: "retry"`, as in the example above |
+
+`wrapField`, an alias name and every `wrapDefaults` key are **plain top-level names**; `wrap` without a `wrapField` is rejected with a 400 when the configuration is saved. A wrapped reply is checked like any parsed reply, so `nonBlankFields` and `responseSchema` still apply to it (give `wrapDefaults` every other required field). Wrapping is counted in `eddi.llm.output{outcome=wrapped}` and `eddi.llm.recovery{action=wrap, outcome=recovered, trigger=invalid_json}` and leaves one `LLM recovery … action=wrap` log line. An un-wrappable reply under `wrap` is counted as `eddi.llm.recovery{action=wrap, outcome=not_wrappable}`. `wrap` and `retry` are alternatives for `onInvalidJson` (a policy is one action); to re-ask the reply that wrap cannot rescue, use `retry` and let the double-escape repair and `fieldAliases` do the local work.
+
+The same code serves the live turn, a resume after a human approval, the format-retry runner's decision to re-ask, the circuit breaker's view of the reply and every cascade step, so a reply one of them accepts is accepted by all.
+
+**Order of recovery.** Fence strip → `\'` repair → double-escape repair → parse → extract an object out of surrounding prose → `fieldAliases` → shape validation (`responseSchema`, `nonBlankFields`) → `wrap` (only for a reply that is still not JSON) → `onInvalidJson` / `onSchemaMismatch` policy (`retry`, cascade escalation, `fallbackAction`).
+
 ### Recovery policies: retry where it helps
 
 A reply the task cannot use is usually fixed by asking again, and the model that slipped is the cheapest one to ask. `responseValidation` therefore has a `retry` action. The order of recovery is always: **the model answers, the parser repairs what it can locally (fence stripping, extracting the object from surrounding prose — free), the same model is asked again with a corrective message (up to `maxRetries`), then a cascade escalates to the next model (which gets its own repair and re-asks, see [Model Cascade](model-cascade.md#format-recovery-and-escalation)), and after the last model `fallbackAction` applies.** Without a cascade it is the same without the escalation step.
@@ -2863,7 +2896,7 @@ A reply the task cannot use is usually fixed by asking again, and the model that
 | Field | Meaning | Default |
 | --- | --- | --- |
 | `onEmpty`, `onTruncation`, `onContentFilter` | now also accept `retry` | `warn` |
-| `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
+| `onInvalidJson` | A `convertToObject` reply that is not valid JSON after the local repair. `retry` re-asks with the corrective message; `wrap` (with `wrapField`) wraps a plain-text reply into an object with no model call, see [Rescue near-miss replies](#rescue-near-miss-replies-without-a-second-model-call); `warn`/`fallback`/`error` act as for the other policies | `ignore` (the raw string is stored, as before) |
 | `onSchemaMismatch` | A reply that parses but breaks the response shape (`responseSchema` or `nonBlankFields`, see above). `retry` re-asks like `onInvalidJson`, with the violation (for example `nonBlank: $.answer` or `schema: $.answer required`) as the corrective message's `{reason}`; `ignore` and `warn` keep the parsed object; `fallback` and `error` act as usual | `ignore` |
 | `onContextTooLong` | The provider refused the prompt as too long. `retry` re-sends **once** with the history window halved (half the `maxContextTokens`, or half the `conversationHistoryLimit`; when that is unlimited, half of the conversation). The anchored first steps (`anchorFirstSteps`) are kept. Any other value lets the failure propagate as before | `error` |
 | `maxRetries` | Same-model re-asks **per model** (per cascade step), shared by every `retry` policy. Clamped to `0..3`. `0` sends no re-ask (a cascade still escalates on invalid output). A cascade step overrides it with `steps[i].maxFormatRetries`, e.g. `0` for an expensive last-resort model | `1` |
