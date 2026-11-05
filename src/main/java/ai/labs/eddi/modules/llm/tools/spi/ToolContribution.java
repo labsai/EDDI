@@ -49,10 +49,15 @@ import java.util.Map;
  *            (http/mcp/a2a) have no separate configuration slug and leave it
  *            empty, which the merge treats as "dispatch name is the canonical
  *            name".
+ * @param toolGroups
+ *            dispatch name → the {@link ToolGroup} it belongs to (http: its
+ *            apicalls configuration; mcp: its server), read only by LAZY
+ *            {@code discover_tools}; empty for sources without groups
  */
 public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
         Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures,
-        Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers) {
+        Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers,
+        Map<String, ToolGroup> toolGroups) {
 
     /**
      * Defensively copies every component to an immutable view.
@@ -76,6 +81,14 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
         failures = failures == null ? List.of() : List.copyOf(failures);
         toolCanonicalNames = toolCanonicalNames == null ? Map.of() : Map.copyOf(toolCanonicalNames);
         toolRequestResolvers = toolRequestResolvers == null ? Map.of() : Map.copyOf(toolRequestResolvers);
+        toolGroups = toolGroups == null ? Map.of() : Map.copyOf(toolGroups);
+    }
+
+    /** A contribution without tool groups — every source but http and mcp. */
+    public ToolContribution(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
+            Map<String, String> toolSources, Map<String, String> toolEndpoints, List<ProviderFailure> failures,
+            Map<String, String> toolCanonicalNames, Map<String, ToolRequestResolver> toolRequestResolvers) {
+        this(specs, executors, toolSources, toolEndpoints, failures, toolCanonicalNames, toolRequestResolvers, Map.of());
     }
 
     /**
@@ -116,6 +129,6 @@ public record ToolContribution(List<ToolSpecification> specs, Map<String, ToolEx
      * failed.
      */
     public static ToolContribution empty() {
-        return new ToolContribution(List.of(), Map.of(), Map.of(), Map.of(), List.of(), Map.of(), Map.of());
+        return new ToolContribution(List.of(), Map.of(), Map.of(), Map.of(), List.of(), Map.of(), Map.of(), Map.of());
     }
 }

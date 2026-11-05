@@ -617,6 +617,8 @@ eddi_llm_failure_total                      # Failed model calls by failure clas
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration|spend — the conversation ceiling or tenant budget refused the next step)
 eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|tool|httpcall|httpcall_retry)
 eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
+eddi_llm_lazy_tools_activated_total         # Tools discover_tools loaded into the request (toolLoadingStrategy LAZY)
+eddi_llm_lazy_tools_refused_total           # Calls to a lazily-loaded tool the model had not loaded, refused NOT_EXECUTED before the gate; tag: source
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
