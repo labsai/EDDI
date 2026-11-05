@@ -10,8 +10,10 @@ import ai.labs.eddi.utils.StringUtilities;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -295,6 +297,20 @@ public class DescriptorStore<T> implements IDescriptorStore<T> {
      */
     public boolean touchLastModified(String resourceId, long epochMillis) {
         return resourceStorage.setNumberField(resourceId, FIELD_LAST_MODIFIED, epochMillis);
+    }
+
+    /**
+     * Sets top-level fields of the live descriptor in one conditional update,
+     * without reading it first or rewriting any other field (see
+     * {@link IResourceStorage#setFieldsIf}).
+     *
+     * @return {@code false} when there is no live descriptor or the guard did not
+     *         hold
+     * @throws UnsupportedOperationException
+     *             when the storage backend cannot update single fields
+     */
+    public boolean setFieldsIf(String resourceId, Map<String, Object> fields, String guardField, Collection<String> allowedGuardValues) {
+        return resourceStorage.setFieldsIf(resourceId, fields, guardField, allowedGuardValues);
     }
 
     @Override
