@@ -537,6 +537,32 @@
       "noticePlaceholder": "Les conversations avec cet agent peuvent être lues par les personnes qui le maintiennent, afin de l'améliorer.",
       "versionNote": "S'applique aux conversations sur la version créée par cette modification et les suivantes — jamais à ce qui a été dit auparavant. Slack, Teams et les clients API ne peuvent pas afficher l'avis ; si des personnes utilisent cet agent par ces canaux, mentionnez-le dans le message d'accueil."
     },
+    "presentation": {
+      "title": "Présentation et titres",
+      "description": "Comment les fenêtres de chat affichent cet agent. Tout est facultatif ; les champs vides gardent les valeurs par défaut.",
+      "displayName": "Nom affiché",
+      "accentColor": "Couleur d'accent (#rrggbb)",
+      "avatar": "Avatar (URL https ou petite URI data:image)",
+      "starters": "Amorces de conversation (une par ligne, jusqu'à {{count}})",
+      "controls": "Commandes du chat",
+      "control": {
+        "undo": "Annuler",
+        "redo": "Rétablir",
+        "attachments": "Pièces jointes",
+        "rating": "Évaluation",
+        "quickReplies": "Réponses rapides",
+        "streaming": "Streaming",
+        "rawHtml": "Afficher le HTML des réponses"
+      },
+      "rawHtmlNote": "Désactivé par défaut : le HTML des réponses est affiché comme du texte. À activer uniquement pour un agent dont les réponses doivent contenir du HTML.",
+      "titles": "Titres des conversations",
+      "titlesEnable": "Laisser un modèle écrire les titres des conversations",
+      "titlesNote": "Sinon, une conversation prend son premier message pour titre. Le modèle s'exécute une fois par conversation, en arrière-plan, et est imputé au budget de coûts. Un titre défini par l'utilisateur n'est jamais remplacé.",
+      "titlesProvider": "Fournisseur",
+      "titlesModel": "Modèle",
+      "titlesMaxLength": "Titre le plus long",
+      "titlesCredentials": "Les identifiants vont dans titleGeneration.parameters du document de l'agent (par exemple une apiKey qui référence un secret du coffre) ; voir la documentation de configuration de l'agent."
+    },
     "copyUrl": "Copier l'URL",
     "liveElsewhere": "Actif : v{{live}} · Affichage de v{{viewing}} (non déployée)",
     "removeWorkflow": "Retirer le workflow de l'agent",

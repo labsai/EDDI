@@ -536,6 +536,32 @@
       "noticePlaceholder": "Gespräche mit diesem Agenten können von den Personen gelesen werden, die ihn betreuen, um ihn zu verbessern.",
       "versionNote": "Gilt für Gespräche mit der Version, die diese Änderung erzeugt, und allen späteren — nie für bereits Gesagtes. Slack, Teams und API-Clients können den Hinweis nicht anzeigen; wenn Personen diesen Agenten dort nutzen, erwähnen Sie es in der Begrüßung."
     },
+    "presentation": {
+      "title": "Darstellung & Titel",
+      "description": "Wie Chatfenster diesen Agenten zeigen. Alles ist optional; leere Felder behalten die Standardwerte.",
+      "displayName": "Anzeigename",
+      "accentColor": "Akzentfarbe (#rrggbb)",
+      "avatar": "Avatar (https-URL oder kleine data:image-URI)",
+      "starters": "Gesprächseinstiege (einer pro Zeile, bis zu {{count}})",
+      "controls": "Chat-Steuerelemente",
+      "control": {
+        "undo": "Rückgängig",
+        "redo": "Wiederholen",
+        "attachments": "Anhänge",
+        "rating": "Bewertung",
+        "quickReplies": "Schnellantworten",
+        "streaming": "Streaming",
+        "rawHtml": "HTML in Antworten darstellen"
+      },
+      "rawHtmlNote": "Standardmäßig aus: HTML in Antworten wird als Text gezeigt. Nur für einen Agenten einschalten, dessen Antworten HTML enthalten sollen.",
+      "titles": "Gesprächstitel",
+      "titlesEnable": "Gesprächstitel von einem Modell schreiben lassen",
+      "titlesNote": "Sonst erhält ein Gespräch seine erste Nachricht als Titel. Das Modell läuft einmal pro Gespräch im Hintergrund und wird dem Kostenbudget belastet. Ein vom Nutzer gesetzter Titel wird nie ersetzt.",
+      "titlesProvider": "Anbieter",
+      "titlesModel": "Modell",
+      "titlesMaxLength": "Längster Titel",
+      "titlesCredentials": "Zugangsdaten gehören in titleGeneration.parameters des Agentendokuments (zum Beispiel ein apiKey, der auf ein Vault-Geheimnis verweist); siehe die Doku zur Agentenkonfiguration."
+    },
     "copyUrl": "URL kopieren",
     "liveElsewhere": "Aktiv: v{{live}} · Ansicht v{{viewing}} (nicht bereitgestellt)",
     "removeWorkflow": "Workflow vom Agent entfernen",

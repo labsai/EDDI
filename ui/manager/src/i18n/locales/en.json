@@ -565,6 +565,32 @@
       "noticePlaceholder": "Conversations with this agent may be read by the people who maintain it, to improve it.",
       "versionNote": "Covers conversations on the version this change creates and later ones — never what was said before. Slack, Teams and API clients cannot show the notice; if people reach this agent there, say it in the greeting."
     },
+    "presentation": {
+      "title": "Presentation & titles",
+      "description": "How chat windows show this agent. Everything is optional; empty fields keep the defaults.",
+      "displayName": "Display name",
+      "accentColor": "Accent colour (#rrggbb)",
+      "avatar": "Avatar (https URL or small data:image URI)",
+      "starters": "Conversation starters (one per line, up to {{count}})",
+      "controls": "Chat controls",
+      "control": {
+        "undo": "Undo",
+        "redo": "Redo",
+        "attachments": "Attachments",
+        "rating": "Rating",
+        "quickReplies": "Quick replies",
+        "streaming": "Streaming",
+        "rawHtml": "Render HTML in replies"
+      },
+      "rawHtmlNote": "Off by default: HTML in replies is shown as text. Turn it on only for an agent whose replies are meant to contain HTML.",
+      "titles": "Conversation titles",
+      "titlesEnable": "Let a model write conversation titles",
+      "titlesNote": "Otherwise a conversation is titled with its first message. The model runs once per conversation, in the background, and is charged to the cost budget. A title the user set is never replaced.",
+      "titlesProvider": "Provider",
+      "titlesModel": "Model",
+      "titlesMaxLength": "Longest title",
+      "titlesCredentials": "Credentials go in titleGeneration.parameters of the agent document (for example an apiKey that references a vault secret); see the agent configuration docs."
+    },
     "copyUrl": "Copy URL",
     "liveElsewhere": "Live: v{{live}} · Viewing v{{viewing}} (not deployed)",
     "removeWorkflow": "Remove workflow from agent",

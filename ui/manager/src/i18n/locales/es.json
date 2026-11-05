@@ -537,6 +537,32 @@
       "noticePlaceholder": "Las conversaciones con este agente pueden ser leídas por las personas que lo mantienen, para mejorarlo.",
       "versionNote": "Cubre las conversaciones con la versión que crea este cambio y las posteriores — nunca lo que se dijo antes. Slack, Teams y los clientes de la API no pueden mostrar el aviso; si las personas usan este agente por esos medios, indíquelo en el saludo."
     },
+    "presentation": {
+      "title": "Presentación y títulos",
+      "description": "Cómo muestran las ventanas de chat a este agente. Todo es opcional; los campos vacíos mantienen los valores predeterminados.",
+      "displayName": "Nombre visible",
+      "accentColor": "Color de acento (#rrggbb)",
+      "avatar": "Avatar (URL https o URI data:image pequeña)",
+      "starters": "Iniciadores de conversación (uno por línea, hasta {{count}})",
+      "controls": "Controles del chat",
+      "control": {
+        "undo": "Deshacer",
+        "redo": "Rehacer",
+        "attachments": "Adjuntos",
+        "rating": "Valoración",
+        "quickReplies": "Respuestas rápidas",
+        "streaming": "Streaming",
+        "rawHtml": "Mostrar HTML en las respuestas"
+      },
+      "rawHtmlNote": "Desactivado por defecto: el HTML de las respuestas se muestra como texto. Actívalo solo para un agente cuyas respuestas deban contener HTML.",
+      "titles": "Títulos de conversación",
+      "titlesEnable": "Dejar que un modelo escriba los títulos de conversación",
+      "titlesNote": "Si no, una conversación se titula con su primer mensaje. El modelo se ejecuta una vez por conversación, en segundo plano, y se carga al presupuesto de costes. Un título puesto por el usuario nunca se reemplaza.",
+      "titlesProvider": "Proveedor",
+      "titlesModel": "Modelo",
+      "titlesMaxLength": "Título más largo",
+      "titlesCredentials": "Las credenciales van en titleGeneration.parameters del documento del agente (por ejemplo, una apiKey que hace referencia a un secreto del vault); consulta la documentación de configuración del agente."
+    },
     "copyUrl": "Copiar URL",
     "liveElsewhere": "Activa: v{{live}} · Viendo v{{viewing}} (sin desplegar)",
     "removeWorkflow": "Quitar el flujo de trabajo del agente",
