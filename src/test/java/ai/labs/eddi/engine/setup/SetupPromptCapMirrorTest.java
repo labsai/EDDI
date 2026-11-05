@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * The Manager holds a copy of
@@ -30,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SetupPromptCapMirrorTest {
 
     private static final Path MANAGER_SETUP_API = Path.of("ui", "manager", "src", "lib", "api", "agent-setup.ts");
-    private static final Pattern MIRROR = Pattern.compile("export const SETUP_MAX_SYSTEM_PROMPT_LENGTH\\s*=\\s*([0-9_]+)\\s*;");
+    private static final Pattern MIRROR = Pattern.compile("export const SETUP_MAX_SYSTEM_PROMPT_LENGTH\\s*=\\s*([0-9][0-9_]*)\\s*;");
 
     @Test
     void managerMirrorEqualsTheBackendCap() throws IOException {
@@ -41,7 +42,14 @@ class SetupPromptCapMirrorTest {
         assertTrue(matcher.find(), MANAGER_SETUP_API + " no longer declares SETUP_MAX_SYSTEM_PROMPT_LENGTH; "
                 + "the Operator prompt-size guard depends on it");
 
-        int mirror = Integer.parseInt(matcher.group(1).replace("_", ""));
+        String literal = matcher.group(1);
+        int mirror;
+        try {
+            mirror = Integer.parseInt(literal.replace("_", ""));
+        } catch (NumberFormatException e) {
+            fail("SETUP_MAX_SYSTEM_PROMPT_LENGTH in " + MANAGER_SETUP_API + " is not an int literal: " + literal, e);
+            return;
+        }
         assertEquals(AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH, mirror,
                 "SETUP_MAX_SYSTEM_PROMPT_LENGTH in " + MANAGER_SETUP_API
                         + " must equal AgentSetupService.MAX_SYSTEM_PROMPT_LENGTH; change both together");
