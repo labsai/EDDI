@@ -41,7 +41,8 @@ public class RestGroupLessons implements IRestGroupLessons {
     private static final Logger LOG = Logger.getLogger(RestGroupLessons.class);
     static final int DEFAULT_LIMIT = 100;
     static final int MAX_LIMIT = 500;
-    static final String SCHEDULE_NAME_PREFIX = "lesson-consolidation-";
+    /** Name prefix of a group's consolidation schedule; the group id follows. */
+    public static final String SCHEDULE_NAME_PREFIX = "lesson-consolidation-";
 
     private final LessonService lessons;
     private final ILessonHistoryStore history;

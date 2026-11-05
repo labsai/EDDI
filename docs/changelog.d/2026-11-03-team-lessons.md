@@ -40,3 +40,16 @@ FIFO eviction in `RetroEngine` still drops the oldest lesson without recording i
 cannot write to another team's lessons.
 
 Docs: [`docs/team-learning-loop.md`](../team-learning-loop.md#lessons).
+
+### Review follow-ups
+
+- `RestScheduleStore` refuses the `lessonType=lesson_consolidation` marker in a create or update body (an update may only
+  echo its own row's marker), and an update of a stored consolidation schedule needs EDIT on its group. A forged marker
+  let anyone who could create a schedule consolidate a team they cannot edit. ZIP import goes through the same guard; the
+  MCP tool cannot set metadata.
+- A merge rewrites the kept lesson with `replaceIfUnchanged` instead of an unconditional `upsert`; losing that race skips
+  the merge (`skipped_changed`) and drops no duplicate.
+- A permanent group delete also removes the `lesson-consolidation-<groupId>` schedule.
+- The workspace page shows the lessons panel from the group's current version, not the URL's.
+- Docs: `maxCostPerRun` is an estimate, not a hard ceiling (the answer length is not enforced); history keeps the newest
+  1,000 rows per team; an owner absent from both shared lists may still have lessons outside the cap.

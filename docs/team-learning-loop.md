@@ -163,8 +163,10 @@ GET /groupstore/groups/{groupId}/lessons          # this team's own lessons
 GET /groupstore/groups/{groupId}/lessons/shared   # what other teams share with it
 ```
 
-The shared read returns `groups` (owners that granted, with their lessons) and `notShared` (owners the reader asked for
-that did not grant it, or that do not exist), so "not shared with me" can be told from "has no lessons". The reading
+The shared read returns `groups` (owners that granted and have lessons among the newest `maxSharedLessons`, with those
+lessons) and `notShared` (owners the reader asked for that did not grant it, or that do not exist), so "not shared with
+me" can be told from everything else. An owner in neither list granted access, but none of its lessons made the cap: it
+may have none, or only older ones. The reading
 team's RETRO phase also quotes the shared lessons after its rendered input, one bounded line each, under a heading that
 calls them other teams' words, not instructions.
 
@@ -177,18 +179,20 @@ things: lessons that **say the same thing** (merged into one) and lessons a **la
 - **It runs on the schedule machinery**, like Dream and team cadences: cluster-wide claim, retry, dead-letter, fire log.
   `PUT /groupstore/groups/{groupId}/lessons/consolidation/schedule {"cronExpression": "0 3 * * 1"}` creates the schedule
   (5-field cron; `DELETE` removes it; `GET …/lessons/consolidation` says whether it is configured and scheduled).
-- **The dollar cap holds before the call.** `maxCostPerRun` (default $0.10, ceiling $5) is checked against a worst case:
-  the input, plus an answer as long as the input, at the configured `inputPricePer1M`/`outputPricePer1M` or an upper
-  bound. A run that could exceed it drops lessons until it fits, and makes no call when it cannot. A spent tenant budget
-  also makes no call. Dream's own cost arithmetic is reused.
+- **The dollar limit is checked before the call, against an estimate.** `maxCostPerRun` (default $0.10, ceiling $5) is
+  compared with the input plus an answer as long as the input, at the configured `inputPricePer1M`/`outputPricePer1M`
+  or an upper bound. A run whose estimate exceeds it drops lessons until it fits, and makes no call when it cannot. A
+  spent tenant budget also makes no call. Dream's own cost arithmetic is reused. The answer's length is not enforced on
+  the request, so it is an estimate, not a hard ceiling: an unusually long answer can cost more.
 - **A retirement needs evidence.** The model must cite outcome ids it was shown; a retirement citing none, or one it was not
   given, is refused. The same goes for a merge naming an unknown key, a lesson used twice, or text over 1,000 characters. At
   most 20 changes apply per run.
-- **Nothing is lost.** Before a lesson leaves the live set its text, the reason and the cited outcomes are written to the
-  history store (`group_lesson_history`, 1,000 rows per team): `GET …/lessons/history`. A merged lesson's own previous text
-  is kept too.
-- **Concurrent writes win.** Every change is conditional on the lesson being exactly as it was read; a lesson rewritten
-  during the model call is skipped and its newer text kept.
+- **History first.** Before a lesson leaves the live set its text, the reason and the cited outcomes are written to the
+  history store (`group_lesson_history`): `GET …/lessons/history`. A merged lesson's own previous text is kept too. The
+  store keeps the newest 1,000 rows per team; each run deletes older ones.
+- **Concurrent writes win.** Every change, the merged lesson's rewrite included, is a conditional write on the lesson
+  being exactly as it was read; a lesson rewritten during the model call is skipped and its newer text kept. Its history
+  rows are written first, so they can then record a merge that did not happen.
 - **The model's text is data.** The input is labelled so, the answer is parsed as JSON only, and anything unparsable
   changes nothing. A transient model failure skips the run (it cannot dead-letter the schedule); a missing model or a
   permanent error fails it.

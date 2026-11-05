@@ -57,19 +57,22 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>
  * Guarantees:
  * <ul>
- * <li><b>The dollar cap is checked before the call</b> against a conservative
- * estimate of what the call can cost (the input, sized up to as many output
- * tokens again, at the configured prices or an upper bound). A run that could
- * exceed {@code maxCostPerRun} first drops lessons until the estimate fits, and
- * makes no call when it cannot.</li>
+ * <li><b>The dollar cap is checked before the call</b> against an estimate of
+ * what the call can cost (the input, sized up to as many output tokens again,
+ * at the configured prices or an upper bound). A run whose estimate exceeds
+ * {@code maxCostPerRun} first drops lessons until it fits, and makes no call
+ * when it cannot. The output length is not enforced on the request, so an
+ * unusually long answer can cost more than the estimate.</li>
  * <li><b>A retirement needs evidence.</b> The model must cite outcome ids it
  * was shown; a retirement citing none, or citing one it was not given, is
  * refused.</li>
  * <li><b>History first.</b> A removed lesson's text is written to the history
  * store before it leaves the live set.</li>
  * <li><b>Concurrent writes win.</b> Every change is conditional on the lesson
- * being exactly as it was read ({@code deleteEntryIfUnchanged}); an action
- * touching a lesson rewritten meanwhile is skipped.</li>
+ * being exactly as it was read ({@code replaceIfUnchanged},
+ * {@code deleteEntryIfUnchanged}); an action touching a lesson rewritten
+ * meanwhile is skipped. Its history rows, written first, may then record a
+ * merge that did not happen; history over-records rather than loses.</li>
  * <li>The model's text is data: input is labelled so, output is parsed as JSON
  * only, and anything unparsable changes nothing.</li>
  * </ul>
@@ -455,7 +458,13 @@ public class LessonConsolidationService {
             }
             try {
                 if ("MERGE".equals(action.type())) {
-                    applyMerge(groupId, runId, action, snapshot, now);
+                    if (!applyMerge(groupId, runId, action, snapshot, now)) {
+                        // The kept lesson was rewritten between the check above and the
+                        // conditional write: the newer text stays, the duplicates too.
+                        count("skipped_changed");
+                        result.add(withNote(action, "a lesson was written during the run; the newer text is kept"));
+                        continue;
+                    }
                     count("merged");
                 } else {
                     applyRetire(groupId, runId, action, snapshot, now);
@@ -490,7 +499,11 @@ public class LessonConsolidationService {
         return true;
     }
 
-    private void applyMerge(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)
+    /**
+     * @return false when the kept lesson changed after the snapshot and nothing was
+     *         merged
+     */
+    private boolean applyMerge(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)
             throws IResourceStore.ResourceStoreException {
         String keepKey = action.keys().get(0);
         UserMemoryEntry keep = snapshot.get(keepKey);
@@ -499,12 +512,20 @@ public class LessonConsolidationService {
         for (String key : action.keys().subList(1, action.keys().size())) {
             recordHistory(groupId, runId, snapshot.get(key), Action.MERGED, "merged into " + keepKey, keepKey, List.of(), now);
         }
-        userMemoryStore.upsert(new UserMemoryEntry(null, keep.userId(), keepKey, action.text().strip(), keep.category(), Visibility.group,
-                LessonService.RETRO_SOURCE, keep.groupIds(), keep.sourceConversationId(), false, keep.accessCount(), keep.createdAt(), now));
+        // Conditional on the kept lesson being exactly as read, like the deletes below:
+        // an unconditional upsert here overwrote a lesson rewritten in the meantime.
+        if (!userMemoryStore.replaceIfUnchanged(keep.id(),
+                new UserMemoryEntry(null, keep.userId(), keepKey, action.text().strip(), keep.category(), Visibility.group,
+                        LessonService.RETRO_SOURCE, keep.groupIds(), keep.sourceConversationId(), false, keep.accessCount(), keep.createdAt(),
+                        now),
+                keep.updatedAt())) {
+            return false;
+        }
         for (String key : action.keys().subList(1, action.keys().size())) {
             UserMemoryEntry dropped = snapshot.get(key);
             userMemoryStore.deleteEntryIfUnchanged(dropped.id(), dropped.updatedAt());
         }
+        return true;
     }
 
     private void applyRetire(String groupId, String runId, ProposedAction action, Map<String, UserMemoryEntry> snapshot, Instant now)

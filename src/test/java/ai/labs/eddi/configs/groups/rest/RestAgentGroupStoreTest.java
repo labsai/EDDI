@@ -206,6 +206,18 @@ class RestAgentGroupStoreTest {
         }
 
         @Test
+        @DisplayName("a PERMANENT delete also removes the lesson-consolidation schedule; a soft delete keeps it")
+        void permanentDelete_removesLessonConsolidationSchedule() throws Exception {
+            when(groupStore.getCurrentResourceId("group-1")).thenReturn(createResourceId("group-1", 1));
+
+            restStore.deleteGroup("group-1", 1, false);
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+
+            restStore.deleteGroup("group-1", 1, true);
+            verify(scheduleStore).deleteSchedulesByName("lesson-consolidation-group-1");
+        }
+
+        @Test
         @DisplayName("I13: a soft (versioned) delete keeps the workspace — the group can come back")
         void softDelete_keepsWorkspace() throws Exception {
             when(groupStore.getCurrentResourceId("group-1"))

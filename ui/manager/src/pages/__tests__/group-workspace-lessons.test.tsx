@@ -56,6 +56,26 @@ describe("team lessons on the workspace page", () => {
     expect(screen.queryByTestId("workspace-lessons")).not.toBeInTheDocument();
   });
 
+  it("decides from the CURRENT version, even when the URL names none and version 1 had no lessonConfig", async () => {
+    useGroup(null);
+    consolidationState();
+    server.use(
+      http.get("*/groupstore/groups/:id/currentversion", () => HttpResponse.json(2)),
+      http.get("*/groupstore/groups/g1", ({ request }) =>
+        HttpResponse.json({
+          name: "Growth Board",
+          members: [],
+          phases: [],
+          lessonConfig: new URL(request.url).searchParams.get("version") === "2" ? LESSON_CONFIG : null,
+        }),
+      ),
+      http.get("*/groupstore/groups/:groupId/lessons", () => HttpResponse.json([lesson(1)])),
+    );
+    renderWorkspacePage();
+
+    expect(await screen.findByTestId("workspace-lessons")).toBeInTheDocument();
+  });
+
   it("lists the team's own lessons, and says when there are none", async () => {
     useGroup(LESSON_CONFIG);
     consolidationState();

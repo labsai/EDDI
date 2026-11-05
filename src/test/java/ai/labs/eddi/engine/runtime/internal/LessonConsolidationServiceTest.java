@@ -103,6 +103,7 @@ class LessonConsolidationServiceTest {
         when(lessons.lessonsOf(eq(GROUP), anyInt())).thenAnswer(i -> List.copyOf(live));
         when(outcomes.listByGroup(eq(GROUP), any(), anyInt())).thenAnswer(i -> List.copyOf(events));
         when(history.insertIfAbsent(any())).thenReturn(true);
+        when(memory.replaceIfUnchanged(anyString(), any(), any())).thenReturn(true);
         service = new LessonConsolidationService(lessons, memory, history, outcomes, llm, quota, new SimpleMeterRegistry());
         service.clock = Clock.fixed(NOW, ZoneOffset.UTC);
     }
@@ -170,7 +171,7 @@ class LessonConsolidationServiceTest {
         assertEquals(Status.SKIPPED, r.status());
         assertTrue(r.message().contains("maxCostPerRun"), r.message());
         verify(llm, never()).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), anyMap());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
     }
 
     @Test
@@ -218,10 +219,10 @@ class LessonConsolidationServiceTest {
         assertEquals(1, r.appliedCount());
         InOrder order = inOrder(history, memory);
         order.verify(history, times(2)).insertIfAbsent(any());
-        order.verify(memory).upsert(any());
+        order.verify(memory).replaceIfUnchanged(eq("id-1"), any(), eq(live.get(0).updatedAt()));
         order.verify(memory).deleteEntryIfUnchanged("id-2", live.get(1).updatedAt());
         ArgumentCaptor<UserMemoryEntry> merged = ArgumentCaptor.forClass(UserMemoryEntry.class);
-        verify(memory).upsert(merged.capture());
+        verify(memory).replaceIfUnchanged(anyString(), merged.capture(), any());
         assertEquals("Merged lesson one and two", merged.getValue().value());
         assertEquals("retro:k1", merged.getValue().key());
         assertEquals("retro", merged.getValue().sourceAgentId(), "the idempotency identity of a retro lesson is kept");
@@ -286,7 +287,7 @@ class LessonConsolidationServiceTest {
 
         assertEquals(1, r.appliedCount(), "only the first merge is valid");
         assertEquals(5, r.actions().stream().filter(a -> a.note() != null).count());
-        verify(memory, times(1)).upsert(any());
+        verify(memory, times(1)).replaceIfUnchanged(anyString(), any(), any());
     }
 
     @Test
@@ -294,7 +295,7 @@ class LessonConsolidationServiceTest {
         modelAnswers("{\"merge\":[{\"keep\":\"retro:k1\",\"drop\":[\"retro:k2\"],\"text\":\"" + "x".repeat(1001) + "\"},"
                 + "{\"keep\":\"retro:k3\",\"drop\":[\"retro:k4\"],\"text\":\"  \"}]}");
         assertEquals(0, service.run(GROUP, false).appliedCount());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
     }
 
     @Test
@@ -334,8 +335,23 @@ class LessonConsolidationServiceTest {
 
         assertEquals(0, r.appliedCount());
         assertTrue(r.actions().get(0).note().contains("written during the run"), r.actions().get(0).note());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
         verify(history, never()).insertIfAbsent(any());
+    }
+
+    @Test
+    @DisplayName("a kept lesson rewritten after the check loses nothing: the merge is skipped and no duplicate is dropped")
+    void aMergeLosingTheConditionalWriteIsSkipped() throws Exception {
+        modelAnswers(MERGE_1_2);
+        when(memory.replaceIfUnchanged(anyString(), any(), any())).thenReturn(false);
+
+        Result r = service.run(GROUP, false);
+
+        assertEquals(Status.COMPLETED, r.status());
+        assertEquals(0, r.appliedCount());
+        assertTrue(r.actions().get(0).note().contains("written during the run"), r.actions().get(0).note());
+        verify(memory, never()).deleteEntryIfUnchanged(anyString(), any());
+        verify(memory, never()).upsert(any());
     }
 
     @Test
@@ -349,7 +365,7 @@ class LessonConsolidationServiceTest {
         assertEquals(Status.COMPLETED, r.status());
         assertEquals(0, r.appliedCount());
         assertTrue(r.actions().get(0).note().contains("written during the run"), r.actions().get(0).note());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
     }
 
     @Test
@@ -361,7 +377,7 @@ class LessonConsolidationServiceTest {
         assertTrue(r.dryRun());
         assertEquals(1, r.actions().size());
         assertEquals(0, r.appliedCount());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
         verify(memory, never()).deleteEntryIfUnchanged(anyString(), any());
         verify(history, never()).insertIfAbsent(any());
         assertTrue(r.estimatedCost() > 0, "a dry run still spends and says how much");
@@ -373,7 +389,7 @@ class LessonConsolidationServiceTest {
         Result r = service.run(GROUP, false);
         assertEquals(Status.COMPLETED, r.status());
         assertEquals(0, r.actions().size());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
     }
 
     @Test
@@ -397,7 +413,7 @@ class LessonConsolidationServiceTest {
                 .thenThrow(new RuntimeException("timeout", new SocketTimeoutException("slow")));
         Result r = service.run(GROUP, false);
         assertEquals(Status.SKIPPED, r.status());
-        verify(memory, never()).upsert(any());
+        verify(memory, never()).replaceIfUnchanged(anyString(), any(), any());
     }
 
     @Test

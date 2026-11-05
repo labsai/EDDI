@@ -135,7 +135,7 @@ class LessonServiceTest {
         int total = shared.groups().stream().mapToInt(g -> g.lessons().size()).sum();
         assertEquals(3, total);
         List<String> texts = shared.groups().stream().flatMap(g -> g.lessons().stream()).map(LessonService.LessonView::text).toList();
-        assertTrue(texts.contains("a-new") && texts.contains("b-new") && texts.contains("a-mid") || texts.contains("b-mid"), texts.toString());
+        assertTrue(texts.contains("a-new") && texts.contains("b-new") && (texts.contains("a-mid") || texts.contains("b-mid")), texts.toString());
         assertFalse(texts.contains("a-old") || texts.contains("b-old"), texts.toString());
     }
 

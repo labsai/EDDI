@@ -268,6 +268,13 @@ public class RestAgentGroupStore implements IRestAgentGroupStore {
                     LOG.errorf(e, "Failed to cascade outcome deletion for group %s", sanitize(id));
                 }
             }
+            // The consolidation schedule names this group; left behind it would fire
+            // on every tick, find no config and skip, forever.
+            try {
+                scheduleStore.deleteSchedulesByName(RestGroupLessons.SCHEDULE_NAME_PREFIX + id);
+            } catch (Exception e) {
+                LOG.errorf(e, "Failed to cascade lesson-consolidation schedule deletion for group %s", sanitize(id));
+            }
             if (lessonHistoryStore != null) {
                 try {
                     lessonHistoryStore.deleteByGroup(id);

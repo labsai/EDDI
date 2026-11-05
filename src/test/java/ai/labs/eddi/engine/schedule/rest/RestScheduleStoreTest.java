@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.runtime.internal.LessonConsolidationService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
@@ -1093,6 +1094,54 @@ class RestScheduleStoreTest {
         ArgumentCaptor<ScheduleConfiguration> written = ArgumentCaptor.forClass(ScheduleConfiguration.class);
         verify(scheduleStore).updateSchedule(eq("tc2"), written.capture());
         assertTrue(TeamCadenceService.isTeamCadenceSchedule(written.getValue().getMetadata()));
+    }
+
+    private static Map<String, Object> lessonMarker(String groupId) {
+        return Map.of(LessonConsolidationService.METADATA_TYPE_KEY, LessonConsolidationService.METADATA_TYPE_CONSOLIDATION,
+                LessonConsolidationService.METADATA_GROUP_ID_KEY, groupId);
+    }
+
+    @Test
+    void createSchedule_withTheLessonConsolidationMarker_isRefused_evenForAdmin() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        var s = makeCronSchedule(null);
+        s.setMetadata(lessonMarker("victim-group"));
+
+        Response response = rest.createSchedule(s);
+
+        assertEquals(400, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains(LessonConsolidationService.METADATA_TYPE_KEY));
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void updateSchedule_turningAScheduleIntoALessonConsolidation_isRefused() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("plain1");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("plain1")).thenReturn(stored);
+        var body = makeCronSchedule("plain1");
+        body.setMetadata(lessonMarker("victim-group"));
+
+        Response response = rest.updateSchedule("plain1", body);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
+    }
+
+    @Test
+    void updateSchedule_ofStoredLessonConsolidation_withoutGroupEdit_isForbidden() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("lc1");
+        stored.setUserId("editor-1");
+        stored.setMetadata(lessonMarker("group-1"));
+        when(scheduleStore.readSchedule("lc1")).thenReturn(stored);
+        var guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess(eq("group-1"), eq(AccessLevel.EDIT), anyString());
+        setField(rest, "resourceAccessGuard", guard);
+
+        assertThrows(ForbiddenException.class, () -> rest.updateSchedule("lc1", makeCronSchedule("lc1")));
+        verify(scheduleStore, never()).updateSchedule(anyString(), any());
     }
 
     @Test
