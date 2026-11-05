@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.pricing.SpendEvent;
+import ai.labs.eddi.engine.pricing.SpendSinks;
+import ai.labs.eddi.modules.llm.impl.UnpricedCallPolicy;
+import ai.labs.eddi.modules.llm.pricing.ModelPriceResolver;
+import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
@@ -130,6 +135,13 @@ public class DreamService {
      */
     @Inject
     TenantQuotaService tenantQuotaService;
+
+    /**
+     * Receives each consolidation charge the tenant accepted; null delivers
+     * nothing.
+     */
+    @Inject
+    SpendSinks spendSinks;
 
     /**
      * The deploy-time vault-grant gate, re-run here because a Dream cycle is not a
@@ -586,6 +598,12 @@ public class DreamService {
             // must not be reported as a failed fire: three of them in a row would
             // exhaust the schedule's retry budget and dead-letter the user's dream
             // schedule for good over what is typically a minutes-long provider blip.
+            if (UnpricedCallPolicy.check(PriceOverride.of(config.getInputPricePer1M(), config.getOutputPricePer1M()), config.getLlmProvider(),
+                    config.getLlmModel(), null, config.getMaxCostPerRun() > 0, "dream") != null) {
+                LOGGER.warnf("[DREAM] Consolidation for user %s skipped: the model is unpriced and strict pricing refuses it",
+                        LogSanitizer.sanitize(userId));
+                break;
+            }
             SummarizationService.SummarizationResult llmResult;
             try {
                 llmResult = summarizationService.summarizeWithUsage(
@@ -1017,6 +1035,11 @@ public class DreamService {
             }
             meterRegistry.counter("eddi.tenant.cost.metering", "outcome",
                     result.accountingUnavailable() ? "unavailable" : result.allowed() ? "recorded" : "over_budget").increment();
+            if (!result.accountingUnavailable() && spendSinks != null) {
+                spendSinks.fire(new SpendEvent(tenantQuotaService.getDefaultTenantId(), null, null, null, null, null, null, SpendEvent.Kind.DREAM,
+                        "dream", charge, 0, llmResult != null ? llmResult.inputTokens() : 0, llmResult != null ? llmResult.outputTokens() : 0,
+                        Instant.now()));
+            }
         } catch (RuntimeException e) {
             pendingTenantCost.accumulateAndGet(charge, Double::sum);
             meterRegistry.counter("eddi.tenant.cost.metering", "outcome", "error").increment();
@@ -1046,6 +1069,11 @@ public class DreamService {
                              Double outputPricePer1M) {
         boolean inputPriced = inputPricePer1M != null && inputPricePer1M >= 0;
         boolean outputPriced = outputPricePer1M != null && outputPricePer1M >= 0;
+        if (!(inputPriced && outputPriced) && result != null && result.usage() != null) {
+            // a missing price is completed from the catalog, as everywhere else
+            return ModelPriceResolver.price(PriceOverride.of(inputPriced ? inputPricePer1M : null, outputPriced ? outputPricePer1M : null),
+                    result.usage()).usd();
+        }
         if (!inputPriced && !outputPriced) {
             return 0.0;
         }
@@ -1127,13 +1155,19 @@ public class DreamService {
         return result;
     }
 
+    /**
+     * Global and group-scoped entries never share a key, not even a group entry
+     * with no group ids: a global entry can carry the group ids of the conversation
+     * it was written in, and in one part with a reader-less group entry the union
+     * stamped those ids onto the reader-less fact.
+     */
     private static String readershipKey(UserMemoryEntry entry) {
         if (entry.visibility() != Visibility.group) {
-            return "";
+            return "global";
         }
         return entry.groupIds() == null
-                ? ""
-                : entry.groupIds().stream().filter(Objects::nonNull).distinct().sorted()
+                ? "group:"
+                : "group:" + entry.groupIds().stream().filter(Objects::nonNull).distinct().sorted()
                         .collect(Collectors.joining(","));
     }
 

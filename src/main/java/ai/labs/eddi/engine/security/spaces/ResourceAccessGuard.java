@@ -350,6 +350,22 @@ public class ResourceAccessGuard {
      * ({@code CallerIdentity.isAdminActingAs}), never from anyone else's.
      */
     public boolean principalMayUse(String resourceId, String principal, boolean principalIsAdmin) {
+        return principalHolds(resourceId, principal, principalIsAdmin, AccessLevel.USE);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String, boolean)} for
+     * {@link AccessLevel#VIEW}: may the named principal read the resource. Same
+     * narrow reading (own resources, direct grants, published; no team shares) and
+     * the same fail-closed answer for an unreadable descriptor. For engine work
+     * that shows a person data about a group they may not have been given, such as
+     * a team's budget.
+     */
+    public boolean principalMayView(String resourceId, String principal, boolean principalIsAdmin) {
+        return principalHolds(resourceId, principal, principalIsAdmin, AccessLevel.VIEW);
+    }
+
+    private boolean principalHolds(String resourceId, String principal, boolean principalIsAdmin, AccessLevel required) {
         if (!settings.isEnforcing() || principalIsAdmin) {
             return true;
         }
@@ -366,7 +382,7 @@ public class ResourceAccessGuard {
             return false;
         }
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, CallerSpaces.of(principal, Set.of()), settings.admitsLegacy());
-        return granted != null && granted.includes(AccessLevel.USE);
+        return granted != null && granted.includes(required);
     }
 
     /**
@@ -653,8 +669,8 @@ public class ResourceAccessGuard {
      * So the question is asked structurally instead: does this caller actually own
      * the resource, or hold the administrator role? Neither answer depends on the
      * enforcement flag, which is what makes it safe in both states. The sharing
-     * endpoint is unaffected — it decides disclosure itself, and is the surface
-     * that exists to show an owner their own grants.
+     * endpoint asks the same question through
+     * {@link #mayReadGrants(DocumentDescriptor)}.
      */
     private boolean mayReadGrants(DocumentDescriptor descriptor, AccessLevel granted) {
         if (ownershipValidator.isAdmin(identity)) {
@@ -667,6 +683,15 @@ public class ResourceAccessGuard {
             return structural != null && structural.includes(AccessLevel.OWN);
         }
         return granted != null && granted.includes(AccessLevel.OWN);
+    }
+
+    /**
+     * Whether this caller may see the grant list of an already-loaded descriptor —
+     * the rule of {@link #mayReadGrants(DocumentDescriptor, AccessLevel)}, for a
+     * surface that shows grants without going through redaction.
+     */
+    public boolean mayReadGrants(DocumentDescriptor descriptor) {
+        return mayReadGrants(descriptor, effectiveLevel(descriptor));
     }
 
     private String ownerLabel(String ownerId) {

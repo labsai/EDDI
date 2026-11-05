@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -123,10 +124,14 @@ public final class TaskListParser {
      * resolved.
      */
     public static String roundRobinAssign(int taskIndex, List<GroupMember> members) {
-        if (members == null || members.isEmpty()) {
+        // Never a HUMAN member: a person is assigned work explicitly or not at all.
+        List<GroupMember> agents = members == null
+                ? List.of()
+                : members.stream().filter(m -> m != null && m.memberType() != MemberType.HUMAN).toList();
+        if (agents.isEmpty()) {
             return null;
         }
-        return members.get(taskIndex % members.size()).agentId();
+        return agents.get(taskIndex % agents.size()).agentId();
     }
 
     // --- Tier 1: JSON parsing ---

@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.nats.client.JetStream;
 import io.nats.client.api.PublishAck;
+import io.nats.client.impl.Headers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -118,12 +119,12 @@ class JetStreamEventBusTest {
 
         JetStream jetStream = mock(JetStream.class);
         when(connections.jetStream()).thenReturn(jetStream);
-        when(jetStream.publish(anyString(), any(byte[].class))).thenThrow(new IllegalStateException("connection closing"));
+        when(jetStream.publish(anyString(), any(Headers.class), any(byte[].class))).thenThrow(new IllegalStateException("connection closing"));
         bus.flushOutbox();
         assertEquals(2, bus.outboxDepth(), "nothing dropped by an unchecked failure");
 
         JetStream healthy = mock(JetStream.class);
-        when(healthy.publish(anyString(), any(byte[].class))).thenReturn(mock(PublishAck.class));
+        when(healthy.publish(anyString(), any(Headers.class), any(byte[].class))).thenReturn(mock(PublishAck.class));
         when(connections.jetStream()).thenReturn(healthy);
         bus.flushOutbox();
         assertEquals(0, bus.outboxDepth());
@@ -140,12 +141,14 @@ class JetStreamEventBusTest {
         JetStream jetStream = mock(JetStream.class);
         when(connections.jetStream()).thenReturn(jetStream);
 
-        when(jetStream.publishAsync(anyString(), any(byte[].class))).thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
+        when(jetStream.publishAsync(anyString(), any(Headers.class), any(byte[].class)))
+                .thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
         bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
         assertEquals(1.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count());
         assertEquals(0, bus.outboxDepth());
 
-        when(jetStream.publishAsync(anyString(), any(byte[].class))).thenReturn(CompletableFuture.failedFuture(new IllegalStateException("no ack")));
+        when(jetStream.publishAsync(anyString(), any(Headers.class), any(byte[].class)))
+                .thenReturn(CompletableFuture.failedFuture(new IllegalStateException("no ack")));
         bus.publish(ClusterEvent.CONNECTION_CHANGED, Map.of());
         assertEquals(1, bus.outboxDepth(), "a failed ack keeps the event for the next flush");
         assertEquals(1.0, registry.counter("eddi.cluster.events.published", "type", ClusterEvent.CONNECTION_CHANGED).count(),
@@ -210,7 +213,7 @@ class JetStreamEventBusTest {
         assertEquals(1, connectedBus.outboxDepth());
 
         JetStream jetStream = mock(JetStream.class);
-        when(jetStream.publish(anyString(), any(byte[].class))).thenReturn(mock(PublishAck.class));
+        when(jetStream.publish(anyString(), any(Headers.class), any(byte[].class))).thenReturn(mock(PublishAck.class));
         when(conn.jetStream()).thenReturn(jetStream);
         when(conn.isConnected()).thenReturn(true); // up again, but no reconnect event fires
 
@@ -223,6 +226,6 @@ class JetStreamEventBusTest {
         assertEquals(0, connectedBus.outboxDepth());
         // drainOutbox lowers the count before it publishes, so wait for the publish
         // too.
-        verify(jetStream, timeout(3000)).publish(anyString(), any(byte[].class));
+        verify(jetStream, timeout(3000)).publish(anyString(), any(Headers.class), any(byte[].class));
     }
 }

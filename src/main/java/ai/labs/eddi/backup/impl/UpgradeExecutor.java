@@ -954,6 +954,12 @@ public class UpgradeExecutor {
                 // run with earlier resources already written and no rollback.
                 callerTokenAuthorPolicy.requireMayAuthor(content, source.type());
             }
+            if (content instanceof ParserConfiguration parser) {
+                // RestParserStore's create check, recorded like the one above: a
+                // dictionary the source did not serve keeps the source's reference,
+                // which may name a dictionary here the caller cannot read.
+                WorkflowReferenceAccess.requireAccessToParserReferences(resourceAccessGuard, parser);
+            }
             if (content instanceof RagConfiguration rag) {
                 // A created knowledge base is a new one, addressed by its own id — the
                 // rule the REST create and the import apply. Without it a source config
@@ -1424,7 +1430,10 @@ public class UpgradeExecutor {
             } else if (adoptSourceConfig && hasSteps(sourceWf.config())) {
                 refusedAdoption = adoptableSourceConfig(sourceWf.config(), targetRefs, createdForAdoption);
                 if (refusedAdoption == null) {
-                    configToWrite = sourceWf.config();
+                    // A copy: the loop below repoints it in place, and the source's
+                    // config is shared by every position that names the same workflow
+                    // (IResourceSource#atPosition).
+                    configToWrite = copyOf(sourceWf.config());
                 }
             }
 
@@ -1502,6 +1511,45 @@ public class UpgradeExecutor {
      * @return null when the source config can be adopted, otherwise the reason for
      *         the operator
      */
+    /**
+     * A copy of the workflow whose steps' maps and lists are its own, so repointing
+     * a reference in it leaves the original as it was.
+     */
+    static WorkflowConfiguration copyOf(WorkflowConfiguration workflow) {
+        WorkflowConfiguration copy = new WorkflowConfiguration();
+        List<WorkflowConfiguration.WorkflowStep> steps = new ArrayList<>();
+        if (workflow.getWorkflowSteps() != null) {
+            for (WorkflowConfiguration.WorkflowStep step : workflow.getWorkflowSteps()) {
+                if (step == null) {
+                    steps.add(null);
+                    continue;
+                }
+                WorkflowConfiguration.WorkflowStep stepCopy = new WorkflowConfiguration.WorkflowStep();
+                stepCopy.setType(step.getType());
+                stepCopy.setConfig(deepCopy(step.getConfig()));
+                stepCopy.setExtensions(deepCopy(step.getExtensions()));
+                steps.add(stepCopy);
+            }
+        }
+        copy.setWorkflowSteps(steps);
+        return copy;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T> T deepCopy(T value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> copy = new LinkedHashMap<>();
+            map.forEach((key, entry) -> copy.put(key, deepCopy(entry)));
+            return (T) copy;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> copy = new ArrayList<>(list.size());
+            list.forEach(entry -> copy.add(deepCopy(entry)));
+            return (T) copy;
+        }
+        return value;
+    }
+
     private String adoptableSourceConfig(WorkflowConfiguration sourceConfig, Map<String, URI> targetRefs,
                                          Set<String> createdForAdoption) {
         for (WorkflowExtensions.ExtensionRef ref : WorkflowExtensions.scan(sourceConfig)) {

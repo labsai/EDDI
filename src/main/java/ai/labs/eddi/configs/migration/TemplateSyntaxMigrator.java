@@ -5,8 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.modules.templating.TemplateEscaping;
-import ai.labs.eddi.modules.templating.impl.RuntimeTemplateEngineFactory;
-import io.quarkus.qute.Engine;
+import ai.labs.eddi.modules.templating.impl.RuntimeTemplateParseCheck;
 import jakarta.enterprise.context.ApplicationScoped;
 
 import java.util.ArrayDeque;
@@ -544,19 +543,6 @@ public class TemplateSyntaxMigrator {
     }
 
     /**
-     * The parser the check below uses: the runtime template engine itself, built
-     * with its default settings from a plain Qute engine. What it adds at parse
-     * level is the section set of {@code RuntimeTemplateEngineFactory} ({@code if},
-     * {@code for}/{@code each}, {@code with}, {@code let}/{@code set},
-     * {@code when}/{@code switch}; no includes, no user tags) and its parser
-     * settings, so a template passes the check exactly when the runtime can read
-     * it. Namespaces are resolved at render time, so an unknown one such as
-     * {@code vars:} or {@code json:} does not fail a parse.
-     */
-    private static final Engine PARSE_ENGINE = RuntimeTemplateEngineFactory.build(Engine.builder().addDefaults().build(),
-            RuntimeTemplateEngineFactory.Settings.defaults());
-
-    /**
      * Why {@code template} is not valid Qute, or {@code null} when it parses. Parse
      * only, nothing is rendered. The conversion is regex- and scan-based and can
      * emit syntax Qute rejects: a template that then fails on every render in the
@@ -564,16 +550,7 @@ public class TemplateSyntaxMigrator {
      * conversion is parsed before it is trusted.
      */
     public String quteParseError(String template) {
-        if (template == null) {
-            return null;
-        }
-        try {
-            PARSE_ENGINE.parse(template);
-            return null;
-        } catch (RuntimeException e) {
-            String message = e.getMessage();
-            return message == null ? e.getClass().getSimpleName() : message.replaceAll("\\s+", " ").trim();
-        }
+        return RuntimeTemplateParseCheck.parseError(template);
     }
 
     /**

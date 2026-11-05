@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.caching;
 
 import ai.labs.eddi.engine.cluster.ClusterConfig;
+import ai.labs.eddi.engine.cluster.ClusterMessageSigner;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.cluster.NatsSharedStateFactory;
 import ai.labs.eddi.engine.cluster.SharedBucket;
@@ -65,6 +66,20 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     @Inject
     Instance<IClusterEventBus> clusterEvents;
 
+    /**
+     * Cluster mode: keys an eviction's key hash with the signing key when one is
+     * set (B5) — a plain SHA-256 of a key that contains a user id is reversible by
+     * dictionary for anyone who reads NATS. Field-injected; null in tests.
+     */
+    @Inject
+    Instance<ClusterMessageSigner> clusterSigner;
+
+    /**
+     * Key text to its keyed hash, like {@link #keyHashes}; used only with a signing
+     * key.
+     */
+    private final Cache<String, String> keyedHashes = Caffeine.newBuilder().maximumSize(KEY_HASH_MEMO_SIZE).build();
+
     private final AtomicBoolean subscribed = new AtomicBoolean();
 
     /**
@@ -97,7 +112,13 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         String bucket = SHARED_BUCKETS.get(name);
         if (bucket != null) {
             Duration bucketTtl = ttl != null ? ttl : defaultSharedTtl(name);
-            boolean failClosed = "nonce-replay-protection".equals(name)
+            // Replay protection fails closed (B4): signed-envelope nonces, and the webhook
+            // delivery de-duplication, which is the only replay protection of the github
+            // and
+            // generic-hmac schemes — a node-local fallback let a captured delivery be
+            // replayed
+            // against another node while NATS was down.
+            boolean failClosed = ("nonce-replay-protection".equals(name) || WEBHOOK_DEDUP.equals(name))
                     && ClusterConfig.REJECT.equals(clusterConfig.degradedNonces());
             return (ICache<K, V>) sharedWrappers.computeIfAbsent(localKey,
                     k -> new SharedKvCache<>(local, natsSharedState.get().bucket(new SharedBucket(bucket, bucketTtl, -1)), failClosed));
@@ -134,9 +155,19 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         events.onResync(() -> INVALIDATED.forEach(this::clearLocal));
     }
 
+    /** The cache whose shared bucket fails closed with the replay nonces (B4). */
+    static final String WEBHOOK_DEDUP = "webhook-event-dedup";
+
+    private ClusterMessageSigner signer() {
+        return clusterSigner != null && clusterSigner.isResolvable() ? clusterSigner.get() : null;
+    }
+
     @Override
     public void evicted(String cacheName, Object key) {
-        clusterEvents.get().publish(ClusterEvent.CACHE_EVICT, Map.of("cache", cacheName, "key", KvKeys.hashed(String.valueOf(key))));
+        ClusterMessageSigner signer = signer();
+        String keyed = signer == null ? null : signer.keyedHash(String.valueOf(key));
+        clusterEvents.get().publish(ClusterEvent.CACHE_EVICT,
+                Map.of("cache", cacheName, "key", keyed != null ? keyed : KvKeys.hashed(String.valueOf(key))));
     }
 
     @Override
@@ -149,9 +180,19 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
         if (cacheName == null || keyHash == null) {
             return;
         }
+        // A keyed hash (k_) comes from a node with the signing key, a plain one (h_)
+        // from a
+        // node without it — an older one during a rolling upgrade: match whichever
+        // arrived.
+        ClusterMessageSigner signer = keyHash.startsWith("k_") ? signer() : null;
+        if (keyHash.startsWith("k_") && (signer == null || !signer.isSigning())) {
+            return; // cannot be matched here; the TTL backstop and resyncs cover it
+        }
         caches.forEach((registered, cache) -> {
             if (registered.equals(cacheName) || registered.startsWith(cacheName + ":ttl=")) {
-                cache.asMap().keySet().removeIf(k -> keyHashes.get(String.valueOf(k), KvKeys::hashed).equals(keyHash));
+                cache.asMap().keySet().removeIf(k -> signer != null
+                        ? keyHash.equals(keyedHashes.get(String.valueOf(k), signer::keyedHash))
+                        : keyHashes.get(String.valueOf(k), KvKeys::hashed).equals(keyHash));
             }
         });
     }

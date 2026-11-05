@@ -20,6 +20,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.OptionalDouble;
 
 /**
  * Tenant quota enforcement engine.
@@ -375,6 +376,37 @@ public class TenantQuotaService {
      */
     public QuotaCheckResult checkCostBudget(String tenantId) {
         return checkCostBudget(tenantId, 0.0);
+    }
+
+    /**
+     * Whether {@code tenantId} has a monthly dollar budget in force — what the
+     * strict unpriced-call policy ({@code REFUSE_WHEN_BUDGETED}) asks. A store that
+     * cannot answer counts as budgeted: the stricter reading.
+     */
+    public boolean hasCostBudget(String tenantId) {
+        try {
+            TenantQuota quota = quotaFor(tenantId);
+            return quota != null && quota.enabled() && quota.maxMonthlyCostUsd() >= 0;
+        } catch (QuotaAccountingUnavailableException e) {
+            return true;
+        }
+    }
+
+    /**
+     * What is left of the tenant's monthly dollar budget (never negative), or empty
+     * when none is in force. Read-only, for callers that size their own ceiling
+     * against it (team budgets).
+     *
+     * @throws QuotaAccountingUnavailableException
+     *             when the quota or its counter cannot be read -- the caller
+     *             decides how to fail, this never answers "unlimited" for an outage
+     */
+    public OptionalDouble remainingCostUsd(String tenantId) {
+        TenantQuota quota = quotaFor(tenantId);
+        if (quota == null || !quota.enabled() || quota.maxMonthlyCostUsd() < 0) {
+            return OptionalDouble.empty();
+        }
+        return OptionalDouble.of(Math.max(0.0, quota.maxMonthlyCostUsd() - quotaStore.getMonthlyCost(tenantId)));
     }
 
     /**

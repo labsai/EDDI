@@ -44,7 +44,7 @@ public class RestLlmStore implements IRestLlmStore {
      * Maps keyed by tool names rather than parameter names: a tool called
      * {@code get_token} is not a credential field.
      */
-    public static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes", "tasks[].toolQuotas.tools");
+    public static final Set<String> NOT_CONFIGURATION = Set.of("tasks[].toolCacheScopes", "tasks[].toolQuotas.tools", "tasks[].toolDisplay");
 
     private final ILlmStore httpCallsStore;
     private final IJsonSchemaCreator jsonSchemaCreator;
@@ -133,7 +133,7 @@ public class RestLlmStore implements IRestLlmStore {
 
     @Override
     public Response patchLlm(String id, Integer version, String jsonPatch) {
-        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, patched -> {
+        return restVersionInfo.patch(id, version, jsonPatch, LlmConfiguration.class, jsonPatcher, NOT_CONFIGURATION, patched -> {
             // The same pre-write checks updateLlm runs.
             requireMayAuthorCallerToken(patched);
             warnOnPlaintextSecrets(patched);

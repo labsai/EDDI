@@ -6,8 +6,10 @@ package ai.labs.eddi.engine.lifecycle.model;
 import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
+import ai.labs.eddi.engine.hitl.audit.HitlChannel;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
@@ -82,6 +84,42 @@ public class HitlDecision {
      */
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private Map<String, Context> context;
+    /**
+     * Optional, APPROVED only: the final answer the approver wrote in place of the
+     * model's draft. Regular conversations: RULE pauses of an agent with
+     * {@code hitlConfig.review.allowAnswerEdits}. Groups: a PHASE pause of a
+     * SYNTHESIS phase with {@code review.allowResultEdits}. Data, never template
+     * source. Validated before the pause is consumed.
+     *
+     * @since 6.7.0
+     */
+    private String editedAnswer;
+    /**
+     * Optional reason code explaining a rejection or an edit (see
+     * {@code review.reasonCodes}). Refused on a plain approval.
+     *
+     * @since 6.7.0
+     */
+    private String reasonCode;
+    /**
+     * Where the decision was made, as the REST layer declared it (the
+     * {@code X-EDDI-Client} header). Server-side only, never read from a body; a
+     * {@code decidedBy} prefix ({@code slack:}, {@code mcp:}, {@code system:*})
+     * wins over it in the audit.
+     *
+     * @since 6.7.0
+     */
+    @JsonIgnore
+    private HitlChannel channel;
+    /**
+     * Id of the {@code hitl.approval} audit entry of this decision, assigned
+     * server-side before the resume runs, so an edit the engine refuses can be
+     * recorded against it ({@code hitl.edit.refused}). Never read from a body.
+     *
+     * @since 6.7.0
+     */
+    @JsonIgnore
+    private String decisionId;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -156,5 +194,41 @@ public class HitlDecision {
 
     public void setContext(Map<String, Context> context) {
         this.context = context;
+    }
+
+    public String getEditedAnswer() {
+        return editedAnswer;
+    }
+
+    public void setEditedAnswer(String editedAnswer) {
+        this.editedAnswer = editedAnswer;
+    }
+
+    public String getReasonCode() {
+        return reasonCode;
+    }
+
+    public void setReasonCode(String reasonCode) {
+        this.reasonCode = reasonCode;
+    }
+
+    @JsonIgnore
+    public HitlChannel getChannel() {
+        return channel;
+    }
+
+    @JsonIgnore
+    public void setChannel(HitlChannel channel) {
+        this.channel = channel;
+    }
+
+    @JsonIgnore
+    public String getDecisionId() {
+        return decisionId;
+    }
+
+    @JsonIgnore
+    public void setDecisionId(String decisionId) {
+        this.decisionId = decisionId;
     }
 }

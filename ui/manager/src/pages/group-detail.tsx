@@ -502,12 +502,12 @@ export function GroupDetailPage() {
   // persisted conversation (which polls while it runs) and says so with a
   // "resuming" notice until the state moves on.
   const handleSubmitHumanInput = useCallback(
-    (gcId: string, memberId: string, content: string) => {
+    (gcId: string, memberId: string, content: string, choice?: string) => {
       if (!groupId) return;
       const requestedAt =
         selectedConversation?.id === gcId ? (selectedConversation.pendingHumanInput?.requestedAt ?? null) : null;
       submitHumanInputMutation.mutate(
-        { groupId, gcId, memberId, content },
+        { groupId, gcId, memberId, content, choice },
         {
           onSuccess: () => {
             toast.success(t("groups.humanTurnSubmitted", "Your response was recorded"));

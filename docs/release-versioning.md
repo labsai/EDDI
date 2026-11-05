@@ -40,13 +40,13 @@ main ─────────────────────────
   ↑
   │  merge when ready
   │
-feature/version-6.3.0 ───────────────────── active development
+feat/my-change ───────────────────────────── short-lived branch from origin/main
 ```
 
 | Branch | Purpose | Docker push? |
 |---|---|---|
 | `main` | Production-ready code | ✅ Build tags on every push |
-| `feature/version-X.Y.Z` | Active development branch | ❌ No Docker push |
+| `feat/…`, `fix/…`, `docs/…` (branched from `origin/main`) | Short-lived work branches | ❌ No Docker push |
 | Pull requests → `main` | Code review, CI validation | ❌ Tests + preflight only |
 
 ---
@@ -174,7 +174,7 @@ This skips the Docker build and smoke test jobs, but **tests still run** — unl
 | Commit message | Tests | Docker build | Smoke test |
 |---|---|---|---|
 | `feat: add new API endpoint` | ✅ | ✅ | ✅ |
-| `docs: update changelog [skip docker]` | ❌ (docs-only paths skip `build-and-test` too) | ❌ | ❌ |
+| `docs: update README [skip docker]` | ❌ (docs-only paths skip `build-and-test` too, except the few docs that tests read, such as the changelog tests, `README.md` and `docs/kubernetes.md`) | ❌ | ❌ |
 | Any tag push (`6.3.0-RC1`) | ✅ | ✅ (always) | ✅ |
 
 > `[skip docker]` is ignored on tag pushes — releases always build Docker images.
@@ -216,9 +216,9 @@ The entire pipeline lives in a single file: [`.github/workflows/ci.yml`](../.git
 ```
 
 Nothing is published until every gate above `docker` has passed. Its `needs` list is
-`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, gitleaks]`, so a failing
-CVE scan, a secret leak, a CodeQL finding or a coverage shortfall each block the push on their
-own. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
+`[detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate, ui-gate]`, so a failing
+CVE scan, a secret leak, a CodeQL finding, a coverage shortfall or a failing end-to-end tier each block the push on their
+own. The diagram below shows the core gates only; `build-image`, the E2E jobs and `ui-gate` sit between them and `docker`. **`build-and-test` runs `mvnw clean test`, not `verify`** — `integration-test` is the only
 job that runs the JaCoCo 90/80 coverage gate.
 
 ### Job Details
@@ -231,7 +231,7 @@ job that runs the JaCoCo 90/80 coverage gate.
 | **trivy-scan** | Same | Filesystem CVE scan, `exit-code 1`; blocks `docker` | ~2-3 min |
 | **gitleaks** | Same | Secret scanning; blocks `docker` | ~1 min |
 | **sbom** | Same | CycloneDX SBOM; does not block `docker` | ~2 min |
-| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql and gitleaks | ~3-4 min |
+| **docker** | Push to `main` or a tag matching `[0-9]*` | `[skip docker]` to skip (ignored on tags). Needs detect-changes, build-and-test, integration-test, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-gate and ui-gate | ~3-4 min |
 | **smoke-test** | After `docker` succeeds | Same as docker | ~1-2 min |
 | **preflight-check** | Pull requests only | Always on PRs | ~5-7 min |
 

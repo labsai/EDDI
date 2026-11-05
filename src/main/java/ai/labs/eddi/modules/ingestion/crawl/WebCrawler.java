@@ -119,6 +119,13 @@ public class WebCrawler {
      */
     private static final int MAX_QUEUED_URLS = 100_000;
 
+    /**
+     * Characters of URL text the link frontier may retain over a crawl, the
+     * canonical id and the fetch URL together. {@link #MAX_QUEUED_URLS} bounds the
+     * count; this bounds the size, which a long base URL multiplies.
+     */
+    static final long MAX_FRONTIER_CHARS = 64_000_000L;
+
     /** Cap on the robots.txt and sitemap bodies. */
     private static final long MAX_METADATA_BYTES = 1024L * 1024;
 
@@ -352,7 +359,7 @@ public class WebCrawler {
         // where the listing's later entries are linked from, and returning before
         // this made them unreachable.
         if (linksWanted) {
-            enqueueLinks(document, candidate.depth() + 1, seedHost, request, excludes, frontier);
+            enqueueLinks(document, candidate.depth() + 1, seedHost, request, excludes, frontier, counters);
         }
 
         String canonical = candidate.ignoreCanonical()
@@ -367,9 +374,11 @@ public class WebCrawler {
             if (!frontier.visited.contains(canonical)) {
                 // Let the page it names speak for itself, under its own URL. If that
                 // produces nothing, this page is re-queued and stored after all.
-                frontier.defer(canonical, candidate);
-                counters.skipped++;
-                return;
+                if (frontier.defer(canonical, candidate)) {
+                    counters.skipped++;
+                    return;
+                }
+                // No room for its canonical target: stored as itself below.
             }
             // The page it names was fetched and produced no document — gone, broken,
             // or a redirect somewhere else. This page is the content, so it stays.
@@ -390,7 +399,7 @@ public class WebCrawler {
     }
 
     private void enqueueLinks(Document document, int depth, String seedHost, CrawlRequest request,
-                              List<UrlPattern> excludes, Frontier frontier) {
+                              List<UrlPattern> excludes, Frontier frontier, Counters counters) {
 
         Queue<Candidate> queue = frontier.queue;
         Set<String> queued = frontier.queued;
@@ -401,6 +410,9 @@ public class WebCrawler {
                 // URL used to be retained however many could actually be fetched, and
                 // a site with sort/filter/page parameters has an unbounded URL space.
                 // Nothing past the remaining fetch budget can ever be polled.
+                //
+                // Links were dropped, so the queue emptying later is not coverage.
+                counters.discoveryIncomplete = true;
                 break;
             }
             String href = link.attr("abs:href");
@@ -418,8 +430,16 @@ public class WebCrawler {
             if (!isInScope(canonical, seedHost, request, excludes)) {
                 continue;
             }
+            // Both strings are retained, and a short relative link inherits the whole of
+            // a long base URL: the count cap alone lets one page pin gigabytes.
+            String fetchUrl = CrawlUrls.stripFragment(href);
+            long cost = (long) canonical.length() + fetchUrl.length();
+            if (!frontier.admit(cost)) {
+                counters.discoveryIncomplete = true;
+                break;
+            }
             queued.add(canonical);
-            queue.add(new Candidate(CrawlUrls.stripFragment(href), canonical, depth, false));
+            queue.add(new Candidate(fetchUrl, canonical, depth, false));
         }
     }
 
@@ -1032,16 +1052,37 @@ public class WebCrawler {
          */
         private final Set<String> queued = new HashSet<>();
         private final Set<String> visited = new HashSet<>();
+        /** URL characters admitted by link discovery so far; see MAX_FRONTIER_CHARS. */
+        private long queuedChars;
         /** Document ids this crawl has reported, as a page or as unchanged. */
         private final Set<String> delivered = new HashSet<>();
         private final Map<String, List<Candidate>> deferredTo = new HashMap<>();
 
-        /** Holds a page back until the page it names as canonical has been tried. */
-        void defer(String canonical, Candidate candidate) {
+        /** Charges URL text against MAX_FRONTIER_CHARS; false when it does not fit. */
+        boolean admit(long chars) {
+            if (queuedChars + chars > MAX_FRONTIER_CHARS) {
+                return false;
+            }
+            queuedChars += chars;
+            return true;
+        }
+
+        /**
+         * Holds a page back until the page it names as canonical has been tried.
+         *
+         * @return false when the canonical target does not fit in the frontier's
+         *         character budget, in which case nothing is held back and the page is
+         *         stored as itself
+         */
+        boolean defer(String canonical, Candidate candidate) {
+            if (!queued.contains(canonical) && !admit(2L * canonical.length())) {
+                return false;
+            }
             deferredTo.computeIfAbsent(canonical, ignored -> new ArrayList<>()).add(candidate);
             if (queued.add(canonical)) {
                 queue.add(new Candidate(canonical, canonical, candidate.depth(), false));
             }
+            return true;
         }
 
         /**

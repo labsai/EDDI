@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
@@ -604,10 +605,7 @@ class StreamingLegacyChatExecutor {
                 }
             }
             if (meta.tokenUsage() != null) {
-                var usage = meta.tokenUsage();
-                metadata.put("tokenUsage", Map.of("inputTokens", usage.inputTokenCount() != null ? usage.inputTokenCount() : 0, "outputTokens",
-                        usage.outputTokenCount() != null ? usage.outputTokenCount() : 0, "totalTokens",
-                        usage.totalTokenCount() != null ? usage.totalTokenCount() : 0));
+                metadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(meta.tokenUsage()));
             }
         }
         return metadata;

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.hitl.model;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import java.util.List;
 
@@ -107,6 +108,27 @@ public class ToolApprovalsConfig {
      * rules tune HOW a gated call is reviewed, never WHETHER it is gated.
      */
     private List<ApprovalRule> rules;
+    /**
+     * Runtime-only: patterns of earned-autonomy categories that are currently
+     * suspended. The gate gates an allowed call matching one with
+     * {@code suspended:<pattern>}. Set on a copy by {@code AutonomyOverlayService},
+     * never read from or written to JSON, so configuration can neither pre-set nor
+     * clear a suspension.
+     *
+     * @since 6.7.0
+     */
+    @JsonIgnore
+    private transient List<String> suspendedPatterns;
+
+    @JsonIgnore
+    public List<String> getSuspendedPatterns() {
+        return suspendedPatterns;
+    }
+
+    @JsonIgnore
+    public void setSuspendedPatterns(List<String> suspendedPatterns) {
+        this.suspendedPatterns = suspendedPatterns;
+    }
 
     /**
      * Per-tool override of the approval scalars above, addressed by the same
@@ -135,8 +157,31 @@ public class ToolApprovalsConfig {
         private String approvalTimeout;
         /** Overrides {@link ToolApprovalsConfig#getPauseReason()}. ≤500 chars. */
         private String pauseReason;
+        /**
+         * Approval category recorded in the audit ledger for calls this rule governs
+         * (e.g. {@code github.reply}). Absent = derived {@code tool:<pattern>}.
+         *
+         * @since 6.7.0
+         */
+        private String approvalCategory;
         /** Overrides {@link ToolApprovalsConfig#getPendingMessage()}. ≤500 chars. */
         private String pendingMessage;
+        /**
+         * Context blocks rendered for the calls this rule governs, shown on the
+         * approval card (see {@link ApprovalContextBlock}). {@code call.*} is available
+         * here. At most 4. Absent = none.
+         *
+         * @since 6.7.0
+         */
+        private List<ApprovalContextBlock> context;
+
+        public List<ApprovalContextBlock> getContext() {
+            return context;
+        }
+
+        public void setContext(List<ApprovalContextBlock> context) {
+            this.context = context;
+        }
 
         public String getMatch() {
             return match;
@@ -168,6 +213,14 @@ public class ToolApprovalsConfig {
 
         public void setPauseReason(String pauseReason) {
             this.pauseReason = pauseReason;
+        }
+
+        public String getApprovalCategory() {
+            return approvalCategory;
+        }
+
+        public void setApprovalCategory(String approvalCategory) {
+            this.approvalCategory = approvalCategory;
         }
 
         public String getPendingMessage() {
