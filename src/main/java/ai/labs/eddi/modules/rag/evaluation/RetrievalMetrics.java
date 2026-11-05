@@ -116,9 +116,7 @@ public final class RetrievalMetrics {
                 missing.add(document);
             }
         }
-        Double recall = wanted.isEmpty()
-                ? null
-                : Math.min(1.0, (double) top.stream().filter(c -> c != null && c.stream().anyMatch(wanted::contains)).count() / wanted.size());
+        Double recall = wanted.isEmpty() ? null : (double) found.size() / wanted.size();
         double reciprocalRank = firstHitRank == null ? 0.0 : 1.0 / firstHitRank;
         return new QueryScore(k, top.size(), wanted.size(), firstHitRank, firstHitRank != null, reciprocalRank, recall,
                 List.copyOf(found), List.copyOf(missing));
