@@ -892,7 +892,12 @@ class ConversationHitlService {
                         if (conversationMemoryStore.compareAndSetStateFenced(conversationId, ConversationState.IN_PROGRESS,
                                 ConversationState.AWAITING_HUMAN, fence)) {
                             conversationService.cacheConversationState(conversationId, ConversationState.AWAITING_HUMAN);
-                            scheduleHitlTimeout(conversationId, memory);
+                            // Re-arm from the STORED bookmark: the resumed pipeline already
+                            // cleared the live memory's (Conversation.resume), and the original
+                            // schedule was deleted before it ran. The store still holds the
+                            // pause, since the lost resume stored nothing.
+                            scheduleHitlTimeout(conversationId,
+                                    convertConversationMemorySnapshot(conversationMemoryStore.loadConversationMemorySnapshot(conversationId)));
                             LOGGER.warnf("Resume of conversation %s lost its lease — the pause is restored (AWAITING_HUMAN) and the "
                                     + "resume is dead-lettered; the decision has to be given again", sanitize(conversationId));
                         } else {

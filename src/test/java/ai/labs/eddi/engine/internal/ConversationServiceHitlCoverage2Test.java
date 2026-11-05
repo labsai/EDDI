@@ -68,6 +68,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -378,15 +379,27 @@ class ConversationServiceHitlCoverage2Test {
          * lease.
          */
         private ILeaseAwareTask acceptedResume() throws Exception {
+            return acceptedResume(snapshot -> {
+            });
+        }
+
+        /** The live memory the accepted resume runs on. */
+        private IConversationMemory liveMemory;
+
+        private ILeaseAwareTask acceptedResume(Consumer<ConversationMemorySnapshot> pause) throws Exception {
             doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
             doReturn(true).when(conversationMemoryStore).compareAndSetState(
                     CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
             var snapshot = rulePauseSnapshot();
             snapshot.setConversationState(ConversationState.IN_PROGRESS);
+            pause.accept(snapshot);
             doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
             IAgent agent = mock(IAgent.class);
             doReturn(agent).when(agentFactory).getAgent(ENV, AGENT_ID, AGENT_VERSION);
-            doReturn(mock(IConversation.class)).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
+            doAnswer(inv -> {
+                liveMemory = inv.getArgument(0);
+                return mock(IConversation.class);
+            }).when(agent).continueConversation(any(IConversationMemory.class), any(), any());
             List<Callable<Void>> queued = new ArrayList<>();
             doAnswer(inv -> queued.add(inv.getArgument(1))).when(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
 
@@ -422,6 +435,33 @@ class ConversationServiceHitlCoverage2Test {
             order.verify(conversationMemoryStore).compareAndSetStateFenced(CONVERSATION_ID, ConversationState.IN_PROGRESS,
                     ConversationState.AWAITING_HUMAN, 9L);
             verify(conversationMemoryStore, never()).storeConversationMemorySnapshotIfState(any(), any());
+        }
+
+        @Test
+        @DisplayName("A5: the restored pause re-arms its timeout from the stored bookmark, not the cleared live one")
+        void lostLeaseRearmsTheTimeoutFromTheStore() throws Exception {
+            ILeaseAwareTask task = acceptedResume(snapshot -> {
+                snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+                snapshot.setHitlApprovalTimeout("PT30M");
+            });
+            doAnswer(inv -> {
+                // Conversation.resume clears the live bookmark before the lease goes
+                liveMemory.setHitlTimeoutPolicy(null);
+                liveMemory.setHitlApprovalTimeout(null);
+                leaseLost.set(true);
+                lostCallbacks.forEach(Runnable::run);
+                IRuntime.IFinishedExecution<Void> done = inv.getArgument(1);
+                done.onComplete(null);
+                return CompletableFuture.completedFuture(null);
+            }).when(runtime).submitCallable(any(), any(), any());
+            doReturn(true).when(conversationMemoryStore).compareAndSetStateFenced(CONVERSATION_ID, ConversationState.IN_PROGRESS,
+                    ConversationState.AWAITING_HUMAN, 9L);
+
+            assertThrows(ConversationStepRunner.TurnLeaseLostException.class, task::call);
+
+            InOrder order = inOrder(scheduleStore);
+            order.verify(scheduleStore).deleteSchedulesByName(anyString());
+            order.verify(scheduleStore).createSchedule(any());
         }
 
         @Test

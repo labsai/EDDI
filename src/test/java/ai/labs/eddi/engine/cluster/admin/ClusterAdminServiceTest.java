@@ -381,6 +381,34 @@ class ClusterAdminServiceTest {
         }
 
         @Test
+        @DisplayName("D6: a scan that runs while the force-release is in flight is not served afterwards")
+        void scanDuringForceReleaseIsDropped() {
+            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenReturn(List.of(
+                    new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null)));
+            when(natsLeases.forceRelease("c.conv1", 10L)).thenAnswer(inv -> {
+                service.leases(null, false, 100); // a console refresh racing the release
+                return new ForceRelease(ForceReleaseOutcome.RELEASED, new LeaseInfo("n2", "b2", 10, NOW), 10);
+            });
+
+            service.forceRelease("conv1", 10L, "admin-1");
+            service.leases(null, false, 100);
+            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+        }
+
+        @Test
+        @DisplayName("D6: a scan invalidated while it reads the bucket is returned but not cached")
+        void scanInvalidatedMidwayIsNotCached() {
+            when(natsLeases.snapshot("", ClusterAdminService.MAX_LEASE_SCAN)).thenAnswer(inv -> {
+                service.invalidateLeaseScan();
+                return List.of(new LeaseSnapshot("c.conv1", new LeaseInfo("n2", "b2", 10, NOW - 1_000), NOW - 500, null));
+            });
+
+            assertEquals(1, service.leases(null, false, 100).leases().size());
+            service.leases(null, false, 100);
+            verify(natsLeases, times(2)).snapshot("", ClusterAdminService.MAX_LEASE_SCAN);
+        }
+
+        @Test
         @DisplayName("a holder that came back with a new boot is RESTARTED")
         void restartedHolder() {
             when(natsLeases.snapshot(anyString(), anyInt()))

@@ -624,6 +624,11 @@ public class ClusterAdminService implements ClusterStartable {
     static final long LEASE_SCAN_CACHE_MILLIS = 3_000;
     private final Object leaseScanLock = new Object();
     private volatile LeaseScan cachedLeaseScan;
+    /**
+     * Bumped by every invalidation, so a scan that read the bucket before a
+     * force-release completed is returned to its caller but never cached.
+     */
+    private final AtomicLong leaseScanGeneration = new AtomicLong();
 
     /** One read of the lease bucket and the summaries of its conversations. */
     private record LeaseScan(List<LeaseSnapshot> snapshots, Map<String, ConversationListingSummary> summaries, long at) {
@@ -640,19 +645,23 @@ public class ClusterAdminService implements ClusterStartable {
             if (cached != null && System.currentTimeMillis() - cached.at() < LEASE_SCAN_CACHE_MILLIS) {
                 return cached;
             }
+            long generation = leaseScanGeneration.get();
             List<LeaseSnapshot> snapshots = natsLeases.get().snapshot("", MAX_LEASE_SCAN);
             // Agents for the conversations, in one read.
             List<String> conversationIds = snapshots.stream().map(LeaseSnapshot::key)
                     .filter(k -> k.startsWith(IConversationLeaseManager.CONVERSATION))
                     .map(k -> k.substring(IConversationLeaseManager.CONVERSATION.length())).toList();
             LeaseScan fresh = new LeaseScan(snapshots, summaries(conversationIds), System.currentTimeMillis());
-            cachedLeaseScan = fresh;
+            if (leaseScanGeneration.get() == generation) {
+                cachedLeaseScan = fresh;
+            }
             return fresh;
         }
     }
 
     /** Drops the shared lease scan after this node changed a lease. */
     void invalidateLeaseScan() {
+        leaseScanGeneration.incrementAndGet();
         cachedLeaseScan = null;
     }
 
@@ -1443,11 +1452,14 @@ public class ClusterAdminService implements ClusterStartable {
         requireCluster("Releasing a lease");
         String key = IConversationLeaseManager.CONVERSATION + conversationId;
         ForceRelease result;
-        invalidateLeaseScan();
         try {
             result = natsLeases.get().forceRelease(key, expectedRevision);
         } catch (ClusterUnavailableException e) {
             throw new ActionRefusedException(409, "NATS_UNREACHABLE", "NATS is unreachable from this node: " + e.getMessage());
+        } finally {
+            // After the release, not before: a scan between the two would cache the
+            // released lease as still held.
+            invalidateLeaseScan();
         }
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("conversationId", conversationId);

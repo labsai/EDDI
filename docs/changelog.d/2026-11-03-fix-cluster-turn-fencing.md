@@ -13,7 +13,9 @@ the turn path, the conversation stores, HITL resume, dead-letter replay and the 
   properties overwrote the predecessor's, and a duplicate `Idempotency-Key` could run twice. A failed
   raise was only logged. Now the fence goes up before anything is read, and a turn that cannot raise
   it — or whose lease is already lost — does not run: 409 + `Retry-After`, input not consumed. The
-  HITL resume does the same and restores the pause.
+  HITL resume is ordered differently: it reads the snapshot and moves the state `AWAITING_HUMAN` →
+  `IN_PROGRESS` on the request thread, and only its queued task raises the fence, before the resumed
+  pipeline runs; a resume that cannot raise it does not run and restores the pause.
   `ConversationStepRunnerLeaseTest.raiseFailureDoesNotStopTheTurn` asserted the old behaviour and was
   replaced by `raiseFailureAnswersBusy`.
 - **A4, the fence only grows.** A full-document write (Mongo `replaceOne`, Postgres `data = ?`)
@@ -44,7 +46,10 @@ the turn path, the conversation stores, HITL resume, dead-letter replay and the 
   was then skipped, timed out on the lease or failed lost its input. The entry is now deleted only
   once the replayed turn commits (checked through its `Idempotency-Key`, `dead-letter-replay:<id>`,
   which every replay of one entry carries), the claim is held until then, and the outcome is on the
-  activity timeline. The legacy `POST /administration/coordinator/dead-letters/{id}/replay` goes
+  activity timeline. With turn idempotency switched off there is no key to look for, and the check
+  falls back to "the conversation's revision moved past the one read before the replay" — another
+  turn can move it too, so in that mode a deleted entry does not prove the replay itself committed.
+  The legacy `POST /administration/coordinator/dead-letters/{id}/replay` goes
   through the same path, so it now claims the entry and is audited with the calling admin.
 - **A9.** A turn the runtime refused after its lease was granted was both dead-lettered and answered
   "retry". It is answered busy, and its dead letter is marked `answeredRetry` and cannot be replayed
@@ -78,6 +83,18 @@ the turn path, the conversation stores, HITL resume, dead-letter replay and the 
 - The node-local dead-letter ring (A10) is not persisted to disk here: it lives in the coordinator
   base class, and a durable journal would also have to honour GDPR erasure. The docs now say what it
   does; persisting it is left to the coordinator workstream.
+
+### Review follow-ups
+
+- A resume that lost its lease re-arms the pause's timeout from the **stored** bookmark: the
+  resumed pipeline had already cleared the live memory's, so a finite `AUTO_REJECT` /
+  `AUTO_APPROVE` / `ABORT` policy was left without a schedule until the next restart.
+- A force-release drops the shared lease scan *after* the release, not before, and a scan that
+  read the bucket while an invalidation happened is returned but not cached (generation counter),
+  so the console does not show a released lease as held for 3 s.
+- `clustering.md` no longer calls the group `g.<id>` lease exclusive: the discussion's writes are
+  not fenced and a holder that loses the lease is not stopped. The A3 and A7 entries above now
+  state the resume's real fencing order and the replay check's fallback without idempotency.
 
 **Files:** [`ConversationStepRunner.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationStepRunner.java),
 [`ConversationService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationService.java),
