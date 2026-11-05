@@ -428,6 +428,10 @@ public final class NationalChecksums {
         return check != 10 && check == digit(nine, 8);
     }
 
+    /**
+     * The New Zealand IRD check digit of the first eight digits under
+     * {@code weights}; 10 means the weights do not yield one.
+     */
     private static int irdCheck(String nine, int[] weights) {
         int sum = 0;
         for (int i = 0; i < 8; i++) {
@@ -460,6 +464,10 @@ public final class NationalChecksums {
                 && mrzDigit(v.substring(0, 10) + v.substring(13, 20) + v.substring(21, 43)) == v.charAt(43) - '0';
     }
 
+    /**
+     * Whether the ICAO check digit at {@code checkAt} matches the field
+     * {@code v[from, checkAt)}.
+     */
     private static boolean mrzCheck(String v, int from, int checkAt) {
         return mrzDigit(v.substring(from, checkAt)) == v.charAt(checkAt) - '0';
     }
@@ -550,10 +558,12 @@ public final class NationalChecksums {
         return n;
     }
 
+    /** The value of the ASCII digit at {@code i}. */
     private static int digit(String v, int i) {
         return v.charAt(i) - '0';
     }
 
+    /** Whether {@code s} is non-empty and consists of ASCII digits only. */
     static boolean allDigits(String s) {
         if (s.isEmpty()) {
             return false;

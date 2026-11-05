@@ -80,6 +80,10 @@ public final class PiiCountries {
         return BY_COUNTRY.getOrDefault(country.trim().toUpperCase(Locale.ROOT), List.of());
     }
 
+    /**
+     * Whether {@code code} (any case, surrounding blanks ignored) names a supported
+     * country.
+     */
     public static boolean isCountry(String code) {
         return BY_COUNTRY.containsKey(code.trim().toUpperCase(Locale.ROOT));
     }

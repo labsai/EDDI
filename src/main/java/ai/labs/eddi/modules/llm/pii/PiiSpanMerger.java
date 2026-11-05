@@ -53,6 +53,12 @@ public final class PiiSpanMerger {
     private PiiSpanMerger() {
     }
 
+    /**
+     * The spans to act on, sorted by start and free of overlaps. Spans touching a
+     * skip range or lying inside a never-term are dropped; of overlapping spans the
+     * higher-priority one wins (always-terms, then length, then score, then input
+     * order).
+     */
     public static List<PiiSpan> merge(String text, List<PiiSpan> spans, Rules rules) {
         List<TextRange> never = TermMatcher.occurrences(text, rules.neverTerms());
         List<Ranked> candidates = new ArrayList<>();
@@ -83,6 +89,7 @@ public final class PiiSpanMerger {
             .thenComparing(r -> -r.span().score())
             .thenComparingInt(Ranked::order);
 
+    /** Whether {@code span} shares a character with any of {@code ranges}. */
     private static boolean overlapsAny(PiiSpan span, List<TextRange> ranges) {
         for (TextRange range : ranges) {
             if (span.overlaps(range.start(), range.end())) {
@@ -92,6 +99,7 @@ public final class PiiSpanMerger {
         return false;
     }
 
+    /** Whether {@code span} lies wholly inside one of {@code ranges}. */
     private static boolean insideAny(PiiSpan span, List<TextRange> ranges) {
         for (TextRange range : ranges) {
             if (range.contains(span.start(), span.end())) {

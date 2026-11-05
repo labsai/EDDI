@@ -196,6 +196,7 @@ public final class PiiChecksums {
         return sum % 10 == tail.charAt(2) - '0';
     }
 
+    /** Whether every character of {@code s} is an ASCII digit. */
     private static boolean allDigits(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);

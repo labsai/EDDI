@@ -290,6 +290,7 @@ public final class BuiltinRecognizers {
         return List.copyOf(RECOGNIZERS.keySet());
     }
 
+    /** Whether this class has a recognizer for {@code entity}. */
     public static boolean supports(String entity) {
         return RECOGNIZERS.containsKey(entity);
     }
@@ -311,6 +312,11 @@ public final class BuiltinRecognizers {
         return recognizer.find(text, deadline);
     }
 
+    /**
+     * A recognizer that runs {@code pattern} over the text and keeps each match
+     * {@code acceptor} confirms; after a rejected match the scan resumes where
+     * {@code resume} says, at least one character on.
+     */
     private static Recognizer scanner(String entity, Pattern pattern, double score, Acceptor acceptor, Resume resume) {
         return (text, deadline) -> {
             Matcher matcher = RegexDeadline.matcher(pattern, text, deadline);
@@ -352,6 +358,10 @@ public final class BuiltinRecognizers {
 
     // ---- German ID card ----
 
+    /**
+     * A German ID-card or passport serial: it must contain a digit, a ten-character
+     * value must carry a valid ICAO check digit, and a keyword must precede it.
+     */
     private static int[] acceptIdCard(String text, int start, int end, long deadline) {
         String value = text.substring(start, end).toUpperCase(Locale.ROOT);
         if (value.chars().noneMatch(Character::isDigit)) {
@@ -365,6 +375,7 @@ public final class BuiltinRecognizers {
 
     // ---- date of birth ----
 
+    /** A date that is plausible as a birth date and follows a birth keyword. */
     private static int[] acceptBirthDate(String text, int start, int end, long deadline) {
         Matcher date = DATE.matcher(text.substring(start, end));
         if (!date.matches() || !plausibleDate(date)) {
@@ -373,6 +384,10 @@ public final class BuiltinRecognizers {
         return hasTriggerBefore(BIRTH_TRIGGER, text, start, deadline) ? new int[]{start, end} : null;
     }
 
+    /**
+     * Whether the matched date can be a calendar date, in whichever of the
+     * {@code DATE} pattern's three forms it was written.
+     */
     private static boolean plausibleDate(Matcher date) {
         if (date.group(1) != null) {
             long a = NationalChecksums.value(date.group(1));
@@ -389,6 +404,10 @@ public final class BuiltinRecognizers {
         return day >= 1 && day <= 31 && plausibleYear(date.group(9));
     }
 
+    /**
+     * A two-digit year is always plausible; a four-digit one must lie between 1900
+     * and 2100.
+     */
     private static boolean plausibleYear(String year) {
         if (year.length() == 2) {
             return true;
@@ -397,6 +416,10 @@ public final class BuiltinRecognizers {
         return y >= 1900 && y <= 2100;
     }
 
+    /**
+     * Whether {@code trigger} matches within the {@code TRIGGER_WINDOW} characters
+     * before {@code start}.
+     */
     private static boolean hasTriggerBefore(Pattern trigger, String text, int start, long deadline) {
         int from = Math.max(0, start - TRIGGER_WINDOW);
         return RegexDeadline.matcher(trigger, text.substring(from, start), deadline).find();
@@ -468,6 +491,7 @@ public final class BuiltinRecognizers {
         return end;
     }
 
+    /** The number of ASCII digits in {@code text[start, end)}. */
     private static int countDigits(String text, int start, int end) {
         int digits = 0;
         for (int i = start; i < end; i++) {

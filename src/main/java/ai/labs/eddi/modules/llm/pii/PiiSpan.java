@@ -31,6 +31,7 @@ public record PiiSpan(int start, int end, String entityType, double score, Strin
         Objects.requireNonNull(detectorId, "detectorId");
     }
 
+    /** The number of characters the span covers. */
     public int length() {
         return end - start;
     }

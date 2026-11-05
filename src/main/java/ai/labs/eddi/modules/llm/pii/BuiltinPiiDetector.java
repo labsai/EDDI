@@ -88,6 +88,10 @@ public class BuiltinPiiDetector implements PiiDetector {
         return configured;
     }
 
+    /**
+     * The non-blank, trimmed entries of a comma-separated parameter; empty for null
+     * or blank.
+     */
     private static List<String> split(String raw) {
         if (raw == null || raw.isBlank()) {
             return List.of();

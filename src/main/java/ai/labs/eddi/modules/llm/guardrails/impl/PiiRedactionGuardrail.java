@@ -140,6 +140,7 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
         return GuardrailVerdict.rewrite(result, reason(found));
     }
 
+    /** The verdict reason, {@code pii:} followed by the kinds found. */
     private static String reason(Set<String> kinds) {
         return "pii:" + String.join(",", kinds);
     }
@@ -178,6 +179,10 @@ public class PiiRedactionGuardrail implements ContentGuardrail {
         return BuiltinRecognizers.entities().stream().filter(wanted::contains).toList();
     }
 
+    /**
+     * The non-blank, trimmed entries of a comma-separated parameter; empty for null
+     * or blank.
+     */
     private static List<String> split(String raw) {
         if (raw == null || raw.isBlank()) {
             return List.of();

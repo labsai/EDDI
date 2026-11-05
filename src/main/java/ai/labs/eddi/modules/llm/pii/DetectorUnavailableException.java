@@ -17,6 +17,10 @@ public class DetectorUnavailableException extends Exception {
     private final String detectorType;
     private final String reason;
 
+    /**
+     * A detector of type {@code detectorType} could not check the text, for
+     * {@code reason}. No stack trace is captured; the reason says what failed.
+     */
     public DetectorUnavailableException(String detectorType, String reason) {
         super(detectorType + ": " + reason, null, false, false);
         this.detectorType = detectorType;

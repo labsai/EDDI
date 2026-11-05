@@ -45,10 +45,19 @@ public final class TermMatcher {
         return found;
     }
 
+    /**
+     * Whether a match of {@code term} may start at {@code index}: at the start of
+     * the text, or where the term or the preceding character is not a letter or
+     * digit.
+     */
     private static boolean boundaryBefore(String text, int index, String term) {
         return index == 0 || !Character.isLetterOrDigit(term.charAt(0)) || !Character.isLetterOrDigit(text.charAt(index - 1));
     }
 
+    /**
+     * Whether a match of {@code term} may end at {@code index}: at the end of the
+     * text, or where the term or the following character is not a letter or digit.
+     */
     private static boolean boundaryAfter(String text, int index, String term) {
         return index == text.length() || !Character.isLetterOrDigit(term.charAt(term.length() - 1))
                 || !Character.isLetterOrDigit(text.charAt(index));
