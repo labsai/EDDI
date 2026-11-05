@@ -175,6 +175,18 @@ public final class LogCaptureFilter implements Filter {
         return null;
     }
 
+    /**
+     * The text {@link BoundedLogStore#capture} would store for a record it is
+     * handed without a message, or null when even that cannot be produced.
+     */
+    private static String preStartMessage(LogRecord record) {
+        try {
+            return LogRecordRedactor.rewrite(BoundedLogStore.formatRecord(record));
+        } catch (Exception _) {
+            return null;
+        }
+    }
+
     @Override
     public boolean isLoggable(LogRecord record) {
         // Redact BEFORE the console handler formats the record, not on a copy
@@ -200,8 +212,19 @@ public final class LogCaptureFilter implements Filter {
         }
 
         BoundedLogStore store = staticStore;
-        if (store == null && redacted && redactedMessage != null && !redactedMessage.isEmpty()) {
-            store = holdUntilStoreExists(record, redactedMessage);
+        if (store == null && redacted) {
+            String held = redactedMessage;
+            if (held == null) {
+                // Redaction succeeded but left the message to capture() — a plain JUL
+                // record still carrying parameters, which capture() formats printf-first.
+                // The held copy is NO_FORMAT, so it is formatted and redacted the same way
+                // here, or the record would be dropped only because the store did not
+                // exist yet.
+                held = preStartMessage(record);
+            }
+            if (held != null && !held.isEmpty()) {
+                store = holdUntilStoreExists(record, held);
+            }
         }
         if (store != null) {
             try {

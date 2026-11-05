@@ -306,6 +306,24 @@ async function resetBrand(request: APIRequestContext) {
   expect([200, 204], `DELETE /administration/branding answered ${res.status()}`).toContain(res.status());
 }
 
+// Outside the full-stack block so it needs no server: the Logs route is walked
+// without waiting for a log line to render, so without this the exclusion could
+// be removed and the walk would still pass on a page that had no log yet.
+test("snapshot leaves marked log text out of the scan and keeps unmarked labels", async ({ page }) => {
+  await page.setContent(`
+    <main>
+      <div data-log-content><span title="EDDI log title">EDDI started at boot</span></div>
+      <label aria-label="EDDI Settings label">EDDI Settings</label>
+    </main>`);
+  const { text, attributes } = await snapshot(page);
+  expect(text).not.toContain("EDDI started at boot");
+  expect(text).toContain("EDDI Settings");
+  expect(attributes.map((a) => a.value)).not.toContain("EDDI log title");
+  expect(attributes.map((a) => a.value)).toContain("EDDI Settings label");
+  // The hidden log element is restored after the scan.
+  await expect(page.getByText("EDDI started at boot")).toBeVisible();
+});
+
 test.describe("Brand leak — Full Stack", () => {
   test.describe.configure({ mode: "serial", timeout: 900_000 });
 

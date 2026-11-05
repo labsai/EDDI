@@ -138,7 +138,7 @@ Returns the unique identifier for this EDDI instance. Useful for correlating log
 
 ## Configuration
 
-Log capture starts at application boot (the log store is created eagerly, and records logged before it is ready are buffered, up to 1000, and replayed into it), so the ring buffer, live tail and database history cover startup warnings without anyone having to open the log view first.
+Log capture starts at application boot (the log store is created eagerly, and records logged before it is ready are buffered, up to 1000, and replayed into it), so the ring buffer and database history receive startup warnings without anyone having to open the log view first. Neither keeps them forever: the ring buffer holds the last `eddi.logs.buffer-size` entries, so on a busy instance older startup lines are evicted, and database history keeps only what reaches `eddi.logs.db-persist-min-level` (default `WARN`) while `eddi.logs.db-enabled` is `true`, subject to `eddi.logs.db-retention-days`. A live-tail client that connects later is first sent the 50 most recent matching entries from the ring buffer, then new ones, so an older startup warning may not appear there; `GET /administration/logs/history` is the place to look for it.
 
 All logging configuration lives in `application.properties`:
 

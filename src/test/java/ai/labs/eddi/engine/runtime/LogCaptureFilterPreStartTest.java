@@ -119,6 +119,34 @@ class LogCaptureFilterPreStartTest {
     }
 
     @Test
+    @DisplayName("a plain JUL record with parameters is formatted printf-first and buffered, not dropped")
+    void plainRecordWithParametersIsBuffered() {
+        LogRecord plain = new LogRecord(Level.WARNING, "connecting to %s");
+        plain.setLoggerName("test.logger");
+        plain.setParameters(new Object[]{"db-host"});
+        assertTrue(filter.isLoggable(plain), "never suppresses");
+        assertEquals(1, LogCaptureFilter.preStartSize());
+
+        LogCaptureFilter.setStore(store);
+
+        assertEquals("connecting to db-host", store.getEntries(null, null, null, 10).get(0).message());
+    }
+
+    @Test
+    @DisplayName("a plain JUL record whose parameter carries a credential is buffered redacted")
+    void plainRecordWithSecretParameterIsRedacted() {
+        LogRecord plain = new LogRecord(Level.WARNING, "token={0}");
+        plain.setLoggerName("test.logger");
+        plain.setParameters(new Object[]{KEY});
+        filter.isLoggable(plain);
+
+        LogCaptureFilter.setStore(store);
+
+        String stored = store.getEntries(null, null, null, 10).get(0).message();
+        assertFalse(stored.contains(KEY), stored);
+    }
+
+    @Test
     @DisplayName("a record that fails redaction is not buffered raw and is still stripped for the console")
     void failedRedactionIsNotBuffered() {
         LogRecord broken = new LogRecord(Level.WARNING, "boom " + KEY) {

@@ -1032,7 +1032,7 @@ EDDI agents can sign their inter-agent messages using Ed25519 digital signatures
 | **Dev mode** | No | Allowed — info log on startup |
 | **Dev mode** | Yes | Full auth with configured Keycloak |
 | **Production** | No + no opt-out | `AuthStartupGuard` **fails startup** with clear error |
-| **Production** | No + explicit opt-out | Starts, but logs an ERROR at startup and a WARN reminder every hour |
+| **Production** | No + explicit opt-out | Starts, but always logs an ERROR at startup; a periodic WARN reminder only when `eddi.security.unauthenticated-reminder-interval` is set (off by default) |
 | **Production** | Yes | Full OIDC with Keycloak multi-tenant support |
 
 The escape hatch (`EDDI_SECURITY_ALLOW_UNAUTHENTICATED=true`) exists for air-gapped deployments and quick demos. The startup ERROR keeps operators aware; a periodic WARN reminder is opt-in via `eddi.security.unauthenticated-reminder-interval`.

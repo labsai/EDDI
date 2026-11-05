@@ -423,7 +423,7 @@ public class BoundedLogStore {
      * {@link org.jboss.logmanager.ExtLogRecord#getFormattedMessage()}. For plain
      * JUL LogRecords, we fall back to manual MessageFormat.
      */
-    private static String formatRecord(LogRecord record) {
+    static String formatRecord(LogRecord record) {
         String msg = record.getMessage();
         if (msg == null)
             return "";
