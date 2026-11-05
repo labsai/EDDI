@@ -17,6 +17,7 @@ what to read before upgrading.
 | --- | --- |
 | 6.5.x to 6.6 and 6.7 | [Upgrading from 6.5](upgrading-from-6.5.md) — covers every change since 6.5: authorization defaults, outbound calls, MCP, newly reserved names, and the 6.7 section on cluster hardening and opt-in features |
 | 6.4.x to 6.5 | [Upgrading from 6.4](upgrading-from-6.4.md) — read section 2 first: several defaults now fail closed |
+| 6.5.x to 6.6 and later | [Upgrading from 6.5](upgrading-from-6.5.md) — authorization defaults and other changes a working 6.5 client notices |
 | 5.x to 6.x | [Upgrading from 5.x](upgrading-from-5x.md) — the first 6.x boot migrates the database in place |
 
 Between other 6.x releases there is no separate guide; the breaking changes are

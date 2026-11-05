@@ -944,8 +944,8 @@ public class AgentConfiguration {
     private boolean enableMemoryTools = false;
 
     /**
-     * Memory configuration — only meaningful when {@code enableMemoryTools} is
-     * true.
+     * Memory configuration (recall order and size, default visibility). Applies
+     * whenever declared; {@code enableMemoryTools} only gates the LLM memory tool.
      */
     private UserMemoryConfig userMemoryConfig;
 

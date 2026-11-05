@@ -12,7 +12,7 @@ HttpCalls are lifecycle tasks that execute during the agent's processing pipelin
 User Input → Parser → Behavior Rules → HttpCalls → Output Generation
 ```
 
-Typically, Behavior Rules decide **when** to make an API call by triggering an action like `httpcall(weather-api)`, and the HttpCalls extension defines **how** to make that call.
+Typically, Behavior Rules decide **when** to make an API call by emitting an action such as `get_weather` (any string; by convention it names the call), and the HttpCalls extension defines **how** to make that call: a call runs when its own `actions` list contains an action the rules emitted.
 
 ### Common Use Cases
 
@@ -72,8 +72,7 @@ than degrading quietly:
   deployment's own address. The caller's origin is read from the inbound request;
   the deployment's own address comes from deployment configuration alone —
   `eddi.self.base-url`, otherwise `http://127.0.0.1:${quarkus.http.port}` (or the
-  `quarkus.http.host` address, when the listener binds one specific non-loopback
-  address and `127.0.0.1` is therefore not this process) — never
+  `quarkus.http.host` address, when the listener binds one specific address, loopback ones such as `127.0.0.5` or `::1` included, so `127.0.0.1` is therefore not this process) — never
   from an agent config or a request header. So a config naming a third-party host
   cannot exfiltrate a user's token, and no allow-list is needed for this to be safe
   by default. With `quarkus.http.port=0` (a random port) and no
@@ -599,8 +598,9 @@ Each element of the stored array describes one item, in the order of the source 
 | HTTP Method | API Endpoint                                    | Request Body    | Response                              |
 | ----------- | ----------------------------------------------- | --------------- | ------------------------------------- |
 | POST        | `/apicallstore/apicalls`                     | http-call-model | N/A                                   |
-| GET         | `/apicallstore/apicalls/descriptors`         | N/A             | list of references to http-call-model |
-| DELETE      | `/apicallstore/apicalls/{id}`                | N/A             | N/A                                   |
+| GET         | `/apicallstore/apicalls/descriptors`         | N/A             | list of references to http-call-model (query: `filter`, `index`, `limit`) |
+| GET         | `/apicallstore/apicalls/jsonSchema`          | N/A             | JSON Schema of the http-call-model |
+| DELETE      | `/apicallstore/apicalls/{id}`                | N/A             | N/A (query: `version`, `permanent=true` removes the history too) |
 | GET         | `/apicallstore/apicalls/{id}`                | N/A             | http-call-model                       |
 | PUT         | `/apicallstore/apicalls/{id}`                | http-call-model | N/A                                   |
 | GET         | `/apicallstore/apicalls/{id}/currentversion` | N/A             | current version number (`text/plain` integer) |
@@ -1125,6 +1125,14 @@ _Request URL_
 `POST` `http://localhost:7070/agents/<conversation_id>?returnDetailed=false&returnCurrentStepOnly=true`
 
 _Request Body_
+
+```javascript
+{
+  "input": "Vienna"
+}
+```
+
+_Response Body_
 
 ```javascript
 {

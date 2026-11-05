@@ -121,7 +121,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 
 /**
  * CDI producer that selects the correct datastore implementation at
- * <b>runtime</b> based on the {@code eddi.datastore} configuration property.
+ * <b>runtime</b> based on the {@code eddi.datastore.type} configuration
+ * property.
  * <p>
  * Both MongoDB and PostgreSQL store implementations are compiled into the same
  * JAR. All stores are annotated {@code @DefaultBean}, so these non-default
@@ -131,7 +132,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
  * <b>Design rationale:</b> {@code @IfBuildProfile} is build-time only (requires
  * separate JARs per database). This producer enables a single Docker image that
  * supports both MongoDB and PostgreSQL, controlled by the
- * {@code EDDI_DATASTORE} environment variable.
+ * {@code EDDI_DATASTORE_TYPE} environment variable.
  *
  * @since 6.0.0
  */

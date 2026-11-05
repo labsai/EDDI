@@ -1048,15 +1048,6 @@ class AgentOrchestrator implements IAgentOrchestrator {
     }
 
     /**
-     * The turn's {@link ToolAssemblyContext}, built once and shared by every
-     * provider so they all read one consistent snapshot.
-     * <p>
-     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
-     * each provider: it can come from a group-injected context variable, and two
-     * providers resolving it independently could disagree if the step data changed
-     * between reads.
-     */
-    /**
      * What an approved tool call of this conversation must not write to: the acting
      * agent, its workflows and their extension resources, resolved from the stores
      * now (L13). See {@link ActingAgentResources}.
@@ -1065,6 +1056,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
         return ActingAgentResources.resolve(agentStore, workflowStore, resourceClientLibrary, memory.getAgentId(), memory.getAgentVersion());
     }
 
+    /**
+     * The turn's {@link ToolAssemblyContext}, built once and shared by every
+     * provider so they all read one consistent snapshot.
+     * <p>
+     * {@code dynamicAgentConfig} in particular is resolved here rather than inside
+     * each provider: it can come from a group-injected context variable, and two
+     * providers resolving it independently could disagree if the step data changed
+     * between reads.
+     */
     ToolAssemblyContext toolAssemblyContext(LlmConfiguration.Task task, IConversationMemory memory) {
         return new ToolAssemblyContext(memory, task, task.getBuiltInToolsWhitelist(),
                 DynamicAgentToolsProvider.resolveDynamicAgentConfig(memory),

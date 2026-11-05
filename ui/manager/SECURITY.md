@@ -4,9 +4,8 @@
 
 | Version | Supported              |
 | ------- | ---------------------- |
-| 6.3.x   | ✅ Active development  |
-| 6.1–6.2 | ⚠️ Security fixes only |
-| < 6.1   | ❌ End of life         |
+| Latest release (6.6.x; 6.7 in development) | ✅ Supported |
+| Older versions | ❌ Not supported. Security fixes ship only in new versions, so upgrade to the latest release |
 
 ## Reporting a Vulnerability
 
@@ -69,20 +68,23 @@ We will credit you in the security advisory unless you prefer to remain anonymou
 > leading to XSS) — an advisory that *does* apply to a client-side SPA.
 >
 > The RSC advisory requires React Server Components mode. This app is a pure
-> client SPA: `BrowserRouter` in `src/main.tsx`, declarative `<Routes>` only, no
-> `createBrowserRouter`, no data-router loaders or actions, no server runtime and
-> no `@react-router/*` server packages. The vulnerable code path is not reachable
+> client SPA: `createBrowserRouter` in `src/app-router.tsx` rendered by
+> `RouterProvider` in `src/main.tsx` (a data router, needed only for `useBlocker`),
+> with a single catch-all route that hands off to declarative `<Routes>` in
+> `<App />`. It defines no route `loader`s or `action`s, and there is no server
+> runtime and no `@react-router/*` server packages. The vulnerable code path is not reachable
 > here, so we accept this finding.
 >
 > **The real fix is a v8 migration, not a version bump.** The advisory covers
 > `7.12.0 – 8.2.0`, so `react-router@8.3.0` is patched — but `react-router-dom`
 > was discontinued at `7.18.2` (v8 consolidates everything into `react-router`).
 > Adopting 8.3.0 therefore means repointing every `react-router-dom` import at
-> `react-router` plus whatever else v8 changed, which is why this branch stayed on
-> `react-router-dom@7.18.2`, the newest release of the package we actually depend
+> `react-router` plus whatever else v8 changed, which is why the app stays on
+> `react-router-dom@7.x` (currently 7.18.4), the newest release of the package we actually depend
 > on. Track the v8 migration separately; it removes this allowlist entry.
 >
-> Re-evaluate if this app ever adopts the data router or any server rendering.
+> Re-evaluate if this app ever adds route loaders or actions, or any server
+> rendering.
 
 The remaining `npm audit` highs are dev-only toolchain transitives (`eslint`,
 `@vitest/coverage-v8` → `glob`/`minimatch`/`brace-expansion`) and are not shipped
