@@ -357,6 +357,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // (redeploy) — otherwise a drifted pause would silently never clear.
                 // Tasks BEFORE resumeIndex already ran pre-pause and are skipped.
                 executeResume(memory, llmConfig, batch, resumeDecision, currentStep, templateDataObjects);
+                // As after executeTask below: the resumed task's hold (its remaining
+                // rounds) shrinks to what it actually spent, so the later tasks of this
+                // turn are not refused against money it no longer needs.
+                if (spendGate != null) {
+                    spendGate.settleHolds(memory);
+                }
             }
 
             var tasks = llmConfig.tasks();
@@ -370,6 +376,11 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 var task = tasks.get(taskIndex);
                 if (task.getActions().contains(MATCH_ALL_OPERATOR) || task.getActions().stream().anyMatch(actions::contains)) {
                     executeTask(memory, task, currentStep, templateDataObjects, taskIndex);
+                    // The task is over and its spend is in audit:cost: what it held beyond
+                    // that goes back to the tenant's budget (no-op unless reservations are on).
+                    if (spendGate != null) {
+                        spendGate.settleHolds(memory);
+                    }
                 }
             }
 
@@ -815,6 +826,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         if (spendRefusal == null && !cascadeActive) {
             spendRefusal = UnpricedCallPolicy.check(ModelPrices.ofTask(task).override(), resolvedType,
                     resolveModelNameOf(processedParams, resolvedType), memory, false, "llm_task");
+        }
+        // Hard tenant ceiling (opt-in): hold the most this model phase can cost
+        // against the monthly budget before it starts. Off, this reads one flag.
+        if (spendRefusal == null && spendGate != null && spendGate.reservationEnabled()) {
+            spendRefusal = spendGate.holdModelPhase(memory, ModelCallBound.phaseMaxUsd(task, cascadeActive, messages, processedParams,
+                    resolvedType, resolveModelNameOf(processedParams, resolvedType), spendGate.reservationDefaultMaxOutputTokens()));
         }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
@@ -2263,6 +2280,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         // scheduled fire's maxCostPerFire) that was spent while the turn waited for
         // approval gets the fallback answer; the approved calls do not run.
         LlmSpendGate.Refusal spendRefusal = spendGate != null ? spendGate.check(memory) : null;
+        // Hard tenant ceiling (opt-in): the rest of the loop holds its maximum cost
+        // too.
+        if (spendRefusal == null && spendGate != null && spendGate.reservationEnabled()) {
+            spendRefusal = spendGate.holdModelPhase(memory, ModelCallBound.resumeMaxUsd(task, batch, processedParams, resolvedType,
+                    resolveModelNameOf(processedParams, resolvedType), spendGate.reservationDefaultMaxOutputTokens()));
+        }
 
         AgentOrchestrator.ExecutionResult result = null;
         try {

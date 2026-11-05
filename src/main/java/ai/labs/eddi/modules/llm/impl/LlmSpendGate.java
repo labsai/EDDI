@@ -254,6 +254,75 @@ public class LlmSpendGate {
         return new Admission(null, reservation);
     }
 
+    /** Whether the opt-in tenant cost reservation (hard ceiling) is on. */
+    public boolean reservationEnabled() {
+        return tenantQuotaService != null && tenantQuotaService.costReservationEnabled();
+    }
+
+    /** The output-token cap a reservation assumes for a model that sets none. */
+    public int reservationDefaultMaxOutputTokens() {
+        return tenantQuotaService != null ? tenantQuotaService.costReservationDefaultMaxOutputTokens() : 4096;
+    }
+
+    /**
+     * Holds {@code maxUsd} - the most the task's model phase can cost - against the
+     * tenant's monthly budget before the model is called (the opt-in hard ceiling).
+     * The hold stays with the turn: it is shrunk to the actual cost when the task
+     * is done ({@link #settleHolds}) and given back once the turn is charged
+     * ({@code TurnCostMeter}).
+     *
+     * @return {@code null} when the model may be called (also when reservations are
+     *         off or the amount is zero), otherwise why not - already counted
+     */
+    public Refusal holdModelPhase(IConversationMemory memory, double maxUsd) {
+        if (!reservationEnabled() || !(maxUsd > 0.0) || memory == null) {
+            return null;
+        }
+        return refusedByReservation(memory, maxUsd, "model call");
+    }
+
+    /**
+     * As {@link #holdModelPhase}, for a priced tool call.
+     */
+    public Refusal holdToolCall(IConversationMemory memory, double priceUsd) {
+        if (!reservationEnabled() || !(priceUsd > 0.0) || memory == null) {
+            return null;
+        }
+        return refusedByReservation(memory, priceUsd, "tool call");
+    }
+
+    private Refusal refusedByReservation(IConversationMemory memory, double maxUsd, String what) {
+        QuotaCheckResult held;
+        try {
+            held = tenantQuotaService.holdForCall(tenantQuotaService.getDefaultTenantId(), memory.getTenantCostHolds(), maxUsd);
+        } catch (RuntimeException e) {
+            return refused(memory, new Refusal(REASON_TENANT_CHECK_ERROR, tenantCheckFailed(meterRegistry, memory.getConversationId(), what, e)));
+        }
+        if (held.allowed()) {
+            return null;
+        }
+        return refused(memory, held.accountingUnavailable()
+                ? new Refusal(REASON_TENANT_ACCOUNTING_UNAVAILABLE, held.reason())
+                : new Refusal(REASON_TENANT_BUDGET, held.reason() + " (reserved $" + String.format("%.4f", maxUsd) + ")"));
+    }
+
+    /**
+     * A task has finished: lowers what the turn holds to what it has actually spent
+     * and not yet been charged for, and gives the difference back. The rest stays
+     * held until the turn is charged.
+     */
+    public void settleHolds(IConversationMemory memory) {
+        if (!reservationEnabled() || memory == null || memory.getTenantCostHolds() == null) {
+            return;
+        }
+        try {
+            tenantQuotaService.shrinkHolds(tenantQuotaService.getDefaultTenantId(), memory.getTenantCostHolds(), unmeteredStepCost(memory));
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Settling the cost holds of conversation %s failed - they are given back when the turn is charged",
+                    memory.getConversationId());
+        }
+    }
+
     private static Refusal ceilingRefusal(double ceiling, double spent) {
         return new Refusal(REASON_CONVERSATION_CEILING, String.format("Conversation cost ceiling ($%.4f) reached: $%.4f spent", ceiling, spent));
     }

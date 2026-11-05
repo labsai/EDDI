@@ -1112,6 +1112,35 @@ class ToolLoopRunner {
     }
 
     /**
+     * Holds the price of a tool call against the tenant's monthly budget (the
+     * opt-in hard ceiling). The hold stays with the turn and is given back once the
+     * turn is charged, so the price is never unaccounted for between the call and
+     * the charge.
+     *
+     * @return why the call may not run, or {@code null} when it may (also when
+     *         reservations are off or the tool is free)
+     */
+    private String holdToolPrice(IConversationMemory memory, ToolInvocation invocation) {
+        if (tenantQuotaService == null || memory == null || !tenantQuotaService.costReservationEnabled()) {
+            return null;
+        }
+        double price = ToolCostTracker.priceOf(invocation);
+        if (!(price > 0.0)) {
+            return null;
+        }
+        try {
+            QuotaCheckResult held = tenantQuotaService.holdForCall(tenantQuotaService.getDefaultTenantId(), memory.getTenantCostHolds(), price);
+            if (held.allowed()) {
+                return null;
+            }
+            LOGGER.warnf("Tenant cost reservation refused tool call '%s': %s", sanitize(invocation.dispatchName()), held.reason());
+            return held.reason();
+        } catch (RuntimeException e) {
+            return LlmSpendGate.tenantCheckFailed(null, memory.getConversationId(), "tool call", e);
+        }
+    }
+
+    /**
      * The answer of a tool loop stopped by the conversation's cost ceiling. Like
      * {@link #iterationBudgetSpentMessage}, it says that what already ran has taken
      * effect.
@@ -1510,14 +1539,22 @@ class ToolLoopRunner {
                         ? () -> mockingExecutor.executeMocked(toolRequest, mock)
                         : () -> executor.execute(toolRequest, null);
                 boolean trackCost = enableCostTracking && mock == null;
-                // Without a quota gate the call takes exactly the path it always took.
-                toolResult = quotaGate == null
-                        ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
-                                enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs)
-                        : toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId, execution,
-                                enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs, quotaGate);
-                // The quota refused it: the tool never ran.
-                notExecuted = quotaGate != null && quotaGate.refused();
+                // Hard tenant ceiling (opt-in): a priced call holds its price against the
+                // monthly budget before it runs, and is refused when the budget cannot take it.
+                String holdRefusal = trackCost ? holdToolPrice(memory, invocation) : null;
+                if (holdRefusal != null) {
+                    toolResult = "Error: " + holdRefusal;
+                    notExecuted = true;
+                } else {
+                    // Without a quota gate the call takes exactly the path it always took.
+                    toolResult = quotaGate == null
+                            ? toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
+                                    execution, enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs)
+                            : toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
+                                    execution, enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs, quotaGate);
+                    // The quota refused it: the tool never ran.
+                    notExecuted = quotaGate != null && quotaGate.refused();
+                }
             }
         } else {
             toolResult = "Error: Tool '" + toolRequest.name() + "' not found";
