@@ -15,12 +15,19 @@ import { HandoffOriginBadge } from "@/components/groups/handoff-origin-badge";
 import { getErrorMessage } from "@/lib/api-client";
 import { cn, formatUsd } from "@/lib/utils";
 import { TeamBudgetCard } from "@/components/workforce/team-budget-card";
-import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
+import { useGroup, useGroupDescriptors, useResolvedGroupVersion } from "@/hooks/use-groups";
 import { useSpaces } from "@/hooks/use-spaces";
 import { accessForDetail } from "@/lib/access";
 import { useSchedules } from "@/hooks/use-schedules";
 import { useAgentNames } from "@/hooks/use-agent-names";
 import { useDeleteWorkspaceBacklogTask } from "@/hooks/use-team-handoffs";
+import { BetDetails } from "@/components/groups/bet-details";
+import { DueBetReviews } from "@/components/groups/due-bet-reviews";
+import { LessonsPanel } from "@/components/groups/lessons-panel";
+import { OutcomeAnalyticsPanel } from "@/components/groups/outcome-analytics";
+import { TaskOutcomes } from "@/components/groups/task-outcomes";
+import { useReviewBet } from "@/hooks/use-group-workspace";
+import { BET_MAX_FIELD_CHARS } from "@/lib/api/group-workspace";
 import {
   describeCron,
   formatInstantInZone,
@@ -99,6 +106,12 @@ export function GroupWorkspacePage() {
   // its original name in this page's header and back-link.
   const version = Number(searchParams.get("version")) || 1;
   const { data: groupConfig } = useGroup(groupId || "", version);
+  // Lessons are read and configured from the group's CURRENT version on the
+  // backend, so whether to show them is too: a version-less link (read as
+  // version 1) or a link to an older version hid the panel of a group that
+  // added lessonConfig later. Same query as above when the URL is current.
+  const currentVersion = useResolvedGroupVersion(groupId, null);
+  const { data: currentGroupConfig } = useGroup(currentVersion !== undefined ? groupId || "" : "", currentVersion);
   const { data: workspace, isLoading, isError, error, refetch } = useGroupWorkspace(groupId);
   // The handoff inbox decisions and the backlog delete need EDIT on the group; hide them when
   // the caller is known to lack it. While the answer is not in (access.known false) the
@@ -137,12 +150,19 @@ export function GroupWorkspacePage() {
   const addCadence = useAddWorkspaceCadence(groupId);
   const deleteCadence = useDeleteWorkspaceCadence(groupId);
   const deleteTask = useDeleteWorkspaceBacklogTask(groupId);
+  const reviewBet = useReviewBet(groupId);
   const { nameOf } = useAgentNames();
 
   const [subject, setSubject] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState(0);
   const [taskError, setTaskError] = useState<string | null>(null);
+  // A bet is optional: the fields below are sent only when "File as a bet" is open.
+  const [asBet, setAsBet] = useState(false);
+  const [hypothesis, setHypothesis] = useState("");
+  const [metric, setMetric] = useState("");
+  const [target, setTarget] = useState("");
+  const [reviewDate, setReviewDate] = useState("");
 
   const [cron, setCron] = useState("");
   // Default to where the viewer is, not UTC: "0 9 * * MON" is read as 9am local.
@@ -158,14 +178,28 @@ export function GroupWorkspacePage() {
   function handleAddTask() {
     setTaskError(null);
     if (!subject.trim()) return;
+    if (asBet && (!hypothesis.trim() || !metric.trim() || !reviewDate)) {
+      setTaskError(t("groupLearning.betIncomplete", "A bet needs a hypothesis, a metric and a review date."));
+      return;
+    }
     addTask.mutate(
-      { subject: subject.trim(), description: description.trim() || undefined, priority },
+      {
+        subject: subject.trim(),
+        description: description.trim() || undefined,
+        priority,
+        ...(asBet ? { hypothesis: hypothesis.trim(), metric: metric.trim(), target: target.trim() || undefined, reviewDate } : {}),
+      },
       {
         onSuccess: () => {
           toast.success(t("groupWorkspace.taskAdded", "Task added to the backlog"));
           setSubject("");
           setDescription("");
           setPriority(0);
+          setAsBet(false);
+          setHypothesis("");
+          setMetric("");
+          setTarget("");
+          setReviewDate("");
         },
         onError: (err) => setTaskError(getErrorMessage(err)),
       },
@@ -323,6 +357,10 @@ export function GroupWorkspacePage() {
       {/* Cross-team handoff: work other teams or agents want to hand to this one */}
       <HandoffInbox groupId={groupId!} items={workspace.handoffs?.inbox ?? []} nameOf={nameOf} readOnly={readOnly} />
 
+      <DueBetReviews groupId={groupId!} readOnly={readOnly} />
+      {groupConfig?.outcomeConfig && <OutcomeAnalyticsPanel groupId={groupId!} />}
+      {currentGroupConfig?.lessonConfig && <LessonsPanel groupId={groupId!} readOnly={readOnly} />}
+
       {/* Backlog */}
       <div className="rounded-xl border border-border bg-card p-4" data-testid="workspace-backlog">
         <h3 className="mb-3 flex items-center justify-between text-sm font-semibold text-foreground">
@@ -368,6 +406,16 @@ export function GroupWorkspacePage() {
                   )}
                 </div>
                 {task.description && <p className="mt-1 text-[10px] text-muted-foreground line-clamp-2">{task.description}</p>}
+                {task.bet && (
+                  <BetDetails
+                    taskId={task.id}
+                    bet={task.bet}
+                    readOnly={readOnly}
+                    pending={reviewBet.isPending}
+                    onReview={(taskId, rescheduleTo) => reviewBet.mutate({ taskId, rescheduleTo })}
+                  />
+                )}
+                {groupConfig?.outcomeConfig && <TaskOutcomes groupId={groupId!} taskId={task.id} />}
               </div>
             ))
           )}
@@ -399,6 +447,51 @@ export function GroupWorkspacePage() {
             className={cn(inputCls, "resize-none")}
             data-testid="workspace-task-description"
           />
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <input type="checkbox" checked={asBet} onChange={(e) => setAsBet(e.target.checked)} data-testid="workspace-task-as-bet" />
+            {t("groupLearning.betToggle", "File as a bet")}
+          </label>
+          {asBet && (
+            <div className="space-y-2 rounded-lg border border-dashed border-primary/40 p-2" data-testid="workspace-bet-fields">
+              <input
+                value={hypothesis}
+                onChange={(e) => setHypothesis(e.target.value)}
+                aria-label={t("groupLearning.betHypothesis", "Hypothesis")}
+                placeholder={t("groupLearning.betHypothesisPlaceholder", "Hypothesis: what do you believe this will achieve?")}
+                maxLength={BET_MAX_FIELD_CHARS}
+                className={inputCls}
+                data-testid="workspace-bet-hypothesis"
+              />
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <input
+                  value={metric}
+                  onChange={(e) => setMetric(e.target.value)}
+                  aria-label={t("groupLearning.betMetric", "Metric")}
+                  placeholder={t("groupLearning.betMetricPlaceholder", "Metric, e.g. replies_received")}
+                  maxLength={BET_MAX_FIELD_CHARS}
+                  className={inputCls}
+                  data-testid="workspace-bet-metric"
+                />
+                <input
+                  value={target}
+                  onChange={(e) => setTarget(e.target.value)}
+                  aria-label={t("groupLearning.betTarget", "Target")}
+                  placeholder={t("groupLearning.betTargetPlaceholder", "Target, e.g. >= 5 (optional)")}
+                  maxLength={BET_MAX_FIELD_CHARS}
+                  className={inputCls}
+                  data-testid="workspace-bet-target"
+                />
+                <input
+                  type="date"
+                  value={reviewDate}
+                  onChange={(e) => setReviewDate(e.target.value)}
+                  aria-label={t("groupLearning.betReviewDate", "Review date")}
+                  className={inputCls}
+                  data-testid="workspace-bet-review-date"
+                />
+              </div>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <label htmlFor="workspace-task-priority" className="text-xs text-muted-foreground">
               {t("groupWorkspace.priority", "Priority")}

@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.hitl.oversight.OversightErrors;
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalAnalyticsService;
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalBackfillService;
 import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalSummary;
+import ai.labs.eddi.engine.hitl.oversight.analytics.OutcomeAnalyticsService;
 import ai.labs.eddi.engine.hitl.oversight.analytics.DecisionFilter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -39,6 +40,9 @@ public class RestApprovalAnalytics implements IRestApprovalAnalytics {
     @Inject
     OversightAccess access;
 
+    @Inject
+    OutcomeAnalyticsService outcomeAnalytics;
+
     Clock clock = Clock.systemUTC();
 
     @Override
@@ -51,6 +55,15 @@ public class RestApprovalAnalytics implements IRestApprovalAnalytics {
             throw OversightErrors.badRequest(OversightErrors.INVALID_PARAMETER, e.getMessage());
         }
         return analytics.summarize(filter, grouping);
+    }
+
+    @Override
+    public OutcomeAnalyticsService.Result outcomes(Query query) {
+        DecisionFilter filter = filter(query);
+        if (filter.groupId() == null) {
+            throw OversightErrors.badRequest(OversightErrors.INVALID_PARAMETER, "groupId is required: outcomes belong to a team");
+        }
+        return outcomeAnalytics.summarize(filter);
     }
 
     @Override

@@ -3149,17 +3149,42 @@ export const handlers = [
   }),
 
   http.post("*/groupstore/groups/:groupId/workspace/backlog", async ({ request }) => {
-    const body = (await request.json().catch(() => ({}))) as { subject?: string; description?: string; priority?: number };
+    const body = (await request.json().catch(() => ({}))) as {
+      subject?: string; description?: string; priority?: number; hypothesis?: string; metric?: string; target?: string; reviewDate?: string;
+    };
     if (!body?.subject?.trim()) {
       return HttpResponse.json({ error: "subject is required" }, { status: 400 });
     }
+    // The server refuses a partial bet the way Bet.of does.
+    if ((body.hypothesis || body.metric || body.reviewDate) && !(body.hypothesis && body.metric && body.reviewDate)) {
+      return HttpResponse.json({ error: "A bet needs a hypothesis, a metric and a reviewDate (target is optional)" }, { status: 400 });
+    }
     return HttpResponse.json({
       id: `task-${Date.now()}`, subject: body.subject, description: body.description ?? "",
+      bet: body.hypothesis
+        ? { hypothesis: body.hypothesis, metric: body.metric, target: body.target ?? null, reviewDate: new Date(body.reviewDate!).toISOString(), reviewedAt: null }
+        : null,
       status: "PENDING", assignedAgentId: null, assignedDisplayName: null, dependsOnIds: [],
       result: null, verificationNote: null, verified: false, priority: body.priority ?? 0,
       createdAt: new Date().toISOString(), completedAt: null,
     }, { status: 201 });
   }),
+
+  // Team learning loop: nothing due, no outcomes, no approvals analytics by default.
+  http.get("*/groupstore/groups/:groupId/workspace/backlog/due-reviews", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/outcomes", () => HttpResponse.json([])),
+  // Team lessons: none, nothing shared, consolidation unconfigured by default.
+  http.get("*/groupstore/groups/:groupId/lessons", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/lessons/shared", ({ params }) =>
+    HttpResponse.json({ readerGroupId: params.groupId, groups: [], notShared: [] }),
+  ),
+  http.get("*/groupstore/groups/:groupId/lessons/history", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/lessons/consolidation", () =>
+    HttpResponse.json({ configured: false, hasModel: false, scheduled: false }),
+  ),
+  http.get("*/hitl/analytics/outcomes", ({ request }) =>
+    HttpResponse.json({ groupId: new URL(request.url).searchParams.get("groupId"), decisions: 0, outcomes: 0, truncated: false, categories: [] }),
+  ),
 
   http.post("*/groupstore/groups/:groupId/workspace/cadences", async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { cronExpression?: string };

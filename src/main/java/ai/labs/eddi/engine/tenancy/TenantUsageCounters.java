@@ -37,6 +37,17 @@ class TenantUsageCounters {
     private Instant minuteWindowStart;
     private Instant dayStart;
     private YearMonth costMonth;
+    private double reservedUsd;
+    /** Epoch millis the held total started (0 = nothing held). */
+    private long reservedSince;
+    /**
+     * Epoch millis of the most recent hold. The held total is dropped only once
+     * THIS is older than the TTL — i.e. every hold in it is — not once the shared
+     * epoch is: on a busy tenant overlapping turns keep the total above zero far
+     * longer than any one turn, and dropping by epoch discarded holds of calls
+     * still running.
+     */
+    private long reservedLastAt;
 
     /**
      * Source of "now". Production always gets {@link Clock#systemUTC()}; a test
@@ -82,6 +93,43 @@ class TenantUsageCounters {
     }
 
     /**
+     * Holds {@code amount} if {@code cost + held + amount <= limit}; returns the
+     * epoch of the hold, or -1 when it does not fit. A held total whose newest hold
+     * is older than {@code ttlMillis} (so every hold in it is) is dropped first.
+     */
+    long tryReserve(double amount, double limit, long ttlMillis) {
+        long now = clock.millis();
+        if (reservedSince > 0 && Math.max(reservedSince, reservedLastAt) < now - ttlMillis) {
+            reservedUsd = 0.0;
+            reservedSince = 0;
+        }
+        if (monthlyCostUsd + reservedUsd + amount > limit) {
+            return -1;
+        }
+        if (reservedUsd <= 0.0) {
+            reservedSince = now;
+        }
+        reservedUsd += amount;
+        reservedLastAt = now;
+        return reservedSince;
+    }
+
+    void release(long generation, double amount) {
+        if (generation != reservedSince || reservedSince == 0) {
+            return;
+        }
+        reservedUsd = Math.max(0.0, reservedUsd - amount);
+        if (reservedUsd <= 1e-9) {
+            reservedUsd = 0.0;
+            reservedSince = 0;
+        }
+    }
+
+    double getReservedUsd() {
+        return reservedUsd;
+    }
+
+    /**
      * Reset expired time windows. Must be called inside the same synchronized block
      * as the check+increment to ensure atomicity.
      * <p>
@@ -112,6 +160,9 @@ class TenantUsageCounters {
         conversationsToday = 0;
         apiCallsThisMinute = 0;
         monthlyCostUsd = 0.0;
+        reservedUsd = 0.0;
+        reservedSince = 0;
+        reservedLastAt = 0;
         Instant now = clock.instant();
         minuteWindowStart = now.truncatedTo(ChronoUnit.MINUTES);
         dayStart = now.truncatedTo(ChronoUnit.DAYS);
@@ -126,6 +177,6 @@ class TenantUsageCounters {
      */
     UsageSnapshot toSnapshot(String tenantId) {
         return new UsageSnapshot(tenantId, conversationsToday, apiCallsThisMinute,
-                monthlyCostUsd, minuteWindowStart, dayStart, costMonth);
+                monthlyCostUsd, minuteWindowStart, dayStart, costMonth, reservedUsd);
     }
 }

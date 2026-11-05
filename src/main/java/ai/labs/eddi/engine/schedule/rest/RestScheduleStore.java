@@ -19,6 +19,7 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.runtime.internal.CronDescriber;
 import ai.labs.eddi.engine.runtime.internal.CronParser;
 import ai.labs.eddi.engine.runtime.internal.DreamService;
+import ai.labs.eddi.engine.runtime.internal.LessonConsolidationService;
 import ai.labs.eddi.engine.runtime.internal.ScheduleFireExecutor;
 import ai.labs.eddi.engine.runtime.internal.SchedulePollerService;
 import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
@@ -50,6 +51,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -221,6 +223,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 return cadenceGuard;
             }
 
+            Response lessonGuard = rejectLessonConsolidationBody(schedule, null, "create");
+            if (lessonGuard != null) {
+                return lessonGuard;
+            }
+
             // A schedule runs AS its userId — refuse to mint one that acts as
             // somebody else (see requireOwnUserId).
             Response ownerGuard = requireOwnUserId(schedule != null ? schedule.getUserId() : null, "create");
@@ -358,6 +365,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             Response cadenceGuard = rejectTeamCadenceBody(schedule, stored, "update");
             if (cadenceGuard != null) {
                 return cadenceGuard;
+            }
+
+            Response lessonGuard = rejectLessonConsolidationBody(schedule, stored, "update");
+            if (lessonGuard != null) {
+                return lessonGuard;
             }
 
             // Same USE gate as create: an update can re-point an existing schedule at a
@@ -523,6 +535,18 @@ public class RestScheduleStore implements IRestScheduleStore {
                 // cadence's creator: the same authority as editing the group's cadences,
                 // which RestGroupWorkspace and guardManagedSchedule gate on EDIT of the group.
                 resourceAccessGuard.requireAccess(governingResourceId(schedule), AccessLevel.EDIT, "group");
+            }
+            if (LessonConsolidationService.isLessonConsolidationSchedule(schedule != null ? schedule.getMetadata() : null)) {
+                // A fire runs a model-backed consolidation that merges and retires the
+                // team's lessons, at its cost: the authority of RestGroupLessons.run,
+                // EDIT of the group. Checked before the owner/manage checks below, so
+                // the schedule's creator cannot fire it after losing EDIT.
+                Object groupId = schedule.getMetadata().get(LessonConsolidationService.METADATA_GROUP_ID_KEY);
+                if (groupId == null || groupId.toString().isBlank()) {
+                    return Response.status(Response.Status.BAD_REQUEST)
+                            .entity("This lesson consolidation schedule names no group and cannot be fired.").build();
+                }
+                resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
             }
 
             if (isHitlSchedule(schedule)) {
@@ -982,6 +1006,16 @@ public class RestScheduleStore implements IRestScheduleStore {
             }
             resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
         }
+        // Same gate as RestGroupLessons.schedule: changing when a team's lessons are
+        // consolidated is an edit of that team.
+        if (LessonConsolidationService.isLessonConsolidationSchedule(md)) {
+            Object groupId = md.get(LessonConsolidationService.METADATA_GROUP_ID_KEY);
+            if (groupId == null || groupId.toString().isBlank()) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity("This lesson consolidation schedule names no group and cannot be updated.").build();
+            }
+            resourceAccessGuard.requireAccess(groupId.toString(), AccessLevel.EDIT, "group");
+        }
         return null;
     }
 
@@ -1220,6 +1254,47 @@ public class RestScheduleStore implements IRestScheduleStore {
                 .entity("Schedules marked as team cadences (metadata " + TeamCadenceService.METADATA_TYPE_KEY
                         + ") cannot be created via this API, and a schedule cannot be turned into one. Manage cadences "
                         + "via POST /groups/{groupId}/workspace/cadences.")
+                .build();
+    }
+
+    /**
+     * Refuses a schedule body that claims to be a lesson consolidation it is not
+     * already.
+     * <p>
+     * These schedules are minted only by {@code RestGroupLessons.schedule}, which
+     * checks EDIT on the group. A fire runs a model-backed consolidation of the
+     * named group's lessons under server identity, reading nothing from the
+     * schedule but {@code groupId}; accepting the marker from a client let anyone
+     * who may create a schedule consolidate (and retire lessons of) a team they
+     * cannot edit, at its cost. A PUT to an existing consolidation schedule may
+     * echo its own markers back; {@link #guardManagedSchedule} has already required
+     * EDIT on its group. ZIP import goes through this same method.
+     *
+     * @param stored
+     *            the stored row for an update, {@code null} for a create
+     */
+    private Response rejectLessonConsolidationBody(ScheduleConfiguration schedule, ScheduleConfiguration stored, String operation) {
+        Map<String, Object> body = schedule != null ? schedule.getMetadata() : null;
+        if (body == null || !body.containsKey(LessonConsolidationService.METADATA_TYPE_KEY)) {
+            return null;
+        }
+        Map<String, Object> current = stored != null ? stored.getMetadata() : null;
+        // The name must stay too: status, replacement and removal find a group's
+        // schedule by "lesson-consolidation-<groupId>", so renaming G's schedule to
+        // H's name would hand H's endpoints a row that consolidates G.
+        if (LessonConsolidationService.isLessonConsolidationSchedule(current)
+                && LessonConsolidationService.isLessonConsolidationSchedule(body)
+                && String.valueOf(current.get(LessonConsolidationService.METADATA_GROUP_ID_KEY))
+                        .equals(String.valueOf(body.get(LessonConsolidationService.METADATA_GROUP_ID_KEY)))
+                && Objects.equals(stored.getName(), schedule.getName())) {
+            return null;
+        }
+        LOGGER.warnf("Refused %s of a schedule whose body declares %s — lesson consolidation schedules are minted "
+                + "internally only", sanitize(operation), LessonConsolidationService.METADATA_TYPE_KEY);
+        return Response.status(Response.Status.BAD_REQUEST)
+                .entity("Schedules marked as lesson consolidations (metadata " + LessonConsolidationService.METADATA_TYPE_KEY
+                        + ") cannot be created via this API, and a schedule cannot be turned into one. Manage them via "
+                        + "PUT /groupstore/groups/{groupId}/lessons/consolidation/schedule.")
                 .build();
     }
 

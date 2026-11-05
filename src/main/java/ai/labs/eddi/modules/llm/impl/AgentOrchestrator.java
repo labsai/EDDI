@@ -42,6 +42,7 @@ import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
+import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceRegistry;
 import ai.labs.eddi.modules.llm.tools.ToolExecutionService;
 import ai.labs.eddi.modules.llm.tools.impl.*;
@@ -305,6 +306,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
      */
     @Inject
     volatile ISharedArtifactStore sharedArtifactStore;
+
+    /**
+     * The agent-operations tools (team scorecard, budget proposal, follow-up
+     * booking). A CDI bean of its own because it needs a handful of services no
+     * other provider does; null under direct construction, where the tools are
+     * simply absent.
+     */
+    @Inject
+    volatile AgentOpsToolsProvider agentOpsToolsProvider;
 
     /**
      * The sampled audit, told about every allowed tool call. Field-injected for the
@@ -821,11 +831,15 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // from ContextualToolsProvider. Every one is a provider now, so a single
         // failing source costs the turn only its own tools.
         var contextual = contextualToolsProvider();
-        merger.addAll(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
+        var phaseOne = new ArrayList<ToolSourceProvider>(List.of(builtinToolsProvider, contextual, dynamicAgentToolsProvider(),
                 new GroupTaskToolsProvider(liveDiscussionRegistry, agentGroupStore),
                 new TeamHandoffToolsProvider(liveDiscussionRegistry, agentGroupStore, teamHandoffService),
                 new ArtifactToolsProvider(liveDiscussionRegistry, agentGroupStore, sharedArtifactStore),
-                new AttachmentToolsProvider(contextual)), ctx);
+                new AttachmentToolsProvider(contextual)));
+        if (agentOpsToolsProvider != null) {
+            phaseOne.add(agentOpsToolsProvider);
+        }
+        merger.addAll(phaseOne, ctx);
 
         // LAZY registers every built-in's executor but shows the model only
         // discover_tools until it asks. The meta-tool advertises the specs phase 1

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -391,6 +392,47 @@ final class McpToolUtils {
         }
         String message = cause.getLocalizedMessage();
         return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * The tool result for a {@link Response} an in-process REST bean returned
+     * instead of throwing: the serialized entity on a 2xx ({@code {"status": n}}
+     * when there is none), otherwise {@link #errorJson(String, String, Map)} with
+     * the resource's own text. A body {@code {"error": "<CODE>", "message": "…"}}
+     * keeps its code; a body {@code {"error": "<sentence>"}} — the shape of the
+     * team-handoff and team-budget resources — keeps the sentence, and the code
+     * follows the status (400 {@code BAD_REQUEST}, 403 {@code FORBIDDEN}, 404
+     * {@code NOT_FOUND}, 409 {@code CONFLICT}, 503 {@code UNAVAILABLE}, anything
+     * else {@code INTERNAL}). A 5xx without a body says only that the request
+     * failed: the resource has logged it.
+     */
+    static String responseJson(IJsonSerialization jsonSerialization, Response response) throws IOException {
+        if (response == null) {
+            return errorJson("The request returned no response", "INTERNAL", null);
+        }
+        int status = response.getStatus();
+        Object entity = response.getEntity();
+        if (status >= 200 && status < 300) {
+            return entity == null ? "{\"status\":" + status + "}" : jsonSerialization.serialize(entity);
+        }
+        String code = switch (status) {
+            case 400 -> "BAD_REQUEST";
+            case 403 -> "FORBIDDEN";
+            case 404 -> "NOT_FOUND";
+            case 409 -> "CONFLICT";
+            case 503 -> "UNAVAILABLE";
+            default -> "INTERNAL";
+        };
+        String message = "The request failed (HTTP " + status + ")";
+        if (entity instanceof Map<?, ?> body && body.get("error") instanceof String error && !error.isBlank()) {
+            if (body.get("message") instanceof String text && !text.isBlank()) {
+                code = error;
+                message = text;
+            } else {
+                message = error;
+            }
+        }
+        return errorJson(message, code, null);
     }
 
     /**

@@ -535,6 +535,8 @@ knowledge that compounds run-over-run.
   `memoryGuardrails.maxValueLength`; ceiling 4000) bounds one stored lesson
   value, lesson plus its "applies:" context. Longer lessons are truncated, the
   context first; the idempotency key still hashes the untruncated lesson.
+- A team's lessons can also be read by teams it agrees to share with, and merged or retired by a
+  scheduled, cost-capped job that keeps what it removes: see [Team Learning Loop → Lessons](team-learning-loop.md#lessons).
 - Member conversations already load group-visible entries at init, so recall
   needs no new namespace. The `retro_recorded` SSE event reports each harvest.
 
@@ -626,7 +628,8 @@ Per-member stats are reliability **recording only** — nothing routes or
 weights on them in v1. A *permanent* group deletion cascades to the workspace;
 a soft (versioned) delete keeps it, because the group can come back. Another
 team or a standalone agent can file tasks into a workspace: see
-[Cross-Team Handoff](team-handoff.md). Not in v1: reputation weighting.
+[Cross-Team Handoff](team-handoff.md). A backlog task can be a **bet** (hypothesis, metric, review date) and a team
+can record the real-world **outcomes** of its work: see [Team Learning Loop](team-learning-loop.md). Not in v1: reputation weighting.
 
 ## Shared artifacts (blackboard-lite)
 

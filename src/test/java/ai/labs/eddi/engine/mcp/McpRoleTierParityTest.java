@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
 import ai.labs.eddi.configs.groups.IRestGroupTemplates;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
+import ai.labs.eddi.configs.groups.IRestTeamHandoffs;
 import ai.labs.eddi.configs.properties.IRestUserMemoryStore;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.engine.api.IRestAgentAdministration;
@@ -22,6 +23,12 @@ import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.api.IRestLogAdmin;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.gdpr.IRestGdprAdmin;
+import ai.labs.eddi.engine.groups.budget.rest.IRestGroupBudget;
+import ai.labs.eddi.engine.groups.budget.rest.IRestTeamBudgets;
+import ai.labs.eddi.engine.hitl.oversight.rest.IRestApprovalAnalytics;
+import ai.labs.eddi.engine.hitl.oversight.rest.IRestAuditSamples;
+import ai.labs.eddi.engine.hitl.oversight.rest.IRestAutonomy;
+import ai.labs.eddi.engine.pricing.rest.IRestModelPriceCatalog;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import io.quarkiverse.mcp.server.Tool;
@@ -58,7 +65,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
- * The MCP role matrix, measured rather than read: every one of the 94 tools is
+ * The MCP role matrix, measured rather than read: every one of the 107 tools is
  * invoked with authorization on, once per single-role identity, and the test
  * records whether the role gate let the call through. The result must equal the
  * documented tier of the tool, and each tier must equal the
@@ -77,7 +84,8 @@ class McpRoleTierParityTest {
 
     private static final Class<?>[] TOOL_CLASSES = {McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
-            McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class};
+            McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -92,7 +100,10 @@ class McpRoleTierParityTest {
             "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule", "upsert_user_memory", "delete_user_memory",
             "delete_all_user_memories", "delete_user_data", "export_user_data",
             // unscoped: the shared server log buffer (see readAgentLogsScoping)
-            "read_agent_logs");
+            "read_agent_logs",
+            // a team's cap is a spending lever (IRestGroupBudget#setCurrentMonthCap,
+            // IRestTeamBudgets#transfer)
+            "adjust_team_budget", "transfer_team_budget");
 
     private static final Set<String> CONVERSE_TOOLS = Set.of("create_conversation", "talk_to_agent", "chat_with_agent", "chat_managed",
             "read_conversation", "read_conversation_log", "list_conversations", "discover_agents",
@@ -110,6 +121,13 @@ class McpRoleTierParityTest {
     private static final Set<String> OBSERVE_TOOLS = Set.of("read_audit_trail");
 
     private static final Set<String> DOCS_TOOLS = Set.of("list_docs", "read_docs");
+
+    /** HITL oversight reads: REST's admin/editor/approver tier. */
+    private static final Set<String> OVERSIGHT_TOOLS = Set.of("summarize_approvals", "list_autonomy_recommendations", "get_autonomy_state",
+            "count_pending_audit_samples");
+
+    /** Team budget reads: REST's admin/editor/viewer tier. */
+    private static final Set<String> BUDGET_READ_TOOLS = Set.of("read_team_budget", "list_team_budgets");
 
     /**
      * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
@@ -130,6 +148,12 @@ class McpRoleTierParityTest {
         }
         if (DOCS_TOOLS.contains(tool)) {
             return McpRoles.DOCS;
+        }
+        if (OVERSIGHT_TOOLS.contains(tool)) {
+            return McpRoles.OVERSIGHT;
+        }
+        if (BUDGET_READ_TOOLS.contains(tool)) {
+            return McpRoles.BUDGET_READ;
         }
         return McpRoles.AUTHOR;
     }
@@ -208,7 +232,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(95, measured.size());
+        assertEquals(107, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -296,6 +320,10 @@ class McpRoleTierParityTest {
                                                                 // cancel_agent_test_run
         mirrors.put(IRestConversationRatingAdmin.class, McpRoles.AUTHOR); // *_conversation_ratings, review_conversation_rating
         mirrors.put(IRestAlertEvents.class, McpRoles.AUTHOR); // list_alert_events, acknowledge_alert_event
+        mirrors.put(IRestTeamHandoffs.class, McpRoles.AUTHOR); // list/accept/decline_team_handoff
+        mirrors.put(IRestApprovalAnalytics.class, McpRoles.OVERSIGHT); // summarize_approvals
+        mirrors.put(IRestAutonomy.class, McpRoles.OVERSIGHT); // list_autonomy_recommendations, get_autonomy_state
+        mirrors.put(IRestAuditSamples.class, McpRoles.OVERSIGHT); // count_pending_audit_samples
 
         for (var entry : mirrors.entrySet()) {
             assertEquals(restRoles(entry.getKey()), new HashSet<>(entry.getValue()), entry.getKey().getSimpleName());
@@ -322,6 +350,26 @@ class McpRoleTierParityTest {
                 assertEquals(new HashSet<>(Arrays.asList(annotation.value())), new HashSet<>(McpRoles.HITL),
                         entry.getKey().getSimpleName() + "#" + methodName);
             }
+        }
+
+        // Resources whose tiers sit on the methods, not the class: each read or write
+        // an MCP tool wraps carries exactly the tool's tier.
+        record MethodTier(Class<?> rest, String method, List<String> tier) {
+        }
+        for (MethodTier mt : List.of(
+                new MethodTier(IRestModelPriceCatalog.class, "readCatalog", McpRoles.AUTHOR), // read_model_prices
+                new MethodTier(IRestModelPriceCatalog.class, "resolve", McpRoles.AUTHOR),
+                new MethodTier(IRestModelPriceCatalog.class, "unpriced", McpRoles.AUTHOR),
+                new MethodTier(IRestGroupBudget.class, "readBudget", McpRoles.BUDGET_READ), // read_team_budget
+                new MethodTier(IRestGroupBudget.class, "readHistory", McpRoles.BUDGET_READ),
+                new MethodTier(IRestTeamBudgets.class, "listBudgets", McpRoles.BUDGET_READ), // list_team_budgets
+                new MethodTier(IRestGroupBudget.class, "setCurrentMonthCap", McpRoles.ADMIN_ONLY), // adjust_team_budget
+                new MethodTier(IRestTeamBudgets.class, "transfer", McpRoles.ADMIN_ONLY))) { // transfer_team_budget
+            Method rest = Arrays.stream(mt.rest().getMethods()).filter(x -> x.getName().equals(mt.method())).findFirst().orElseThrow();
+            RolesAllowed annotation = rest.getAnnotation(RolesAllowed.class);
+            assertTrue(annotation != null, mt.method() + " carries no @RolesAllowed of its own");
+            assertEquals(new HashSet<>(Arrays.asList(annotation.value())), new HashSet<>(mt.tier()),
+                    mt.rest().getSimpleName() + "#" + mt.method());
         }
 
         // The observer tier is REST's audit/log tier (admin-only) plus eddi-viewer.

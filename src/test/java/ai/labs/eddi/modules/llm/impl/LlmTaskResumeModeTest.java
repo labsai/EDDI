@@ -208,6 +208,24 @@ class LlmTaskResumeModeTest {
     }
 
     @Test
+    @DisplayName("the resumed task's cost holds are settled when it finishes, before the later tasks of the turn reserve")
+    void resumeSettlesHolds() throws Exception {
+        var b = batch("taskA", 0);
+        wireBaseMemory(List.of("action1"), b, decision(HitlVerdict.APPROVED));
+        when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
+                .thenReturn(new AgentOrchestrator.ExecutionResult("resumed answer", new ArrayList<>()));
+        var spendGate = mock(LlmSpendGate.class);
+        llmTask.spendGate = spendGate;
+
+        var t = task("taskA", List.of("action1"));
+        llmTask.execute(memory, new LlmConfiguration(List.of(t)));
+
+        var order = inOrder(agentOrchestrator, spendGate);
+        order.verify(agentOrchestrator).resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any());
+        order.verify(spendGate).settleHolds(memory);
+    }
+
+    @Test
     @DisplayName("resume mode asks the spend gate first: a spent conversation runs neither the approved calls nor the model")
     void resumeRefusedBySpendGate() throws Exception {
         var b = batch("taskA", 0);

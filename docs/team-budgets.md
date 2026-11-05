@@ -69,7 +69,8 @@ down, the amount is held back and charged with the next charge.
 | Where | What |
 |---|---|
 | A new discussion (`discuss`, async start, a cadence-created one) | Refused before anything is created. REST: **409** with the reason as text; the streaming endpoint sends the same text in its `group_error` event |
-| A follow-up or continuation of an existing root discussion | Refused the same way (**409** with the reason; a streamed continuation sends it in `group_error`) |
+| A follow-up or continuation of an existing root discussion | Refused the same way (**409** with the reason; a streamed continuation sends it in `group_error`). A follow-up's member turn is charged to the team as soon as it ends, and it is refused before it starts when the discussion has already reached its team ceiling |
+| A [cross-team handoff](team-handoff.md) **into** a team that is exhausted (or whose budget cannot be read) | Refused with the same text, before anything is filed: the model and the handoff audit entry get the reason. `surface="handoff"` on the refusal metric |
 | A standing-team cadence fire | **Skipped**, not failed: a success that is not retried, with the backlog untouched. The skip text says the budget is spent |
 | A discussion already running | Runs on. It is *not* cut short by a gate; its own ceiling (below) handles it |
 | A resume after an HITL pause or a human input | Not gated: work already started is not abandoned |
@@ -194,7 +195,9 @@ Metrics Reference dashboard under **Team Budgets**.
   the tenant meter has the same bound.
 - **Oversubscription is not checked.** Team caps may add up to more than the tenant's budget; the tenant gate
   still binds, and `limitedBy` says which limit is the tighter one.
-- **Not yet in the box:** the MCP tools for budgets and the Platform Operator's knowledge of them.
+- **MCP and the Platform Operator.** `read_team_budget`, `list_team_budgets` and, for administrators,
+  `adjust_team_budget` and `transfer_team_budget` (see [MCP Server](mcp-server.md#team-budget-tools-4)). The Platform
+  Operator reads budgets and explains refusals; it holds no budget write, so a cap is raised by an administrator.
 
 ## In the Manager
 
@@ -209,3 +212,8 @@ Metrics Reference dashboard under **Team Budgets**.
   budget** (from, to, amount, reason; one `Idempotency-Key` per opening of the dialog, replaced after a 4xx answer,
   which applied nothing, and kept after a 5xx or network error, so the retry stays idempotent). Other roles do not see the
   buttons; the server enforces it regardless.
+
+## Agents proposing budget changes
+
+An agent can read its team's numbers and propose a raise or transfer that an administrator approves, with the
+[Agent Operations Tools](agent-ops-tools.md). The change still goes through the admin-only operations above.

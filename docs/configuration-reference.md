@@ -696,6 +696,9 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-agents-per-tenant` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-api-calls-per-minute` | `-1` | `-1` = unlimited |
+| `eddi.tenant.quota.cost-reservation.enabled` | `false` | Hard ceiling: hold a call's maximum cost against the monthly budget before the call and refuse it when it does not fit — see [Tenant Quotas](tenant-quotas.md#hard-ceiling-cost-reservation-opt-in) |
+| `eddi.tenant.quota.cost-reservation.ttl` | `PT10M` | How long a hold that was never released (node died mid-turn) may pin the budget |
+| `eddi.tenant.quota.cost-reservation.default-max-output-tokens` | `4096` | Output-token cap assumed when sizing a hold for a model that sets none |
 | `eddi.tenant.quota.max-monthly-cost-usd` | `-1` | `-1` = unlimited. Priced LLM and tool spend per UTC month; once reached, LLM tasks serve their fallback answer and tool calls are refused. Unpriced models meter $0 — see [Tenant Quotas](tenant-quotas.md#the-monthly-cost-budget) |
 | `eddi.variables.cache-ttl-minutes` | `2` | [Global variable](global-variables.md) cache lifetime |
 | `eddi.deployment.env` | `development` *(when unset)* | Value matched by the `deploymentContext` behavior-rule condition, letting one agent behave differently per environment |

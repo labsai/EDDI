@@ -483,7 +483,7 @@ public class TeamCadenceService {
                         backlogTask.description(), TaskStatus.VERIFIED, outcome.assignedAgentId(),
                         outcome.assignedDisplayName(), backlogTask.dependsOnIds(), outcome.result(),
                         outcome.verificationNote(), true, backlogTask.priority(), backlogTask.createdAt(),
-                        Instant.now()));
+                        Instant.now(), backlogTask.createdByAgentId(), backlogTask.bet()));
                 workspace.getMetrics().setTasksVerified(workspace.getMetrics().getTasksVerified() + 1);
                 if (outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksVerified(
@@ -496,7 +496,8 @@ public class TeamCadenceService {
                 workspace.getBacklog().updateTask(new TaskItem(backlogTask.id(), backlogTask.subject(),
                         appendFeedbackBounded(backlogTask.description(), gc.getId(), feedback),
                         TaskStatus.PENDING, null, null, backlogTask.dependsOnIds(), null, null, false,
-                        backlogTask.priority(), backlogTask.createdAt(), null));
+                        backlogTask.priority(), backlogTask.createdAt(), null, backlogTask.createdByAgentId(),
+                        backlogTask.bet()));
                 if (outcome != null && outcome.assignedAgentId() != null) {
                     memberStats(workspace, outcome.assignedAgentId()).setTasksFailed(
                             memberStats(workspace, outcome.assignedAgentId()).getTasksFailed() + 1);
@@ -598,7 +599,7 @@ public class TeamCadenceService {
     private static TaskItem withStatus(TaskItem task, TaskStatus status) {
         return new TaskItem(task.id(), task.subject(), task.description(), status, task.assignedAgentId(),
                 task.assignedDisplayName(), task.dependsOnIds(), task.result(), task.verificationNote(),
-                task.verified(), task.priority(), task.createdAt(), task.completedAt());
+                task.verified(), task.priority(), task.createdAt(), task.completedAt(), task.createdByAgentId(), task.bet());
     }
 
     /**
