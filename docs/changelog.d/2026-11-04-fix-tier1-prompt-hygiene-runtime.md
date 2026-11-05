@@ -26,7 +26,7 @@ template giving instructions. The text could also be any size.
   {targetName}'s…", the speaker's own `displayName`) get the same one-line treatment, and the list
   budget counts every rendered string of an entry (names and phase name too), not only its content.
 - The Manager's verbatim copy of the arbitration prompt (`NEGOTIATION_ARBITRATION_TEMPLATE` in
-  [`hitl-config.ts`](../../ui/manager/src/lib/hitl-config.ts)) follows the new preset; a Vitest
+  [`hitl-config.ts`](../../ui/packages/app-kit/src/lib/hitl-config.ts)) follows the new preset; a Vitest
   compares the two.
 - The user's own `question` is not treated as peer text.
 - **Not covered yet:** the task-force templates (`TEMPLATE_EXECUTE`, `TEMPLATE_VERIFY`), which
@@ -65,7 +65,7 @@ the same provider outage retried in lockstep and arrived in one burst again.
 - **Downwards only**, so a jittered sleep never exceeds `maxBackoffDelayMs`, the 60-second total
   backoff budget or the turn deadline. A provider-requested wait (`honorRetryAfter`) is never
   shortened. `0` turns it off; values outside `[0, 1]` are clamped and `NaN` counts as `0`.
-- The Manager's `retry` type gained the optional field ([`types.ts`](../../ui/manager/src/components/editors/llm/types.ts)).
+- The Manager's `retry` type gained the optional field ([`types.ts`](../../ui/packages/app-kit/src/components/editors/llm/types.ts)).
 
 ### Behaviour changes operators may notice
 

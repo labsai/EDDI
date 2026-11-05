@@ -169,39 +169,59 @@ src/
 │   │   └── editor-registry.tsx        # EDITOR_MAP (single source of truth)
 │   ├── studio/               # Agent Studio workspace
 │   ├── operator/             # Platform Operator (activation, chat, status)
-│   ├── workforce/            # Group-conversation workspace (/workforce)
-│   └── …                     # one directory per feature area — agents, chat, hitl,
-│                             # secrets, connections, groups, workflows, …
+│   └── …                     # one directory per feature area — agents, hitl, secrets,
+│                             # connections, groups, workflows, …
 ├── hooks/                    # TanStack Query hooks, one file per domain
 ├── lib/
-│   ├── api/                  # API modules (agents.ts, resources.ts, backup.ts, …);
-│   │                         # chat.ts binds @eddi/core's conversation API (ui/packages/core)
+│   ├── api/                  # API modules only the Manager calls (backup.ts, cluster
+│   │                         # ops, …); the shared ones are @eddi/app-kit's
 │   ├── operator/             # Operator tool allow-list + system prompt
-│   ├── api-client.ts         # Base fetch wrapper with auth header injection
-│   └── query-keys.ts         # Shared TanStack Query keys
-├── i18n/                     # config.ts (setupI18n from @eddi/ui) + locales/ (11 locale JSON files)
-├── pages/                    # Route pages; pages/workforce/ for the Workforce app
+│   └── …
+├── i18n/                     # config.ts (setupAppI18n from @eddi/app-kit) + locales/ (11 files)
+├── pages/                    # Route pages
 └── test/
-    ├── setup.ts              # Vitest setup (MSW, monaco mock, …)
-    ├── test-utils.tsx        # Shared render helpers (renderPage, …)
-    └── mocks/                # MSW handlers.ts + server.ts
+    └── setup.ts              # The Manager's Vitest setup (its i18n); the shared setup,
+                              # test-utils and the MSW mock API are @eddi/app-kit's
 ```
 
 Tests sit next to what they test, in `__tests__/` directories throughout `src/`. List
 `src/components/` rather than trusting any enumeration here — it grows with every feature.
 
-### Shared packages: `@eddi/core` and `@eddi/ui`
+**Workforce is not here.** It is its own app, [`ui/workforce`](../workforce/AGENTS.md), with
+its own shell, router and bundle (phase 5 of the frontend unification plan). What the two
+apps share — the API client and its hooks (`lib/api-client.ts`, `lib/api/*`, `hooks/*`),
+the Keycloak session, the UI primitives (`components/ui/*`), the group, chat and editor
+components Workforce also renders, the base stylesheet and the mock API — lives in
+[`@eddi/app-kit`](../packages/app-kit/README.md) and is imported as
+`@eddi/app-kit/<path>` (the same paths it had under `src/`). Two rules hold it together:
+
+- **The Manager never imports Workforce code** — ESLint (`appBoundary`) and
+  `src/__tests__/app-boundary.test.ts` fail on it. Code both need moves to a package.
+- **A link to Workforce is a page load.** `<Link to="/workforce/…">` matches nothing in this
+  router; use `AppLink`, `AppNavigate` or `useAppNavigate` from `@eddi/app-kit`, which use the
+  router within the app and a full navigation across. `src/__tests__/route-integrity.test.ts`
+  fails on a router link into the other app. Theme (`eddi-theme`), language (`i18nextLng`),
+  pins and the Keycloak session carry over through same-origin storage.
+
+### Shared packages: `@eddi/core`, `@eddi/ui`, `@eddi/conversation`, `@eddi/app-kit`
+
+The fourth, [`@eddi/app-kit`](../packages/app-kit/README.md), is the layer above the other three that this app shares with Workforce (see "Workforce is not here" above). It may use the router, call the backend and read `window.__EDDI_*__`; it never imports an app, and the three packages below it never import it.
 
 Two packages under [`ui/packages`](../packages/README.md) are compiled into this app as source. `@eddi/core` is the conversation contract (below, API Communication). `@eddi/ui` holds the design tokens (`index.css` imports `@eddi/ui/theme.css`), `ThemeProvider` / `useTheme`, the i18next setup and per-locale fonts, `Button` and `ThemedToaster` — import them from `@eddi/ui`. A change to a token or to `Button` reaches the Chat UI too once it uses them; it stays a pure move unless the change is meant to be visual. Tailwind scans the package (`@source` in `theme.css`), so its classes are generated. `npm run i18n:check` scans `ui/packages/*/src` with this app's locale files, and counts a package's own locale files (`src/i18n/locales`) as this app's.
 
 A third, [`@eddi/conversation`](../packages/conversation/README.md), holds the agent kind of conversation: the `AgentConversation` controller, the shared components and **the one markdown renderer** (`MarkdownContent`). `components/chat/chat-message.tsx` renders replies through it (`conversation-markdown.tsx`, which also hands the shared components this app's `t`); its `conversation.*` strings are merged into this app's bundles in `i18n/config.ts` (`withConversationLocales`) and live in the package, in all eleven locales. Every markdown surface uses `ConversationMarkdown` (options pass through: `escapeRawHtml` for third-party text such as release notes); a test in the package (`markdown/one-renderer.test.ts`) fails on any other `react-markdown` import in the UIs. **`ChatPanel` runs on the controller**: `use-chat.ts` builds `chatConversation` with the package's host hooks (README → Host hooks) — the controller reads and writes `useChatStore` through `chatConversationStore`, follows its `conversationEpoch`, and leaves the Manager's copy (toasts, error bubbles, the pause banner) to `presentChatFailure` and the debug drawer to `recordDebugEvent`. A turn rule (how a turn is sent, refused, streamed, reconciled) is fixed in `agent-conversation.ts`, not here; what stays Manager code is start, load/resume with its secret masking, following an executing turn, undo/redo/rerun and end. The Workforce member thread (`workforce-thread.tsx`) runs an `AgentConversation` of its own per advisor (internal store; its error banner, Retry and pause notice through `presentFailure` / `onTurnSnapshot`). The Operator keeps its own loop until phase 6.
 
-### Workforce: sidebar, Home and the chat URL (phase 4)
+### `ChatPanel` in both apps
 
-- **The sidebar's conversations** (`components/workforce/session-list.tsx`, data in `hooks/use-workforce-sessions.ts`, shaping in `lib/workforce-sessions.ts`) list the person's chats (`GET /conversationstore/conversations`, owner-scoped by the backend; for an admin, who sees everyone's, narrowed to their own here) and team sessions (`GET /groups/{id}/conversations` for each team they can see), grouped Pinned / Today / Yesterday / Previous 7 / Previous 30 days / by month. Member conversations of a team session are left out of the chats (`memberConversationIds`). Rename and pin are `PATCH /conversationstore/conversations/{id}` (B2), delete is the owner `DELETE`; all three update the TanStack cache first and restore it on error (`workforceKeys`). Team sessions have no title or pin on the backend: their question is the title, and they can only be deleted. Every endpoint here is open to `eddi-user` — keep it that way (`e2e/workforce-end-user.spec.ts` fails on any store read).
-- **Home** (`components/workforce/workforce-home.tsx`): `HomeComposer` (agent picker defaulting to the agent of the most recent chat, else the first listed; the picked agent's `appearance.starters` as chips; its review notice), `RecentSessions` (the top five of the sidebar's data), then the catalog with each agent's B4 appearance from `GET /catalog/agents`. Sending hands the text to the chat in **router state** (`lib/workforce-chat-start.ts`), never in the URL, so a link still only preselects an agent.
-- **`ChatPanel urlSync`** (Workforce only) keeps `?agentId=…&conversationId=…` in the address bar so a reload or a second tab returns to the conversation (T1.15); without it the Manager's chat clears the parameters once read, as before. `initialMessage` starts a new conversation and sends Home's text once the agent is selected and its profile has answered.
-- **`conversationControls`** (B4) are read from the profile by `useAgentReviewProfile` and honoured by `ChatPanel` in both apps: undo, redo, attachments, ratings and quick replies disappear when the agent switched them off, and `streaming: false` sends without streaming (`agentStreaming` in the chat store). The Manager still never renders raw HTML.
+`ChatPanel` (`@eddi/app-kit/components/chat/chat-panel`) is the Manager's chat and Workforce's.
+**`urlSync`** (Workforce only) keeps `?agentId=…&conversationId=…` in the address bar so a
+reload or a second tab returns to the conversation (T1.15); without it the Manager's chat
+clears the parameters once read, as before. **`conversationControls`** (B4) are read from the
+profile by `useAgentReviewProfile` and honoured in both apps: undo, redo, attachments, ratings
+and quick replies disappear when the agent switched them off, and `streaming: false` sends
+without streaming (`agentStreaming` in the chat store). The Manager still never renders raw
+HTML. Workforce's sidebar, Home and its use of the chat are described in
+[`ui/workforce/AGENTS.md`](../workforce/AGENTS.md).
 
 ### Key Patterns
 
@@ -250,7 +270,7 @@ All 10 resource types are defined in `src/lib/api/resources.ts` as `RESOURCE_TYP
 
 #### 3. MSW Mock Handlers
 
-- All handlers are in `src/test/mocks/handlers.ts`
+- All handlers are in `ui/packages/app-kit/src/test/mocks/handlers.ts` (`@eddi/app-kit/test/mocks/handlers`): the Manager and Workforce run against the same mock API, in Vitest and under `npm run dev`. The OpenAPI contract test that grades them stays here (`src/test/mocks/__tests__/openapi-contract.test.ts`, with `openapi-operations.json`)
 - Specific GET handlers go **before** the generic `createResourceHandlers` block
 - Include realistic mock data matching the backend Java model — a fixture written to match the page rather than the server hides the very bugs the test exists for
 
@@ -407,8 +427,8 @@ what it finds. Off by default. Worth knowing before touching it:
 
 #### 5. Route-level code splitting
 
-Route pages in `app.tsx` load through `lazyPage()` (`src/lib/lazy-page.ts`) —
-with three deliberate exceptions that stay eager: the two layouts, the landing
+Route pages in `app.tsx` load through `lazyPage()` (`@eddi/app-kit/lib/lazy-page`) —
+with three deliberate exceptions that stay eager: the layout, the landing
 page (where `/` redirects, so it is on the critical path) and the command palette
 (it binds a global hotkey and must exist before the user presses it).
 Consequences worth knowing:
@@ -416,18 +436,23 @@ Consequences worth knowing:
 - **Add a route → use `lazyPage`.** A static page import puts that page back in
   the entry chunk, which is how it reached 8.5 MB before the split.
 - **Monaco is not in the entry chunk.** It is imported by
-  `src/lib/monaco-setup.ts`, which the four editor components import for its side
-  effect. That file must stay a side-effect import — `@monaco-editor/react` falls
-  back to the jsDelivr CDN if `loader.config()` has not run before `<Editor>`
-  mounts, and tests mock it out via `vi.mock("@/lib/monaco-setup")` in
-  `src/test/setup.ts`.
+  `lib/monaco-setup.ts` in @eddi/app-kit, which the four editor components import for
+  its side effect. That file must stay a side-effect import — `@monaco-editor/react`
+  falls back to the jsDelivr CDN if `loader.config()` has not run before `<Editor>`
+  mounts, and tests mock it out via `vi.mock("@eddi/app-kit/lib/monaco-setup")` in
+  the shared setup (`ui/packages/app-kit/src/test/setup-common.ts`).
+- **The mock API is not in the production bundle.** `main.tsx` passes `startApp`
+  its loader as `import.meta.env.DEV ? () => import(…) : undefined`; written as a
+  plain arrow, the bundler keeps the dynamic import and ships ~600 KB of mock data
+  as an unloaded chunk.
 - **Locales are code-split too.** Only `en.json` is bundled (it is `fallbackLng`,
   so it must resolve synchronously); the other ten load through the lazy backend
   `setupI18n` installs (`@eddi/ui`, [`ui/packages/ui`](../packages/ui/README.md)),
   from `LOCALE_LOADERS` in `src/i18n/config.ts`. Add a locale by adding it to
-  `SUPPORTED_LANGUAGES` in `@eddi/ui` **and** to both apps' loader maps (this one and
-  the Chat UI's `src/i18n/index.ts`) — the types make a missed entry a compile error.
-  Script fonts load per locale through `installLocaleFonts` (`@eddi/ui/fonts`). `main.tsx` awaits `i18nReady` before the first render so a
+  `SUPPORTED_LANGUAGES` in `@eddi/ui` **and** to every loader map (this one,
+  Workforce's, @eddi/app-kit's `i18n/app-i18n.ts` and the Chat UI's
+  `src/i18n/index.ts`) — the types make a missed entry a compile error.
+  Script fonts load per locale through `installLocaleFonts` (`@eddi/ui/fonts`). `startApp` (from `main.tsx`) awaits `i18nReady` before the first render so a
   non-English user never sees a flash of English, and `i18n.changeLanguage()` is
   now genuinely async: await it, and handle rejection (a chunk can 404 across a
   deploy).
@@ -439,7 +464,7 @@ Chunks are content-hashed, and the Maven build copies a fresh `dist/` into the j
 #### 6. Tests
 
 - Vitest + RTL in `__tests__/` directories beside the code — page tests in `src/pages/__tests__/` (naming: `resource-detail-{type}.test.tsx`), component and lib tests beside their sources
-- Render pages through `renderPage(path, element, routePattern?, client?)` from `src/test/test-utils.tsx` (`MemoryRouter` + `QueryClient` + `ThemeProvider`). Some older files still define a local `renderPage` of their own — don't copy that pattern into new files
+- Render pages through `renderPage(path, element, routePattern?, client?)` from `@eddi/app-kit/test/test-utils` (`MemoryRouter` + `QueryClient` + `ThemeProvider`; `renderAs(roles, path, routes)` for a role-aware screen). Some older files still define a local `renderPage` of their own — don't copy that pattern into new files
 - **Assert on `data-testid` attributes**, never on translated copy — every row, button, input and state a test checks gets one
 - E2E tests via Playwright in `e2e/`, including `rtl.spec.ts` and `theme.spec.ts`
 

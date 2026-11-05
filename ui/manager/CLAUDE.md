@@ -17,14 +17,16 @@ look like.**
 
 ## The five rules that catch most mistakes
 
-1. **Compose, don't recreate.** `src/components/ui/` (primitives) and
-   `src/components/shared/` (app-level components) already exist — list the directories;
+1. **Compose, don't recreate.** `components/ui/` (primitives) and `components/shared/`
+   (app-level components) already exist, in `src/` and in `@eddi/app-kit`
+   (`ui/packages/app-kit/src`, shared with Workforce) — list the directories;
    `eddi-ui` describes each. Import them. Do not
    pull in a fresh shadcn/ui component, and do not hand-roll a button, badge, card,
    dialog, empty state or error state.
 2. **Colors come from tokens, never hex.** `bg-primary`, `text-muted-foreground`,
    `border-border`, `bg-card`, `text-destructive`. Tokens are declared in `@theme` in
-   `src/index.css` and flip in dark mode. A literal `#f59e0b` in a component is a bug.
+   `@eddi/ui/theme.css` (`ui/packages/ui`) and flip in dark mode. A literal `#f59e0b` in
+   a component is a bug.
 3. **Logical properties only.** `ps-*` / `pe-*` / `ms-*` / `me-*` / `start-*` / `end-*` /
    `text-start` / `text-end`. Never `pl-`, `pr-`, `ml-`, `mr-`, `left-`, `right-`. The app
    ships Arabic; `e2e/rtl.spec.ts` will catch you.
