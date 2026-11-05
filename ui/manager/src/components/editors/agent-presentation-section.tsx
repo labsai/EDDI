@@ -22,6 +22,23 @@ function parseStarters(text: string): string[] {
 }
 
 /**
+ * The text with the caps applied, so the textarea never shows what would not be saved:
+ * each line cut at MAX_STARTER_LENGTH, and nothing kept after the MAX_STARTERS-th starter.
+ * Blank lines before that stay, so a new line can still be started.
+ */
+function capStartersText(text: string): string {
+  const kept: string[] = [];
+  let starters = 0;
+  for (const raw of text.split("\n")) {
+    if (starters === MAX_STARTERS) break;
+    const line = raw.slice(0, MAX_STARTER_LENGTH);
+    if (line.trim()) starters++;
+    kept.push(line);
+  }
+  return kept.join("\n");
+}
+
+/**
  * How the agent presents itself to the people chatting with it — `appearance`,
  * `conversationControls` — and whether a model writes conversation titles
  * (`titleGeneration`). All optional; the backend validates every field on save.
@@ -135,8 +152,9 @@ export const AgentPresentationSection = memo(function AgentPresentationSection({
           <textarea
             value={startersText}
             onChange={(e) => {
-              setStartersText(e.target.value);
-              patchAppearance({ starters: parseStarters(e.target.value) });
+              const text = capStartersText(e.target.value);
+              setStartersText(text);
+              patchAppearance({ starters: parseStarters(text) });
             }}
             rows={3}
             disabled={disabled}

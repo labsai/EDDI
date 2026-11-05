@@ -65,6 +65,21 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a provider key pasted into a model field is still caught by the shape rules")
+    void scrubJson_keyInAModelFieldIsRedacted() throws Exception {
+        String json = """
+                {
+                    "parameters": { "modelName": "sk-ant-api03-AbCdEfGh1234567890XyZ" },
+                    "titleGeneration": { "llmModel": "sk-proj-AbCdEfGh1234567890XyZw" }
+                }
+                """;
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("AbCdEfGh1234567890XyZ"), "the structural exemption skips only the entropy check: " + scrubbed);
+    }
+
+    @Test
     void scrubJson_vaultReferences_passthrough() throws Exception {
         String json = """
                 {

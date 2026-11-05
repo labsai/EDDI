@@ -390,7 +390,10 @@ public class SecretScrubber {
             }
         }
         String decided = scrubSingleValue(fieldName, parentFieldName, textValue);
-        if (decided != null || isStructuralFieldName(fieldName) || looksLikeUrl(textValue)) {
+        // A structural name only exempts the value from the entropy check (inside
+        // scrubSingleValue): a provider key pasted into "model" or "llmModel" still
+        // gets the shape rules below, or it would leave in the export as it is.
+        if (decided != null || looksLikeUrl(textValue)) {
             return decided;
         }
         return requestMaterial ? redactFreeText(textValue) : redactCredentialShapes(textValue);

@@ -53,6 +53,18 @@ describe("AgentPresentationSection — conversation starters", () => {
     expect(onEdit.mock.lastCall?.[0].appearance.starters).toEqual(["A", "B"]);
   });
 
+  it("shows only what will be saved: six starters, each cut at 200 characters", () => {
+    const onEdit = vi.fn();
+    render(<Harness initial={baseAgent} onEdit={onEdit} />);
+
+    const long = "x".repeat(250);
+    fireEvent.change(starters(), { target: { value: `${long}\n2\n\n3\n4\n5\n6\n7` } });
+
+    const saved = onEdit.mock.lastCall?.[0].appearance.starters;
+    expect(saved).toEqual(["x".repeat(200), "2", "3", "4", "5", "6"]);
+    expect(starters().value).toBe(`${"x".repeat(200)}\n2\n\n3\n4\n5\n6`);
+  });
+
   it("follows the stored starters when the draft is discarded", () => {
     const initial = { ...baseAgent, appearance: { starters: ["Hello"] } } as Agent;
     render(<Harness initial={initial} onEdit={vi.fn()} />);
