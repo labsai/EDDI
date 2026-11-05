@@ -9,7 +9,6 @@ A 13-scope audit compared the docs, Javadoc and inline comments with the code. E
 **Code**
 - Counterweight preset snippets are now `counterweight_cautious` / `counterweight_strict`. The hyphenated names could never be created (`PromptSnippetStore.NAME_PATTERN` is `[a-z0-9_]+`). The hyphenated names are still read as a fallback.
 - `OrdinalNumbersDictionary` carried the id `punctuation` (copy-paste); it is now `ordinal_number`.
-- `RestSemanticParser.parse` parameter renamed `parserId`.
 - Everything else under `src/` is Javadoc or comment text only.
 
 **Docs**
