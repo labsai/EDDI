@@ -340,6 +340,17 @@ class AgentOrchestrator implements IAgentOrchestrator {
     volatile GuardrailService guardrailService;
 
     /**
+     * Hands the {@code toolCallGuardrails} engine to the tool loop, which is not a
+     * CDI bean; an initializer rather than a constructor parameter for the same
+     * reason as the fields above. Never called under direct construction, where the
+     * loop runs without argument guardrails as before.
+     */
+    @Inject
+    void setToolCallGuardrails(ToolCallGuardrails toolCallGuardrails) {
+        toolLoopRunner.toolCallGuardrails = toolCallGuardrails;
+    }
+
+    /**
      * Test seam for supplying the attachment services to a directly-constructed
      * orchestrator (CDI populates the fields above in production). Previously this
      * was the sole wiring path, pushed in by {@code LlmTask}'s

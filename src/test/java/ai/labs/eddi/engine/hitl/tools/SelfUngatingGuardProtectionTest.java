@@ -255,6 +255,54 @@ class SelfUngatingGuardProtectionTest {
                     "[{\"op\":\"replace\",\"path\":\"/tasks/0/description\",\"value\":\"x\"}]", p));
         }
 
+        private final String storedWithGuardrails = "{\"tasks\":[{\"id\":\"t\",\"toolCallGuardrails\":[{\"type\":\"judge\",\"tools\":[\"mcp:x\"]}]}]}";
+
+        @Test
+        @DisplayName("omitting stored tool-call guardrails is refused like omitting a gate")
+        void guardrailOmissionIsRefused() {
+            Protection p = withStoredLlm(storedWithGuardrails);
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[{\"id\":\"t\"}]}", p));
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0\",\"value\":{\"id\":\"t\"}}]", p));
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON,
+                    SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"remove\",\"path\":\"/tasks\"}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"replace\",\"path\":\"/tasks/0/description\",\"value\":\"x\"}]", p));
+        }
+
+        private final String storedSecondTaskGated = "{\"tasks\":[{\"id\":\"a\"},"
+                + "{\"id\":\"b\",\"toolApprovals\":{\"requireApproval\":[\"http:*\"]}}]}";
+
+        @Test
+        @DisplayName("an add or remove that shifts a protected task's index is refused; an append, a later index or a replace passes")
+        void indexShiftIsRefused() {
+            Protection p = withStoredLlm(storedSecondTaskGated);
+            // The first remove shifts the gated /tasks/1 to /tasks/0, the second drops it.
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"remove\",\"path\":\"/tasks/0\"},{\"op\":\"remove\",\"path\":\"/tasks/0\"}]", p));
+            assertEquals(SelfUngatingGuard.LLM_GATE_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"add\",\"path\":\"/tasks/1\",\"value\":{\"id\":\"c\"}}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"add\",\"path\":\"/tasks/-\",\"value\":{\"id\":\"c\"}}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"add\",\"path\":\"/tasks/2\",\"value\":{\"id\":\"c\"}}]", p));
+            assertNull(SelfUngatingGuard.refusal("PATCH", url, "[{\"op\":\"replace\",\"path\":\"/tasks/0\",\"value\":{\"id\":\"z\"}}]", p));
+        }
+
+        @Test
+        @DisplayName("the index-shift check covers stored guardrails as well as gates")
+        void indexShiftCoversGuardrails() {
+            Protection p = withStoredLlm("{\"tasks\":[{\"id\":\"a\"},{\"id\":\"b\",\"toolCallGuardrails\":[{\"type\":\"judge\"}]}]}");
+            assertEquals(SelfUngatingGuard.LLM_GUARDRAIL_REMOVAL_REASON, SelfUngatingGuard.refusal("PATCH", url,
+                    "[{\"op\":\"remove\",\"path\":\"/tasks/0\"},{\"op\":\"remove\",\"path\":\"/tasks/0\"}]", p));
+        }
+
+        @Test
+        @DisplayName("an empty stored guardrail list protects nothing, so a document that carries one can still be replaced")
+        void emptyStoredListIsNotProtected() {
+            assertNull(SelfUngatingGuard.refusal("PUT", url, "{\"tasks\":[{\"id\":\"t\"}]}",
+                    withStoredLlm("{\"tasks\":[{\"id\":\"t\",\"toolCallGuardrails\":[]}]}")));
+        }
+
         @Test
         @DisplayName("an earlier add or remove that moves the gated task is refused; an append passes")
         void patchThatShiftsTheGatedTask() {

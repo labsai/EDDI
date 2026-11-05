@@ -267,6 +267,10 @@ context. Three layers apply, none of which you configure to get:
 `directiveAction` is `warn`, `redact` (default) or `block`. An unrecognised value
 degrades to `warn` — a typo must not silently start blocking every tool result.
 
+This governs what comes **out** of a tool. What goes **in** — the arguments of a
+call, such as the body of a comment about to be posted — is screened by
+[`toolCallGuardrails`](tool-call-guardrails.md).
+
 `directiveAppliesToSources` narrows **directive handling only**. Provenance marking
 is never narrowed, deliberately: an unmarked result arriving in the same transcript
 position a system instruction occupies is the gap this feature exists to close, and

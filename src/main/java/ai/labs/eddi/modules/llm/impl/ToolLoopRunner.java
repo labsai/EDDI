@@ -35,6 +35,7 @@ import ai.labs.eddi.modules.llm.guardrails.ToolArgumentSchemaValidator;
 import ai.labs.eddi.modules.llm.tools.spi.ToolArgumentValidator;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
+import ai.labs.eddi.modules.llm.guardrails.PaidCallGate;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.ToolCacheService;
@@ -114,6 +115,14 @@ class ToolLoopRunner {
     private final ToolApprovalGateSupport gateSupport;
     private final ToolContextBudget toolContextBudgetGuard;
     private final ToolResultGuardrail toolResultGuardrail;
+    /**
+     * The task's {@code toolCallGuardrails}, run over each response's admitted
+     * calls before the approval gate. Set by {@code AgentOrchestrator}'s CDI
+     * initializer rather than the constructor, which tests call directly; null
+     * there, and then inert.
+     */
+    volatile ToolCallGuardrails toolCallGuardrails;
+
     /**
      * Told about every allowed call after it ran (the sampled audit); set by the
      * owner.
@@ -434,6 +443,7 @@ class ToolLoopRunner {
             // so a HITL resume, which is a new run of this method, starts a fresh one.
             // Null when the task switched it off.
             ToolRepeatGuard repeatGuard = ToolRepeatGuard.forTask(task, toolCanonicalNames);
+            ToolCallGuardrails.RunBudget argumentModelChecks = ToolCallGuardrails.newRunBudget();
 
             // Engine-enforced counterweight: strict mode caps iterations
             var counterweight = task.getCounterweight();
@@ -600,6 +610,21 @@ class ToolLoopRunner {
                     // a schema check anything (ToolArgumentValidator).
                     admitted = refuseInvalidArguments(admitted, toolExecutors, toolSources, currentMessages, aiMessage, trace,
                             exchangeRecorder);
+
+                    // === Tool-call guardrails (toolCallGuardrails), before the approval gate ===
+                    // A refused call never reaches a human or a tool; a redaction is what the
+                    // approver, the transcript and the tool all see. Null: no guardrails.
+                    var argumentScreen = toolCallGuardrails == null
+                            ? null
+                            : toolCallGuardrails.screenBatch(task, memory, aiMessage, admitted, toolSources, setup.toolEndpoints(), currentMessages,
+                                    trace, argumentModelChecks, sideCallSpend(memory, conversationId, enableCostTracking, runSpend));
+                    if (argumentScreen != null) {
+                        aiMessage = argumentScreen.message();
+                        admitted = argumentScreen.admitted();
+                        for (ToolCallGuardrails.Refusal refused : argumentScreen.refused()) {
+                            addResult(currentMessages, aiMessage, refused.request(), refused.result(), exchangeRecorder);
+                        }
+                    }
 
                     // === Tool-approval gate (tool-level HITL) ===
                     // Split the batch into gated (require human approval) and allowed
@@ -1409,38 +1434,28 @@ class ToolLoopRunner {
         return new ToolResponseTruncator.SummarizerSpend() {
             @Override
             public boolean admit() {
-                double unsettled = runSpend != null ? runSpend.getAsDouble() : 0.0;
-                if (memory != null) {
-                    OptionalDouble ceiling = LlmSpendGate.effectiveCeiling(memory);
-                    if (LlmSpendGate.ceilingApplies(ceiling) && LlmSpendGate.conversationCost(memory) + unsettled >= ceiling.getAsDouble()) {
-                        return false;
-                    }
-                }
-                if (tenantQuotaService == null) {
-                    return true;
-                }
-                try {
-                    return tenantQuotaService
-                            .checkCostBudget(tenantQuotaService.getDefaultTenantId(),
-                                    Math.max(0.0, LlmSpendGate.unmeteredStepCost(memory) + unsettled))
-                            .allowed();
-                } catch (RuntimeException e) {
-                    // Fail closed, as every other tenant check: the result is truncated.
-                    return false;
-                }
+                // Refused (fail closed on a tenant check that cannot answer): the result
+                // is truncated.
+                return LoopSideCallSpend.refusal(memory, tenantQuotaService, runSpend != null ? runSpend.getAsDouble() : 0.0) == null;
             }
 
             @Override
             public void charge(Map<String, Object> tokenUsage) {
-                if (!enableCostTracking || conversationId == null || toolExecutionService == null
-                        || toolExecutionService.getCostTracker() == null) {
-                    return;
-                }
-                double price = ModelPrices.forToolSummarizer(task).cost(tokenUsage);
-                toolExecutionService.getCostTracker()
-                        .trackToolCall(new ToolInvocation(SUMMARIZER_DISPATCH_NAME, SUMMARIZER_DISPATCH_NAME, price), conversationId);
+                LoopSideCallSpend.charge(toolExecutionService, conversationId, enableCostTracking, SUMMARIZER_DISPATCH_NAME,
+                        ModelPrices.forToolSummarizer(task).cost(tokenUsage));
             }
         };
+    }
+
+    /**
+     * The spend checks of a {@code toolCallGuardrails} model call (a judge or a
+     * classifier on a tool call's arguments): admitted and charged like the
+     * summarizer's ({@link LoopSideCallSpend}), under
+     * {@link ToolCallGuardrails#DISPATCH_NAME}.
+     */
+    PaidCallGate sideCallSpend(IConversationMemory memory, String conversationId, boolean enableCostTracking, DoubleSupplier runSpend) {
+        return LoopSideCallSpend.gate(memory, tenantQuotaService, toolExecutionService, conversationId, enableCostTracking, runSpend,
+                ToolCallGuardrails.DISPATCH_NAME);
     }
 
     /**
