@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "Verwende {{tool}}…",
   "conversation.indicator.escalating": "Ich sehe genauer hin…",
   "conversation.indicator.thinking": "Denke nach…",
+  "conversation.indicator.guardrail": "Antwort wird geprüft…",
   "conversation.message.noResponse": "Keine Antwort",
   "conversation.speaker.you": "Sie sagten:",
   "conversation.speaker.agent": "{{name}} sagte:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "Kommentar",
   "conversation.rating.comment.placeholder": "Noch etwas? (optional)",
   "conversation.rating.send": "Senden",
-  "conversation.rating.skip": "Überspringen"
+  "conversation.rating.skip": "Überspringen",
+  "conversation.guardrail.notice": "Guardrail ({{phase}}): {{type}}, {{action}}",
+  "conversation.guardrail.phaseInput": "Eingabe",
+  "conversation.guardrail.phaseOutput": "Ausgabe",
+  "conversation.guardrail.actionBlock": "blockiert",
+  "conversation.guardrail.actionRedact": "geschwärzt",
+  "conversation.guardrail.actionReprompt": "Modell erneut angefragt",
+  "conversation.guardrail.actionWarn": "markiert"
 }

@@ -1,10 +1,12 @@
 /* ──────────────────────────────────────────────
    TypingIndicator — Bouncing dots (agent is typing)
    ThinkingIndicator — Pulsing brain; `escalating` for a model-cascade step up,
+                       `guardrail` while a guardrail that fired is at work,
                        `tool` while a tool call is running
    ────────────────────────────────────────────── */
 
-import { Brain, Wrench } from "lucide-react";
+import { Brain, ShieldCheck, Wrench } from "lucide-react";
+import type { ConversationMessage } from "../controller/state";
 import { englishText, type Translate } from "../i18n/text";
 import { useConversationText } from "../react/hooks";
 
@@ -56,20 +58,47 @@ export function TypingIndicator() {
  * state here exists only mid-turn — so the widget announces this text from a
  * status region outside the transcript instead.
  */
-export function indicatorStatusText(escalating: boolean, tool: string | null, t: Translate = englishText): string {
+export function indicatorStatusText(
+  escalating: boolean,
+  tool: string | null,
+  t: Translate = englishText,
+  guardrail = false,
+): string {
   if (tool) return t("conversation.indicator.tool", { tool });
+  if (guardrail) return t("conversation.indicator.guardrail");
   return escalating ? t("conversation.indicator.escalating") : t("conversation.indicator.thinking");
 }
 
+/**
+ * Whether a guardrail has fired on the reply still being written — the wait
+ * that follows (a re-asked model, a rewrite) is the guardrail at work.
+ */
+export function guardrailActive(messages: readonly ConversationMessage[], processing: boolean): boolean {
+  if (!processing) return false;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role === "user") return false;
+    if (m?.role === "agent" && m.isStreaming) return !!m.guardrails?.length;
+  }
+  return false;
+}
+
+/**
+ * `guardrail` says a guardrail fired on the reply being written (see
+ * `guardrailActive`): the wait that follows is it re-asking the model or
+ * rewriting the answer. A tool call wins over it; it wins over `escalating`.
+ */
 export function ThinkingIndicator({
   escalating = false,
   tool = null,
+  guardrail = false,
 }: {
   escalating?: boolean;
   tool?: string | null;
+  guardrail?: boolean;
 }) {
   const t = useConversationText();
-  const mode = tool ? "tool" : escalating ? "escalating" : "thinking";
+  const mode = tool ? "tool" : guardrail ? "guardrail" : escalating ? "escalating" : "thinking";
   // Hidden from assistive technology: the transcript is aria-busy while this is
   // on screen, so ChatWidget announces indicatorStatusText() from a status
   // region outside it. Announcing here as well would read it twice.
@@ -82,10 +111,12 @@ export function ThinkingIndicator({
         <div className="indicator__thinking">
           {mode === "tool" ? (
             <Wrench className="indicator__brain" size="1em" />
+          ) : mode === "guardrail" ? (
+            <ShieldCheck className="indicator__brain" size="1em" />
           ) : (
             <Brain className="indicator__brain" size="1em" />
           )}
-          <span>{indicatorStatusText(escalating, tool, t)}</span>
+          <span>{indicatorStatusText(escalating, tool, t, guardrail)}</span>
         </div>
       </div>
     </div>

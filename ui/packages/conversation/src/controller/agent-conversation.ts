@@ -37,6 +37,7 @@ import {
   type OutputImage,
   type SSEEvent,
   type ApprovalStatus,
+  type InputField,
 } from "@eddi/core";
 import { englishText, type Translate } from "../i18n/text";
 import { skippedTurnMessage, startFailureMessage } from "./notices";
@@ -46,6 +47,7 @@ import {
   type AgentConversationState,
   type ConversationAction,
   type ConversationMessage,
+  type MessageAttachment,
 } from "./state";
 import type { AgentTransport } from "./transport";
 
@@ -68,6 +70,122 @@ export interface AgentConversationOptions {
   environment?: string;
   /** A rerun replaced this step's reply: a rating given to the old one no longer applies. */
   onStepRerun?: (stepIndex: number) => void;
+
+  /* ─── Host hooks (phase 3c): how a host with its own store and its own copy
+     drives the same turn loop. Every one is optional; without them the
+     controller behaves as it does for the Chat UI. ─── */
+
+  /**
+   * Keep the state in the host's store instead of inside the controller. The
+   * Manager keeps its chat in a Zustand store that a dozen components read; the
+   * controller reads and writes through this, and `subscribe` delegates to it.
+   */
+  store?: ConversationStore;
+  /**
+   * The host's own conversation generation, when something other than
+   * `reset()` replaces the conversation on screen (the Manager's agent picker,
+   * its history list). A turn whose generation moved on writes nothing more.
+   */
+  generation?: () => number;
+  /**
+   * Let a turn whose conversation was replaced keep reading its stream, for at
+   * most this long, so the turn the user sent finishes on the server (closing
+   * the stream cancels it there). Without it, a replaced conversation's stream
+   * stops being read at once. Nothing a detached turn reads is applied.
+   */
+  detachedGraceMs?: number;
+  /**
+   * Re-read the conversation after a streamed turn for undo/redo and a state
+   * the stream did not report (the default). A host that takes both from the
+   * `done` payload (`onTurnSnapshot`) turns it off.
+   */
+  refreshAfterStream?: boolean;
+  /**
+   * How a sent message shows its files: as `📎 name` lines in its text (the
+   * default) or as `attachments` on the message, which `Message` renders as chips.
+   */
+  attachmentDisplay?: "text" | "chips";
+  /** The texts of one output entry. @eddi/core's `extractOutputTexts` of its `output` list by default. */
+  outputTexts?: (output: Record<string, unknown>) => string[];
+  /** Every event of the turn on screen, before the controller applies it (a debug panel). */
+  onStreamEvent?: (event: SSEEvent) => void;
+  /** A turn starts (as the instance property `onTurnStart`, which the Chat UI sets). */
+  onTurnStarting?: () => void;
+  /** A turn on screen ended, however it ended. */
+  onTurnEnd?: () => void;
+  /** The snapshot a finished turn answered with: the `done` payload, or the non-streamed reply. */
+  onTurnSnapshot?: (snapshot: Partial<ConversationSnapshot>) => void;
+  /**
+   * Why a turn that finished on the server failed (an ERROR turn's task errors),
+   * shown with its reply. Null when it did not fail.
+   */
+  turnFailure?: (snapshot: Partial<ConversationSnapshot>) => string | null;
+  /**
+   * Show a refused or failed turn the host's way. Return true when the host
+   * presented it (and withdrew the bubble, if it wanted to); the controller then
+   * only ends the turn. Return false for the controller's own notices.
+   */
+  presentFailure?: (failure: TurnFailure, context: TurnFailureContext) => boolean | Promise<boolean>;
+}
+
+/** A store the controller keeps its state in, when the host owns it. */
+export interface ConversationStore {
+  get(): AgentConversationState;
+  set(next: AgentConversationState): void;
+  subscribe(listener: () => void): () => void;
+}
+
+/** A turn that did not end with a reply. */
+export interface TurnFailure {
+  /**
+   * `refused`: the server turned the turn down before it ran (a 4xx, or a
+   * stream error code for an unconsumed turn). `failed`: the request failed (a
+   * dropped connection, a 5xx). `streamError`: the stream reported an error
+   * while the turn ran.
+   */
+  kind: "refused" | "failed" | "streamError";
+  /** The HTTP status, when the failure was one. */
+  status: number | null;
+  /** The stream error code, when the backend sent one. */
+  code: string | null;
+  /** The server's own sentence, or the error's message. */
+  message: string;
+  /** The error that was thrown, if any. */
+  error?: unknown;
+  /** Part of the reply had already arrived. */
+  partial: boolean;
+}
+
+export interface TurnFailureContext {
+  /** The conversation the turn was sent to. */
+  conversationId: string | null;
+  /** The id of the turn's user message. */
+  userMessageId: string;
+  /** What the user sent, unmasked. */
+  text: string;
+  isSecret: boolean;
+  /** The input field the turn answered (cleared when it was sent). */
+  answeredField: InputField | null;
+  /** Withdraw the turn's bubble and hand its input back to the composer. */
+  withdraw(): void;
+  /** Whether the conversation the turn belongs to is still on screen. */
+  isCurrent(): boolean;
+}
+
+/** How `send` ended. `failed` and `refused` carry what happened. */
+export type TurnResult =
+  | { outcome: "sent" | "ignored" }
+  | { outcome: "refused" | "failed"; failure: TurnFailure };
+
+/** A file sent with a turn: what the context names, and what the bubble shows. */
+export interface TurnAttachment {
+  storageRef: string;
+  fileName: string;
+  mimeType?: string;
+  sizeBytes?: number;
+  forwardableInline?: boolean;
+  /** A local preview (an object URL) for an image. */
+  previewUrl?: string;
 }
 
 /**
@@ -97,10 +215,12 @@ interface TurnContext {
    * known yet: the caller re-reads the conversation and applies that instead.
    */
   doneUnreadable: boolean;
+  /** An error the stream reported, kept for the host to present once the stream ends. */
+  failure: TurnFailure | null;
 }
 
 function newTurn(stateBeforeSend: ConversationState | null, userMessageId: string | null = null): TurnContext {
-  return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false, doneUnreadable: false };
+  return { tokenCount: 0, stateBeforeSend, userMessageId, announcedPause: false, doneUnreadable: false, failure: null };
 }
 
 function uid(prefix: string): string {
@@ -137,14 +257,29 @@ function isAbortError(e: unknown): boolean {
 
 interface PendingTurn {
   text: string;
+  /** Files to put back into the composer's staging; files the host passed in stay the host's. */
   attachments: AttachmentResult[];
   isSecret: boolean;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function toMessageAttachment(a: TurnAttachment): MessageAttachment {
+  return {
+    fileName: a.fileName,
+    ...(a.mimeType !== undefined ? { mimeType: a.mimeType } : {}),
+    ...(a.sizeBytes !== undefined ? { sizeBytes: a.sizeBytes } : {}),
+    ...(a.previewUrl !== undefined ? { previewUrl: a.previewUrl } : {}),
+    ...(a.forwardableInline !== undefined ? { forwardableInline: a.forwardableInline } : {}),
+  };
 }
 
 type Listener = () => void;
 
 export class AgentConversation {
-  private state: AgentConversationState;
+  private localState: AgentConversationState;
   private readonly listeners = new Set<Listener>();
   private options: AgentConversationOptions;
   /**
@@ -171,12 +306,18 @@ export class AgentConversation {
 
   constructor(options: AgentConversationOptions, initial: AgentConversationState = initialConversationState) {
     this.options = options;
-    this.state = initial;
+    this.localState = initial;
   }
 
   /* ─── Store ─────────────────────────────────── */
 
+  /** The state, from the host's store when it keeps one. */
+  private get state(): AgentConversationState {
+    return this.options.store ? this.options.store.get() : this.localState;
+  }
+
   subscribe = (listener: Listener): (() => void) => {
+    if (this.options.store) return this.options.store.subscribe(listener);
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -187,9 +328,14 @@ export class AgentConversation {
 
   /** Apply one action — the composer's own (attachments, secret mode) come in here too. */
   dispatch = (action: ConversationAction): void => {
-    const next = conversationReducer(this.state, action);
-    if (next === this.state) return;
-    this.state = next;
+    const previous = this.state;
+    const next = conversationReducer(previous, action);
+    if (next === previous) return;
+    if (this.options.store) {
+      this.options.store.set(next);
+      return;
+    }
+    this.localState = next;
     for (const listener of [...this.listeners]) listener();
   };
 
@@ -200,12 +346,19 @@ export class AgentConversation {
 
   /** Whether a continuation started at `gen` still belongs to the conversation on screen. */
   isCurrent(gen: number): boolean {
-    return gen === this.generation;
+    return gen === this.currentGeneration;
   }
 
   /** The current generation, for a host's own async continuations (a HITL watch). */
   get currentGeneration(): number {
-    return this.generation;
+    return this.options.generation ? this.options.generation() : this.generation;
+  }
+
+  /** The texts of one output entry (see `outputTexts`). */
+  private textsOf(output: unknown): string[] {
+    if (!output || typeof output !== "object") return [];
+    if (this.options.outputTexts) return this.options.outputTexts(output as Record<string, unknown>);
+    return extractOutputTexts((output as { output?: unknown }).output);
   }
 
   private get t(): Translate {
@@ -278,7 +431,7 @@ export class AgentConversation {
         }
         // Handles bare-string entries too — HITL's pending-approval placeholder
         // and reviewer-rejection message arrive as raw strings.
-        for (const text of extractOutputTexts(agentReplies)) {
+        for (const text of this.textsOf(output)) {
           // A full read lists every step, so the position is the server's step
           // index (reply ratings are keyed by it). A turn response carries only
           // its own step, at index 0, and is counted instead.
@@ -388,9 +541,15 @@ export class AgentConversation {
     const dispatch = this.dispatch;
     const outputs = snapshot?.conversationOutputs;
     const lastOutput = outputs?.length ? outputs[outputs.length - 1] : undefined;
-    const outputText = extractOutputTexts(lastOutput?.output).join("\n\n");
+    const outputText = this.textsOf(lastOutput).join("\n\n");
     const outputImages = extractOutputImages(lastOutput?.output);
     const skipped = isSkippedTurn(snapshot, turn.tokenCount, turn.stateBeforeSend);
+    // Why the turn failed on the server, shown with whatever it said (a host's
+    // copy; the Chat UI has none). Never for a skipped turn: its payload is the
+    // previous step's.
+    const failure = skipped || !snapshot ? null : (this.options.turnFailure?.(snapshot) ?? null);
+    const failureLine = failure ? `⚠️ ${failure}` : "";
+    if (snapshot && !skipped) this.options.onTurnSnapshot?.(snapshot);
 
     // A requested input field (a password prompt) arrives here on the streaming
     // path, which is the default. Reading it only from the non-streaming
@@ -418,10 +577,13 @@ export class AgentConversation {
       const placeholder = this.state.messages.find((m) => m.role === "agent" && m.isStreaming && m.content === "");
       const guardrails = placeholder?.guardrails;
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-      if (outputText || outputImages.length) {
+      // A failed turn's reason goes into its reply rather than beside it, so
+      // it does not leave an empty bubble above its explanation.
+      const content = [outputText, failureLine].filter(Boolean).join("\n\n");
+      if (content || outputImages.length) {
         dispatch({
           type: "ADD_MESSAGE",
-          message: { ...makeAgentMessage(outputText, outputImages), ...(guardrails ? { guardrails } : {}) },
+          message: { ...makeAgentMessage(content, outputImages), ...(guardrails ? { guardrails } : {}) },
         });
       }
       if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
@@ -432,6 +594,8 @@ export class AgentConversation {
       // SUPERSEDE them (fallback text) after the fact. The snapshot is
       // authoritative.
       if (outputText) dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
+      // After the reconcile, which would take an appended reason with it.
+      if (failureLine) dispatch({ type: "APPEND_TO_LAST_AGENT", token: `\n\n${failureLine}` });
       // Images never stream as tokens; the snapshot is their only source.
       if (outputImages.length) dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage("", outputImages) });
       dispatch({ type: "SET_QUICK_REPLIES", replies: lastOutput?.quickReplies ?? [] });
@@ -540,7 +704,19 @@ export class AgentConversation {
       case "error": {
         // Payload is {"message":"…","code":"…"}, not a bare string.
         const { message, code } = parseErrorEvent(event.data);
-        if (turn.tokenCount === 0 && code !== null && UNCONSUMED_STREAM_ERROR_CODES.has(code)) {
+        const unconsumed = turn.tokenCount === 0 && code !== null && UNCONSUMED_STREAM_ERROR_CODES.has(code);
+        if (this.options.presentFailure) {
+          // The host shows it, once the stream has ended (it may want a read).
+          turn.failure = {
+            kind: unconsumed ? "refused" : "streamError",
+            status: null,
+            code,
+            message,
+            partial: turn.tokenCount > 0,
+          };
+          return true;
+        }
+        if (unconsumed) {
           // Refused before it ran — the streaming twin of a 409. Withdraw the
           // optimistic bubble and hand the draft (a secret included, masked)
           // back. The refresh after the stream picks up the paused state.
@@ -584,7 +760,7 @@ export class AgentConversation {
    * greeting grafted onto the new one.
    */
   async open(fresh: boolean): Promise<void> {
-    const gen = this.generation;
+    const gen = this.currentGeneration;
     const dispatch = this.dispatch;
     const transport = this.transport;
     dispatch({ type: "SET_START_FAILED", value: false });
@@ -643,7 +819,7 @@ export class AgentConversation {
    * lose (the Manager showed none until the next turn).
    */
   async resume(conversationId: string): Promise<boolean> {
-    const gen = this.generation;
+    const gen = this.currentGeneration;
     try {
       const snapshot = await this.transport.read(conversationId);
       if (!this.isCurrent(gen)) return false;
@@ -660,27 +836,39 @@ export class AgentConversation {
 
   /* ─── Send ──────────────────────────────────── */
 
-  /** Send a turn. Quick replies and the requested field call this directly. */
-  async send(text: string, isSecret?: boolean): Promise<void> {
+  /**
+   * Send a turn. Quick replies and the requested field call this directly.
+   *
+   * @param extras.attachments Files the host staged itself (the Manager's
+   *   composer), sent instead of the controller's `pendingAttachments`.
+   * @returns How the turn ended. The Chat UI ignores it; the Manager's mutation
+   *   rejects on `refused` and `failed`.
+   */
+  async send(text: string, isSecret?: boolean, extras: { attachments?: readonly TurnAttachment[] } = {}): Promise<TurnResult> {
     const dispatch = this.dispatch;
     const t = this.t;
     const transport = this.transport;
     // Re-entrancy guard. Quick replies and the requested field bypass the
     // composer's disabled state, so a click during an in-flight turn used to
     // start a second one — two streams writing into the same transcript.
-    if (this.state.isProcessing) return;
+    if (this.state.isProcessing) return { outcome: "ignored" };
     // Nothing is sent before the host says it may be (the review notice).
-    if (this.options.canSend && !this.options.canSend()) return;
+    if (this.options.canSend && !this.options.canSend()) return { outcome: "ignored" };
 
     // Conversation identity for THIS turn. Every async continuation below must
     // re-check it: New Conversation can land while a request is in flight.
-    const sendGen = this.generation;
+    const sendGen = this.currentGeneration;
     const conversationId = this.state.conversationId;
+    const answeredField = this.state.activeInputField;
 
     // Attachments staged in the composer travel with THIS turn as attachment_N
-    // context entries — the only path the backend reads.
-    const attachments = this.state.pendingAttachments;
-    const attachmentContext = buildAttachmentContext(attachments);
+    // context entries — the only path the backend reads. A secret turn never
+    // forwards a file: a masked turn must not leak one to the model (the
+    // composers block the combination; a field the agent asked for can still
+    // bring it about). The staged files stay staged.
+    const fromHost = extras.attachments !== undefined;
+    const staged: readonly TurnAttachment[] = isSecret ? [] : (extras.attachments ?? this.state.pendingAttachments);
+    const attachmentContext = buildAttachmentContext(staged);
     const secretContext = isSecret ? { secretInput: { type: "string" as const, value: "true" } } : undefined;
     const context =
       secretContext || Object.keys(attachmentContext).length > 0
@@ -688,32 +876,39 @@ export class AgentConversation {
         : undefined;
 
     // Attachments are named in the transcript so the user can see what was
-    // actually sent. A file above the forward limit was stored but will not be
-    // inlined; the model gets a note in its place, so the agent may or may not
-    // reach the content — say the part we know is true. This line lives in the
-    // bubble TEXT, so it does not survive an undo/redo.
-    const attachmentLine = attachments.length
-      ? attachments
-          .map((a) =>
-            a.forwardableInline === false ? t("conversation.attach.largeLine", { file: a.fileName }) : `📎 ${a.fileName}`,
-          )
-          .join("\n")
-      : "";
+    // actually sent: as chips on the message, or as text lines. A file above
+    // the forward limit was stored but will not be inlined; the model gets a
+    // note in its place, so the agent may or may not reach the content — say
+    // the part we know is true. The text line does not survive an undo/redo.
+    const chips = this.options.attachmentDisplay === "chips";
+    const attachmentLine =
+      staged.length && !chips
+        ? staged
+            .map((a) =>
+              a.forwardableInline === false ? t("conversation.attach.largeLine", { file: a.fileName }) : `📎 ${a.fileName}`,
+            )
+            .join("\n")
+        : "";
     const displayed = isSecret ? SECRET_BUBBLE : text;
     const userMsg: ConversationMessage = {
       id: uid("user"),
       role: "user",
       content: [attachmentLine, displayed].filter(Boolean).join("\n\n"),
       timestamp: Date.now(),
+      ...(chips && staged.length ? { attachments: staged.map(toMessageAttachment) } : {}),
     };
     // Remember the REAL input per turn: the bubble content is display text
     // (masked secrets, "📎 name" lines) and must never be what we hand back.
     const turnId = userMsg.id;
-    this.pendingTurns.set(turnId, { text, attachments, isSecret: !!isSecret });
+    this.pendingTurns.set(turnId, {
+      text,
+      attachments: fromHost || isSecret ? [] : this.state.pendingAttachments,
+      isSecret: !!isSecret,
+    });
     if (isSecret && text.trim()) this.secretTexts.add(text.trim());
 
     dispatch({ type: "ADD_MESSAGE", message: userMsg });
-    dispatch({ type: "CLEAR_ATTACHMENTS" });
+    if (!fromHost && !isSecret) dispatch({ type: "CLEAR_ATTACHMENTS" });
     // A requested input field lasts for ONE reply. A quick reply answers it too.
     dispatch({ type: "CLEAR_INPUT_FIELD" });
     dispatch({ type: "SET_QUICK_REPLIES", replies: [] });
@@ -730,7 +925,18 @@ export class AgentConversation {
     /** True once Stop or New conversation has taken this turn over. */
     const stopped = () => this.abort !== abort;
     const turn = newTurn(this.state.conversationState, turnId);
+    const failureContext: TurnFailureContext = {
+      conversationId,
+      userMessageId: turnId,
+      text,
+      isSecret: !!isSecret,
+      answeredField,
+      withdraw: () => this.withdraw(turnId),
+      isCurrent: () => this.isCurrent(sendGen),
+    };
     this.onTurnStart?.();
+    this.options.onTurnStarting?.();
+    let result: TurnResult = { outcome: "sent" };
 
     try {
       if (transport.mode === "local" && transport.stream) {
@@ -748,87 +954,166 @@ export class AgentConversation {
         const snapshot = await transport.say(null, text, { context, signal: abort.signal });
         // Stopped, or the conversation was replaced, while the reply was in
         // flight: it belongs to a turn nobody is waiting for any more.
-        if (!this.isCurrent(sendGen) || stopped()) return;
+        if (!this.isCurrent(sendGen) || stopped()) return result;
         dispatch({ type: "SET_THINKING", value: false });
-        this.applySnapshot(snapshot);
+        this.applyTurnSnapshot(snapshot);
         dispatch({ type: "SET_PROCESSING", value: false });
       } else if (this.options.streaming !== false && transport.stream && conversationId) {
         dispatch({ type: "ADD_MESSAGE", message: streamingPlaceholder() });
-        // The controller also breaks the for-await when "done" fires: proxies
-        // (Vite dev, nginx) may not forward the SSE close, so the read would
-        // hang forever without it.
-        let streamDone = false;
-        try {
-          for await (const event of transport.stream(conversationId, text, { context, signal: abort.signal })) {
-            // New Conversation mid-stream: stop writing into its replacement.
-            if (!this.isCurrent(sendGen)) break;
-            if (this.handleEvent(event, turn)) {
-              streamDone = true;
-              abort.abort();
-              break;
-            }
-          }
-        } catch (e) {
-          if (!isAbortError(e)) throw e;
-        }
-        // Past this point everything belongs to the turn just read; a swapped
-        // conversation abandons it, safety net included.
-        if (!this.isCurrent(sendGen)) return;
-        if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
-
-        // `done` is a trimmed snapshot — undoAvailable and redoAvailable are
-        // absent — so re-read for them.
-        try {
-          const after = await transport.read(conversationId, true);
-          if (!this.isCurrent(sendGen)) return;
-          // An unreadable `done` left the turn's outcome unapplied; this read of
-          // the current step carries the same fields, so it stands in.
-          if (turn.doneUnreadable && !stopped()) this.applyDone(after, turn);
-          dispatch({
-            type: "SET_UNDO_REDO",
-            undoAvailable: after.undoAvailable ?? false,
-            redoAvailable: after.redoAvailable ?? false,
-          });
-          // A failing stream sends `error` and closes WITHOUT a `done`, so only
-          // this read learns the conversation is ERROR / EXECUTION_INTERRUPTED.
-          // But it RACES a Stop: a refresh issued before Stop set
-          // EXECUTION_INTERRUPTED lands afterwards with a stale READY. A
-          // controller that is no longer current means this turn was stopped.
-          // And a READY read straight after this turn announced a pause is the
-          // store not having caught up: keep the pause.
-          const staleOverPause = turn.announcedPause && after.conversationState === "READY";
-          if (after.conversationState && !stopped() && !staleOverPause) {
-            dispatch({
-              type: "SET_CONVERSATION_STATE",
-              state: after.conversationState,
-              endReason: after.endReason ?? null,
-            });
-          }
-        } catch {
-          // Best effort — unless it was also the only source of the turn's
-          // outcome: then end the turn, and say so when nothing of the reply is
-          // on screen. The message WAS consumed, so the draft is not handed back.
-          if (turn.doneUnreadable && this.isCurrent(sendGen) && !stopped()) {
-            this.applyDone(null, turn);
-            if (turn.tokenCount === 0) {
-              dispatch({ type: "ADD_MESSAGE", message: makeNotice(`⚠️ ${t("conversation.send.connectionLost")}`) });
-            }
-          }
-        }
+        result = await this.readStream(transport, conversationId, text, context, abort, turn, sendGen, failureContext);
       } else if (transport.say && conversationId) {
         const snapshot = await transport.say(conversationId, text, { context, signal: abort.signal });
-        if (!this.isCurrent(sendGen) || stopped()) return;
+        if (!this.isCurrent(sendGen) || stopped()) return result;
         dispatch({ type: "SET_THINKING", value: false });
-        this.applySnapshot(snapshot);
+        this.applyTurnSnapshot(snapshot);
         dispatch({ type: "SET_PROCESSING", value: false });
       }
     } catch (err) {
-      await this.handleSendFailure(err, { sendGen, turn, turnId, conversationId, stopped });
+      result = await this.handleSendFailure(err, { sendGen, turn, turnId, conversationId, stopped, failureContext });
     } finally {
       // Release this turn's record; only the failure paths deleted it.
       this.pendingTurns.delete(turnId);
       if (this.abort === abort) this.abort = null;
+      if (this.isCurrent(sendGen)) this.options.onTurnEnd?.();
     }
+    return result;
+  }
+
+  /** Apply a turn answered by one snapshot: its reply, then why it failed, if it did. */
+  private applyTurnSnapshot(snapshot: Partial<ConversationSnapshot>): void {
+    this.applySnapshot(snapshot);
+    this.options.onTurnSnapshot?.(snapshot);
+    const failure = this.options.turnFailure?.(snapshot);
+    if (failure) this.dispatch({ type: "ADD_MESSAGE", message: makeAgentMessage(`⚠️ ${failure}`) });
+  }
+
+  /** Read one streamed turn to its end, then the conversation once more (see `refreshAfterStream`). */
+  private async readStream(
+    transport: AgentTransport,
+    conversationId: string,
+    text: string,
+    context: Record<string, { type: "string" | "object"; value: unknown }> | undefined,
+    abort: AbortController,
+    turn: TurnContext,
+    sendGen: number,
+    failureContext: TurnFailureContext,
+  ): Promise<TurnResult> {
+    const dispatch = this.dispatch;
+    const t = this.t;
+    const stopped = () => this.abort !== abort;
+    const stream = transport.stream;
+    if (!stream) return { outcome: "sent" };
+    // A replaced conversation's stream: stop reading it at once, or — with a
+    // grace period — drain it so the turn finishes on the server, and abort it
+    // when the grace runs out. A subscription rather than a check per event,
+    // because the case being bounded is exactly the one where no event comes.
+    const grace = this.options.detachedGraceMs;
+    let detachTimer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe =
+      grace !== undefined
+        ? this.subscribe(() => {
+            if (!this.isCurrent(sendGen) && detachTimer === undefined) {
+              detachTimer = setTimeout(() => abort.abort(), grace);
+            }
+          })
+        : null;
+    // The controller also breaks the for-await when "done" fires: proxies
+    // (Vite dev, nginx) may not forward the SSE close, so the read would
+    // hang forever without it.
+    let streamDone = false;
+    try {
+      try {
+        for await (const event of stream(conversationId, text, { context, signal: abort.signal })) {
+          // New Conversation mid-stream: stop writing into its replacement.
+          if (!this.isCurrent(sendGen)) {
+            if (grace === undefined) break;
+            if (event.type === "done" || event.type === "error") {
+              abort.abort();
+              break;
+            }
+            continue;
+          }
+          this.options.onStreamEvent?.(event);
+          if (this.handleEvent(event, turn)) {
+            streamDone = true;
+            abort.abort();
+            break;
+          }
+        }
+      } catch (e) {
+        if (!isAbortError(e)) throw e;
+      }
+    } finally {
+      unsubscribe?.();
+      if (detachTimer !== undefined) clearTimeout(detachTimer);
+    }
+    // Past this point everything belongs to the turn just read; a swapped
+    // conversation abandons it, safety net included.
+    if (!this.isCurrent(sendGen)) return { outcome: "sent" };
+    if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
+
+    let result: TurnResult = { outcome: "sent" };
+    if (turn.failure) {
+      const failure = turn.failure;
+      await this.presentHostFailure(failure, failureContext);
+      if (failure.kind === "refused") result = { outcome: "refused", failure };
+      if (!this.isCurrent(sendGen)) return result;
+    }
+    if (this.options.refreshAfterStream === false && !turn.doneUnreadable) return result;
+
+    // `done` is a trimmed snapshot — undoAvailable and redoAvailable are
+    // absent — so re-read for them.
+    try {
+      const after = await transport.read(conversationId, true);
+      if (!this.isCurrent(sendGen)) return result;
+      // An unreadable `done` left the turn's outcome unapplied; this read of
+      // the current step carries the same fields, so it stands in.
+      if (turn.doneUnreadable && !stopped()) this.applyDone(after, turn);
+      dispatch({
+        type: "SET_UNDO_REDO",
+        undoAvailable: after.undoAvailable ?? false,
+        redoAvailable: after.redoAvailable ?? false,
+      });
+      // A failing stream sends `error` and closes WITHOUT a `done`, so only
+      // this read learns the conversation is ERROR / EXECUTION_INTERRUPTED.
+      // But it RACES a Stop: a refresh issued before Stop set
+      // EXECUTION_INTERRUPTED lands afterwards with a stale READY. A
+      // controller that is no longer current means this turn was stopped.
+      // And a READY read straight after this turn announced a pause is the
+      // store not having caught up: keep the pause.
+      const staleOverPause = turn.announcedPause && after.conversationState === "READY";
+      if (after.conversationState && !stopped() && !staleOverPause) {
+        dispatch({
+          type: "SET_CONVERSATION_STATE",
+          state: after.conversationState,
+          endReason: after.endReason ?? null,
+        });
+      }
+    } catch {
+      // Best effort — unless it was also the only source of the turn's
+      // outcome: then end the turn, and say so when nothing of the reply is
+      // on screen. The message WAS consumed, so the draft is not handed back.
+      if (turn.doneUnreadable && this.isCurrent(sendGen) && !stopped()) {
+        this.applyDone(null, turn);
+        if (turn.tokenCount === 0) {
+          dispatch({ type: "ADD_MESSAGE", message: makeNotice(`⚠️ ${t("conversation.send.connectionLost")}`) });
+        }
+      }
+    }
+    return result;
+  }
+
+  /** Hand a failure to the host, then end the turn whatever it did. */
+  private async presentHostFailure(failure: TurnFailure, context: TurnFailureContext): Promise<boolean> {
+    const present = this.options.presentFailure;
+    if (!present) return false;
+    const handled = await present(failure, context);
+    if (handled && context.isCurrent()) {
+      this.pendingTurns.delete(context.userMessageId);
+      this.dispatch({ type: "FINISH_STREAMING" });
+      this.dispatch({ type: "SET_PROCESSING", value: false });
+    }
+    return handled;
   }
 
   /** Called when a turn starts (the follow-to-bottom hand-off). */
@@ -842,24 +1127,38 @@ export class AgentConversation {
       turnId: string;
       conversationId: string | null;
       stopped: () => boolean;
+      failureContext: TurnFailureContext;
     },
-  ): Promise<void> {
-    const { sendGen, turn, turnId, conversationId, stopped } = ctx;
+  ): Promise<TurnResult> {
+    const { sendGen, turn, turnId, conversationId, stopped, failureContext } = ctx;
     const dispatch = this.dispatch;
     const t = this.t;
     const transport = this.transport;
+    const status = err instanceof ApiError ? err.status : typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : null;
+    const refused = status !== null && status >= 400 && status < 500;
+    const failure: TurnFailure = {
+      kind: refused ? "refused" : "failed",
+      status,
+      code: null,
+      message: errorMessage(err),
+      error: err,
+      partial: turn.tokenCount > 0,
+    };
+    const result: TurnResult = { outcome: refused ? "refused" : "failed", failure };
     // A failure after New Conversation belongs to the turn the user abandoned.
-    if (!this.isCurrent(sendGen)) return;
+    if (!this.isCurrent(sendGen)) return result;
     // Stop (or New conversation) ended this turn on purpose; whoever stopped it
     // reset the UI, and the abort must not be reported as a failure.
-    if (transport.mode !== "local" && stopped()) return;
+    if (transport.mode !== "local" && stopped()) return { outcome: "sent" };
 
     dispatch({ type: "SET_PROCESSING", value: false });
     dispatch({ type: "SET_THINKING", value: false });
     // This path never reaches FINISH_STREAMING, so clear these here too.
     dispatch({ type: "SET_ESCALATING", value: false });
     dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
-    const status = err instanceof ApiError ? err.status : null;
+
+    if (await this.presentHostFailure(failure, failureContext)) return result;
+    if (!this.isCurrent(sendGen)) return result;
 
     if (status === 409) {
       // Refused and NEVER consumed — most often because the conversation is
@@ -874,7 +1173,7 @@ export class AgentConversation {
       if (conversationId) {
         try {
           const snap = await transport.read(conversationId, true);
-          if (!this.isCurrent(sendGen)) return;
+          if (!this.isCurrent(sendGen)) return result;
           if (snap.conversationState) {
             dispatch({ type: "SET_CONVERSATION_STATE", state: snap.conversationState, endReason: snap.endReason ?? null });
           }
@@ -882,7 +1181,7 @@ export class AgentConversation {
           // best effort
         }
       }
-      return;
+      return result;
     }
 
     if (status === 410 && conversationId) {
@@ -895,19 +1194,19 @@ export class AgentConversation {
       } catch {
         // best effort — the generic ended footer still applies
       }
-      if (!this.isCurrent(sendGen)) return;
+      if (!this.isCurrent(sendGen)) return result;
       this.withdraw(turnId);
       dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
       if (endReason !== END_REASON_AGENT_VERSION_RETIRED) {
         dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("conversation.send.ended")) });
       }
-      return;
+      return result;
     }
 
     // Every other 4xx refused the turn before it ran: withdraw and hand back.
     // Each has its own copy because the remedies differ (sign in again,
     // shorten, wait, ask the operator).
-    if (status !== null && status >= 400 && status < 500) {
+    if (refused) {
       this.withdraw(turnId);
       const copy =
         status === 401
@@ -922,7 +1221,7 @@ export class AgentConversation {
                   ? t("conversation.send.rateLimited")
                   : t("conversation.send.failed");
       dispatch({ type: "ADD_MESSAGE", message: makeNotice(copy) });
-      return;
+      return result;
     }
 
     console.error("Failed to send message:", err);
@@ -936,7 +1235,7 @@ export class AgentConversation {
         type: "ADD_MESSAGE",
         message: makeNotice(status === 503 ? t("conversation.send.unavailable") : t("conversation.send.failed")),
       });
-      return;
+      return result;
     }
     // Part of the answer is already on screen. Keep it, say it may be cut
     // short, and re-read: the server may have finished the turn, or still be
@@ -947,7 +1246,7 @@ export class AgentConversation {
     if (conversationId) {
       try {
         const after = await transport.read(conversationId, true);
-        if (!this.isCurrent(sendGen) || stopped()) return;
+        if (!this.isCurrent(sendGen) || stopped()) return result;
         dispatch({
           type: "SET_UNDO_REDO",
           undoAvailable: after.undoAvailable ?? false,
@@ -960,6 +1259,7 @@ export class AgentConversation {
         // best effort
       }
     }
+    return result;
   }
 
   /* ─── Undo, redo, retry ─────────────────────── */
@@ -968,7 +1268,7 @@ export class AgentConversation {
     const conversationId = this.state.conversationId;
     // The managed route has no agent id; requiring one made these inert there.
     if (!conversationId) return;
-    const gen = this.generation;
+    const gen = this.currentGeneration;
     if (this.transport.mode === "local") return;
     const dispatch = this.dispatch;
     try {
@@ -1014,7 +1314,7 @@ export class AgentConversation {
   async retry(): Promise<void> {
     const conversationId = this.state.conversationId;
     if (!conversationId) return;
-    const gen = this.generation;
+    const gen = this.currentGeneration;
     const dispatch = this.dispatch;
     dispatch({ type: "SET_PROCESSING", value: true });
     dispatch({ type: "SET_HISTORY_BUSY" });
@@ -1079,7 +1379,7 @@ export class AgentConversation {
   async cancel(): Promise<void> {
     const conversationId = this.state.conversationId;
     if (!conversationId) return;
-    const gen = this.generation;
+    const gen = this.currentGeneration;
     const dispatch = this.dispatch;
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
@@ -1116,7 +1416,7 @@ export class AgentConversation {
 
     const conversationId = this.state.conversationId;
     if (!conversationId || this.transport.mode === "local") return;
-    const gen = this.generation;
+    const gen = this.currentGeneration;
     try {
       await this.transport.cancel(conversationId);
       // New Conversation while the cancel was in flight: the fresh one is not interrupted.
@@ -1133,8 +1433,9 @@ export class AgentConversation {
   /** Abandon whatever is in flight and clear: the next open starts from nothing. */
   reset(): void {
     // Without this the old stream kept writing tokens, state and undo/redo
-    // flags into the NEW conversation.
-    this.abort?.abort();
+    // flags into the NEW conversation. With a grace period the stream is left
+    // to drain (the generation check keeps it from writing) and aborted later.
+    if (this.options.detachedGraceMs === undefined) this.abort?.abort();
     this.abort = null;
     this.generation += 1;
     this.pendingTurns.clear();

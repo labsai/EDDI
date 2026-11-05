@@ -11,19 +11,37 @@ kinds follow in phase 6.
 
 | Module | What it holds |
 | --- | --- |
-| `controller/agent-conversation.ts` | `AgentConversation`: the turn state machine of the 1:1 loops — open, send (streamed or not), undo, redo, rerun, stop, cancel a paused turn, restart, resume, the refresh after a pause. A plain store (`subscribe`, `getSnapshot`, `dispatch`) |
+| `controller/agent-conversation.ts` | `AgentConversation`: the turn state machine of the 1:1 loops — open, send (streamed or not), undo, redo, rerun, stop, cancel a paused turn, restart, resume, the refresh after a pause. A plain store (`subscribe`, `getSnapshot`, `dispatch`), with host hooks (below) |
 | `controller/state.ts` | `AgentConversationState`, `ConversationMessage` and `conversationReducer` (generic over a host's extra state) |
 | `controller/transport.ts` | `AgentTransport` — `conversation`, `managed` or `local` — and `createConversationTransport` / `createManagedTransport` on @eddi/core's API |
 | `controller/notices.ts` | What a client says about a dropped turn, a failed start, a pause |
 | `i18n/text.ts` | The shared `conversation.*` strings in the eleven locales, `withConversationLocales` for an app's i18next setup, the English fallback |
 | `react/hooks.tsx`, `react/context.tsx` | `useAgentConversation(controller)` (`useSyncExternalStore`), `ConversationTextProvider` / `useConversationText`, `ConversationProvider` (the state and dispatch the composer acts on) |
 | `markdown/` | **The one markdown renderer** (`MarkdownContent`, §2.5): images in model text become links, raw HTML only through rehype-sanitize (the parser a lazy chunk, rendered for every agent until D9's per-agent setting), KaTeX (`$$…$$`, `trust: false`) and highlight.js as lazy chunks, links in a new tab, GFM parsed without its serialiser (`remark-gfm-parse.ts`) |
-| `components/` | `Message` (markdown, designer images, copy, reply rating, an `actions` slot), `MessageList` (live region, follows new content while at the bottom), `Composer` (IME-safe, attachments with picker, drop and paste, secret mode, restored drafts), `SecretInput` (the field an agent requested), `QuickReplies`, `ThinkingIndicator` / `TypingIndicator` (typing, tool, cascade), `PausedCard` (read-only, cancel), `RatingCard`, `StepRating`, `ScrollToBottom` |
+| `components/` | `Message` (markdown, designer images, a sent message's attachments, a reply's guardrail notes, copy, reply rating, an `actions` slot), `MessageList` (live region, follows new content while at the bottom), `Composer` (IME-safe, attachments with picker, drop and paste, secret mode, restored drafts), `SecretInput` (the field an agent requested), `QuickReplies`, `ThinkingIndicator` / `TypingIndicator` (typing, tool, cascade, guardrail — `guardrailActive`), `PausedCard` (read-only, cancel), `RatingCard`, `StepRating`, `ScrollToBottom` |
 
 The components carry the Chat UI's BEM class names (`message--user`,
-`chat-input__textarea`, …); the Chat UI's `chat.css` styles them. The Manager uses
-`MarkdownContent` inside its own message bubble; the rest of its chat moves onto the
-controller and these components in a later step.
+`chat-input__textarea`, …); the Chat UI's `chat.css` styles them. The Manager runs
+its chat on the controller (`use-chat.ts`, through the host hooks) and renders it
+with its own bubble around `MarkdownContent`.
+
+## Host hooks
+
+A host with its own store, copy and side panels drives the same turn loop through
+options; without them the controller behaves as it does for the Chat UI. The
+Manager uses all of them (`ui/manager/src/hooks/use-chat.ts`).
+
+| Option | What it is for |
+| --- | --- |
+| `store` | Keep the state in the host's store (`get`, `set`, `subscribe`) — the Manager's Zustand chat store |
+| `generation` | The host's own conversation generation, when something other than `reset()` replaces the conversation on screen |
+| `detachedGraceMs` | Let a replaced conversation's stream drain this long, so the turn finishes on the server, then abort it |
+| `refreshAfterStream` | Off: take undo/redo from the `done` payload (`onTurnSnapshot`) instead of a read after the stream |
+| `attachmentDisplay` | `"chips"`: files on the message as `attachments` instead of `📎` lines; `send(text, secret, { attachments })` takes the host's staged files. A secret turn never forwards a file |
+| `outputTexts` | How an output entry becomes texts (the Manager also reads the flat `output:text:*` keys) |
+| `onStreamEvent`, `onTurnStarting`, `onTurnEnd` | Every event of the turn on screen (a debug panel) and the turn's boundaries |
+| `onTurnSnapshot`, `turnFailure` | The snapshot a finished turn answered with; why it failed, shown in its reply |
+| `presentFailure` | Show a refused or failed turn the host's way (toasts, error bubbles, a banner); `send` resolves `{ outcome }` so a caller can reject |
 
 ## Using it
 

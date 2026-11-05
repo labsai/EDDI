@@ -4,6 +4,7 @@
   "conversation.indicator.tool": "{{tool}} を使用中…",
   "conversation.indicator.escalating": "さらに詳しく確認しています…",
   "conversation.indicator.thinking": "考えています…",
+  "conversation.indicator.guardrail": "返信を確認しています…",
   "conversation.message.noResponse": "応答がありません",
   "conversation.speaker.you": "あなたの発言:",
   "conversation.speaker.agent": "{{name}} の発言:",
@@ -106,5 +107,12 @@
   "conversation.rating.comment.label": "コメント",
   "conversation.rating.comment.placeholder": "ほかにありますか?(任意)",
   "conversation.rating.send": "送信",
-  "conversation.rating.skip": "スキップ"
+  "conversation.rating.skip": "スキップ",
+  "conversation.guardrail.notice": "ガードレール（{{phase}}）：{{type}} {{action}}",
+  "conversation.guardrail.phaseInput": "入力",
+  "conversation.guardrail.phaseOutput": "出力",
+  "conversation.guardrail.actionBlock": "ブロック済み",
+  "conversation.guardrail.actionRedact": "マスク済み",
+  "conversation.guardrail.actionReprompt": "モデルに再度問い合わせ",
+  "conversation.guardrail.actionWarn": "フラグ付け"
 }

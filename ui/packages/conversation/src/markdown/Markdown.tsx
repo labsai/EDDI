@@ -107,6 +107,28 @@ function CodeBlock({ node: _node, children, ...props }: ComponentPropsWithoutRef
 const BASE_REHYPE: PluggableList = [rehypeSanitize];
 const REMARK_PLAIN: PluggableList = [remarkGfm];
 
+interface MdastNode {
+  type: string;
+  value?: string;
+  children?: MdastNode[];
+}
+
+/**
+ * Raw HTML as the text it is (`escapeRawHtml`): every `html` node becomes a
+ * `text` node, so `<conversationId>` in third-party notes reads as written
+ * instead of vanishing as an unknown tag. Without it, raw HTML is either
+ * sanitised and rendered (`enableRawHtml`) or dropped.
+ */
+function remarkHtmlAsText() {
+  const visit = (node: MdastNode): void => {
+    if (node.type === "html") node.type = "text";
+    node.children?.forEach(visit);
+  };
+  return (tree: MdastNode) => visit(tree);
+}
+
+const REMARK_ESCAPED: PluggableList = [remarkGfm, remarkHtmlAsText];
+
 /**
  * Links open in a new tab. A plain link navigated the page itself away —
  * inside the widget's iframe that is the whole chat, and the conversation was
@@ -130,7 +152,7 @@ function MarkdownImage({ src, alt, title }: ComponentPropsWithoutRef<"img"> & { 
   const label = (alt && alt.trim()) || href || "image";
   if (!href) return <span style={{ fontStyle: "italic", opacity: 0.7 }}>{label}</span>;
   return (
-    <a href={href} target="_blank" rel="noopener noreferrer" title={title ?? href}>
+    <a href={href} target="_blank" rel="noopener noreferrer" title={title ?? href} data-testid="markdown-image-link">
       {label}
     </a>
   );
@@ -161,6 +183,12 @@ export interface MarkdownContentProps {
   enableCodeHighlight?: boolean;
   /** Sanitised raw HTML (D9 makes this per agent). Default on. */
   enableRawHtml?: boolean;
+  /**
+   * Show raw HTML as text instead of rendering or dropping it — for
+   * third-party text whose angle brackets are prose (release notes). Implies
+   * `enableRawHtml={false}`.
+   */
+  escapeRawHtml?: boolean;
 }
 
 /** Render an agent's markdown under the one policy above. */
@@ -169,14 +197,18 @@ export const MarkdownContent = memo(function MarkdownContent({
   enableMath = true,
   enableCodeHighlight = true,
   enableRawHtml = true,
+  escapeRawHtml = false,
 }: MarkdownContentProps) {
-  const rich = useRichPlugins(children, enableMath, enableCodeHighlight, enableRawHtml);
+  const rich = useRichPlugins(children, enableMath, enableCodeHighlight, enableRawHtml && !escapeRawHtml);
   // Sanitising runs FIRST, on the model's markup. KaTeX and highlight.js then
   // build their own markup from the sanitised text, so their classes and spans
   // are neither subject to nor stripped by the schema.
   const remark = useMemo<PluggableList>(
-    () => (rich.math ? [remarkGfm, rich.math.remarkMath] : REMARK_PLAIN),
-    [rich.math],
+    () => {
+      const base = escapeRawHtml ? REMARK_ESCAPED : REMARK_PLAIN;
+      return rich.math ? [...base, rich.math.remarkMath] : base;
+    },
+    [rich.math, escapeRawHtml],
   );
   const rehype = useMemo<PluggableList>(() => {
     if (!rich.math && !rich.highlight && !rich.raw) return BASE_REHYPE;

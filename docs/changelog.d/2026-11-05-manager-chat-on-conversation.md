@@ -1,0 +1,10 @@
+## 💬 refactor(manager): the Manager's chat on `AgentConversation` (2026-11-05)
+
+**Repo:** EDDI (`refactor/manager-chat-on-conversation`, stacked on `feat/ui-eddi-conversation`)
+
+Phase 3c of the frontend unification plan (`planning/frontend-unification-plan.md` §1.3, §2.5, §3.2, §7 phase 3): the Manager's 1:1 chat runs on [`@eddi/conversation`](../../ui/packages/conversation/README.md)'s controller, and every markdown surface in the UIs renders through the one renderer.
+
+### What changed and why
+
+- **Host hooks on `AgentConversation`** ([`agent-conversation.ts`](../../ui/packages/conversation/src/controller/agent-conversation.ts), [README](../../ui/packages/conversation/README.md#host-hooks)). The controller can keep its state in a host's store (`store`), follow a host's conversation generation (`generation`), let a replaced conversation's stream drain for a grace period before aborting it (`detachedGraceMs`), take undo/redo from `done` instead of a read (`refreshAfterStream: false`), show files as chips (`attachmentDisplay`, `send(text, secret, { attachments })`), read outputs a host's way (`outputTexts`), and hand events, turn boundaries, the finished snapshot, a failed turn's reason and every refusal or failure to the host (`onStreamEvent`, `onTurnStarting`, `onTurnEnd`, `onTurnSnapshot`, `turnFailure`, `presentFailure`). `send` resolves `{ outcome }`. Without the hooks it behaves as before; the widget's suites are unchanged. New rule for every surface: a secret turn never forwards an attachment.
+- **`Message`** renders a sent message's attachments (image previews, file chips with size, "too large to send directly") and a reply's guardrail notes; **`ThinkingIndicator`** has a guardrail state (`guardrail`, `guardrailActive(messages, processing)`: "Checking the reply…") that the widget now shows. Eight `conversation.*` strings in the eleven locales (the guardrail lines are the Manager's existing translations). **`MarkdownContent`** gains `escapeRawHtml` (raw HTML shown as the text it is, for third-party text whose angle brackets are prose), and its image links carry `data-testid="markdown-image-link"`.
