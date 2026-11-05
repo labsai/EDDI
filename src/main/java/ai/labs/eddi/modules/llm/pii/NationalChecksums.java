@@ -134,7 +134,7 @@ public final class NationalChecksums {
         if (!allDigits(body) || !allDigits(key)) {
             return false;
         }
-        return 97 - Long.parseLong(body) % 97 == Integer.parseInt(key);
+        return 97 - value(body) % 97 == (int) value(key);
     }
 
     /** Italian codice fiscale: 16 characters, the last a check letter. */
@@ -171,7 +171,7 @@ public final class NationalChecksums {
         if (prefix >= 0) {
             number = prefix + number.substring(1);
         }
-        return allDigits(number) && ES_LETTERS.charAt(Integer.parseInt(number) % 23) == v.charAt(8);
+        return allDigits(number) && ES_LETTERS.charAt((int) value(number) % 23) == v.charAt(8);
     }
 
     /** Portuguese NIF: nine digits, mod-11 with weights 9 to 2. */
@@ -209,8 +209,8 @@ public final class NationalChecksums {
         if (v.length() != 11 || !allDigits(v)) {
             return false;
         }
-        long body = Long.parseLong(v.substring(0, 9));
-        int key = Integer.parseInt(v.substring(9));
+        long body = value(v.substring(0, 9));
+        int key = (int) value(v.substring(9));
         return 97 - body % 97 == key || 97 - (2_000_000_000L + body) % 97 == key;
     }
 
@@ -251,8 +251,8 @@ public final class NationalChecksums {
         if (v.length() != 11 || !allDigits(v)) {
             return false;
         }
-        int month = Integer.parseInt(v.substring(2, 4)) % 20;
-        int day = Integer.parseInt(v.substring(4, 6));
+        int month = (int) value(v.substring(2, 4)) % 20;
+        int day = (int) value(v.substring(4, 6));
         if (month < 1 || month > 12 || day < 1 || day > 31) {
             return false;
         }
@@ -272,7 +272,7 @@ public final class NationalChecksums {
         if (v.length() != 10 || !allDigits(v)) {
             return false;
         }
-        int day = Integer.parseInt(v.substring(4, 6));
+        int day = (int) value(v.substring(4, 6));
         String dd = String.format("%02d", day > 60 ? day - 60 : day);
         return date(v.substring(2, 4), dd) && luhn(v);
     }
@@ -296,7 +296,7 @@ public final class NationalChecksums {
         if (!allDigits(number) || !date(v.substring(2, 4), v.substring(0, 2))) {
             return false;
         }
-        return FI_CHECK.charAt(Integer.parseInt(number) % 31) == v.charAt(10);
+        return FI_CHECK.charAt((int) value(number) % 31) == v.charAt(10);
     }
 
     // ---- Asia-Pacific ----
@@ -417,7 +417,7 @@ public final class NationalChecksums {
             return false;
         }
         String nine = v.length() == 8 ? "0" + v : v;
-        long number = Long.parseLong(nine);
+        long number = value(nine);
         if (number <= 10_000_000L || number >= 150_000_000L) {
             return false;
         }
@@ -532,9 +532,21 @@ public final class NationalChecksums {
         if (!allDigits(month) || !allDigits(day)) {
             return false;
         }
-        int m = Integer.parseInt(month);
-        int d = Integer.parseInt(day);
+        int m = (int) value(month);
+        int d = (int) value(day);
         return m >= 1 && m <= 12 && d >= 1 && d <= 31;
+    }
+
+    /**
+     * The number {@code digits} spells. Callers check {@link #allDigits} first;
+     * computed digit by digit, so nothing here can throw on odd input.
+     */
+    private static long value(String digits) {
+        long n = 0;
+        for (int i = 0; i < digits.length(); i++) {
+            n = n * 10 + digit(digits, i);
+        }
+        return n;
     }
 
     private static int digit(String v, int i) {
