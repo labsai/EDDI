@@ -753,6 +753,9 @@ jobs:
           image='prom/prometheus:v3.4.0@sha256:78ed1f9050eb9eaf766af6e580230b1c4965728650e332cd1ee918c0c4699775'
           docker run --rm -v "$PWD/docs/monitoring:/rules:ro" -w /rules --entrypoint promtool "$image" check rules eddi-alerts.yml
           docker run --rm -v "$PWD/docs/monitoring:/rules:ro" -w /rules --entrypoint promtool "$image" test rules eddi-alerts.test.yml
+          # The cluster-mode rules, which the chart's PrometheusRule adds in cluster mode.
+          docker run --rm -v "$PWD/docs/monitoring:/rules:ro" -w /rules --entrypoint promtool "$image" check rules eddi-cluster-alerts.yml
+          docker run --rm -v "$PWD/docs/monitoring:/rules:ro" -w /rules --entrypoint promtool "$image" test rules eddi-cluster-alerts.test.yml
           docker run --rm -v "$PWD/docs/monitoring:/etc/prometheus:ro" --entrypoint promtool "$image" check config /etc/prometheus/prometheus.yml
 
       - name: Check the generated monitoring copies
@@ -889,6 +892,45 @@ jobs:
             || { echo "::error::the in-chart NATS nodes are not routed into one cluster"; exit 1; }
           grep -qF 'nats://route:ci-placeholder-route@eddi-nats-0.eddi-nats:6222' <<<"$rendered" \
             || { echo "::error::the in-chart NATS routes do not authenticate"; exit 1; }
+          grep -qE 'image: "nats:[0-9]+\.[0-9]+\.[0-9]+-alpine@sha256:[0-9a-f]{64}"' <<<"$rendered" \
+            || { echo "::error::the in-chart NATS image is not pinned to a patch version and digest (C10)"; exit 1; }
+          grep -qF '"$JS.API.STREAM.DELETE.>"' <<<"$rendered" \
+            || { echo "::error::the in-chart NATS user may delete streams (C4)"; exit 1; }
+          grep -qF 'requiredDuringSchedulingIgnoredDuringExecution' <<<"$rendered" \
+            || { echo "::error::the in-chart NATS pods are not spread over nodes (C10)"; exit 1; }
+          grep -qE 'max_file_store: 4096M$' <<<"$rendered" \
+            || { echo "::error::max_file_store leaves no filesystem headroom on the 5Gi volume (C9)"; exit 1; }
+          grep -qF 'command: ["sleep", "5"]' <<<"$rendered" \
+            || { echo "::error::EDDI has no preStop sleep (C7)"; exit 1; }
+          echo "--- cluster mode: in-chart NATS over TLS mounts the CA (cert-manager-style Secret)"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.messagingType=nats --set nats.enabled=true \
+            --set nats.auth.password=fixturefixturefixture --set nats.cluster.routePassword=fixturefixtureroute \
+            --set nats.tls.enabled=true --set nats.tls.secretName=eddi-nats-tls --set prometheusRule.enabled=true)
+          grep -qF 'EDDI_NATS_TLS_TRUSTSTORE_PATH: "/etc/eddi/nats-ca/ca.crt"' <<<"$rendered" \
+            || { echo "::error::EDDI does not trust the in-chart NATS CA (C2b)"; exit 1; }
+          grep -qF 'secretName: eddi-nats-tls' <<<"$rendered" && grep -qF 'mountPath: /etc/eddi/nats-ca' <<<"$rendered" \
+            || { echo "::error::the NATS CA Secret is not mounted into EDDI (C2b)"; exit 1; }
+          grep -qF 'EDDI_NATS_URL: "tls://eddi-nats-0.eddi-nats:4222' <<<"$rendered" \
+            || { echo "::error::the in-chart NATS URL is not tls:// with nats.tls.enabled"; exit 1; }
+          grep -qF 'alert: EddiClusterNatsMisconfigured' <<<"$rendered" \
+            || { echo "::error::the cluster alerts are not in the PrometheusRule (C12)"; exit 1; }
+          echo "--- cluster mode: an external NATS gets R3 and its CA"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.messagingType=nats --set nats.externalUrl=tls://nats.example.com:4222 \
+            --set nats.externalCaSecretName=corp-ca)
+          grep -qF 'EDDI_NATS_REPLICAS: "3"' <<<"$rendered" \
+            || { echo "::error::an external NATS gets R1 buckets and streams (C3)"; exit 1; }
+          grep -qF 'secretName: corp-ca' <<<"$rendered" \
+            || { echo "::error::nats.externalCaSecretName is not mounted (C2b)"; exit 1; }
+          echo "--- cluster mode: ingress-nginx gets SSE timeouts and /mcp affinity"
+          rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
+            "${optin[@]}" --set eddi.security.allowUnauthenticated=true --set eddi.messagingType=nats \
+            --set nats.externalUrl=nats://nats.example.com:4222 --set ingress.enabled=true --set ingress.className=nginx)
+          grep -qF 'nginx.ingress.kubernetes.io/proxy-read-timeout: "300"' <<<"$rendered" \
+            || { echo "::error::the ingress keeps the 60 s read timeout that cuts SSE off (C13)"; exit 1; }
+          grep -qF 'nginx.ingress.kubernetes.io/upstream-hash-by: $remote_addr' <<<"$rendered" \
+            || { echo "::error::/mcp has no client affinity (C13)"; exit 1; }
           echo "--- cluster mode: HPA against an external NATS"
           rendered=$(helm template eddi helm/eddi --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw \
             "${optin[@]}" --set eddi.messagingType=nats --set nats.externalUrl=nats://nats.example.com:4222 \
@@ -972,6 +1014,17 @@ jobs:
           expect_failure "a clustered in-chart NATS without a route password" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
             --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats
+          expect_failure "an unknown nats.antiAffinity" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.enabled=true --set nats.auth.password=fixturefixturefixture --set nats.cluster.routePassword=fixturefixtureroute \
+            --set nats.antiAffinity=sometimes
+          expect_failure "a secondary NATS user with the primary's name" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.enabled=true --set nats.auth.password=fixturefixturefixture --set nats.cluster.routePassword=fixturefixtureroute \
+            --set nats.auth.secondaryUsername=eddi --set nats.auth.secondaryPassword=fixturefixturefixture
+          expect_failure "a termination grace that does not cover preStop + drain + readiness grace" \
+            --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
+            --set nats.externalUrl=nats://nats.example.com:4222 --set eddi.terminationGracePeriodSeconds=70
           expect_failure "in-chart and external NATS at once" \
             --set eddi.vaultMasterKey=$key --set mongodb.rootPassword=$mongopw --set eddi.messagingType=nats \
             --set nats.enabled=true --set nats.auth.password=ci-placeholder-nats --set nats.cluster.routePassword=ci-placeholder-route \

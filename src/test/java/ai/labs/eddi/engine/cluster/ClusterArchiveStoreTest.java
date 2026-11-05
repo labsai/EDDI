@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.io.IOException;
 import java.io.OutputStream;
 import java.time.Duration;
 import java.util.List;
@@ -23,9 +24,15 @@ import io.nats.client.Connection;
 import io.nats.client.ObjectStore;
 import io.nats.client.ObjectStoreManagement;
 import io.nats.client.api.ObjectInfo;
+import io.nats.client.api.ObjectStoreConfiguration;
+import io.nats.client.api.ObjectStoreStatus;
+import io.nats.client.api.StreamConfiguration;
+import io.nats.client.api.StreamInfo;
 import io.nats.client.api.ApiResponse;
 import io.nats.client.JetStreamApiException;
+import io.nats.client.JetStreamManagement;
 import io.nats.client.support.JsonParser;
+import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -158,6 +165,97 @@ class ClusterArchiveStoreTest {
         assertFalse(store.fetch("a.zip", dir.resolve("a.zip"), Duration.ofMinutes(5)));
         assertFalse(store.fetch("a.zip", dir.resolve("a.zip"), Duration.ofMinutes(5)));
 
+        verify(management, times(2)).getStatus("EDDI_ARCHIVES");
+    }
+
+    /**
+     * C9: the archive bucket shares JetStream storage with the lease bucket; an
+     * unbounded one let large exports fill the store and block lease creates.
+     */
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("a new archive bucket is created with the configured size cap")
+    void newBucketIsCapped(@TempDir Path dir) throws Exception {
+        ClusterConfig config = ClusterConfig.defaults().withMessagingType("nats");
+        Connection connection = mock(Connection.class);
+        ObjectStoreManagement management = mock(ObjectStoreManagement.class);
+        when(connection.objectStoreManagement()).thenReturn(management);
+        String json = "{\"type\":\"io.nats.jetstream.api.v1.stream_info_response\",\"error\":{\"code\":404,\"err_code\":10059,"
+                + "\"description\":\"stream not found\"}}";
+        when(management.getStatus("EDDI_ARCHIVES")).thenThrow(new JetStreamApiException(new ApiResponse<Object>(JsonParser.parse(json)) {
+        }));
+        when(connection.objectStore("EDDI_ARCHIVES")).thenReturn(mock(ObjectStore.class));
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.requireConnected()).thenReturn(connection);
+        Instance<NatsConnectionManager> connections = mock(Instance.class);
+        when(connections.get()).thenReturn(manager);
+
+        new ClusterArchiveStore(config, connections).publish("a.zip", Files.writeString(dir.resolve("a.zip"), "zip"), Duration.ofMinutes(5));
+
+        ArgumentCaptor<ObjectStoreConfiguration> created = ArgumentCaptor.forClass(ObjectStoreConfiguration.class);
+        verify(management).create(created.capture());
+        assertEquals(1L << 30, created.getValue().getMaxBucketSize());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("an existing unbounded archive bucket is given the cap")
+    void existingBucketIsCapped(@TempDir Path dir) throws Exception {
+        ClusterConfig config = ClusterConfig.defaults().withMessagingType("nats");
+        Connection connection = mock(Connection.class);
+        ObjectStoreManagement management = mock(ObjectStoreManagement.class);
+        when(connection.objectStoreManagement()).thenReturn(management);
+        ObjectStoreStatus status = mock(ObjectStoreStatus.class);
+        when(status.getMaxBucketSize()).thenReturn(-1L);
+        when(management.getStatus("EDDI_ARCHIVES")).thenReturn(status);
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(connection.jetStreamManagement()).thenReturn(jsm);
+        StreamInfo info = mock(StreamInfo.class);
+        when(info.getConfiguration()).thenReturn(StreamConfiguration.builder().name("OBJ_EDDI_ARCHIVES").build());
+        when(jsm.getStreamInfo("OBJ_EDDI_ARCHIVES")).thenReturn(info);
+        when(connection.objectStore("EDDI_ARCHIVES")).thenReturn(mock(ObjectStore.class));
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.requireConnected()).thenReturn(connection);
+        Instance<NatsConnectionManager> connections = mock(Instance.class);
+        when(connections.get()).thenReturn(manager);
+
+        new ClusterArchiveStore(config, connections).publish("a.zip", Files.writeString(dir.resolve("a.zip"), "zip"), Duration.ofMinutes(5));
+
+        ArgumentCaptor<StreamConfiguration> updated = ArgumentCaptor.forClass(StreamConfiguration.class);
+        verify(jsm).updateStream(updated.capture());
+        assertEquals(1L << 30, updated.getValue().getMaxBytes());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    @DisplayName("a cap that failed is tried again on the next use instead of being given up")
+    void failedCapIsRetried(@TempDir Path dir) throws Exception {
+        ClusterConfig config = ClusterConfig.defaults().withMessagingType("nats");
+        Connection connection = mock(Connection.class);
+        ObjectStoreManagement management = mock(ObjectStoreManagement.class);
+        when(connection.objectStoreManagement()).thenReturn(management);
+        ObjectStoreStatus status = mock(ObjectStoreStatus.class);
+        when(status.getMaxBucketSize()).thenReturn(-1L);
+        when(management.getStatus("EDDI_ARCHIVES")).thenReturn(status);
+        JetStreamManagement jsm = mock(JetStreamManagement.class);
+        when(connection.jetStreamManagement()).thenReturn(jsm);
+        StreamInfo info = mock(StreamInfo.class);
+        when(info.getConfiguration()).thenReturn(StreamConfiguration.builder().name("OBJ_EDDI_ARCHIVES").build());
+        when(jsm.getStreamInfo("OBJ_EDDI_ARCHIVES")).thenReturn(info);
+        when(jsm.updateStream(any())).thenThrow(new IOException("JetStream request timed out")).thenReturn(info);
+        when(connection.objectStore("EDDI_ARCHIVES")).thenReturn(mock(ObjectStore.class));
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.requireConnected()).thenReturn(connection);
+        Instance<NatsConnectionManager> connections = mock(Instance.class);
+        when(connections.get()).thenReturn(manager);
+        ClusterArchiveStore store = new ClusterArchiveStore(config, connections);
+        Path file = Files.writeString(dir.resolve("a.zip"), "zip");
+
+        store.publish("a.zip", file, Duration.ofMinutes(5));
+        store.publish("b.zip", file, Duration.ofMinutes(5));
+        store.publish("c.zip", file, Duration.ofMinutes(5));
+
+        verify(jsm, times(2)).updateStream(any());
         verify(management, times(2)).getStatus("EDDI_ARCHIVES");
     }
 }

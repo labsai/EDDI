@@ -39,7 +39,7 @@ writes racing an erasure, journal tombstone retention, tool-pause narration vs o
 former member, cascade ids of non-viewable nodes, team-share notifications to former members — listed in the batch report.
 
 **Files:** [`NatsConnectionManager.java`](../../src/main/java/ai/labs/eddi/engine/cluster/NatsConnectionManager.java),
-[`HostnameVerifyingSslContext.java`](../../src/main/java/ai/labs/eddi/engine/cluster/HostnameVerifyingSslContext.java),
+`HostnameVerifyingSslContext.java` (since replaced by `ServerNameTrustManager`),
 [`ConversationHitlService.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationHitlService.java),
 [`HitlCrashRecoveryObserver.java`](../../src/main/java/ai/labs/eddi/engine/hitl/HitlCrashRecoveryObserver.java),
 [`ApprovedCallScope.java`](../../src/main/java/ai/labs/eddi/engine/hitl/tools/ApprovedCallScope.java),

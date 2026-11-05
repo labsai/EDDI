@@ -1,11 +1,27 @@
 {{- if .Values.ingress.enabled }}
+{{- /*
+  ingress-nginx defaults (ingress.nginxDefaults, className "nginx"): EDDI streams
+  turns and the coordinator over SSE, which the controller's 60 s read timeout
+  cuts off and its response buffering holds back; and an MCP (Streamable HTTP)
+  session lives on the replica that answered `initialize`, so in cluster mode
+  /mcp gets an Ingress of its own that hashes on the client address (annotations
+  apply per Ingress, so the main one stays round-robin). Annotations the operator
+  sets win over these.
+*/}}
+{{- $nginx := and .Values.ingress.nginxDefaults (eq (toString (default "" .Values.ingress.className)) "nginx") }}
+{{- $timeout := toString (.Values.ingress.readTimeoutSeconds | default 300) }}
+{{- $annotations := dict }}
+{{- if $nginx }}
+{{- $annotations = dict "nginx.ingress.kubernetes.io/proxy-buffering" "off" "nginx.ingress.kubernetes.io/proxy-read-timeout" $timeout "nginx.ingress.kubernetes.io/proxy-send-timeout" $timeout }}
+{{- end }}
+{{- $annotations = merge (deepCopy (.Values.ingress.annotations | default dict)) $annotations }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "eddi.fullname" . }}
   labels:
     {{- include "eddi.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
+  {{- with $annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
@@ -38,4 +54,42 @@ spec:
                   name: http
           {{- end }}
     {{- end }}
+{{- if and $nginx (eq (include "eddi.messagingType" .) "nats") }}
+---
+# /mcp: one replica per client (consistent hash on the client address), so an
+# MCP session stays on the node that opened it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "eddi.fullname" . }}-mcp
+  labels:
+    {{- include "eddi.labels" . | nindent 4 }}
+  annotations:
+    {{- toYaml (merge (dict "nginx.ingress.kubernetes.io/upstream-hash-by" "$remote_addr") $annotations) | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- range .Values.ingress.tls }}
+    - hosts:
+        {{- range .hosts }}
+        - {{ . | quote }}
+        {{- end }}
+      secretName: {{ .secretName }}
+    {{- end }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "eddi.fullname" $ }}
+                port:
+                  name: http
+    {{- end }}
+{{- end }}
 {{- end }}
