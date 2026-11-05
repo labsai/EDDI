@@ -376,6 +376,17 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private ToolQuotaConfig toolQuotas;
 
         /**
+         * What a streaming client may be told about a call of each tool, keyed by tool
+         * name (like {@code toolQuotas}, the name the model invoked wins over the
+         * built-in slug): a static label and the values of a few allow-listed top-level
+         * arguments - see {@link ToolDisplayConfig}. Absent means a streamed tool call
+         * carries the tool name and call id only.
+         *
+         * @since 6.5.0
+         */
+        private Map<String, ToolDisplayConfig> toolDisplay;
+
+        /**
          * Cross-team handoff: the teams this agent may file tasks into through the
          * {@code handoff_to_team} tool. Absent means the tool is never assembled. A
          * target only receives when its own {@code handoffConfig.accept} lists this
@@ -1065,6 +1076,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setToolQuotas(ToolQuotaConfig toolQuotas) {
             this.toolQuotas = toolQuotas;
+        }
+
+        public Map<String, ToolDisplayConfig> getToolDisplay() {
+            return toolDisplay;
+        }
+
+        public void setToolDisplay(Map<String, ToolDisplayConfig> toolDisplay) {
+            this.toolDisplay = toolDisplay;
         }
 
         public HandoffPolicies.TeamHandoffConfig getTeamHandoff() {

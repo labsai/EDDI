@@ -930,6 +930,7 @@ real capabilities, change `type` to `openai-compatible`, keep `baseUrl`, `modelN
 | `enforceBudget`            | boolean  | Refuse tool calls once `maxBudgetPerConversation` is passed. **Opt-out** — `false` keeps the ceiling report-only (cost is still tracked), and such a task is named once in a WARN | true (`eddi.tools.budget.enforce-by-default`) |
 | `toolPricing`              | map      | Per-call tool prices in USD. Keyed on the built-in slug (`{"websearch": 0.005}`) or on a single dispatch name (`{"searchNews": 0.01}`), which takes precedence — so one operation can be priced apart from its siblings | (built-in defaults) |
 | `toolQuotas`               | object   | Per-subject, per-window caps on tool calls, counted across conversations: `{"subject": "<template>", "tools": {"<tool>": {"limit": 100, "window": "P1D", "pool": "<optional>"}}}`. Counts real executions only, applies to approved calls on resume, fails closed. See [Per-subject tool quotas](#per-subject-tool-quotas-toolquotas) | (none) |
+| `toolDisplay`              | map      | What a streaming client may show of a tool call: `{"<tool>": {"label": "Creating an action", "fields": ["title"]}}`. `label` is a static string (max 120 chars); `fields` allow-lists up to 3 top-level argument names whose scalar values are shown (redacted, cut to 80 chars). Emitted on the SSE `tool_call` event only. See [Showing a tool call to a watching client](#showing-a-tool-call-to-a-watching-client-tooldisplay) | (none: name and call id only) |
 | `teamHandoff`              | object   | Cross-team handoff: the teams this agent may file tasks into with the `handoff_to_team` tool: `{"targets": [{"alias": "account-desk", "groupId": "…", "description": "…"}], "maxPerTurn": 2, "maxPerConversation": 5}`. A target only receives if its own `handoffConfig.accept` lists this agent. See [Cross-Team Handoff](team-handoff.md) | (none) |
 | `inputPricePer1M` / `outputPricePer1M` | number | Token prices in USD per 1M tokens for this task's **model calls**, feeding the conversation's tracked cost (`audit:cost`), any group cost ceiling and the tenant's [monthly cost budget](tenant-quotas.md#the-monthly-cost-budget). Applies to non-cascade calls; a [model cascade](model-cascade.md) prices its steps via its own fields of the same name. Negative values fail deployment. Unset prices, and cache and long-context prices (`pricing`), come from the [price catalog](model-pricing.md) | (catalog, else unpriced — $0) |
 | `enableToolCaching`        | boolean  | Cache tool results to reduce API calls. Built-in tools only, unless an HTTP/MCP/A2A tool is named in `toolCacheScopes` — see [Tool cache scoping](#tool-cache-scoping) | true                   |
@@ -2100,6 +2101,7 @@ difference between a rule that binds and one that is silently ignored:
 | `toolCacheScopes`            | slug **or** dispatch name — dispatch name wins       |
 | `toolTimeoutsMs`             | slug **or** dispatch name — dispatch name wins       |
 | `toolQuotas.tools`           | slug **or** dispatch name — dispatch name wins       |
+| `toolDisplay`                | slug **or** dispatch name — dispatch name wins       |
 | `toolApprovals`              | dispatch name, optionally `source:name`-qualified    |
 | cache TTL, default price     | slug (resolved automatically)                        |
 | `eddi.tool.*` metric `tool` tag | dispatch name                                     |
@@ -2131,6 +2133,23 @@ going to run. Refused calls are always the tail of the response and are answered
 ones, so the tool results arrive in the order the model listed the calls. Each one is traced as `tool_call_capped` and the turn logs one WARN.
 `maxToolIterations` itself is clamped to 100. Under a [model cascade](model-cascade.md) each step
 runs its own tool loop, so `maxToolCallsPerTurn` applies per cascade step, not across the steps.
+
+#### Showing a tool call to a watching client (`toolDisplay`)
+
+The SSE `tool_call` event carries the tool name and the model's call id, never the arguments: they may hold user data. An app that wants plain-language activity lines ("Creating an action: Renew the contract") opts in per tool, with `toolDisplay` on the LLM task:
+
+```json
+"toolDisplay": {
+  "createAction": { "label": "Creating an action", "fields": ["title"] }
+}
+```
+
+- `label` is static text, at most 120 characters; it is sent as `displayName`.
+- `fields` is an allow-list of at most 3 **top-level** argument names. A value is shown only if it is a string, number or boolean (an object or array never is), is run through the secret redaction filter, and is cut to 80 characters with an ellipsis. They are sent as `display: {"title": "..."}`.
+- Keys follow the other per-tool settings: the dispatch name the model invoked wins over the built-in slug.
+- Validated when the configuration is saved: a blank or over-long label or name, more than 3 fields, a duplicate or blank field, or an entry that shows nothing is a `400`.
+- A field whose name looks like a credential (`password`, `apiKey`, `token`, `secret` and the like) is refused at save with a `400`, and is skipped at runtime even if a stored configuration still lists it: it is never shown, whatever its value.
+- It affects the `tool_call` event only. `tool_result`, `task_complete.toolTrace` and everything stored are unchanged; note that `toolTrace` still carries redacted arguments and results.
 
 #### Per-subject tool quotas (`toolQuotas`)
 

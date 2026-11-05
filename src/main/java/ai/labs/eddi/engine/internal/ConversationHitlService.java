@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
@@ -381,6 +382,50 @@ class ConversationHitlService {
                                    Boolean returnCurrentStepOnly,
                                    List<String> returningFields)
             throws ResourceStoreException, ResourceNotFoundException {
+        doResume(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields, null);
+    }
+
+    /**
+     * The streamed resume: the same validation, commit and turn as
+     * {@link #resumeConversation(String, HitlDecision, ConversationResponseHandler, Boolean, Boolean, List)},
+     * with the resumed turn's events routed to {@code streaming}. Refusals throw
+     * before {@code streaming} has been touched.
+     */
+    public void resumeConversationStreaming(String conversationId,
+                                            HitlDecision decision,
+                                            IConversationService.StreamingResponseHandler streaming,
+                                            Boolean returnDetailed,
+                                            Boolean returnCurrentStepOnly,
+                                            List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        if (streaming == null) {
+            throw new IllegalArgumentException("a streaming resume needs a handler");
+        }
+        // The turn's completion reaches the stream through the same delivery points a
+        // plain reply handler uses (settled, re-paused after persist, skipped); only
+        // the failure paths differ and are routed to onError below.
+        ConversationResponseHandler adapter = new ConversationResponseHandler() {
+            @Override
+            public void onComplete(SimpleConversationMemorySnapshot snapshot) {
+                streaming.onComplete(snapshot);
+            }
+
+            @Override
+            public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
+                streaming.onSkipped(snapshot);
+            }
+        };
+        doResume(conversationId, decision, adapter, returnDetailed, returnCurrentStepOnly, returningFields, streaming);
+    }
+
+    private void doResume(String conversationId,
+                          HitlDecision decision,
+                          ConversationResponseHandler handler,
+                          Boolean returnDetailed,
+                          Boolean returnCurrentStepOnly,
+                          List<String> returningFields,
+                          IConversationService.StreamingResponseHandler streaming)
+            throws ResourceStoreException, ResourceNotFoundException {
         // See resumeConversation's @throws IllegalArgumentException javadoc
         // (IConversationService) for why this is checked here rather than trusted
         // from each caller.
@@ -468,6 +513,8 @@ class ConversationHitlService {
         // The pending batch the DECISION applies to — captured here so the audit reads
         // it deterministically even though the async resume may mutate the live memory.
         final PendingToolCallBatch prePauseBatch;
+        // The id of the pause this decision settles - what a resume stream announces.
+        final String settledPauseId;
         // The pause as it was, for the decision's audit entry: when it began, its
         // timeout policy and, for a RULE pause, the draft an edit replaces.
         final HitlDecisionRecords.RegularPause prePauseFacts;
@@ -506,6 +553,7 @@ class ConversationHitlService {
             agentId = snapshot.getAgentId();
             agentVersion = snapshot.getAgentVersion();
             environment = snapshot.getEnvironment();
+            settledPauseId = HitlDecision.pauseIdOf(snapshot.getHitlPausedAt());
             prePauseWasToolCall = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(memory.getHitlPauseType());
             prePauseBatch = memory.getHitlPendingToolCalls();
             prePauseFingerprint = prePauseBatch != null ? prePauseBatch.getFingerprint() : null;
@@ -564,6 +612,12 @@ class ConversationHitlService {
             // onNoProgress / maxAutoApprovalsPerTurn from it in onComplete.
             populateToolApprovalsConfig(memory);
 
+            // A streamed resume reports the continued turn through the same sink a
+            // streamed say installs, so task, tool and token events reach the client.
+            if (streaming != null) {
+                memory.setEventSink(ConversationService.eventSinkFor(streaming));
+            }
+
             // Ordering contract (same as the say path, see ConversationService
             // .completeTurn): a resume that RE-PAUSES tells its client only after the
             // re-pause is persisted by resumeFinished below, with the state the store
@@ -578,6 +632,17 @@ class ConversationHitlService {
             IConversation conversation = agent.continueConversation(memory,
                     conversationService.createPropertiesHandler(memory.getUserId(), agent.getUserMemoryConfig(), agent.isMemoryToolsEnabled()),
                     returnMemory -> {
+                        // A streamed turn that lost the cluster lease stored nothing: the
+                        // stream ends with an error, not with a done event for a turn that
+                        // is not stored (as a streamed say does). Checked BEFORE meterTurnCost,
+                        // as the say path does: a turn stopped by lease loss stores nothing, and
+                        // the node that took the conversation over runs (and meters) it again.
+                        if (streaming != null && conversationService.stoppedByLeaseLoss(conversationId, returnMemory,
+                                new SimpleConversationMemorySnapshot())) {
+                            replyDelivered.set(true);
+                            streaming.onError(new ConversationStepRunner.TurnLeaseLostException(conversationId, returnMemory.getFenceToken()));
+                            return;
+                        }
                         // Settle point of a resumed turn: charge what the resume added
                         // to the step's priced spend (the pre-pause part was charged
                         // when the pause settled — audit:metered_cost says how much).
@@ -632,6 +697,22 @@ class ConversationHitlService {
             final CallerIdentity resumeCallerIdentity = approverOwnsConversation ? approverIdentity : null;
             final CallerIdentity approvedCallsIdentity = approverOwnsConversation ? null : approverIdentity;
 
+            // The decision is committed and the resumed turn is about to run: a streamed
+            // client hears so exactly once, before any event of the continued turn. Called
+            // from the resume callable, after its cancelled/ended check, rather than at
+            // submit - so a resume the coordinator drops, or one cancelled before it ran,
+            // never announces itself (those end in onSkipped, the pause restored).
+            final Runnable announceResumeAccepted = () -> {
+                if (streaming == null) {
+                    return;
+                }
+                try {
+                    streaming.onResumeAccepted(settledPauseId, decision.getVerdict());
+                } catch (RuntimeException e) {
+                    LOGGER.warnf(e, "Could not announce the accepted resume of %s", sanitize(conversationId));
+                }
+            };
+
             Callable<Void> resumeCallable = () -> {
                 // #3: a cancel or a terminal end may have landed between the CAS
                 // and this execution (flag on the registered memory, or DB-only in
@@ -652,6 +733,7 @@ class ConversationHitlService {
                     }
                     return null;
                 }
+                announceResumeAccepted.run();
                 try {
                     conversation.resume(decision);
                 } catch (Exception e) {
@@ -660,7 +742,11 @@ class ConversationHitlService {
                     // The resume threw: when its output was never rendered the client is
                     // still waiting, so answer with the ERROR snapshot and its reason.
                     if (handler != null && replyDelivered.compareAndSet(false, true)) {
-                        deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        if (streaming != null) {
+                            streaming.onError(e);
+                        } else {
+                            deliverFailed(handler, memory, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                        }
                     }
                 }
                 return null;
@@ -779,7 +865,11 @@ class ConversationHitlService {
                         // timeout. Once only: if the REST timeout answered first, this
                         // second answer is simply ignored.
                         if (handler != null && replyDelivered.compareAndSet(false, true)) {
-                            deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            if (streaming != null) {
+                                streaming.onError(t);
+                            } else {
+                                deliverStored(handler, conversationId, environment, returnDetailed, returnCurrentStepOnly, returningFields);
+                            }
                         }
                     }
                 }

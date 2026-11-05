@@ -313,6 +313,7 @@
     "POST /agents/{conversationId}/redo",
     "POST /agents/{conversationId}/rerun",
     "POST /agents/{conversationId}/resume",
+    "POST /agents/{conversationId}/resume/stream",
     "POST /agents/{conversationId}/stream",
     "POST /agents/{conversationId}/undo",
     "POST /agentstore/agents",

@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRequiredException;
@@ -66,6 +68,7 @@ import java.util.Map;
 import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
@@ -585,6 +588,7 @@ class ToolLoopRunner {
                                 Map<String, Object> capStep = new HashMap<>();
                                 capStep.put("type", "tool_error");
                                 capStep.put("tool", gatedReq.name());
+                                withCallId(capStep, gatedReq);
                                 capStep.put("error", "hitl_pause_cap");
                                 trace.add(capStep);
                             }
@@ -974,6 +978,7 @@ class ToolLoopRunner {
             Map<String, Object> step = new HashMap<>();
             step.put("type", "tool_error");
             step.put("tool", req.name());
+            withCallId(step, req);
             step.put("error", "tool_quota_refused");
             trace.add(step);
         }
@@ -1035,6 +1040,7 @@ class ToolLoopRunner {
                 Map<String, Object> step = new HashMap<>();
                 step.put("type", "tool_error");
                 step.put("tool", req.name());
+                withCallId(step, req);
                 step.put("error", "credential_reference_refused");
                 trace.add(step);
             } catch (Exception e) {
@@ -1348,12 +1354,88 @@ class ToolLoopRunner {
                                    boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                    LlmConfiguration.Task task, boolean isLazy,
                                    List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
-        // Live "Using {tool}…" signal for streaming clients — name only, before
-        // execution, so the status line moves the moment work starts rather than
-        // when the whole loop summarizes at turn end.
-        if (memory != null && memory.getEventSink() != null) {
-            memory.getEventSink().onToolCall(toolRequest.name());
+        // Live signals for streaming clients, announced here - the one place every
+        // call passes through - so each call is closed exactly once whichever of the
+        // many exits of the pipeline below it leaves by. Name, call id, status and
+        // duration only: arguments and results may hold user data. The one exception
+        // is what the designer allow-listed in toolDisplay.
+        ConversationEventSink sink = memory != null ? memory.getEventSink() : null;
+        long startedNanos = System.nanoTime();
+        String status = TOOL_STATUS_ERROR;
+        if (sink != null) {
+            announceToolCall(sink, toolRequest, task, toolCanonicalNames);
         }
+        try {
+            ToolCallResult result = executeToolCallPipeline(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames,
+                    toolSources, defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task,
+                    isLazy, builtInSpecs, activeSpecs, runSpend);
+            status = toolStatusOf(result);
+            return result;
+        } finally {
+            if (sink != null) {
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+                try {
+                    sink.onToolResult(toolRequest.name(), toolRequest.id(), status, durationMs);
+                } catch (RuntimeException e) {
+                    LOGGER.debug("Event sink failed on tool_result; ignoring", e);
+                }
+            }
+        }
+    }
+
+    /** {@code tool_result} status of a call that ran and succeeded. */
+    public static final String TOOL_STATUS_OK = "ok";
+    /** A call that failed, or threw. */
+    public static final String TOOL_STATUS_ERROR = "error";
+    /** A call refused or skipped before the tool ran. */
+    public static final String TOOL_STATUS_NOT_EXECUTED = "not_executed";
+    /** A call a human declined. */
+    public static final String TOOL_STATUS_REJECTED = "rejected";
+
+    private static String toolStatusOf(ToolCallResult result) {
+        if (result.notExecuted()) {
+            return TOOL_STATUS_NOT_EXECUTED;
+        }
+        return ToolOutcomeClassifier.classify(result.raw()).isFailure() ? TOOL_STATUS_ERROR : TOOL_STATUS_OK;
+    }
+
+    /** Tells the sink a call is starting; a failing sink never breaks the loop. */
+    private static void announceToolCall(ConversationEventSink sink, ToolExecutionRequest toolRequest, LlmConfiguration.Task task,
+                                         Map<String, String> toolCanonicalNames) {
+        try {
+            ToolDisplay display = task != null
+                    ? ToolDisplayResolver.resolve(task.getToolDisplay(), toolRequest.name(),
+                            ToolNameResolver.canonical(toolRequest.name(), toolCanonicalNames), toolRequest.arguments())
+                    : null;
+            sink.onToolCall(toolRequest.name(), toolRequest.id(), display);
+        } catch (RuntimeException e) {
+            LOGGER.debug("Event sink failed on tool_call; ignoring", e);
+        }
+    }
+
+    /**
+     * Records the model's call id on a trace step, so a stored trace keeps call
+     * identity.
+     */
+    private static void withCallId(Map<String, Object> step, ToolExecutionRequest request) {
+        if (request != null && request.id() != null) {
+            step.put("callId", request.id());
+        }
+    }
+
+    /**
+     * The per-request pipeline itself - see {@link #executeToolCall}, which wraps
+     * it in the live tool_call / tool_result events.
+     */
+    private ToolCallResult executeToolCallPipeline(ToolExecutionRequest toolRequest, IConversationMemory memory,
+                                                   List<Map<String, Object>> trace,
+                                                   Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                                   Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
+                                                   int defaultRateLimit, Double maxBudget, String conversationId,
+                                                   boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
+                                                   LlmConfiguration.Task task, boolean isLazy,
+                                                   List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs,
+                                                   DoubleSupplier runSpend) {
         // Name-only observer for plain (non-streamed) turns, e.g. a group member's.
         // An observer must never break the tool loop.
         if (memory != null && memory.getToolCallObserver() != null) {
@@ -1379,6 +1461,7 @@ class ToolLoopRunner {
         Map<String, Object> callStep = new HashMap<>();
         callStep.put("type", "tool_call");
         callStep.put("tool", toolRequest.name());
+        withCallId(callStep, toolRequest);
         // The trace is a DISPLAY/audit record (task summaries, SSE, memory,
         // traceSoFar merge on resume) — never an execution input, so it takes
         // the redacted form. Execution keeps using toolRequest directly; a
@@ -1408,6 +1491,7 @@ class ToolLoopRunner {
             Map<String, Object> mockedStep = new HashMap<>();
             mockedStep.put("type", "tool_result");
             mockedStep.put("tool", toolRequest.name());
+            withCallId(mockedStep, toolRequest);
             mockedStep.put("result", SecretRedactionFilter.redact(mockedResult));
             mockedStep.put("mocked", true);
             trace.add(mockedStep);
@@ -1437,6 +1521,7 @@ class ToolLoopRunner {
             Map<String, Object> budgetStep = new HashMap<>();
             budgetStep.put("type", "tool_error");
             budgetStep.put("tool", toolRequest.name());
+            withCallId(budgetStep, toolRequest);
             budgetStep.put("error", budgetError);
             trace.add(budgetStep);
 
@@ -1463,6 +1548,7 @@ class ToolLoopRunner {
                 Map<String, Object> errorStep = new HashMap<>();
                 errorStep.put("type", "tool_error");
                 errorStep.put("tool", toolRequest.name());
+                withCallId(errorStep, toolRequest);
                 errorStep.put("error", checkError);
                 trace.add(errorStep);
                 // The exception class stays in the trace and the log; the model gets
@@ -1484,6 +1570,7 @@ class ToolLoopRunner {
                 Map<String, Object> quotaStep = new HashMap<>();
                 quotaStep.put("type", "tool_error");
                 quotaStep.put("tool", toolRequest.name());
+                withCallId(quotaStep, toolRequest);
                 quotaStep.put("error", costCheck.reason());
                 trace.add(quotaStep);
 
@@ -1614,6 +1701,7 @@ class ToolLoopRunner {
         Map<String, Object> resultStep = new HashMap<>();
         resultStep.put("type", "tool_result");
         resultStep.put("tool", toolRequest.name());
+        withCallId(resultStep, toolRequest);
         // Redacted for the same reason as the call step's arguments: an API
         // response can echo a credential (its own, or one the request carried).
         // toolResult was redacted above; it is scanned again because truncation

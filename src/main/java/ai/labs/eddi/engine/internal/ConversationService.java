@@ -46,6 +46,7 @@ import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.TaskId;
+import ai.labs.eddi.engine.lifecycle.ToolDisplay;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -1375,7 +1376,7 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     /** Forwards the pipeline's progress events to a streaming handler. */
-    private static ConversationEventSink eventSinkFor(StreamingResponseHandler streamingHandler) {
+    static ConversationEventSink eventSinkFor(StreamingResponseHandler streamingHandler) {
         return new ConversationEventSink() {
             @Override
             public void onTaskStart(TaskId taskId, String taskType, int index) {
@@ -1385,6 +1386,16 @@ public class ConversationService implements IConversationService, UserErasurePar
             @Override
             public void onToolCall(String toolName) {
                 streamingHandler.onToolCall(toolName);
+            }
+
+            @Override
+            public void onToolCall(String toolName, String callId, ToolDisplay display) {
+                streamingHandler.onToolCall(toolName, callId, display);
+            }
+
+            @Override
+            public void onToolResult(String toolName, String callId, String status, long durationMs) {
+                streamingHandler.onToolResult(toolName, callId, status, durationMs);
             }
 
             @Override
@@ -2265,6 +2276,16 @@ public class ConversationService implements IConversationService, UserErasurePar
         @Override
         public void onToolCall(String toolName) {
             delegate.onToolCall(toolName);
+        }
+
+        @Override
+        public void onToolCall(String toolName, String callId, ToolDisplay display) {
+            delegate.onToolCall(toolName, callId, display);
+        }
+
+        @Override
+        public void onToolResult(String toolName, String callId, String status, long durationMs) {
+            delegate.onToolResult(toolName, callId, status, durationMs);
         }
 
         @Override
@@ -3176,6 +3197,18 @@ public class ConversationService implements IConversationService, UserErasurePar
                                    List<String> returningFields)
             throws ResourceStoreException, ResourceNotFoundException {
         conversationHitlService.resumeConversation(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly, returningFields);
+    }
+
+    @Override
+    public void resumeConversationStreaming(String conversationId,
+                                            HitlDecision decision,
+                                            StreamingResponseHandler handler,
+                                            Boolean returnDetailed,
+                                            Boolean returnCurrentStepOnly,
+                                            List<String> returningFields)
+            throws ResourceStoreException, ResourceNotFoundException {
+        conversationHitlService.resumeConversationStreaming(conversationId, decision, handler, returnDetailed, returnCurrentStepOnly,
+                returningFields);
     }
 
     @Override
