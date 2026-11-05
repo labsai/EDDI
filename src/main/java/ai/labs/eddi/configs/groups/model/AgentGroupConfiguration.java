@@ -7,6 +7,8 @@ package ai.labs.eddi.configs.groups.model;
 import ai.labs.eddi.configs.hitl.HitlGranularity;
 import ai.labs.eddi.configs.hitl.HitlRejectionPolicy;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.configs.hitl.model.ApprovalContextBlock;
+import ai.labs.eddi.configs.hitl.model.GroupHitlReviewConfig;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Size;
 
@@ -120,6 +122,21 @@ public class AgentGroupConfiguration {
 
     public void setTaskListConfig(GroupTaskConfig taskListConfig) {
         this.taskListConfig = taskListConfig;
+    }
+
+    /**
+     * Cross-team handoff, both halves: the teams this group may file tasks into
+     * (tools and decision rules) and the sources it accepts from. {@code null}
+     * means the group neither sends nor receives — see {@link HandoffPolicies}.
+     */
+    private HandoffPolicies.GroupHandoffConfig handoffConfig;
+
+    public HandoffPolicies.GroupHandoffConfig getHandoffConfig() {
+        return handoffConfig;
+    }
+
+    public void setHandoffConfig(HandoffPolicies.GroupHandoffConfig handoffConfig) {
+        this.handoffConfig = handoffConfig;
     }
 
     /**
@@ -525,10 +542,8 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents, nested groups, or
-     * humans (I6). Whether members may create and co-edit shared artifacts
-     * mid-discussion (I17). {@code null} means the artifact tools are absent
-     * entirely.
+     * Whether members may create and co-edit shared artifacts mid-discussion (I17).
+     * {@code null} means the artifact tools are absent entirely.
      */
     private ArtifactConfig artifactConfig;
 
@@ -601,7 +616,8 @@ public class AgentGroupConfiguration {
     }
 
     /**
-     * A member of the group. Members can be individual agents or nested groups.
+     * A member of the group. Members can be individual agents, nested groups, or
+     * humans (I6).
      * <p>
      * For {@code MemberType.GROUP} members, the {@code agentId} field contains the
      * group configuration ID instead. The sub-group runs its own discussion and its
@@ -961,12 +977,15 @@ public class AgentGroupConfiguration {
      * @param tiePolicy
      *            what resolves a tie or a quorum failure: {@code MODERATOR_DECIDES}
      *            (one moderator turn choosing among the tied options),
-     *            {@code HUMAN_DECIDES} (reserved for I6 human members — rejected at
-     *            save time until that ships), or {@code NO_DECISION} (default:
-     *            record {@code type=NONE} and carry on)
+     *            {@code HUMAN_DECIDES} (the discussion pauses until the
+     *            {@code humanTieBreak} decider chooses), or {@code NO_DECISION}
+     *            (default: record {@code type=NONE} and carry on)
+     * @param humanTieBreak
+     *            who decides under {@code HUMAN_DECIDES}, how long they have and
+     *            what a timeout resolves to. See {@link HumanTieBreakConfig}
      */
     public record VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
-            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+            Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy, HumanTieBreakConfig humanTieBreak) {
 
         public static final double DEFAULT_QUORUM = 0.5;
 
@@ -980,6 +999,12 @@ public class AgentGroupConfiguration {
             }
             weights = weights == null ? Map.of() : Map.copyOf(weights);
             tiePolicy = tiePolicy == null ? TiePolicy.NO_DECISION : tiePolicy;
+        }
+
+        /** Backward-compatible constructor without {@code humanTieBreak}. */
+        public VoteConfig(VoteMethod method, OptionsSource optionsSource, List<String> options, double quorum,
+                Map<String, Double> weights, boolean weightByConfidence, TiePolicy tiePolicy) {
+            this(method, optionsSource, options, quorum, weights, weightByConfidence, tiePolicy, null);
         }
 
         /**
@@ -1035,11 +1060,12 @@ public class AgentGroupConfiguration {
      *            threshold converges
      * @param judge
      *            {@code "MODERATOR"} (default) runs the group's configured
-     *            moderator agent as the judge. {@code "SERVICE"} is accepted and
-     *            documented but currently falls back to MODERATOR with a warning:
-     *            the shared {@code SummarizationService} needs LLM provider/model
-     *            coordinates and credentials that {@code AgentGroupConfiguration}
-     *            does not carry, so wiring it needs config this item does not add
+     *            moderator agent as the judge. {@code "SERVICE"} asks the model
+     *            named in {@code service} directly — one cheap call, no agent turn,
+     *            and it works in a group without a moderator. {@code "SERVICE"}
+     *            without a configured {@code service} block falls back to the
+     *            moderator with a warning, which is what it did before the block
+     *            existed
      * @param mode
      *            {@code "SIMILARITY"} (default, the behaviour before 6.6): the
      *            judge scores agreement between this repeat and the previous one
@@ -1050,8 +1076,12 @@ public class AgentGroupConfiguration {
      *            1, the check runs after every repeat). Either way a verdict that
      *            cannot be parsed never ends the phase. The all-abstained exit
      *            applies in both modes
+     * @param service
+     *            the model {@code judge: "SERVICE"} calls; ignored for MODERATOR.
+     *            See {@link ServiceJudgeConfig}
      */
-    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode) {
+    public record ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode,
+            ServiceJudgeConfig service) {
 
         /**
          * The lowest {@code minRepeats} that can mean anything — see the record
@@ -1081,6 +1111,11 @@ public class AgentGroupConfiguration {
             judge = judge == null || judge.isBlank() ? JUDGE_MODERATOR : judge.trim().toUpperCase();
         }
 
+        /** Backward-compatible constructor without {@code service}. */
+        public ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge, String mode) {
+            this(enabled, minRepeats, threshold, judge, mode, null);
+        }
+
         /** Backward-compatible constructor without {@code mode}: SIMILARITY. */
         public ConvergenceConfig(boolean enabled, int minRepeats, double threshold, String judge) {
             this(enabled, minRepeats, threshold, judge, null);
@@ -1095,6 +1130,14 @@ public class AgentGroupConfiguration {
         @JsonIgnore
         public boolean isVerdictMode() {
             return MODE_VERDICT.equals(mode);
+        }
+
+        /**
+         * Whether the SERVICE judge runs: {@code judge: "SERVICE"} with a model named.
+         */
+        @JsonIgnore
+        public boolean usesServiceJudge() {
+            return JUDGE_SERVICE.equals(judge) && service != null && service.isConfigured();
         }
     }
 
@@ -1687,6 +1730,39 @@ public class AgentGroupConfiguration {
 
         public void setOnTaskRejection(HitlRejectionPolicy onTaskRejection) {
             this.onTaskRejection = onTaskRejection != null ? onTaskRejection : HitlRejectionPolicy.FAIL;
+        }
+
+        /**
+         * Result edits on approval and the audit taxonomy — see
+         * {@link GroupHitlReviewConfig}. Absent = approve/reject only.
+         *
+         * @since 6.7.0
+         */
+        private GroupHitlReviewConfig review;
+
+        public GroupHitlReviewConfig getReview() {
+            return review;
+        }
+
+        public void setReview(GroupHitlReviewConfig review) {
+            this.review = review;
+        }
+
+        /**
+         * Context rendered for the approver when a phase or task pauses (see
+         * {@link ApprovalContextBlock}); {@code group.*} is available. Rendered once
+         * when the pause is committed. Absent = no context.
+         *
+         * @since 6.7.0
+         */
+        private List<ApprovalContextBlock> approvalContext;
+
+        public List<ApprovalContextBlock> getApprovalContext() {
+            return approvalContext;
+        }
+
+        public void setApprovalContext(List<ApprovalContextBlock> approvalContext) {
+            this.approvalContext = approvalContext;
         }
     }
 

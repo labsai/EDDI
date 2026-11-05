@@ -37,7 +37,7 @@ is on every snapshot in the `ERROR` state, a plain read of the conversation as w
 - `code` is a failure class (`TRANSIENT`, `RATE_LIMITED`, `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`,
   `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `TIMEOUT`) when the failure was recognised as a provider or transport
   failure, otherwise `TURN_FAILED`. An unexpected server fault is a `500` with
-  `{"error": {"code": "INTERNAL_ERROR", ...}}`.
+  `{"error": {"code": "INTERNAL_ERROR", ...}}`. The `retryable` verdict is fixed per class: `TRANSIENT`, `RATE_LIMITED` and `TIMEOUT` are retryable; `QUOTA_EXHAUSTED`, `AUTH`, `BAD_REQUEST`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND` and `TURN_FAILED` are not.
 - `retryable` says whether sending the same request again can succeed; `retryAfterMs` is the provider's own
   hint (`null` when it gave none) and is also sent as a `Retry-After` header (whole seconds).
 - `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body. It is the
@@ -93,7 +93,7 @@ When you create a conversation:
 
 Each message sent to a conversation:
 
-1. Loads the conversation memory from MongoDB/cache
+1. Loads the conversation memory from the configured datastore (MongoDB or PostgreSQL)
 2. Executes the agent's lifecycle pipeline
 3. Updates the conversation memory with results
 4. Saves the updated memory
@@ -410,7 +410,7 @@ Response Body
 
 ### When a message is refused or a turn runs too long
 
-A request the server cannot act on is answered with `400` and a JSON body — `{"error": "bad_request", "message": "…"}` — that names what was wrong: a body that is not valid JSON (with line and column), a `context` value of the wrong shape (with its JSON path), a document nested past the parser's limit, or a query parameter of the wrong type (`?conversationState=BOGUS` lists the legal states; `?version=abc` says a number is expected). A value rejected inside a library rather than by EDDI itself — a malformed conversation id, for instance — is answered with `The request contains an invalid value (reference …)`; the library's own message, which can name internal classes or paths, is logged under that reference instead of being returned. Under `/v1` (the OpenAI-compatible API) the same errors use the OpenAI envelope, `{"error": {"message": "…", "type": "invalid_request_error", "code": "…"}}`. Before this release several of these came back as an empty `400`, as `404 Not Found`, or — posting to a malformed id — as `500`.
+A request the server cannot act on is answered with `400` and a JSON body — `{"error": "bad_request", "message": "…"}` — that names what was wrong: a body that is not valid JSON (with line and column), a `context` value of the wrong shape (with its JSON path), a document nested past the parser's limit, or a query parameter of the wrong type (`?conversationState=BOGUS` lists the legal states; `?version=abc` says a number is expected). A value rejected inside a library rather than by EDDI itself — a malformed conversation id, for instance — is answered with `The request contains an invalid value (reference …)`; the library's own message, which can name internal classes or paths, is logged under that reference instead of being returned. Under `/v1` (the OpenAI-compatible API) the same errors use the OpenAI envelope, `{"error": {"message": "…", "type": "invalid_request_error", "code": "…"}}`.
 
 The caller of a turn (`POST /agents/{conversationId}`) is answered `408 Request Timeout` once `systemRuntime.agentTimeoutInSeconds` (default `60`) has passed since its request **arrived**, so time the request spent waiting for a thread on a busy node counts. A request that has already used the whole budget before it reaches the engine is answered `408` at once and queues nothing. A turn still waiting in its conversation's queue when the time is up is not run either: its caller already has the `408`, so the message was **not** processed and can be sent again (`eddi.conversation.skip-turns-of-timed-out-callers`, on by default). Only a turn that started in time can still finish after its caller's `408`.
 
@@ -604,7 +604,9 @@ curl -X POST "http://localhost:7070/agents/CONV_ID/redo"
 ```bash
 # 1. Start conversation
 curl -X POST "http://localhost:7070/agents/AGENT_ID/start" -d '{}'
-# Returns: 201 with "location: /agents/CONV_ID" header (no body)
+# Returns: 201 with a Location header (no body), e.g.
+#   eddi://ai.labs.conversation/conversationstore/conversations/CONV_ID
+# The conversation id is the last path segment.
 
 # 2. Send message
 curl -X POST "http://localhost:7070/agents/CONV_ID" \

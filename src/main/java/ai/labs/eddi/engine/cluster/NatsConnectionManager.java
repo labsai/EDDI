@@ -286,20 +286,30 @@ public class NatsConnectionManager {
         // Not only when eddi.nats.tls.enabled: a tls:// or wss:// server without an
         // explicit context made jnats fall back to the JVM default context, which
         // checks no host name — any CA-signed certificate for any host was accepted.
+        // (opentls://, jnats' trust-anything scheme, fails ClusterConfig.validate().)
         if (config.natsTlsRequired()) {
             builder.sslContext(buildSslContext());
+            if (config.natsTlsVerifyHostname()) {
+                // jnats' default (ResolveToAll) dials the resolved IP addresses. The
+                // certificate check (ServerNameTrustManager) uses the configured names
+                // either way; HappyEyeballs dials the name itself, so the handshake also
+                // carries it (SNI), and still falls back across addresses.
+                builder.hostnameResolveMode(Options.HostnameResolveMode.HappyEyeballs);
+            }
         }
         return builder.build();
     }
 
     SSLContext buildSslContext() throws IOException, GeneralSecurityException {
         TrustManager[] trustManagers = trustManagers();
-        KeyManagerFactory kmf = null;
+        KeyManagerFactory kmf;
         if (config.natsTlsKeystorePath().isPresent()) {
             char[] password = config.natsTlsKeystorePassword().orElse("").toCharArray();
             KeyStore keys = loadKeyStore(config.natsTlsKeystorePath().get(), new String(password));
             kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
             kmf.init(keys, password);
+        } else {
+            kmf = defaultKeyManagerFactory();
         }
         SSLContext context = SSLContext.getInstance("TLS");
         context.init(kmf == null ? null : kmf.getKeyManagers(), trustManagers, null);
@@ -307,13 +317,41 @@ public class NatsConnectionManager {
     }
 
     /**
+     * The JVM's default client certificate ({@code javax.net.ssl.keyStore}), for a
+     * node that configures no EDDI key store: {@code SSLContext.getDefault()} reads
+     * it, but a context initialised with no key managers would not, and mutual TLS
+     * would silently stop presenting a certificate. {@code null} when no such key
+     * store is set.
+     */
+    static KeyManagerFactory defaultKeyManagerFactory() throws IOException, GeneralSecurityException {
+        String path = System.getProperty("javax.net.ssl.keyStore", "");
+        if (path.isBlank()) {
+            return null;
+        }
+        String type = System.getProperty("javax.net.ssl.keyStoreType", KeyStore.getDefaultType());
+        String provider = System.getProperty("javax.net.ssl.keyStoreProvider", "");
+        char[] password = System.getProperty("javax.net.ssl.keyStorePassword", "").toCharArray();
+        KeyStore keys = provider.isBlank() ? KeyStore.getInstance(type) : KeyStore.getInstance(type, provider);
+        if ("NONE".equals(path)) {
+            keys.load(null, password);
+        } else {
+            try (InputStream in = Files.newInputStream(Path.of(path))) {
+                keys.load(in, password);
+            }
+        }
+        KeyManagerFactory kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        kmf.init(keys, password);
+        return kmf;
+    }
+
+    /**
      * The trust store's managers (or the JVM's default CAs), each X.509 one wrapped
      * so that the certificate must also name a configured NATS host
      * ({@link ServerNameTrustManager}) unless
      * {@code eddi.nats.tls.verify-hostname=false}. jnats sets no endpoint
-     * identification, and it dials — and hands TLS — the resolved IP, not the host
-     * name: without this, a certificate for ANY host the trust store accepts
-     * authenticated the broker.
+     * identification, and with its default resolution it dials — and hands TLS —
+     * the resolved IP (so do servers it discovers from INFO): without this, a
+     * certificate for ANY host the trust store accepts authenticated the broker.
      */
     TrustManager[] trustManagers() throws IOException, GeneralSecurityException {
         TrustManagerFactory tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());

@@ -1949,4 +1949,22 @@ class DreamServiceTest {
 
         assertEquals(Map.of("fact", List.of(a1, a2)), parts);
     }
+
+    @Test
+    void splitGroupScopedGroupsByGroupIds_keepsAGlobalEntryApartFromAReaderlessGroupEntry() {
+        // A global entry carries the ids of the group conversation it was written in;
+        // merged with a group entry that has no readers, the union handed those ids
+        // to the reader-less fact.
+        Instant now = Instant.now();
+        var readerless = new UserMemoryEntry("1", "user-1", "k1", "v1", "fact", Visibility.group, "agent-1", List.of(), "c", false, 0, now,
+                now);
+        var global = new UserMemoryEntry("2", "user-1", "k2", "v2", "fact", Visibility.global, "agent-1", List.of("A"), "c", false, 0, now,
+                now);
+
+        var parts = DreamService.splitGroupScopedGroupsByGroupIds(Map.of("fact", List.of(readerless, global)));
+
+        assertEquals(2, parts.size(), parts.keySet().toString());
+        assertTrue(parts.values().contains(List.of(readerless)));
+        assertTrue(parts.values().contains(List.of(global)));
+    }
 }

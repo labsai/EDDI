@@ -45,7 +45,8 @@ public enum MailAnomaly {
      * The {@code text/plain} and {@code text/html} renderings of a
      * {@code multipart/alternative} say substantially different things. The agent
      * reads the plain one while a person reviewing the mail sees the HTML, so a
-     * later phase should surface or refuse such a mail rather than act on it.
+     * stricter stage could surface or refuse such a mail rather than act on it; it
+     * is informational only today.
      */
     ALTERNATIVES_DIVERGE
 }

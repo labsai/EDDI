@@ -22,7 +22,7 @@ import java.util.List;
  * <p>
  * Prompt snippets are reusable system prompt building blocks stored as
  * versioned configuration documents. They are automatically available in LLM
- * task system prompts via {@code {{snippets.<name>}}}.
+ * task system prompts via {@code {snippets.<name>}}.
  *
  * @author ginccc
  * @since 6.0.0

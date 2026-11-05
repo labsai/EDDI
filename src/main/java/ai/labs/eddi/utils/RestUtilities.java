@@ -108,7 +108,7 @@ public class RestUtilities {
             try {
                 queryParamVersion = Integer.parseInt(versionString);
             } catch (NumberFormatException e) {
-                throw new IllegalArgumentException("Query param \"version\" must be a non-negative integer.");
+                throw new IllegalArgumentException("Query param \"version\" must be an integer.");
             }
         }
 
@@ -131,8 +131,8 @@ public class RestUtilities {
      * mints: hex digits only (a MongoDB ObjectId is 24; 18 is the historical floor
      * test fixtures rely on), or a canonical 8-4-4-4-12 UUID (PostgreSQL).
      * <p>
-     * Dashes used to be accepted anywhere, so a segment of eighteen dashes was an
-     * "id" and travelled on to the store. Whether a well-shaped id exists is the
+     * Dashes are accepted only in the canonical UUID positions, so a segment of
+     * eighteen dashes is not an "id". Whether a well-shaped id exists is the
      * store's question; both answer "not found" for one they cannot hold.
      */
     public static boolean isValidId(String s) {
@@ -193,8 +193,8 @@ public class RestUtilities {
     /**
      * The URI with its query string removed — but only when that query actually
      * carries a usable {@code version}. Returns {@code null} when the URI has no
-     * query, no {@code version} parameter, or a {@code version} that is not a
-     * non-negative integer.
+     * query, no {@code version} parameter, or a {@code version} that is not an
+     * integer.
      * <p>
      * Exists for the {@code updateResourceUri} endpoints on the agent and workflow
      * stores, which match stored references by "everything before the query" and

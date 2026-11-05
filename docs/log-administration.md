@@ -138,6 +138,8 @@ Returns the unique identifier for this EDDI instance. Useful for correlating log
 
 ## Configuration
 
+Log capture starts at application boot (the log store is created eagerly, and records logged before it is ready are buffered, up to 1000, and replayed into it), so the ring buffer and database history receive startup warnings without anyone having to open the log view first. Neither keeps them forever: the ring buffer holds the last `eddi.logs.buffer-size` entries, so on a busy instance older startup lines are evicted, and database history keeps only what reaches `eddi.logs.db-persist-min-level` (default `WARN`) while `eddi.logs.db-enabled` is `true`, subject to `eddi.logs.db-retention-days`. A live-tail client that connects later is first sent the 50 most recent matching entries from the ring buffer, then new ones, so an older startup warning may not appear there; `GET /administration/logs/history` is the place to look for it.
+
 All logging configuration lives in `application.properties`:
 
 | Property | Default | Description |
@@ -195,7 +197,7 @@ code that applied it.)
                          └───────────────────────┘
 ```
 
-The `LogCaptureFilter` captures **every** log record (all levels) into the ring buffer for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
+The `LogCaptureFilter` captures every record the logger emits into the ring buffer (INFO and above unless `quarkus.log.min-level` is lowered, see above) for instant query. Only entries meeting the `db-persist-min-level` threshold are enqueued for async batch persistence to the database.
 
 ### What the filter rewrites on the way out
 

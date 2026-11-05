@@ -164,6 +164,20 @@ export const ratingKeys = {
 } as const;
 
 /**
+ * HITL oversight. Everything sits under `oversightKeys.all`, so a verdict, an
+ * apply or a lift refreshes the queue, the analytics and the autonomy list.
+ */
+export const oversightKeys = {
+  all: ["hitl-oversight"] as const,
+  summary: (query: object, groupBy: string) => [...oversightKeys.all, "summary", query, groupBy] as const,
+  samples: (agentId: string | undefined, status: string, index: number, limit: number) =>
+    [...oversightKeys.all, "samples", agentId ?? null, status, index, limit] as const,
+  sample: (id: string) => [...oversightKeys.all, "sample", id] as const,
+  pending: (agentId?: string) => [...oversightKeys.all, "pending", agentId ?? null] as const,
+  autonomy: (agentId?: string) => [...oversightKeys.all, "autonomy", agentId ?? null] as const,
+} as const;
+
+/**
  * Alerts. Everything sits under `alertKeys.all`, so an acknowledgement, a retry
  * or a rule save refreshes the inbox, the rule list and the sidebar badge.
  */

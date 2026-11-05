@@ -12,11 +12,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Write-once, append-only contract for the immutable audit ledger.
+ * Write-once, append-only contract for the audit ledger.
  * <p>
- * Implementations <strong>MUST NOT</strong> provide update or delete
- * operations. This is a deliberate design constraint for EU AI Act compliance:
- * once an audit entry is persisted, it must remain unmodifiable.
+ * Implementations <strong>MUST NOT</strong> provide delete operations, and no
+ * update beyond the two GDPR mutations described below. This is a deliberate
+ * design constraint for EU AI Act record-keeping: once an audit entry is
+ * persisted, it must remain otherwise unmodifiable.
  * <p>
  * <strong>GDPR Art. 17 exception:</strong> Audit entries are retained under the
  * legal obligation to maintain decision traceability (EU AI Act Articles
@@ -39,7 +40,8 @@ public interface IAuditStore {
      * Append a single audit entry to the ledger.
      *
      * @param entry
-     *            the entry to persist (must have a non-null HMAC)
+     *            the entry to persist (its HMAC is null when no signing key is
+     *            configured)
      */
     void appendEntry(AuditEntry entry);
 

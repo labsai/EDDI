@@ -86,6 +86,7 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
     private volatile boolean synthesisPosted = false;
     private volatile String groupQuestion;
     private volatile String groupConversationId;
+    private volatile boolean showApprovalContext = false;
 
     /**
      * Context snapshot for an agent's participation — used for follow-up
@@ -145,6 +146,15 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         this.hitlApprovalChannel = hitlApprovalChannel;
         this.hitlApproverUserIds = hitlApproverUserIds;
         this.integrationName = integrationName;
+    }
+
+    /**
+     * Whether the group's {@code approvalContext} is rendered on the approval card
+     * in the channel (the integration's {@code hitlApprovalContext} opt-in).
+     * Default {@code false}: the card carries a one-line hint instead.
+     */
+    public void setShowApprovalContext(boolean showApprovalContext) {
+        this.showApprovalContext = showApprovalContext;
     }
 
     @Override
@@ -345,6 +355,22 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         }
     }
 
+    /**
+     * The tie-break notice (tiePolicy HUMAN_DECIDES): who decides and among what.
+     * Notification-only like every human-turn notice — the decision is made in
+     * EDDI, where the decider's identity is the one the access guard checks.
+     */
+    private String tieBreakNotice(String name, String phaseName, List<String> options) {
+        var sb = new StringBuilder(String.format("🗳️ Tie in *%s* — *%s* decides:\n", phaseName, name));
+        options.stream().limit(MAX_TALLY_LINES)
+                .forEach(option -> sb.append(String.format("• %s\n", buildPreview(option, MAX_TALLY_OPTION_CHARS))));
+        if (options.size() > MAX_TALLY_LINES) {
+            sb.append(String.format("… and %d more option(s)\n", options.size() - MAX_TALLY_LINES));
+        }
+        sb.append(String.format("Decide in EDDI (conversation `%s`).", groupConversationId != null ? groupConversationId : "unknown"));
+        return sb.toString();
+    }
+
     /** Slack messages are skimmed, not scrolled — a ten-option tally is noise. */
     private static final int MAX_TALLY_LINES = 6;
 
@@ -369,9 +395,14 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
         String name = event.displayName() != null && !event.displayName().isBlank()
                 ? event.displayName()
                 : event.memberId();
-        String msg = String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
-                name, event.phaseName(),
-                groupConversationId != null ? groupConversationId : "unknown");
+        String msg = event.detail() != null && event.detail().isTieBreak()
+                ? tieBreakNotice(name, event.phaseName(), event.detail().options())
+                : event.detail() != null && event.detail().isTask()
+                        ? String.format("📋 *%s* — a task assigned to you is ready in *%s*. Respond in EDDI (conversation `%s`).",
+                                name, event.phaseName(), groupConversationId != null ? groupConversationId : "unknown")
+                        : String.format("🙋 *%s* — you're up in *%s*. Respond in EDDI (conversation `%s`).",
+                                name, event.phaseName(),
+                                groupConversationId != null ? groupConversationId : "unknown");
         String threadTs = expandedMode ? null : userThreadTs;
         postSafe(channelId, threadTs, msg);
         // A human pause is terminal for THIS listener instance — the discussion
@@ -461,9 +492,18 @@ public class SlackGroupDiscussionListener implements GroupDiscussionEventListene
                     "⏸️ Discussion awaiting approval", "Discussion", groupConversationId,
                     phase, event.reason(), null,
                     actionValue, includeButtons);
+            // The group's approvalContext (rendered at pause commit), between the facts and
+            // the buttons.
+            boolean contextShown = SlackApprovalContextBlocks.insertBeforeActions(blocks, event.approvalContext(), showApprovalContext);
             String fallback = "Group discussion " + groupConversationId + " is awaiting human approval.";
             try {
-                slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+                if (contextShown) {
+                    // Conversation text on the card: no link or media preview of anything a member
+                    // wrote.
+                    slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback, false);
+                } else {
+                    slackApi.postBlocksMessage(authToken, hitlApprovalChannel, null, blocks, fallback);
+                }
             } catch (SlackDeliveryException e) {
                 LOGGER.warnf("Failed to post group HITL approval notification for %s: %s",
                         LogSanitizer.sanitize(groupConversationId), LogSanitizer.sanitize(e.getMessage()));

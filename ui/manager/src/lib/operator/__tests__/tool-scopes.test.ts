@@ -383,6 +383,15 @@ describe("tool-scopes", () => {
       expect(WRITE_ENDPOINTS).not.toContain(excluded);
     });
 
+    it("never grants setup-api sync — one call rewrites an existing agent's whole toolset", () => {
+      // Re-sync regenerates an agent's tools from a spec the caller supplies; like
+      // setup-api's dryRun (hidden from the OpenAPI schema the operator's tools are
+      // generated from), it is an integrator's tool, not the operator's.
+      const all = [...READ_ENDPOINTS, ...WRITE_ENDPOINTS];
+      expect(all.filter((e) => e.includes("/setup-api/sync"))).toEqual([]);
+      expect(all.filter((e) => e.includes("{agentId}/setup-api"))).toEqual([]);
+    });
+
     it("is offered now that WRITE_ENDPOINTS is populated", () => {
       // The seam no longer gates on a previously verified gate or auth mode —
       // activation itself proves the gate about the agent it actually creates

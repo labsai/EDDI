@@ -22,16 +22,18 @@ import java.util.Locale;
  * Trusts a NATS server certificate only if the trust store accepts its chain
  * AND it names one of the NATS hosts EDDI was configured with.
  * <p>
- * Endpoint identification on the socket cannot do this for NATS: jnats resolves
- * every server host name to its addresses and dials — and hands the TLS layer —
- * the bare IP, so an HTTPS-style check compared the certificate with an IP
- * address and refused every certificate issued for a host name. (jnats'
- * {@code Unresolved} mode, which would keep the name, then fails to connect at
- * all.) This check uses the configured names instead: a certificate for some
- * other host — what a man in the middle with any CA-signed certificate holds —
- * is refused, a certificate for the configured {@code nats.example.com}, or a
- * {@code *.example.com} wildcard, is accepted on whichever of its addresses
- * jnats dials. An IP address in {@code eddi.nats.url} needs an IP SAN.
+ * Endpoint identification on the socket is not enough for NATS: with its
+ * default resolution jnats dials — and hands the TLS layer — the bare IP, and
+ * servers it discovers from the cluster's INFO are usually IP addresses
+ * whatever the resolution mode, so an HTTPS-style check compares the
+ * certificate with an IP address and refuses every certificate issued for a
+ * host name. (EDDI does select {@code HappyEyeballs}, which dials the
+ * configured name, so SNI carries it.) This check uses the configured names
+ * instead: a certificate for some other host — what a man in the middle with
+ * any CA-signed certificate holds — is refused, a certificate for the
+ * configured {@code nats.example.com}, or a {@code *.example.com} wildcard, is
+ * accepted on whichever of its addresses jnats dials. An IP address in
+ * {@code eddi.nats.url} needs an IP SAN.
  */
 final class ServerNameTrustManager extends X509ExtendedTrustManager {
 
