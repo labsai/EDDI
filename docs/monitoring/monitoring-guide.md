@@ -326,10 +326,10 @@ Notes and caveats:
 ## Alerting Rules
 
 The rules ship with EDDI: [`eddi-alerts.yml`](eddi-alerts.yml) (25 rules, nine
-groups). The cluster rules (`EddiClusterDegraded`, `EddiClusterFenceRejected`,
+groups), which is the file provisioned below. The cluster rules (`EddiClusterDegraded`, `EddiClusterFenceRejected`,
 `EddiClusterLeaseTimeouts`, `EddiDeadLetters`) live in
 [`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) and are runbooked in
-[Clustering](../clustering.md#runbook). Where they are loaded:
+[Clustering](../clustering.md#runbook); they are not loaded by the paths below and must be added to `rule_files` yourself when cluster mode is enabled. Where `eddi-alerts.yml` is loaded:
 
 | Delivery path | How |
 |---|---|

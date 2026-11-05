@@ -661,7 +661,7 @@ Conversation memory has two audiences. Pipeline tasks (behavior rules, property 
 
 ## Conversation store and lifecycle
 
-The stored snapshot is served by `/conversationstore/conversations` (read a simple or raw log, list, `DELETE` one conversation or a set, `POST end-inactive` and `POST end` to end conversations, `GET active/{agentId}`). Deleting a conversation goes through `ConversationPurgeService`, which removes the conversation together with what hangs off it: vault slots, attachments, checkpoints, the HITL journal, the stored memory and the conversation descriptor. Checkpoints (`IConversationCheckpointStore`) are saved copies of the conversation memory (`MemoryCheckpoint`). For erasure on behalf of a data subject see [GDPR compliance](gdpr-compliance.md).
+The stored snapshot is served by `/conversationstore/conversations` (read a simple or raw log, list, `DELETE` one conversation or a set, `POST end-inactive` and `POST end` to end conversations, `GET active/{agentId}`). Deleting a conversation goes through `ConversationPurgeService`, which removes the conversation together with what hangs off it: vault slots, attachments, checkpoints, the HITL journal, the stored memory and the conversation descriptor. Checkpoints (`IConversationCheckpointStore`) are saved snapshots of the conversation properties and the step index (`MemoryCheckpoint`), not of the steps or outputs. A rollback restores the properties only, so a checkpoint is not a backup of the whole conversation. For erasure on behalf of a data subject see [GDPR compliance](gdpr-compliance.md).
 
 ## Related Documentation
 

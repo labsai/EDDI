@@ -76,7 +76,7 @@ PowerShell equivalents (`install.ps1`):
 .\install.ps1 -Defaults                    # All defaults, no prompts
 .\install.ps1 -Database postgres -WithAuth # PostgreSQL + Keycloak
 .\install.ps1 -Full                        # Everything enabled
-.\install.ps1 -Local                       # Build Docker image from local source
+.\install.ps1 -Local                       # Build Docker image from local source (run from a repo checkout, after .\mvnw.cmd package -DskipTests)
 .\install.ps1 -DryRun                      # Show what would be done
 ```
 

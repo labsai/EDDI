@@ -107,7 +107,7 @@ deployed and `READY` in that environment.
 
 ## Sending a message
 
-**Retrying safely.** Send an `Idempotency-Key` (or `X-EDDI-Request-Id`; the former wins) header on `POST /agents/{conversationId}` and its `/stream` twin so a retried request does not run the turn twice. A duplicate of a turn still in flight answers `409` with `Retry-After`. See [conversations.md](conversations.md#idempotent-turns) and `eddi.turns.idempotency.ttl-seconds`.
+**Retrying safely.** Send an `Idempotency-Key` (or `X-EDDI-Request-Id`; the former wins) header on `POST /agents/{conversationId}` and its `/stream` twin so a retried request does not run the turn twice. A duplicate of a turn still in flight answers `409` with `Retry-After`. The protection has limits: a failed turn is not remembered, and a completed turn is replayed only within `eddi.turns.idempotency.ttl-seconds` and while its step is among the conversation's latest 50. A retry outside those conditions runs the turn again and can repeat side-effecting tools. See [conversations.md](conversations.md#idempotent-turns).
 
 The same path takes plain text or JSON.
 

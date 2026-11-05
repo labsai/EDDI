@@ -144,7 +144,7 @@ For the bot to accept DMs, you must enable the Messages Tab:
 
 ### 8. Approval buttons (optional, HITL)
 
-To use Slack buttons for human-in-the-loop approvals, enable **Interactivity & Shortcuts** in the Slack app and set the **Request URL** to `https://<your-eddi-host>/integrations/slack/interactive`. Set `hitlApprovalChannel` (and optionally `hitlApproverUserIds`) in the integration's `platformConfig`. See [HITL → Slack Integration](hitl.md#slack-integration) for the keys and scopes.
+To use Slack buttons for human-in-the-loop approvals, enable **Interactivity & Shortcuts** in the Slack app and set the **Request URL** to `https://<your-eddi-host>/integrations/slack/interactive`. Set `hitlApprovalChannel` and `hitlApproverUserIds` (the approvers' Slack user ids; without it EDDI renders no buttons and the approval is notification-only) in the integration's `platformConfig`. See [HITL → Slack Integration](hitl.md#slack-integration) for the keys and scopes.
 
 The Slack timeouts and retry counts above are configurable through `eddi.slack.*`; see the [Configuration Reference](configuration-reference.md).
 

@@ -46,8 +46,10 @@ applies in dev mode only.
 
 > **Empty is not the same as unset.** Several properties ship deliberately empty
 > (`eddi.vault.master-key`, `eddi.openai-compat.api-key`). An empty value is a real
-> value that disables or defaults the feature; it is not an error, and startup
-> will not complain.
+> value that disables or defaults the feature; it is not an error. One exception:
+> with `authorization.enabled=true`, the OpenAI-compatible API enabled and an empty
+> `eddi.openai-compat.api-key`, startup fails (`OpenAiStartupGuard`) unless
+> `eddi.openai-compat.http-policy=authenticated` is set or the API is disabled.
 
 ---
 

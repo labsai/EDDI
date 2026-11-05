@@ -102,7 +102,7 @@ All features can be toggled via **URL query parameters** — ideal for iframe em
 | `hideStreaming`       | `?hideStreaming=true`       | Turn off token streaming           |
 | `hideAgentName`       | `?hideAgentName=true`       | Hide the agent name                |
 | `userId`              | `?userId=alice`             | User id to chat as (when the host page does not set one) |
-| `apiServer`           | `?apiServer=https://eddi.example.com` | EDDI server to talk to; defaults to the serving origin |
+| `apiServer`           | `?apiServer=/eddi` | A clean same-origin path (single leading `/`); absolute URLs are ignored. For a cross-origin server set `apiBaseUrl` in the widget config. Defaults to the serving origin |
 
 Further colour and font parameters (such as `accentHover`) are listed in `COLOR_PARAM_MAP` in `src/components/ChatWidget.tsx`.
 

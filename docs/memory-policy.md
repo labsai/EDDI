@@ -144,7 +144,7 @@ With `continueOnFailure: true` the remaining tasks keep running after the failur
 turn can answer for itself:
 
 - an output set keyed on `task_failed_<taskId>` renders a fallback message in the same turn;
-- a behavior rule that matches `task_failed_<taskId>` can emit actions that trigger a later task (for example an LLM task that explains the problem).
+- a behavior rule that matches `task_failed_<taskId>` can emit actions that trigger a later task (for example an LLM task that explains the problem). Only tasks after the failing one still run, so the rule must sit in a second behavior-rules step placed after the failing task and before the fallback task; the first behavior step has already run by then.
 
 ```json
 {

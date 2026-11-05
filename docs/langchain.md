@@ -1392,11 +1392,11 @@ These tools are assembled from the conversation or the group rather than from th
 | --- | --- | --- |
 | `usermemory` | Persistent user memory tool | `enableMemoryTools` is on; see [User Memory](user-memory.md) |
 | `conversationRecall` | Recall of turns the rolling summary compressed | `conversationSummary.enabled` is true |
-| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set; see [Group Conversations](group-conversations.md) |
-| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set |
+| `artifacts` | Shared group artifacts | The agent takes part in a group whose `artifactConfig` is set with `allowArtifactTools: true`, and `enableBuiltInTools` is on; see [Group Conversations](group-conversations.md) |
+| `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true`, and `enableBuiltInTools` is on |
 | `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent` | Dynamic agents | Only under a governing group policy, even when the whitelist is omitted |
 
-An omitted whitelist therefore means the standard built-in tools plus user memory and recall, not literally every tool. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
+An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact and group-task tools when the group policy enables them (and dynamic-agent tools under a governing group policy). If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
 
 ### Tool response limits
 
@@ -1406,7 +1406,7 @@ An omitted whitelist therefore means the standard built-in tools plus user memor
 | --- | --- | --- |
 | `defaultMaxChars` | `50000` (about 12k tokens) | Maximum characters per tool response |
 | `perToolLimits` | none | Map of tool name to its own character limit |
-| `truncationStrategy` | `truncate` | `truncate` cuts hard at the limit with a note; `paginate` returns the first page plus a `responseId` to fetch the rest with `fetch_page`; `summarize` routes the response through `summarizerModel` and falls back to truncation |
+| `truncationStrategy` | `headTail` | `headTail` keeps the start and the end and drops the middle with a note; `truncate` cuts hard at the limit with a note; `paginate` returns the first page plus a `responseId` to fetch the rest with `fetch_page`; `summarize` routes the response through `summarizerModel` and falls back to truncation |
 | `summarizerModel` | none | Model for the `summarize` strategy |
 
 ### Tool result guardrails

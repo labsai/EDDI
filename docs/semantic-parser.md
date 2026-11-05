@@ -587,6 +587,8 @@ Let's build an agent routing system for customer service:
 
 ### 5. Result:
 
+> These action names are illustrative. Nothing routes or prioritises by itself: a later task (for example an API call or a behavior rule) must be configured to listen for them.
+
 - Request routed to Billing Specialist Agent (e.g., GPT-4 with billing context)
 - Priority set to high for escalation tracking
 - Conversation context includes category and intent for agent

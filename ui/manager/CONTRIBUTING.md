@@ -43,7 +43,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 | Tool         | Version | Notes                                    |
 | ------------ | ------- | ---------------------------------------- |
-| **Node.js**  | 22.18+  | The Maven build pins the exact version (`node.version` in `pom.xml`) |
+| **Node.js**  | 22.22.2+, 24.15.0+ or 26.0.0+ | The Maven build pins the exact version (`node.version` in `pom.xml`) |
 | **npm**      | 10+     | Bundled with Node.js                     |
 | **Docker**   | Latest  | For backend services (optional)          |
 
