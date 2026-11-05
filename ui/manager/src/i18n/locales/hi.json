@@ -120,6 +120,8 @@
     "workspaces": "कार्यक्षेत्र",
     "breadcrumb": "ब्रेडक्रम्ब",
     "checkingVersion": "संस्करण जाँचा जा रहा है...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} डेमो {{version}}",
     "expandSidebar": "साइडबार फैलाएँ",
     "collapseSidebar": "साइडबार समेटें",
     "branding": "ब्रांडिंग",
@@ -7201,6 +7203,7 @@
     "sourceLabel": "लागू ब्रांड का स्रोत:",
     "updated": "{{who}} द्वारा {{when}} को अंतिम बार सहेजा गया, संशोधन {{revision}}",
     "saveFailed": "ब्रांड सहेजा नहीं गया: {{reason}}",
+    "writeTimeout": "सर्वर ने समय पर उत्तर नहीं दिया। बदलाव लागू हुआ या नहीं, यह देखने के लिए पेज को फिर से लोड करें।",
     "warningsTitle": "सहेजा गया, सर्वर की चेतावनी के साथ:",
     "toast": {
       "applyFailed": "सहेजा गया, लेकिन यह टैब नया ब्रांड लोड नहीं कर सका। देखने के लिए पेज फिर से लोड करें।",

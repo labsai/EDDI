@@ -152,7 +152,10 @@ conversation leases and fencing, KV latency, cluster events and RPCs, degraded-m
 shared rate limits and audit sequences. The full list is in
 [Metrics → Cluster mode](../metrics.md); the
 [EDDI Cluster dashboard](eddi-cluster-dashboard.json) charts it, and
-[`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) holds alerting rules for it. None of these
+[`eddi-cluster-alerts.yml`](eddi-cluster-alerts.yml) holds alerting rules for it (tested by
+`promtool test rules eddi-cluster-alerts.test.yml`; the Helm chart's PrometheusRule includes
+them in cluster mode, and their `eddi-cluster-nats` group reads the NATS server's own metrics
+from the exporter that `nats.metrics.enabled=true` adds). None of these
 series exists in the default in-memory mode. Dead letters are counted by
 `eddi_coordinator_total_dead_lettered_total` and `eddi_coordinator_dead_letters` in both modes.
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.cluster;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.enterprise.inject.Instance;
 import org.eclipse.microprofile.health.HealthCheckResponse;
 import org.junit.jupiter.api.DisplayName;
@@ -139,5 +140,37 @@ class ClusterHealthCheckTest {
         HealthCheckResponse up = inMemory.call();
         assertEquals(HealthCheckResponse.Status.UP, up.getStatus());
         assertTrue(up.getData().map(Map::isEmpty).orElse(true));
+    }
+
+    /**
+     * C2: a bad credential, a TLS failure or a node that never connected used to
+     * leave readiness UP while every turn ran unfenced.
+     */
+    @Test
+    @DisplayName("a misconfiguration or no first connect: DOWN, with the reason in verbose mode")
+    void readinessProblemIsDown() {
+        NatsConnectionManager manager = mock(NatsConnectionManager.class);
+        when(manager.isDegraded()).thenReturn(true);
+        when(manager.node()).thenReturn(new NodeIdentity("n1", "b1"));
+        when(manager.readinessProblem()).thenReturn(Optional.of("NATS auth error: Authorization Violation"));
+        var check = new ClusterHealthCheck(ClusterConfig.defaults().withMessagingType("nats"), instance(manager), instance(null),
+                instance(null), true);
+        HealthCheckResponse response = check.call();
+        assertEquals(HealthCheckResponse.Status.DOWN, response.getStatus());
+        assertEquals("NATS auth error: Authorization Violation", response.getData().orElseThrow().get("problem"));
+    }
+
+    @Test
+    @DisplayName("readiness end to end: a fresh node that has never connected is DOWN")
+    void freshNodeIsDownUntilConnected() {
+        NatsConnectionManager manager = new NatsConnectionManager(ClusterConfig.defaults().withMessagingType("nats"),
+                new NodeIdentity("n1", "b1"), new SimpleMeterRegistry());
+        try {
+            var check = new ClusterHealthCheck(ClusterConfig.defaults().withMessagingType("nats"), instance(manager), instance(null),
+                    instance(null), false);
+            assertEquals(HealthCheckResponse.Status.DOWN, check.call().getStatus());
+        } finally {
+            manager.shutdown();
+        }
     }
 }

@@ -1466,7 +1466,7 @@ eddi.tools.websearch.google.cx=YOUR_CUSTOM_SEARCH_ENGINE_ID
 #### Web Scraper Tool
 
 `extractWithSelector` evaluates a model-written CSS selector against a page of up to
-`eddi.tools.web-scraper.max-response-bytes`. Two defences keep that from pinning the server:
+`eddi.tools.web-scraper.max-response-bytes`. Three defences keep that from pinning the server:
 
 - **Regex selectors are refused** before the page is fetched: `:matches`, `:matchesOwn`,
   `:matchText`, `:matchesWholeText`, `:matchesWholeOwnText` and the `[attr~=regex]` operator. jsoup

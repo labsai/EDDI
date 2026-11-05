@@ -945,7 +945,7 @@ eddi_vault_grant_update_count_total         # allowedAgents edited without the v
 eddi_vault_delete_count_total               # Secrets deleted
 eddi_vault_errors_count_total               # Vault operation failures (store unreachable, decryption failed) — not "no such key"
 eddi_vault_reseal_failures_total            # Sealed rows a DEK rotation could not open and skipped; tag: participant
-eddi_vault_legacy_unbound_opened_count_total # Values opened only through the no-AAD legacy fallback; zero after a rotate-dek = safe to set eddi.vault.accept-unbound-legacy-data=false
+eddi_vault_legacy_unbound_opened_count_total # Fallback attempts for values opened only through the no-AAD legacy fallback (refused ones included); cumulative, so after a rotate-dek on every tenant watch its rate, not its total: once the rate has stayed at zero over your whole observation period it is safe to set eddi.vault.accept-unbound-legacy-data=false
 eddi_vault_cache_hits_total                 # Resolved-secret cache hits
 eddi_vault_cache_misses_total               # Resolved-secret cache misses
 eddi_vault_resolve_errors_total             # Resolution failures seen by SecretResolver
@@ -1133,6 +1133,8 @@ eddi_agents_deployed                        # Currently deployed agents (gauge)
 eddi_cluster_nats_connected                 # 1 while this node is connected to NATS (gauge)
 eddi_cluster_degraded                       # 1 while degraded: NATS unreachable for longer than the grace (gauge)
 eddi_cluster_nats_reconnects_total          # Reconnects of this node
+eddi_cluster_nats_errors_total              # NATS errors {cause=auth|tls|config|permission|timeout|io|slow_consumer|server|other}; every cause registered at 0
+eddi_cluster_nats_misconfigured             # 1 while the connection fails for a reason retrying cannot heal (auth, TLS, client options); the node is not ready (gauge)
 eddi_cluster_members                        # Members in the presence bucket (gauge)
 eddi_cluster_node_duplicate                 # 1 while another live JVM uses this node's id; readiness is DOWN (gauge)
 eddi_cluster_versions                       # Distinct EDDI version/payload-protocol pairs among the live members; >1 during a rolling upgrade (gauge)

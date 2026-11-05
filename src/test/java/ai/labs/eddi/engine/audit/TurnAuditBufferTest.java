@@ -106,6 +106,51 @@ class TurnAuditBufferTest {
     }
 
     @Test
+    @DisplayName("a turn that recorded a failed task does not hand its evidence over: that entry carries no llmDetail")
+    void flushDoesNotHandOverAFailedTurn() {
+        List<AuditEntry> accepted = new ArrayList<>();
+        memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> accepted.add(entry));
+        TurnAuditBuffer buffer = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        AuditEntry failed = new AuditEntry("id-failed", "conv-1", "agent-1", 1, "user-1", null, 1, "llm", "type", 1, 5L, null,
+                Map.of("status", "TASK_FAILED"), null, null, null, 0.0, Instant.now(), null, null);
+        memory.getAuditCollector().collect(failed);
+
+        assertFalse(buffer.flush(memory), "the failure entry is accepted but holds no prompt or response");
+        assertEquals(2, accepted.size(), "both entries are still submitted");
+    }
+
+    @Test
+    @DisplayName("a failed turn that pauses keeps its evidence through the resume: the new buffer sees the step marker")
+    void resumedTurnDoesNotHandOverWhatAFailedTaskLeft() {
+        TurnAuditBuffer first = TurnAuditBuffer.install(memory);
+        AuditEntry failed = new AuditEntry("id-failed", "conv-1", "agent-1", 1, "user-1", null, 1, "llm", "type", 1, 5L, null,
+                Map.of("status", "TASK_FAILED"), null, null, null, 0.0, Instant.now(), null, null);
+        memory.getAuditCollector().collect(failed);
+        assertFalse(first.flush(memory));
+
+        // the resume installs a new buffer on the same step; its own entries are all
+        // clean
+        TurnAuditBuffer resumed = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        assertFalse(resumed.flush(memory), "the prompt and response were never in an accepted entry");
+    }
+
+    @Test
+    @DisplayName("an entry the ledger refused before a pause keeps its evidence through the resume too")
+    void resumedTurnDoesNotHandOverWhatTheLedgerRefused() {
+        memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> false);
+        TurnAuditBuffer first = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("llm", "hello", Map.of("compiledPrompt", "p")));
+        assertFalse(first.flush(memory));
+
+        memory.setAuditCollector((IAuditEntryCollector.Acknowledging) entry -> true);
+        TurnAuditBuffer resumed = TurnAuditBuffer.install(memory);
+        memory.getAuditCollector().collect(entry("parser", "hello", null));
+        assertFalse(resumed.flush(memory), "the refused entry's prompt and response are in no accepted entry");
+    }
+
+    @Test
     @DisplayName("flush reports failure when a submit throws; a plain collector counts as accepting")
     void flushReportsFailure() {
         memory.setAuditCollector(entry -> {
@@ -115,6 +160,9 @@ class TurnAuditBufferTest {
         memory.getAuditCollector().collect(entry("parser", "hello", null));
         assertFalse(buffer.flush(memory));
 
+        // A new turn: the first flush left its retain marker on that step, which is the
+        // point
+        memory = new ConversationMemory("aabbccddeeff112233445566", "agent-1", 1, "user-1");
         memory.setAuditCollector(ledger::add);
         buffer = TurnAuditBuffer.install(memory);
         memory.getAuditCollector().collect(entry("parser", "hello", null));

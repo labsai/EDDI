@@ -40,3 +40,4 @@ Cross-team lesson sharing (explicit grants) and the scheduled, cost-capped conso
 PR. Not run locally: the `*IT` store tests (Docker) and the Playwright suite; CI is the gate for those.
 
 Docs: [`docs/team-learning-loop.md`](../team-learning-loop.md).
+- Final Platform Operator revision for 6.7.0 after merging main, #1259, #1260 and #1265 into this branch: **59** (the revisions 55–58 named in those PRs' fragments were intermediate).

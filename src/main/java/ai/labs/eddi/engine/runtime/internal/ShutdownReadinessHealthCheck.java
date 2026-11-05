@@ -35,6 +35,6 @@ public class ShutdownReadinessHealthCheck implements HealthCheck {
     @Override
     public HealthCheckResponse call() {
         var responseBuilder = HealthCheckResponse.named("Graceful shutdown readiness check");
-        return gracefulShutdownService.isShuttingDown() ? responseBuilder.down().build() : responseBuilder.up().build();
+        return gracefulShutdownService.isReadinessDown() ? responseBuilder.down().build() : responseBuilder.up().build();
     }
 }

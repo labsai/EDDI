@@ -120,6 +120,8 @@
     "workspaces": "工作区",
     "breadcrumb": "面包屑导航",
     "checkingVersion": "正在检查版本...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} 演示版 {{version}}",
     "expandSidebar": "展开侧边栏",
     "collapseSidebar": "收起侧边栏",
     "branding": "品牌",
@@ -7201,6 +7203,7 @@
     "sourceLabel": "当前品牌来源：",
     "updated": "{{who}} 于 {{when}} 最后保存，修订版 {{revision}}",
     "saveFailed": "品牌未保存：{{reason}}",
+    "writeTimeout": "服务器未在规定时间内响应。请重新加载页面，查看更改是否已生效。",
     "warningsTitle": "已保存，服务器给出警告：",
     "toast": {
       "applyFailed": "已保存，但此标签页无法加载新品牌。请重新加载页面查看。",

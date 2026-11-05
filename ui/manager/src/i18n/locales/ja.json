@@ -120,6 +120,8 @@
     "workspaces": "ワークスペース",
     "breadcrumb": "パンくずリスト",
     "checkingVersion": "バージョンを確認中...",
+    "versionLabel": "{{productName}} {{version}}",
+    "versionLabelDemo": "{{productName}} デモ {{version}}",
     "expandSidebar": "サイドバーを展開",
     "collapseSidebar": "サイドバーを折りたたむ",
     "branding": "ブランディング",
@@ -7201,6 +7203,7 @@
     "sourceLabel": "現在のブランドの出所：",
     "updated": "{{when}} に {{who}} が最終保存（リビジョン {{revision}}）",
     "saveFailed": "ブランドは保存されませんでした：{{reason}}",
+    "writeTimeout": "サーバーが時間内に応答しませんでした。変更が反映されたかどうかは、ページを再読み込みして確認してください。",
     "warningsTitle": "保存しました（サーバーからの警告あり）：",
     "toast": {
       "applyFailed": "保存しましたが、このタブで新しいブランドを読み込めませんでした。ページを再読み込みしてください。",

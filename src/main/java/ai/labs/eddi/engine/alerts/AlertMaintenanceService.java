@@ -50,6 +50,12 @@ public class AlertMaintenanceService {
     static final int CLAIM_BATCH = 100;
     static final int DIGEST_BATCH = 500;
 
+    /**
+     * Where the orphan scan resumes. Only a hint for fairness between passes, so a
+     * lost or racing update costs a repeated page, never a missed rule for long.
+     */
+    private volatile String digestScanCursor;
+
     /** What one pass did; {@link #isEmpty()} when nothing at all. */
     public record Result(int retried, int digests, long deleted, long released) {
         public boolean isEmpty() {
@@ -115,7 +121,16 @@ public class AlertMaintenanceService {
      */
     long releaseOrphanedDigestEvents() {
         long released = 0;
-        for (String ruleId : eventStore.findDigestPendingRuleIds(DIGEST_BATCH)) {
+        // One bounded page per pass, resumed where the last one stopped: rules that
+        // hold events
+        // and still digest would otherwise fill the page every time and keep a later,
+        // orphaned
+        // rule from ever being looked at. A short page means the end: start over next
+        // pass.
+        String after = digestScanCursor;
+        List<String> page = eventStore.findDigestPendingRuleIds(after, DIGEST_BATCH);
+        digestScanCursor = page.size() < DIGEST_BATCH ? null : page.get(page.size() - 1);
+        for (String ruleId : page) {
             try {
                 Optional<AlertRule> rule = ruleStore.read(ruleId);
                 if (rule.isEmpty() || !rule.get().enabled() || interval(rule.get().effectiveDigest()) == null) {

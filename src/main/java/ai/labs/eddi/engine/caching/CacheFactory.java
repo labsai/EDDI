@@ -164,6 +164,10 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
 
     @Override
     public void evicted(String cacheName, Object key) {
+        // The memos hold the raw key text (it can carry a user id): forget it with the
+        // entry
+        keyHashes.invalidate(String.valueOf(key));
+        keyedHashes.invalidate(String.valueOf(key));
         ClusterMessageSigner signer = signer();
         String keyed = signer == null ? null : signer.keyedHash(String.valueOf(key));
         clusterEvents.get().publish(ClusterEvent.CACHE_EVICT,

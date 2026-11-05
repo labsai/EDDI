@@ -337,6 +337,28 @@ class SecretScrubberTest {
     }
 
     @Test
+    @DisplayName("a percent-encoded query name is judged by what the server reads: %6bey is key")
+    void scrubJson_encodedQueryCredentialName() {
+        String json = "{\"path\": \"/x?%6bey=abc123session&lang=en\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("abc123session"), "the decoded name is key, a credential query name: " + scrubbed);
+        assertTrue(scrubbed.contains("lang=en"), scrubbed);
+    }
+
+    @Test
+    @DisplayName("an absolute URL's percent-encoded query name is judged decoded too: %73ig is sig")
+    void scrubJson_encodedQueryCredentialNameInAnAbsoluteUrl() {
+        String json = "{\"specUrl\": \"https://api.example.com/v1?%73ig=opaquesignature123&lang=en\"}";
+
+        String scrubbed = scrubber.scrubJson(json);
+
+        assertFalse(scrubbed.contains("opaquesignature123"), "the decoded name is sig, a credential query name: " + scrubbed);
+        assertTrue(scrubbed.contains("lang=en"), scrubbed);
+    }
+
+    @Test
     @DisplayName("hole 3 — credentials embedded in a URL are scrubbed, the host is not")
     void scrubJson_credentialsInsideAUrl() {
         String json = "{\"targetServerUrl\": \"https://user:aaaaaaaaaaaaaaaaaaaa@api.example.com/v1\","

@@ -68,8 +68,8 @@ down, the amount is held back and charged with the next charge.
 
 | Where | What |
 |---|---|
-| A new discussion (`discuss`, async start, a cadence-created one) | Refused before anything is created. REST: **409** with the reason as text |
-| A follow-up or continuation of an existing root discussion | Refused the same way. A follow-up's member turn is charged to the team as soon as it ends, and it is refused before it starts when the discussion has already reached its team ceiling |
+| A new discussion (`discuss`, async start, a cadence-created one) | Refused before anything is created. REST: **409** with the reason as text; the streaming endpoint sends the same text in its `group_error` event |
+| A follow-up or continuation of an existing root discussion | Refused the same way (**409** with the reason; a streamed continuation sends it in `group_error`). A follow-up's member turn is charged to the team as soon as it ends, and it is refused before it starts when the discussion has already reached its team ceiling |
 | A [cross-team handoff](team-handoff.md) **into** a team that is exhausted (or whose budget cannot be read) | Refused with the same text, before anything is filed: the model and the handoff audit entry get the reason. `surface="handoff"` on the refusal metric |
 | A standing-team cadence fire | **Skipped**, not failed: a success that is not retried, with the backlog untouched. The skip text says the budget is spent |
 | A discussion already running | Runs on. It is *not* cut short by a gate; its own ceiling (below) handles it |
