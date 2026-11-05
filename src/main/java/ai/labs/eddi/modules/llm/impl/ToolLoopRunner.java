@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.TokenCountEstimator;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
+import ai.labs.eddi.engine.lifecycle.ToolTraceRedaction;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -1322,6 +1323,60 @@ class ToolLoopRunner {
                                    boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
                                    LlmConfiguration.Task task, boolean isLazy,
                                    List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
+        int traceStart = trace.size();
+        ToolCallResult result = runToolCall(toolRequest, memory, trace, toolExecutors, toolRateLimits, toolCanonicalNames, toolSources,
+                defaultRateLimit, maxBudget, conversationId, enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs,
+                activeSpecs, runSpend);
+        emitToolResult(memory, toolRequest.name(), trace, traceStart, result);
+        return result;
+    }
+
+    /**
+     * The live "{tool} finished" signal for streaming clients (B6), paired with the
+     * {@code onToolCall} that {@link #runToolCall} sent before the call. Built from
+     * the trace entry the call just wrote — its result, or the refusal of a budget,
+     * quota or deadline gate — so it reports exactly what the turn-end
+     * {@code toolTrace} will, through the same redaction
+     * ({@link ToolTraceRedaction#summary}). An event sink must never break the tool
+     * loop.
+     */
+    static void emitToolResult(IConversationMemory memory, String toolName, List<Map<String, Object>> trace, int traceStart,
+                               ToolCallResult result) {
+        if (memory == null || memory.getEventSink() == null) {
+            return;
+        }
+        try {
+            String text = null;
+            boolean succeeded = false;
+            for (int i = trace.size() - 1; i >= traceStart && i >= 0; i--) {
+                Map<String, Object> entry = trace.get(i);
+                Object type = entry.get("type");
+                if ("tool_result".equals(type)) {
+                    text = entry.get("result") instanceof String r ? r : null;
+                    succeeded = true;
+                    break;
+                }
+                if ("tool_error".equals(type)) {
+                    text = entry.get("error") instanceof String e ? e : null;
+                    break;
+                }
+            }
+            boolean ok = succeeded && result != null && !result.notExecuted()
+                    && ToolOutcomeClassifier.classify(result.raw()) == ToolOutcomeClassifier.Outcome.SUCCESS;
+            memory.getEventSink().onToolResult(toolName, ok, ToolTraceRedaction.summary(text));
+        } catch (RuntimeException e) {
+            LOGGER.debug("tool_result event failed; ignoring", e);
+        }
+    }
+
+    private ToolCallResult runToolCall(ToolExecutionRequest toolRequest, IConversationMemory memory,
+                                       List<Map<String, Object>> trace,
+                                       Map<String, ToolExecutor> toolExecutors, Map<String, Integer> toolRateLimits,
+                                       Map<String, String> toolCanonicalNames, Map<String, String> toolSources,
+                                       int defaultRateLimit, Double maxBudget, String conversationId,
+                                       boolean enableRateLimiting, boolean enableCaching, boolean enableCostTracking,
+                                       LlmConfiguration.Task task, boolean isLazy,
+                                       List<ToolSpecification> builtInSpecs, List<ToolSpecification> activeSpecs, DoubleSupplier runSpend) {
         // Live "Using {tool}…" signal for streaming clients — name only, before
         // execution, so the status line moves the moment work starts rather than
         // when the whole loop summarizes at turn end.

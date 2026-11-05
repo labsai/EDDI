@@ -146,6 +146,25 @@ public interface ConversationEventSink {
     }
 
     /**
+     * Called by the tool loop after a tool call it announced with
+     * {@link #onToolCall} has finished — ran, failed, or was refused (budget,
+     * quota, deadline). Not called when the loop aborted mid-call (a cancellation
+     * or an approval pause), whose turn ends without the call's result.
+     *
+     * @param toolName
+     *            the tool's name, as in {@link #onToolCall}
+     * @param ok
+     *            whether the tool ran and its result does not report a failure
+     * @param summary
+     *            the start of the result (or of the refusal), redacted like the
+     *            turn-end {@code toolTrace} ({@code ToolTraceRedaction.summary})
+     *            and at most {@code ToolTraceRedaction.MAX_SUMMARY_LENGTH}
+     *            characters; never null
+     */
+    default void onToolResult(String toolName, boolean ok, String summary) {
+    }
+
+    /**
      * Called when the entire conversation step has completed successfully. The SSE
      * endpoint should send the final snapshot and close the stream.
      */
