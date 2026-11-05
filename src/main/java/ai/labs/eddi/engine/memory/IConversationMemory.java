@@ -154,6 +154,15 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * What this turn holds against the tenant's monthly cost budget while the
+     * opt-in cost reservation is on; {@code null} (the default) when this memory
+     * keeps none.
+     */
+    default TenantCostHolds getTenantCostHolds() {
+        return null;
+    }
+
+    /**
      * The agent's self-continuation settings ({@code maxContinuations},
      * {@code continuationInput}); {@link ContinuationPolicy#OFF} when the agent
      * sets none. Transient like the cost ceiling: carried from the agent onto

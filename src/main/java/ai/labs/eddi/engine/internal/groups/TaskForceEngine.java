@@ -161,7 +161,8 @@ public class TaskForceEngine {
                             original.id(), original.subject(), original.description(),
                             original.status(), original.assignedAgentId(), original.assignedDisplayName(),
                             resolvedDepIds, original.result(), original.verificationNote(),
-                            original.verified(), original.priority(), original.createdAt(), original.completedAt());
+                            original.verified(), original.priority(), original.createdAt(), original.completedAt(),
+                            original.createdByAgentId(), original.bet());
                     gc.getTaskList().updateTask(withDeps); // replace with dependency-aware version
                 }
             }

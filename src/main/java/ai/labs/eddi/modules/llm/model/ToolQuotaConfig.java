@@ -36,6 +36,13 @@ public class ToolQuotaConfig {
     /** Shortest window: one minute. */
     public static final String MIN_WINDOW = "PT1M";
 
+    /**
+     * The window value that counts per run instead of per time span: one group
+     * cadence run, one scheduled fire, else the conversation. See
+     * {@code docs/langchain.md#per-run-caps-window-run}.
+     */
+    public static final String RUN_WINDOW = "RUN";
+
     /** Longest window: 31 days. */
     public static final String MAX_WINDOW = "P31D";
 
@@ -92,7 +99,9 @@ public class ToolQuotaConfig {
         /**
          * ISO-8601 duration of the window, between {@link #MIN_WINDOW} and
          * {@link #MAX_WINDOW}, e.g. {@code P1D}. Windows are fixed and aligned to the
-         * UTC epoch, so {@code P1D} resets at 00:00 UTC.
+         * UTC epoch, so {@code P1D} resets at 00:00 UTC. Or {@code RUN}: the cap holds
+         * for one run (a group discussion, a scheduled fire, else the conversation) and
+         * starts again with the next one.
          */
         private String window;
 

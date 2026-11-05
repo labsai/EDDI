@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal.handoff;
 
+import ai.labs.eddi.configs.groups.model.SharedTaskList.Bet;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
@@ -830,4 +831,42 @@ class TeamHandoffServiceTest {
             assertEquals(1, workspace().getHandoffs().inboxSize());
         }
     }
+
+    // ------------------------------------------------------------------ bets
+
+    @Nested
+    class Bets {
+
+        private HandoffRequest withBet(HandoffRequest r) {
+            return new HandoffRequest(r.sourceKind(), r.sourceId(), r.sourceVersion(), r.sourceConversationId(), r.sourceMemberAgentId(), r.userId(),
+                    r.targetGroupId(), r.subject(), r.description(), r.priority(), r.trigger(), r.decisionRef(), r.artifactId(), r.reference(),
+                    r.hop(), r.lineage(), r.dedupeKey(), r.maxDescriptionChars(), r.runQuota(),
+                    Bet.of("a launch post gets replies", "replies", ">= 5", "2026-12-01"));
+        }
+
+        @Test
+        void anAutoFiledHandoffBecomesABetOnTheBacklog() throws Exception {
+            assertTrue(service.file(withBet(groupRequest("Launch post"))).success());
+
+            var task = workspace().getBacklog().getTasks().get(0);
+            assertEquals("replies", task.bet().metric());
+            assertEquals(Instant.parse("2026-12-01T00:00:00Z"), task.bet().reviewDate());
+        }
+
+        @Test
+        void aReviewedHandoffKeepsItsBetInTheInbox() throws Exception {
+            accept = new AcceptPolicy(List.of(new AcceptRule("group:" + SOURCE_GROUP, IntakeMode.REVIEW, null)), 500, 100);
+
+            assertEquals(Outcome.QUEUED_FOR_REVIEW, service.file(withBet(groupRequest("Launch post"))).outcome());
+
+            assertEquals("a launch post gets replies", workspace().getHandoffs().getInbox().get(0).bet().hypothesis());
+        }
+
+        @Test
+        void anOrdinaryHandoffIsNotABet() throws Exception {
+            service.file(groupRequest("Plain"));
+            assertNull(workspace().getBacklog().getTasks().get(0).bet());
+        }
+    }
+
 }

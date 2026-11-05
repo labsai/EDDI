@@ -93,7 +93,16 @@ export interface AddBacklogTaskRequest {
   description?: string;
   /** Higher runs earlier when a cadence pulls — NOT the "0 = highest" convention `TaskItem`'s general Javadoc describes elsewhere. */
   priority?: number;
+  /** Set all of hypothesis, metric and reviewDate to file the task as a bet; target is optional. The server answers 400 for a partial set. */
+  hypothesis?: string;
+  metric?: string;
+  target?: string;
+  /** ISO date (`2026-12-01`, UTC midnight) or instant. */
+  reviewDate?: string;
 }
+
+/** Backend `Bet.MAX_FIELD_CHARS`. */
+export const BET_MAX_FIELD_CHARS = 500;
 
 /** Body of `addWorkspaceCadence`. */
 export interface AddCadenceRequest {
@@ -151,6 +160,27 @@ export function addWorkspaceBacklogTask(
     `/groupstore/groups/${seg(groupId)}/workspace/backlog`,
     request,
   );
+}
+
+/**
+ * Bets whose review date has arrived and that have no verdict yet, earliest first.
+ * `asOf` (ISO date or instant) asks what will be due by then.
+ * GET /groupstore/groups/{groupId}/workspace/backlog/due-reviews
+ */
+export function getDueBetReviews(groupId: string, asOf?: string): Promise<TaskItem[]> {
+  const query = asOf ? `?asOf=${encodeURIComponent(asOf)}` : "";
+  return api.get<TaskItem[]>(`/groupstore/groups/${seg(groupId)}/workspace/backlog/due-reviews${query}`);
+}
+
+/**
+ * Close a bet's review (it stops being due), or reopen it for a later date with
+ * `rescheduleTo`. Failures: 404 (no such task), 409 (the task is not a bet).
+ * POST /groupstore/groups/{groupId}/workspace/backlog/{taskId}/bet/review
+ */
+export function reviewBet(groupId: string, taskId: string, rescheduleTo?: string): Promise<TaskItem> {
+  return api.post<TaskItem>(`/groupstore/groups/${seg(groupId)}/workspace/backlog/${seg(taskId)}/bet/review`, {
+    rescheduleTo: rescheduleTo || null,
+  });
 }
 
 /**
