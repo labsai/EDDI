@@ -350,6 +350,22 @@ public class ResourceAccessGuard {
      * ({@code CallerIdentity.isAdminActingAs}), never from anyone else's.
      */
     public boolean principalMayUse(String resourceId, String principal, boolean principalIsAdmin) {
+        return principalHolds(resourceId, principal, principalIsAdmin, AccessLevel.USE);
+    }
+
+    /**
+     * {@link #principalMayUse(String, String, boolean)} for
+     * {@link AccessLevel#VIEW}: may the named principal read the resource. Same
+     * narrow reading (own resources, direct grants, published; no team shares) and
+     * the same fail-closed answer for an unreadable descriptor. For engine work
+     * that shows a person data about a group they may not have been given, such as
+     * a team's budget.
+     */
+    public boolean principalMayView(String resourceId, String principal, boolean principalIsAdmin) {
+        return principalHolds(resourceId, principal, principalIsAdmin, AccessLevel.VIEW);
+    }
+
+    private boolean principalHolds(String resourceId, String principal, boolean principalIsAdmin, AccessLevel required) {
         if (!settings.isEnforcing() || principalIsAdmin) {
             return true;
         }
@@ -366,7 +382,7 @@ public class ResourceAccessGuard {
             return false;
         }
         AccessLevel granted = DescriptorAccess.effectiveLevel(descriptor, CallerSpaces.of(principal, Set.of()), settings.admitsLegacy());
-        return granted != null && granted.includes(AccessLevel.USE);
+        return granted != null && granted.includes(required);
     }
 
     /**

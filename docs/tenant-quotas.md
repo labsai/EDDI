@@ -196,6 +196,10 @@ within a time window — "100 content improvements per user per day", across con
 the agent designer's [`toolQuotas`](langchain.md#per-subject-tool-quotas-toolquotas), which is configured
 per LLM task and counted per subject. The two stack: a call must pass both.
 
+To give each **team** (a group) its own monthly share of the tenant's budget, use a group's
+[`teamBudget`](team-budgets.md). Both apply: a team stops at its own cap or when the tenant's runs
+out, whichever comes first.
+
 ## See also
 
 - [Configuration Reference](configuration-reference.md) — the `eddi.tenant.quota.*` defaults

@@ -23,6 +23,7 @@ import { AlertDialog } from "@/components/ui/alert-dialog";
 import { useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
 import type { TenantQuota } from "@/lib/api/quotas";
 import { parseQuotaLimit } from "@/lib/quota-limit";
+import { TeamBudgetsTable } from "@/components/quotas/team-budgets-table";
 
 const DEFAULT_TENANT = "default";
 
@@ -364,6 +365,8 @@ export function QuotasPage() {
         onConfirm={handleReset}
         isPending={resetMutation.isPending}
       />
+
+      <TeamBudgetsTable />
     </div>
   );
 }

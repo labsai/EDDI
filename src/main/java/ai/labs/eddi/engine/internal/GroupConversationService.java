@@ -40,12 +40,16 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationStat
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.configs.groups.model.TeamBudgetState;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetContext;
+import ai.labs.eddi.engine.groups.budget.TeamBudgetService;
+import ai.labs.eddi.engine.groups.budget.TeamSpendMeter;
 import ai.labs.eddi.engine.hitl.context.GroupApprovalContextRenderer;
 import ai.labs.eddi.engine.internal.groups.StanceSummaryEngine;
 import ai.labs.eddi.engine.internal.groups.DebateVerdictParser;
@@ -246,6 +250,20 @@ public class GroupConversationService implements IGroupConversationService, User
      */
     @Inject
     LiveDiscussionRegistry liveDiscussionRegistry;
+
+    /**
+     * F6: the team monthly budget -- the admission gate and the spend meter. Same
+     * field-injection pattern and null-safety as {@link #attachmentStore}: null in
+     * direct-construction unit tests, which then run unbudgeted.
+     */
+    @Inject
+    TeamBudgetService teamBudgetService;
+
+    @Inject
+    TeamSpendMeter teamSpendMeter;
+
+    @Inject
+    TeamBudgetContext teamBudgetContext;
 
     /**
      * I8's lesson store. Same field-injection pattern and null-safety as
@@ -809,6 +827,11 @@ public class GroupConversationService implements IGroupConversationService, User
             counterGroupDiscussion.increment();
         }
 
+        // F6: charge what the previous leg left uncharged and set this leg's team
+        // ceiling.
+        if (teamSpendMeter != null) {
+            teamSpendMeter.beginLeg(gc, config);
+        }
         ProtocolConfig resolvedProtocol = resolveProtocol(config);
         // I1: a nested discussion runs under the tighter of its own ceiling and the
         // budget its parent had left. Applied here (once, at the top of the leg)
@@ -1695,6 +1718,10 @@ public class GroupConversationService implements IGroupConversationService, User
             // already carrying the pre-pause total) contributes only what it newly
             // spent rather than double-counting the earlier leg's.
             groupCostDollars.add(Math.max(0.0, gc.getTotalCost() - costAtLegStart));
+            // F6: the last team charge of this leg (system costs recorded between turns).
+            if (teamSpendMeter != null) {
+                teamSpendMeter.endLeg(gc);
+            }
             // F1: unconditional, like the control-token removal below — a paused
             // discussion must not stay resolvable as "live" once this leg has
             // decided to stop. commitPause() persists AWAITING_APPROVAL and then
@@ -1995,6 +2022,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                                 String question)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
+        admitTeamBudgetForExisting(groupConversationId);
         return lifecycleOps().followUpWithMember(groupConversationId, targetAgentId, question);
     }
 
@@ -2003,6 +2031,7 @@ public class GroupConversationService implements IGroupConversationService, User
                                                 GroupDiscussionEventListener listener)
             throws GroupDiscussionException, IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         rejectIfShuttingDown();
+        admitTeamBudgetForExisting(groupConversationId);
         return withArtifacts(lifecycleOps().continueDiscussion(groupConversationId, question, listener));
     }
 
@@ -2026,6 +2055,55 @@ public class GroupConversationService implements IGroupConversationService, User
 
     private void failConversation(GroupConversation gc) {
         lifecycleOps().failConversation(gc);
+    }
+
+    /**
+     * F6: a follow-up or continuation spends on an existing root discussion, so it
+     * is held to the same gate as a new one. A resume is not (work already running
+     * is not cut short). An unreadable discussion is left to the operation itself
+     * to report.
+     */
+    private void admitTeamBudgetForExisting(String groupConversationId) throws GroupDiscussionException {
+        if (teamBudgetService == null || groupConversationId == null) {
+            return;
+        }
+        GroupConversation existing;
+        try {
+            existing = conversationStore.read(groupConversationId);
+        } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
+            return;
+        }
+        if (existing != null && existing.getDepth() == 0 && existing.getGroupId() != null) {
+            teamBudgetService.admit(existing.getGroupId(), TeamBudgetService.Surface.FOLLOWUP);
+        }
+    }
+
+    /**
+     * F6: {@code context.teamBudget} / {@code context.teamBudgets} for a member
+     * turn of {@code gc}; empty for a group without a {@code teamBudget}. Each
+     * oversight team is shown only if the discussion's owner may view that group.
+     */
+    public Map<String, Object> teamBudgetTemplateValues(GroupConversation gc) {
+        if (teamBudgetContext == null || gc == null) {
+            return Map.of();
+        }
+        return teamBudgetContext.values(gc, groupId -> discussionOwnerMayView(groupId, gc.getUserId()));
+    }
+
+    boolean discussionOwnerMayView(String groupId, String principal) {
+        ResourceAccessGuard guard = resourceAccessGuard;
+        if (guard == null) {
+            return true;
+        }
+        CallerIdentity caller = callerIdentityContext != null ? callerIdentityContext.current() : null;
+        return guard.principalMayView(groupId, principal, caller != null && caller.isAdminActingAs(principal));
+    }
+
+    /** F6: charges the increase of {@code gc}'s total cost to its root team. */
+    public void chargeTeamBudget(GroupConversation gc) {
+        if (teamSpendMeter != null) {
+            teamSpendMeter.charge(gc);
+        }
     }
 
     private GroupLifecycleOps lifecycleOps() {
@@ -2149,6 +2227,12 @@ public class GroupConversationService implements IGroupConversationService, User
      * turn unchecked. (resolveAgentTimeoutSeconds swallows its own lookup errors
      * and falls back to a default, so it would not catch this either.)
      * <p>
+     * F6: a follow-up is also a leg of the run for its team budget. This starts
+     * that leg ({@link TeamSpendMeter#beginLeg}: sweep what is uncharged, refresh
+     * the team ceiling) and tightens the result by the team ceiling, the same one
+     * every phase turn sees through {@code TeamBudgetCeilings}. The follow-up's
+     * cost is charged by its callback ({@link #chargeTeamBudget}).
+     * <p>
      * Public: called back from GroupLifecycleOps.followUpWithMember.
      */
     public Double resolveEffectiveCostCeiling(GroupConversation gc)
@@ -2159,7 +2243,16 @@ public class GroupConversationService implements IGroupConversationService, User
         }
         AgentGroupConfiguration config = groupStore.read(gc.getGroupId(), currentGroupId.getVersion());
         Double own = config != null ? resolveProtocol(config).maxCostPerDiscussion() : null;
-        return effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        Double ceiling = effectiveCostCeiling(own, gc.getInheritedCostCeiling());
+        if (teamSpendMeter != null && config != null) {
+            teamSpendMeter.beginLeg(gc, config);
+            TeamBudgetState state = gc.getTeamBudgetState();
+            Double team = state == null ? null : state.getCeilingUsd();
+            if (team != null && !team.isNaN() && (ceiling == null || team < ceiling)) {
+                ceiling = team;
+            }
+        }
+        return ceiling;
     }
 
     /**
@@ -2571,7 +2664,15 @@ public class GroupConversationService implements IGroupConversationService, User
     }
 
     private GroupConversation createGroupConversation(String groupId, String question, String userId, int depth)
-            throws IResourceStore.ResourceStoreException {
+            throws IResourceStore.ResourceStoreException, GroupDiscussionException {
+
+        // F6: a root discussion of a team with no budget left is refused before
+        // anything
+        // is created. A nested child is never gated: its parent already paid for the
+        // slot.
+        if (depth == 0 && teamBudgetService != null) {
+            teamBudgetService.admit(groupId, TeamBudgetService.Surface.DISCUSSION);
+        }
 
         GroupConversation gc = new GroupConversation();
         // The field initialiser is the LEGACY sentinel so key-less stored documents
